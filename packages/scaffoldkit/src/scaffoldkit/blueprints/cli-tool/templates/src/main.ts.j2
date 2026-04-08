@@ -1,0 +1,18 @@
+const { Command } = require("commander");
+const { registerConfigCommand } = require("./commands/config");
+const { registerRunCommand } = require("./commands/run");
+
+const program = new Command();
+
+program
+  .name("{{ project_name }}")
+  .description("{{ description }}")
+  .version("0.1.0");
+
+registerRunCommand(program);
+registerConfigCommand(program);
+
+program.parseAsync(process.argv).catch((error: Error) => {
+  process.stderr.write(`error: ${error.message}\n`);
+  process.exitCode = 1;
+});

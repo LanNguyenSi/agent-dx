@@ -1,0 +1,21 @@
+FROM python:{{ python_version }}-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY . .
+
+RUN pip install --no-cache-dir uvicorn \
+    && if [ -f requirements.txt ]; then \
+         pip install --no-cache-dir -r requirements.txt; \
+       elif [ -f pyproject.toml ]; then \
+         pip install --no-cache-dir . || true; \
+       else \
+         echo "No Python dependency manifest found. Keeping scaffold image minimal."; \
+       fi
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "if [ -f app/main.py ]; then python -m uvicorn app.main:app --host 0.0.0.0 --port 8000; elif [ -f main.py ]; then python -m uvicorn main:app --host 0.0.0.0 --port 8000; else echo 'FastAPI scaffold: add your ASGI entrypoint to run the service.'; sleep infinity; fi"]

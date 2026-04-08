@@ -1,0 +1,13 @@
+[extends]
+  default-path = "/"
+
+[rules]
+  allowlist-path = ".gitleaks.allowlist"
+
+[pipeline]
+  author-name = "Gitleaks"
+  author-email = "gitleaks@github.com"
+  message = "gitleaks: detected secrets"
+
+[redact]
+  message = "***REDACTED***"

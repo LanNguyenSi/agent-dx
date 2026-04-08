@@ -1,0 +1,98 @@
+# {{ display_name }}
+
+{{ description }}
+
+## Quick Start
+
+{% if stack == "nextjs-fullstack" %}
+{% include "readme/quickstart-nextjs-fullstack.md.j2" %}
+{% elif stack == "symfony-api-react" %}
+{% include "readme/quickstart-symfony-api-react.md.j2" %}
+{% elif stack == "django-htmx" %}
+{% include "readme/quickstart-django-htmx.md.j2" %}
+{% elif stack == "rails-hotwire" %}
+{% include "readme/quickstart-rails-hotwire.md.j2" %}
+{% endif %}
+
+## Architecture
+
+- **Stack:** {{ stack }}
+- **Architecture:** {{ architecture_style }}
+{% if use_ddd %}
+- **Domain-Driven Design:** Yes
+{% endif %}
+{% if use_auth %}
+- **Authentication:** Included
+{% endif %}
+{% if use_docker %}
+- **Docker:** Included
+{% endif %}
+
+## Project Structure
+
+```
+{{ project_name }}/
+├── apps/
+│   ├── web/          # Frontend application
+│   └── api/          # Backend API
+├── packages/
+│   ├── ui/           # Shared UI components
+│   └── shared/       # Shared utilities and types
+├── docs/
+│   ├── architecture.md
+│   ├── ways-of-working.md
+│   ├── adrs/         # Architecture Decision Records
+│   └── page-templates/
+{% if ai_context %}
+├── AI_CONTEXT.md     # AI agent context
+{% endif %}
+└── README.md
+```
+
+{% if stack == "nextjs-fullstack" %}
+{% include "readme/manifest-nextjs-fullstack.md.j2" %}
+{% elif stack == "symfony-api-react" %}
+{% include "readme/manifest-symfony-api-react.md.j2" %}
+{% elif stack == "django-htmx" %}
+{% include "readme/manifest-django-htmx.md.j2" %}
+{% elif stack == "rails-hotwire" %}
+{% include "readme/manifest-rails-hotwire.md.j2" %}
+{% endif %}
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Ways of Working](docs/ways-of-working.md)
+- [ADR: Architecture Decision](docs/adrs/0001-architecture.md)
+
+## Page Templates
+
+Reference designs for standard pages:
+
+- [Dashboard Page](docs/page-templates/dashboard-page.md)
+- [Detail Page](docs/page-templates/detail-page.md)
+- [Settings Page](docs/page-templates/settings-page.md)
+
+## Testing
+
+Strategy: **{{ test_strategy }}**
+
+{% if stack == "nextjs-fullstack" %}
+{% include "readme/testing-nextjs-fullstack.md.j2" %}
+{% elif stack == "symfony-api-react" %}
+{% include "readme/testing-symfony-api-react.md.j2" %}
+{% elif stack == "django-htmx" %}
+{% include "readme/testing-django-htmx.md.j2" %}
+{% elif stack == "rails-hotwire" %}
+{% include "readme/testing-rails-hotwire.md.j2" %}
+{% endif %}
+
+## Design
+
+Style direction: **{{ design_style }}**
+
+See `docs/page-templates/` for structural references.
+
+---
+
+*Generated with [ScaffoldKit](https://github.com/LanNguyenSi/scaffoldkit)*

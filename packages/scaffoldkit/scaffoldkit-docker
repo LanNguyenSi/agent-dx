@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# scaffoldkit-docker: run scaffoldkit inside a Docker container.
+#
+# The container mounts a host directory at /workspace so that generated
+# projects are written back to the host filesystem.
+#
+# Usage:
+#   scaffoldkit-docker [wrapper-options] [--] [scaffoldkit-args...]
+#
+# Key wrapper options:
+#   --build             Build (or rebuild) the Docker image before running
+#   --output DIR        Mount DIR as /workspace (default: current directory)
+#   --print             Print the docker command and exit without running it
+#   --help              Show this help message
+
+set -euo pipefail
+
+IMAGE="${SCAFFOLDKIT_IMAGE:-scaffoldkit:latest}"
+BUILD_IMAGE=false
+PRINT_ONLY=false
+OUTPUT_DIR=""
+
+usage() {
+  cat <<'USAGE'
+Usage: scaffoldkit-docker [wrapper-options] [--] [scaffoldkit-args...]
+
+Wrapper options:
+  --build             Build (or rebuild) the local Docker image before running
+  --output DIR        Host directory to mount at /workspace for generated projects
+                      (defaults to the current working directory)
+  --print             Print the docker run command and exit without running it
+  --help, -h          Show this help message
+
+Environment variables:
+  SCAFFOLDKIT_IMAGE   Override the Docker image (default: scaffoldkit:latest)
+
+Examples:
+  # Interactive TUI - output lands in ./output
+  scaffoldkit-docker --output ./output
+
+  # Build image first, then run
+  scaffoldkit-docker --build --output ./output
+
+  # Scaffold a specific blueprint non-interactively
+  scaffoldkit-docker -- new saas-dashboard --output-dir my-project
+
+  # List available blueprints
+  scaffoldkit-docker -- list
+
+  # Dry-run: see the docker command without executing it
+  scaffoldkit-docker --print -- list
+USAGE
+}
+
+SCAFFOLDKIT_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build)    BUILD_IMAGE=true; shift ;;
+    --output)   OUTPUT_DIR="$2"; shift 2 ;;
+    --output=*) OUTPUT_DIR="${1#--output=}"; shift ;;
+    --print)    PRINT_ONLY=true; shift ;;
+    --help|-h)  usage; exit 0 ;;
+    --)         shift; SCAFFOLDKIT_ARGS+=("$@"); break ;;
+    *)          SCAFFOLDKIT_ARGS+=("$1"); shift ;;
+  esac
+done
+
+# Resolve the output directory to an absolute path
+if [[ -z "$OUTPUT_DIR" ]]; then
+  OUTPUT_DIR="$(pwd)"
+else
+  # Resolve to absolute path; mkdir -p so the mount source exists
+  OUTPUT_DIR="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
+fi
+
+# Validate Docker is available
+if ! command -v docker >/dev/null 2>&1; then
+  echo "[scaffoldkit-docker][error] Docker is not installed or not in PATH." >&2
+  exit 1
+fi
+
+# Build image if requested
+if [[ "$BUILD_IMAGE" == true ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  echo "[scaffoldkit-docker] Building image ${IMAGE} from ${SCRIPT_DIR} ..." >&2
+  docker build -t "$IMAGE" "$SCRIPT_DIR"
+fi
+
+# Compose docker run arguments
+DOCKER_ARGS=(
+  run
+  -it
+  --rm
+  -v "${OUTPUT_DIR}:/workspace"
+  -w /workspace
+  -e "TERM=${TERM:-xterm-256color}"
+  "$IMAGE"
+)
+
+# Append any extra arguments to pass through to scaffoldkit inside the container
+if [[ ${#SCAFFOLDKIT_ARGS[@]} -gt 0 ]]; then
+  DOCKER_ARGS+=("${SCAFFOLDKIT_ARGS[@]}")
+fi
+
+if [[ "$PRINT_ONLY" == true ]]; then
+  printf '%q ' docker "${DOCKER_ARGS[@]}"
+  printf '\n'
+  exit 0
+fi
+
+exec docker "${DOCKER_ARGS[@]}"

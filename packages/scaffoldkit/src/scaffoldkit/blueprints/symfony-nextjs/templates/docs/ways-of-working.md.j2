@@ -1,0 +1,314 @@
+# Ways of Working: {{ display_name }}
+
+This document defines how the team delivers fullstack features across the Symfony API (`apps/api`) and Next.js frontend (`apps/web`). Consistency here reduces coordination overhead and keeps both sides of the stack in sync.
+
+---
+
+## Fullstack Definition of Done
+
+A feature is **done** when all of the following are true:
+
+### Backend (Symfony)
+- [ ] Entity and migration created/updated and tested against a real database
+- [ ] API endpoint implemented and returns the correct HTTP status codes
+- [ ] Server-side validation in place (Symfony Validator constraints)
+- [ ] Unit tests cover the Service/{% if use_ddd %}Domain {% endif %}layer
+- [ ] Integration test covers the HTTP endpoint via `WebTestCase`
+- [ ] OpenAPI annotations{% if api_style == "api-platform" %} (or API Platform attributes){% endif %} are accurate
+- [ ] No `var_dump`, `dd()`, or debug output left in code
+
+### Shared Types
+- [ ] `packages/shared-types` updated to reflect any new or changed response shape
+{% if api_style == "api-platform" %}
+- [ ] Types regenerated (`pnpm --filter shared-types generate`) and committed
+{% endif %}
+
+### Frontend (Next.js)
+- [ ] Service function in `src/services/` calls the new endpoint
+- [ ] Page/component renders loading and error states
+- [ ] Form validation mirrors backend constraints (client-side UX, not a security measure)
+- [ ] No TypeScript errors (`pnpm tsc --noEmit` passes)
+- [ ] Component tests written for interactive components
+
+### Cross-Cutting
+- [ ] All lint checks pass (`composer lint` + `pnpm lint`)
+- [ ] No `.env` files or secrets committed
+- [ ] Documentation updated if the change affects architecture or the API contract
+- [ ] PR reviewed by at least one other team member
+- [ ] Feature tested in a staging/preview environment end-to-end
+
+---
+
+## API-First Workflow
+
+Every fullstack feature follows this order. **Never build the frontend against a stubbed API if the real endpoint can be built first.**
+
+```
+1. DESIGN
+   Agree on the API shape: endpoint URL, request body, response fields.
+   Write or update the relevant section in docs/api-contract.md.
+
+2. BACKEND
+   Implement the Symfony endpoint.
+   Write integration tests that document the exact JSON shape.
+   Deploy to staging or run locally.
+
+3. SHARED TYPES
+   {% if api_style == "api-platform" %}Regenerate shared-types from the live OpenAPI spec.{% else %}Update packages/shared-types/src/index.ts by hand.{% endif %}
+   Commit the updated types file in the same PR as the API work.
+
+4. FRONTEND
+   Implement the service function and UI against the real API.
+   The TypeScript compiler enforces the contract.
+
+5. REVIEW
+   PR includes both backend and frontend changes where possible (atomic cross-app PR).
+   Reviewer checks the API contract doc, not just the code.
+```
+
+This order means the backend is the source of truth and the frontend adapts to it - never the other way around.
+
+---
+
+## Branching Strategy
+
+We use **trunk-based development** with short-lived feature branches off `main`.
+
+### Branch Naming
+
+```
+feature/<ticket-id>-<short-description>    # new functionality
+fix/<ticket-id>-<short-description>        # bug fixes
+chore/<description>                        # tooling, deps, refactoring
+docs/<description>                         # documentation only
+migration/<description>                    # database migration changes
+```
+
+### Workflow
+
+1. Cut a branch from `main` (always up to date)
+2. Make small, focused commits - prefer one logical change per commit
+3. Open a PR as a draft early (link the ticket)
+4. Move to "Ready for Review" when the DoD checklist is met
+5. Request at least one reviewer
+6. Squash-merge into `main` after approval
+7. Delete the branch; staging deploys automatically
+
+---
+
+## Pull Request Conventions
+
+### PR Scope
+
+A PR **may span both `apps/api` and `apps/web`** when the changes are coupled (e.g. new endpoint + new page). This is preferred over separate PRs that must be merged in a specific order and create a brief period of inconsistency.
+
+If a PR is backend-only (e.g. a migration or performance fix), that is fine too. Just note in the description that no frontend changes are needed.
+
+### PR Title
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) format:
+
+```
+feat(users): add profile photo upload endpoint and UI
+fix(auth): handle expired refresh token without redirect loop
+chore(deps): upgrade API Platform to 3.3
+docs(api-contract): document pagination envelope
+migration(orders): add status_history column
+```
+
+Scope is optional but recommended. Use the feature domain (e.g. `auth`, `users`, `billing`), not the app name (`api`, `web`).
+
+### PR Description Template
+
+```markdown
+## What
+Brief summary of the change.
+
+## Why
+Ticket link or motivation.
+
+## How
+Non-obvious implementation notes. Include a diagram if helpful.
+
+## API Changes
+- [ ] No API changes
+- [ ] New endpoint: `METHOD /path` (see api-contract.md)
+- [ ] Changed response shape: describe old vs new
+
+## Shared Types
+- [ ] No type changes
+- [ ] Updated: list changed interfaces
+
+## Testing
+How was this verified? (unit tests, manual test steps, screenshot)
+
+## Checklist
+- [ ] Lint passes
+- [ ] Tests pass
+- [ ] No secrets committed
+- [ ] Docs updated (if needed)
+```
+
+### Review Expectations
+
+- Review within 1 business day
+- Block on correctness and security; suggest (not block) on style
+- If a PR touches both apps, review the API contract coherence, not just individual files
+- Leave a "Reviewed API contract" comment if you have verified the types match
+
+---
+
+## Architecture Decision Records (ADRs)
+
+Write an ADR in `docs/adrs/` for any decision that future engineers would otherwise have to reverse-engineer from the code.
+
+### When to Write an ADR
+
+- Choosing between competing libraries or frameworks
+- Changing the API contract in a non-backwards-compatible way
+- Introducing a new architectural pattern (e.g. CQRS, event sourcing)
+- Adding infrastructure (new Docker service, external dependency)
+- Deciding to NOT do something obvious (e.g. not using GraphQL, not using SSE for real-time)
+
+### ADR Format
+
+```markdown
+# ADR-NNNN: Title
+
+## Status
+Proposed | Accepted | Deprecated | Superseded by ADR-XXXX
+
+## Context
+What is the problem or constraint driving this decision?
+
+## Decision
+What did we decide, and what are the specific details?
+
+## Consequences
+
+### Positive
+Benefits of this decision.
+
+### Negative
+Trade-offs or costs.
+
+### Risks
+What could go wrong, and how is it mitigated?
+
+## References
+Links to relevant docs, tickets, or prior art.
+```
+
+Number ADRs sequentially. Never delete an ADR - deprecate or supersede it.
+
+---
+
+## Testing Expectations
+
+Strategy: **{{ test_strategy }}**
+
+### Backend (PHPUnit)
+
+{% if test_strategy == "unit-and-integration" %}
+- **Unit tests** (`tests/Unit/`): Every Service class has a unit test. Dependencies are mocked. Tests run without a database.
+- **Integration tests** (`tests/Integration/`): Every controller endpoint has an integration test using Symfony's `WebTestCase` with the test database.
+- Target: >80% line coverage on `src/Service/`{% if use_ddd %}, `src/Domain/`{% endif %}, >60% on `src/Controller/`.
+{% elif test_strategy == "full-pyramid" %}
+- **Unit tests** (`tests/Unit/`): All service and domain logic, mocked deps, no DB, fast.
+- **Integration tests** (`tests/Integration/`): All endpoints via `WebTestCase`, real test DB, asserts HTTP status and JSON body.
+- **Contract tests** (`tests/Contract/`): Snapshot or schema-based tests that verify the actual JSON output matches `packages/shared-types`.
+- Target: >80% unit, >70% integration, zero uncontracted response shapes.
+{% endif %}
+
+Test naming convention:
+```
+test<Subject><Scenario><ExpectedResult>
+// e.g. testCreateUserWithDuplicateEmailReturns422
+```
+
+### Frontend (Vitest + React Testing Library)
+
+{% if test_strategy == "unit-and-integration" %}
+- **Unit tests**: Pure utility functions in `src/lib/`, custom hooks.
+- **Component tests**: Interactive Client Components (forms, modals, stateful lists). Use `@testing-library/react`. Do not test presentational-only Server Components.
+{% elif test_strategy == "full-pyramid" %}
+- **Unit tests**: Pure utilities and hooks.
+- **Component tests**: All interactive components.
+- **E2E tests** (Playwright): Top user journeys - login, view dashboard, create/edit/delete an entity, error states. Run against the full Docker Compose stack.
+{% endif %}
+
+Do not mock `fetch` or the API service layer in component tests if you can use a local test server (MSW). Mocking the network makes tests brittle and misses serialization bugs.
+
+### General Rules
+
+- Tests live next to the code they test (`*.test.ts` / `*.spec.php`) or in `tests/` for integration suites
+- A test that is hard to write is usually a design smell - consider refactoring
+- Do not comment out failing tests; fix them or delete them
+- CI must be green before merging
+
+---
+
+## Deployment Pipeline
+
+Both apps are deployed from `main`. The backend deploys first.
+
+```
+1. API tests pass (PHPUnit)
+2. Deploy Symfony to production
+3. Run database migrations (php bin/console doctrine:migrations:migrate --no-interaction)
+4. Smoke-test API health endpoint
+5. Frontend tests pass (Vitest{% if test_strategy == "full-pyramid" %} + Playwright{% endif %})
+6. Deploy Next.js to production
+7. Verify frontend loads and can authenticate
+```
+
+**Why backend first?** The database migration must complete before the new frontend code tries to use the new fields. The old frontend is forwards-compatible by design (it ignores unknown fields).
+
+**Backwards compatibility rule:** An API change is **never** allowed to break the currently deployed frontend. If a breaking change is unavoidable, deploy both apps simultaneously (blue/green or feature flag).
+
+---
+
+## Documentation Expectations
+
+| Document | Update trigger |
+|----------|---------------|
+| `README.md` | Any change to setup, env vars, or scripts |
+| `docs/architecture.md` | New infrastructure, layer changes, new patterns |
+| `docs/api-contract.md` | Any new endpoint or changed response shape |
+| `docs/ways-of-working.md` | Process or convention changes |
+| `docs/adrs/` | Any significant decision (see above) |
+| `packages/shared-types` | Any API response change |
+
+Documentation PRs do not need a ticket, but they do need a reviewer.
+
+---
+
+## AI Collaboration Guidelines
+
+{% if ai_context %}
+This project ships with `AI_CONTEXT.md` designed for AI coding agents (Claude Code, Copilot Workspace, etc.).
+
+### For AI Agents
+
+- Read `AI_CONTEXT.md` before starting any task
+- Read `docs/api-contract.md` before touching any data flow
+- Follow the API-first workflow above - never build a frontend without a matching API endpoint
+- Update `packages/shared-types` whenever an API response changes
+- Write tests; do not skip them for "simple" changes
+- Create an ADR when introducing a new library or pattern
+
+### For Developers Working with AI
+
+- Scope prompts to one logical change at a time (e.g. "add the GET /users/:id endpoint" is better than "add user management")
+- Reference specific files: "follow the pattern in `src/Controller/HealthController.php`"
+- Review AI-generated code against the same DoD checklist as human code
+- If the AI changes `packages/shared-types`, verify the Symfony output and the frontend service are consistent
+- Update `AI_CONTEXT.md` when conventions change
+{% else %}
+When using AI coding assistants:
+
+- Provide the contents of `docs/api-contract.md` as context
+- Specify which app is in scope (api or web)
+- Reference existing controller or service files as style examples
+- Review generated code against the DoD checklist
+{% endif %}

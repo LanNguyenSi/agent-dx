@@ -1,0 +1,95 @@
+# ADR 0001: Establish the Initial Spring Boot Architecture
+
+## Status
+
+Accepted
+
+## Context
+
+We are creating **{{ display_name }}**, a Java {{ java_version }} backend based on Spring Boot {{ spring_boot_version }}.
+The initial blueprint needs to choose a default structure that is clear for humans, easy for AI agents to navigate,
+and robust enough for a production-oriented backend.
+
+Key forces:
+
+- predictable package boundaries matter more than clever abstraction
+- the team needs strong local development ergonomics
+- the stack must support ordinary CRUD flows and non-trivial business rules
+- documentation should steer contributors toward safe defaults
+
+## Decision
+
+We will use:
+
+- **Spring Boot {{ spring_boot_version }}** as the application platform
+- **{{ build_tool }}** as the build tool
+- **{{ api_style }}** as the HTTP stack
+- **{{ database }}** as the primary relational database
+{% if use_ddd %}
+- a **DDD-oriented package layout** with clear separation between transport, orchestration, domain, and persistence
+{% else %}
+- a **conventional layered package layout** with clear separation between controllers, services, repositories, and domain classes
+{% endif %}
+{% if use_auth %}
+- **{{ auth_method }}** as the baseline authentication strategy
+{% endif %}
+{% if test_strategy == "junit-only" %}
+- **JUnit-focused testing** with selective Spring test usage
+{% elif test_strategy == "junit-and-testcontainers" %}
+- **JUnit plus Testcontainers** as the default verification strategy
+{% else %}
+- a **full test pyramid** including thin end-to-end coverage
+{% endif %}
+
+## Rationale
+
+### Why Spring Boot
+
+Spring Boot provides a mature default model for dependency injection, configuration, HTTP handling, validation, and operational concerns. That lets the project focus on product logic instead of framework assembly.
+
+### Why {{ build_tool }}
+
+{% if build_tool == "maven" %}
+Maven is explicit, predictable, and familiar across many enterprise Java teams. It optimizes for readability and conventional structure over maximum build-script flexibility.
+{% else %}
+Gradle offers stronger composability and often a better developer experience for custom build logic, while still working well with the Spring Boot plugin ecosystem.
+{% endif %}
+
+### Why {{ api_style }}
+
+{% if api_style == "spring-mvc" %}
+The servlet stack is the simplest fit for the majority of line-of-business backends, especially when persistence and most integrations are blocking.
+{% else %}
+WebFlux is selected when non-blocking I/O is a first-class requirement rather than an implementation detail.
+{% endif %}
+
+### Why {{ database }}
+
+{% if database == "postgresql" %}
+PostgreSQL provides strong transactional guarantees, good tooling, and a feature set that covers most production API backends without exotic tradeoffs.
+{% elif database == "mysql" %}
+MySQL is a pragmatic default when team familiarity or hosting standards already center on it.
+{% else %}
+MariaDB is selected when compatibility with MySQL-style operations is needed with MariaDB-specific operational preferences.
+{% endif %}
+
+## Consequences
+
+Positive:
+
+- contributors can place code with low ambiguity
+- service and repository boundaries are explicit
+- the generated documentation gives AI agents high-signal context quickly
+- the test strategy is visible from day one
+
+Negative:
+
+- the blueprint does not generate a complete runnable application shell on its own
+- teams still need to choose concrete libraries for mapping, migrations, and quality tooling
+- architecture discipline is required to prevent controllers or repositories from accumulating business logic
+
+## Follow-Up
+
+1. Generate the application skeleton with Spring Initializr or internal standards.
+2. Add the `Application` bootstrap class and first feature slice.
+3. Add migration tooling, security wiring, and CI implementation matching this documented shape.

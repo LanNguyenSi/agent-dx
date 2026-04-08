@@ -1,0 +1,31 @@
+FROM php:{{ php_version }}-cli-bookworm
+
+ARG APP_ENV=dev
+
+ENV COMPOSER_ALLOW_SUPERUSER=1
+ENV APP_ENV=${APP_ENV}
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git \
+        unzip \
+        libicu-dev \
+        libzip-dev \
+        libpq-dev \
+        default-libmysqlclient-dev \
+    && docker-php-ext-install -j"$(nproc)" \
+        intl \
+        opcache \
+        pdo \
+        pdo_mysql \
+        pdo_pgsql \
+        zip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+
+WORKDIR /app
+
+EXPOSE 8000
+
+CMD ["php", "-S", "0.0.0.0:8000", "-t", "public"]

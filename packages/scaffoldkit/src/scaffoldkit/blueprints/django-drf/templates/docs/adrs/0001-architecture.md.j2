@@ -1,0 +1,39 @@
+# ADR-0001: Django + DRF Baseline
+
+## Status
+
+Accepted
+
+## Context
+
+{{ display_name }} requires a Python backend where Django's ORM and administrative ecosystem are considered an advantage rather than overhead. A generic REST scaffold would hide too much framework-specific structure.
+
+## Decision
+
+Adopt **Django + Django REST Framework** as the backend baseline with:
+
+- a dedicated project config layer
+- explicit domain apps
+- DRF resources for the HTTP surface
+{% if use_celery %}- Celery for deferred work
+{% endif %}
+{% if use_channels %}- Channels for websocket support
+{% endif %}
+
+Database baseline: **{{ database }}**
+
+Auth baseline: **{{ auth_strategy }}**
+
+## Consequences
+
+Positive:
+
+- strong ORM and migration workflow
+- rich admin and ecosystem support
+- DRF gives predictable serializer/view/permission patterns
+
+Trade-offs:
+
+- Django structure is more opinionated than minimalist frameworks
+- careless placement of business logic can lead to “fat serializers” or “fat viewsets”
+- framework-specific guidance must stay explicit for downstream agents

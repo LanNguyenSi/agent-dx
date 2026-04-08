@@ -1,0 +1,19 @@
+fastapi>=0.115.12,<0.116.0
+uvicorn[standard]>=0.34.0,<0.35.0
+sqlalchemy>=2.0.40,<3.0.0
+alembic>=1.15.2,<2.0.0
+{% if db_provider == "postgresql" -%}
+psycopg[binary]>=3.2.6,<4.0.0
+{% elif db_provider == "mysql" -%}
+pymysql>=1.1.1,<2.0.0
+{% endif -%}
+{% if auth_strategy == "jwt" -%}
+pyjwt>=2.10.1,<3.0.0
+{% elif auth_strategy == "oauth2" -%}
+authlib>=1.5.2,<2.0.0
+{% elif auth_strategy == "api-key" -%}
+passlib>=1.7.4,<2.0.0
+{% endif -%}
+{% if use_redis -%}
+redis>=5.2.1,<6.0.0
+{% endif %}

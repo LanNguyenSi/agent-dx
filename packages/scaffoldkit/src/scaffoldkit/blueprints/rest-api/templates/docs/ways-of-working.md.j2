@@ -1,0 +1,296 @@
+# Ways of Working: {{ display_name }}
+
+## Definition of Done
+
+A feature or bug fix is considered done when ALL of the following are true:
+
+- [ ] Code is written and passes all lint and format checks
+- [ ] Tests are written, passing, and match the **{{ test_strategy }}** strategy
+- [ ] New or changed endpoints are reflected in the OpenAPI spec{% if use_openapi %} (auto-generated or manually updated){% endif %}
+- [ ] Error cases are handled and return correct HTTP status codes and error envelopes
+- [ ] Documentation is updated if the change affects architecture, API design, or data models
+- [ ] Code has been reviewed by at least one team member
+- [ ] The change has been tested against a real {{ database }} instance (locally or in CI)
+{% if use_auth %}
+- [ ] Authorization rules are in place: authenticated routes require a valid token; resource access is scoped to the requesting user or role
+{% endif %}
+- [ ] No secrets or environment-specific values are committed to source control
+
+## Branching Strategy
+
+We use trunk-based development with short-lived feature branches.
+
+### Branch Naming
+
+```
+feature/<ticket-id>-<short-description>
+fix/<ticket-id>-<short-description>
+chore/<description>
+docs/<description>
+api/<ticket-id>-<resource-or-endpoint>
+```
+
+### Workflow
+
+1. Create a branch from `main`
+2. Make small, focused commits
+3. Open a Pull Request early (draft if WIP)
+4. Ensure CI passes before requesting review
+5. Request review when ready
+6. Squash-merge into `main`
+7. Delete the branch after merge
+
+## Pull Request Conventions
+
+### PR Title
+
+Use conventional commit format:
+
+```
+feat(users): add PATCH endpoint for profile updates
+fix(auth): handle expired refresh token gracefully
+perf(orders): add index on orders.created_at
+docs(api-design): document cursor pagination pattern
+chore(deps): upgrade {{ framework }} to latest patch
+```
+
+**Scope** is the resource or module affected: `users`, `auth`, `orders`, `config`, `middleware`, etc.
+
+### PR Description
+
+Every PR should include:
+
+- **What**: brief summary of the changes
+- **Why**: motivation or ticket reference
+- **How**: implementation approach if non-obvious
+- **API changes**: list any new, modified, or removed endpoints
+- **Testing**: how the change was verified (unit tests added, manual curl commands, etc.)
+
+### Review Expectations
+
+- Review within 1 business day
+- Approve with minor comments rather than blocking on style
+- Block on: correctness issues, security concerns, missing tests, undocumented API changes
+- Use `[nit]` prefix for style/preference comments that do not block approval
+
+## API Versioning
+
+The API is versioned via the URL path: `/api/v1/...`
+
+### Rules for Versioning
+
+- Non-breaking changes (new optional fields, new endpoints) can be added to the current version
+- Breaking changes (removing fields, changing field types, changing semantics) require a new version
+- Deprecated fields are annotated in the OpenAPI spec before removal
+- A version is not removed until all known consumers have migrated
+
+### What Counts as a Breaking Change
+
+| Change | Breaking? |
+|--------|-----------|
+| Add a new optional request field | No |
+| Add a new response field | No (consumers must ignore unknown fields) |
+| Add a new endpoint | No |
+| Remove a request or response field | Yes |
+| Change a field type | Yes |
+| Change a field name | Yes |
+| Change HTTP status code for success | Yes |
+| Add a required request field | Yes |
+| Change authentication requirement | Yes |
+
+## Error Handling Conventions
+
+All errors use a consistent JSON envelope. Never return a plain string error.
+
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable description.",
+    "details": []
+  }
+}
+```
+
+### Standard Error Codes
+
+| HTTP Status | Code | When to Use |
+|-------------|------|-------------|
+| 400 | `VALIDATION_ERROR` | Request body or query params failed validation |
+| 400 | `INVALID_REQUEST` | Malformed JSON, missing required fields |
+{% if use_auth %}
+| 401 | `UNAUTHORIZED` | Missing or invalid authentication credentials |
+| 403 | `FORBIDDEN` | Authenticated but not authorized for this resource |
+{% endif %}
+| 404 | `NOT_FOUND` | Resource does not exist |
+| 409 | `CONFLICT` | Resource already exists (e.g., duplicate email) |
+| 422 | `UNPROCESSABLE` | Input is valid but violates a business rule |
+| 429 | `RATE_LIMITED` | Too many requests |
+| 500 | `INTERNAL_ERROR` | Unexpected server error |
+| 503 | `SERVICE_UNAVAILABLE` | Dependency is down |
+
+### Rules
+
+- Never expose stack traces or internal error messages in responses
+- Log the full error (including stack trace) server-side with a correlation ID
+- Include the correlation ID in the `X-Request-ID` response header so clients can reference it in support tickets
+- `VALIDATION_ERROR` must include a `details` array listing each invalid field
+
+## Testing Expectations
+
+Strategy: **{{ test_strategy }}**
+
+{% if test_strategy == "unit-and-integration" %}
+### Unit Tests
+
+- Every service method has at least one unit test
+- Repositories are mocked using a test double in service tests
+- Test happy path, validation failures, and key edge cases
+- Aim for >80% coverage on all service and utility code
+- Tests run in <5 seconds total; no real database or network
+
+### Integration Tests
+
+- Every route is covered by at least one integration test using a real {{ database }} instance
+- Test the full request-to-database cycle including auth middleware
+- Integration test database is seeded and torn down per test suite
+- Tests should be independent: each test sets up its own state
+{% elif test_strategy == "contract-testing" %}
+### Contract Tests
+
+- Consumers define contracts that describe the API shape they depend on
+- Provider verification runs against the real API on every CI build
+- A failing contract test blocks the build - it means a consumer is broken
+- Contracts are version-controlled alongside the API
+
+### Integration Tests
+
+- Repository layer: every query method tested against a real {{ database }} instance
+- Service layer: tested with real repositories (no mocking at this layer)
+
+### Unit Tests
+
+- Complex transformation logic, validators, and utilities have unit tests
+- Keep unit tests focused on code that has branching logic
+{% elif test_strategy == "full-pyramid" %}
+### Unit Tests (most)
+
+- Every service method
+- Every validation rule
+- Every data transformation utility
+- Target: >80% line coverage, 100% branch coverage on business logic
+
+### Integration Tests (some)
+
+- Every repository method against a real {{ database }} instance
+- Every route via HTTP client against a running test application
+- Auth middleware and permission checks
+
+### Contract Tests (few)
+
+- Top-level consumer-driven contracts for the most critical resources
+- Run in CI against the real provider
+{% endif %}
+
+### Test Naming
+
+```
+test_<subject>_<scenario>_<expected_result>
+```
+
+Examples:
+- `test_create_user_with_duplicate_email_returns_409`
+- `test_list_orders_with_date_filter_returns_filtered_results`
+- `test_delete_resource_as_non_owner_returns_403`
+
+### Test File Location
+
+- Unit tests: alongside source files, or in `tests/` mirroring the `src/` structure
+- Integration tests: in `tests/integration/`, named after the resource (`users.integration.test.*`)
+
+## Architecture Decision Records (ADRs)
+
+Significant architectural decisions are documented in `docs/adrs/`.
+
+### When to Write an ADR
+
+- Introducing a new library or framework dependency
+- Changing the database schema in a significant way
+- Establishing a new API design pattern or convention
+- Choosing between multiple valid implementation approaches
+- Deprecating or removing an API resource
+- Changing the authentication strategy
+
+### ADR Format
+
+```markdown
+# ADR-NNNN: Title
+
+## Status
+Proposed | Accepted | Deprecated | Superseded by ADR-XXXX
+
+## Context
+What is the problem, constraint, or opportunity?
+
+## Decision
+What did we decide to do?
+
+## Consequences
+Positive and negative trade-offs. What becomes easier? What becomes harder?
+
+## References
+Links to related ADRs, docs, or external resources.
+```
+
+## Documentation Expectations
+
+| Document | When to Update |
+|----------|---------------|
+| `README.md` | When setup steps or environment variables change |
+| `docs/architecture.md` | When layers, responsibilities, or major components change |
+| `docs/api-design.md` | When new conventions are established for REST design |
+| `docs/adrs/` | When a significant architectural decision is made |
+{% if use_openapi %}
+| OpenAPI spec | On every endpoint addition or modification |
+{% endif %}
+{% if ai_context %}
+| `AI_CONTEXT.md` | When architecture rules, patterns, or conventions change |
+{% endif %}
+
+## AI Collaboration Guidelines
+
+{% if ai_context %}
+This project is designed for AI-assisted development.
+
+### For AI Agents
+
+- Read `AI_CONTEXT.md` before starting any task
+- Follow the layered architecture: routes call services, services call repositories
+- Match the existing test strategy: **{{ test_strategy }}**
+- Use the error codes and response envelope defined in `docs/api-design.md`
+- Write an ADR when introducing a new library or significant pattern
+{% if use_auth %}
+- Always include authorization checks when adding endpoints that access user-owned data
+{% endif %}
+
+### For Developers Working with AI
+
+- Provide clear, scoped task descriptions referencing specific resources or endpoints
+- Reference existing files (e.g., "follow the pattern in `src/routes/users.py`")
+- Review AI-generated code against the same standards as human-written code
+- Update `AI_CONTEXT.md` when patterns change so future AI sessions stay aligned
+{% else %}
+When using AI coding assistants on this project:
+
+- Provide the project structure and relevant conventions as context
+- Reference `docs/architecture.md` and `docs/api-design.md` for existing patterns
+- Review generated code for correct error handling, auth checks, and test coverage
+- Ensure generated code follows the layer separation rules
+{% endif %}
+
+## Communication
+
+- Prefer async communication: PR comments, ADRs, and doc updates over Slack threads
+- Document decisions, not just outcomes
+- When a significant design question arises in a PR review, elevate it to an ADR
+- Keep the `docs/` folder up to date - stale documentation is worse than no documentation

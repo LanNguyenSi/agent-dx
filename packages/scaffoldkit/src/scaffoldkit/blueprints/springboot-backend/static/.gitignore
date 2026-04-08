@@ -1,0 +1,47 @@
+###> Java ###
+*.class
+*.log
+*.ctxt
+*.jar
+*.war
+*.nar
+*.ear
+hs_err_pid*
+replay_pid*
+###< Java ###
+
+###> Maven ###
+target/
+.mvn/wrapper/maven-wrapper.jar
+###< Maven ###
+
+###> Gradle ###
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+###< Gradle ###
+
+###> Spring Boot ###
+spring.log
+.env
+.env.local
+application-local.yml
+application-local.yaml
+###< Spring Boot ###
+
+###> IDE ###
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+###< IDE ###
+
+###> OS ###
+.DS_Store
+Thumbs.db
+###< OS ###
+
+###> Coverage ###
+coverage/
+###< Coverage ###

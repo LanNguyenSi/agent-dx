@@ -1,0 +1,44 @@
+# Decisions
+
+Architecture and engineering decisions that shape how agents should work in this project.
+
+## Active Decisions
+
+### D-001: Express.js with TypeScript
+- **Date:** {{ "now" | default("2026-01-01") }}
+- **Status:** accepted
+- **Context:** Need a lightweight, well-understood Node.js API framework.
+- **Decision:** Use Express.js with TypeScript strict mode.
+- **Consequences:** Mature ecosystem, extensive middleware available. Manual type annotations needed.
+- **Agent impact:** All files must be `.ts`. No `any` types. Use Zod for runtime validation.
+
+### D-002: Prisma ORM with {{ db_provider | capitalize }}
+- **Date:** {{ "now" | default("2026-01-01") }}
+- **Status:** accepted
+- **Context:** Need type-safe database access with migration support.
+- **Decision:** Use Prisma ORM with {{ db_provider }}.
+- **Consequences:** Schema-first approach. Generated client needs regeneration after changes.
+- **Agent impact:** Run `npx prisma generate` after schema changes. Use transactions for related mutations.
+
+### D-003: Route-Service-Prisma Architecture
+- **Date:** {{ "now" | default("2026-01-01") }}
+- **Status:** accepted
+- **Context:** Need clear separation of concerns.
+- **Decision:** Routes handle HTTP, services handle business logic, Prisma handles data.
+- **Consequences:** More files, but each layer is testable independently.
+- **Agent impact:** Never put business logic in routes. Never put HTTP concerns in services.
+{% if use_docker %}
+
+### D-004: Docker Deployment
+- **Date:** {{ "now" | default("2026-01-01") }}
+- **Status:** accepted
+- **Context:** Need reproducible deployment.
+- **Decision:** Multi-stage Dockerfile with docker-compose.
+- **Consequences:** Consistent environments across dev and production.
+- **Agent impact:** Include `prisma generate` in Dockerfile build stage.
+{% endif %}
+
+## Superseded
+
+| ID | Title | Superseded By | Date |
+|----|-------|---------------|------|

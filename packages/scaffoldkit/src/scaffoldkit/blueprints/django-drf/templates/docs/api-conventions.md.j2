@@ -1,0 +1,46 @@
+# API Conventions: {{ display_name }}
+
+## Base Path
+
+Use `/api/v1`.
+
+## DRF Style Rules
+
+- plural resources
+- explicit serializer classes
+- explicit permission classes
+- predictable pagination and error envelopes
+
+## Suggested Endpoint Shape
+
+- `GET /api/v1/resources/`
+- `POST /api/v1/resources/`
+- `GET /api/v1/resources/{id}/`
+- `PATCH /api/v1/resources/{id}/`
+- `DELETE /api/v1/resources/{id}/`
+
+## Error Envelope
+
+Prefer a stable error envelope even when DRF defaults are tempting:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request payload",
+    "details": []
+  }
+}
+```
+
+## Pagination
+
+Prefer one default pagination style per service and document it clearly. Cursor pagination is usually better for growing datasets; page-number pagination is fine for internal tools with modest scale.
+
+## Documentation
+
+{% if use_drf_spectacular %}
+Use drf-spectacular or equivalent schema tooling so the API docs stay generated from real code.
+{% else %}
+Keep this document updated manually as the API evolves.
+{% endif %}

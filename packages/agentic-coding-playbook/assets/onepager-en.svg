@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700" width="900" height="700" font-family="'Segoe UI', system-ui, sans-serif">
+
+  <!-- Background -->
+  <rect width="900" height="700" fill="#f8fafc"/>
+
+  <!-- Header -->
+  <rect x="0" y="0" width="900" height="76" rx="0" fill="#1e293b"/>
+  <text x="450" y="32" text-anchor="middle" fill="#f8fafc" font-size="20" font-weight="700" letter-spacing="0.3">Enterprise Agentic Coding</text>
+  <text x="450" y="56" text-anchor="middle" fill="#94a3b8" font-size="13">When Agent · When Human · When System?</text>
+  <text x="450" y="71" text-anchor="middle" fill="#475569" font-size="10">Lan Nguyen Si · github.com/LanNguyenSi/agentic-coding-playbook</text>
+
+  <!-- THREE COLUMNS -->
+  <!-- Agent -->
+  <rect x="24" y="90" width="272" height="166" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="24" y="90" width="272" height="40" rx="8" fill="#dbeafe"/>
+  <rect x="24" y="118" width="272" height="12" fill="#dbeafe"/>
+  <text x="160" y="116" text-anchor="middle" fill="#1d4ed8" font-size="13" font-weight="700">AGENT</text>
+  <text x="160" y="145" text-anchor="middle" fill="#3b82f6" font-size="11" font-style="italic">may optimize</text>
+  <text x="52" y="166" fill="#475569" font-size="11">• generate</text>
+  <text x="52" y="182" fill="#475569" font-size="11">• analyze</text>
+  <text x="52" y="198" fill="#475569" font-size="11">• prepare</text>
+  <text x="52" y="216" fill="#94a3b8" font-size="10" font-style="italic">Mistakes: from context gaps</text>
+  <text x="52" y="230" fill="#94a3b8" font-size="10" font-style="italic">no production effect (Tier 1)</text>
+
+  <!-- Mensch -->
+  <rect x="314" y="90" width="272" height="166" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="314" y="90" width="272" height="40" rx="8" fill="#dcfce7"/>
+  <rect x="314" y="118" width="272" height="12" fill="#dcfce7"/>
+  <text x="450" y="116" text-anchor="middle" fill="#15803d" font-size="13" font-weight="700">HUMAN</text>
+  <text x="450" y="145" text-anchor="middle" fill="#16a34a" font-size="11" font-style="italic">must be accountable</text>
+  <text x="342" y="166" fill="#475569" font-size="11">• decide</text>
+  <text x="342" y="182" fill="#475569" font-size="11">• approve</text>
+  <text x="342" y="198" fill="#475569" font-size="11">• assess</text>
+  <text x="342" y="216" fill="#94a3b8" font-size="10" font-style="italic">Mistakes: from time pressure</text>
+  <text x="342" y="230" fill="#94a3b8" font-size="10" font-style="italic">Accountability always stays with humans</text>
+
+  <!-- System -->
+  <rect x="604" y="90" width="272" height="166" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="604" y="90" width="272" height="40" rx="8" fill="#fef9c3"/>
+  <rect x="604" y="118" width="272" height="12" fill="#fef9c3"/>
+  <text x="740" y="116" text-anchor="middle" fill="#854d0e" font-size="13" font-weight="700">SYSTEM</text>
+  <text x="740" y="145" text-anchor="middle" fill="#a16207" font-size="11" font-style="italic">must enforce</text>
+  <text x="632" y="166" fill="#475569" font-size="11">• verify</text>
+  <text x="632" y="182" fill="#475569" font-size="11">• block</text>
+  <text x="632" y="200" fill="#475569" font-size="11">• log</text>
+  <text x="632" y="216" fill="#94a3b8" font-size="10" font-style="italic">Mistakes: only through misconfiguration</text>
+  <text x="632" y="230" fill="#94a3b8" font-size="10" font-style="italic">Discipline does not scale. Systems do.</text>
+
+  <!-- ROW 2: Tier-Modell + Entscheidungslogik -->
+  <!-- Tier-Modell -->
+  <rect x="24" y="276" width="418" height="170" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="24" y="276" width="418" height="36" rx="8" fill="#f1f5f9"/>
+  <rect x="24" y="300" width="418" height="12" fill="#f1f5f9"/>
+  <text x="233" y="298" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="700" letter-spacing="0.5">TIER MODEL</text>
+
+  <rect x="44" y="322" width="118" height="52" rx="6" fill="#dbeafe" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="103" y="342" text-anchor="middle" fill="#1d4ed8" font-size="11" font-weight="700">Tier 1</text>
+  <text x="103" y="358" text-anchor="middle" fill="#3b82f6" font-size="10">Autonomous</text>
+  <text x="103" y="372" text-anchor="middle" fill="#93c5fd" font-size="9">no review required</text>
+
+  <rect x="176" y="322" width="118" height="52" rx="6" fill="#fef9c3" stroke="#fde68a" stroke-width="1"/>
+  <text x="235" y="342" text-anchor="middle" fill="#92400e" font-size="11" font-weight="700">Tier 2</text>
+  <text x="235" y="358" text-anchor="middle" fill="#b45309" font-size="10">Assisted</text>
+  <text x="235" y="372" text-anchor="middle" fill="#d97706" font-size="9">review before effect</text>
+
+  <rect x="308" y="322" width="118" height="52" rx="6" fill="#fee2e2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="367" y="342" text-anchor="middle" fill="#991b1b" font-size="11" font-weight="700">Tier 3</text>
+  <text x="367" y="358" text-anchor="middle" fill="#dc2626" font-size="10">Prohibited</text>
+  <text x="367" y="372" text-anchor="middle" fill="#f87171" font-size="9">even with review</text>
+
+  <text x="233" y="408" text-anchor="middle" fill="#64748b" font-size="10" font-style="italic">The higher the risk, the closer to human and system.</text>
+  <text x="233" y="424" text-anchor="middle" fill="#64748b" font-size="10" font-style="italic">Deploy Prod · Credentials · Bypass gates → always Tier 3</text>
+
+  <!-- Entscheidungslogik -->
+  <rect x="458" y="276" width="418" height="170" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="458" y="276" width="418" height="36" rx="8" fill="#f1f5f9"/>
+  <rect x="458" y="300" width="418" height="12" fill="#f1f5f9"/>
+  <text x="667" y="298" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="700" letter-spacing="0.5">DECISION LOGIC</text>
+
+  <text x="478" y="330" fill="#475569" font-size="12">1.  Is the result reversible?</text>
+  <text x="478" y="350" fill="#475569" font-size="12">2.  Does a human carry accountability?</text>
+  <text x="478" y="370" fill="#475569" font-size="12">3.  Does a system protect production?</text>
+
+  <line x1="478" y1="388" x2="856" y2="388" stroke="#e2e8f0" stroke-width="1"/>
+
+  <rect x="478" y="396" width="166" height="32" rx="6" fill="#dcfce7" stroke="#bbf7d0" stroke-width="1"/>
+  <text x="561" y="416" text-anchor="middle" fill="#15803d" font-size="11" font-weight="700">3x Yes: agent may proceed</text>
+
+  <rect x="658" y="396" width="178" height="32" rx="6" fill="#fee2e2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="747" y="416" text-anchor="middle" fill="#991b1b" font-size="11" font-weight="700">1x No: clarify first</text>
+
+  <!-- ROW 3: Greenfield/Brownfield + Minimum Governance -->
+  <!-- Greenfield/Brownfield -->
+  <rect x="24" y="462" width="418" height="150" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="24" y="448" width="418" height="36" rx="8" fill="#f1f5f9"/>
+  <rect x="24" y="486" width="418" height="12" fill="#f1f5f9"/>
+  <text x="233" y="484" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="700" letter-spacing="0.5">GREENFIELD VS. BROWNFIELD</text>
+
+  <rect x="44" y="500" width="180" height="96" rx="6" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+  <text x="134" y="518" text-anchor="middle" fill="#15803d" font-size="11" font-weight="700">Greenfield</text>
+  <text x="134" y="534" text-anchor="middle" fill="#475569" font-size="10">Set up gates from day one.</text>
+  <text x="134" y="550" text-anchor="middle" fill="#475569" font-size="10">Never catch up later.</text>
+  <text x="134" y="566" text-anchor="middle" fill="#16a34a" font-size="10" font-weight="600">Starts clean.</text>
+  <text x="134" y="590" text-anchor="middle" fill="#94a3b8" font-size="9">Branch protection · CI · review</text>
+
+  <rect x="238" y="500" width="188" height="96" rx="6" fill="#fffbeb" stroke="#fde68a" stroke-width="1"/>
+  <text x="332" y="518" text-anchor="middle" fill="#92400e" font-size="11" font-weight="700">Brownfield</text>
+  <text x="332" y="534" text-anchor="middle" fill="#475569" font-size="10">Capture baseline.</text>
+  <text x="332" y="550" text-anchor="middle" fill="#475569" font-size="10">Set gate at baseline.</text>
+  <text x="332" y="566" text-anchor="middle" fill="#475569" font-size="10">Improve incrementally.</text>
+  <text x="332" y="582" text-anchor="middle" fill="#b45309" font-size="10" font-weight="600">Gets better. Never worse.</text>
+
+  <!-- Minimum Governance -->
+  <rect x="458" y="462" width="418" height="150" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="458" y="448" width="418" height="36" rx="8" fill="#f1f5f9"/>
+  <rect x="458" y="486" width="418" height="12" fill="#f1f5f9"/>
+  <text x="667" y="484" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="700" letter-spacing="0.5">MINIMUM GOVERNANCE</text>
+
+  <text x="478" y="514" fill="#475569" font-size="11">•  Branch protection on main / release/*</text>
+  <text x="478" y="532" fill="#475569" font-size="11">•  Required CI checks: build · test · lint</text>
+  <text x="478" y="550" fill="#475569" font-size="11">•  At least 1 human review per PR</text>
+  <text x="478" y="568" fill="#475569" font-size="11">•  Audit trail for agent actions</text>
+  <text x="478" y="586" fill="#475569" font-size="11">•  Sign-off before every deployment</text>
+
+  <!-- Footer -->
+  <rect x="0" y="628" width="900" height="72" fill="#1e293b"/>
+  <text x="450" y="650" text-anchor="middle" fill="#f8fafc" font-size="12" font-weight="600">"Organizations do not scale agents by giving them more freedom,</text>
+  <text x="450" y="668" text-anchor="middle" fill="#94a3b8" font-size="12">but by designing accountability and system boundaries clearly."</text>
+  <text x="450" y="688" text-anchor="middle" fill="#475569" font-size="10">Lan Nguyen Si · CC BY 4.0 · March 2026 · github.com/LanNguyenSi/agentic-coding-playbook</text>
+
+</svg>

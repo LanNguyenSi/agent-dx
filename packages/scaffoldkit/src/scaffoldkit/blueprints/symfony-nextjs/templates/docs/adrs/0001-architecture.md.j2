@@ -1,0 +1,136 @@
+# ADR-0001: Monorepo with Symfony API + Next.js Frontend
+
+## Status
+
+Accepted
+
+## Context
+
+{{ display_name }} needs a fullstack architecture. The team evaluated several combinations of backend and frontend technology and several ways to structure the resulting codebases.
+
+### Requirements
+
+- A JSON API consumed by a web frontend
+- Server-side rendering for initial page loads (SEO, performance)
+- Strong typing across the frontend codebase
+{% if use_auth %}
+- Secure authentication ({{ auth_method | upper }})
+{% endif %}
+- A database-backed domain model with migrations
+- Ability to move fast on features without sacrificing maintainability
+- A structure that AI coding agents can navigate predictably
+
+### Options Evaluated
+
+#### Backend options
+
+| Option | Verdict |
+|--------|---------|
+| **Symfony {{ php_version }}** | Chosen - mature, explicit, excellent DX for APIs |
+| Laravel | Strong but more opinionated conventions, heavier magic |
+| Node.js (Express/Fastify) | Valid, but PHP/Symfony is the team's stronger suit |
+| Django | Good option but Python adds a second runtime to the stack |
+
+Symfony was chosen because:
+- Explicit dependency injection makes code easy to follow and test
+- Doctrine ORM is the most capable ORM in the PHP ecosystem
+{% if api_style == "api-platform" %}
+- API Platform turns Doctrine entities into a fully specified REST API with minimal boilerplate
+{% endif %}
+- The PHP ecosystem has excellent static analysis (PHPStan, Psalm) that catches contract drift
+- Symfony's HTTP kernel is well understood and has a 15-year track record
+
+#### Frontend options
+
+| Option | Verdict |
+|--------|---------|
+| **Next.js (App Router)** | Chosen - SSR + React + TypeScript, strong ecosystem |
+| Remix | Valid alternative, similar philosophy |
+| SvelteKit | Excellent but smaller ecosystem, less team experience |
+| Vue/Nuxt | Valid but React is the team's stronger suit |
+| Twig (server-rendered) | Rejected - no rich interactivity without significant JS |
+
+Next.js was chosen because:
+- App Router Server Components give SSR without sacrificing React's component model
+- TypeScript support is first-class
+- The deployment story (Vercel, Docker) is straightforward
+- The ecosystem (testing, UI libraries, tooling) is mature
+
+#### Monorepo vs. separate repositories
+
+| Option | Verdict |
+|--------|---------|
+| **Monorepo (single repo)** | Chosen |
+| Separate repos (api + web) | Rejected |
+| Shared types package published to npm registry | Rejected (overhead) |
+
+The monorepo was chosen because:
+- A single PR can atomically change the API endpoint and the frontend that consumes it
+- `packages/shared-types` enforces the contract at compile time in the same build pipeline
+- Onboarding developers only need to clone one repository
+- CI can enforce that the API and frontend are always compatible
+- Tooling (linting, formatting, scripts) is defined once
+
+The downside is that the repository contains two different language ecosystems (PHP and Node). This is accepted because the two apps have clear boundaries (`apps/api` and `apps/web`) and their build systems are independent.
+
+## Decision
+
+We build {{ display_name }} as a **monorepo** containing:
+
+1. **`apps/api`** - Symfony {{ php_version }} REST API{% if api_style == "api-platform" %} using API Platform{% endif %}
+2. **`apps/web`** - Next.js (Node {{ node_version }}) frontend using the App Router
+3. **`packages/shared-types`** - TypeScript interfaces{% if api_style == "api-platform" %} generated from the API Platform OpenAPI spec{% else %} maintained by hand{% endif %}
+
+### Communication
+
+The frontend communicates with the backend exclusively over HTTP (REST/JSON). The frontend has no direct database access. This is enforced by the Docker network topology (the database container is only accessible to the `symfony-fpm` container).
+
+### Type Safety
+
+{% if api_style == "api-platform" %}
+API Platform generates an OpenAPI 3.1 specification. `openapi-typescript` converts it to TypeScript interfaces in `packages/shared-types`. Regenerating types is a required step whenever a Symfony entity or API resource annotation changes. This is enforced by a CI check that fails if the generated file is stale.
+{% else %}
+Shared types in `packages/shared-types/src/index.ts` are maintained by hand. The rule is: change the types first, then update both the Symfony serializer output and the Next.js service layer in the same commit. A TypeScript compilation error in the frontend is the signal that the contract is broken.
+{% endif %}
+
+{% if use_ddd %}
+### Domain-Driven Design
+
+The Symfony backend is structured using DDD layers (Domain, Application, Infrastructure). This provides a clear home for business logic that is independent of the HTTP layer and the database technology. The frontend page structure loosely mirrors the bounded contexts defined in the backend domain model.
+{% endif %}
+
+## Consequences
+
+### Positive
+
+- Atomic cross-app changes reduce the risk of deploying a frontend that is incompatible with the API
+- Shared TypeScript types provide a compiler-enforced contract
+- Clear directory structure (`apps/`, `packages/`) makes navigation predictable
+- Single CI pipeline can enforce coherence between both apps
+- AI coding agents can read `AI_CONTEXT.md` and understand the full picture from one file
+
+### Negative
+
+- Two different language runtimes (PHP, Node) require contributors to be comfortable in both
+- Monorepo CI must be configured carefully to avoid running PHP tests when only frontend files change (and vice versa)
+- `packages/shared-types` must be kept in sync manually{% if api_style == "api-platform" %} (mitigated by code generation){% endif %}; drift is possible if the team skips the regeneration step
+
+### Risks
+
+| Risk | Mitigation |
+|------|-----------|
+| API contract drift (backend changes shape without updating types) | CI check{% if api_style == "api-platform" %}, type regeneration script{% endif %}, code review checklist |
+| Monorepo grows unwieldy | Each app is deployable independently; can split into separate repos if needed |
+| Frontend bypasses the API | Docker network config; code review; ESLint no-direct-db rule |
+| Migrations deployed after frontend | Deployment pipeline (backend deploys first, documented in ways-of-working.md) |
+
+## References
+
+- [Architecture documentation](../architecture.md)
+- [Ways of working](../ways-of-working.md)
+- [API contract](../api-contract.md)
+- [Symfony documentation](https://symfony.com/doc/current/index.html)
+- [Next.js App Router documentation](https://nextjs.org/docs/app)
+{% if api_style == "api-platform" %}
+- [API Platform documentation](https://api-platform.com/docs/)
+{% endif %}

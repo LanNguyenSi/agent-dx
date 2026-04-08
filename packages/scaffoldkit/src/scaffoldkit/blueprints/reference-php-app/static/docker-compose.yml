@@ -1,0 +1,65 @@
+services:
+  php-fpm:
+    container_name: "${PROJECT_NAME}-app"
+    build:
+      target: dev
+      context: ..
+      dockerfile: ./build/app/Dockerfile
+      ssh:
+        - default
+    working_dir: "/var/www/project"
+    env_file:
+      - ./.env
+    networks:
+      app_network:
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001
+      - /var/www/project/var/log:uid=10001,gid=10001
+      - /var/www/project/var/cache:uid=10001,gid=10001
+    cap_drop:
+      - NET_RAW
+    volumes:
+      - ./project:/var/www/project:rw
+      - ./build/app/php.prod.ini:/usr/local/etc/php/conf.d/local.ini:ro
+  nginx:
+    build:
+      context: ..
+      dockerfile: ./build/nginx/Dockerfile
+    container_name: "${PROJECT_NAME}-nginx"
+    depends_on:
+      - php-fpm
+    networks:
+      web:
+        aliases:
+          - "${PROJECT_NAME}.${DOMAIN_SUFFIX}"
+      app_network:
+    volumes:
+      - ./project:/var/www/project:ro
+      - ./build/nginx/default.dev.conf:/etc/nginx/conf.d/default.conf:ro
+
+  mysql:
+    image: mysql:8.0.33-debian
+    platform: linux/amd64
+    container_name: "${PROJECT_NAME}-mysql"
+    environment:
+      MYSQL_RANDOM_ROOT_PASSWORD: "true"
+      MYSQL_USER: auv
+      MYSQL_PASSWORD: auv
+      MYSQL_DATABASE: auv
+    command: "--max-allowed-packet=8388608"
+    volumes:
+      - ./build/mysql/test:/docker-entrypoint-initdb.d
+      - /var/lib/mysql
+    networks:
+      app_network:
+        aliases:
+          - "api-business-matrix-mysql"
+
+networks:
+  app_network:
+    driver: bridge
+  web:
+    external: true

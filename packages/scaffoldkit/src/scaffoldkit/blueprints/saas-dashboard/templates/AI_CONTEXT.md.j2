@@ -1,0 +1,131 @@
+# AI Context: {{ display_name }}
+
+> This file provides context for AI coding agents working on this project.
+> Read this before making any changes.
+
+## Project Overview
+
+**{{ display_name }}** is a {{ description | lower }}.
+
+- **Stack:** {{ stack }}
+- **Architecture:** {{ architecture_style }}
+- **Test Strategy:** {{ test_strategy }}
+- **Design Style:** {{ design_style }}
+{% if use_ddd %}
+- **DDD:** Yes - code is organized around domain bounded contexts
+{% endif %}
+
+## Repository Structure
+
+```
+{{ project_name }}/
+├── apps/web/          → Frontend application
+├── apps/api/          → Backend API
+├── packages/ui/       → Shared UI components
+├── packages/shared/   → Shared types and utilities
+├── docs/              → Project documentation
+│   ├── architecture.md
+│   ├── ways-of-working.md
+│   ├── adrs/          → Architecture Decision Records
+│   └── page-templates/→ UI page structure references
+└── AI_CONTEXT.md      → This file
+```
+
+## Architecture Rules
+
+1. **Separation of concerns**: Do not mix UI logic with business logic or data access.
+2. **Use shared packages**: Common types go in `packages/shared`, UI components in `packages/ui`.
+3. **Follow established patterns**: Check existing code before introducing new patterns.
+{% if use_ddd %}
+4. **Respect bounded contexts**: Each domain module owns its data and API surface.
+{% endif %}
+5. **Document decisions**: Write an ADR in `docs/adrs/` when introducing significant changes.
+
+## Page Patterns
+
+When building new pages, follow these templates:
+
+| Page Type | Reference | Description |
+|-----------|-----------|-------------|
+| Dashboard | `docs/page-templates/dashboard-page.md` | Overview with widgets and metrics |
+| Detail | `docs/page-templates/detail-page.md` | Single-entity view with actions |
+| Settings | `docs/page-templates/settings-page.md` | Configuration forms with sections |
+
+### Common Page Structure
+
+Every page should have:
+
+- A clear page title and breadcrumb
+- Loading and error states
+- Responsive layout
+- Consistent action placement (primary actions top-right)
+
+## Adding New Features
+
+When implementing a new feature:
+
+1. **Check architecture docs**: Read `docs/architecture.md` for structural guidance.
+2. **Check page templates**: Use `docs/page-templates/` as structural references for new pages.
+3. **Follow the test strategy**: Write tests matching the `{{ test_strategy }}` approach.
+4. **Update documentation**: Update relevant docs if the change affects architecture or APIs.
+5. **Write an ADR**: If introducing a new library, pattern, or significant design choice.
+
+## Code Quality Rules
+
+- Follow the project's lint configuration
+- Use TypeScript strict mode (if applicable)
+- Write meaningful commit messages (conventional commits)
+- Keep functions small and focused
+- Prefer composition over inheritance
+{% if use_auth %}
+- Never expose authentication tokens in client-side code
+- Validate permissions on the server side
+{% endif %}
+
+## Testing Rules
+
+Strategy: **{{ test_strategy }}**
+
+{% if test_strategy == "unit-and-integration" %}
+- Write unit tests for all business logic
+- Write integration tests for API endpoints
+- Mock external services, not internal modules
+{% elif test_strategy == "e2e-focused" %}
+- Write E2E tests for every user journey
+- Keep tests focused on user behavior, not implementation
+{% elif test_strategy == "full-pyramid" %}
+- Unit tests for logic, integration tests for boundaries, E2E for journeys
+- Maintain the testing pyramid - more unit tests than integration, more integration than E2E
+{% endif %}
+
+## Design Guidelines
+
+Style: **{{ design_style }}**
+
+{% if design_style == "minimal-clean" %}
+- Generous whitespace, limited color palette
+- Clear typography hierarchy
+- Subtle borders and shadows
+- Focus on content readability
+{% elif design_style == "corporate-professional" %}
+- Structured layouts with clear navigation
+- Professional color scheme (blues, grays)
+- Data-dense but organized
+- Formal tone in UI copy
+{% elif design_style == "playful-modern" %}
+- Rounded corners, vibrant accent colors
+- Friendly illustrations and icons
+- Micro-interactions and transitions
+- Conversational UI copy
+{% endif %}
+
+## What NOT to Do
+
+- Do not install new major dependencies without an ADR
+- Do not bypass TypeScript type checking
+- Do not commit environment-specific configuration
+- Do not skip tests for "simple" changes
+{% if use_auth %}
+- Do not store secrets in source code
+{% endif %}
+- Do not introduce new patterns without checking existing ones first

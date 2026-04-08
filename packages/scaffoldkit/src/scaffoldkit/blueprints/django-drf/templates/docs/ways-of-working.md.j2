@@ -1,0 +1,40 @@
+# Ways of Working: {{ display_name }}
+
+## Definition of Done
+
+- serializers, permissions, and service logic are covered appropriately
+- migrations are reviewed, not just generated
+- API behavior is validated end-to-end for changed resources
+- auth and permission implications are called out in review
+- schema/docs are updated when the contract changes
+
+## Development Workflow
+
+1. design one resource boundary
+2. choose the serializer/view/service split deliberately
+3. add migrations and persistence changes
+4. cover the slice with pytest-django and integration tests
+
+## Review Triggers
+
+Seek architectural review when:
+
+- auth model changes
+- serializers start to carry workflow logic
+- viewsets become orchestration-heavy
+{% if use_celery %}- Celery tasks alter user-visible business flow
+{% endif %}
+{% if use_channels %}- websocket behavior changes resource consistency expectations
+{% endif %}
+
+## Testing Expectations
+
+Current strategy: **{{ test_strategy }}**
+
+{% if test_strategy == "pytest-django" %}
+- prioritize model, serializer, permission, and service tests
+{% elif test_strategy == "pytest-django-and-integration" %}
+- pair focused unit tests with API integration coverage per resource
+{% else %}
+- maintain a broader verification ladder across unit, integration, and scenario tests
+{% endif %}

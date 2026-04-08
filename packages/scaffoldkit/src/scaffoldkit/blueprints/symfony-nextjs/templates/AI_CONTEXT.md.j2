@@ -1,0 +1,311 @@
+# AI Context: {{ display_name }}
+
+> Read this file before making any changes to this repository.
+> It is the single source of truth for how this codebase works.
+
+---
+
+## Project Overview
+
+**{{ display_name }}** is a fullstack monorepo.
+
+- **Backend:** Symfony {{ php_version }} REST API (`apps/api/`){% if api_style == "api-platform" %} using API Platform{% endif %}
+- **Frontend:** Next.js (Node {{ node_version }}) with App Router (`apps/web/`)
+- **Shared contract:** TypeScript interfaces in `packages/shared-types/`
+- **Database:** {{ database | capitalize }}
+{% if use_auth %}
+- **Auth:** {{ auth_method | upper }} tokens, httpOnly cookies, server-side enforcement
+{% endif %}
+- **Test strategy:** {{ test_strategy }}
+- **Design style:** {{ design_style }}
+
+---
+
+## Repository Structure
+
+```
+{{ project_name }}/
+├── apps/
+│   ├── api/                         # Symfony {{ php_version }} backend
+│   │   ├── config/                  # Symfony config (packages/, routes/, services.yaml)
+│   │   ├── migrations/              # Doctrine migrations (NEVER edit manually)
+│   │   ├── src/
+{% if use_ddd %}
+│   │   │   ├── Domain/              # Pure business logic (no framework deps)
+│   │   │   │   ├── Model/           # Entities, value objects, aggregates
+│   │   │   │   ├── Service/         # Stateless domain services
+│   │   │   │   ├── Event/           # Domain events
+│   │   │   │   └── Repository/      # Repository interfaces
+│   │   │   ├── Application/         # Use cases (Command/Query handlers)
+│   │   │   │   ├── Command/
+│   │   │   │   ├── Query/
+│   │   │   │   └── DTO/
+│   │   │   ├── Infrastructure/      # Framework adapters
+│   │   │   │   ├── Persistence/     # Doctrine mappings + repo implementations
+│   │   │   │   └── Http/            # Symfony controllers (thin)
+{% else %}
+│   │   │   ├── Controller/          # HTTP layer ONLY - no business logic here
+│   │   │   ├── Entity/              # Doctrine ORM entities
+│   │   │   ├── Repository/          # Query methods on top of Doctrine
+│   │   │   ├── Service/             # All business logic lives here
+│   │   │   ├── DTO/                 # Request/response shapes
+{% endif %}
+│   │   │   └── Exception/           # Domain-specific exceptions
+│   │   └── tests/
+│   │       ├── Unit/                # Fast, no DB, mocked deps
+│   │       └── Integration/         # Real HTTP + real DB
+│   └── web/                         # Next.js {{ node_version }} frontend
+│       └── src/
+│           ├── app/                 # App Router pages
+│           │   ├── (auth)/          # Auth route group
+│           │   └── (dashboard)/     # Protected route group
+│           ├── components/
+│           │   ├── ui/              # Primitive components{% if ui_library == "shadcn-ui" %} (shadcn/ui){% elif ui_library == "radix-ui" %} (Radix UI){% endif %}
+│           │   └── features/        # Feature-specific composed components
+│           ├── hooks/               # Custom React hooks
+│           ├── lib/
+│           │   ├── api.ts           # Fetch wrapper (auth headers, error parsing, retry)
+│           │   └── utils.ts         # cn(), formatDate(), etc.
+│           ├── services/            # One file per API resource
+│           └── types/               # Frontend-only types (not in shared-types)
+├── packages/
+│   └── shared-types/
+│       └── src/index.ts             # TypeScript interfaces for all API responses
+├── docs/
+│   ├── architecture.md
+│   ├── ways-of-working.md
+│   ├── api-contract.md              # THE contract between api and web
+│   └── adrs/                        # Architectural decisions
+{% if use_docker %}
+├── docker/                          # Dockerfiles and nginx config
+{% endif %}
+└── AI_CONTEXT.md                    # This file
+```
+
+---
+
+## How to Add a Feature End-to-End
+
+Follow this order every time. Do not skip steps.
+
+### 1. Define the entity (Symfony)
+
+```php
+// apps/api/src/Entity/Product.php
+{% if api_style == "api-platform" %}
+#[ApiResource(...)]
+{% endif %}
+#[ORM\Entity(repositoryClass: ProductRepository::class)]
+class Product { /* ... */ }
+```
+
+Then generate + run the migration:
+```bash
+php bin/console doctrine:migrations:diff
+php bin/console doctrine:migrations:migrate
+```
+
+### 2. Implement the API endpoint (Symfony)
+
+{% if api_style == "api-platform" %}
+API Platform auto-generates endpoints from `#[ApiResource]`. Add operation configs (security, normalization groups) to the attribute.
+{% else %}
+Create a controller in `apps/api/src/Controller/`. Keep it thin: validate request, call a Service, return JSON.
+
+```php
+#[Route('/api/products', methods: ['POST'])]
+public function create(Request $request, ProductService $service): JsonResponse
+{
+    $dto = $this->deserializeAndValidate($request, CreateProductDto::class);
+    return $this->json($service->create($dto), Response::HTTP_CREATED);
+}
+```
+{% endif %}
+
+Write integration tests (`tests/Integration/`) before moving to the frontend.
+
+### 3. Update shared types
+
+{% if api_style == "api-platform" %}
+```bash
+# Requires the API dev server running
+pnpm --filter shared-types generate
+```
+Commit the updated `packages/shared-types/src/index.ts`.
+{% else %}
+Edit `packages/shared-types/src/index.ts` to reflect the new response shape. Commit this in the same PR as the API changes.
+{% endif %}
+
+### 4. Add a service function (Next.js)
+
+```typescript
+// apps/web/src/services/products.ts
+import { api } from '@/lib/api';
+import type { Product, PaginatedResponse } from '@{{ project_name }}/shared-types';
+
+export async function getProducts(page = 1): Promise<PaginatedResponse<Product>> {
+  return api.get(`/products?page=${page}`);
+}
+```
+
+The `api` helper handles: base URL, `Authorization` header from cookies, JSON parsing, and 401 retry.
+
+### 5. Build the page (Next.js)
+
+- Use a **Server Component** to fetch data: `const products = await getProducts()`
+- Use **Client Components** only for interactivity (`'use client'`)
+- Follow the page templates in `docs/page-templates/`
+
+```typescript
+// apps/web/src/app/(dashboard)/products/page.tsx
+export default async function ProductsPage() {
+  const { data: products } = await getProducts();
+  return <ProductTable products={products} />;
+}
+```
+
+---
+
+## API Contract Rules
+
+These are non-negotiable. See `docs/api-contract.md` for full details.
+
+1. **All data via HTTP API.** Never access the database from the frontend.
+2. **Pagination envelope is consistent.** Every collection returns `{ data, meta, links }`.
+3. **Error envelope is consistent.** Every error returns `{ status, title, detail, violations? }`.
+4. **IDs are UUIDs.** Never use auto-increment integers in URLs or JSON.
+5. **Timestamps are ISO 8601** with timezone offset.
+{% if api_style == "api-platform" %}
+6. **Regenerate types after entity changes.** `pnpm --filter shared-types generate` is mandatory.
+{% else %}
+6. **Update shared-types after response changes.** Hand-edit `packages/shared-types/src/index.ts`.
+{% endif %}
+7. **Never break the contract silently.** If you rename a field, update the type, the service, and document it in an ADR.
+
+---
+
+## Backend Rules (Symfony)
+
+{% if use_ddd %}
+- **Domain layer has zero framework dependencies.** Never import Symfony or Doctrine in `src/Domain/`.
+- **Controllers delegate immediately.** A controller method should be 5-10 lines: deserialize, call application service, return response.
+- **Entities are in the Domain.** Doctrine annotations live on infrastructure layer mapping classes.
+{% else %}
+- **Controllers are thin.** Validate the HTTP request, call a Service, return a response. Zero business logic.
+- **Services own business logic.** If you find logic in a Controller, move it to a Service.
+- **Entities are Doctrine POPOs.** No business logic in entity classes.
+{% endif %}
+- **Validate with Symfony Validator,** not manually. Use `#[Assert\...]` constraints on DTOs or entities.
+- **Return typed responses.** Use `$this->json($data, $status)` in controllers.
+- **Migrations are immutable.** Never edit an existing migration file. Create a new one.
+- **No `dd()` or `var_dump()` in committed code.** Use `bin/console debug:*` commands locally.
+- **Use UUIDs (v7) for primary keys,** not auto-increment integers.
+
+### Test rules (PHPUnit)
+
+- Unit tests in `tests/Unit/`: mock every dependency, no DB, no HTTP, must be fast.
+- Integration tests in `tests/Integration/`: use `WebTestCase`, assert HTTP status + JSON body shape.
+- Every new endpoint needs at least: happy path, validation failure (422), and unauthenticated (401).
+
+---
+
+## Frontend Rules (Next.js)
+
+- **Default to Server Components.** Only add `'use client'` when you need `useState`, `useEffect`, or browser APIs.
+- **Fetch in Server Components.** Do not fetch in `useEffect`. Use `async` Server Components.
+- **Never fetch in loops.** Use `Promise.all` for parallel fetches.
+- **Use `lib/api.ts` for all HTTP calls.** Never use `fetch` directly in components or services.
+- **Import types from `@{{ project_name }}/shared-types`.** Never duplicate type definitions.
+- **`useTransition` for mutations.** Wrap all API mutation calls in `startTransition` to keep the UI responsive.
+- **Map 422 violations to field errors.** Never show a generic "error" for validation failures.
+- **httpOnly cookies for tokens.** Never store tokens in `localStorage` or expose them to JavaScript.
+- **TypeScript strict mode is on.** Fix type errors; never use `any` unless you have a documented reason.
+
+### File naming
+
+- Pages: `page.tsx` (required by App Router)
+- Layouts: `layout.tsx`
+- Loading: `loading.tsx`
+- Error: `error.tsx` (must be `'use client'`)
+- Not found: `not-found.tsx`
+- Components: `PascalCase.tsx`
+- Hooks: `useCamelCase.ts`
+- Services: `camelCase.ts` (e.g. `users.ts`, `products.ts`)
+
+---
+
+{% if use_docker %}
+## Docker Rules
+
+- **Do not edit `docker-compose.yml` for personal preferences.** Use `docker-compose.override.yml` (gitignored).
+- **The database is not exposed on the host** in production mode. Use `docker compose exec {{ database }} psql` to access it.
+- **Rebuild images when dependencies change:** `docker compose build --no-cache api` after `composer.lock` changes.
+- **Never store secrets in Dockerfiles.** Use environment variables from `.env.local` (gitignored).
+
+{% endif %}
+
+---
+
+## What NOT to Do
+
+These are the most common mistakes. Avoid them.
+
+| Never | Instead |
+|-------|---------|
+| Access the database directly from Next.js | Call the Symfony API |
+| Duplicate business logic in the frontend | The API validates and enforces rules |
+| Skip updating `shared-types` when changing a response | Update types first, then code |
+| Commit `.env.local` or `.env` | They are gitignored; use `.env.example` as the template |
+| Use `localStorage` for auth tokens | Use httpOnly cookies set by Next.js API routes |
+| Write logic in a Symfony Controller | Write it in a Service{% if use_ddd %} or Domain class{% endif %} |
+| Edit a Doctrine migration after it has been applied | Create a new migration |
+| Use `any` in TypeScript | Find or create the right type |
+| Install a new major dependency without an ADR | Write the ADR first, then install |
+| Return different JSON shapes from similar endpoints | Follow the contract in `docs/api-contract.md` |
+| Merge a PR with failing tests | Fix the tests first |
+
+---
+
+## Page Templates
+
+When building a new page, consult the reference in `docs/page-templates/`:
+
+| Template | Use for |
+|----------|---------|
+| `dashboard.md` | List pages, overview pages with metrics |
+| `detail.md` | Single-entity view with actions |
+| `form.md` | Create and edit forms with validation |
+
+Every page must handle: loading state, error state, empty state, and the not-found case.
+
+---
+
+## Design System ({{ design_style }})
+
+{% if styling == "tailwind" %}
+Utility classes from Tailwind CSS. Use the `cn()` helper from `src/lib/utils.ts` to merge conditional classes.
+{% elif styling == "css-modules" %}
+CSS Modules. Each component has a `.module.css` sibling. Global tokens in `src/app/globals.css`.
+{% elif styling == "scss" %}
+SCSS Modules. Design tokens in `src/styles/_variables.scss`. Import per component.
+{% endif %}
+
+{% if ui_library == "shadcn-ui" %}
+Components in `src/components/ui/` are shadcn/ui components - they are owned by this project. Customize them directly; do not fight the library.
+{% elif ui_library == "radix-ui" %}
+Radix UI primitives are used unstyled. All styling is applied via the project's CSS approach.
+{% endif %}
+
+{% if design_style == "minimal-clean" %}
+- Restrained color palette: neutrals + one accent
+- Generous whitespace, strong typographic hierarchy
+- No decorative elements - every visual element carries meaning
+{% elif design_style == "corporate-professional" %}
+- Structured, data-dense layouts
+- Professional blues/grays, clear hierarchy
+- Always-visible labels on interactive elements
+{% elif design_style == "playful-modern" %}
+- Rounded corners, vibrant colors, micro-interactions
+- Friendly copy tone, icon-forward navigation
+- Animation on user-triggered actions only (not on page load)
+{% endif %}

@@ -1,0 +1,108 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+{% if database == "postgresql" %}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/{{ project_name }}
+      SPRING_DATASOURCE_USERNAME: app
+      SPRING_DATASOURCE_PASSWORD: password
+{% elif database == "mysql" %}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/{{ project_name }}
+      SPRING_DATASOURCE_USERNAME: app
+      SPRING_DATASOURCE_PASSWORD: password
+{% elif database == "mariadb" %}
+      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb:3306/{{ project_name }}
+      SPRING_DATASOURCE_USERNAME: app
+      SPRING_DATASOURCE_PASSWORD: password
+{% endif %}
+{% if use_redis %}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+{% endif %}
+    depends_on:
+{% if database == "postgresql" %}
+      postgres:
+        condition: service_healthy
+{% elif database == "mysql" %}
+      mysql:
+        condition: service_healthy
+{% elif database == "mariadb" %}
+      mariadb:
+        condition: service_healthy
+{% endif %}
+{% if use_redis %}
+      redis:
+        condition: service_started
+{% endif %}
+
+{% if database == "postgresql" %}
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: {{ project_name }}
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d {{ project_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{% elif database == "mysql" %}
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: {{ project_name }}
+      MYSQL_USER: app
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{% elif database == "mariadb" %}
+  mariadb:
+    image: mariadb:10.11
+    environment:
+      MARIADB_DATABASE: {{ project_name }}
+      MARIADB_USER: app
+      MARIADB_PASSWORD: password
+      MARIADB_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -proot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{% endif %}
+{% if use_redis %}
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+{% endif %}
+
+volumes:
+{% if database == "postgresql" %}
+  postgres-data:
+{% elif database == "mysql" %}
+  mysql-data:
+{% elif database == "mariadb" %}
+  mariadb-data:
+{% endif %}

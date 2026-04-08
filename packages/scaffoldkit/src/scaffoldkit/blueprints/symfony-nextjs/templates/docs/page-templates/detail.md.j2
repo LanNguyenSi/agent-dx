@@ -1,0 +1,270 @@
+# Page Template: Detail Page
+
+This template describes the structure, data flow, and component breakdown for a **detail (single-entity) page** in {{ display_name }}. Use it when building any page that shows a single resource fetched by ID.
+
+---
+
+## Purpose
+
+A detail page displays the full representation of one entity. It allows the user to read all attributes, take actions (edit, delete, status change), and navigate to related entities. It must handle the not-found case gracefully.
+
+---
+
+## Data Flow
+
+```
+Browser requests /users/018e7b1a-...
+
+Next.js Server Component
+  └── calls getUser(id) from services/users.ts
+        └── GET /api/users/018e7b1a-...
+              └── Symfony returns User JSON
+                    or 404 → Next.js renders notFound()
+
+Server Component renders full page with user data
+Browser receives HTML with data already present
+```
+
+The page ID comes from the URL segment (`params.id`). The Server Component fetches the resource and either renders it or calls `notFound()` from `next/navigation`.
+
+---
+
+## URL
+
+```
+/users/[id]
+/products/[id]
+/orders/[id]
+```
+
+Protected route. Each entity type has its own route segment. The `[id]` segment is a UUID.
+
+---
+
+## Page Structure
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Breadcrumb: Dashboard / Users / Jane Smith                 │
+├─────────────────────────────────────────────────────────────┤
+│  Page Header                                                │
+│  Avatar/Icon  "Jane Smith"           [Edit]  [▼ More]      │
+│               jane@example.com                              │
+│               Status: Active  Since: Jan 2024               │
+├─────────────────────────────────────────────────────────────┤
+│  Tab Bar (optional)                                         │
+│  [Overview]  [Activity]  [Settings]                        │
+├─────────────────────────────────────────────────────────────┤
+│  Main Content (two-column on wider screens)                 │
+│  ┌──────────────────────┐  ┌──────────────────────────┐    │
+│  │  Details Section     │  │  Related Entities        │    │
+│  │  Field: Value        │  │  Recent Orders           │    │
+│  │  Field: Value        │  │  ─────────────────────   │    │
+│  │  Field: Value        │  │  Order #123  $45.00       │    │
+│  │                      │  │  Order #124  $12.00       │    │
+│  └──────────────────────┘  └──────────────────────────┘    │
+├─────────────────────────────────────────────────────────────┤
+│  Danger Zone (destructive actions, collapsed by default)   │
+│  [Delete this user]                                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Component Breakdown
+
+| Component | Type | Responsibility |
+|-----------|------|----------------|
+| `UserDetailPage` | Server Component | Fetch entity, pass to children |
+| `EntityHeader` | Server Component | Name, avatar, key attributes, status badge |
+| `Breadcrumb` | Server Component | Static navigation trail |
+| `DetailsGrid` | Server Component | Label/value pairs |
+| `RelatedList` | Server Component | Paginated related entities (first page only) |
+| `ActionMenu` | **Client Component** | Edit / More dropdown (needs `useState`) |
+| `DeleteDialog` | **Client Component** | Confirmation modal before delete |
+| `StatusToggle` | **Client Component** | Toggle active/inactive with optimistic UI |
+| `InlineEditField` | **Client Component** | Click-to-edit a single field |
+
+---
+
+## Server Component Implementation
+
+```typescript
+// apps/web/src/app/(dashboard)/users/[id]/page.tsx
+
+import { notFound } from 'next/navigation';
+import { getUser } from '@/services/users';
+import { getUserOrders } from '@/services/orders';
+import { EntityHeader } from '@/components/features/users/EntityHeader';
+import { DetailsGrid } from '@/components/features/users/DetailsGrid';
+import { RelatedOrdersList } from '@/components/features/users/RelatedOrdersList';
+import { ActionMenu } from '@/components/features/users/ActionMenu';
+import { DeleteDialog } from '@/components/features/users/DeleteDialog';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+
+interface UserDetailPageProps {
+  params: { id: string };
+}
+
+export default async function UserDetailPage({ params }: UserDetailPageProps) {
+  // Parallel fetch: the user and their recent orders
+  const [user, ordersResult] = await Promise.all([
+    getUser(params.id).catch(() => null),
+    getUserOrders(params.id, { perPage: 5 }).catch(() => null),
+  ]);
+
+  // Let Next.js render the 404 page - do not render an error state here
+  if (!user) notFound();
+
+  return (
+    <main className="space-y-6 p-6">
+      <Breadcrumb
+        items={[
+          { label: 'Dashboard', href: '/dashboard' },
+          { label: 'Users', href: '/users' },
+          { label: user.name },
+        ]}
+      />
+
+      <div className="flex items-start justify-between">
+        <EntityHeader user={user} />
+        <div className="flex gap-2">
+          {/* Client Components for interactions */}
+          <ActionMenu userId={user.id} />
+          <DeleteDialog userId={user.id} userName={user.name} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <DetailsGrid user={user} />
+        </div>
+        <div>
+          <RelatedOrdersList orders={ordersResult?.data ?? []} userId={user.id} />
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export async function generateMetadata({ params }: UserDetailPageProps) {
+  const user = await getUser(params.id).catch(() => null);
+  return {
+    title: user ? `${user.name} - {{ display_name }}` : 'User Not Found',
+  };
+}
+```
+
+---
+
+## Client Component: DeleteDialog
+
+Destructive actions require explicit confirmation. The dialog handles its own open/close state, then calls a Server Action (or the API directly) on confirm.
+
+```typescript
+// apps/web/src/components/features/users/DeleteDialog.tsx
+'use client';
+
+import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { deleteUser } from '@/services/users';
+
+interface DeleteDialogProps {
+  userId: string;
+  userName: string;
+}
+
+export function DeleteDialog({ userId, userName }: DeleteDialogProps) {
+  const [open, setOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  const handleDelete = () => {
+    startTransition(async () => {
+      await deleteUser(userId);
+      router.push('/users');
+      router.refresh();
+    });
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="btn btn-danger-outline text-sm"
+      >
+        Delete
+      </button>
+
+      {open && (
+        <div role="dialog" aria-modal>
+          <p>Are you sure you want to delete <strong>{userName}</strong>?</p>
+          <p className="text-sm text-gray-500">This action cannot be undone.</p>
+          <div className="flex gap-2 justify-end mt-4">
+            <button onClick={() => setOpen(false)} disabled={isPending}>
+              Cancel
+            </button>
+            <button onClick={handleDelete} disabled={isPending} className="btn btn-danger">
+              {isPending ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+```
+
+---
+
+## Not Found
+
+```typescript
+// apps/web/src/app/(dashboard)/users/[id]/not-found.tsx
+export default function UserNotFound() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 p-12">
+      <p className="text-xl font-medium">User not found</p>
+      <p className="text-gray-500">
+        This user may have been deleted or you may not have access.
+      </p>
+      <a href="/users" className="btn btn-secondary">Back to Users</a>
+    </div>
+  );
+}
+```
+
+---
+
+## API Calls Made by This Page
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `GET /api/users/{id}` | GET | Load the entity |
+| `GET /api/users/{id}/orders` | GET | Load related orders (first 5) |
+| `DELETE /api/users/{id}` | DELETE | Triggered by DeleteDialog |
+| `PATCH /api/users/{id}` | PATCH | Triggered by StatusToggle or InlineEditField |
+
+---
+
+## Design Notes ({{ design_style }})
+
+{% if design_style == "minimal-clean" %}
+- Header: avatar placeholder (initials, gray circle), name in `text-2xl font-semibold`, email in `text-gray-500`
+- Status badge: small pill, 2 colors only (green for active, gray for inactive)
+- Details grid: two-column label/value layout, labels in `text-sm text-gray-500`, values in `text-sm font-medium`
+- Danger zone: hidden behind a disclosure, red border section at the bottom
+- No decorative elements - every visible element carries information
+{% elif design_style == "corporate-professional" %}
+- Header: professional avatar with colored border by role, name prominent, role/department visible
+- Status badge: colored per status type (active/inactive/pending/suspended)
+- Details grid: full-width card with section headers, alternating row backgrounds
+- Action buttons: always visible, labeled (not icon-only)
+- Danger zone: visible but with a warning icon and explanatory text
+{% elif design_style == "playful-modern" %}
+- Header: gradient avatar, name in bold with emoji status indicator
+- Status badge: animated pulse dot + label, vibrant color per status
+- Details grid: card per field group with hover effect and icons
+- Action buttons: colored pill buttons with icons, hover animations
+- Danger zone: accordion with a clear skull/warning icon, rounded-xl container
+{% endif %}

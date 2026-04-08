@@ -1,0 +1,51 @@
+plugins {
+  id "java"
+  id "org.springframework.boot" version "{{ spring_boot_version }}.0"
+  id "io.spring.dependency-management" version "1.1.7"
+}
+
+group = "{{ base_package.rsplit('.', 1)[0] if '.' in base_package else base_package }}"
+version = "0.1.0-SNAPSHOT"
+
+java {
+  toolchain {
+    languageVersion = JavaLanguageVersion.of({{ java_version }})
+  }
+}
+
+repositories {
+  mavenCentral()
+}
+
+dependencies {
+  implementation "org.springframework.boot:{{ 'spring-boot-starter-webflux' if api_style == 'webflux' else 'spring-boot-starter-web' }}"
+  implementation "org.springframework.boot:spring-boot-starter-validation"
+  implementation "org.springframework.boot:spring-boot-starter-data-jpa"
+{% if use_auth -%}
+  implementation "org.springframework.boot:spring-boot-starter-security"
+{% endif -%}
+{% if use_auth and (auth_method == "jwt" or auth_method == "oauth2") -%}
+  implementation "org.springframework.boot:spring-boot-starter-oauth2-resource-server"
+{% endif -%}
+{% if use_redis -%}
+  implementation "org.springframework.boot:spring-boot-starter-data-redis"
+{% endif -%}
+{% if use_kafka -%}
+  implementation "org.springframework.kafka:spring-kafka"
+{% endif -%}
+{% if database == "postgresql" -%}
+  runtimeOnly "org.postgresql:postgresql"
+{% elif database == "mysql" -%}
+  runtimeOnly "com.mysql:mysql-connector-j"
+{% else -%}
+  runtimeOnly "org.mariadb.jdbc:mariadb-java-client"
+{% endif -%}
+  testImplementation "org.springframework.boot:spring-boot-starter-test"
+{% if test_strategy != "junit-only" -%}
+  testImplementation "org.testcontainers:junit-jupiter"
+{% endif -%}
+}
+
+tasks.named("test") {
+  useJUnitPlatform()
+}

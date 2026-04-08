@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "release/*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate generated documentation shell
+        shell: bash
+        run: |
+          test -f README.md
+          test -f docs/architecture.md
+          test -f docs/ways-of-working.md
+          test -d apps/web
+          test -d apps/api
+          echo "SaaS dashboard scaffold structure looks valid."
+
+  verify-bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify Django bootstrap
+        shell: bash
+        run: |
+          test -f pyproject.toml
+          test -f apps/api/manage.py
+          test -f apps/api/config/settings.py
+          test -f apps/web/templates/dashboard/index.html
+          python -m py_compile apps/api/manage.py apps/api/config/settings.py apps/api/dashboard/views.py
+
+{% if use_docker %}
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t {{ project_name }}:ci .
+{% endif %}

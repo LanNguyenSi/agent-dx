@@ -1,0 +1,92 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scaffoldkit"
+version = "0.1.0"
+description = "AI-aided project scaffolding tool with declarative blueprints"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "ScaffoldKit Contributors" }]
+keywords = ["scaffolding", "project-generator", "blueprints", "templates", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+    "Typing :: Typed",
+]
+dependencies = [
+    "jinja2>=3.1",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "questionary>=2.0",
+    "rich>=13.0",
+    "typer>=0.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/scaffoldkit/scaffoldkit"
+Repository = "https://github.com/scaffoldkit/scaffoldkit"
+Issues = "https://github.com/scaffoldkit/scaffoldkit/issues"
+
+[project.scripts]
+scaffoldkit = "scaffoldkit.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "types-PyYAML>=6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scaffoldkit"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/scaffoldkit/blueprints" = "scaffoldkit/blueprints"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "SIM",   # flake8-simplify
+    "TCH",   # flake8-type-checking
+    "RUF",   # ruff-specific rules
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/scaffoldkit/models.py" = ["TCH003"]  # Pydantic needs Path at runtime
+"src/scaffoldkit/cli.py" = ["TCH003"]    # Typer evaluates annotations at runtime
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["questionary.*"]
+ignore_missing_imports = true

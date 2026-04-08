@@ -1,0 +1,201 @@
+# {{ display_name }}
+
+{{ description }}
+
+- **Framework:** {{ framework }}
+- **Site type:** {{ site_type }}
+- **Styling:** {{ styling }}
+- **Deploy target:** {{ deploy_target }}
+{% if use_cms %}
+- **CMS:** {{ cms_type }}
+{% endif %}
+{% if use_i18n %}
+- **i18n:** enabled
+{% endif %}
+{% if use_analytics %}
+- **Analytics:** enabled
+{% endif %}
+
+## Quick Start
+
+### Prerequisites
+
+{% if framework == "astro" %}
+- Node.js 18 or later
+- npm, pnpm, or yarn
+{% elif framework == "nextjs-static" %}
+- Node.js 18 or later
+- npm, pnpm, or yarn
+{% elif framework == "hugo" %}
+- Hugo extended v0.120 or later (`brew install hugo` / `winget install Hugo.Hugo.Extended`)
+{% elif framework == "eleventy" %}
+- Node.js 18 or later
+- npm or yarn
+{% endif %}
+
+### Install and run
+
+{% if framework == "astro" %}
+```bash
+npm install
+npm run dev
+```
+
+The site starts at `http://localhost:4321`.
+{% elif framework == "nextjs-static" %}
+```bash
+npm install
+npm run dev
+```
+
+The site starts at `http://localhost:3000`.
+{% elif framework == "hugo" %}
+```bash
+hugo server --buildDrafts
+```
+
+The site starts at `http://localhost:1313`. Live reload is included.
+{% elif framework == "eleventy" %}
+```bash
+npm install
+npm run dev
+```
+
+The site starts at `http://localhost:8080`.
+{% endif %}
+
+## Project Structure
+
+```
+{{ project_name }}/
+├── src/
+│   ├── pages/          # Page files (route = file path)
+│   ├── components/     # Reusable UI components
+│   ├── layouts/        # Page layout templates
+│   ├── content/        # Markdown/MDX content collections
+│   └── assets/         # Images and static assets processed at build
+├── public/             # Unprocessed static files (fonts, favicons)
+├── docs/
+│   ├── architecture.md
+│   ├── ways-of-working.md
+│   ├── content-guide.md
+│   └── adrs/           # Architecture Decision Records
+{% if ai_context %}
+├── AI_CONTEXT.md       # AI agent context
+{% endif %}
+└── README.md
+```
+
+## Building for Production
+
+{% if framework == "astro" %}
+```bash
+npm run build       # Outputs to dist/
+npm run preview     # Preview the production build locally
+```
+{% elif framework == "nextjs-static" %}
+```bash
+npm run build       # Runs next build + next export, outputs to out/
+npx serve out       # Preview the exported static files
+```
+{% elif framework == "hugo" %}
+```bash
+hugo                # Outputs to public/
+```
+{% elif framework == "eleventy" %}
+```bash
+npm run build       # Outputs to _site/
+```
+{% endif %}
+
+## Deployment
+
+Target platform: **{{ deploy_target }}**
+
+{% if deploy_target == "vercel" %}
+The project is configured for Vercel. Connect the repository in the Vercel dashboard - it detects the framework automatically.
+
+For CLI deployment:
+```bash
+npm install -g vercel
+vercel --prod
+```
+{% elif deploy_target == "netlify" %}
+The project is configured for Netlify. Connect the repository in the Netlify dashboard or use the CLI:
+
+```bash
+npm install -g netlify-cli
+netlify deploy --prod
+```
+
+A `netlify.toml` with the correct build command and publish directory is included.
+{% elif deploy_target == "github-pages" %}
+Deployment is handled by the GitHub Actions workflow in `.github/workflows/deploy.yml`. Push to `main` to trigger a build and deploy to the `gh-pages` branch.
+
+Ensure GitHub Pages is configured to serve from the `gh-pages` branch in your repository settings.
+{% elif deploy_target == "cloudflare-pages" %}
+The project is configured for Cloudflare Pages. Connect the repository via the Cloudflare dashboard (Workers & Pages > Create application > Pages > Connect to Git).
+
+Build settings:
+- Build command: `{{ 'npm run build' if framework != 'hugo' else 'hugo' }}`
+- Build output directory: `{{ 'dist' if framework == 'astro' else ('out' if framework == 'nextjs-static' else ('_site' if framework == 'eleventy' else 'public')) }}`
+{% endif %}
+
+## Editing Content
+
+{% if site_type == "docs" %}
+Documentation pages live in `src/content/docs/`. Add `.md` or `.mdx` files and they appear in the navigation automatically (depending on framework configuration).
+{% elif site_type == "blog" %}
+Blog posts live in `src/content/blog/`. Each file is a post. Set `draft: true` in frontmatter to hide a post from the published site.
+{% elif site_type == "landing-page" %}
+The landing page content is in `src/pages/index.{{ 'astro' if framework == 'astro' else ('tsx' if framework == 'nextjs-static' else 'md') }}`. Component sections are in `src/components/sections/`.
+{% elif site_type == "portfolio" %}
+Project entries live in `src/content/projects/`. Add a new `.md` file for each project.
+{% endif %}
+
+See [docs/content-guide.md](docs/content-guide.md) for full frontmatter reference and content conventions.
+
+{% if use_cms %}
+## Content Management
+
+This site uses **{{ cms_type }}** as its content source.
+
+{% if cms_type == "markdown-files" %}
+Content is stored as Markdown files in `src/content/`. Edit files directly and commit to publish. The schema for each content type is validated at build time.
+{% elif cms_type == "headless-cms" %}
+Content is fetched from the headless CMS at build time. Set the CMS API credentials in `.env.local`:
+
+```
+CMS_API_URL=https://your-cms.example.com/api
+CMS_API_TOKEN=your-token-here
+```
+{% elif cms_type == "git-based" %}
+Content is managed through a git-based CMS interface (such as Decap CMS). The admin panel is available at `/admin` when the site is deployed. Authentication is handled via the deployment platform's identity service.
+{% endif %}
+{% endif %}
+
+{% if use_i18n %}
+## Internationalization
+
+The site supports multiple languages. Translations are organized by locale:
+
+```
+src/content/
+  en/     # English (default)
+  fr/     # French
+  de/     # German (add more as needed)
+```
+
+The default locale is English. To add a new language, duplicate the `en/` directory, rename it to the locale code, and translate the content.
+{% endif %}
+
+## Documentation
+
+- [Architecture](docs/architecture.md) - site structure, build pipeline, and deployment
+- [Ways of Working](docs/ways-of-working.md) - content workflow, PR conventions, accessibility, and performance
+- [Content Guide](docs/content-guide.md) - frontmatter reference, images, SEO metadata, components in content
+- [ADR: Framework and Deployment](docs/adrs/0001-architecture.md) - decision record for framework and hosting choices
+
+---
+
+*Generated with [ScaffoldKit](https://github.com/LanNguyenSi/scaffoldkit)*

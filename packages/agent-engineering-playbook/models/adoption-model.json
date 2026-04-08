@@ -1,0 +1,126 @@
+{
+  "version": "1.0",
+  "paths": {
+    "core": {
+      "description": "Default path for any serious product expected to reach production quality.",
+      "mandatory_playbooks_by_phase": {
+        "phase_0": [
+          "playbooks/01-project-setup.md",
+          "playbooks/02-architecture.md",
+          "playbooks/04-design-principles.md",
+          "playbooks/08-documentation.md"
+        ],
+        "phase_1": [
+          "playbooks/01-project-setup.md",
+          "playbooks/02-architecture.md",
+          "playbooks/03-team-roles.md",
+          "playbooks/04-design-principles.md",
+          "playbooks/05-development-workflow.md",
+          "playbooks/06-testing-strategy.md",
+          "playbooks/07-quality-assurance.md",
+          "playbooks/08-documentation.md"
+        ],
+        "phase_2": [
+          "playbooks/01-project-setup.md",
+          "playbooks/02-architecture.md",
+          "playbooks/03-team-roles.md",
+          "playbooks/04-design-principles.md",
+          "playbooks/05-development-workflow.md",
+          "playbooks/06-testing-strategy.md",
+          "playbooks/07-quality-assurance.md",
+          "playbooks/08-documentation.md",
+          "playbooks/09-production.md"
+        ]
+      }
+    },
+    "enterprise": {
+      "description": "Additional controls for sensitive, audited, enterprise, regulated, or high-trust products.",
+      "mandatory_playbooks_by_phase": {
+        "phase_3": [
+          "playbooks/10-security-and-governance.md",
+          "playbooks/11-change-management-and-incidents.md"
+        ]
+      },
+      "mandatory_templates": [
+        "templates/threat-model-template.md",
+        "templates/runbook-template.md",
+        "templates/service-ownership-template.md",
+        "templates/data-classification-matrix.md",
+        "templates/access-review-template.md",
+        "templates/exception-register-template.md",
+        "templates/compliance-mapping-template.md"
+      ]
+    }
+  },
+  "phases": {
+    "phase_0": {
+      "name": "Exploration",
+      "conditions": [
+        "problem is still being validated",
+        "no real customer data",
+        "low blast radius"
+      ],
+      "defer_by_default": [
+        "formal security review",
+        "full incident process",
+        "enterprise change approval"
+      ]
+    },
+    "phase_1": {
+      "name": "Product Build",
+      "conditions": [
+        "active implementation toward first usable release",
+        "real feature work underway",
+        "production plausible soon"
+      ],
+      "prepare_next": [
+        "playbooks/09-production.md",
+        "playbooks/11-change-management-and-incidents.md"
+      ]
+    },
+    "phase_2": {
+      "name": "Production",
+      "conditions": [
+        "live users depend on the system",
+        "outages matter",
+        "rollback and observability are necessary"
+      ],
+      "enterprise_triggers": [
+        "sensitive data is handled",
+        "privileged admin capabilities exist",
+        "external customer commitments increase"
+      ]
+    },
+    "phase_3": {
+      "name": "Enterprise",
+      "conditions": [
+        "enterprise customers or procurement reviews",
+        "sensitive personal, financial, or business-critical data",
+        "auditability requirements",
+        "multiple teams or services"
+      ]
+    }
+  },
+  "global_minimum_rules": [
+    "use version control",
+    "keep secrets out of source control",
+    "define clear ownership",
+    "write enough documentation to avoid tribal knowledge",
+    "review important changes before shipping"
+  ],
+  "enterprise_triggers": [
+    "system stores sensitive customer or company data",
+    "production access must be controlled and auditable",
+    "customers ask about security reviews, incident handling, or certifications",
+    "multiple teams need shared governance",
+    "downtime or data mistakes have material commercial impact",
+    "AI agents can influence production-adjacent code, infrastructure, or workflows"
+  ],
+  "assessment_questions": [
+    "Is this still exploratory, or is production expected soon?",
+    "Are real users or customer data involved?",
+    "What is the blast radius of failure?",
+    "Are there external trust or audit requirements?",
+    "Are multiple teams, services, or privileged workflows involved?"
+  ]
+}

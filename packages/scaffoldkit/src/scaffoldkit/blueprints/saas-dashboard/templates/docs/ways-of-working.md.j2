@@ -1,0 +1,161 @@
+# Ways of Working: {{ display_name }}
+
+## Definition of Done
+
+A feature is considered done when:
+
+- [ ] Code is written and passes all lint checks
+- [ ] Tests are written and passing (matching the {{ test_strategy }} strategy)
+- [ ] Documentation is updated if the change affects architecture or APIs
+- [ ] Code has been reviewed by at least one team member
+- [ ] Feature is deployed to a staging/preview environment
+- [ ] Acceptance criteria from the ticket are met
+
+## Branching Strategy
+
+We use **trunk-based development** with short-lived feature branches.
+
+### Branch Naming
+
+```
+feature/<ticket-id>-<short-description>
+fix/<ticket-id>-<short-description>
+chore/<description>
+docs/<description>
+```
+
+### Workflow
+
+1. Create a branch from `main`
+2. Make small, focused commits
+3. Open a Pull Request early (draft if WIP)
+4. Request review when ready
+5. Squash-merge into `main`
+6. Delete the branch after merge
+
+## Pull Request Conventions
+
+### PR Title
+
+Use conventional commit format:
+
+```
+feat(dashboard): add widget drag-and-drop
+fix(auth): resolve token refresh race condition
+docs(architecture): update deployment diagram
+```
+
+### PR Description
+
+Every PR should include:
+
+- **What**: brief summary of changes
+- **Why**: motivation or ticket reference
+- **How**: implementation approach (if non-obvious)
+- **Testing**: how the change was verified
+
+### Review Expectations
+
+- Review within 1 business day
+- Focus on correctness, clarity, and maintainability
+- Approve with minor comments rather than blocking on style
+
+## Architecture Decision Records (ADRs)
+
+We document significant architectural decisions in `docs/adrs/`.
+
+### When to Write an ADR
+
+- Introducing a new library or framework
+- Changing the data model significantly
+- Choosing between multiple valid approaches
+- Establishing a new pattern or convention
+
+### ADR Format
+
+```markdown
+# ADR-NNNN: Title
+
+## Status
+Proposed | Accepted | Deprecated | Superseded
+
+## Context
+What is the problem or situation?
+
+## Decision
+What did we decide?
+
+## Consequences
+What are the trade-offs?
+```
+
+## Testing Expectations
+
+Strategy: **{{ test_strategy }}**
+
+{% if test_strategy == "unit-and-integration" %}
+- Every module with business logic has unit tests
+- API endpoints have integration tests with a real database
+- Critical UI components have component tests
+- Aim for >80% coverage on business logic
+{% elif test_strategy == "e2e-focused" %}
+- Every user journey has an end-to-end test
+- API endpoints have smoke tests
+- Critical pages have visual regression tests
+- Coverage targets focus on journey completion, not lines
+{% elif test_strategy == "full-pyramid" %}
+- Unit tests: all pure functions and business logic
+- Integration tests: all API endpoints and service interactions
+- E2E tests: top 10 user journeys
+- Target: >80% unit coverage, >60% integration coverage
+{% endif %}
+
+### Test Naming
+
+```
+test_<unit>_<scenario>_<expected_result>
+```
+
+Example: `test_login_with_expired_token_returns_401`
+
+## Documentation Expectations
+
+- README: always up to date with setup instructions
+- Architecture: update when structure changes
+- ADRs: write for every significant decision
+- API: document endpoints (OpenAPI or inline)
+- Page templates: reference when building new pages
+
+## AI Collaboration Guidelines
+
+{% if ai_context %}
+This project is designed for AI-assisted development.
+
+### For AI Agents
+
+- Read `AI_CONTEXT.md` before starting work
+- Follow the patterns described in architecture docs
+- Reference page templates when building UI
+- Write tests matching the project's testing strategy
+- Create ADRs when introducing new patterns
+
+### For Developers Working with AI
+
+- Provide clear, scoped instructions
+- Reference specific files and patterns
+- Review AI-generated code against the same PR standards
+- Update AI_CONTEXT.md when patterns change
+{% else %}
+When using AI coding assistants:
+
+- Provide project context and conventions
+- Review generated code thoroughly
+- Ensure tests are included
+- Update documentation for AI-introduced patterns
+{% endif %}
+
+## Communication
+
+- Prefer async communication (comments, PRs, docs) over sync
+- Document decisions, not just discussions
+- Use the ADR process for architectural choices

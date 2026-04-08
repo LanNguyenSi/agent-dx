@@ -1,0 +1,30 @@
+# Current Tasks
+
+## In Progress
+
+- [ ] Replace the scaffold logic in `{{sourceEntry}}` with project-specific behaviour
+- [ ] Extend `{{testEntry}}` beyond the generated smoke test
+{{#if hasMemory}}- [ ] Decide whether `src/memory/` should stay local or move to a persistent backend{{/if}}
+{{#if hasTriologue}}- [ ] Add real Triologue room and message flows{{/if}}
+{{#if hasSkills}}- [ ] Replace the example skill with project-specific skills{{/if}}
+
+## Backlog
+
+- [ ] Add richer test coverage around the real runtime logic
+- [ ] Introduce structured logging
+- [ ] Add deployment and operational notes
+- [ ] Decide whether the agent should remain a CLI or become a service
+
+## Completed
+
+- [x] Project scaffolding (via agent-dev-kit)
+- [x] Default test setup
+- [x] README and `.ai/` context generation
+{{#if hasMemory}}- [x] Memory scaffold{{/if}}
+{{#if hasSkills}}- [x] Skills scaffold{{/if}}
+{{#if hasTriologue}}- [x] Triologue bootstrap wiring{{/if}}
+
+## Notes
+
+- Keep generated docs in sync with the runtime
+- Revisit `.ai/DECISIONS.md` when the scaffold is no longer representative

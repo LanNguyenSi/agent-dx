@@ -1,0 +1,41 @@
+{
+  "name": "{{ project_name }}",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+{% if stack == "nextjs-fullstack" -%}
+    "apps/web",
+    "apps/api",
+    "packages/shared"
+{% else -%}
+    "apps/web"
+{% endif %}
+  ],
+  "scripts": {
+{% if stack == "nextjs-fullstack" -%}
+    "dev:web": "npm run dev --workspace apps/web",
+    "dev:api": "npm run dev --workspace apps/api",
+    "build": "npm run build --workspace apps/web && npm run build --workspace apps/api",
+    "test": "npm run test --workspace apps/web && npm run test --workspace apps/api",
+    "test:e2e": "npm run test --workspace apps/web"
+{% else -%}
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "test": "pnpm --filter web test"
+{% endif %}
+  },
+  "dependencies": {
+{% if stack == "nextjs-fullstack" -%}
+    "concurrently": "^9.1.2"
+{% else -%}
+    "concurrently": "^9.1.2"
+{% endif %}
+  },
+  "devDependencies": {
+{% if stack == "nextjs-fullstack" -%}
+    "npm-run-all": "^4.1.5"
+{% else -%}
+    "pnpm": "^10.6.5"
+{% endif %}
+  }
+}

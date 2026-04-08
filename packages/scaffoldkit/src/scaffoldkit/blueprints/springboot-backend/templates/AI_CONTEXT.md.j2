@@ -1,0 +1,97 @@
+# AI Context: {{ display_name }}
+
+## Project Summary
+
+- **Project:** {{ display_name }}
+- **Slug:** `{{ project_name }}`
+- **Description:** {{ description }}
+- **Base package:** `{{ base_package }}`
+- **Java:** {{ java_version }}
+- **Spring Boot:** {{ spring_boot_version }}
+- **Build tool:** {{ build_tool }}
+- **API style:** {{ api_style }}
+- **Database:** {{ database }}
+{% if use_auth %}
+- **Authentication:** {{ auth_method }}
+{% endif %}
+{% if use_ddd %}
+- **Architecture:** DDD-oriented layering
+{% else %}
+- **Architecture:** standard Spring layering
+{% endif %}
+
+## Where Code Lives
+
+- `src/main/java/{{ base_package | replace('.', '/') }}/web/`: controllers and HTTP-facing DTO mapping
+- `src/main/java/{{ base_package | replace('.', '/') }}/web/dto/`: request and response DTOs
+- `src/main/java/{{ base_package | replace('.', '/') }}/service/`: use-case orchestration and transaction boundaries
+- `src/main/java/{{ base_package | replace('.', '/') }}/domain/`: domain entities, enums, and invariant-bearing logic
+- `src/main/java/{{ base_package | replace('.', '/') }}/repository/`: persistence adapters and Spring Data repositories
+- `src/main/java/{{ base_package | replace('.', '/') }}/security/`: auth filters, converters, and security configuration
+- `src/main/resources/`: application configuration, SQL, and infrastructure-facing resources
+- `src/test/java/{{ base_package | replace('.', '/') }}/`: unit, slice, and integration tests
+
+## Architecture Rules for Agents
+
+1. Do not put business logic in controllers.
+2. Do not let controllers call repositories directly.
+3. Prefer request/response DTOs over exposing entities at the API boundary.
+4. Keep service methods aligned to use cases, not generic CRUD helper buckets.
+5. If a change affects architecture boundaries, update `docs/architecture.md` or add an ADR.
+6. Use one clear source of truth for configuration keys and property names.
+
+## Common Commands
+
+{% if build_tool == "maven" %}
+```bash
+./mvnw test
+./mvnw verify
+./mvnw spring-boot:run
+```
+{% else %}
+```bash
+./gradlew test
+./gradlew check
+./gradlew bootRun
+```
+{% endif %}
+
+## Testing Expectations
+
+{% if test_strategy == "junit-only" %}
+- Prefer plain JUnit tests for business logic
+- Use Spring test slices when HTTP, validation, or repository wiring matters
+{% elif test_strategy == "junit-and-testcontainers" %}
+- Use Testcontainers for database-backed integration tests
+- Avoid fake compatibility layers that hide real database behavior
+{% else %}
+- Cover pure logic with unit tests
+- Cover Spring behavior with slice tests
+- Reserve end-to-end tests for critical flows only
+{% endif %}
+
+## Security Notes
+
+{% if use_auth and auth_method == "jwt" %}
+- Protected endpoints expect bearer tokens
+- Token parsing belongs in Spring Security configuration, not individual controllers
+{% elif use_auth and auth_method == "oauth2" %}
+- Resource-server settings, issuer, and scope mapping are security-owned concerns
+- Authorization decisions still need tests close to the business use case
+{% elif use_auth and auth_method == "api-key" %}
+- API key handling should be centralized and auditable
+- Do not duplicate header parsing logic across controllers
+{% else %}
+- If auth is not enabled, document the trust assumptions before exposing endpoints
+{% endif %}
+
+## Integration Notes
+
+{% if use_redis %}
+- Redis is available for caching or short-lived coordination, not as the primary system of record
+{% endif %}
+{% if use_kafka %}
+- Kafka messages are contracts; changing payload shape is a breaking change unless versioned
+{% endif %}
+- Repository behavior should be verified against the real database engine where correctness matters
+- Migrations, event contracts, and auth changes deserve explicit review attention

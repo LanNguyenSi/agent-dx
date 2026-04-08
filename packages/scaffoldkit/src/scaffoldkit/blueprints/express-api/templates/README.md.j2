@@ -1,0 +1,68 @@
+# {{ display_name }}
+
+{{ description }}
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Runtime | Node.js + TypeScript |
+| Framework | Express.js |
+| Database | {{ db_provider | capitalize }} via Prisma ORM |
+| Auth | {{ auth_strategy | upper }}{% if auth_strategy == "none" %} (none){% endif %} |
+{% if use_redis %}| Cache | Redis |
+{% endif %}{% if use_websockets %}| Real-time | Socket.io |
+{% endif %}{% if use_queue %}| Queue | BullMQ + Redis |
+{% endif %}{% if use_docker %}| Deploy | Docker + docker-compose |
+{% endif %}
+
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Set up database
+cp .env.example .env
+npx prisma migrate dev --name init
+
+# Run development server
+npm run dev
+```
+
+{% if use_docker %}
+## Docker
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+{% endif %}
+
+## Project Structure
+
+```
+{{ project_name }}/
+├── src/
+│   ├── routes/          # Express route handlers
+│   ├── services/        # Business logic
+│   ├── middleware/       # Auth, validation, error handling
+│   ├── models/          # Type definitions and schemas
+│   ├── types/           # Shared TypeScript types
+│   ├── utils/           # Helper functions
+│   └── index.ts         # App entry point
+├── prisma/
+│   └── schema.prisma    # Database schema
+├── tests/               # Test files
+├── docs/                # Documentation
+└── .ai/                 # Agent context files
+```
+
+## Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start dev server with hot reload |
+| `npm run build` | Compile TypeScript |
+| `npm start` | Start production server |
+| `npm test` | Run tests |
+| `npm run lint` | Lint with ESLint |

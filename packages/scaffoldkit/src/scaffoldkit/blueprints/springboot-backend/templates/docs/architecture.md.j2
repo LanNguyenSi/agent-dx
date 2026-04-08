@@ -1,0 +1,173 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+**{{ display_name }}** is a Spring Boot {{ spring_boot_version }} backend targeting Java {{ java_version }}.
+
+- **Base package:** `{{ base_package }}`
+- **Build tool:** {{ build_tool }}
+- **HTTP stack:** {{ api_style }}
+- **Database:** {{ database }}
+{% if use_auth %}
+- **Authentication:** {{ auth_method }}
+{% endif %}
+{% if use_ddd %}
+- **Architecture style:** DDD-inspired layered backend
+{% else %}
+- **Architecture style:** conventional Spring layered backend
+{% endif %}
+
+## Principles
+
+1. **Controllers own HTTP only.** Request mapping, validation, and response shaping happen in the web layer. Business rules do not.
+2. **Services orchestrate use cases.** Transactions, domain coordination, and cross-repository workflows belong in services.
+3. **Repositories own persistence.** SQL, JPA queries, and persistence-specific details stay behind repository boundaries.
+4. **Validation happens at the edge.** Bean Validation annotations live on request DTOs, not inside controllers.
+5. **Observability is built in.** Every externally visible flow should be traceable through structured logs and metrics.
+6. **Prefer explicit package boundaries.** Keep dependencies directional and easy to enforce with reviews or ArchUnit.
+
+---
+
+{% if use_ddd %}
+## Package Structure (DDD-Oriented)
+
+```text
+src/main/java/{{ base_package | replace('.', '/') }}/
+├── config/                  # Spring wiring, infrastructure beans, external client config
+├── web/                     # REST controllers, exception handlers, transport-only concerns
+├── web/dto/                 # Request and response models
+├── domain/                  # Entities, value objects, domain services, domain exceptions
+├── service/                 # Application services / use-case orchestration
+├── repository/              # Persistence adapters and Spring Data repositories
+└── security/                # Filters, auth converters, security config
+```
+
+### Boundary Rules
+
+- `domain/` must not depend on `web/`.
+- `web/` must never call repositories directly.
+- `repository/` maps between persistence representation and domain objects if necessary.
+- `service/` is the transaction boundary for write use cases.
+- Security adapters expose the authenticated principal in a form the service layer can consume without servlet-specific coupling.
+
+{% else %}
+## Package Structure (Standard Layered)
+
+```text
+src/main/java/{{ base_package | replace('.', '/') }}/
+├── config/                  # Configuration properties and bean wiring
+├── web/                     # Controllers and exception advice
+├── web/dto/                 # Transport DTOs
+├── service/                 # Business logic and transactional orchestration
+├── domain/                  # Core entities and enums
+├── repository/              # Spring Data repositories and custom persistence logic
+└── security/                # Security config and authentication helpers
+```
+
+### Layer Responsibilities
+
+- `web/`: receive HTTP input, validate DTOs, delegate once, return HTTP responses
+- `service/`: own business rules, transactions, and interactions across repositories
+- `repository/`: own JPA access patterns and custom queries
+- `domain/`: hold the ubiquitous language and invariant-bearing model
+- `config/`: register infrastructure without leaking framework details across the codebase
+
+{% endif %}
+
+---
+
+{% if api_style == "spring-mvc" %}
+## HTTP Model: Spring MVC
+
+Use the blocking servlet stack when:
+
+- the application is request/response heavy rather than stream-heavy
+- most dependencies are blocking anyway (JPA, traditional drivers, external SDKs)
+- operational simplicity matters more than extreme connection scaling
+
+### Conventions
+
+- Controllers return `ResponseEntity<?>` only when status or headers vary; otherwise return typed DTOs directly
+- Global error handling lives in `@RestControllerAdvice`
+- Synchronous service methods keep flow easy to debug and easier for most teams to reason about
+
+{% else %}
+## HTTP Model: WebFlux
+
+Use WebFlux when non-blocking I/O is a deliberate design choice end-to-end.
+
+### Conventions
+
+- Controllers return `Mono<T>` / `Flux<T>`
+- Do not mix reactive handlers with blocking repositories on the hot path
+- Keep reactive chains shallow; move mapping logic into named methods or dedicated components
+- Timeouts, retries, and circuit-breaking rules must be explicit for all outbound calls
+
+{% endif %}
+
+---
+
+## Persistence
+
+{% if database == "postgresql" %}
+PostgreSQL is the primary relational store. Prefer `jsonb` only for data with clear schema-flexibility needs; default to explicit columns for core business entities.
+{% elif database == "mysql" %}
+MySQL is the primary relational store. Keep collations explicit and verify timezone behavior in both the database and application configuration.
+{% else %}
+MariaDB is the primary relational store. Verify compatibility for any advanced SQL feature copied from generic MySQL examples.
+{% endif %}
+
+Persistence rules:
+
+- Repository methods expose intent, not implementation details
+- Migrations are reviewed artifacts, never throwaway generated files
+- Avoid leaking JPA entities directly into public API contracts
+- N+1 query risks are handled deliberately with fetch strategies or dedicated query paths
+
+{% if use_redis %}
+Redis is available for caching, rate limiting, or short-lived state. Do not treat it as a primary source of truth.
+{% endif %}
+
+{% if use_kafka %}
+Kafka is available for asynchronous integration events. Treat events as contracts: version them, document them, and keep payloads stable.
+{% endif %}
+
+---
+
+## Security
+
+{% if use_auth and auth_method == "jwt" %}
+Authentication uses JWT bearer tokens. Token parsing belongs in security filters or resource-server configuration, while authorization decisions stay close to the use case.
+{% elif use_auth and auth_method == "oauth2" %}
+Authentication uses OAuth2 / OIDC resource-server flows. Keep issuer, audience, and scope mapping explicit in configuration and tests.
+{% elif use_auth and auth_method == "api-key" %}
+Authentication uses API keys. Treat this as an operational convenience pattern, not a substitute for fine-grained user identity when product requirements need it.
+{% else %}
+No auth scaffold is assumed. Internal trust assumptions still need documentation at system boundaries.
+{% endif %}
+
+Security rules:
+
+- Authorization happens in services or dedicated policy components, not sprinkled across controllers
+- Every externally exposed mutation path must have an authorization story
+- Secrets come from environment-specific configuration, never committed defaults
+- Audit-relevant actions should emit structured logs with actor, target, and outcome
+
+---
+
+## Testing Strategy
+
+{% if test_strategy == "junit-only" %}
+Focus on unit tests and Spring slice tests. This is the fastest feedback loop, but it requires discipline to avoid over-trusting mocks.
+{% elif test_strategy == "junit-and-testcontainers" %}
+Use unit tests for pure logic and Testcontainers-backed integration tests for persistence and infrastructure edges. This is the recommended default because it catches wiring drift early.
+{% else %}
+Use the full pyramid: unit, slice, integration, and a thin end-to-end layer for the critical business journeys.
+{% endif %}
+
+Minimum expectations:
+
+- services have deterministic unit tests
+- controllers have request/validation/error-path coverage
+- repository behavior is verified against a real database where it matters
+- authentication and authorization have explicit happy-path and denial-path tests

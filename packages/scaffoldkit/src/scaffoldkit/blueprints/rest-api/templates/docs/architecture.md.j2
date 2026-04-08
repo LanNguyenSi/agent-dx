@@ -1,0 +1,462 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+{{ display_name }} is a REST API built with **{{ framework }}** and **{{ database }}**. It follows a layered architecture that separates HTTP concerns from business logic and data access, making each layer independently testable and replaceable.
+
+## Architectural Layers
+
+```
+┌─────────────────────────────────────────────┐
+│              HTTP Clients / Consumers        │
+└──────────────────────┬──────────────────────┘
+                       │ HTTP
+┌──────────────────────▼──────────────────────┐
+│               Routes / Controllers           │
+│   Request parsing, validation, response      │
+│             (src/routes/)                    │
+├─────────────────────────────────────────────┤
+│                  Services                    │
+│      Business logic, orchestration           │
+│  (no HTTP knowledge, no database queries)    │
+├─────────────────────────────────────────────┤
+│               Repositories                   │
+│    Database queries, data access objects     │
+│           ({{ database }} specific)          │
+├─────────────────────────────────────────────┤
+│                   Models                     │
+│        Data shapes, schema definitions       │
+│             (src/models/)                    │
+└─────────────────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────┐
+│               {{ database | title }}         │
+└─────────────────────────────────────────────┘
+```
+
+### Layer Responsibilities
+
+**Routes / Controllers (`src/routes/`)**
+
+- Parse and validate incoming HTTP requests
+- Delegate to the appropriate service
+- Format and return HTTP responses
+- Handle HTTP-level concerns: status codes, headers, content negotiation
+- Must NOT contain business logic or database queries
+
+**Services**
+
+- Implement all business logic
+- Orchestrate calls across multiple repositories
+- Validate business rules (as opposed to input format validation)
+- Must NOT import HTTP framework types or query the database directly
+- Are the primary unit of unit testing
+
+**Repositories**
+
+- Execute all database queries
+- Map database rows/documents to model objects
+- Handle pagination, filtering, and sorting at the query level
+- Must NOT implement business logic
+- Are the primary integration testing target
+
+**Models (`src/models/`)**
+
+- Define data shapes as types or classes
+- Contain validation schemas for input/output
+- Are framework-agnostic where possible
+
+**Middleware (`src/middleware/`)**
+
+- Cross-cutting concerns applied to all or selected routes
+- Logging, request tracing, CORS, rate limiting
+{% if use_auth %}
+- Authentication and authorization checks
+{% endif %}
+- Error normalization and response formatting
+
+**Config (`src/config/`)**
+
+- Load and validate environment variables at startup
+- Expose typed configuration objects to the rest of the application
+- Fail fast if required configuration is missing
+
+## Framework: {{ framework }}
+
+{% if framework == "fastapi" %}
+FastAPI is a Python web framework built on Starlette and Pydantic.
+
+Key conventions for this project:
+
+- **Routers**: Each resource has its own `APIRouter` in `src/routes/`. Routers are registered in `src/main.py`.
+- **Schemas**: Pydantic models in `src/models/` define request bodies, response shapes, and internal data structures. Separate `CreateSchema`, `UpdateSchema`, and `ResponseSchema` per resource.
+- **Dependency injection**: FastAPI's `Depends()` is used to inject services and repositories into route handlers, and to enforce authentication on protected routes.
+- **Async**: Route handlers and service methods are `async def`. Database calls must be awaited using an async ORM (e.g., SQLAlchemy async, Tortoise ORM, or Beanie for MongoDB).
+- **Startup/shutdown**: Use `lifespan` context managers for database pool initialization and cleanup.
+
+```python
+# Example route structure
+# src/routes/users.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from src.models.user import UserCreate, UserResponse
+from src.services.user_service import UserService
+from src.middleware.auth import require_auth
+
+router = APIRouter(prefix="/users", tags=["users"])
+
+@router.get("/", response_model=list[UserResponse])
+async def list_users(
+    page: int = 1,
+    page_size: int = 20,
+    service: UserService = Depends(),
+):
+    return await service.list_users(page=page, page_size=page_size)
+
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    body: UserCreate,
+    service: UserService = Depends(),
+):
+    return await service.create_user(body)
+```
+
+{% elif framework == "express" %}
+Express is a minimal Node.js web framework.
+
+Key conventions for this project:
+
+- **Routers**: Each resource has its own `express.Router` in `src/routes/`. Routers are mounted in `src/app.js` under versioned prefixes.
+- **Schemas**: Use a validation library (e.g., Zod or Joi) to define and enforce request/response shapes in `src/models/`.
+- **Middleware**: Express middleware in `src/middleware/` is applied globally (via `app.use`) or per-router.
+- **Async errors**: Wrap async handlers with a utility to forward errors to the global error handler, or use `express-async-errors`.
+- **Separation**: Route handlers call service functions and return. No business logic lives in route files.
+
+```javascript
+// Example route structure
+// src/routes/users.js
+const express = require('express');
+const router = express.Router();
+const userService = require('../services/userService');
+const { requireAuth } = require('../middleware/auth');
+const { validateBody } = require('../middleware/validate');
+const { createUserSchema } = require('../models/user');
+
+router.get('/', async (req, res) => {
+  const { page = 1, pageSize = 20 } = req.query;
+  const result = await userService.listUsers({ page, pageSize });
+  res.json(result);
+});
+
+router.post('/', validateBody(createUserSchema), async (req, res) => {
+  const user = await userService.createUser(req.body);
+  res.status(201).json(user);
+});
+
+module.exports = router;
+```
+
+{% elif framework == "django-rest" %}
+Django REST Framework (DRF) is a powerful toolkit for building Web APIs on top of Django.
+
+Key conventions for this project:
+
+- **ViewSets**: Use `ModelViewSet` or `GenericViewSet` with mixins. Register with a `DefaultRouter` in `src/routes/`.
+- **Serializers**: DRF serializers in `src/models/` handle validation and representation. Separate serializers for create, update, and response when their shapes differ.
+- **Permissions**: DRF permission classes enforce authorization. Apply globally in `settings.py` and override per-view as needed.
+- **Filtering**: Use `django-filter` for query parameter filtering. Define `FilterSet` classes alongside serializers.
+- **Pagination**: Use DRF's `PageNumberPagination` or `CursorPagination` globally.
+
+```python
+# Example ViewSet structure
+# src/routes/users.py
+from rest_framework import viewsets, permissions
+from src.models.user import User
+from src.serializers.user import UserSerializer, UserCreateSerializer
+
+class UserViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.all().order_by('-created_at')
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return UserCreateSerializer
+        return UserSerializer
+```
+
+{% elif framework == "spring-boot" %}
+Spring Boot with Spring Web and Spring Data provides a comprehensive Java API platform.
+
+Key conventions for this project:
+
+- **Controllers**: `@RestController` classes in `src/routes/` (package: `com.{{ project_name | replace('-', '.') }}.routes`). Each controller handles one resource.
+- **DTOs**: Data Transfer Objects in `src/models/` define API request and response shapes. Use `record` types (Java 16+) for immutability.
+- **Services**: `@Service` beans implement business logic. Injected into controllers via constructor injection.
+- **Repositories**: `@Repository` interfaces extend Spring Data (`JpaRepository` for {{ database if database != 'mongodb' else 'MongoRepository' }}).
+- **Validation**: Use Bean Validation (`@Valid`, `@NotNull`, `@Size`) on DTO fields and controller method parameters.
+- **Exception handling**: `@ControllerAdvice` with `@ExceptionHandler` methods centralizes error responses.
+
+```java
+// Example controller structure
+@RestController
+@RequestMapping("/api/v1/users")
+@RequiredArgsConstructor
+public class UserController {
+
+    private final UserService userService;
+
+    @GetMapping
+    public ResponseEntity<Page<UserResponse>> listUsers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(userService.listUsers(PageRequest.of(page, size)));
+    }
+
+    @PostMapping
+    public ResponseEntity<UserResponse> createUser(@Valid @RequestBody UserCreateRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(userService.createUser(request));
+    }
+}
+```
+
+{% endif %}
+
+## Database: {{ database }}
+
+{% if database == "postgresql" %}
+PostgreSQL is the primary data store.
+
+**Connection**: Use a connection pool. Configure `DATABASE_URL` as a standard PostgreSQL connection string (`postgresql://user:pass@host:5432/dbname`).
+
+**Migrations**: Track schema changes with a migration tool:
+{% if framework == "fastapi" %}
+- Alembic is the standard choice for SQLAlchemy projects
+- Each migration is a versioned Python file
+- Run `alembic upgrade head` before starting the application
+{% elif framework == "django-rest" %}
+- Django's built-in migration system (`python manage.py makemigrations` / `migrate`)
+{% elif framework == "express" %}
+- Knex.js migrations, or Prisma Migrate if using Prisma ORM
+{% elif framework == "spring-boot" %}
+- Flyway or Liquibase for SQL-based migrations applied at startup
+{% endif %}
+
+**Conventions**:
+- Table names are plural snake_case: `users`, `api_keys`, `refresh_tokens`
+- All tables have `id` (UUID or serial), `created_at`, and `updated_at` columns
+- Foreign keys are explicit and indexed
+- Soft deletes use a `deleted_at` nullable timestamp column
+
+{% elif database == "mysql" %}
+MySQL is the primary data store.
+
+**Connection**: Configure `DATABASE_URL` as a MySQL connection string (`mysql://user:pass@host:3306/dbname`). Use a connection pool sized to your application's concurrency.
+
+**Conventions**:
+- Table names are plural snake_case
+- Use `BIGINT UNSIGNED` for auto-increment primary keys or `CHAR(36)` for UUIDs
+- All tables have `id`, `created_at`, `updated_at`
+- Use `InnoDB` engine for transaction support and foreign key constraints
+- Soft deletes via `deleted_at` nullable column
+
+{% elif database == "mongodb" %}
+MongoDB is the primary data store.
+
+**Connection**: Configure `DATABASE_URL` as a MongoDB connection string (`mongodb://user:pass@host:27017/dbname`). Use the official driver or an ODM.
+{% if framework == "fastapi" %}
+- Beanie (async ODM on Motor) or Motor directly
+{% elif framework == "express" %}
+- Mongoose ODM for schema definition and validation
+{% elif framework == "spring-boot" %}
+- Spring Data MongoDB with `@Document` annotations
+{% endif %}
+
+**Conventions**:
+- Collection names are plural camelCase: `users`, `apiKeys`
+- All documents have `_id` (ObjectId), `createdAt`, `updatedAt`
+- Use embedded documents for data that is always fetched together
+- Use references (ObjectId) for data that is queried independently
+- Avoid deeply nested structures (max 2 levels)
+
+{% elif database == "sqlite" %}
+SQLite is used as the primary data store. This is suitable for development, testing, and lightweight deployments. For production use with significant load, consider migrating to PostgreSQL.
+
+**Connection**: Configure the path to the database file via `DATABASE_URL` (e.g., `sqlite:///./app.db`).
+
+**Conventions**:
+- Same naming conventions as PostgreSQL apply
+- WAL mode is recommended for concurrent reads: `PRAGMA journal_mode=WAL`
+- Not suitable for high-concurrency write workloads
+
+{% endif %}
+
+{% if use_auth %}
+## Authentication: {{ auth_strategy | upper }}
+
+{% if auth_strategy == "jwt" %}
+Authentication is stateless using JSON Web Tokens.
+
+**Flow**:
+1. Client sends credentials (username/password) to `POST /api/v1/auth/login`
+2. Server validates credentials, issues a short-lived access token and a long-lived refresh token
+3. Client includes `Authorization: Bearer <access_token>` in subsequent requests
+4. When the access token expires, the client uses the refresh token to obtain a new one from `POST /api/v1/auth/refresh`
+
+**Implementation rules**:
+- Access tokens expire in 15-60 minutes
+- Refresh tokens expire in 7-30 days and are stored server-side (in the database) to allow revocation
+- Tokens are signed with `HS256` (HMAC-SHA256) using the `JWT_SECRET` environment variable
+- Never embed sensitive data in the JWT payload - only include `sub` (user ID), `iat`, and `exp`
+- Validate the token on every protected request; do not cache validation results in memory
+
+{% elif auth_strategy == "oauth2" %}
+Authentication delegates to an OAuth2 provider (e.g., Google, GitHub, Auth0).
+
+**Flow** (Authorization Code with PKCE):
+1. Client redirects user to `GET /api/v1/auth/authorize`
+2. API redirects to the provider's authorization URL
+3. Provider redirects back to `GET /api/v1/auth/callback` with an authorization code
+4. API exchanges the code for provider tokens, looks up or creates the local user, and issues a session token
+5. Client uses the session token for subsequent API requests
+
+**Implementation rules**:
+- Store `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` in environment variables
+- Validate the `state` parameter to prevent CSRF attacks
+- Store minimal user data locally (provider ID, email, display name)
+
+{% elif auth_strategy == "api-key" %}
+Authentication uses static API keys issued per application or client.
+
+**Flow**:
+1. An API key is generated and issued out-of-band (via admin panel or CLI command)
+2. Client includes `X-API-Key: <key>` header on every request
+3. The middleware hashes the key and looks it up in the database
+4. The associated service account and its permissions are loaded and attached to the request context
+
+**Implementation rules**:
+- Never store plaintext keys in the database - store the SHA-256 hash with a prefix for lookup
+- Keys can be scoped to specific resources or operations
+- Support multiple active keys per client to allow rotation without downtime
+- Include `created_at`, `last_used_at`, and `expires_at` on key records
+
+{% endif %}
+
+### Authorization
+
+Beyond authentication (who are you?), authorization (what can you do?) is enforced at the service layer using a role or permission model:
+
+- Roles are assigned to users: `admin`, `member`, `viewer`
+- Permissions are checked before any mutating operation
+- Resource ownership is validated: users may only modify their own resources unless they hold an elevated role
+- Authorization failures return `403 Forbidden`, not `404 Not Found`, unless hiding resource existence is a security requirement
+
+{% endif %}
+
+{% if use_docker %}
+## Infrastructure
+
+### Docker Compose (Local Development)
+
+```
+docker compose up
+```
+
+Services:
+- **api**: The application container, auto-reloads on file changes
+- **db**: {{ database | title }} database with a named volume for persistence
+{% if use_auth and auth_strategy == "jwt" %}
+- **redis** (optional): For storing refresh token revocation lists or rate limit counters
+{% endif %}
+
+Environment variables are provided via a `.env` file (see `.env.example`).
+
+### Production Considerations
+
+- Run the API behind a reverse proxy (nginx, Caddy, or a cloud load balancer)
+- Use managed database services when available
+- Store secrets in a secrets manager (AWS Secrets Manager, Vault, etc.), not in environment files
+- Enable structured JSON logging for log aggregation
+- Expose `/health` and `/metrics` endpoints for monitoring
+
+{% endif %}
+
+{% if use_ci %}
+## CI/CD
+
+The CI pipeline runs on every push and pull request:
+
+1. **Lint**: Check code style and format
+2. **Type check**: Verify type correctness (if applicable)
+3. **Unit tests**: Run fast, isolated tests
+4. **Integration tests**: Run tests against a real {{ database }} instance (spun up by the CI environment)
+5. **Build**: Verify the application builds successfully
+6. **Security scan**: Check for known vulnerabilities in dependencies
+
+On merge to `main`:
+- Deploy to a staging environment
+- Run smoke tests against staging
+- Manual promotion gate to production (or automatic for low-risk changes)
+
+{% endif %}
+
+## Error Handling
+
+All errors return a consistent JSON envelope:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "The request body is invalid.",
+    "details": [
+      { "field": "email", "message": "Must be a valid email address." }
+    ]
+  }
+}
+```
+
+See [API Design](api-design.md) for the full error code list and HTTP status mapping.
+
+## Testing Strategy
+
+Approach: **{{ test_strategy }}**
+
+{% if test_strategy == "unit-and-integration" %}
+**Unit tests** (fast, no I/O):
+- Every service method has unit tests
+- Repositories are mocked in service tests
+- Business rules and edge cases are exhaustively covered at this layer
+
+**Integration tests** (real database, in `tests/integration/`):
+- Every repository method is tested against a real {{ database }} instance
+- Every route is tested via an HTTP client against a running application
+- Authentication flows are tested end-to-end
+{% elif test_strategy == "contract-testing" %}
+**Contract tests** (API shape):
+- Consumer-driven contracts are defined using Pact or a similar tool
+- The API runs a provider verification suite on every build
+- Breaking changes to the API shape fail the build
+
+**Integration tests** (data layer):
+- Repository methods are tested against a real {{ database }} instance
+- Service orchestration logic is tested with real repositories
+
+**Unit tests** (logic):
+- Complex transformation and validation logic has unit tests
+{% elif test_strategy == "full-pyramid" %}
+**Unit tests** (many, fast):
+- All service methods
+- All data transformation utilities
+- All validation logic
+
+**Integration tests** (fewer, slower):
+- Repository methods against a real {{ database }} instance
+- Route handlers via HTTP client against a running application
+- External service integrations (with a test double for the external service)
+
+**Contract tests** (API shape):
+- Consumer-driven contracts verified on every build
+{% endif %}
+
+## Decisions
+
+See [ADR log](adrs/) for all architectural decisions and their rationale.

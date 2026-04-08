@@ -1,0 +1,13 @@
+{
+  "name": "@{{ project_name }}/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "openapi-typescript http://localhost:8000/api/docs.json -o src/index.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.6.1",
+    "typescript": "^5.8.2"
+  }
+}

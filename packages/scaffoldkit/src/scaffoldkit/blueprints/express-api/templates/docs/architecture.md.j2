@@ -1,0 +1,27 @@
+# Architecture — {{ display_name }}
+
+## Overview
+
+{{ description }}
+
+## Stack
+
+- **Runtime:** Node.js + TypeScript
+- **Framework:** Express.js
+- **Database:** {{ db_provider | capitalize }} via Prisma ORM
+- **Auth:** {{ auth_strategy | upper }}
+{% if use_redis %}- **Cache:** Redis{% endif %}
+{% if use_websockets %}- **Real-time:** Socket.io{% endif %}
+{% if use_queue %}- **Queue:** BullMQ{% endif %}
+
+## Architecture Pattern
+
+Route → Service → Prisma (three-layer separation)
+
+- **Routes** (`src/routes/`): HTTP parsing, status codes, response formatting
+- **Services** (`src/services/`): Business logic, validation, orchestration
+- **Prisma** (`prisma/`): Data access, migrations, schema
+
+## Key Decisions
+
+See `docs/adrs/` for architecture decision records.

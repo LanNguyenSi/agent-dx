@@ -1,0 +1,20 @@
+# ADR 0001: Express.js + TypeScript + Prisma
+
+## Status
+
+Accepted
+
+## Context
+
+We need a REST API with type safety, database migrations, and a lightweight framework.
+
+## Decision
+
+Use Express.js with TypeScript strict mode and Prisma ORM for database access. Three-layer architecture: routes → services → Prisma.
+
+## Consequences
+
+- Mature framework with large middleware ecosystem
+- Type-safe database queries via Prisma generated client
+- Manual type annotations needed (no automatic inference like tRPC)
+- Schema-first database design with migration support

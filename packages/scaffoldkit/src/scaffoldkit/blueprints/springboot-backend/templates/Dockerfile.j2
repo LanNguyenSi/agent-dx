@@ -1,0 +1,19 @@
+FROM eclipse-temurin:{{ java_version }}-jdk-jammy
+
+WORKDIR /app
+
+COPY . .
+
+RUN if [ -f mvnw ]; then chmod +x mvnw; fi \
+    && if [ -f gradlew ]; then chmod +x gradlew; fi \
+    && if [ -f pom.xml ]; then \
+         if [ -f mvnw ]; then ./mvnw -q -DskipTests package; else mvn -q -DskipTests package; fi; \
+       elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then \
+         if [ -f gradlew ]; then ./gradlew build -x test; else gradle build -x test; fi; \
+       else \
+         mkdir -p build && printf 'Spring Boot scaffold shell\n' > build/README.txt; \
+       fi
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "if ls target/*.jar >/dev/null 2>&1; then java -jar $(ls target/*.jar | head -n1); elif ls build/libs/*.jar >/dev/null 2>&1; then java -jar $(ls build/libs/*.jar | head -n1); else echo 'Spring Boot scaffold: add pom.xml or Gradle build files to run the app.'; sleep infinity; fi"]

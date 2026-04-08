@@ -1,0 +1,74 @@
+# AI Context: {{ display_name }}
+
+Read this file before changing the codebase.
+
+## System Summary
+
+{{ display_name }} is {{ description | lower }} built on **Django + DRF** with **{{ database }}**.
+
+| Property | Value |
+|----------|-------|
+| Python | {{ python_version }} |
+| Package Manager | {{ package_manager }} |
+| Auth | {{ auth_strategy }} |
+| Test Strategy | {{ test_strategy }} |
+
+## Repository Rules
+
+```text
+config/              project settings, URLs, ASGI/WSGI, environment wiring
+apps/api/            DRF serializers, viewsets, routers, permissions
+apps/users/          user and auth-related domain code
+apps/common/         shared services and utilities
+tests/integration/   API + database integration coverage
+```
+
+## Non-Negotiable Boundaries
+
+1. Keep Django project config separate from domain apps.
+2. Keep serializers focused on transport and validation, not orchestration-heavy business logic.
+3. Keep permissions explicit and reusable; do not duplicate authorization rules across viewsets.
+4. Put domain workflows into services or use-case modules, not into model methods by default.
+5. Use migrations intentionally; schema drift is a real change, not background noise.
+
+## DRF Conventions
+
+- one router registration per resource group
+- explicit serializers for create/update/read shapes where needed
+- use viewsets only when they reduce noise without hiding behavior
+- prefer explicit permission classes over ad-hoc inline checks
+{% if use_drf_spectacular %}
+- keep the OpenAPI output accurate through serializers, views, and schema annotations
+{% endif %}
+
+## Authentication Rules
+
+{% if auth_strategy == "none" %}
+- No auth is scaffolded. Treat any later auth addition as an architectural change.
+{% elif auth_strategy == "session" %}
+- Session auth fits browser-oriented internal systems. Keep CSRF and session boundaries explicit.
+{% elif auth_strategy == "jwt" %}
+- JWT auth belongs in dedicated auth modules and DRF authentication classes.
+{% elif auth_strategy == "token" %}
+- Token auth should be centralized and revocation semantics documented.
+{% else %}
+- OAuth2 provider integration belongs in infrastructure/auth modules, not inside business resources.
+{% endif %}
+
+## Testing Rules
+
+{% if test_strategy == "pytest-django" %}
+- prioritize pytest-django coverage for serializers, permissions, and service modules
+- add smoke tests for the API surface
+{% elif test_strategy == "pytest-django-and-integration" %}
+- every exposed resource gets integration coverage for auth, validation, and persistence
+- business workflow modules get focused unit tests
+{% else %}
+- maintain unit, integration, and broader workflow verification separately
+{% endif %}
+
+## Implementation Heuristics
+
+- implement one app/resource at a time
+- decide early whether logic belongs in serializer, service, permission, or model
+- document structural exceptions in `docs/adrs/`

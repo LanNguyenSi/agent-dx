@@ -1,0 +1,167 @@
+# ADR-0001: Framework and Deployment Platform
+
+## Status
+
+Accepted
+
+## Context
+
+{{ display_name }} is a **{{ site_type }}** site. The team needed to choose a static site framework and a deployment platform.
+
+Key requirements:
+
+- Static output: no server runtime in production
+- Fast builds suitable for a content-heavy repository
+- Good developer experience with hot reload
+{% if site_type == "docs" %}
+- Native support for content collections or a similar structured content model
+- Good Markdown/MDX support including custom components in content
+{% elif site_type == "blog" %}
+- Tag and category taxonomy pages
+- RSS feed generation
+- Author pages
+{% elif site_type == "landing-page" %}
+- Component-based page building
+- Image optimisation built in or easy to add
+- Fast build times for iteration speed
+{% elif site_type == "portfolio" %}
+- Content collections for project entries
+- Flexible layout system for varied project showcases
+{% endif %}
+- Deployment that supports preview URLs for pull requests
+- Free tier suitable for the expected traffic level
+
+### Frameworks Considered
+
+| Framework | Pros | Cons |
+|-----------|------|------|
+| Astro | Zero-JS by default, islands architecture, excellent content collections, framework-agnostic components | Relatively new, smaller ecosystem than Next.js |
+| Next.js (static export) | Large ecosystem, React components, well-understood | Static export has limitations vs full Next.js; heavier JS baseline |
+| Hugo | Extremely fast builds, mature, no Node.js runtime | Go templating has a learning curve; limited JavaScript integration |
+| Eleventy | Flexible, minimal opinions, excellent template language choice | More configuration required; smaller community than Astro or Hugo |
+
+### Deployment Platforms Considered
+
+| Platform | Pros | Cons |
+|----------|------|------|
+| Vercel | Excellent DX, instant preview URLs, generous free tier, framework-aware | Vendor lock-in risk for advanced features |
+| Netlify | Strong free tier, flexible build plugins, good form/function support | Slightly slower deploys than Vercel |
+| GitHub Pages | Zero cost, simple setup, no third-party account needed | No built-in preview URLs; limited build environment |
+| Cloudflare Pages | Global CDN, generous free tier, fast cache invalidation | Newer platform; some build environment differences |
+
+## Decision
+
+We chose **{{ framework }}** as the framework and **{{ deploy_target }}** as the deployment platform.
+
+### Framework Rationale
+
+{% if framework == "astro" %}
+Astro was chosen because:
+
+- Content collections provide typed, validated frontmatter out of the box
+- Zero JavaScript shipped by default - pages are pure HTML unless a component explicitly opts in
+- Islands architecture allows selective hydration: interactive widgets load JS, everything else does not
+- Supports `.astro`, `.md`, `.mdx`, and framework components (React, Vue, Svelte) in the same project
+- Build performance is excellent even with many pages
+{% elif framework == "nextjs-static" %}
+Next.js static export was chosen because:
+
+- The team has existing React expertise - no new framework syntax to learn
+- The React ecosystem provides a wide range of ready-made components
+- Static export (`output: 'export'`) produces fully portable static HTML
+- Image optimisation is built in via `next/image`
+- TypeScript support is first-class
+{% elif framework == "hugo" %}
+Hugo was chosen because:
+
+- Build speed is unmatched - thousands of pages in seconds
+- No Node.js dependency makes the build environment simpler
+- Mature and stable: breaking changes are rare
+- Built-in taxonomy, pagination, RSS, and sitemap generation
+- Shortcodes provide reusable content snippets without JavaScript
+{% elif framework == "eleventy" %}
+Eleventy was chosen because:
+
+- Template language agnostic: Markdown, Nunjucks, Liquid, and JavaScript templates can coexist
+- Minimal magic - the build pipeline is explicit and easy to understand
+- Excellent support for data files and computed data
+- No framework lock-in: the output is plain HTML, easy to migrate later
+- Active community and plugin ecosystem
+{% endif %}
+
+### Deployment Rationale
+
+{% if deploy_target == "vercel" %}
+Vercel was chosen because:
+
+- Automatic preview deployments for every pull request provide quick visual review
+- Zero-config deployment: the framework is detected automatically
+- The edge CDN delivers consistent performance globally
+- The free tier covers the expected traffic without cost
+{% elif deploy_target == "netlify" %}
+Netlify was chosen because:
+
+- Deploy previews on every pull request support the content review workflow
+- Build plugins provide flexibility for custom build steps (link checking, image optimisation)
+- The free tier is generous and well-suited to static sites
+- Form handling and serverless functions are available if needed later
+{% elif deploy_target == "github-pages" %}
+GitHub Pages was chosen because:
+
+- No third-party account is required - everything is in the existing GitHub repository
+- Cost is zero (included with the repository)
+- The GitHub Actions workflow gives full control over the build and deployment process
+- Suitable for the expected traffic and team size
+{% elif deploy_target == "cloudflare-pages" %}
+Cloudflare Pages was chosen because:
+
+- Deployment to Cloudflare's global network provides very low latency worldwide
+- The free tier is among the most generous available
+- Automatic preview deployments are supported
+- Integration with Cloudflare Workers is available if edge functions are needed later
+{% endif %}
+
+## Consequences
+
+### Positive
+
+- Clear, documented technical foundation from day one
+- Framework and deployment choice are aligned with the project's {{ site_type }} use case
+- Preview deployments on every PR support an async review workflow
+- Static output means no server to maintain or secure
+
+### Negative
+
+{% if framework == "astro" %}
+- Astro's `.astro` component syntax is not transferable to other frameworks
+- The content collections API has had breaking changes between major versions
+{% elif framework == "nextjs-static" %}
+- Static export disables some Next.js features (server actions, API routes, image optimisation without a custom loader)
+- React adds baseline JavaScript weight compared to zero-JS frameworks
+{% elif framework == "hugo" %}
+- Go template syntax has a steeper learning curve for developers from JavaScript backgrounds
+- Adding interactivity requires separate JavaScript, as Hugo has no component model
+{% elif framework == "eleventy" %}
+- More initial configuration is required compared to opinionated frameworks
+- No built-in image optimisation (a plugin is required)
+{% endif %}
+
+### Risks and Mitigations
+
+- **Framework major version upgrades**: Breaking changes are possible. Mitigate by pinning the framework version in `package.json` and reviewing release notes before upgrading.
+- **Deployment platform pricing changes**: Static files are portable. The build output can be hosted anywhere. Mitigate by keeping the build config simple and avoiding platform-specific features where possible.
+- **Build time growth as content scales**: Monitor build times in CI. If they exceed 10 minutes, investigate incremental builds or content pagination strategies.
+
+## References
+
+- [Architecture documentation](../architecture.md)
+- [Ways of working](../ways-of-working.md)
+{% if framework == "astro" %}
+- [Astro documentation](https://docs.astro.build)
+{% elif framework == "nextjs-static" %}
+- [Next.js static export documentation](https://nextjs.org/docs/app/building-your-application/deploying/static-exports)
+{% elif framework == "hugo" %}
+- [Hugo documentation](https://gohugo.io/documentation/)
+{% elif framework == "eleventy" %}
+- [Eleventy documentation](https://www.11ty.dev/docs/)
+{% endif %}

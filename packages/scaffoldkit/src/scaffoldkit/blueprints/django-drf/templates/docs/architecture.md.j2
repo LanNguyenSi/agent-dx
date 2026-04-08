@@ -1,0 +1,87 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+{{ display_name }} is a Django REST Framework backend organized around a conventional Django project plus explicit domain apps. The blueprint assumes Django is a first-class choice because the ORM, admin ecosystem, and DRF tooling are part of the intended implementation path.
+
+## High-Level Structure
+
+```text
+Clients
+  |
+DRF routers / viewsets
+  |
+serializers + permissions
+  |
+services / use-case modules
+  |
+Django ORM models
+  |
+{{ database | title }}
+```
+
+## Repository Layout
+
+- `config/` for settings, URLs, and environment wiring
+- `apps/api/` for REST resources and API composition
+- `apps/users/` for identity and access concerns
+- `apps/common/` for shared building blocks
+
+## Responsibilities
+
+### Viewsets and API Views
+
+- HTTP orchestration only
+- select serializer class, permission class, and service entrypoint
+- never become the home of complex workflow branching
+
+### Serializers
+
+- request validation
+- output shaping
+- light data transformation
+
+Serializers should not become service substitutes.
+
+### Services / Use Cases
+
+- workflow orchestration
+- cross-model business rules
+- integration coordination
+
+### Models
+
+- persistence structure
+- low-level invariants
+- query behavior where Django conventions make that natural
+
+## Auth Strategy
+
+Current auth choice: **{{ auth_strategy }}**
+
+## Operational Options
+
+{% if use_celery %}
+- Celery is assumed for deferred and out-of-band processing.
+{% else %}
+- No async worker is assumed at scaffold time.
+{% endif %}
+{% if use_channels %}
+- Channels are part of the target shape for websocket or long-lived connections.
+{% else %}
+- No websocket layer is assumed initially.
+{% endif %}
+
+{% if use_drf_spectacular %}
+OpenAPI output is part of the contract and should stay aligned with serializers and routers.
+{% endif %}
+
+## First Slice
+
+The first delivery slice should prove:
+
+1. one concrete Django app
+2. one DRF resource with serializer, permission, and service logic
+3. migrations and persistence flow
+4. auth wiring for the chosen strategy
+5. integration coverage for the resource lifecycle

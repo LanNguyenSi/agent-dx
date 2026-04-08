@@ -1,0 +1,38 @@
+# ADR-0001: FastAPI Service Baseline
+
+## Status
+
+Accepted
+
+## Context
+
+{{ display_name }} needs a Python backend with clear API documentation, typed validation, and a structure that downstream agents can extend without collapsing business logic into route handlers.
+
+## Decision
+
+Adopt **FastAPI** as the HTTP framework and keep the repository organized around:
+
+- routers
+- services
+- repositories
+- typed models
+{% if use_background_jobs %}- background workers for deferred work
+{% endif %}
+
+Database baseline: **{{ db_provider }}**
+
+Auth baseline: **{{ auth_strategy }}**
+
+## Consequences
+
+Positive:
+
+- strong request/response typing
+- low-friction OpenAPI generation
+- clear async story for I/O heavy services
+
+Trade-offs:
+
+- strict layering needs discipline
+- async misuse can hide blocking calls
+- infrastructure choices still need to be filled in deliberately during implementation

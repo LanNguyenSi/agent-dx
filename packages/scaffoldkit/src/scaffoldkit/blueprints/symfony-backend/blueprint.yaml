@@ -1,0 +1,228 @@
+name: symfony-backend
+display_name: "Symfony Backend"
+description: "Production-ready Symfony API backend with docs, architecture patterns, and AI context"
+version: "1.0.0"
+stack: "php-symfony"
+
+metadata:
+  architecture: "symfony-api"
+  php_ecosystem: true
+
+variables:
+  - name: project_name
+    description: "Project slug (lowercase, hyphens)"
+    type: string
+    default: "my-api"
+    required: true
+
+  - name: display_name
+    description: "Human-readable project name"
+    type: string
+    default: "My API"
+    required: true
+
+  - name: description
+    description: "Short project description"
+    type: string
+    default: "A Symfony-based API backend"
+    required: true
+
+  - name: php_version
+    description: "PHP version to target"
+    type: choice
+    choices:
+      - "8.2"
+      - "8.3"
+      - "8.4"
+    default: "8.3"
+    required: true
+
+  - name: symfony_version
+    description: "Symfony framework version"
+    type: choice
+    choices:
+      - "6.4"
+      - "7.1"
+      - "7.2"
+    default: "7.2"
+    required: true
+
+  - name: api_style
+    description: "API layer approach"
+    type: choice
+    choices:
+      - "api-platform"
+      - "custom-controllers"
+      - "fos-rest"
+    default: "api-platform"
+    required: true
+
+  - name: database
+    description: "Primary database engine"
+    type: choice
+    choices:
+      - "postgresql"
+      - "mysql"
+      - "mariadb"
+    default: "postgresql"
+    required: true
+
+  - name: use_ddd
+    description: "Use Domain-Driven Design layer structure (Domain / Application / Infrastructure)"
+    type: boolean
+    default: false
+
+  - name: use_cqrs
+    description: "Use CQRS pattern via Symfony Messenger (Command Bus / Query Bus)"
+    type: boolean
+    default: false
+
+  - name: use_auth
+    description: "Include authentication scaffold"
+    type: boolean
+    default: true
+
+  - name: auth_method
+    description: "Authentication mechanism"
+    type: choice
+    choices:
+      - "jwt"
+      - "oauth2"
+      - "api-key"
+    default: "jwt"
+    required: true
+
+  - name: use_docker
+    description: "Include Docker and Docker Compose configuration"
+    type: boolean
+    default: true
+
+  - name: use_ci
+    description: "Include CI/CD pipeline configuration (GitHub Actions)"
+    type: boolean
+    default: true
+
+  - name: use_rabbitmq
+    description: "Include RabbitMQ transport for async messaging"
+    type: boolean
+    default: false
+
+  - name: use_redis
+    description: "Include Redis for caching and/or sessions"
+    type: boolean
+    default: false
+
+  - name: test_strategy
+    description: "Testing approach"
+    type: choice
+    choices:
+      - "phpunit-only"
+      - "phpunit-and-behat"
+      - "pest"
+    default: "phpunit-only"
+    required: true
+
+  - name: ai_context
+    description: "Generate AI_CONTEXT.md for agent-assisted development"
+    type: boolean
+    default: true
+
+templates:
+  - source: README.md.j2
+    target: README.md
+
+  - source: composer.json.j2
+    target: composer.json
+
+  - source: .env.j2
+    target: .env
+
+  - source: bin/console.j2
+    target: bin/console
+
+  - source: public/index.php.j2
+    target: public/index.php
+
+  - source: src/Kernel.php.j2
+    target: src/Kernel.php
+
+  - source: src/Controller/HealthController.php.j2
+    target: src/Controller/HealthController.php
+
+  - source: config/bundles.php.j2
+    target: config/bundles.php
+
+  - source: config/routes.yaml.j2
+    target: config/routes.yaml
+
+  - source: config/services.yaml.j2
+    target: config/services.yaml
+
+  - source: config/packages/framework.yaml.j2
+    target: config/packages/framework.yaml
+
+  - source: config/packages/doctrine.yaml.j2
+    target: config/packages/doctrine.yaml
+
+  - source: .dockerignore.j2
+    target: .dockerignore
+    condition: use_docker
+
+  - source: docker-compose.yml.j2
+    target: docker-compose.yml
+    condition: use_docker
+
+  - source: docker/php/Dockerfile.j2
+    target: docker/php/Dockerfile
+    condition: use_docker
+
+  - source: .github/workflows/ci.yml.j2
+    target: .github/workflows/ci.yml
+    condition: use_ci
+
+  - source: docs/architecture.md.j2
+    target: docs/architecture.md
+
+  - source: docs/ways-of-working.md.j2
+    target: docs/ways-of-working.md
+
+  - source: docs/adrs/0001-architecture.md.j2
+    target: docs/adrs/0001-architecture.md
+
+  - source: docs/api-conventions.md.j2
+    target: docs/api-conventions.md
+
+  - source: AI_CONTEXT.md.j2
+    target: AI_CONTEXT.md
+    condition: ai_context
+
+static_files:
+  - source: .editorconfig
+    target: .editorconfig
+
+  - source: .gitignore
+    target: .gitignore
+
+directories:
+  - bin
+  - src
+  - src/Entity
+  - src/Repository
+  - src/Controller
+  - src/Service
+  - src/EventSubscriber
+  - src/Domain
+  - src/Application
+  - src/Infrastructure
+  - config
+  - config/packages
+  - migrations
+  - tests
+  - tests/Unit
+  - tests/Integration
+  - tests/Functional
+  - docs/adrs
+  - public
+  - templates
+  - translations
+  - var

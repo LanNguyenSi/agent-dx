@@ -1,0 +1,16 @@
+FROM php:{{ php_version }}-cli-bookworm
+
+ENV COMPOSER_ALLOW_SUPERUSER=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git unzip libicu-dev libzip-dev libpq-dev default-libmysqlclient-dev \
+    && docker-php-ext-install -j"$(nproc)" intl opcache pdo pdo_mysql pdo_pgsql zip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+
+WORKDIR /app
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "if [ -f composer.json ]; then composer install --no-interaction --prefer-dist || true; php -S 0.0.0.0:8000 -t public; else echo 'Symfony API scaffold: add apps/api/composer.json to run the backend.'; sleep infinity; fi"]

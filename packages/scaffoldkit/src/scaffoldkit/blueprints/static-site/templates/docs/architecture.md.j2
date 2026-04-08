@@ -1,0 +1,238 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+{{ display_name }} is a **{{ site_type }}** site built with **{{ framework }}** and styled with **{{ styling }}**. It deploys to **{{ deploy_target }}**.
+
+The site follows a standard static site architecture: content and templates are compiled at build time into plain HTML, CSS, and JavaScript. There is no runtime server. Pages are served directly from a CDN.
+
+## Principles
+
+1. **Build-time over runtime**: All data fetching, templating, and content transformation happens during the build. The deployed artefact is pure static files.
+2. **Content as data**: Structured content (Markdown with frontmatter) is the source of truth. The framework renders it; it is not coupled to the framework's internals.
+3. **Progressive enhancement**: Pages render and are readable without JavaScript. Interactivity is layered on top.
+4. **Performance budget**: Target Lighthouse scores of 90+ across all categories. See [ways-of-working.md](ways-of-working.md) for specific targets.
+
+## Directory Structure
+
+```
+{{ project_name }}/
+├── src/
+│   ├── pages/          # Route-defining files (one file = one URL)
+│   ├── components/     # Reusable presentational components
+│   ├── layouts/        # Full-page layout wrappers
+│   ├── content/        # Markdown and MDX content collections
+│   └── assets/         # Images and fonts (processed at build: hashed, optimised)
+├── public/             # Files copied verbatim to the build output root
+│   └── ...             # Favicons, robots.txt, OG images, etc.
+{% if framework == "astro" %}
+├── astro.config.mjs    # Framework configuration
+{% elif framework == "nextjs-static" %}
+├── next.config.js      # Framework configuration (output: 'export')
+{% elif framework == "hugo" %}
+├── hugo.toml           # Framework configuration
+{% elif framework == "eleventy" %}
+├── .eleventy.js        # Framework configuration
+{% endif %}
+└── docs/
+    ├── architecture.md (this file)
+    ├── ways-of-working.md
+    ├── content-guide.md
+    └── adrs/
+```
+
+## Routing
+
+{% if framework == "astro" %}
+Routing is file-based. A file at `src/pages/about.astro` produces `/about/index.html` in the build output. Dynamic routes use bracket notation: `src/pages/blog/[slug].astro` generates one page per content entry.
+
+Static paths for dynamic routes must be declared in a `getStaticPaths()` export.
+{% elif framework == "nextjs-static" %}
+Routing is file-based under `src/pages/`. Next.js static export (`next export`) writes each page as an `index.html` file. Dynamic routes use bracket notation: `src/pages/blog/[slug].tsx` generates one page per path returned by `getStaticPaths`.
+
+All data fetching must use `getStaticProps` or `getStaticPaths` - no server-side data fetching is available in static export mode.
+{% elif framework == "hugo" %}
+Hugo builds pages from content files in `content/` combined with templates in `layouts/`. The URL structure mirrors the content directory structure. Taxonomy pages (tags, categories) are generated automatically.
+
+Shortcodes in `layouts/shortcodes/` allow reusable content snippets inside Markdown.
+{% elif framework == "eleventy" %}
+Eleventy builds one output file per input template. The URL is derived from the file path by default but can be overridden with `permalink` in frontmatter. Collection-based pages (blog posts, etc.) are built using pagination over data collections.
+{% endif %}
+
+## Components and Layouts
+
+### Layouts
+
+Layouts wrap pages with shared structure (navigation, footer, head metadata). They live in `src/layouts/`.
+
+Typical layouts:
+- `Base.{{ 'astro' if framework == 'astro' else ('tsx' if framework == 'nextjs-static' else 'html') }}` - HTML shell with `<head>`, global styles, and scripts
+- `Page.{{ 'astro' if framework == 'astro' else ('tsx' if framework == 'nextjs-static' else 'html') }}` - standard content page with sidebar or TOC (for docs)
+- `Post.{{ 'astro' if framework == 'astro' else ('tsx' if framework == 'nextjs-static' else 'html') }}` - article layout with author and date (for blog)
+
+### Components
+
+Components are reusable pieces of UI. They live in `src/components/` and are organised by concern:
+
+```
+src/components/
+├── navigation/     # Site nav, breadcrumbs, pagination
+├── content/        # Content-aware components (callouts, code blocks, cards)
+├── layout/         # Structural components (sidebar, hero, footer)
+└── seo/            # Meta tags, structured data, Open Graph
+```
+
+## Content Pipeline
+
+{% if use_cms and cms_type == "headless-cms" %}
+Content is fetched from the headless CMS API at build time and written to local data files before the framework processes them. The fetch step runs first in the build command.
+{% else %}
+Content lives in `src/content/` as Markdown or MDX files. The framework reads them, validates frontmatter against a schema, and makes them available as typed data for page generation.
+{% endif %}
+
+### Content Collections
+
+{% if site_type == "docs" %}
+- `src/content/docs/` - documentation pages, organised by section
+{% elif site_type == "blog" %}
+- `src/content/blog/` - blog posts, sorted by date
+- `src/content/authors/` - author profiles
+{% elif site_type == "landing-page" %}
+- `src/content/sections/` - landing page sections as structured data
+- `src/content/testimonials/` - customer testimonials
+{% elif site_type == "portfolio" %}
+- `src/content/projects/` - portfolio project entries
+- `src/content/skills/` - skill and technology list
+{% endif %}
+
+### Image Handling
+
+Images in `src/assets/` are processed at build time:
+- Resized to multiple widths for responsive `srcset`
+- Converted to WebP with fallback formats
+- Content-hashed for cache-busting
+
+Images in `public/` are copied as-is. Use `public/` only for images that must have a stable, predictable URL (e.g., Open Graph images referenced in external metadata).
+
+## Styling
+
+Approach: **{{ styling }}**
+
+{% if styling == "tailwind" %}
+Tailwind CSS is configured in `tailwind.config.mjs`. Design tokens (colours, spacing, typography) are defined in the `theme.extend` section.
+
+Guidelines:
+- Use Tailwind utility classes in component markup.
+- Extract repeated utility patterns into component classes using `@apply` in `src/styles/components.css` when a pattern appears three or more times.
+- Never use arbitrary values (e.g., `w-[347px]`) unless absolutely necessary - prefer adding a named token to the theme.
+{% elif styling == "vanilla-css" %}
+CSS is written in plain CSS with custom properties for design tokens. Files live in `src/styles/`:
+
+```
+src/styles/
+├── global.css        # Reset, custom properties, base typography
+├── components/       # Per-component CSS files
+└── utilities.css     # Single-purpose utility classes
+```
+
+Custom properties are defined on `:root` in `global.css` and referenced everywhere else.
+{% elif styling == "scss" %}
+SCSS is compiled at build time. Files live in `src/styles/`:
+
+```
+src/styles/
+├── _tokens.scss      # Design tokens as SCSS variables and maps
+├── _reset.scss       # CSS reset
+├── _typography.scss  # Base type styles
+├── components/       # Per-component SCSS partials
+└── main.scss         # Entry point that imports all partials
+```
+
+Use SCSS variables and maps for tokens. Avoid deep nesting (max 3 levels).
+{% endif %}
+
+## Build Process
+
+{% if framework == "astro" %}
+```
+npm run build
+```
+1. Astro reads `src/pages/` and `src/content/`.
+2. Content frontmatter is validated against collection schemas.
+3. Components and layouts are compiled to HTML.
+4. Assets in `src/assets/` are optimised and hashed.
+5. Output is written to `dist/`.
+{% elif framework == "nextjs-static" %}
+```
+npm run build
+```
+1. Next.js runs `next build`: compiles React, runs `getStaticProps`/`getStaticPaths`, generates HTML.
+2. `next export` writes static HTML files to `out/`.
+3. Assets are hashed and written alongside the HTML.
+{% elif framework == "hugo" %}
+```
+hugo
+```
+1. Hugo reads `content/` and `layouts/`.
+2. Taxonomy and list pages are generated.
+3. Assets in `assets/` are processed by Hugo Pipes.
+4. Output is written to `public/`.
+{% elif framework == "eleventy" %}
+```
+npm run build
+```
+1. Eleventy processes all input templates and data files.
+2. Collections are assembled (blog posts, etc.).
+3. Templates are rendered to HTML.
+4. Passthrough file copy moves `public/` contents to `_site/`.
+5. Output is written to `_site/`.
+{% endif %}
+
+{% if use_ci %}
+## CI/CD
+
+The CI pipeline runs on every push and pull request:
+
+1. Install dependencies
+2. Lint (ESLint / Stylelint / Markdownlint)
+3. Run build (`{{ 'npm run build' if framework != 'hugo' else 'hugo' }}`)
+4. Run link checker on built output
+5. Deploy (on merge to `main` only)
+
+{% if deploy_target == "github-pages" %}
+Deployment to GitHub Pages is handled by `.github/workflows/deploy.yml` using the official `actions/deploy-pages` action.
+{% elif deploy_target == "vercel" %}
+Vercel integrates directly with GitHub. Pushes to `main` trigger production deployments; PR branches get preview deployments automatically.
+{% elif deploy_target == "netlify" %}
+Netlify integrates directly with GitHub. A `netlify.toml` configures build settings. PRs generate deploy previews.
+{% elif deploy_target == "cloudflare-pages" %}
+Cloudflare Pages integrates directly with GitHub. PRs generate preview URLs automatically.
+{% endif %}
+{% endif %}
+
+{% if use_i18n %}
+## Internationalisation
+
+Localised content is organised by locale under `src/content/`:
+
+```
+src/content/
+  en/   # Default locale
+  fr/
+  de/
+```
+
+The framework routing is configured to generate locale-prefixed URLs (`/fr/about`, `/de/about`) and set the HTML `lang` attribute per page. A `hreflang` sitemap is generated at build time.
+{% endif %}
+
+{% if use_analytics %}
+## Analytics
+
+Analytics are injected via the base layout and respect the user's `prefers-reduced-data` / Do Not Track signals. Analytics scripts are loaded with `defer` and `async` to avoid blocking page rendering.
+
+The analytics snippet is conditionally excluded in development builds to avoid polluting production data.
+{% endif %}
+
+## Decisions
+
+See [ADR log](adrs/) for architectural decisions and rationale.

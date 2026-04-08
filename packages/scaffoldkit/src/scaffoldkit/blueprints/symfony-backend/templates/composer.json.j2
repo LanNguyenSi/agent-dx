@@ -1,0 +1,79 @@
+{
+  "name": "{{ project_name }}/app",
+  "type": "project",
+  "license": "proprietary",
+  "description": "{{ description }}",
+  "require": {
+    "php": "^{{ php_version }}",
+    "ext-ctype": "*",
+    "ext-iconv": "*",
+    "doctrine/dbal": "^4.2",
+    "doctrine/doctrine-bundle": "^2.13",
+    "doctrine/doctrine-migrations-bundle": "^3.4",
+    "doctrine/orm": "^3.3",
+    "symfony/console": "{{ symfony_version }}.*",
+    "symfony/dotenv": "{{ symfony_version }}.*",
+    "symfony/flex": "^2.6",
+    "symfony/framework-bundle": "{{ symfony_version }}.*",
+    "symfony/http-kernel": "{{ symfony_version }}.*",
+    "symfony/runtime": "{{ symfony_version }}.*",
+    "symfony/serializer": "{{ symfony_version }}.*",
+    "symfony/validator": "{{ symfony_version }}.*",
+    "symfony/yaml": "{{ symfony_version }}.*"{% if use_auth %},
+    "symfony/security-bundle": "{{ symfony_version }}.*"{% endif %}{% if api_style == "api-platform" %},
+    "api-platform/symfony": "^4.1"{% elif api_style == "fos-rest" %},
+    "friendsofsymfony/rest-bundle": "^3.8",
+    "nelmio/api-doc-bundle": "^4.36"{% endif %}{% if use_cqrs or use_rabbitmq %},
+    "symfony/messenger": "{{ symfony_version }}.*"{% endif %}{% if use_rabbitmq %},
+    "symfony/amqp-messenger": "{{ symfony_version }}.*"{% endif %}{% if use_redis %},
+    "symfony/cache": "{{ symfony_version }}.*"{% endif %}{% if use_auth and auth_method == "jwt" %},
+    "lexik/jwt-authentication-bundle": "^3.1"{% endif %}
+  },
+  "require-dev": {
+    "symfony/debug-bundle": "{{ symfony_version }}.*",
+    "symfony/maker-bundle": "^1.61",
+    "symfony/phpunit-bridge": "{{ symfony_version }}.*",
+    "symfony/web-profiler-bundle": "{{ symfony_version }}.*"{% if test_strategy == "pest" %},
+    "pestphp/pest": "^3.8"{% elif test_strategy == "phpunit-and-behat" %},
+    "behat/behat": "^3.17"{% endif %}
+  },
+  "autoload": {
+    "psr-4": {
+      "App\\\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "App\\\\Tests\\\\": "tests/"
+    }
+  },
+  "scripts": {
+    "auto-scripts": {
+      "cache:clear": "symfony-cmd"
+    },
+    "post-install-cmd": [
+      "@auto-scripts"
+    ],
+    "post-update-cmd": [
+      "@auto-scripts"
+    ],
+    "lint": [
+      "php -l src/Kernel.php",
+      "php -l public/index.php"
+    ],
+    "test": "phpunit"
+  },
+  "config": {
+    "allow-plugins": {
+      "php-http/discovery": true,
+      "symfony/flex": true
+    },
+    "sort-packages": true
+  },
+  "extra": {
+    "symfony": {
+      "allow-contrib": true,
+      "require": "{{ symfony_version }}.*"
+    }
+  }
+}

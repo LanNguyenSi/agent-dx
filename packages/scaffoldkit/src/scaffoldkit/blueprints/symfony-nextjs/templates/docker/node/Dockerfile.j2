@@ -1,0 +1,11 @@
+FROM node:{{ node_version }}-alpine
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /app
+
+RUN corepack enable || true
+
+EXPOSE 3000
+
+CMD ["sh", "-c", "if [ -f package.json ]; then if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile || pnpm install; pnpm dev --hostname 0.0.0.0; elif [ -f yarn.lock ]; then yarn install --frozen-lockfile || yarn install; yarn dev --hostname 0.0.0.0 || yarn dev; else npm install; npm run dev -- --hostname 0.0.0.0 || npm run dev; fi; else echo 'Next.js web scaffold: add apps/web/package.json to run the frontend.'; sleep infinity; fi"]

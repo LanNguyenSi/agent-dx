@@ -1,0 +1,63 @@
+{% if framework == "fastapi" or framework == "django-rest" %}
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY . .
+
+RUN pip install --no-cache-dir uvicorn \
+    && if [ -f requirements.txt ]; then \
+         pip install --no-cache-dir -r requirements.txt; \
+       elif [ -f pyproject.toml ]; then \
+         pip install --no-cache-dir . || true; \
+       else \
+         echo "No Python dependency manifest found. Keeping scaffold image minimal."; \
+       fi
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "if [ -f manage.py ]; then python manage.py runserver 0.0.0.0:8000; elif [ -f main.py ]; then python -m uvicorn main:app --host 0.0.0.0 --port 8000; elif [ -f app/main.py ]; then python -m uvicorn app.main:app --host 0.0.0.0 --port 8000; elif [ -f src/main.py ]; then python -m uvicorn src.main:app --host 0.0.0.0 --port 8000; else echo 'REST API scaffold: add your application entrypoint to run the service.'; sleep infinity; fi"]
+{% elif framework == "express" %}
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY . .
+
+RUN corepack enable || true \
+    && if [ -f package.json ]; then \
+         if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile || pnpm install; \
+         elif [ -f package-lock.json ]; then npm ci; \
+         elif [ -f yarn.lock ]; then yarn install --frozen-lockfile || yarn install; \
+         else npm install; fi; \
+       else \
+         echo "No package.json found. Keeping scaffold image minimal."; \
+       fi
+
+EXPOSE 3000
+
+CMD ["sh", "-c", "if [ -f package.json ]; then if npm run | grep -qE '(^| )dev( |$)'; then npm run dev -- --host 0.0.0.0 || npm run dev; elif npm run | grep -qE '(^| )start( |$)'; then npm run start; else echo 'REST API scaffold: add a dev or start script to package.json.'; sleep infinity; fi; else echo 'REST API scaffold: add package.json to run the service.'; sleep infinity; fi"]
+{% else %}
+FROM eclipse-temurin:21-jdk-jammy
+
+WORKDIR /app
+
+COPY . .
+
+RUN if [ -f mvnw ]; then chmod +x mvnw; fi \
+    && if [ -f gradlew ]; then chmod +x gradlew; fi \
+    && if [ -f pom.xml ]; then \
+         if [ -f mvnw ]; then ./mvnw -q -DskipTests package; else mvn -q -DskipTests package; fi; \
+       elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then \
+         if [ -f gradlew ]; then ./gradlew build -x test; else gradle build -x test; fi; \
+       else \
+         mkdir -p build && printf 'REST API scaffold shell\n' > build/README.txt; \
+       fi
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "if ls target/*.jar >/dev/null 2>&1; then java -jar $(ls target/*.jar | head -n1); elif ls build/libs/*.jar >/dev/null 2>&1; then java -jar $(ls build/libs/*.jar | head -n1); else echo 'REST API scaffold: add Spring Boot build files to run the service.'; sleep infinity; fi"]
+{% endif %}

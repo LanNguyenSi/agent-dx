@@ -1,0 +1,14 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "{{ project_name }}"
+version = "0.1.0"
+description = "{{ description }}"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "django>=5.1.7,<5.2.0",
+  "djangorestframework>=3.15.2,<4.0.0"
+]

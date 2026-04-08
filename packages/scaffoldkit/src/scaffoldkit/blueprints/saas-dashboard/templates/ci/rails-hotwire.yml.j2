@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "release/*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate generated documentation shell
+        shell: bash
+        run: |
+          test -f README.md
+          test -f docs/architecture.md
+          test -f docs/ways-of-working.md
+          test -d apps/web
+          test -d apps/api
+          echo "SaaS dashboard scaffold structure looks valid."
+
+  verify-bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+
+      - name: Verify Rails bootstrap
+        shell: bash
+        run: |
+          test -f Gemfile
+          test -f apps/api/config.ru
+          test -f apps/api/config/application.rb
+          test -f apps/web/app/views/dashboard/index.html.erb
+          ruby -c apps/api/config/application.rb
+          ruby -c apps/api/config/routes.rb
+
+{% if use_docker %}
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t {{ project_name }}:ci .
+{% endif %}

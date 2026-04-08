@@ -1,0 +1,12 @@
+```bash
+# Create local environment
+uv venv
+source .venv/bin/activate
+uv sync
+
+# Copy backend env
+cp apps/api/.env.example apps/api/.env
+
+# Start Django app shell
+uv run python apps/api/manage.py runserver
+```

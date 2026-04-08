@@ -1,0 +1,90 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    volumes:
+      - ./apps/api:/app
+    environment:
+{% if database == "postgresql" %}
+      DATABASE_URL: postgresql://app:app@db:5432/{{ project_name }}?serverVersion=16&charset=utf8
+{% else %}
+      DATABASE_URL: mysql://app:app@db:3306/{{ project_name }}?serverVersion=8.0
+{% endif %}
+{% if use_redis %}
+      REDIS_URL: redis://redis:6379
+{% endif %}
+{% if use_rabbitmq %}
+      MESSENGER_TRANSPORT_DSN: amqp://guest:guest@rabbitmq:5672/%2f/messages
+{% endif %}
+    depends_on:
+      db:
+        condition: service_started
+{% if use_redis %}
+      redis:
+        condition: service_started
+{% endif %}
+{% if use_rabbitmq %}
+      rabbitmq:
+        condition: service_started
+{% endif %}
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/node/Dockerfile
+    volumes:
+      - ./apps/web:/app
+    ports:
+      - "3000:3000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - api
+      - web
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+{% if database == "postgresql" %}
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: {{ project_name }}
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+{% else %}
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: {{ project_name }}
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - db-data:/var/lib/mysql
+{% endif %}
+{% if use_redis %}
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+{% endif %}
+{% if use_rabbitmq %}
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+{% endif %}
+
+volumes:
+  db-data:

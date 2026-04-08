@@ -1,0 +1,163 @@
+name: reference-php-app
+display_name: "Reference PHP App"
+description: "Reference Symfony/PHP repository scaffold with Docker, CI actions, security tooling, and a placeholder application mount"
+version: "1.0.0"
+stack: "php-symfony-reference"
+
+metadata:
+  architecture: "ops-shell-with-mounted-app"
+  repository_type: "reference"
+  includes:
+    - "docker"
+    - "github-actions"
+    - "security-tooling"
+    - "php-quality-tools"
+
+variables:
+  - name: project_name
+    description: "Repository slug used in workflow-local action references"
+    type: string
+    default: "reference-php-app"
+    required: true
+
+  - name: display_name
+    description: "Human-readable project name"
+    type: string
+    default: "Reference PHP App"
+    required: true
+
+  - name: description
+    description: "Short description of the reference repository"
+    type: string
+    default: "Reference repository scaffold for a Symfony/PHP application"
+    required: true
+
+  - name: domain_suffix
+    description: "Default domain suffix written into .env.dist"
+    type: string
+    default: "localhost"
+    required: true
+
+  - name: use_docker
+    description: "Include Docker build files and docker-compose configuration"
+    type: boolean
+    default: true
+
+  - name: use_ci
+    description: "Include the reference GitHub Actions pipeline"
+    type: boolean
+    default: true
+
+  - name: ai_context
+    description: "Generate AI context guidance for downstream agents"
+    type: boolean
+    default: true
+
+templates:
+  - source: README.md.j2
+    target: README.md
+
+  - source: .env.dist.j2
+    target: .env.dist
+
+  - source: .github/workflows/pipeline.yml.j2
+    target: .github/workflows/pipeline.yml
+    condition: use_ci
+
+  - source: AI_CONTEXT.md.j2
+    target: AI_CONTEXT.md
+    condition: ai_context
+
+  - source: project/README.md.j2
+    target: project/README.md
+
+static_files:
+  - source: .github/actions/build-ci-image/action.yml
+    target: .github/actions/build-ci-image/action.yml
+    condition: use_ci
+
+  - source: .github/actions/build-prod-image/action.yml
+    target: .github/actions/build-prod-image/action.yml
+    condition: use_ci
+
+  - source: .github/actions/cleanup-cache/action.yml
+    target: .github/actions/cleanup-cache/action.yml
+    condition: use_ci
+
+  - source: .github/actions/cve-check/action.yml
+    target: .github/actions/cve-check/action.yml
+    condition: use_ci
+
+  - source: .github/actions/license-check/action.yml
+    target: .github/actions/license-check/action.yml
+    condition: use_ci
+
+  - source: .github/actions/make-command/action.yml
+    target: .github/actions/make-command/action.yml
+    condition: use_ci
+
+  - source: .github/actions/secret-scan/action.yml
+    target: .github/actions/secret-scan/action.yml
+    condition: use_ci
+
+  - source: .github/actions/tag-image/action.yml
+    target: .github/actions/tag-image/action.yml
+    condition: use_ci
+
+  - source: .gitignore
+    target: .gitignore
+
+  - source: .gitleaks.allowlist
+    target: .gitleaks.allowlist
+
+  - source: .gitleaks.toml
+    target: .gitleaks.toml
+
+  - source: Makefile
+    target: Makefile
+
+  - source: build/app/Dockerfile
+    target: build/app/Dockerfile
+    condition: use_docker
+
+  - source: build/app/php.dev.ini
+    target: build/app/php.dev.ini
+    condition: use_docker
+
+  - source: build/app/php.prod.ini
+    target: build/app/php.prod.ini
+    condition: use_docker
+
+  - source: build/nginx/Dockerfile
+    target: build/nginx/Dockerfile
+    condition: use_docker
+
+  - source: build/nginx/default.dev.conf
+    target: build/nginx/default.dev.conf
+    condition: use_docker
+
+  - source: build/nginx/default.prod.conf
+    target: build/nginx/default.prod.conf
+    condition: use_docker
+
+  - source: docker-compose.yml
+    target: docker-compose.yml
+    condition: use_docker
+
+  - source: docs/img.png
+    target: docs/img.png
+
+  - source: phpstan.neon.dist
+    target: phpstan.neon.dist
+
+  - source: phpunit.xml.dist
+    target: phpunit.xml.dist
+
+  - source: sbom/license_policy.json
+    target: sbom/license_policy.json
+
+  - source: tools/composer.json
+    target: tools/composer.json
+
+directories:
+  - project

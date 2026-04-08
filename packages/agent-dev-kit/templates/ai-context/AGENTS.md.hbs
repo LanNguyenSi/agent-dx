@@ -1,0 +1,35 @@
+# Agent Team
+
+## Primary Agent
+
+- **Name:** {{agentName}}
+- **Role:** {{agentRole}}
+- **Capabilities:** {{capabilities}}
+- **Status:** In Development
+
+## Collaborating Agents
+
+- Primary maintainer
+- Optional collaborators you add later
+
+## Workflow
+
+1. Implement the agent workflow in `{{sourceEntry}}`
+2. Extend or replace the default smoke test in `{{testEntry}}`
+3. Track changes and decisions in `.ai/TASKS.md` and `.ai/DECISIONS.md`
+4. Keep README and runtime behaviour aligned as the project grows
+
+## Communication
+
+{{#if hasTriologue}}
+- Primary: Triologue (room: {{triologueRoom}})
+{{/if}}
+- Backup: Git commits, issues or project notes
+- Emergency: Direct maintainer handoff
+
+## Standards
+
+- **Code Style:** {{languageName}}
+- **Testing:** Unit tests required for core logic
+- **Documentation:** Keep README and `.ai/` context in sync
+- **Commits:** Small, reviewable changes

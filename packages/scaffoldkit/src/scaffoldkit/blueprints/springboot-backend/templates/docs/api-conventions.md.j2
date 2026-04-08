@@ -1,0 +1,85 @@
+# API Conventions: {{ display_name }}
+
+## Resource Naming
+
+- Use plural nouns for collection endpoints: `/users`, `/orders`, `/invoices`
+- Use stable identifiers in paths: `/users/{userId}`
+- Avoid verbs in URLs unless the action is not a normal resource mutation
+- Keep endpoint names aligned with the language used in the service layer
+
+## HTTP Semantics
+
+- `GET` is safe and idempotent
+- `POST` creates or triggers non-idempotent commands
+- `PUT` replaces a complete resource representation when that model genuinely exists
+- `PATCH` applies partial updates
+- `DELETE` removes or deactivates resources according to product rules
+
+## Request Models
+
+- Public endpoints use dedicated request DTOs, never JPA entities directly
+- Validate request DTOs with Bean Validation annotations
+- Use explicit enum values in the API contract; do not rely on ordinal serialization
+- Prefer ISO-8601 for timestamps and dates
+
+## Response Models
+
+- Return explicit response DTOs
+- Do not leak internal database identifiers or persistence-only fields unless the API contract requires them
+- Paginated list endpoints should return both items and pagination metadata
+- Keep success responses boring and predictable
+
+## Error Handling
+
+Use RFC 7807 style problem responses via Spring's `ProblemDetail` or an equivalent structure:
+
+```json
+{
+  "type": "https://api.example.com/problems/validation-error",
+  "title": "Validation failed",
+  "status": 400,
+  "detail": "One or more fields are invalid.",
+  "instance": "/users",
+  "errors": {
+    "email": ["must be a well-formed email address"]
+  }
+}
+```
+
+Rules:
+
+- business-rule failures use stable machine-readable problem types
+- validation failures include field-level details
+- authorization failures do not leak sensitive policy internals
+- unhandled exceptions are mapped once globally, not ad hoc in controllers
+
+## Versioning
+
+- Prefer additive evolution before introducing a new API version
+- When versioning is needed, use a clear URL or header strategy and document it consistently
+- Breaking changes require an ADR and migration plan
+
+## Security
+
+{% if use_auth and auth_method == "jwt" %}
+- Expect `Authorization: Bearer <token>` on protected endpoints
+- Claims-to-authority mapping is defined centrally in security configuration
+{% elif use_auth and auth_method == "oauth2" %}
+- OAuth2 scopes and audience expectations are documented per protected resource
+- Token validation and principal mapping are centralized
+{% elif use_auth and auth_method == "api-key" %}
+- API keys are passed in a dedicated header such as `X-API-Key`
+- Keys are rotated operationally and never encoded with broad hidden semantics
+{% else %}
+- Explicitly document trust boundaries for every exposed endpoint
+{% endif %}
+
+## Idempotency and Async Work
+
+- Retry-safe write endpoints should support an idempotency key when duplicate submission risk is real
+{% if use_kafka %}
+- Async event publication must be treated as part of the contract, with documented event names and payload versions
+{% else %}
+- Async processing is introduced only when business or operational needs justify the added complexity
+{% endif %}
+- Long-running operations should return a trackable job or workflow reference instead of blocking indefinitely

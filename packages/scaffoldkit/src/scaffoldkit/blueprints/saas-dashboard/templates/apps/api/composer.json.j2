@@ -1,0 +1,20 @@
+{
+  "name": "{{ project_name }}/api",
+  "type": "project",
+  "description": "{{ description }}",
+  "require": {
+    "php": "^8.3",
+    "symfony/framework-bundle": "^7.2",
+    "symfony/runtime": "^7.2",
+    "symfony/yaml": "^7.2",
+    "symfony/console": "^7.2",
+    "doctrine/orm": "^3.3",
+    "doctrine/doctrine-bundle": "^2.13",
+    "api-platform/symfony": "^4.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "App\\\\": "src/"
+    }
+  }
+}

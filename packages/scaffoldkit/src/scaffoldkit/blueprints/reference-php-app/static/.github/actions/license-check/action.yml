@@ -1,0 +1,21 @@
+name: License Check
+description: Runs License Check
+inputs:
+  artifact-name:
+    description: Prefix used for the SBOM artifact
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Download SBOM
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}-${{ github.sha }}-sbom-cache
+        path: /tmp
+
+    - name: Run license check
+      uses: MaibornWolff/purl-patrol@v1.6.2
+      with:
+        SBOM_PATH: /tmp/${{ inputs.artifact-name }}-${{ github.sha }}.sbom
+        LICENSE_POLICY_PATH: sbom/license_policy.json
+        BREAK_ENABLED: true

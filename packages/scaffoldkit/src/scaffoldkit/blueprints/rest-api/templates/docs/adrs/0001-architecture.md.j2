@@ -1,0 +1,244 @@
+# ADR-0001: Framework and Database Selection
+
+## Status
+
+Accepted
+
+## Context
+
+{{ display_name }} requires a foundational technology choice covering:
+
+1. The web framework for handling HTTP, routing, validation, and serialization
+2. The primary database for persistent storage
+{% if use_auth %}
+3. The authentication strategy for securing API endpoints
+{% endif %}
+
+These decisions establish the project's core constraints and conventions. They are expensive to change after a codebase matures, so they deserve explicit documentation.
+
+### Requirements
+
+- A REST API that is straightforward to develop, test, and deploy
+- Clear separation between HTTP handling, business logic, and data access
+- Strong support for input validation and structured error responses
+{% if use_openapi %}
+- Automatic or low-friction OpenAPI specification generation
+{% endif %}
+{% if use_auth %}
+- Secure, well-understood authentication mechanism
+{% endif %}
+- Good ecosystem support and long-term maintainability
+
+### Evaluated Options
+
+**Frameworks considered:**
+- FastAPI (Python) - async-native, Pydantic validation, built-in OpenAPI
+- Express (Node.js) - minimal, flexible, vast ecosystem
+- Django REST Framework (Python) - batteries-included, ORM integration
+- Spring Boot (Java/Kotlin) - enterprise-grade, strong typing, mature ecosystem
+
+**Databases considered:**
+- PostgreSQL - relational, ACID, strong ecosystem
+- MySQL - relational, widely hosted, good performance
+- MongoDB - document store, flexible schema, horizontal scale
+- SQLite - embedded, zero-infrastructure, limited concurrency
+
+{% if use_auth %}
+**Auth strategies considered:**
+- JWT - stateless, scalable, no server-side session storage
+- OAuth2 - delegated auth, reduces password management burden
+- API Key - simple, suitable for service-to-service or developer APIs
+{% endif %}
+
+## Decision
+
+**Framework: {{ framework }}**
+
+**Database: {{ database }}**
+
+{% if use_auth %}
+**Auth strategy: {{ auth_strategy | upper }}**
+{% endif %}
+
+### Rationale
+
+{% if framework == "fastapi" %}
+**FastAPI** was selected because:
+
+- Native async support aligns with non-blocking I/O patterns for database and external service calls
+- Pydantic provides runtime validation and clear schema definitions that serve as living documentation
+- OpenAPI schema is generated automatically from type annotations, reducing maintenance burden
+- Performance benchmarks place it among the fastest Python frameworks
+- The Python ecosystem is strong for data processing, if that need arises
+
+Trade-offs accepted:
+- Python's GIL limits CPU-bound parallelism (acceptable for an I/O-bound API)
+- Async code requires discipline to avoid accidentally blocking the event loop
+
+{% elif framework == "express" %}
+**Express** was selected because:
+
+- Minimal footprint gives full control over middleware composition
+- The Node.js/JavaScript ecosystem is the largest in the world; hiring and library availability are excellent
+- Non-blocking I/O model is well-suited to an API handling concurrent requests
+- JSON is a native data type in JavaScript, reducing serialization friction
+
+Trade-offs accepted:
+- "Minimal" means more decisions: validation library, ORM, logger all must be chosen and configured
+- JavaScript's dynamic typing requires explicit validation discipline; TypeScript is strongly recommended
+
+{% elif framework == "django-rest" %}
+**Django REST Framework** was selected because:
+
+- Tight integration with Django's ORM removes the need for a separate database abstraction layer
+- Serializers handle both validation and representation in one place
+- ViewSets and Routers reduce boilerplate for standard CRUD operations
+- Built-in browsable API aids development and debugging
+- Django's migration system provides first-class schema management
+
+Trade-offs accepted:
+- Django is synchronous by default; async support is available but requires care with the ORM
+- More "magic" than minimal frameworks; understanding the request lifecycle takes time for newcomers
+
+{% elif framework == "spring-boot" %}
+**Spring Boot** was selected because:
+
+- Strong static typing with Java/Kotlin catches an entire class of errors at compile time
+- Spring ecosystem is mature and covers every common need (security, data, messaging, caching)
+- Dependency injection and the application context simplify component wiring
+- Production-ready features (health checks, metrics, externalized configuration) are built in
+
+Trade-offs accepted:
+- Higher initial setup complexity compared to dynamic-language frameworks
+- Longer build times; requires JVM tooling
+- More verbose than Python or Node.js alternatives
+
+{% endif %}
+
+{% if database == "postgresql" %}
+**PostgreSQL** was selected because:
+
+- ACID compliance and strong consistency are critical for reliable data
+- Rich feature set: JSONB for semi-structured data, full-text search, arrays, window functions
+- Best-in-class ecosystem: pgvector, PostGIS, logical replication
+- Strong cloud-hosted options (RDS, Cloud SQL, Supabase, Neon)
+- Proven reliability at any scale from prototype to high-traffic production
+
+Trade-offs accepted:
+- Requires a running database service (more setup than SQLite)
+- Schema changes require migrations, which add process overhead
+
+{% elif database == "mysql" %}
+**MySQL** was selected because:
+
+- Extremely widely deployed; hosting options are ubiquitous and inexpensive
+- Well-understood operational model with years of production learnings available
+- Strong cloud-hosted options (RDS, Cloud SQL, PlanetScale)
+- Good performance for read-heavy workloads
+
+Trade-offs accepted:
+- Fewer advanced features than PostgreSQL (no native JSONB until MySQL 5.7, no arrays)
+- `utf8mb4` charset must be explicitly set to avoid emoji and Unicode issues
+- Some SQL standard deviations require awareness
+
+{% elif database == "mongodb" %}
+**MongoDB** was selected because:
+
+- Document model maps naturally to JSON API payloads
+- Flexible schema supports rapid iteration without migration overhead in early development
+- Horizontal scaling (sharding) is a first-class feature
+- Good fit for hierarchical or variable-structure data
+
+Trade-offs accepted:
+- No native joins; complex relational queries require application-level aggregation
+- Eventual consistency modes require careful consideration for data correctness
+- Schema flexibility can become a liability without disciplined validation (enforce schemas at the application layer)
+
+{% elif database == "sqlite" %}
+**SQLite** was selected because:
+
+- Zero infrastructure: the database is a single file, ideal for development, testing, and small deployments
+- Embedded in the process: no separate service to manage
+- Supports standard SQL
+
+Trade-offs accepted:
+- Not suitable for high-concurrency writes (serialized write lock)
+- Not designed for distributed or multi-process deployments
+- **Migration path to PostgreSQL is planned** before production traffic grows significantly
+
+{% endif %}
+
+{% if use_auth %}
+### Auth Strategy Rationale
+
+{% if auth_strategy == "jwt" %}
+**JWT** was selected because:
+
+- Stateless verification: the server does not need to look up a session in the database on every request
+- Works well with horizontally scaled deployments (any server can verify any token)
+- Widely understood by developers; libraries exist in every language
+- Short-lived access tokens limit the blast radius of a compromised token
+
+Trade-offs accepted:
+- Tokens cannot be invalidated before expiry without a revocation list (we use a database-backed refresh token table to support revocation)
+- Token size is larger than an opaque session ID
+
+{% elif auth_strategy == "oauth2" %}
+**OAuth2** was selected because:
+
+- Delegates credential management to a trusted identity provider
+- Users do not create a new password for this service, reducing password fatigue and breach surface
+- Supports fine-grained scopes for delegated access
+- Well-established standard with broad library support
+
+Trade-offs accepted:
+- Depends on an external identity provider; if the provider is down, login is unavailable
+- The Authorization Code flow has more moving parts than simple username/password
+- Implementation requires careful handling of state, PKCE, and token storage
+
+{% elif auth_strategy == "api-key" %}
+**API keys** were selected because:
+
+- Simple to implement and understand
+- Well-suited for machine-to-machine or developer API use cases where users are not humans
+- Keys can be scoped, rotated, and revoked independently
+- No session state on the server (keys are hashed and looked up)
+
+Trade-offs accepted:
+- Keys are long-lived by default; rotation discipline is required
+- No standard protocol (unlike OAuth2); each implementation is slightly different
+- Not suitable as the primary auth mechanism for browser-based human users
+
+{% endif %}
+{% endif %}
+
+## Consequences
+
+### Positive
+
+- Framework and database are well-matched to the use case and team experience
+- The layered architecture (routes - services - repositories - models) is idiomatic for **{{ framework }}**
+- Established conventions from day one reduce decision fatigue for new contributors
+{% if use_openapi %}
+- OpenAPI documentation is generated automatically, keeping the spec in sync with the code
+{% endif %}
+- Infrastructure choices are documented here, making future revisits faster
+
+### Negative / Trade-offs
+
+- The framework and database are opinionated choices; contributors unfamiliar with them face a learning curve
+- Changing either choice later would be a significant refactor
+{% if database == "sqlite" %}
+- SQLite will need to be replaced before the application handles significant concurrent write traffic
+{% endif %}
+
+### Risks
+
+- Over time, team preferences may shift; document any future reconsiderations in a superseding ADR
+- Third-party library quality varies; vet new dependencies carefully before adding them
+
+## References
+
+- [Architecture documentation](../architecture.md)
+- [API Design conventions](../api-design.md)
+- [Ways of Working](../ways-of-working.md)

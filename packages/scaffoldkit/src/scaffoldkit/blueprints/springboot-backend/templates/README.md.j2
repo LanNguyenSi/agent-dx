@@ -1,0 +1,180 @@
+# {{ display_name }}
+
+{{ description }}
+
+- **Java:** {{ java_version }}
+- **Spring Boot:** {{ spring_boot_version }}
+- **Build tool:** {{ build_tool }}
+- **HTTP stack:** {{ api_style }}
+- **Database:** {{ database }}
+{% if use_auth %}
+- **Authentication:** {{ auth_method }}
+{% endif %}
+{% if use_docker %}
+- **Docker:** included in the delivery plan
+{% endif %}
+{% if use_ci %}
+- **CI/CD:** expected via GitHub Actions or equivalent
+{% endif %}
+
+## Requirements
+
+| Tool | Version |
+|------|---------|
+| Java | {{ java_version }} |
+{% if build_tool == "maven" %}
+| Maven | 3.9+ |
+{% else %}
+| Gradle | 8.7+ |
+{% endif %}
+{% if database == "postgresql" %}
+| PostgreSQL | 15+ |
+{% elif database == "mysql" %}
+| MySQL | 8.0+ |
+{% elif database == "mariadb" %}
+| MariaDB | 10.11+ |
+{% endif %}
+{% if use_docker %}
+| Docker | 24+ |
+| Docker Compose | 2.20+ |
+{% endif %}
+
+## Project Layout
+
+```text
+src/
+├── main/
+│   ├── java/{{ base_package | replace('.', '/') }}/
+│   │   ├── config/
+│   │   ├── web/
+│   │   ├── web/dto/
+│   │   ├── service/
+│   │   ├── domain/
+│   │   ├── repository/
+│   │   └── security/
+│   └── resources/
+└── test/
+    ├── java/{{ base_package | replace('.', '/') }}/
+    └── resources/
+```
+
+{% if use_ddd %}
+This blueprint assumes a DDD-leaning package split. Keep domain rules inside `domain/` and orchestrate use cases from `service/` or dedicated application services.
+{% else %}
+This blueprint assumes a conventional Spring layered architecture. Keep controllers thin, service classes cohesive, and repositories persistence-focused.
+{% endif %}
+
+## Getting Started
+
+### 1. Clone and enter the project
+
+```bash
+git clone <repo-url> {{ project_name }}
+cd {{ project_name }}
+```
+
+### 2. Configure local settings
+
+Create an `application-local.yml` or set environment variables for local development.
+
+```yaml
+spring:
+  application:
+    name: {{ project_name }}
+  datasource:
+{% if database == "postgresql" %}
+    url: jdbc:postgresql://localhost:5432/{{ project_name | replace('-', '_') }}
+    driver-class-name: org.postgresql.Driver
+{% elif database == "mysql" %}
+    url: jdbc:mysql://localhost:3306/{{ project_name | replace('-', '_') }}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+{% else %}
+    url: jdbc:mariadb://localhost:3306/{{ project_name | replace('-', '_') }}
+    driver-class-name: org.mariadb.jdbc.Driver
+{% endif %}
+    username: app
+    password: change-me
+{% if use_auth and auth_method == "jwt" %}
+app:
+  security:
+    jwt-secret: change-me-to-a-long-random-value
+{% elif use_auth and auth_method == "oauth2" %}
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://issuer.example.com/realms/main
+{% elif use_auth and auth_method == "api-key" %}
+app:
+  security:
+    api-key-header: X-API-Key
+{% endif %}
+{% if use_redis %}
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+{% endif %}
+{% if use_kafka %}
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+{% endif %}
+```
+
+### 3. Install dependencies and run the app
+
+{% if build_tool == "maven" %}
+```bash
+./mvnw spring-boot:run
+./mvnw test
+```
+{% else %}
+```bash
+./gradlew bootRun
+./gradlew test
+```
+{% endif %}
+
+The default local endpoint is typically `http://localhost:8080`.
+
+## Testing
+
+{% if test_strategy == "junit-only" %}
+Use JUnit 5 for unit and slice tests. Prefer `@WebMvcTest`, `@DataJpaTest`, and plain service tests before adding full integration coverage.
+{% elif test_strategy == "junit-and-testcontainers" %}
+Use JUnit 5 plus Testcontainers for integration tests. Database-backed repository tests should run against a real container, not H2 in compatibility mode.
+{% else %}
+Use a full test pyramid: unit tests, Spring slice tests, Testcontainers-backed integration tests, and a small number of end-to-end API smoke tests.
+{% endif %}
+
+{% if build_tool == "maven" %}
+```bash
+./mvnw test
+./mvnw verify
+```
+{% else %}
+```bash
+./gradlew test
+./gradlew check
+```
+{% endif %}
+
+## Code Quality
+
+Recommended checks:
+
+- Spotless or formatter plugin for code style
+- Checkstyle or PMD for static rules
+- Error Prone or NullAway if the team uses them
+- ArchUnit for package-boundary rules
+- Testcontainers for real integration paths
+
+## Next Steps
+
+1. Generate the initial Spring Boot app shell with your preferred initializer settings.
+2. Add the main `Application` class under `{{ base_package }}`.
+3. Create the first vertical slice: controller, request DTO, service, repository, and tests.
+4. Wire local database, auth, and observability before building feature breadth.

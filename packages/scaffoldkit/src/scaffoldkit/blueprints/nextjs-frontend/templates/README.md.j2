@@ -1,0 +1,212 @@
+# {{ display_name }}
+
+{{ description }}
+
+## Requirements
+
+- **Node.js**: 20.x or later (use `.nvmrc` or `volta` to pin the version)
+- **Package manager**: pnpm 9.x (recommended) -- `npm install -g pnpm`
+- **Next.js**: {{ nextjs_version }}.x
+
+## Quick Start
+
+```bash
+# Install dependencies
+pnpm install
+
+# Copy environment variables
+cp .env.example .env.local
+
+# Start development server
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `pnpm dev` | Start development server with hot reload |
+| `pnpm build` | Create production build |
+| `pnpm start` | Start production server (requires build) |
+| `pnpm lint` | Run ESLint |
+| `pnpm lint:fix` | Run ESLint with auto-fix |
+| `pnpm type-check` | Run TypeScript compiler check |
+| `pnpm test` | Run unit tests |
+{% if test_strategy == "vitest-and-playwright" or test_strategy == "jest-and-cypress" %}
+| `pnpm test:e2e` | Run end-to-end tests |
+| `pnpm test:e2e:ui` | Run e2e tests with interactive UI |
+{% endif %}
+{% if use_storybook %}
+| `pnpm storybook` | Start Storybook dev server |
+| `pnpm build-storybook` | Build static Storybook |
+{% endif %}
+| `pnpm clean` | Remove `.next/`, `out/`, `coverage/` |
+
+## Environment Variables
+
+Create a `.env.local` file in the project root. **Never commit this file.**
+
+```bash
+# .env.local
+
+# --- Public variables (exposed to the browser) ---
+# Prefix with NEXT_PUBLIC_ to expose to the client bundle.
+NEXT_PUBLIC_API_URL=http://localhost:4000
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+{% if use_auth and auth_provider == "clerk" %}
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+{% endif %}
+
+# --- Server-only variables (never exposed to the browser) ---
+{% if use_auth and auth_provider == "next-auth" %}
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=generate-with-openssl-rand-base64-32
+{% elif use_auth and auth_provider == "clerk" %}
+CLERK_SECRET_KEY=sk_test_...
+{% elif use_auth and auth_provider == "custom-jwt" %}
+JWT_SECRET=generate-with-openssl-rand-base64-32
+JWT_EXPIRY=1h
+REFRESH_TOKEN_EXPIRY=7d
+{% endif %}
+```
+
+> **Rule:** `NEXT_PUBLIC_` variables are bundled into the client JavaScript. Never put secrets, API keys, or tokens in `NEXT_PUBLIC_` variables.
+
+## Project Structure
+
+```
+{{ project_name }}/
+{% if router == "app-router" %}
+├── src/
+│   ├── app/                  # App Router: pages, layouts, loading, error
+│   │   ├── (auth)/           # Route group: authentication pages
+│   │   ├── (dashboard)/      # Route group: protected pages
+│   │   ├── api/              # API route handlers (BFF pattern)
+│   │   ├── layout.tsx        # Root layout
+│   │   └── page.tsx          # Home page
+│   ├── components/
+│   │   ├── ui/               # Headless/primitive UI components
+│   │   ├── layout/           # Structural components (Header, Sidebar)
+│   │   └── features/         # Domain-specific feature components
+│   ├── hooks/                # Custom React hooks
+│   ├── lib/                  # Third-party client config (e.g., queryClient)
+│   ├── services/             # API service layer (typed fetch wrappers)
+│   ├── styles/               # Global CSS, design tokens
+│   └── types/                # Shared TypeScript types
+{% else %}
+├── src/
+│   ├── pages/                # Pages Router: each file is a route
+│   │   ├── api/              # API routes
+│   │   ├── _app.tsx          # App wrapper (providers)
+│   │   ├── _document.tsx     # HTML document shell
+│   │   └── index.tsx         # Home page
+│   ├── components/
+│   │   ├── ui/               # Headless/primitive UI components
+│   │   ├── layout/           # Structural components (Header, Sidebar)
+│   │   └── features/         # Domain-specific feature components
+│   ├── hooks/                # Custom React hooks
+│   ├── lib/                  # Third-party client config
+│   ├── services/             # API service layer
+│   ├── styles/               # Global CSS, design tokens
+│   └── types/                # Shared TypeScript types
+{% endif %}
+├── public/                   # Static assets (images, fonts, favicons)
+├── docs/
+│   ├── architecture.md       # System architecture and data flow
+│   ├── ways-of-working.md    # Team conventions and DoD
+│   ├── component-guide.md    # Component patterns and conventions
+│   ├── adrs/                 # Architecture Decision Records
+│   └── page-templates/       # Structural reference for standard pages
+{% if ai_context %}
+├── AI_CONTEXT.md             # AI agent context - read before coding
+{% endif %}
+├── .env.example              # Example environment variables
+└── README.md
+```
+
+## Technology Choices
+
+| Concern | Choice |
+|---------|--------|
+| Framework | Next.js {{ nextjs_version }} ({{ router }}) |
+| Language | {{ language | title }} |
+| Styling | {{ styling }} |
+{% if ui_library != "none" %}
+| UI Components | {{ ui_library }} |
+{% endif %}
+| State | {{ state_management }} |
+| API Client | {{ api_client }} |
+{% if use_auth %}
+| Auth | {{ auth_provider }} |
+{% endif %}
+{% if use_i18n %}
+| i18n | next-intl |
+{% endif %}
+| Testing | {{ test_strategy }} |
+
+## Documentation
+
+- [Architecture](docs/architecture.md) - Component hierarchy, data flow, server vs client boundaries
+- [Ways of Working](docs/ways-of-working.md) - DoD, conventions, PR process
+- [Component Guide](docs/component-guide.md) - How to build components correctly
+- [ADR: Architecture Decision](docs/adrs/0001-architecture.md) - Why these choices were made
+
+## Page Templates
+
+Reference designs for common page types:
+
+- [Dashboard](docs/page-templates/dashboard.md) - KPI cards, charts, activity feed
+- [Detail](docs/page-templates/detail.md) - Entity view with tabs and related content
+- [Form](docs/page-templates/form.md) - Create/edit forms with validation
+
+{% if use_docker %}
+## Docker
+
+```bash
+# Development with hot reload
+docker compose up
+
+# Production build
+docker compose -f docker-compose.prod.yml up --build
+```
+
+The development compose file mounts your source directory so changes are reflected immediately.
+{% endif %}
+
+{% if use_storybook %}
+## Storybook
+
+Component development in isolation:
+
+```bash
+pnpm storybook     # http://localhost:6006
+```
+
+Every component in `src/components/ui/` and `src/components/features/` must have a `.stories.tsx` file.
+{% endif %}
+
+## Testing
+
+Strategy: **{{ test_strategy }}**
+
+```bash
+{% if test_strategy == "vitest-only" %}
+pnpm test           # run all tests
+pnpm test --watch   # watch mode
+pnpm test --coverage # coverage report
+{% elif test_strategy == "vitest-and-playwright" %}
+pnpm test           # unit tests (vitest)
+pnpm test:e2e       # e2e tests (playwright)
+pnpm test:e2e:ui    # playwright interactive UI
+{% elif test_strategy == "jest-and-cypress" %}
+pnpm test           # unit tests (jest)
+pnpm test:e2e       # e2e tests (cypress headless)
+pnpm test:e2e:open  # cypress interactive runner
+{% endif %}
+```
+
+---
+
+*Generated with [ScaffoldKit](https://github.com/LanNguyenSi/scaffoldkit)*

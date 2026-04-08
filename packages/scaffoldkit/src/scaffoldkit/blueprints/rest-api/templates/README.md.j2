@@ -1,0 +1,300 @@
+# {{ display_name }}
+
+{{ description }}
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Framework | {{ framework }} |
+| Database | {{ database }} |
+{% if use_auth %}
+| Auth | {{ auth_strategy | upper }} |
+{% endif %}
+{% if use_openapi %}
+| API Docs | OpenAPI / Swagger |
+{% endif %}
+| Test Strategy | {{ test_strategy }} |
+
+## Quick Start
+
+{% if framework == "fastapi" %}
+```bash
+# Create a virtual environment
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Copy environment config
+cp .env.example .env
+
+# Run database migrations
+alembic upgrade head
+
+# Start the development server
+uvicorn src.main:app --reload --port 8000
+```
+
+{% if use_openapi %}
+API documentation is available at: http://localhost:8000/docs
+{% endif %}
+{% elif framework == "express" %}
+```bash
+# Install dependencies
+npm install
+
+# Copy environment config
+cp .env.example .env
+
+# Run database migrations
+npm run db:migrate
+
+# Start the development server
+npm run dev
+```
+
+{% if use_openapi %}
+API documentation is available at: http://localhost:3000/api-docs
+{% endif %}
+{% elif framework == "django-rest" %}
+```bash
+# Create a virtual environment
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Copy environment config
+cp .env.example .env
+
+# Run database migrations
+python manage.py migrate
+
+# Start the development server
+python manage.py runserver 8000
+```
+
+{% if use_openapi %}
+API documentation is available at: http://localhost:8000/api/schema/swagger-ui/
+{% endif %}
+{% elif framework == "spring-boot" %}
+```bash
+# Build the project
+./mvnw clean package -DskipTests
+
+# Copy environment config
+cp src/main/resources/application.example.yml src/main/resources/application-local.yml
+
+# Start the development server
+./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+{% if use_openapi %}
+API documentation is available at: http://localhost:8080/swagger-ui.html
+{% endif %}
+{% endif %}
+
+{% if use_docker %}
+### Running with Docker
+
+```bash
+# Start all services (API + database)
+docker compose up
+
+# Start in the background
+docker compose up -d
+
+# View logs
+docker compose logs -f api
+
+# Stop all services
+docker compose down
+```
+{% endif %}
+
+## Project Structure
+
+```
+{{ project_name }}/
+├── src/
+│   ├── routes/           # Route handlers and request validation
+│   ├── models/           # Data models and schemas
+│   ├── middleware/        # Authentication, logging, error handling
+│   └── config/           # App configuration and environment
+├── tests/
+│   ├── integration/       # Integration tests against a real database
+│   └── *.test.*           # Unit tests co-located with source or in tests/
+├── docs/
+│   ├── architecture.md    # System design and layer responsibilities
+│   ├── ways-of-working.md # Team conventions and definition of done
+│   ├── api-design.md      # REST conventions, naming, error formats
+│   └── adrs/              # Architecture Decision Records
+{% if ai_context %}
+├── AI_CONTEXT.md          # AI agent context - read before making changes
+{% endif %}
+├── .editorconfig
+├── .gitignore
+└── README.md
+```
+
+## API Endpoints
+
+Base path: `/api/v1`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+{% if use_auth %}
+| POST | `/api/v1/auth/login` | Authenticate and receive token |
+| POST | `/api/v1/auth/logout` | Invalidate token |
+{% if auth_strategy == "oauth2" %}
+| GET | `/api/v1/auth/callback` | OAuth2 callback handler |
+{% endif %}
+{% endif %}
+| GET | `/api/v1/resources` | List resources (paginated) |
+| POST | `/api/v1/resources` | Create a resource |
+| GET | `/api/v1/resources/{id}` | Get a single resource |
+| PUT | `/api/v1/resources/{id}` | Replace a resource |
+| PATCH | `/api/v1/resources/{id}` | Partially update a resource |
+| DELETE | `/api/v1/resources/{id}` | Delete a resource |
+
+See [API Design](docs/api-design.md) for full conventions and error formats.
+{% if use_openapi %}
+See the interactive docs at `/docs` (or `/swagger-ui.html` for Spring Boot) when the server is running.
+{% endif %}
+
+## Authentication
+
+{% if use_auth %}
+This API uses **{{ auth_strategy | upper }}** authentication.
+
+{% if auth_strategy == "jwt" %}
+Include the token in all protected requests:
+
+```http
+Authorization: Bearer <your-token>
+```
+
+Tokens expire after 24 hours. Use the refresh endpoint to obtain a new token without re-authenticating.
+{% elif auth_strategy == "oauth2" %}
+Authentication follows the OAuth2 Authorization Code flow. Redirect users to `/api/v1/auth/authorize` to begin the flow. The API will exchange the code for tokens and return a session.
+{% elif auth_strategy == "api-key" %}
+Include your API key in the request header:
+
+```http
+X-API-Key: <your-api-key>
+```
+
+API keys are issued per application and should never be exposed in client-side code.
+{% endif %}
+{% else %}
+This API does not require authentication. All endpoints are publicly accessible.
+{% endif %}
+
+## Testing
+
+Strategy: **{{ test_strategy }}**
+
+{% if framework == "fastapi" or framework == "django-rest" %}
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=src --cov-report=term-missing
+
+# Run only unit tests
+pytest tests/ -m "not integration"
+
+# Run only integration tests
+pytest tests/integration/
+```
+{% elif framework == "express" %}
+```bash
+# Run all tests
+npm test
+
+# Run with coverage
+npm run test:coverage
+
+# Run only unit tests
+npm run test:unit
+
+# Run only integration tests
+npm run test:integration
+```
+{% elif framework == "spring-boot" %}
+```bash
+# Run all tests
+./mvnw test
+
+# Run with coverage report
+./mvnw test jacoco:report
+
+# Run only unit tests
+./mvnw test -Dgroups="unit"
+
+# Run only integration tests
+./mvnw test -Dgroups="integration"
+```
+{% endif %}
+
+{% if test_strategy == "unit-and-integration" %}
+- Unit tests cover service logic and data transformations
+- Integration tests run against a real {{ database }} instance
+- Target: >80% coverage on business logic
+{% elif test_strategy == "contract-testing" %}
+- Consumer-driven contract tests verify API shape
+- Provider tests ensure the API meets consumer expectations
+- Integration tests cover database interactions
+{% elif test_strategy == "full-pyramid" %}
+- Unit tests cover all pure functions and service logic
+- Integration tests cover database queries and external service calls
+- Contract tests cover API consumer expectations
+- Target: >80% unit coverage, >60% integration coverage
+{% endif %}
+
+## Configuration
+
+Environment variables are loaded from `.env` (development) or the system environment (production).
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_URL` | Database connection string | - |
+{% if framework == "fastapi" or framework == "django-rest" %}
+| `SECRET_KEY` | Application secret key | - |
+| `DEBUG` | Enable debug mode | `false` |
+| `ALLOWED_HOSTS` | Comma-separated allowed hosts | `*` |
+{% elif framework == "express" %}
+| `PORT` | Port to listen on | `3000` |
+| `NODE_ENV` | Environment name | `development` |
+| `JWT_SECRET` | Secret for signing tokens | - |
+{% elif framework == "spring-boot" %}
+| `SERVER_PORT` | Port to listen on | `8080` |
+| `SPRING_PROFILES_ACTIVE` | Active Spring profiles | `local` |
+{% endif %}
+{% if use_auth and auth_strategy == "jwt" %}
+| `JWT_SECRET` | Secret for signing JWT tokens | - |
+| `JWT_EXPIRY` | Token expiry duration | `24h` |
+{% elif use_auth and auth_strategy == "oauth2" %}
+| `OAUTH_CLIENT_ID` | OAuth2 client ID | - |
+| `OAUTH_CLIENT_SECRET` | OAuth2 client secret | - |
+| `OAUTH_REDIRECT_URI` | Callback URL after auth | - |
+{% endif %}
+
+## Documentation
+
+- [Architecture](docs/architecture.md) - System design and layer responsibilities
+- [Ways of Working](docs/ways-of-working.md) - Team conventions and definition of done
+- [API Design](docs/api-design.md) - REST conventions, naming, pagination, error formats
+- [ADR-0001: Framework and Database](docs/adrs/0001-architecture.md) - Why these technology choices were made
+{% if use_openapi %}
+- Interactive API docs available when the server is running
+{% endif %}
+
+---
+
+*Generated with [ScaffoldKit](https://github.com/LanNguyenSi/scaffoldkit)*

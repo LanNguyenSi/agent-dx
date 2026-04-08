@@ -1,0 +1,77 @@
+# Tasks
+
+## Current Sprint
+
+| ID | Task | Priority | Status | Assignee |
+|----|------|----------|--------|----------|
+| T-001 | Database schema | high | open | unassigned |
+| T-002 | Core CRUD endpoints | high | open | unassigned |
+| T-003 | Auth middleware | high | open | unassigned |
+| T-004 | Input validation | high | open | unassigned |
+| T-005 | Error handling | medium | open | unassigned |
+{% if use_docker %}| T-006 | Docker deployment | medium | open | unassigned |
+{% endif %}
+
+## Task Details
+
+### T-001: Database Schema
+**Priority:** high
+**Problem:** No data model defined.
+**Solution:** Design Prisma schema with entities, relations, and indexes.
+**Files:** `prisma/schema.prisma`
+**Acceptance Criteria:**
+- [ ] All entities with relationships defined
+- [ ] Indexes on frequently queried fields
+- [ ] Migration runs cleanly
+
+### T-002: Core CRUD Endpoints
+**Priority:** high
+**Problem:** No API endpoints.
+**Solution:** Build REST routes with service layer.
+**Files:** `src/routes/`, `src/services/`
+**Acceptance Criteria:**
+- [ ] GET (list + detail), POST, PUT, DELETE for each entity
+- [ ] Proper HTTP status codes (200, 201, 400, 404, 500)
+- [ ] Transactions for related mutations
+
+### T-003: Auth Middleware
+**Priority:** high
+**Problem:** No authentication.
+**Solution:** {{ auth_strategy | upper }} auth middleware.
+**Files:** `src/middleware/auth.ts`, `src/routes/auth.ts`
+**Acceptance Criteria:**
+- [ ] Login/register endpoints (if JWT)
+- [ ] Protected route middleware
+- [ ] Token validation
+
+### T-004: Input Validation
+**Priority:** high
+**Problem:** No request validation.
+**Solution:** Zod schemas for all request bodies.
+**Files:** `src/models/`, `src/middleware/validate.ts`
+**Acceptance Criteria:**
+- [ ] Zod schema per endpoint
+- [ ] Validation middleware rejects invalid input
+- [ ] Descriptive error messages
+
+### T-005: Error Handling
+**Priority:** medium
+**Problem:** No structured error responses.
+**Solution:** Global error handler middleware.
+**Files:** `src/middleware/error.ts`
+**Acceptance Criteria:**
+- [ ] All errors returned as JSON
+- [ ] No internal details leaked in production
+- [ ] Proper status codes for different error types
+
+## Backlog
+
+- Integration tests for critical flows
+- Rate limiting middleware
+- API documentation (OpenAPI/Swagger)
+- Health check endpoint
+
+## Rules
+
+- Each task must have clear acceptance criteria before work begins.
+- Agents should update status when starting and completing tasks.

@@ -1,0 +1,11 @@
+FROM ubuntu:24.04
+
+WORKDIR /workspace
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl git nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+CMD ["bash", "-lc", "if [ \"$APP_ROLE\" = \"web\" ]; then cd apps/web && npm install && npm run dev -- --hostname 0.0.0.0 || npm run dev; elif [ \"$APP_ROLE\" = \"api\" ]; then cd apps/api && npm install && npm run dev; else echo 'Unknown APP_ROLE for nextjs-fullstack'; sleep infinity; fi"]

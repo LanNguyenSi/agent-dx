@@ -1,0 +1,26 @@
+FROM node:20-slim
+
+{% if db_provider != 'sqlite' %}# Install OpenSSL for Prisma
+RUN apt-get update && \
+    apt-get install -y openssl && \
+    rm -rf /var/lib/apt/lists/*
+
+{% endif %}WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy application code
+COPY . .
+
+{% if db_provider != 'sqlite' %}# Generate Prisma client
+RUN npx prisma generate
+
+{% endif %}# Expose dev server port
+EXPOSE 3000
+
+# Start development server
+CMD ["npm", "run", "dev"]

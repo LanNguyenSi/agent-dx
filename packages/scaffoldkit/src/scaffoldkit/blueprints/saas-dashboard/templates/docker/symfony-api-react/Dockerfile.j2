@@ -1,0 +1,11 @@
+FROM ubuntu:24.04
+
+WORKDIR /workspace
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl git nodejs npm php-cli composer \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+CMD ["bash", "-lc", "if [ \"$APP_ROLE\" = \"web\" ]; then cd apps/web && npm install && npm run dev -- --host 0.0.0.0 || npm run dev; elif [ \"$APP_ROLE\" = \"api\" ]; then cd apps/api && composer install --no-interaction --prefer-dist || true && php -S 0.0.0.0:8000 -t public; else echo 'Unknown APP_ROLE for symfony-api-react'; sleep infinity; fi"]

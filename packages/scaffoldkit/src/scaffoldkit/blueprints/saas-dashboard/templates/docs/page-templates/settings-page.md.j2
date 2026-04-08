@@ -1,0 +1,136 @@
+# Page Template: Settings Page
+
+> Reference template for building settings/configuration pages in {{ display_name }}.
+
+## Purpose
+
+Settings pages allow users to configure application preferences, account settings, and integrations. Settings are grouped into logical sections with a sidebar or tab navigation.
+
+## Layout Structure
+
+```
+┌──────────────────────────────────────────────────┐
+│  Header / Navigation Bar                          │
+├──────────┬───────────────────────────────────────┤
+│          │  Settings                               │
+│          ├────────────┬──────────────────────────┤
+│  Sidebar │  Settings  │  Section Title            │
+│          │  Nav       │                            │
+│  (nav)   │            │  Setting Group 1           │
+│          │  > General │  ┌──────────────────────┐ │
+│          │    Profile │  │ Label    [input     ] │ │
+│          │    Notif.  │  │ Label    [toggle    ] │ │
+│          │    Team    │  │ Label    [select   v] │ │
+│          │    Billing │  └──────────────────────┘ │
+│          │    API     │                            │
+│          │            │  Setting Group 2           │
+│          │            │  ┌──────────────────────┐ │
+│          │            │  │ ...                   │ │
+│          │            │  └──────────────────────┘ │
+│          │            │                            │
+│          │            │         [Save Changes]     │
+└──────────┴────────────┴──────────────────────────┘
+```
+
+## Settings Sections
+
+### General
+
+- Application name / branding
+- Language and locale
+- Timezone
+- Date/number format
+
+### Profile
+
+- Display name and avatar
+- Email address
+- Password change
+- Two-factor authentication (if {{ use_auth }})
+
+### Notifications
+
+- Email notification preferences
+- In-app notification preferences
+- Digest frequency (real-time / daily / weekly)
+
+### Team (if applicable)
+
+- Team member list with roles
+- Invite new members
+- Remove members
+- Role management
+
+### Billing (if applicable)
+
+- Current plan display
+- Usage metrics
+- Payment method
+- Invoice history
+
+### API / Integrations
+
+- API key management (create, revoke)
+- Webhook configuration
+- Third-party integrations
+
+## Components
+
+### Settings Navigation
+
+- Vertical sidebar list of sections
+- Active section highlighted
+- Sections can be nested (General > Appearance)
+
+### Setting Group
+
+- Group title with optional description
+- Form fields: text inputs, toggles, selects, radio groups
+- Each field: label, input, help text (optional), validation error (optional)
+
+### Save Behavior
+
+- **Option A:** Save button per section (explicit save)
+- **Option B:** Auto-save with debounce (immediate feedback)
+- Show success/error toast after save
+
+## States
+
+| State | Behavior |
+|-------|----------|
+| Loading | Skeleton for form fields |
+| Pristine | Save button disabled |
+| Dirty | Save button enabled, unsaved indicator |
+| Saving | Save button shows spinner |
+| Saved | Success toast, button resets |
+| Error | Inline validation + error toast |
+
+## Design Notes ({{ design_style }})
+
+{% if design_style == "minimal-clean" %}
+- Left sidebar navigation, clean form layout
+- Subtle section dividers
+- Muted save button until changes are made
+{% elif design_style == "corporate-professional" %}
+- Card-based sections with headers
+- Clear form labels with help text
+- Standard button styles for actions
+{% elif design_style == "playful-modern" %}
+- Colorful section icons in navigation
+- Rounded input fields
+- Animated toggle switches
+{% endif %}
+
+## Data Requirements
+
+- Load: `GET /api/settings`
+- Save: `PATCH /api/settings/<section>`
+- Team: `GET /api/team/members`, `POST /api/team/invite`
+
+## Accessibility
+
+- Settings nav uses proper `nav` landmark
+- Form fields have associated labels
+- Toggle switches have accessible names
+- Keyboard navigation through all settings
+- Save confirmation announced to screen readers

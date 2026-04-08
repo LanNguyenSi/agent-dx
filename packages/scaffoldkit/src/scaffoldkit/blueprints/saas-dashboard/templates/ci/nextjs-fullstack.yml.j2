@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "release/*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate generated documentation shell
+        shell: bash
+        run: |
+          test -f README.md
+          test -f docs/architecture.md
+          test -f docs/ways-of-working.md
+          test -d apps/web
+          test -d apps/api
+          echo "SaaS dashboard scaffold structure looks valid."
+
+  verify-bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify Next.js + Node bootstrap
+        shell: bash
+        run: |
+          test -f package.json
+          test -f apps/web/package.json
+          test -f apps/web/app/page.tsx
+          test -f apps/api/package.json
+          test -f apps/api/src/index.ts
+          node -e "JSON.parse(require('fs').readFileSync('package.json', 'utf8')); JSON.parse(require('fs').readFileSync('apps/web/package.json', 'utf8')); JSON.parse(require('fs').readFileSync('apps/api/package.json', 'utf8'))"
+
+{% if use_docker %}
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t {{ project_name }}:ci .
+{% endif %}

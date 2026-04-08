@@ -1,0 +1,11 @@
+FROM ubuntu:24.04
+
+WORKDIR /workspace
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl git ruby-full build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+CMD ["bash", "-lc", "cd apps/api && ruby -wc config/application.rb config/routes.rb >/dev/null && ruby -run -e httpd ../web -p 8000"]

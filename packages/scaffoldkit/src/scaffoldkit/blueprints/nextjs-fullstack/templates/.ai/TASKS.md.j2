@@ -1,0 +1,78 @@
+# Tasks
+
+## Current Sprint
+
+| ID | Task | Priority | Status | Assignee |
+|----|------|----------|--------|----------|
+| T-001 | Initial data model | high | open | unassigned |
+| T-002 | Public pages (listing + detail) | high | open | unassigned |
+| T-003 | Admin panel (login, dashboard, CRUD) | high | open | unassigned |
+| T-004 | API endpoints with auth | high | open | unassigned |
+{% if use_docker %}| T-005 | Docker deployment | high | open | unassigned |
+{% endif %}
+
+## Task Details
+
+### T-001: Initial Data Model
+**Priority:** high
+**Problem:** No database schema defined yet.
+**Solution:** Design Prisma schema based on domain requirements.
+**Files:** `prisma/schema.prisma`
+**Acceptance Criteria:**
+- [ ] All entities with relationships defined
+- [ ] Indexes on frequently queried fields
+- [ ] Migration runs cleanly: `npx prisma migrate dev --name init`
+
+### T-002: Public Pages
+**Priority:** high
+**Problem:** No public-facing UI.
+**Solution:** Build listing + detail pages as Server Components.
+**Files:** `app/(public)/`, `components/public/`
+**Acceptance Criteria:**
+- [ ] Responsive layout (mobile-first)
+- [ ] {{ language | capitalize }} UI text
+- [ ] Server Components with `force-dynamic`
+
+### T-003: Admin Panel
+**Priority:** high
+**Problem:** No admin interface.
+**Solution:** Build login, dashboard, CRUD pages.
+**Files:** `app/admin/`, `components/admin/`, `lib/auth.ts`
+**Acceptance Criteria:**
+- [ ] JWT auth with protected routes
+- [ ] Dashboard with overview stats
+- [ ] CRUD operations for all entities
+
+### T-004: API Endpoints
+**Priority:** high
+**Problem:** No REST API.
+**Solution:** Build CRUD endpoints with auth middleware.
+**Files:** `app/api/`
+**Acceptance Criteria:**
+- [ ] Transactions for related mutations
+- [ ] Proper HTTP status codes
+- [ ] Auth required for write operations
+{% if use_docker %}
+
+### T-005: Docker Deployment
+**Priority:** high
+**Problem:** No production deployment config.
+**Solution:** Multi-stage Dockerfile + Traefik config.
+**Files:** `Dockerfile`, `docker-compose.traefik.yml`
+**Acceptance Criteria:**
+- [ ] `prisma generate` in both deps AND builder stages
+- [ ] Health check endpoint
+- [ ] Traefik labels for SSL
+{% endif %}
+
+## Backlog
+
+- Integration tests for critical flows
+- Error handling and validation improvements
+- Performance optimization (caching, lazy loading)
+
+## Rules
+
+- Each task must have clear acceptance criteria before work begins.
+- Agents should update status when starting and completing tasks.
+- Blocked tasks must note what they are waiting for.

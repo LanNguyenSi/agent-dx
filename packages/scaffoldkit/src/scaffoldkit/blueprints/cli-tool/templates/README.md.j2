@@ -1,0 +1,408 @@
+# {{ display_name }}
+
+{{ description }}
+
+## Overview
+
+`{{ project_name }}` is a command-line tool built with **{{ language }}** and **{{ cli_framework }}**.
+{% if distribution == "pip-package" %}
+It is distributed as a Python package via PyPI.
+{% elif distribution == "binary" %}
+It is distributed as a self-contained binary.
+{% elif distribution == "homebrew" %}
+It is distributed via Homebrew.
+{% elif distribution == "docker" %}
+It is distributed as a Docker image.
+{% endif %}
+
+## Installation
+
+{% if distribution == "pip-package" %}
+### Via pip
+
+```bash
+pip install {{ project_name }}
+```
+
+### Via pipx (recommended for isolated install)
+
+```bash
+pipx install {{ project_name }}
+```
+
+### From source
+
+```bash
+git clone https://github.com/your-org/{{ project_name }}.git
+cd {{ project_name }}
+pip install -e ".[dev]"
+```
+{% elif distribution == "binary" %}
+### Download pre-built binary
+
+Download the latest release from the [releases page](https://github.com/your-org/{{ project_name }}/releases).
+
+```bash
+# Linux / macOS
+curl -sSL https://github.com/your-org/{{ project_name }}/releases/latest/download/{{ project_name }}-$(uname -s | tr '[:upper:]' '[:lower:]')-amd64 -o /usr/local/bin/{{ project_name }}
+chmod +x /usr/local/bin/{{ project_name }}
+```
+
+### From source
+
+```bash
+git clone https://github.com/your-org/{{ project_name }}.git
+cd {{ project_name }}
+{% if language == "go" %}
+go build -o {{ project_name }} ./cmd/{{ project_name }}
+{% elif language == "rust" %}
+cargo build --release
+cp target/release/{{ project_name }} /usr/local/bin/
+{% endif %}
+```
+{% elif distribution == "homebrew" %}
+### Via Homebrew
+
+```bash
+brew tap your-org/{{ project_name }}
+brew install {{ project_name }}
+```
+
+### From source
+
+```bash
+git clone https://github.com/your-org/{{ project_name }}.git
+cd {{ project_name }}
+{% if language == "go" %}
+go build -o {{ project_name }} ./cmd/{{ project_name }}
+{% elif language == "rust" %}
+cargo build --release
+{% endif %}
+```
+{% elif distribution == "docker" %}
+### Via Docker
+
+```bash
+docker pull your-org/{{ project_name }}:latest
+
+# Run a command
+docker run --rm your-org/{{ project_name }} {{ project_name }} --help
+```
+
+### Alias for convenience
+
+```bash
+alias {{ project_name }}='docker run --rm -v "$PWD:/work" -w /work your-org/{{ project_name }}'
+```
+{% endif %}
+
+## Quick Start
+
+```bash
+# Show help
+{{ project_name }} --help
+
+# Show version
+{{ project_name }} --version
+
+# Run the default command
+{{ project_name }} run
+
+# Get help for a subcommand
+{{ project_name }} run --help
+```
+
+## Usage
+
+### Global Options
+
+| Option | Description |
+|--------|-------------|
+| `--help` | Show help and exit |
+| `--version` | Show version and exit |
+{% if use_config_file %}
+| `--config PATH` | Path to config file (default: `~/.config/{{ project_name }}/config.{{ config_format }}`) |
+{% endif %}
+| `--verbose` | Enable verbose output |
+| `--quiet` | Suppress non-error output |
+| `--no-color` | Disable colored output |
+
+### Commands
+
+#### `{{ project_name }} run`
+
+Execute the primary action.
+
+```bash
+{{ project_name }} run [OPTIONS] [ARGS]...
+
+Options:
+  --dry-run   Show what would happen without making changes
+  --output    Output format: text, json, yaml  [default: text]
+  --help      Show this message and exit
+```
+
+#### `{{ project_name }} config`
+
+{% if use_config_file %}
+Manage tool configuration.
+
+```bash
+{{ project_name }} config show              # Print current config
+{{ project_name }} config set KEY VALUE     # Set a config value
+{{ project_name }} config get KEY           # Get a config value
+{{ project_name }} config reset             # Reset to defaults
+```
+{% else %}
+Show current configuration and environment.
+
+```bash
+{{ project_name }} config show
+```
+{% endif %}
+
+#### `{{ project_name }} version`
+
+Show detailed version information.
+
+```bash
+{{ project_name }} version
+# {{ display_name }} v0.1.0
+# Language: {{ language }}
+# Framework: {{ cli_framework }}
+# Build: (commit hash)
+```
+
+{% if use_config_file %}
+## Configuration
+
+{{ display_name }} stores configuration at:
+
+- **Linux/macOS**: `~/.config/{{ project_name }}/config.{{ config_format }}`
+- **Windows**: `%APPDATA%\{{ project_name }}\config.{{ config_format }}`
+
+The `--config` flag overrides the default path.
+
+### Example config file
+
+{% if config_format == "yaml" %}
+```yaml
+# {{ project_name }} configuration
+output_format: text
+color: true
+verbose: false
+# Add your settings here
+```
+{% elif config_format == "toml" %}
+```toml
+# {{ project_name }} configuration
+output_format = "text"
+color = true
+verbose = false
+# Add your settings here
+```
+{% elif config_format == "json" %}
+```json
+{
+  "output_format": "text",
+  "color": true,
+  "verbose": false
+}
+```
+{% endif %}
+
+### Environment Variables
+
+All config keys can be overridden via environment variables prefixed with `{{ project_name | upper | replace("-", "_") }}_`:
+
+```bash
+export {{ project_name | upper | replace("-", "_") }}_OUTPUT_FORMAT=json
+export {{ project_name | upper | replace("-", "_") }}_VERBOSE=true
+```
+
+Priority order (highest to lowest): CLI flags > environment variables > config file > defaults.
+{% endif %}
+
+## Project Structure
+
+```
+{{ project_name }}/
+├── src/
+│   ├── commands/         # One file per subcommand
+│   ├── config/           # Config loading and validation
+│   └── main.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+├── tests/
+│   └── ...               # Test files mirroring src/
+├── docs/
+│   ├── architecture.md
+│   ├── ways-of-working.md
+│   └── adrs/
+{% if ai_context %}
+├── AI_CONTEXT.md
+{% endif %}
+└── README.md
+```
+
+## Development
+
+### Prerequisites
+
+{% if language == "python" %}
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) or pip
+{% elif language == "go" %}
+- Go 1.22+
+{% elif language == "rust" %}
+- Rust 1.78+ (install via [rustup](https://rustup.rs))
+{% elif language == "typescript" %}
+- Node.js 20+
+- npm or pnpm
+{% endif %}
+
+### Setup
+
+{% if language == "python" %}
+```bash
+git clone https://github.com/your-org/{{ project_name }}.git
+cd {{ project_name }}
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+# Install with dev dependencies
+pip install -e ".[dev]"
+```
+{% elif language == "go" %}
+```bash
+git clone https://github.com/your-org/{{ project_name }}.git
+cd {{ project_name }}
+go mod download
+```
+{% elif language == "rust" %}
+```bash
+git clone https://github.com/your-org/{{ project_name }}.git
+cd {{ project_name }}
+cargo build
+```
+{% elif language == "typescript" %}
+```bash
+git clone https://github.com/your-org/{{ project_name }}.git
+cd {{ project_name }}
+npm install
+npm run build
+```
+{% endif %}
+
+### Running Tests
+
+{% if language == "python" %}
+```bash
+pytest tests/
+pytest tests/ -v --tb=short   # Verbose output
+pytest tests/ --cov=src       # With coverage
+```
+{% elif language == "go" %}
+```bash
+go test ./...
+go test ./... -v              # Verbose
+go test ./... -cover          # With coverage
+```
+{% elif language == "rust" %}
+```bash
+cargo test
+cargo test -- --nocapture     # Show stdout
+```
+{% elif language == "typescript" %}
+```bash
+npm test
+npm run test:coverage
+```
+{% endif %}
+
+### Linting and Formatting
+
+{% if language == "python" %}
+```bash
+ruff check src/ tests/
+ruff format src/ tests/
+mypy src/
+```
+{% elif language == "go" %}
+```bash
+gofmt -w .
+go vet ./...
+golangci-lint run
+```
+{% elif language == "rust" %}
+```bash
+cargo fmt
+cargo clippy
+```
+{% elif language == "typescript" %}
+```bash
+npm run lint
+npm run format
+```
+{% endif %}
+
+{% if use_ci %}
+## CI/CD
+
+Continuous integration runs on every pull request and push to `main`:
+
+- Lint and format check
+- Unit tests
+- Build verification
+{% if distribution == "binary" or distribution == "homebrew" %}
+- Cross-platform build (Linux, macOS, Windows)
+{% endif %}
+{% if distribution == "pip-package" %}
+- Publish to PyPI on tagged releases
+{% elif distribution == "homebrew" %}
+- Update Homebrew formula on tagged releases
+{% endif %}
+
+See `.github/workflows/` for pipeline definitions.
+{% endif %}
+
+## Testing
+
+Strategy: **{{ test_strategy }}**
+
+{% if test_strategy == "unit-tests" %}
+Tests cover individual commands, argument parsing, config loading, and output formatting.
+Run them with the command shown in the Development section above.
+{% elif test_strategy == "snapshot-testing" %}
+Tests capture and compare CLI output snapshots. Update snapshots with:
+{% if language == "python" %}
+```bash
+pytest tests/ --snapshot-update
+```
+{% elif language == "rust" %}
+```bash
+cargo test -- --update-snapshots
+```
+{% endif %}
+{% elif test_strategy == "integration-tests" %}
+Tests invoke the compiled binary and assert on exit codes and stdout/stderr.
+Run them after building the project.
+{% endif %}
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make your changes with tests
+4. Run the full test suite
+5. Open a pull request
+
+See [ways-of-working](docs/ways-of-working.md) for full contribution guidelines.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+*Generated with [ScaffoldKit](https://github.com/LanNguyenSi/scaffoldkit)*

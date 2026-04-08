@@ -1,0 +1,12 @@
+```bash
+# Install dependencies
+npm install
+
+# Copy example env files
+cp apps/web/.env.local.example apps/web/.env.local
+cp apps/api/.env.example apps/api/.env
+
+# Start web and API in separate terminals
+npm run dev:web
+npm run dev:api
+```

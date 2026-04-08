@@ -1,0 +1,11 @@
+services:
+  scaffoldkit:
+    build:
+      context: .
+    image: scaffoldkit:latest
+    stdin_open: true   # keep STDIN open for interactive TUI
+    tty: true          # allocate a pseudo-TTY for interactive TUI
+    volumes:
+      # Generated projects are written to ./output on the host
+      - ./output:/workspace
+    restart: "no"

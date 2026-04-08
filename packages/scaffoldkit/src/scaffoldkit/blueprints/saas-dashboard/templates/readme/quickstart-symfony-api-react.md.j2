@@ -1,0 +1,14 @@
+```bash
+# Install frontend dependencies
+cd apps/web && npm install
+
+# Install backend dependencies
+cd ../api && composer install
+
+# Copy backend env
+cp .env.example .env
+
+# Start frontend and backend in separate terminals
+cd ../web && npm run dev
+cd ../api && php -S 127.0.0.1:8000 -t public
+```

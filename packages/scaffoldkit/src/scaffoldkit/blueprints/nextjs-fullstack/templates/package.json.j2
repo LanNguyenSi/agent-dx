@@ -1,0 +1,37 @@
+{
+  "name": "{{ project_name }}",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"{% if db_provider != 'none' %},
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio"{% endif %}
+  },
+  "dependencies": {
+    "next": "15.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"{% if db_provider != 'none' %},
+    "@prisma/client": "^6.2.0"{% endif %}{% if auth_strategy == 'jwt' %},
+    "jsonwebtoken": "^9.0.2",
+    "bcrypt": "^5.1.1"{% endif %}{% if use_analytics %},
+    "recharts": "^3.8.0"{% endif %}{% if use_email %},
+    "nodemailer": "^6.9.16"{% endif %}
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.2.4",
+    "typescript": "^5"{% if db_provider != 'none' %},
+    "prisma": "^6.2.0"{% endif %}{% if auth_strategy == 'jwt' %},
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/bcrypt": "^5.0.2"{% endif %}{% if use_email %},
+    "@types/nodemailer": "^6.4.16"{% endif %}
+  }
+}

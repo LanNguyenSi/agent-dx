@@ -1,0 +1,82 @@
+# Ways of Working: {{ display_name }}
+
+## Delivery Standards
+
+- Keep pull requests narrow and vertically sliced
+- Every feature ships with tests at the right level, not just implementation code
+- Architecture decisions that change package boundaries or infrastructure choices get an ADR
+- Prefer boring, explicit Spring configuration over clever meta-programming
+
+## Coding Conventions
+
+- Controllers are thin and usually delegate to exactly one service method
+- Request DTOs use Bean Validation annotations and are separate from persistence entities
+- Service methods are named after business use cases, not framework actions
+- Repository interfaces expose domain-oriented methods such as `findActiveSubscriptionByAccountId`
+- Avoid field injection and framework static access; use constructor injection everywhere
+
+## Package Discipline
+
+{% if use_ddd %}
+- Keep the domain model free from controller and transport concerns
+- Do not let JPA-specific annotations or repository APIs leak into the conceptual domain layer without a deliberate reason
+- Cross-context orchestration belongs in application services, not entities
+{% else %}
+- Domain classes may use JPA annotations, but transport DTOs still stay out of the persistence model
+- If a service grows beyond a coherent use case boundary, split it by workflow rather than by technical helper methods
+- Shared utility packages are a last resort; prefer placing logic close to the feature that owns it
+{% endif %}
+
+## Testing Rules
+
+{% if test_strategy == "junit-only" %}
+- Pure business logic gets plain JUnit tests with minimal Spring context usage
+- Use Spring slice tests only where framework integration adds real value
+- Mock repositories and external clients carefully; do not mock the method under test's own behavior
+{% elif test_strategy == "junit-and-testcontainers" %}
+- Unit tests cover business branching and validation rules
+- Integration tests use Testcontainers for database-backed repositories and key infrastructure adapters
+- Do not replace the real database with H2 for repository semantics that rely on vendor behavior
+{% else %}
+- Unit tests cover pure logic
+- Slice tests verify MVC/WebFlux behavior, serialization, and validation
+- Integration tests verify database and messaging wiring
+- End-to-end smoke tests cover the highest-value user or system journeys only
+{% endif %}
+
+## Commands
+
+{% if build_tool == "maven" %}
+```bash
+./mvnw test
+./mvnw verify
+./mvnw spring-boot:run
+```
+{% else %}
+```bash
+./gradlew test
+./gradlew check
+./gradlew bootRun
+```
+{% endif %}
+
+## Dependency Hygiene
+
+- Add Spring starters only when they materially reduce custom boilerplate
+- Avoid overlapping libraries that solve the same problem
+- Prefer Spring Boot auto-configuration when it remains understandable; override explicitly when behavior matters
+- Document any non-standard infrastructure dependency in `docs/architecture.md` or an ADR
+
+## Database and Migrations
+
+- Migration files are reviewed like code
+- Repository methods must reflect actual query intent
+- Large read queries should use projection DTOs or dedicated read models
+- Transaction boundaries live in services, not in controllers
+
+## Security and Operations
+
+- New endpoints require an explicit authn/authz decision before merge
+- Sensitive configuration is provided via environment-specific secrets
+- Logs must be structured and scrubbed of secrets, tokens, and raw personal data
+- Operational runbooks belong in docs when the application introduces non-trivial infrastructure

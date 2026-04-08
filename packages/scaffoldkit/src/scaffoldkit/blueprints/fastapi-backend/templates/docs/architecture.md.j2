@@ -1,0 +1,103 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+{{ display_name }} is a FastAPI backend organized as a layered Python service. The blueprint assumes a single deployable unit with explicit boundaries between HTTP contracts, business logic, persistence, and background work.
+
+## High-Level Structure
+
+```text
+HTTP clients
+    |
+FastAPI routers (`app/api/routes`)
+    |
+Services (`app/services`)
+    |
+Repositories (`app/repositories`)
+    |
+{{ db_provider | title }}
+```
+
+Supporting layers:
+
+- `app/models` for Pydantic request/response models and internal data structures
+- `app/core` for configuration, security, startup, and dependency wiring
+{% if use_background_jobs %}- `app/workers` for asynchronous background jobs
+{% endif %}
+
+## Responsibilities
+
+### Routers
+
+- parse and validate HTTP input
+- call one service per use case
+- translate service outcomes into HTTP responses
+
+Routers must not embed workflow logic or direct SQL/ORM operations.
+
+### Services
+
+- enforce business rules
+- orchestrate repositories and integrations
+- apply authorization after identity is resolved
+
+Services do not know about FastAPI request objects.
+
+### Repositories
+
+- handle database-specific read/write operations
+- keep query concerns localized
+- expose clear methods such as `get_by_id`, `list`, `create`, `update`
+
+Repositories must not contain workflow branching or permission logic.
+
+### Core
+
+- settings and environment loading
+- auth/security dependencies
+- application startup and dependency registration
+
+## Data and Persistence
+
+The default database is **{{ db_provider }}**.
+
+Guidance:
+
+- keep migration ownership explicit through Alembic
+- treat schema changes as review-worthy, not incidental
+- separate transport models from persistence models if the API shape diverges
+
+## Auth Strategy
+
+Current auth choice: **{{ auth_strategy }}**
+
+## Background Work
+
+{% if use_background_jobs %}
+Background jobs are part of the intended design. Use them for notifications, import/export pipelines, and long-running orchestration. Do not keep request handlers open while work that can be queued is in progress.
+{% else %}
+No background worker is assumed at the scaffold level. Add one only when request latency or workflow complexity justifies it.
+{% endif %}
+
+## Operational Notes
+
+{% if use_redis %}
+- Redis is available for caching, coordination, or worker support.
+{% else %}
+- No cache or broker is assumed yet; keep initial complexity low.
+{% endif %}
+{% if use_docker %}
+- Docker is part of the intended local and deployment workflow.
+{% else %}
+- Containerization is optional; document local environment expectations explicitly.
+{% endif %}
+
+## First Implementation Slice
+
+The first feature should prove:
+
+1. one resource with request/response schemas
+2. one repository using the chosen persistence layer
+3. one service with business rules
+4. one route module with auth and error handling
+5. unit and integration coverage for the vertical slice

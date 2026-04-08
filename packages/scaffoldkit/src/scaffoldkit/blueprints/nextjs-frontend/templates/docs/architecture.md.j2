@@ -1,0 +1,728 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+**{{ display_name }}** is a Next.js {{ nextjs_version }} frontend application using the **{{ router }}** with **{{ styling }}** for styling and **{{ state_management }}** for client state.
+
+## Principles
+
+1. **Server first**: Push as much logic as possible to the server. Reach for Server Components before Client Components.
+2. **Separation of concerns**: UI rendering, data fetching, and business logic live in distinct layers.
+3. **Colocation**: Keep files close to where they are used. Feature code lives in `src/components/features/`.
+4. **Typed contracts**: All API responses and component props are typed. No `any`.
+5. **Explicit loading and error states**: Every data-fetching boundary has a loading skeleton and error fallback.
+
+---
+
+## Routing Structure
+
+{% if router == "app-router" %}
+### App Router (Next.js {{ nextjs_version }})
+
+The App Router uses the file system under `src/app/`. Each folder is a route segment. Special files (`page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`) map to React concepts.
+
+```
+src/app/
+├── layout.tsx              # Root layout - fonts, global providers, metadata
+├── page.tsx                # "/" home page
+├── loading.tsx             # Root-level Suspense fallback
+├── error.tsx               # Root-level error boundary
+├── not-found.tsx           # 404 page
+│
+├── (auth)/                 # Route group: no shared layout with dashboard
+│   ├── login/
+│   │   └── page.tsx
+│   └── register/
+│       └── page.tsx
+│
+├── (dashboard)/            # Route group: shared authenticated layout
+│   ├── layout.tsx          # Sidebar + header shell
+│   ├── dashboard/
+│   │   ├── page.tsx        # Server Component - fetches data at request time
+│   │   └── loading.tsx     # Skeleton while data loads
+│   ├── [entity]/
+│   │   ├── page.tsx        # List page
+│   │   └── [id]/
+│   │       └── page.tsx    # Detail page
+│   └── settings/
+│       └── page.tsx
+│
+└── api/                    # API route handlers (BFF pattern)
+    └── [resource]/
+        └── route.ts        # GET, POST, PATCH, DELETE handlers
+```
+
+**Route Groups** (`(auth)`, `(dashboard)`) organise routes without affecting the URL. Use them to scope layouts.
+
+{% else %}
+### Pages Router (Next.js {{ nextjs_version }})
+
+The Pages Router lives under `src/pages/`. Each file maps directly to a URL.
+
+```
+src/pages/
+├── _app.tsx                # Global providers, layout wrapper, global styles
+├── _document.tsx           # HTML document customisation (fonts, meta)
+├── index.tsx               # "/" home page
+├── 404.tsx                 # Not found page
+├── 500.tsx                 # Error page
+│
+├── auth/
+│   ├── login.tsx
+│   └── register.tsx
+│
+├── dashboard/
+│   └── index.tsx           # /dashboard
+│
+├── [entity]/
+│   ├── index.tsx           # /[entity] list page
+│   └── [id].tsx            # /[entity]/[id] detail page
+│
+└── api/                    # API routes
+    └── [resource]/
+        └── index.ts
+```
+
+Data fetching uses `getServerSideProps` (per-request) or `getStaticProps` (build-time / ISR).
+
+{% endif %}
+
+---
+
+## Component Hierarchy
+
+Components are layered from generic to specific. A component should only import from the same level or lower.
+
+```
+Pages / Route Segments    (src/app/ or src/pages/)
+       |
+       v
+  Layout Components       (src/components/layout/)
+  [Header, Sidebar, PageShell, Breadcrumbs]
+       |
+       v
+  Feature Components      (src/components/features/)
+  [UserTable, InvoiceCard, ProductForm]
+       |
+       v
+  UI / Primitive Components  (src/components/ui/)
+  [Button, Input, Badge, Dialog, DataTable]
+```
+
+**Rule:** Feature components can compose UI components. UI components must not import feature components. Pages import layout and feature components.
+
+---
+
+## Data Fetching Patterns
+
+{% if router == "app-router" %}
+### Server Components (default)
+
+Use Server Components for any data that can be fetched at request time without client interactivity.
+
+```tsx
+// src/app/(dashboard)/users/page.tsx
+// No "use client" directive = Server Component
+import { UserTable } from "@/components/features/UserTable";
+import { getUsers } from "@/services/users";
+
+export default async function UsersPage() {
+  const users = await getUsers(); // direct async call, no useEffect
+  return <UserTable users={users} />;
+}
+```
+
+Advantages:
+- Zero client-side JavaScript for the data fetch
+- Data is never exposed in the network tab
+- Automatic deduplication with `fetch` cache
+
+### Client Components
+
+Add `"use client"` only when you need:
+- Browser APIs (`window`, `localStorage`, `navigator`)
+- React hooks that require client state (`useState`, `useEffect`, `useReducer`)
+- Event handlers that need immediate interactivity
+- Third-party libraries that are not server-compatible
+
+```tsx
+"use client";
+// src/components/features/SearchBar.tsx
+import { useState } from "react";
+
+export function SearchBar({ onSearch }: { onSearch: (q: string) => void }) {
+  const [query, setQuery] = useState("");
+  // ...
+}
+```
+
+### Suspense Boundaries
+
+Wrap async Server Components in `<Suspense>` to stream content progressively.
+
+```tsx
+import { Suspense } from "react";
+import { UserTableSkeleton } from "@/components/ui/UserTableSkeleton";
+
+export default function Page() {
+  return (
+    <main>
+      <h1>Users</h1>
+      <Suspense fallback={<UserTableSkeleton />}>
+        <UserTable /> {/* async server component */}
+      </Suspense>
+    </main>
+  );
+}
+```
+
+### `loading.tsx` vs `<Suspense>`
+
+- `loading.tsx`: automatic Suspense boundary for the entire page segment
+- `<Suspense>`: fine-grained control within a page - prefer this for partial loading
+
+{% else %}
+### Pages Router Data Fetching
+
+| Method | When to use |
+|--------|-------------|
+| `getServerSideProps` | Data changes per request (user-specific, real-time) |
+| `getStaticProps` | Data can be pre-built (marketing pages, public content) |
+| `getStaticPaths` + `getStaticProps` | Dynamic routes with known IDs at build time |
+| Client-side (`useEffect` / React Query) | Data that changes after interaction (search, filters) |
+
+```tsx
+// src/pages/users/index.tsx
+import type { GetServerSideProps } from "next";
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const users = await getUsers();
+  return { props: { users } };
+};
+```
+
+{% endif %}
+
+---
+
+## API Client Layer
+
+{% if api_client == "tanstack-query" %}
+### TanStack Query
+
+Server state (remote data) is managed by TanStack Query. Define queries in `src/services/` and consume them in components.
+
+```
+src/services/
+├── api.ts          # Base fetch wrapper with error handling and auth headers
+├── users.ts        # User-related queries and mutations
+├── products.ts
+└── index.ts        # Re-export all services
+```
+
+**Query key convention:**
+
+```ts
+// src/services/users.ts
+export const userKeys = {
+  all: ["users"] as const,
+  list: (filters: UserFilters) => ["users", "list", filters] as const,
+  detail: (id: string) => ["users", "detail", id] as const,
+};
+```
+
+**Service function:**
+
+```ts
+export async function fetchUsers(filters: UserFilters): Promise<User[]> {
+  const res = await api.get("/users", { params: filters });
+  return res.data;
+}
+
+export function useUsers(filters: UserFilters) {
+  return useQuery({
+    queryKey: userKeys.list(filters),
+    queryFn: () => fetchUsers(filters),
+    staleTime: 30_000,
+  });
+}
+```
+
+{% elif api_client == "axios" %}
+### Axios
+
+All HTTP calls go through a shared Axios instance in `src/lib/axios.ts` which applies auth headers, base URL, and error interceptors.
+
+```ts
+// src/lib/axios.ts
+import axios from "axios";
+
+export const apiClient = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  timeout: 10_000,
+});
+
+apiClient.interceptors.request.use((config) => {
+  const token = getToken(); // from auth store
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+apiClient.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    if (error.response?.status === 401) signOut();
+    return Promise.reject(normalizeError(error));
+  }
+);
+```
+
+{% else %}
+### Native Fetch
+
+All API calls use the native `fetch` API wrapped in typed service functions in `src/services/`.
+
+```ts
+// src/services/api.ts
+export async function apiFetch<T>(
+  path: string,
+  options?: RequestInit
+): Promise<T> {
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+      ...options?.headers,
+    },
+  });
+  if (!res.ok) throw await buildApiError(res);
+  return res.json() as Promise<T>;
+}
+```
+
+{% endif %}
+
+### Error Handling
+
+All service functions throw typed `ApiError` objects:
+
+```ts
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+```
+
+Components catch errors via error boundaries or React Query's `isError` state. Never swallow errors silently.
+
+---
+
+## State Management
+
+{% if state_management == "zustand" %}
+### Zustand
+
+Client-only UI state (modals, sidebar open/closed, user preferences) lives in Zustand stores. Server state (API data) belongs in TanStack Query or Server Components - not in Zustand.
+
+```
+src/lib/stores/
+├── ui.store.ts       # sidebar, modals, toasts
+├── auth.store.ts     # current user session (if custom-jwt)
+└── index.ts
+```
+
+**Store pattern:**
+
+```ts
+// src/lib/stores/ui.store.ts
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+interface UIState {
+  sidebarOpen: boolean;
+  toggleSidebar: () => void;
+}
+
+export const useUIStore = create<UIState>()(
+  persist(
+    (set) => ({
+      sidebarOpen: true,
+      toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+    }),
+    { name: "ui-preferences" }
+  )
+);
+```
+
+{% elif state_management == "jotai" %}
+### Jotai
+
+Atomic state management. Each atom represents a single unit of state. Compose atoms to derive computed state.
+
+```
+src/lib/atoms/
+├── ui.atoms.ts       # sidebar, modal, toast atoms
+├── auth.atoms.ts     # session atoms
+└── index.ts
+```
+
+```ts
+// src/lib/atoms/ui.atoms.ts
+import { atom } from "jotai";
+import { atomWithStorage } from "jotai/utils";
+
+export const sidebarOpenAtom = atomWithStorage("sidebarOpen", true);
+export const activeModalAtom = atom<string | null>(null);
+```
+
+{% elif state_management == "redux-toolkit" %}
+### Redux Toolkit
+
+State is split into slices. Each feature owns its slice. Use `createAsyncThunk` only when needed - prefer TanStack Query for server state.
+
+```
+src/lib/store/
+├── index.ts          # configureStore
+├── hooks.ts          # typed useAppSelector, useAppDispatch
+└── slices/
+    ├── ui.slice.ts
+    └── auth.slice.ts
+```
+
+{% elif state_management == "react-query-only" %}
+### TanStack Query Only (No Client Store)
+
+Server state is in TanStack Query. Ephemeral UI state (open dialogs, form dirty state) is local `useState`. No global client store.
+
+This is intentionally minimal. Introduce a store only if you find yourself passing UI state through more than 2 component layers.
+
+{% endif %}
+
+---
+
+{% if use_auth %}
+## Authentication
+
+{% if auth_provider == "next-auth" %}
+### NextAuth.js
+
+Auth is handled by NextAuth.js (Auth.js v5 in Next.js 15). Configuration lives in `src/lib/auth.ts`.
+
+```
+src/lib/auth.ts         # NextAuth config: providers, callbacks, session
+src/app/api/auth/[...nextauth]/route.ts   # Auth API route
+src/middleware.ts        # Route protection via NextAuth middleware
+```
+
+**Protecting routes** - `src/middleware.ts`:
+
+```ts
+export { auth as middleware } from "@/lib/auth";
+
+export const config = {
+  matcher: ["/(dashboard)/:path*", "/api/:path*"],
+};
+```
+
+**Session in Server Components:**
+
+```ts
+import { auth } from "@/lib/auth";
+
+export default async function Page() {
+  const session = await auth();
+  if (!session) redirect("/login");
+  return <Dashboard user={session.user} />;
+}
+```
+
+{% elif auth_provider == "clerk" %}
+### Clerk
+
+Clerk handles all auth UI, sessions, and token management. No custom auth code required.
+
+```
+src/middleware.ts    # clerkMiddleware() - protects routes
+src/lib/clerk.ts    # Clerk client config
+```
+
+**Protecting routes:**
+
+```ts
+// src/middleware.ts
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+
+const isProtected = createRouteMatcher(["/(dashboard)(.*)"]);
+
+export default clerkMiddleware((auth, req) => {
+  if (isProtected(req)) auth().protect();
+});
+```
+
+{% elif auth_provider == "custom-jwt" %}
+### Custom JWT
+
+Tokens are stored in `HttpOnly` cookies (not `localStorage`). The JWT is validated in middleware on every request to a protected route.
+
+```
+src/lib/auth/
+├── jwt.ts          # sign, verify, decode helpers
+├── cookies.ts      # getToken, setToken, clearToken
+└── middleware.ts   # route protection logic
+src/middleware.ts   # Next.js middleware entry
+```
+
+**Never store JWTs in localStorage** - `HttpOnly` cookies are not accessible to JavaScript, preventing XSS token theft.
+
+{% endif %}
+{% endif %}
+
+---
+
+## Styling Architecture
+
+{% if styling == "tailwind" %}
+### Tailwind CSS
+
+Design tokens are defined in `tailwind.config.ts`. Custom colours, fonts, and spacing extend the base theme.
+
+```
+src/styles/
+├── globals.css          # @tailwind directives, CSS custom properties
+└── typography.css       # Prose styles (optional)
+```
+
+**Conventions:**
+- Use semantic colour names (`text-foreground`, `bg-card`) from the design token layer, not raw values (`text-gray-900`).
+- Complex component styles use `cva` (class-variance-authority) to manage variants.
+- Never use `@apply` in component files - use Tailwind classes in JSX directly.
+
+```tsx
+// Use cva for variant-based components
+import { cva, type VariantProps } from "class-variance-authority";
+
+const button = cva("inline-flex items-center rounded-md font-medium transition-colors", {
+  variants: {
+    variant: {
+      primary: "bg-primary text-primary-foreground hover:bg-primary/90",
+      ghost: "hover:bg-accent hover:text-accent-foreground",
+    },
+    size: {
+      sm: "h-8 px-3 text-sm",
+      md: "h-10 px-4",
+    },
+  },
+  defaultVariants: { variant: "primary", size: "md" },
+});
+```
+
+{% elif styling == "css-modules" %}
+### CSS Modules
+
+Each component has a colocated `.module.css` file. Global styles and tokens are in `src/styles/`.
+
+```
+src/styles/
+├── globals.css         # CSS custom properties (design tokens), resets
+├── tokens.css          # --color-*, --spacing-*, --font-* variables
+└── typography.css      # Base typography rules
+```
+
+**Convention:** Component styles are in `ComponentName.module.css` next to `ComponentName.tsx`. Never use global class names in component files.
+
+{% elif styling == "styled-components" %}
+### Styled Components
+
+Theme tokens are defined in `src/styles/theme.ts` and provided via `ThemeProvider`. Use `styled` for component styles and `css` helper for reusable style fragments.
+
+```
+src/styles/
+├── theme.ts            # DefaultTheme: colors, spacing, typography
+├── GlobalStyles.ts     # createGlobalStyle - resets and base styles
+└── mixins.ts           # Reusable css`` fragments
+```
+
+**SSR:** Styled Components requires the `ServerStyleSheet` pattern for correct server-side rendering in Next.js.
+
+{% elif styling == "scss" %}
+### SCSS
+
+Styles use SCSS with a 7-1 partial architecture. Variables and mixins are defined in `src/styles/abstracts/`.
+
+```
+src/styles/
+├── abstracts/
+│   ├── _variables.scss   # Design tokens as SCSS variables
+│   ├── _mixins.scss      # Responsive breakpoints, flex helpers
+│   └── _functions.scss
+├── base/
+│   ├── _reset.scss
+│   └── _typography.scss
+├── components/           # Global component overrides (avoid - prefer colocated)
+└── main.scss             # Imports all partials
+```
+
+Component-level SCSS uses colocated `.module.scss` files to avoid global scope pollution.
+
+{% endif %}
+
+---
+
+{% if ui_library == "shadcn-ui" %}
+## UI Components: shadcn/ui
+
+Components are copied into `src/components/ui/` via the `shadcn` CLI. They are yours to modify.
+
+```bash
+# Add a new component
+pnpx shadcn@latest add button
+pnpx shadcn@latest add dialog
+```
+
+Components sit in `src/components/ui/`. **Do not import directly from the shadcn registry** - always use the local copy so customisation is possible.
+
+{% elif ui_library == "radix-ui" %}
+## UI Components: Radix UI
+
+Radix UI provides unstyled, accessible primitives. Compose them in `src/components/ui/` and apply styling with {{ styling }}.
+
+```tsx
+// src/components/ui/Dialog.tsx
+import * as RadixDialog from "@radix-ui/react-dialog";
+
+export const Dialog = RadixDialog.Root;
+export const DialogTrigger = RadixDialog.Trigger;
+export const DialogContent = /* styled wrapper */ ...;
+```
+
+{% elif ui_library == "headless-ui" %}
+## UI Components: Headless UI
+
+Headless UI components are framework-integrated (React). Wrap them in `src/components/ui/` to add consistent styling.
+
+{% endif %}
+
+---
+
+{% if use_i18n %}
+## Internationalisation (i18n)
+
+**Library:** next-intl
+
+```
+src/
+├── i18n/
+│   ├── config.ts           # locales, defaultLocale
+│   ├── request.ts          # next-intl server config
+│   └── routing.ts          # createNavigation helpers
+├── messages/
+│   ├── en.json             # English strings
+│   └── fr.json             # French strings (example)
+└── middleware.ts           # locale detection and redirect
+```
+
+**Conventions:**
+- All user-visible strings go through `useTranslations()` or `getTranslations()`.
+- Message keys follow dot notation: `common.save`, `users.table.empty`.
+- Never hardcode UI copy in JSX.
+
+{% endif %}
+
+---
+
+## Performance Patterns
+
+### Image Optimisation
+
+Always use `next/image` instead of `<img>`. Provide explicit `width` and `height` (or `fill` with a positioned parent) to prevent layout shift (CLS).
+
+```tsx
+import Image from "next/image";
+
+<Image
+  src="/hero.webp"
+  alt="..."
+  width={800}
+  height={450}
+  priority // above the fold only
+/>
+```
+
+### Dynamic Imports
+
+Use `next/dynamic` for components that are large, client-only, or not needed on initial render.
+
+```tsx
+import dynamic from "next/dynamic";
+
+const HeavyChart = dynamic(() => import("@/components/features/HeavyChart"), {
+  loading: () => <ChartSkeleton />,
+  ssr: false, // charts often require window
+});
+```
+
+### Font Loading
+
+Use `next/font` to self-host fonts and eliminate layout shift from Google Fonts.
+
+```ts
+// src/app/layout.tsx
+import { Inter } from "next/font/google";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
+```
+
+### Metadata
+
+Every page exports a `metadata` object (App Router) or `<Head>` content (Pages Router) for SEO.
+
+```ts
+export const metadata: Metadata = {
+  title: `${entity.name} | {{ display_name }}`,
+  description: entity.description,
+};
+```
+
+---
+
+{% if use_ci %}
+## CI/CD
+
+The CI pipeline runs on every push and pull request:
+
+1. **Lint** - ESLint + Prettier format check
+2. **Type check** - `tsc --noEmit`
+3. **Unit tests** - {{ test_strategy }} with coverage
+{% if test_strategy == "vitest-and-playwright" or test_strategy == "jest-and-cypress" %}
+4. **E2E tests** - against a preview deployment or local server
+{% endif %}
+5. **Build** - `next build` must succeed
+
+Merge is blocked if any step fails.
+
+{% endif %}
+
+{% if use_docker %}
+## Docker
+
+```
+Dockerfile              # Multi-stage: deps -> builder -> runner
+docker-compose.yml      # Dev: app with hot reload
+docker-compose.prod.yml # Prod: optimised image
+.dockerignore
+```
+
+The production image uses the Next.js standalone output (`output: "standalone"` in `next.config.ts`) for minimal image size.
+
+{% endif %}
+
+## Decisions
+
+See [ADR log](adrs/) for architectural decisions and their rationale.

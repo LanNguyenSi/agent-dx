@@ -1,0 +1,101 @@
+# Page Template: Detail Page
+
+> Reference template for building single-entity detail pages in {{ display_name }}.
+
+## Purpose
+
+Detail pages display comprehensive information about a single entity (user, project, order, etc.) and provide actions to manage it.
+
+## Layout Structure
+
+```
+┌──────────────────────────────────────────────────┐
+│  Header / Navigation Bar                          │
+├──────────┬───────────────────────────────────────┤
+│          │  Breadcrumb: Home > List > Entity Name │
+│          ├───────────────────────────────────────┤
+│          │  Entity Title          [Edit] [Delete] │
+│          │  Status Badge / Subtitle               │
+│  Sidebar ├───────────────────────────────────────┤
+│          │  Tab Bar: Overview | Activity | Settings│
+│  (nav)   ├───────────────────────────────────────┤
+│          │  Tab Content Area                       │
+│          │                                         │
+│          │  Section 1: Key Information             │
+│          │  ┌─────────────┬─────────────────┐     │
+│          │  │ Field Label │ Value            │     │
+│          │  │ Field Label │ Value            │     │
+│          │  └─────────────┴─────────────────┘     │
+│          │                                         │
+│          │  Section 2: Related Items               │
+│          │  ┌───────────────────────────────┐     │
+│          │  │ Related item list / table      │     │
+│          │  └───────────────────────────────┘     │
+└──────────┴───────────────────────────────────────┘
+```
+
+## Components
+
+### Entity Header
+
+- Entity name / title (large, prominent)
+- Status badge (active, pending, archived)
+- Primary actions: Edit, Delete, or domain-specific actions
+- Secondary actions in a "..." dropdown menu
+
+### Tab Navigation
+
+- **Overview**: key information and metadata
+- **Activity**: timeline of changes and events
+- **Settings**: entity-specific configuration (if applicable)
+
+### Key Information Section
+
+- Label-value pairs in a 2-column grid
+- Group related fields into subsections
+- Show "-" for empty optional fields
+
+### Related Items Section
+
+- Table or card list of associated entities
+- Link to each related entity's detail page
+- "Add" action to create new relations
+
+## States
+
+| State | Behavior |
+|-------|----------|
+| Loading | Skeleton for header and content |
+| Not Found | 404 message with back link |
+| Error | Error banner with retry |
+| Loaded | Full entity display |
+| Deleting | Confirmation modal before delete |
+
+## Design Notes ({{ design_style }})
+
+{% if design_style == "minimal-clean" %}
+- Clean white card with subtle section separators
+- Status badges use muted color fills
+- Actions are text buttons, not prominent
+{% elif design_style == "corporate-professional" %}
+- Structured header with clear hierarchy
+- Bordered sections with subtle backgrounds
+- Actions are standard buttons with icons
+{% elif design_style == "playful-modern" %}
+- Colorful status badges and icons
+- Rounded sections with light shadows
+- Actions have hover animations
+{% endif %}
+
+## Data Requirements
+
+- Endpoint: `GET /api/<entity>/:id`
+- Activity: `GET /api/<entity>/:id/activity`
+- Related: `GET /api/<entity>/:id/related`
+
+## Accessibility
+
+- Breadcrumb uses proper `nav` and `aria-label`
+- Tabs use `role="tablist"` / `role="tab"` / `role="tabpanel"`
+- Delete action requires confirmation
+- Status badges have text labels, not just color

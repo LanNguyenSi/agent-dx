@@ -1,0 +1,9 @@
+require "rails"
+require "action_controller/railtie"
+
+module DashboardApi
+  class Application < Rails::Application
+    config.load_defaults 8.0
+    config.paths["app/views"] << root.join("../web/app/views").to_s
+  end
+end

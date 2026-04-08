@@ -1,0 +1,20 @@
+FROM python:{{ python_version }}-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY . .
+
+RUN if [ -f requirements.txt ]; then \
+      pip install --no-cache-dir -r requirements.txt; \
+    elif [ -f pyproject.toml ]; then \
+      pip install --no-cache-dir . || true; \
+    else \
+      echo "No Python dependency manifest found. Keeping scaffold image minimal."; \
+    fi
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "if [ -f manage.py ]; then python manage.py runserver 0.0.0.0:8000; else echo 'Django DRF scaffold: add manage.py and project bootstrap to run the service.'; sleep infinity; fi"]

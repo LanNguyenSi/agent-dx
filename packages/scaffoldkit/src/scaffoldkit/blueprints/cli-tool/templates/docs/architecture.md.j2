@@ -1,0 +1,304 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+{{ display_name }} is a CLI tool implemented in **{{ language }}** using the **{{ cli_framework }}** framework.
+It follows a command-based architecture where each subcommand is an isolated unit with its own
+argument parsing, validation, and execution logic.
+
+## Principles
+
+1. **Single responsibility per command**: Each command file owns one subcommand and nothing else.
+2. **Fail fast with clear messages**: Validate inputs at parse time; emit actionable error messages to stderr.
+3. **Exit codes are part of the interface**: Always exit with a meaningful code (see Exit Codes below).
+4. **Stdout for data, stderr for diagnostics**: Program output goes to stdout; logs, warnings, and errors go to stderr.
+5. **Composable with other tools**: Support `--output json` on commands that produce structured data.
+{% if use_config_file %}
+6. **Config is optional**: The tool must work with no config file present; config only overrides defaults.
+{% endif %}
+
+## System Structure
+
+```
+{{ project_name }}/
+├── src/
+│   ├── commands/         # One module per subcommand
+│   │   ├── run.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+│   │   └── config.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+│   ├── config/           # Config file loading, validation, env var merging
+│   │   └── loader.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+│   └── main.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+│       # Entrypoint: registers commands, sets global flags
+├── tests/
+│   ├── commands/         # Tests mirroring src/commands
+│   └── config/
+└── docs/
+```
+
+## Key Subsystems
+
+### 1. Command Parsing ({{ cli_framework }})
+
+{% if cli_framework == "typer" %}
+Commands are defined as Python functions decorated with `@app.command()`. Typer derives
+argument names, types, and help text from function signatures and type annotations.
+
+```python
+# src/commands/run.py
+import typer
+
+def run(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without changes"),
+    output: str = typer.Option("text", "--output", "-o", help="Output format"),
+) -> None:
+    """Execute the primary action."""
+    ...
+```
+
+The root app is created in `src/main.py` and subcommand apps are added with `app.add_typer()`.
+{% elif cli_framework == "click" %}
+Commands are defined as Python functions decorated with `@cli.command()`. Click uses
+decorators to attach arguments, options, and help text.
+
+```python
+# src/commands/run.py
+import click
+
+@click.command()
+@click.option("--dry-run", is_flag=True, help="Preview without changes")
+@click.option("--output", "-o", default="text", help="Output format")
+def run(dry_run, output):
+    """Execute the primary action."""
+    ...
+```
+
+The root group is defined in `src/main.py` and subcommands are registered with `cli.add_command()`.
+{% elif cli_framework == "cobra" %}
+Commands are `cobra.Command` structs. Each command defines its `Use`, `Short`, `Long`, and `RunE` fields.
+
+```go
+// src/commands/run.go
+var runCmd = &cobra.Command{
+    Use:   "run",
+    Short: "Execute the primary action",
+    RunE: func(cmd *cobra.Command, args []string) error {
+        dryRun, _ := cmd.Flags().GetBool("dry-run")
+        output, _ := cmd.Flags().GetString("output")
+        return executeRun(dryRun, output)
+    },
+}
+
+func init() {
+    runCmd.Flags().Bool("dry-run", false, "Preview without changes")
+    runCmd.Flags().StringP("output", "o", "text", "Output format")
+}
+```
+
+The root command is created in `src/main.go` and subcommands are added with `rootCmd.AddCommand()`.
+{% elif cli_framework == "clap" %}
+Commands are defined using Clap's derive macros on Rust structs and enums.
+
+```rust
+// src/commands/run.rs
+use clap::Args;
+
+#[derive(Args)]
+pub struct RunArgs {
+    /// Preview without changes
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Output format
+    #[arg(short, long, default_value = "text")]
+    pub output: String,
+}
+```
+
+The root CLI struct in `src/main.rs` uses `#[derive(Parser)]` with a `#[command(subcommand)]` field.
+{% elif cli_framework == "commander" %}
+Commands are registered on a `Command` instance. Each subcommand has its own Command object.
+
+```typescript
+// src/commands/run.ts
+import { Command } from "commander";
+
+export function registerRun(program: Command): void {
+    program
+        .command("run")
+        .description("Execute the primary action")
+        .option("--dry-run", "Preview without changes", false)
+        .option("-o, --output <format>", "Output format", "text")
+        .action(async (options) => {
+            await executeRun(options);
+        });
+}
+```
+
+The root program is created in `src/main.ts` and subcommands are registered before `program.parseAsync()`.
+{% endif %}
+
+### 2. Config Loading
+
+{% if use_config_file %}
+Config is loaded in layers, with later layers overriding earlier ones:
+
+```
+1. Compiled-in defaults
+2. Config file (~/.config/{{ project_name }}/config.{{ config_format }})
+3. Environment variables ({{ project_name | upper | replace("-", "_") }}_*)
+4. CLI flags passed at runtime
+```
+
+The config loader lives in `src/config/`. It is responsible for:
+
+- Locating the config file (respects `--config` flag and `XDG_CONFIG_HOME`)
+- Parsing the {{ config_format | upper }} file into a typed struct/dataclass
+- Merging environment variable overrides
+- Returning a validated config object to each command
+
+Commands receive config as a parameter; they do not read it directly. This keeps commands
+testable without touching the filesystem.
+
+{% if config_format == "yaml" %}
+Config file path resolution order:
+1. Value of `--config` flag
+2. `${{ project_name | upper | replace("-", "_") }}_CONFIG` environment variable
+3. `$XDG_CONFIG_HOME/{{ project_name }}/config.yaml`
+4. `~/.config/{{ project_name }}/config.yaml`
+{% elif config_format == "toml" %}
+Config file path resolution order:
+1. Value of `--config` flag
+2. `${{ project_name | upper | replace("-", "_") }}_CONFIG` environment variable
+3. `$XDG_CONFIG_HOME/{{ project_name }}/config.toml`
+4. `~/.config/{{ project_name }}/config.toml`
+{% elif config_format == "json" %}
+Config file path resolution order:
+1. Value of `--config` flag
+2. `${{ project_name | upper | replace("-", "_") }}_CONFIG` environment variable
+3. `$XDG_CONFIG_HOME/{{ project_name }}/config.json`
+4. `~/.config/{{ project_name }}/config.json`
+{% endif %}
+{% else %}
+The tool has no persistent config file. All configuration comes from CLI flags and environment
+variables. Each command receives an options struct built from parsed flags.
+{% endif %}
+
+### 3. Output Formatting
+
+Commands should never write directly to stdout with unstructured print statements.
+Instead, they call a shared output layer:
+
+- **`output text`**: Human-readable, with optional color (disabled if `NO_COLOR` is set or `--no-color` is passed, or if stdout is not a TTY)
+- **`output json`**: Machine-readable JSON, always without color
+- **`output yaml`**: Machine-readable YAML, always without color
+
+The output module respects:
+
+- `NO_COLOR` environment variable (per [no-color.org](https://no-color.org))
+- `--no-color` flag
+- TTY detection: disable color when stdout is piped
+
+### 4. Error Handling and Exit Codes
+
+All errors are caught at the top-level command runner and translated to appropriate exit codes.
+Commands signal failure by raising/returning an error - they never call `os.exit()` directly.
+
+#### Exit Code Reference
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | General / unspecified error |
+| `2` | Invalid arguments or usage error |
+| `3` | Configuration error (bad config file, missing required setting) |
+| `4` | Runtime error (external service unavailable, permission denied) |
+| `5` | Not found (resource the command expected does not exist) |
+
+Error messages follow the pattern: `error: <what went wrong>. <how to fix it>.`
+
+Good: `error: config file not found at ~/.config/{{ project_name }}/config.{{ config_format }}. Run '{{ project_name }} config init' to create it.`
+Bad: `FileNotFoundError: [Errno 2] No such file or directory`
+
+### 5. Logging and Verbosity
+
+Diagnostic output is gated by a verbosity level:
+
+- **Default**: warnings and errors only
+- **`--verbose`**: informational messages, command timing
+- **`--debug`**: debug-level traces (when applicable)
+
+Structured log lines go to stderr and never to stdout.
+
+{% if use_ci %}
+## CI/CD Architecture
+
+{% if language == "python" %}
+The pipeline runs on GitHub Actions (`.github/workflows/ci.yml`):
+
+1. **lint** - ruff, mypy
+2. **test** - pytest with coverage
+3. **build** - `pip build` to verify package is installable
+{% if distribution == "pip-package" %}
+4. **publish** - twine upload on tagged releases
+{% endif %}
+{% elif language == "go" %}
+The pipeline runs on GitHub Actions (`.github/workflows/ci.yml`):
+
+1. **lint** - golangci-lint
+2. **test** - `go test ./...` with race detector
+3. **build** - cross-compile for linux/amd64, darwin/amd64, darwin/arm64, windows/amd64
+{% if distribution == "binary" or distribution == "homebrew" %}
+4. **release** - goreleaser on tagged releases
+{% endif %}
+{% elif language == "rust" %}
+The pipeline runs on GitHub Actions (`.github/workflows/ci.yml`):
+
+1. **lint** - cargo fmt --check, cargo clippy
+2. **test** - cargo test
+3. **build** - cross-compile via cross or cargo for target platforms
+{% if distribution == "binary" or distribution == "homebrew" %}
+4. **release** - cargo-dist or release-plz on tagged releases
+{% endif %}
+{% elif language == "typescript" %}
+The pipeline runs on GitHub Actions (`.github/workflows/ci.yml`):
+
+1. **lint** - eslint, prettier --check
+2. **test** - npm test
+3. **build** - tsc --noEmit + npm pack
+{% if distribution == "pip-package" %}
+4. **publish** - npm publish on tagged releases
+{% endif %}
+{% endif %}
+{% endif %}
+
+## Testing Strategy
+
+Approach: **{{ test_strategy }}**
+
+{% if test_strategy == "unit-tests" %}
+Each command module has a corresponding test file. Tests invoke command functions directly
+with controlled inputs - they do not spawn subprocess invocations.
+
+- Commands are tested with mocked config and mocked I/O
+- Config loader is tested with temporary files
+- Output formatter is tested for both text and JSON modes
+{% elif test_strategy == "snapshot-testing" %}
+Tests capture stdout and stderr output for known inputs and compare against stored snapshots.
+
+- Snapshots are stored in `tests/snapshots/`
+- Update snapshots intentionally with the `--snapshot-update` flag
+- Snapshot diffs are reviewed as part of code review
+- Color escape codes are stripped before snapshotting
+{% elif test_strategy == "integration-tests" %}
+Tests invoke the compiled binary as a subprocess and assert on:
+
+- Exit code
+- stdout content (exact match or substring)
+- stderr content (for error cases)
+
+This validates argument parsing, config loading, and output formatting end-to-end.
+{% endif %}
+
+## Decisions
+
+See [ADR log](adrs/) for architectural decisions and their rationale.

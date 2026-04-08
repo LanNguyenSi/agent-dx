@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+dist/
+out/
+_site/
+public/
+.cache/
+
+# Framework-specific
+.astro/
+.next/
+.nuxt/
+.vercel/
+.netlify/
+
+# Hugo
+resources/_gen/
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Lighthouse CI
+.lighthouseci/
+lhci_reports/
+
+# Temporary
+*.tmp
+*.temp

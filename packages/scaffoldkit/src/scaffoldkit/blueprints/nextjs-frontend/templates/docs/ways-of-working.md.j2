@@ -1,0 +1,360 @@
+# Ways of Working: {{ display_name }}
+
+## Definition of Done
+
+A feature is **done** when all of the following are true:
+
+- [ ] Code passes `pnpm lint` and `pnpm type-check` with zero errors
+- [ ] All new components have explicit `loading` and `error` states
+- [ ] Tests are written per the **{{ test_strategy }}** strategy (see below)
+- [ ] Lighthouse CI score does not regress (Performance >= 85, Accessibility = 100, Best Practices >= 90)
+- [ ] Core Web Vitals targets are met on the preview URL (LCP < 2.5 s, CLS < 0.1, INP < 200 ms)
+- [ ] No accessibility violations at WCAG 2.1 AA level (`axe` or `eslint-plugin-jsx-a11y`)
+- [ ] Code has been reviewed and approved by at least one team member
+- [ ] The feature works at 320 px, 768 px, and 1280 px viewport widths
+- [ ] Documentation is updated if the change affects architecture or conventions
+{% if use_storybook %}
+- [ ] New UI components have a Storybook story covering the default and key variant states
+{% endif %}
+
+---
+
+## Component Naming Conventions
+
+### Files
+
+| Item | Convention | Example |
+|------|-----------|---------|
+| Component file | PascalCase | `UserCard.tsx` |
+| Component directory | PascalCase | `UserCard/index.tsx` |
+| Hook file | camelCase prefixed `use` | `useUserData.ts` |
+| Utility file | camelCase | `formatDate.ts` |
+| Type file | camelCase | `user.types.ts` |
+| Service file | camelCase | `users.service.ts` |
+| Style file (module) | matches component | `UserCard.module.css` |
+| Story file | matches component | `UserCard.stories.tsx` |
+| Test file | matches component | `UserCard.test.tsx` |
+
+### Component exports
+
+Every component file exports the component as a **named export**. Default exports are only used by Next.js page and layout files.
+
+```tsx
+// Good
+export function UserCard({ user }: UserCardProps) { ... }
+
+// Avoid (except for pages/layouts)
+export default function UserCard() { ... }
+```
+
+### Barrel exports
+
+Each `src/components/ui/`, `src/components/layout/`, and `src/components/features/` directory has an `index.ts` that re-exports its public API.
+
+```ts
+// src/components/ui/index.ts
+export { Button, type ButtonProps } from "./Button";
+export { Input, type InputProps } from "./Input";
+export { Badge } from "./Badge";
+```
+
+Import from the barrel, not the file directly:
+
+```ts
+// Good
+import { Button, Input } from "@/components/ui";
+
+// Avoid
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+```
+
+---
+
+## Import Ordering
+
+Imports must follow this order (enforced by ESLint `import/order`):
+
+1. Node built-ins (`path`, `fs`)
+2. External packages (`react`, `next/*`, third-party libraries)
+3. Internal aliases (`@/lib/*`, `@/components/*`, `@/services/*`)
+4. Relative imports (`./UserCard`, `../utils`)
+5. Type imports (`import type { ... }`)
+
+```tsx
+// Good
+import { Suspense } from "react";
+import Image from "next/image";
+import { useQuery } from "@tanstack/react-query";
+
+import { Button } from "@/components/ui";
+import { useUsers } from "@/services/users";
+
+import type { User } from "@/types/user";
+```
+
+---
+
+## Branching Strategy
+
+Trunk-based development with short-lived feature branches.
+
+### Branch Names
+
+```
+feature/<ticket-id>-short-description
+fix/<ticket-id>-short-description
+chore/description
+docs/description
+```
+
+### Workflow
+
+1. Create branch from `main`
+2. Make small, focused commits (aim for < 400 LOC per PR)
+3. Open a Draft PR early to get CI feedback
+4. Mark ready for review when complete
+5. Squash-merge into `main`
+6. Delete the branch after merge
+
+---
+
+## Pull Request Conventions
+
+### PR Title
+
+Follow Conventional Commits format:
+
+```
+feat(users): add avatar upload to profile page
+fix(auth): resolve session expiry redirect loop
+perf(dashboard): lazy-load chart components
+a11y(nav): improve keyboard navigation in sidebar
+chore(deps): upgrade Next.js to 15.2
+```
+
+**Scope** should be a feature area or route (`users`, `auth`, `dashboard`, `settings`, `ui`).
+
+### PR Description
+
+```markdown
+## What
+Brief summary of the change.
+
+## Why
+Ticket link or motivation.
+
+## How
+Implementation approach (if non-obvious).
+
+## Screenshots / Video
+(for UI changes)
+
+## Checklist
+- [ ] Lint passes
+- [ ] Tests pass
+- [ ] Lighthouse score checked
+- [ ] Responsive layout verified
+```
+
+### Review Expectations
+
+- Review within 1 business day
+- Approve if the implementation is correct and follows conventions, even if you'd do it differently
+- Block only for correctness issues, security problems, or convention violations
+- Resolve your own comments once addressed; don't wait for the author to dismiss
+
+---
+
+## Accessibility Requirements
+
+This project targets **WCAG 2.1 Level AA** compliance.
+
+### Mandatory
+
+- All interactive elements are keyboard-operable (Tab, Enter, Space, Escape, Arrow keys)
+- All images have descriptive `alt` text (or `alt=""` for decorative images)
+- Form inputs have associated `<label>` elements (or `aria-label`)
+- Focus is always visible (`outline` must not be `none` without a styled replacement)
+- Colour contrast ratio >= 4.5:1 for normal text, >= 3:1 for large text
+- No content relies on colour alone to convey meaning
+- Modals trap focus and return focus to the trigger on close
+- Live regions (`aria-live`) announce dynamic content changes to screen readers
+
+### Tooling
+
+- `eslint-plugin-jsx-a11y` runs in CI - zero warnings allowed
+- Run `axe` in browser DevTools before marking a PR ready for review
+- Screen-reader test (VoiceOver / NVDA) for complex interactive patterns
+
+---
+
+## Testing Expectations
+
+Strategy: **{{ test_strategy }}**
+
+{% if test_strategy == "vitest-only" %}
+### Vitest (Unit + Component Tests)
+
+- Every custom hook (`src/hooks/`) has a test file
+- Every utility function (`src/lib/`) has a test file
+- Feature components with non-trivial logic have a component test using `@testing-library/react`
+- Component tests use `render`, `screen`, `userEvent` - never query by test ID unless absolutely necessary
+- Mock only at the network boundary (use `msw` for API mocks, not `vi.mock` on service functions)
+- Target: >= 80 % branch coverage on `src/lib/` and `src/hooks/`
+
+**Test naming:**
+
+```ts
+describe("UserCard", () => {
+  it("renders the user display name", () => { ... });
+  it("shows a fallback avatar when imageUrl is null", () => { ... });
+  it("calls onDelete when the delete button is clicked", async () => { ... });
+});
+```
+
+{% elif test_strategy == "vitest-and-playwright" %}
+### Vitest (Unit + Component Tests)
+
+- All hooks and utilities have Vitest unit tests
+- Feature components have component tests with `@testing-library/react`
+- Use `msw` for network mocking in tests
+- Target: >= 80% branch coverage on `src/lib/` and `src/hooks/`
+
+### Playwright (End-to-End)
+
+- Every critical user journey has a Playwright test
+- Tests run against a local `next dev` or `next start` server
+- Use Page Object Models for reusable interactions
+- Prefer `getByRole`, `getByLabel`, `getByText` over test IDs
+- Tests must pass in Chromium, Firefox, and WebKit
+
+**Key journeys to cover:**
+{% if use_auth %}
+- Authentication: login, logout, token expiry redirect
+{% endif %}
+- Primary happy path for the main feature
+- Form validation (valid submit, invalid fields)
+- Error states (API failure, 404)
+
+{% elif test_strategy == "jest-and-cypress" %}
+### Jest (Unit + Component Tests)
+
+- All hooks and utilities have Jest unit tests
+- Feature components have component tests with `@testing-library/react`
+- Use `msw` for network mocking
+- Target: >= 80% branch coverage on `src/lib/` and `src/hooks/`
+
+### Cypress (End-to-End)
+
+- Every critical user journey has a Cypress test
+- Use `cy.intercept()` to stub slow or flaky API calls
+- Prefer `cy.findByRole()` (Testing Library Cypress) over `.get('[data-testid]')`
+
+{% endif %}
+
+{% if use_storybook %}
+---
+
+## Storybook Requirements
+
+- Every component in `src/components/ui/` **must** have a story
+- Feature components with multiple visual states should have stories
+- Each story must render correctly in isolation (no context dependencies without decorators)
+- Stories must cover: default state, all key variants, loading state, error/empty state
+- Use `@storybook/test` (play functions) for interaction tests on complex components
+
+**Story naming:**
+
+```ts
+// UserCard.stories.tsx
+export default {
+  title: "Features/UserCard",
+  component: UserCard,
+} satisfies Meta<typeof UserCard>;
+
+export const Default: Story = { args: { user: mockUser } };
+export const WithoutAvatar: Story = { args: { user: { ...mockUser, imageUrl: null } } };
+export const Loading: Story = { ... };
+```
+
+{% endif %}
+
+---
+
+## Architecture Decision Records (ADRs)
+
+Write an ADR in `docs/adrs/` when:
+
+- Introducing a library not already in `package.json`
+- Changing the data fetching pattern (e.g., adding a new caching strategy)
+- Establishing a new component pattern
+- Choosing between multiple valid architectural approaches
+
+**ADR format:**
+
+```markdown
+# ADR-NNNN: Title
+
+## Status
+Proposed | Accepted | Deprecated | Superseded by ADR-XXXX
+
+## Context
+What problem are we solving? What forces are at play?
+
+## Decision
+What did we decide to do?
+
+## Consequences
+### Positive
+### Negative
+### Risks
+
+## References
+```
+
+---
+
+## Documentation Expectations
+
+| Document | Owner | Updated when... |
+|----------|-------|----------------|
+| `README.md` | Everyone | Setup steps change |
+| `docs/architecture.md` | Lead | Structure or data flow changes |
+| `docs/ways-of-working.md` | Lead | Conventions change |
+| `docs/adrs/` | Author | New significant decision made |
+| `docs/component-guide.md` | Everyone | New pattern introduced |
+{% if ai_context %}
+| `AI_CONTEXT.md` | Lead | Patterns, structure, or rules change |
+{% endif %}
+
+---
+
+## AI Collaboration Guidelines
+
+{% if ai_context %}
+This project is optimised for AI-assisted development.
+
+### For AI Agents
+
+- Read `AI_CONTEXT.md` before starting any task
+- Follow the patterns in `docs/architecture.md` exactly
+- Use `docs/page-templates/` as the structural reference for new pages
+- Write tests matching the **{{ test_strategy }}** strategy
+- Write an ADR if introducing a new library or pattern
+- Never add `"use client"` without justification
+
+### For Developers Working with AI
+
+- Give the agent a clear, scoped task with file-level context
+- Reference specific docs and patterns in your prompt
+- Review AI output against the same DoD and PR standards as human code
+- Update `AI_CONTEXT.md` when patterns change so the agent stays aligned
+{% else %}
+When using AI coding assistants:
+
+- Provide project context: share `docs/architecture.md` with the agent
+- Scope tasks clearly - one feature or component at a time
+- Review generated code against DoD and coding conventions
+- Ensure tests are included - do not accept code without tests
+{% endif %}

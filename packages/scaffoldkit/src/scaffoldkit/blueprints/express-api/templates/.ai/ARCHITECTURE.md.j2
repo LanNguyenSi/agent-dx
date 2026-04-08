@@ -1,0 +1,76 @@
+# Architecture
+
+## Overview
+
+**{{ display_name }}** is a TypeScript REST API built with Express.js.
+
+```
+{{ project_name }}/
+├── src/
+│   ├── routes/          # Express route handlers
+│   ├── services/        # Business logic
+│   ├── middleware/       # Auth, validation, error handling
+│   ├── models/          # Zod schemas and type definitions
+│   ├── types/           # Shared TypeScript interfaces
+│   ├── utils/           # Helper functions
+│   └── index.ts         # App entry point + Express setup
+├── prisma/
+│   └── schema.prisma    # Database schema
+├── tests/               # Test files
+├── docs/                # Documentation
+└── .ai/                 # Agent context (this folder)
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Runtime | Node.js + TypeScript (strict mode) |
+| Framework | Express.js |
+| Database | {{ db_provider | capitalize }} via Prisma ORM |
+| Validation | Zod |
+| Auth | {{ auth_strategy | upper }} |
+{% if use_redis %}| Cache | Redis (ioredis) |
+{% endif %}{% if use_websockets %}| Real-time | Socket.io |
+{% endif %}{% if use_queue %}| Queue | BullMQ + Redis |
+{% endif %}{% if use_docker %}| Deploy | Docker + docker-compose |
+{% endif %}
+
+## Key Patterns
+
+### Route → Service → Prisma
+Routes handle HTTP concerns (parsing, status codes). Services contain business logic. Prisma handles data access.
+
+```
+Request → Route (parse + validate) → Service (logic) → Prisma (DB) → Response
+```
+
+### Input Validation
+All request bodies validated with Zod schemas defined in `src/models/`. Validation middleware rejects invalid input before it reaches the service layer.
+
+{% if auth_strategy == "jwt" %}
+### Authentication
+JWT tokens in `Authorization: Bearer <token>` header.
+Middleware in `src/middleware/auth.ts`: `verifyToken()` extracts and validates.
+Protected routes use `requireAuth` middleware.
+{% elif auth_strategy == "api-key" %}
+### Authentication
+API key in `X-API-Key` header.
+Key validation in `src/middleware/auth.ts`.
+{% endif %}
+
+### Error Handling
+Global error handler in `src/middleware/error.ts`. All errors are caught and returned as JSON with proper status codes.
+
+## Database
+
+Schema in `prisma/schema.prisma`. After changes:
+1. `npx prisma migrate dev --name <description>`
+2. `npx prisma generate`
+3. Restart dev server
+
+## Constraints
+
+- All responses are JSON
+- Use transactions for multi-table mutations
+- Never expose internal error details in production

@@ -1,0 +1,87 @@
+# ADR-0001: Architecture Style and Stack
+
+## Status
+
+Accepted
+
+## Context
+
+{{ display_name }} needs a clear architectural foundation. The team evaluated several options for the overall system structure and technology stack.
+
+Key requirements:
+
+- Dashboard-style SaaS application
+- Multiple user roles and permissions
+{% if use_auth %}
+- Secure authentication and session management
+{% endif %}
+- Data visualization and reporting
+- Scalable to multiple feature domains
+
+## Decision
+
+We chose a **{{ architecture_style }}** architecture using the **{{ stack }}** stack.
+
+### Rationale
+
+{% if architecture_style == "monorepo" %}
+**Monorepo** was chosen because:
+
+- Shared code (types, UI components) is easy to maintain
+- Atomic changes across frontend and backend
+- Unified CI/CD pipeline
+- Single source of truth for dependencies
+{% elif architecture_style == "modular-monolith" %}
+**Modular Monolith** was chosen because:
+
+- Clear module boundaries without deployment complexity
+- Easier refactoring and code sharing
+- Simpler infrastructure for the current team size
+- Can evolve toward microservices if needed
+{% elif architecture_style == "microservices" %}
+**Microservices** was chosen because:
+
+- Independent deployment and scaling per service
+- Technology flexibility per service
+- Clear ownership boundaries
+- Fault isolation
+{% endif %}
+
+{% if use_ddd %}
+**Domain-Driven Design** patterns are adopted to:
+
+- Organize code around business concepts
+- Maintain clear bounded contexts
+- Support a ubiquitous language across the team
+{% endif %}
+
+## Consequences
+
+### Positive
+
+- Clear structure from day one
+- Shared conventions reduce onboarding time
+- Documentation-first approach supports AI-assisted development
+
+### Negative
+
+{% if architecture_style == "monorepo" %}
+- Monorepo tooling adds build complexity
+- All code in one repository can feel overwhelming initially
+{% elif architecture_style == "modular-monolith" %}
+- Module boundaries require discipline to maintain
+- Risk of accidentally coupling modules
+{% elif architecture_style == "microservices" %}
+- Higher infrastructure and deployment complexity
+- Distributed system challenges (network, consistency)
+{% endif %}
+
+### Risks
+
+- Architecture may need revisiting as the team or product grows
+- Initial setup is opinionated - future contributors should read this ADR
+
+## References
+
+- [Architecture documentation](../architecture.md)
+- [Ways of working](../ways-of-working.md)

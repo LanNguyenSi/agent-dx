@@ -1,0 +1,138 @@
+name: express-api
+display_name: "Express.js REST API"
+description: "TypeScript REST API with Express, Prisma, PostgreSQL, and AI agent context"
+version: "1.0.0"
+stack: "express-api"
+
+metadata:
+  architecture: "express-rest-api"
+
+variables:
+  - name: project_name
+    description: "Project slug (lowercase, hyphens)"
+    type: string
+    default: "my-api"
+    required: true
+
+  - name: display_name
+    description: "Human-readable project name"
+    type: string
+    default: "My API"
+    required: true
+
+  - name: description
+    description: "Short project description"
+    type: string
+    default: "A TypeScript REST API"
+    required: true
+
+  - name: db_provider
+    description: "Database provider"
+    type: choice
+    choices:
+      - "postgresql"
+      - "mysql"
+      - "sqlite"
+    default: "postgresql"
+    required: true
+
+  - name: auth_strategy
+    description: "Authentication approach"
+    type: choice
+    choices:
+      - "jwt"
+      - "api-key"
+      - "none"
+    default: "jwt"
+    required: true
+
+  - name: use_docker
+    description: "Include Docker deployment config"
+    type: boolean
+    default: true
+
+  - name: use_redis
+    description: "Include Redis for caching/sessions"
+    type: boolean
+    default: false
+
+  - name: use_websockets
+    description: "Include Socket.io for real-time features"
+    type: boolean
+    default: false
+
+  - name: use_queue
+    description: "Include background job queue (BullMQ)"
+    type: boolean
+    default: false
+
+  - name: ai_context
+    description: "Generate .ai/ folder for agent workflows"
+    type: boolean
+    default: true
+
+templates:
+  - source: README.md.j2
+    target: README.md
+
+  - source: package.json.j2
+    target: package.json
+
+  - source: tsconfig.json.j2
+    target: tsconfig.json
+
+  - source: Makefile.j2
+    target: Makefile
+
+  - source: docker-compose.dev.yml.j2
+    target: docker-compose.dev.yml
+    condition: use_docker
+
+  - source: Dockerfile.dev.j2
+    target: Dockerfile.dev
+    condition: use_docker
+
+  - source: .ai/AGENTS.md.j2
+    target: .ai/AGENTS.md
+    condition: ai_context
+
+  - source: .ai/ARCHITECTURE.md.j2
+    target: .ai/ARCHITECTURE.md
+    condition: ai_context
+
+  - source: .ai/TASKS.md.j2
+    target: .ai/TASKS.md
+    condition: ai_context
+
+  - source: .ai/DECISIONS.md.j2
+    target: .ai/DECISIONS.md
+    condition: ai_context
+
+  - source: docs/architecture.md.j2
+    target: docs/architecture.md
+
+  - source: docs/adrs/0001-architecture.md.j2
+    target: docs/adrs/0001-architecture.md
+
+static_files:
+  - source: .editorconfig
+    target: .editorconfig
+
+  - source: .gitignore
+    target: .gitignore
+
+  - source: .dockerignore
+    target: .dockerignore
+    condition: use_docker
+
+directories:
+  - src/routes
+  - src/services
+  - src/middleware
+  - src/models
+  - src/types
+  - src/utils
+  - prisma
+  - tests
+  - docs/adrs
+  - .ai

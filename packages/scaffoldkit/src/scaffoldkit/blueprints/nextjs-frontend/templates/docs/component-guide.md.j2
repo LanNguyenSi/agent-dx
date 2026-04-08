@@ -1,0 +1,352 @@
+# Component Guide: {{ display_name }}
+
+This guide defines how to build, structure, and test components in this project. Read this before writing any component.
+
+---
+
+## Component Categories
+
+### 1. UI Components (`src/components/ui/`)
+
+Generic, reusable primitives with no domain knowledge. They accept data and callbacks via props and render nothing beyond what they are given.
+
+**Examples:** `Button`, `Input`, `Badge`, `DataTable`, `Dialog`, `Spinner`, `Avatar`, `Tooltip`
+
+**Rules:**
+- No API calls, no store reads, no routing
+- Fully controlled by props
+- Must work in Storybook without any application context
+{% if use_storybook %}
+- Must have a `.stories.tsx` file
+{% endif %}
+- Must have explicit TypeScript props interface
+
+### 2. Layout Components (`src/components/layout/`)
+
+Structural chrome components that define the application shell.
+
+**Examples:** `AppHeader`, `Sidebar`, `PageShell`, `Breadcrumbs`, `MobileNav`
+
+**Rules:**
+- May read from the auth store or UI store
+- No business logic
+- Render slots (children) rather than knowing about specific pages
+
+### 3. Feature Components (`src/components/features/`)
+
+Domain-aware components that compose UI primitives and know about the application's data model.
+
+**Examples:** `UserTable`, `InvoiceCard`, `ProductSearchBar`, `OrderStatusBadge`
+
+**Rules:**
+- May call hooks (`useUsers`, `useProducts`)
+- May read from state stores
+- Should not make direct API calls - delegate to service hooks
+- Grouped by domain: `src/components/features/users/`, `src/components/features/products/`
+
+---
+
+## Props Interface Convention
+
+Every component has a named TypeScript interface for its props.
+
+```tsx
+// Naming: ComponentNameProps
+interface UserCardProps {
+  user: User;
+  onDelete?: (id: string) => void;
+  isLoading?: boolean;
+  className?: string; // always accept className for layout overrides
+}
+```
+
+### Prop naming rules
+
+| Pattern | Convention | Example |
+|---------|-----------|---------|
+| Boolean flags | `is` or `has` prefix | `isLoading`, `hasError`, `isDisabled` |
+| Event handlers | `on` prefix | `onClick`, `onSubmit`, `onClose` |
+| Render props / slots | `render` prefix or `children` | `renderActions`, `children` |
+| IDs and keys | descriptive | `userId`, `productId` |
+
+### Avoid
+
+- `data` as a prop name - be specific (`user`, `products`, `invoice`)
+- `info` or `item` - be specific
+- Optional booleans with no default - always define a `defaultProps` or destructure with `= false`
+
+---
+
+## Composing Components
+
+Prefer **composition** over complex prop drilling. Use children or render props for extensible slots.
+
+```tsx
+// Good: composition via children
+function Card({ children, className }: CardProps) {
+  return (
+    <div className={cn("rounded-lg border bg-card p-6", className)}>
+      {children}
+    </div>
+  );
+}
+
+function CardHeader({ children }: { children: React.ReactNode }) {
+  return <div className="mb-4 flex items-center justify-between">{children}</div>;
+}
+
+// Usage
+<Card>
+  <CardHeader>
+    <h2>Users</h2>
+    <Button>Add user</Button>
+  </CardHeader>
+  <UserTable users={users} />
+</Card>
+```
+
+---
+
+## Error Boundaries
+
+Wrap feature-level sections in `ErrorBoundary` components to prevent a single failing component from crashing the whole page.
+
+```tsx
+// src/components/ui/ErrorBoundary.tsx
+"use client";
+
+import { Component, type ReactNode } from "react";
+
+interface Props {
+  fallback: ReactNode;
+  children: ReactNode;
+}
+
+interface State {
+  hasError: boolean;
+}
+
+export class ErrorBoundary extends Component<Props, State> {
+  state: State = { hasError: false };
+
+  static getDerivedStateFromError(): State {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) return this.props.fallback;
+    return this.props.children;
+  }
+}
+```
+
+Use it in feature sections:
+
+```tsx
+<ErrorBoundary fallback={<SectionError message="Failed to load users" />}>
+  <Suspense fallback={<UserTableSkeleton />}>
+    <UserTable />
+  </Suspense>
+</ErrorBoundary>
+```
+
+---
+
+## Loading States
+
+Every component that fetches data must have a **skeleton loading state** - never use a spinner for content that has a known shape.
+
+```tsx
+// src/components/features/users/UserCard.skeleton.tsx
+export function UserCardSkeleton() {
+  return (
+    <div className="animate-pulse rounded-lg border bg-card p-6">
+      <div className="mb-3 h-4 w-1/3 rounded bg-muted" />
+      <div className="h-3 w-2/3 rounded bg-muted" />
+    </div>
+  );
+}
+```
+
+**Convention:** Skeleton components are colocated with their parent and named `ComponentName.skeleton.tsx`.
+
+{% if router == "app-router" %}
+For page-level loading, use `loading.tsx` in the route segment. For section-level loading, use `<Suspense>` directly.
+{% endif %}
+
+---
+
+## How to Create a New Component
+
+Follow these steps every time you add a new component.
+
+### Step 1: Decide the category
+
+- No domain knowledge, purely visual? -> `src/components/ui/`
+- Part of the application shell? -> `src/components/layout/`
+- Tied to a business concept? -> `src/components/features/<domain>/`
+
+### Step 2: Create the file(s)
+
+For a simple component:
+
+```
+src/components/features/users/
+├── UserCard.tsx
+├── UserCard.skeleton.tsx
+├── UserCard.test.tsx
+{% if use_storybook %}
+├── UserCard.stories.tsx
+{% endif %}
+```
+
+For a complex component with its own sub-components, use a directory:
+
+```
+src/components/features/users/UserCard/
+├── index.tsx               # re-exports the public API
+├── UserCard.tsx            # main component
+├── UserCardAvatar.tsx      # sub-component
+├── UserCard.skeleton.tsx
+├── UserCard.test.tsx
+{% if use_storybook %}
+└── UserCard.stories.tsx
+{% endif %}
+```
+
+### Step 3: Write the component
+
+```tsx
+// src/components/features/users/UserCard.tsx
+import type { User } from "@/types/user";
+import { Avatar } from "@/components/ui";
+import { cn } from "@/lib/utils";
+
+interface UserCardProps {
+  user: User;
+  onSelect?: (id: string) => void;
+  isSelected?: boolean;
+  className?: string;
+}
+
+export function UserCard({
+  user,
+  onSelect,
+  isSelected = false,
+  className,
+}: UserCardProps) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={isSelected}
+      onClick={() => onSelect?.(user.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onSelect?.(user.id);
+      }}
+      className={cn(
+        "flex cursor-pointer items-center gap-3 rounded-lg border p-4 transition-colors",
+        isSelected ? "border-primary bg-primary/5" : "hover:bg-muted",
+        className
+      )}
+    >
+      <Avatar src={user.avatarUrl} alt={user.displayName} />
+      <div>
+        <p className="font-medium">{user.displayName}</p>
+        <p className="text-sm text-muted-foreground">{user.email}</p>
+      </div>
+    </div>
+  );
+}
+```
+
+### Step 4: Write the test
+
+```tsx
+// src/components/features/users/UserCard.test.tsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { UserCard } from "./UserCard";
+import { mockUser } from "@/test/factories/user";
+
+describe("UserCard", () => {
+  it("renders the user display name and email", () => {
+    render(<UserCard user={mockUser} />);
+    expect(screen.getByText(mockUser.displayName)).toBeInTheDocument();
+    expect(screen.getByText(mockUser.email)).toBeInTheDocument();
+  });
+
+  it("calls onSelect with the user id when clicked", async () => {
+    const onSelect = vi.fn();
+    render(<UserCard user={mockUser} onSelect={onSelect} />);
+    await userEvent.click(screen.getByRole("button"));
+    expect(onSelect).toHaveBeenCalledWith(mockUser.id);
+  });
+
+  it("marks the card as pressed when isSelected is true", () => {
+    render(<UserCard user={mockUser} isSelected />);
+    expect(screen.getByRole("button")).toHaveAttribute("aria-pressed", "true");
+  });
+});
+```
+
+### Step 5: Export from barrel
+
+```ts
+// src/components/features/users/index.ts
+export { UserCard } from "./UserCard";
+export { UserCardSkeleton } from "./UserCard.skeleton";
+```
+
+{% if use_storybook %}
+### Step 6: Write the story
+
+```tsx
+// src/components/features/users/UserCard.stories.tsx
+import type { Meta, StoryObj } from "@storybook/react";
+import { UserCard } from "./UserCard";
+import { mockUser } from "@/test/factories/user";
+
+const meta: Meta<typeof UserCard> = {
+  title: "Features/Users/UserCard",
+  component: UserCard,
+  args: { user: mockUser },
+};
+export default meta;
+
+type Story = StoryObj<typeof UserCard>;
+
+export const Default: Story = {};
+export const Selected: Story = { args: { isSelected: true } };
+export const WithoutAvatar: Story = {
+  args: { user: { ...mockUser, avatarUrl: null } },
+};
+```
+
+{% endif %}
+
+---
+
+## Accessibility Checklist for Components
+
+Before marking a component as done, verify:
+
+- [ ] Interactive elements use semantic HTML (`<button>`, `<a>`, `<input>`) not `<div onClick>`
+- [ ] If a non-semantic element must be interactive, it has `role`, `tabIndex`, and keyboard handler
+- [ ] Icons without adjacent text have `aria-label` or `aria-hidden="true"`
+- [ ] Error messages are associated with their input via `aria-describedby`
+- [ ] Focus styles are visible (do not use `outline-none` without a custom replacement)
+- [ ] Colour is not the only indicator of state (also use text, icon, or shape)
+- [ ] Dynamic content changes are announced with `aria-live` where appropriate
+
+---
+
+## What NOT to Do
+
+- Do not use `any` in props interfaces - use `unknown` and narrow the type
+- Do not read directly from `localStorage` in a component - use a hook or store
+- Do not `console.log` in production components - use a logger utility
+- Do not put business logic in UI components
+- Do not create a new `fetch` call inside a component - use a service function
+- Do not use inline styles (`style={% raw %}{{ ... }}{% endraw %}`) - use {{ styling }} classes
+- Do not skip error and loading states - they are part of the DoD

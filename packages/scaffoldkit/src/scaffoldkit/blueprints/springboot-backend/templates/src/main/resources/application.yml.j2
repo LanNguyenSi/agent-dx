@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: {{ project_name }}
+  datasource:
+{% if database == "postgresql" -%}
+    url: jdbc:postgresql://localhost:5432/{{ project_name | replace('-', '_') }}
+    driver-class-name: org.postgresql.Driver
+{% elif database == "mysql" -%}
+    url: jdbc:mysql://localhost:3306/{{ project_name | replace('-', '_') }}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+{% else -%}
+    url: jdbc:mariadb://localhost:3306/{{ project_name | replace('-', '_') }}
+    driver-class-name: org.mariadb.jdbc.Driver
+{% endif -%}
+    username: app
+    password: change-me
+
+server:
+  port: 8080

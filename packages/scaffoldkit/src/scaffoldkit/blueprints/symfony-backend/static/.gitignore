@@ -1,0 +1,66 @@
+###> symfony/framework-bundle ###
+/.env.local
+/.env.local.php
+/.env.*.local
+/config/secrets/prod/prod.decrypt.private.php
+/public/bundles/
+/var/
+/vendor/
+###< symfony/framework-bundle ###
+
+###> doctrine/doctrine-bundle ###
+/config/jwt/*.pem
+###< doctrine/doctrine-bundle ###
+
+###> phpunit ###
+/phpunit.xml
+###< phpunit ###
+
+###> PHP-CS-Fixer ###
+/.php-cs-fixer.cache
+###< PHP-CS-Fixer ###
+
+###> PHPStan ###
+/phpstan-baseline.neon.dist
+###< PHPStan ###
+
+###> Rector ###
+/rector-cache/
+###< Rector ###
+
+###> composer ###
+/auth.json
+###< composer ###
+
+###> Docker ###
+docker-compose.override.yml
+###< Docker ###
+
+###> IDE ###
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*.iml
+###< IDE ###
+
+###> OS ###
+.DS_Store
+Thumbs.db
+###< OS ###
+
+###> Logs and cache ###
+*.log
+/var/log/
+/var/cache/
+/var/sessions/
+###< Logs and cache ###
+
+###> Coverage ###
+/var/coverage/
+/coverage/
+###< Coverage ###
+
+###> Behat ###
+/build/
+###< Behat ###

@@ -1,0 +1,478 @@
+# API Conventions: {{ display_name }}
+
+This document defines the conventions all API endpoints in **{{ display_name }}** must follow. Consistency here reduces consumer confusion and makes the API predictable.
+
+---
+
+## URL Structure
+
+### Base URL
+
+All API routes are prefixed with `/api/v1`. Versioning is path-based.
+
+```
+https://api.example.com/api/v1/...
+```
+
+### Resource Naming
+
+| Convention | Example |
+|------------|---------|
+| Plural nouns for collections | `/api/v1/users` |
+| Singular noun for a resource | `/api/v1/users/{id}` |
+| Kebab-case for multi-word resources | `/api/v1/api-keys` |
+| Nested resources for ownership | `/api/v1/users/{userId}/orders` |
+| Actions as sub-resources (not verbs in URL) | `/api/v1/users/{id}/password-reset` (POST) |
+
+### HTTP Methods
+
+| Method | Semantics | Success Status |
+|--------|-----------|---------------|
+| `GET` | Read a resource or collection | 200 |
+| `POST` | Create a new resource | 201 |
+| `PUT` | Full replacement of a resource | 200 |
+| `PATCH` | Partial update of a resource | 200 |
+| `DELETE` | Remove a resource | 204 |
+
+Never use `GET` for operations that mutate state. Never use `POST` for a read if a `GET` with query parameters will do.
+
+---
+
+## Request Format
+
+### Content-Type
+
+All requests with a body must include:
+
+```
+Content-Type: application/json
+```
+
+{% if api_style == "api-platform" %}
+API Platform also accepts `application/ld+json` and `application/vnd.api+json`. Default to `application/json` for simplicity unless JSON-LD or JSON:API features are required.
+
+{% endif %}
+### Request Body
+
+Use camelCase for JSON property names:
+
+```json
+{
+    "email": "user@example.com",
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "roleIds": [1, 2]
+}
+```
+
+### Query Parameters
+
+Use camelCase for query parameter names:
+
+```
+GET /api/v1/users?page=1&itemsPerPage=25&orderBy=createdAt&orderDir=desc
+GET /api/v1/orders?status=pending&createdAfter=2024-01-01
+```
+
+---
+
+## Response Format
+
+### Success Response
+
+For single resources:
+
+```json
+{
+    "id": "018e1234-5678-7abc-def0-1234567890ab",
+    "email": "user@example.com",
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "createdAt": "2024-03-15T10:30:00+00:00",
+    "updatedAt": "2024-03-15T10:30:00+00:00"
+}
+```
+
+For collections:
+
+```json
+{
+    "items": [...],
+    "total": 142,
+    "page": 1,
+    "itemsPerPage": 25
+}
+```
+
+{% if api_style == "api-platform" %}
+API Platform's default collection format includes `hydra:member`, `hydra:totalItems`, and pagination links. Use this unless the consumer explicitly needs a plain JSON envelope.
+
+{% endif %}
+
+### Date and Time Format
+
+All timestamps use **ISO 8601** with timezone offset:
+
+```
+"createdAt": "2024-03-15T10:30:00+00:00"
+```
+
+- Always include timezone information
+- Store and return UTC; let consumers convert to local time
+- Date-only values use `YYYY-MM-DD` format: `"birthDate": "1990-05-20"`
+
+### Identifiers
+
+Primary keys exposed in the API are **UUIDs** (version 7 preferred for sortability):
+
+```
+"id": "018e1234-5678-7abc-def0-1234567890ab"
+```
+
+Never expose database auto-increment integers as external IDs. Internal integer IDs remain in the database only.
+
+---
+
+## Error Responses
+
+All error responses follow RFC 7807 (Problem Details for HTTP APIs):
+
+```json
+{
+    "type": "https://api.example.com/errors/validation",
+    "title": "Validation Failed",
+    "status": 422,
+    "detail": "The request data is invalid.",
+    "violations": [
+        {
+            "propertyPath": "email",
+            "message": "This value is not a valid email address.",
+            "code": "bd79c0ab-ddba-46cc-a703-a7a4b08de310"
+        },
+        {
+            "propertyPath": "password",
+            "message": "This value is too short. It should have 8 characters or more.",
+            "code": "9ff3fdc4-b214-49db-8718-39c315e33d45"
+        }
+    ]
+}
+```
+
+### Standard Error Types
+
+| HTTP Status | `type` slug | When to use |
+|-------------|-------------|-------------|
+| 400 | `bad-request` | Malformed JSON, missing required header |
+| 401 | `unauthorized` | Missing or invalid authentication credentials |
+| 403 | `forbidden` | Authenticated but not allowed to access this resource |
+| 404 | `not-found` | Resource does not exist |
+| 409 | `conflict` | Duplicate resource (e.g., email already in use) |
+| 422 | `validation` | Request body fails validation constraints |
+| 429 | `rate-limit-exceeded` | Too many requests |
+| 500 | `internal-error` | Unexpected server error (no detail exposed to client) |
+
+**Rule:** Never expose stack traces, SQL errors, or internal paths in error responses in `prod` environment.
+
+---
+
+## Validation
+
+Symfony Validator is the canonical validation layer. Constraints live on:
+
+{% if api_style == "api-platform" %}
+1. The API resource class (using `#[Assert\...]` attributes)
+2. DTO classes for write operations (preferred for complex input shapes)
+{% else %}
+1. Entity classes for persistence-level constraints
+2. DTO/Form classes for HTTP input validation (preferred; keep entities clean of HTTP concerns)
+{% endif %}
+
+### Common Constraints
+
+```php
+use Symfony\Component\Validator\Constraints as Assert;
+
+final class CreateUserInput
+{
+    #[Assert\NotBlank]
+    #[Assert\Email(mode: 'html5')]
+    public string $email;
+
+    #[Assert\NotBlank]
+    #[Assert\Length(min: 8, max: 72)]
+    public string $password;
+
+    #[Assert\NotBlank]
+    #[Assert\Length(max: 100)]
+    public string $firstName;
+
+    #[Assert\Choice(choices: ['admin', 'user', 'viewer'])]
+    public string $role = 'user';
+}
+```
+
+Validation errors are automatically formatted as 422 responses with the `violations` structure above.
+
+---
+
+## Serialization Groups
+
+{% if api_style == "api-platform" %}
+API Platform uses Symfony Serializer groups declared on the `#[ApiResource]` attribute.
+
+{% endif %}
+Standard group naming convention:
+
+| Group | Purpose |
+|-------|---------|
+| `{resource}:read` | Default GET response (single resource) |
+| `{resource}:list` | Slimmer subset for collection responses (omit large fields) |
+| `{resource}:write` | Accepted on POST/PUT/PATCH |
+| `{resource}:admin` | Additional fields visible only to admins |
+| `{resource}:embed` | Minimal fields when this resource is embedded in another |
+
+```php
+use Symfony\Component\Serializer\Annotation\Groups;
+
+class User
+{
+    #[Groups(['user:read', 'user:list', 'user:embed'])]
+    public string $id;
+
+    #[Groups(['user:read', 'user:list'])]
+    public string $email;
+
+    #[Groups(['user:read'])]
+    public \DateTimeImmutable $createdAt;
+
+    #[Groups(['user:admin'])]
+    public string $internalNotes;
+
+    // Write-only: never exposed in responses
+    #[Groups(['user:write'])]
+    public string $password;
+}
+```
+
+---
+
+## Pagination
+
+### Request Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | integer | 1 | Page number (1-indexed) |
+| `itemsPerPage` | integer | 25 | Items per page |
+
+Maximum `itemsPerPage`: 100. Requests for more than 100 items per page return a 400 error.
+
+### Response Structure
+
+```json
+{
+    "items": [...],
+    "total": 142,
+    "page": 2,
+    "itemsPerPage": 25,
+    "totalPages": 6
+}
+```
+
+{% if api_style == "api-platform" %}
+API Platform also provides `hydra:view` with `hydra:first`, `hydra:last`, `hydra:previous`, `hydra:next` link relations in JSON-LD responses.
+
+{% endif %}
+
+---
+
+## Filtering and Sorting
+
+### Filtering
+
+Filters are passed as query parameters using the field name:
+
+```
+GET /api/v1/users?status=active&role=admin
+GET /api/v1/orders?createdAfter=2024-01-01&createdBefore=2024-12-31
+GET /api/v1/products?name=widget   # partial match
+```
+
+{% if api_style == "api-platform" %}
+Use API Platform's built-in filters:
+
+```php
+#[ApiFilter(SearchFilter::class, properties: [
+    'email' => 'exact',
+    'firstName' => 'partial',
+    'status' => 'exact',
+])]
+#[ApiFilter(DateFilter::class, properties: ['createdAt'])]
+#[ApiFilter(RangeFilter::class, properties: ['price'])]
+#[ApiFilter(BooleanFilter::class, properties: ['isActive'])]
+```
+
+{% endif %}
+
+### Sorting
+
+```
+GET /api/v1/users?orderBy=createdAt&orderDir=desc
+GET /api/v1/users?orderBy=lastName&orderDir=asc
+```
+
+Only explicitly whitelisted fields can be used for sorting. Attempting to sort by a non-whitelisted field returns 400.
+
+---
+
+## Versioning Strategy
+
+Versioning is **path-based**: `/api/v1/`, `/api/v2/`.
+
+Rules:
+
+1. **Never break a deployed version.** A v1 endpoint remains stable for its entire support window.
+2. **Additive changes are non-breaking:** Adding new optional response fields or new optional request parameters does not require a version bump.
+3. **Breaking changes require a new version:** Removing fields, changing field types, changing required fields, or altering semantics requires `/api/v2/`.
+4. **Run versions in parallel** during transition. The old version is deprecated (via `Deprecation` response header) for at least one major release cycle.
+5. Document the deprecation in `docs/adrs/` when beginning the transition.
+
+---
+
+{% if use_auth %}
+## Authentication in API Requests
+
+{% if auth_method == "jwt" %}
+All protected endpoints require a JWT in the `Authorization` header:
+
+```
+Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJz...
+```
+
+Obtaining a token:
+
+```
+POST /api/auth/token
+Content-Type: application/json
+
+{
+    "email": "user@example.com",
+    "password": "s3cr3t"
+}
+```
+
+Response:
+
+```json
+{
+    "token": "eyJhbGciOiJSUzI1NiJ9...",
+    "refreshToken": "a1b2c3d4...",
+    "expiresIn": 3600
+}
+```
+
+Refresh:
+
+```
+POST /api/auth/token/refresh
+Content-Type: application/json
+
+{
+    "refreshToken": "a1b2c3d4..."
+}
+```
+
+{% elif auth_method == "api-key" %}
+All protected endpoints require an API key header:
+
+```
+X-API-Key: sk_live_abc123...
+```
+
+Keys are issued per client and can be revoked independently. Rate limits are applied per key.
+
+{% elif auth_method == "oauth2" %}
+All protected endpoints require a Bearer token obtained via OAuth2:
+
+```
+Authorization: Bearer <access_token>
+```
+
+Consult the OAuth2 authorization server documentation for token acquisition flows.
+
+{% endif %}
+
+### Unauthenticated Responses
+
+Missing credentials return `401 Unauthorized`. Insufficient permissions return `403 Forbidden`. Never return `404` to hide the existence of a resource from unauthorized users unless the security model explicitly requires it.
+
+{% endif %}
+
+---
+
+## Rate Limiting
+
+Rate limits are enforced per authenticated identity (user ID or API key).
+
+| Tier | Limit |
+|------|-------|
+| Default | 300 requests / minute |
+| Write operations (POST/PUT/PATCH/DELETE) | 60 requests / minute |
+| Auth endpoints | 10 requests / minute |
+
+Rate limit information is included in every response:
+
+```
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 297
+X-RateLimit-Reset: 1710499200
+```
+
+When the limit is exceeded, the response is `429 Too Many Requests` with a `Retry-After` header.
+
+---
+
+## CORS Configuration
+
+CORS is configured via `nelmio/cors-bundle` (`config/packages/nelmio_cors.yaml`):
+
+```yaml
+nelmio_cors:
+    defaults:
+        allow_credentials: false
+        allow_origin: []
+        allow_headers: ['Content-Type', 'Authorization']
+        allow_methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+        expose_headers: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'Link']
+        max_age: 3600
+
+    paths:
+        '^/api/':
+            allow_origin: ['%env(CORS_ALLOW_ORIGIN)%']
+            allow_headers: ['*']
+            allow_methods: ['*']
+```
+
+Permitted origins are configured per environment via the `CORS_ALLOW_ORIGIN` environment variable. In `prod`, this must be an explicit list, not `*`.
+
+---
+
+## Idempotency
+
+For write operations that may be retried (payment processing, email sending, import jobs), clients should pass an idempotency key:
+
+```
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+```
+
+The server stores the result for 24 hours and returns the same response on repeated requests with the same key. Idempotency keys are UUIDs generated by the client.
+
+---
+
+## Deprecation
+
+Deprecated endpoints and fields are signaled via:
+
+1. **Response header:** `Deprecation: true` and `Sunset: Sat, 01 Jan 2026 00:00:00 GMT`
+2. **Documentation:** The ADR recording the deprecation is linked from the OpenAPI spec
+3. **Changelog:** The deprecation is listed in `CHANGELOG.md` with the version and planned removal date

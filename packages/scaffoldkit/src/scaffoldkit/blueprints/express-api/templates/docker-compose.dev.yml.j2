@@ -1,0 +1,38 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "4001:4001"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://{{ project_name }}:{{ project_name }}@db:5432/{{ project_name }}
+{% if use_redis %}      - REDIS_URL=redis://redis:6379
+{% endif %}    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - db
+{% if use_redis %}      - redis
+{% endif %}
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: {{ project_name }}
+      POSTGRES_USER: {{ project_name }}
+      POSTGRES_PASSWORD: {{ project_name }}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+{% if use_redis %}
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+{% endif %}
+
+volumes:
+  pgdata:

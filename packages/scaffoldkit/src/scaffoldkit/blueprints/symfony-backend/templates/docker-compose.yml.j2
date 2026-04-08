@@ -1,0 +1,122 @@
+services:
+  php:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    working_dir: /app
+    volumes:
+      - ./:/app
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: dev
+{% if database == "postgresql" %}
+      DATABASE_URL: postgresql://app:password@postgres:5432/{{ project_name }}?serverVersion=15&charset=utf8
+{% elif database == "mysql" %}
+      DATABASE_URL: mysql://app:password@mysql:3306/{{ project_name }}?serverVersion=8.0&charset=utf8mb4
+{% elif database == "mariadb" %}
+      DATABASE_URL: mysql://app:password@mariadb:3306/{{ project_name }}?serverVersion=10.11-MariaDB&charset=utf8mb4
+{% endif %}
+{% if use_rabbitmq %}
+      MESSENGER_TRANSPORT_DSN: amqp://guest:guest@rabbitmq:5672/%2f/messages
+{% endif %}
+{% if use_redis %}
+      REDIS_URL: redis://redis:6379
+{% endif %}
+    depends_on:
+{% if database == "postgresql" %}
+      postgres:
+        condition: service_healthy
+{% elif database == "mysql" %}
+      mysql:
+        condition: service_healthy
+{% elif database == "mariadb" %}
+      mariadb:
+        condition: service_healthy
+{% endif %}
+{% if use_redis %}
+      redis:
+        condition: service_started
+{% endif %}
+{% if use_rabbitmq %}
+      rabbitmq:
+        condition: service_started
+{% endif %}
+{% if database == "postgresql" %}
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: {{ project_name }}
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d {{ project_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{% elif database == "mysql" %}
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: {{ project_name }}
+      MYSQL_USER: app
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{% elif database == "mariadb" %}
+
+  mariadb:
+    image: mariadb:10.11
+    environment:
+      MARIADB_DATABASE: {{ project_name }}
+      MARIADB_USER: app
+      MARIADB_PASSWORD: password
+      MARIADB_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -proot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+{% endif %}
+{% if use_redis %}
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+{% endif %}
+{% if use_rabbitmq %}
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+{% endif %}
+
+volumes:
+{% if database == "postgresql" %}
+  postgres-data:
+{% elif database == "mysql" %}
+  mysql-data:
+{% elif database == "mariadb" %}
+  mariadb-data:
+{% endif %}

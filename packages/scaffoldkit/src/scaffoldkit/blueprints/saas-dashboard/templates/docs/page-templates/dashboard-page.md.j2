@@ -1,0 +1,88 @@
+# Page Template: Dashboard
+
+> Reference template for building dashboard/overview pages in {{ display_name }}.
+
+## Purpose
+
+The dashboard is the primary landing page after login. It provides an at-a-glance overview of key metrics, recent activity, and quick actions.
+
+## Layout Structure
+
+```
+┌──────────────────────────────────────────────────┐
+│  Header / Navigation Bar                          │
+├──────────┬───────────────────────────────────────┤
+│          │  Page Title + Actions                  │
+│          ├───────────┬───────────┬───────────────┤
+│  Sidebar │  KPI Card │  KPI Card │  KPI Card     │
+│          ├───────────┴───────────┴───────────────┤
+│  (nav)   │  Main Chart / Visualization            │
+│          ├───────────────────┬───────────────────┤
+│          │  Recent Activity  │  Quick Actions     │
+│          │  (table/list)     │  (shortcuts)       │
+└──────────┴───────────────────┴───────────────────┘
+```
+
+## Components
+
+### KPI Cards (Top Row)
+
+- 3-4 key performance indicators
+- Each card: metric label, current value, trend indicator (up/down/neutral)
+- Click navigates to detail view
+
+### Main Visualization
+
+- Primary chart showing the most important trend
+- Time range selector (7d / 30d / 90d)
+- Responsive sizing
+
+### Recent Activity
+
+- Table or list of recent events/actions
+- Columns: timestamp, type, summary, actor
+- Paginated or virtualized for performance
+- Row click navigates to detail page
+
+### Quick Actions
+
+- 3-5 most common actions as buttons/cards
+- Examples: "Create New...", "View Reports", "Invite Team Member"
+
+## States
+
+| State | Behavior |
+|-------|----------|
+| Loading | Skeleton placeholders for each section |
+| Empty | Welcome message with setup steps |
+| Error | Error banner with retry action |
+| Loaded | Full dashboard with data |
+
+## Design Notes ({{ design_style }})
+
+{% if design_style == "minimal-clean" %}
+- White background, subtle gray borders between sections
+- Single accent color for interactive elements
+- Generous padding between cards
+{% elif design_style == "corporate-professional" %}
+- Light gray background, white content cards with shadow
+- Blue accent for primary actions
+- Dense but organized information layout
+{% elif design_style == "playful-modern" %}
+- Colorful gradient header area
+- Rounded cards with colorful icons
+- Animated number counters for KPIs
+{% endif %}
+
+## Data Requirements
+
+- Endpoint: `GET /api/dashboard/summary`
+- Response includes: KPIs, chart data, recent activity
+- Cache: 60 seconds (dashboard is eventually consistent)
+
+## Accessibility
+
+- KPI cards are keyboard-navigable
+- Chart has text alternative / data table fallback
+- Color is not the only indicator for trends (use icons)
+- Screen reader announces dynamic updates

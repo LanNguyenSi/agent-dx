@@ -1,0 +1,14 @@
+name: Tag Image
+description: Tags and pushes a previously built container image
+inputs:
+  image-name:
+    description: Fully qualified image reference without the tag
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Tag and push image
+      shell: bash
+      run: |
+        docker tag "${{ inputs.image-name }}:${{ github.sha }}" "${{ inputs.image-name }}:${{ github.ref_name }}"
+        docker push "${{ inputs.image-name }}:${{ github.ref_name }}"

@@ -1,0 +1,373 @@
+# Ways of Working: {{ display_name }}
+
+## Definition of Done
+
+A feature or fix is considered done when **all** of the following are true:
+
+- [ ] Code is written and compiles without errors
+- [ ] PHPStan passes at the configured level (no suppressed errors without a comment explaining why)
+- [ ] PHP-CS-Fixer reports no violations
+- [ ] All tests pass (`php bin/phpunit` returns green)
+- [ ] New behavior has tests matching the **{{ test_strategy }}** strategy
+- [ ] If an entity was added or modified: a migration has been generated and reviewed
+- [ ] If a public API endpoint was added or changed: `docs/api-conventions.md` or the OpenAPI spec is updated
+- [ ] If an architectural decision was made: an ADR is written in `docs/adrs/`
+- [ ] The PR description explains **what** changed, **why**, and how it was tested
+- [ ] At least one team member has reviewed and approved the PR
+
+## Coding Standards
+
+### PHP Style
+
+This project follows **PSR-12** enforced by PHP-CS-Fixer. The configuration lives in `.php-cs-fixer.dist.php`.
+
+Key rules beyond PSR-12:
+
+- `declare(strict_types=1);` in every PHP file
+- `final` on every class that is not explicitly designed for extension
+- `readonly` on constructor-promoted properties where the property is never reassigned
+- No `public` properties on entities or services (use getters for entities, constructor injection for services)
+- Explicit return types on every method, including `void`
+- No `mixed` type without a PHPDoc explanation
+
+Run the fixer locally before committing:
+
+```bash
+vendor/bin/php-cs-fixer fix
+```
+
+### Static Analysis
+
+PHPStan is configured in `phpstan.neon` at **level 8** (strict). Baseline suppressions (`phpstan-baseline.neon`) are allowed only for third-party code you cannot control.
+
+```bash
+vendor/bin/phpstan analyse
+```
+
+PHPStan level ladder:
+
+| Level | What it checks |
+|-------|---------------|
+| 6 | Basic type errors |
+| 7 | Strict nullable checks |
+| 8 | Template types, callable shapes |
+| 9 | Strict mixed usage |
+
+Target is level 8. Do not downgrade without a team decision and an ADR.
+
+### Rector
+
+Rector is configured in `rector.php` and is used to:
+
+- Apply PHP {{ php_version }} syntax upgrades automatically
+- Enforce Symfony-specific best practices
+- Remove deprecated API usage
+
+Run Rector in dry-run before any major upgrade:
+
+```bash
+vendor/bin/rector process --dry-run
+vendor/bin/rector process
+```
+
+## Doctrine Conventions
+
+These rules are **non-negotiable** to keep schema history clean:
+
+1. **Always generate migrations:** Use `php bin/console make:migration`. Never write a migration by hand.
+2. **Never edit a committed migration:** Once a migration has been applied to `main` or any deployed environment, it is immutable. Create a new migration to fix mistakes.
+3. **Never use `doctrine:schema:update --force`:** This bypasses migration history. It is only acceptable in local dev reset scenarios.
+4. **One migration per logical change:** Don't bundle multiple unrelated schema changes in a single migration.
+5. **Add a docblock to every migration:** Describe what schema change it makes and why.
+6. **Review generated SQL:** Always inspect the generated migration before committing. Auto-generated SQL can sometimes produce unexpected `DROP` statements.
+
+### Entity Rules
+
+- Use PHP 8 attributes (`#[ORM\...]`) for all Doctrine mapping
+- Use `#[ORM\GeneratedValue(strategy: 'SEQUENCE')]` for PostgreSQL or `IDENTITY` for MySQL
+- Prefer UUIDs (`Symfony\Component\Uid\Uuid`) for public-facing IDs
+- Use Doctrine collections (`ArrayCollection`) for relationships, never plain arrays
+- Do not use `cascade: ['remove']` without understanding the full graph; prefer explicit deletion in a service
+
+## Dependency Injection Rules
+
+- All service dependencies are injected via the constructor
+- Never call `$this->container->get(...)` or use `ContainerInterface` outside of absolutely necessary bridge code
+- Never use `ServiceLocator` unless implementing a plugin system
+- Tag services explicitly when using abstract service definitions
+- Use `#[Autowire]` attribute for named services or parameters
+
+```php
+// Correct
+public function __construct(
+    private readonly UserRepositoryInterface $users,
+    #[Autowire('%app.max_login_attempts%')]
+    private readonly int $maxLoginAttempts,
+) {}
+
+// Wrong - never do this
+$this->users = $container->get('App\Repository\UserRepository');
+```
+
+## Routing and Controller Rules
+
+- Use PHP attributes (`#[Route]`) for all routing; no YAML or XML route files for application routes
+- Controllers are `final` classes
+- Controllers extend nothing (or `AbstractController` only when Symfony's shortcut methods are needed)
+- One controller per resource (e.g., `UserController`, `OrderController`)
+- Controller methods should not exceed ~20 lines; extract to services if they grow
+- All API controllers return `JsonResponse`; never render Twig in API controllers
+
+## Branching Strategy
+
+We use **trunk-based development** with short-lived feature branches.
+
+### Branch Naming
+
+```
+feature/<ticket-id>-<short-description>
+fix/<ticket-id>-<short-description>
+chore/<description>
+docs/<description>
+refactor/<description>
+```
+
+### Workflow
+
+1. Create a branch from `main`
+2. Make small, focused commits (aim for one logical change per commit)
+3. Open a Pull Request early; mark as draft if work in progress
+4. Self-review the diff before requesting reviews
+5. Request review when ready
+6. Squash-merge into `main` after approval
+7. Delete the branch after merge
+
+## Pull Request Conventions
+
+### PR Title
+
+Use conventional commit format:
+
+```
+feat(users): add email verification endpoint
+fix(auth): refresh token not rotating on use
+refactor(order): extract fulfilment logic to service
+chore(deps): upgrade symfony/* to 7.2.x
+docs(adr): record decision on JWT key rotation strategy
+```
+
+### PR Description Template
+
+```markdown
+## What
+Brief summary of the change.
+
+## Why
+Ticket reference or business reason.
+
+## How
+Non-obvious implementation details (skip if straightforward).
+
+## Testing
+- [ ] Unit tests added for ...
+- [ ] Integration test covers ...
+- [ ] Tested manually via curl / Postman: ...
+
+## Migration
+- [ ] No migration required
+- [ ] Migration added: `NNNN_description`
+
+## Checklist
+- [ ] PHPStan passes
+- [ ] PHP-CS-Fixer passes
+- [ ] Tests pass
+```
+
+### Review Expectations
+
+- Review within 1 business day
+- Focus on correctness, clarity, and maintainability
+- Approve with minor inline comments rather than blocking on style nits
+- Use "Request changes" only for correctness issues or clear violations of these conventions
+- Do not merge your own PR (exception: critical hotfixes with post-hoc review)
+
+## Testing Expectations
+
+Strategy: **{{ test_strategy }}**
+
+{% if test_strategy == "phpunit-only" %}
+### PHPUnit
+
+- Every service class with business logic has unit tests in `tests/Unit/`
+- Every repository has at least one integration test in `tests/Integration/`
+- Every API endpoint has a functional test in `tests/Functional/`
+- Coverage target: **>= 80%** on `src/` (measured by `php bin/phpunit --coverage-text`)
+- Do not use `@covers` annotations to game coverage; let it reflect real usage
+- Use `createMock()` for simple mocks; use Prophecy for complex interaction assertions
+- Database integration tests use transaction rollback via `Doctrine\DBAL\Connection::beginTransaction` / rollback in `tearDown`
+
+Test naming convention:
+
+```
+testMethodName_scenarioDescription_expectedOutcome
+// or for Pest/describe style:
+it('returns 401 when token is expired')
+```
+
+Example:
+
+```php
+public function testCreateUser_withValidData_persistsAndReturns201(): void
+public function testCreateUser_withDuplicateEmail_returns422(): void
+public function testCreateUser_withoutAuthentication_returns401(): void
+```
+
+{% elif test_strategy == "phpunit-and-behat" %}
+### PHPUnit + Behat
+
+**PHPUnit** covers unit and integration layers:
+- Every service with business logic has unit tests
+- Every repository has integration tests
+- Coverage target: >= 80% on `src/`
+
+**Behat** covers the HTTP API behavior:
+- Every user-facing API operation has a Behat scenario in `features/`
+- Scenarios are written in business language (Given/When/Then)
+- Step definitions live in `features/bootstrap/ApiContext.php`
+- Use Behat contexts to abstract HTTP calls: `Given I am authenticated`, `When I send POST to "/api/users"`
+- Avoid testing implementation details in Behat; test observable HTTP behavior
+
+```gherkin
+Feature: User registration
+  Background:
+    Given the database is clean
+
+  Scenario: Successful registration
+    When I send a POST request to "/api/v1/register" with:
+      | email    | newuser@example.com |
+      | password | S3cur3P@ssword       |
+    Then the response status code should be 201
+    And the JSON response should contain "id"
+
+  Scenario: Duplicate email
+    Given a user exists with email "existing@example.com"
+    When I send a POST request to "/api/v1/register" with:
+      | email    | existing@example.com |
+      | password | S3cur3P@ssword        |
+    Then the response status code should be 422
+```
+
+{% elif test_strategy == "pest" %}
+### Pest
+
+- Use `describe()` blocks to group tests by class or feature
+- Use `it()` for individual test cases
+- Use `beforeEach()` for shared setup
+- Coverage target: >= 80% on `src/`
+- Use Pest's `expect()` API for assertions; avoid raw PHPUnit assertion methods
+
+```php
+describe('UserService', function () {
+    beforeEach(function () {
+        $this->userRepo = Mockery::mock(UserRepositoryInterface::class);
+        $this->service = new UserService($this->userRepo);
+    });
+
+    it('throws when email is already taken', function () {
+        $this->userRepo->shouldReceive('findByEmail')->andReturn(new User());
+        expect(fn () => $this->service->register('taken@example.com', 'password'))
+            ->toThrow(EmailAlreadyTakenException::class);
+    });
+});
+```
+
+{% endif %}
+
+## Architecture Decision Records (ADRs)
+
+Significant decisions are documented in `docs/adrs/`.
+
+### When to Write an ADR
+
+- Introducing a new Composer dependency
+- Choosing between multiple valid implementation approaches
+- Changing the authentication strategy
+- Adding a new architectural layer or pattern
+- Deprecating or removing an existing pattern
+
+### ADR Format
+
+```markdown
+# ADR-NNNN: Title
+
+## Status
+Proposed | Accepted | Deprecated | Superseded by ADR-XXXX
+
+## Context
+What is the problem or situation that requires a decision?
+
+## Decision
+What did we decide and how does it work?
+
+## Consequences
+
+### Positive
+- ...
+
+### Negative
+- ...
+
+### Risks
+- ...
+```
+
+ADR filenames: `NNNN-kebab-case-title.md` (e.g., `0002-use-ulid-as-primary-key.md`)
+
+## Documentation Expectations
+
+| Document | Update when |
+|----------|-------------|
+| `README.md` | Setup steps change, new environment variables added |
+| `docs/architecture.md` | New layers, patterns, or integration points added |
+| `docs/api-conventions.md` | New endpoint conventions established |
+| `docs/adrs/` | Any significant decision is made |
+| OpenAPI spec | Any endpoint is added, modified, or removed |
+
+## Security Practices
+
+- Never commit secrets, credentials, or API keys (use `.env.local`, excluded from git)
+- Never log request bodies containing passwords, tokens, or PII
+- Always sanitize user input before using it in filenames, paths, or system calls
+- Use `password_hash()` / Symfony's `PasswordHasher` for all passwords - never MD5 or SHA1
+- Validate and authorize every request in the security layer; never trust client-supplied role claims
+- Run `composer audit` regularly and address critical/high CVEs within 48 hours
+
+## AI Collaboration Guidelines
+
+{% if ai_context %}
+This project is designed for AI-assisted development. The `AI_CONTEXT.md` file is the primary reference for AI agents.
+
+### For AI Agents
+
+- Read `AI_CONTEXT.md` before making any changes
+- Follow Symfony-specific patterns described in `docs/architecture.md`
+- Never introduce a new library without checking if an existing one covers the need
+- Write tests as part of every feature change - never skip tests for "simple" changes
+- Generate migrations after entity changes; never modify existing migrations
+- Run PHPStan after changes to catch type errors before they reach review
+
+### For Developers Using AI Tools
+
+- Provide scoped instructions with file paths and class names
+- Always review AI-generated code against the same standards as human-written code
+- Verify PHPStan and test suite pass after AI-generated changes
+- Update `AI_CONTEXT.md` when patterns or conventions change significantly
+{% else %}
+When using AI coding assistants:
+
+- Provide explicit context: file paths, method signatures, Symfony version
+- Always verify that generated code uses constructor injection, not service location
+- Check that migrations are generated correctly after entity changes
+- Ensure tests are included in any generated feature code
+- Run static analysis and tests after accepting AI suggestions
+{% endif %}

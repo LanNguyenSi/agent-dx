@@ -1,0 +1,72 @@
+{
+  "name": "{{ project_name }}",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+{% if language == "typescript" -%}
+    "type-check": "tsc --noEmit",
+{% endif -%}
+{% if test_strategy == "vitest-only" or test_strategy == "vitest-and-playwright" -%}
+    "test": "vitest run",
+{% else -%}
+    "test": "jest --runInBand",
+{% endif -%}
+{% if test_strategy == "vitest-and-playwright" -%}
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+{% elif test_strategy == "jest-and-cypress" -%}
+    "test:e2e": "cypress run",
+    "test:e2e:open": "cypress open",
+{% endif -%}
+{% if use_storybook -%}
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+{% endif -%}
+    "clean": "rimraf .next out coverage"
+  },
+  "dependencies": {
+    "next": "{{ '15.2.4' if nextjs_version == '15' else '14.2.24' }}",
+    "react": "{{ '^19.0.0' if nextjs_version == '15' else '^18.3.1' }}",
+    "react-dom": "{{ '^19.0.0' if nextjs_version == '15' else '^18.3.1' }}"{% if api_client == "axios" %},
+    "axios": "^1.8.4"{% elif api_client == "tanstack-query" %},
+    "@tanstack/react-query": "^5.71.5"{% endif %}{% if state_management == "zustand" %},
+    "zustand": "^5.0.3"{% elif state_management == "jotai" %},
+    "jotai": "^2.12.2"{% elif state_management == "redux-toolkit" %},
+    "@reduxjs/toolkit": "^2.6.1",
+    "react-redux": "^9.2.0"{% endif %}{% if ui_library == "radix-ui" %},
+    "@radix-ui/react-slot": "^1.1.2"{% elif ui_library == "headless-ui" %},
+    "@headlessui/react": "^2.2.0"{% endif %}{% if use_auth and auth_provider == "next-auth" %},
+    "next-auth": "^5.0.0-beta.25"{% elif use_auth and auth_provider == "clerk" %},
+    "@clerk/nextjs": "^6.12.7"{% endif %}
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@types/node": "^22.13.14",
+    "@types/react": "{{ '^19.0.10' if nextjs_version == '15' else '^18.3.12' }}",
+    "@types/react-dom": "{{ '^19.0.4' if nextjs_version == '15' else '^18.3.1' }}",
+    "eslint": "^9.22.0",
+    "eslint-config-next": "{{ '15.2.4' if nextjs_version == '15' else '14.2.24' }}",
+{% if language == "typescript" -%}
+    "typescript": "^5.8.2",
+{% endif -%}
+{% if test_strategy == "vitest-only" or test_strategy == "vitest-and-playwright" -%}
+    "vitest": "^3.0.9",
+{% else -%}
+    "jest": "^29.7.0",
+{% endif -%}
+{% if test_strategy == "vitest-and-playwright" -%}
+    "@playwright/test": "^1.51.0",
+{% elif test_strategy == "jest-and-cypress" -%}
+    "cypress": "^14.2.0",
+{% endif -%}
+{% if use_storybook -%}
+    "storybook": "^8.6.7",
+{% endif -%}
+    "rimraf": "^6.0.1"
+  }
+}

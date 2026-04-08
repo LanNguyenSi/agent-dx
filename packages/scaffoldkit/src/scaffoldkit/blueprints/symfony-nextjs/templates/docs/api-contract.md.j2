@@ -1,0 +1,461 @@
+# API Contract: {{ display_name }}
+
+This document is the **agreement between the Symfony backend and the Next.js frontend**. Both sides must conform to it. When the contract changes, update this document first, then update the implementation.
+
+> If you are adding a new feature, jump to [Adding a Feature End-to-End](#adding-a-feature-end-to-end).
+
+---
+
+## Base URL
+
+| Environment | Backend URL |
+|-------------|-------------|
+| Local (Docker) | `http://localhost:8080/api` |
+| Local (no Docker) | `http://localhost:8000/api` |
+| Staging | `https://api.staging.{{ project_name }}.example.com/api` |
+| Production | `https://api.{{ project_name }}.example.com/api` |
+
+The frontend reads `NEXT_PUBLIC_API_URL` from its environment. All service functions in `apps/web/src/services/` prepend this value.
+
+---
+
+## Request Conventions
+
+### Content Type
+
+All requests with a body must send:
+```
+Content-Type: application/json
+```
+
+All requests must accept:
+```
+Accept: application/json
+```
+
+{% if api_style == "api-platform" %}
+For PATCH requests (partial update), use:
+```
+Content-Type: application/merge-patch+json
+```
+{% endif %}
+
+{% if use_auth %}
+### Authorization
+
+Authenticated endpoints require a Bearer token in the `Authorization` header:
+
+```
+Authorization: Bearer <access_token>
+```
+
+The token is set by the Next.js API route layer (`apps/web/src/app/api/auth/`) and read from an httpOnly cookie. **Client Components never read the raw token.** The `lib/api.ts` utility handles attaching it on the server side.
+
+#### Token Lifecycle
+
+| Event | Action |
+|-------|--------|
+| Login success | Store `access_token` + `refresh_token` in httpOnly cookies |
+| Request with expired token (401) | Attempt silent refresh via `POST /auth/refresh` |
+| Refresh success | Update cookies, retry original request |
+| Refresh failure | Clear cookies, redirect to `/login` |
+| Logout | `POST /auth/logout`, clear cookies |
+
+{% endif %}
+
+---
+
+## Response Conventions
+
+### Success Responses
+
+| Method | Success Status | Body |
+|--------|---------------|------|
+| GET (single) | 200 | Resource object |
+| GET (collection) | 200 | Paginated envelope (see below) |
+| POST | 201 | Created resource object |
+| PUT / PATCH | 200 | Updated resource object |
+| DELETE | 204 | Empty body |
+
+### Resource Object Shape
+
+Every resource object includes an `id` field of type `string` (UUID) and `createdAt` / `updatedAt` timestamps in ISO 8601 format:
+
+```json
+{
+  "id": "018e7b1a-4a2f-7000-8000-000000000001",
+  "createdAt": "2024-03-15T10:30:00+00:00",
+  "updatedAt": "2024-03-15T11:00:00+00:00"
+}
+```
+
+{% if api_style == "api-platform" %}
+API Platform uses `@id` (JSON-LD IRI) alongside `id`. The frontend uses the plain `id` field for routing and the TypeScript types reflect this.
+{% endif %}
+
+---
+
+## Pagination Contract
+
+All collection endpoints return a consistent pagination envelope:
+
+```json
+{
+  "data": [ /* array of resource objects */ ],
+  "meta": {
+    "total": 120,
+    "page": 1,
+    "perPage": 20,
+    "lastPage": 6
+  },
+  "links": {
+    "first": "/api/users?page=1",
+    "prev": null,
+    "next": "/api/users?page=2",
+    "last": "/api/users?page=6"
+  }
+}
+```
+
+### Pagination Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | integer | 1 | Current page (1-indexed) |
+| `perPage` | integer | 20 | Items per page (max 100) |
+| `sort` | string | `createdAt` | Sort field |
+| `order` | `asc` / `desc` | `desc` | Sort direction |
+
+Example: `GET /api/users?page=2&perPage=50&sort=email&order=asc`
+
+The TypeScript type for the envelope is in `packages/shared-types`:
+
+```typescript
+export interface PaginatedResponse<T> {
+  data: T[];
+  meta: {
+    total: number;
+    page: number;
+    perPage: number;
+    lastPage: number;
+  };
+  links: {
+    first: string | null;
+    prev: string | null;
+    next: string | null;
+    last: string | null;
+  };
+}
+```
+
+---
+
+## Error Format
+
+All errors return a consistent JSON body. The frontend's `lib/api.ts` parses this and throws typed errors.
+
+### Error Envelope
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+  "title": "Validation Failed",
+  "status": 422,
+  "detail": "The request contains invalid data.",
+  "violations": [
+    {
+      "field": "email",
+      "message": "This value is not a valid email address."
+    },
+    {
+      "field": "password",
+      "message": "This value is too short. It should have 8 characters or more."
+    }
+  ]
+}
+```
+
+The `violations` array is present only on 422 responses. For other error types it is omitted.
+
+### Standard HTTP Error Codes
+
+| Code | Meaning | Frontend action |
+|------|---------|----------------|
+| 400 | Bad Request - malformed JSON | Show generic error toast |
+| 401 | Unauthenticated | Attempt token refresh, then redirect to login |
+| 403 | Forbidden - wrong role/ownership | Show "Access Denied" message |
+| 404 | Not Found | Show 404 page or "not found" inline message |
+| 409 | Conflict - duplicate unique field | Map to specific form error |
+| 422 | Validation Failed | Map `violations` to form field errors |
+| 429 | Rate Limited | Show "too many requests" with retry guidance |
+| 500 | Server Error | Show generic error with incident reference |
+
+---
+
+## Endpoint Naming Conventions
+
+- All endpoints are prefixed with `/api/`
+- Resource names are **plural nouns** in kebab-case: `/api/user-profiles`, not `/api/userProfile`
+- Nested resources are allowed one level deep: `/api/users/{id}/addresses`
+- Actions that are not CRUD use verbs: `POST /api/users/{id}/deactivate`
+- IDs are UUIDs (v7 for new entities): `/api/users/018e7b1a-4a2f-7000-8000-000000000001`
+
+---
+
+{% if use_auth %}
+## Auth Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/login` | Exchange email+password for tokens |
+| POST | `/api/auth/refresh` | Exchange refresh_token for a new access_token |
+| POST | `/api/auth/logout` | Invalidate the current refresh token |
+| GET | `/api/auth/me` | Return the currently authenticated user |
+
+### POST /api/auth/login
+
+Request:
+```json
+{
+  "email": "user@example.com",
+  "password": "secret123"
+}
+```
+
+Response (200):
+```json
+{
+  "token": "<jwt-access-token>",
+  "refresh_token": "<refresh-token>",
+  "user": {
+    "id": "018e7b1a-...",
+    "email": "user@example.com",
+    "name": "Jane Smith",
+    "roles": ["ROLE_USER"]
+  }
+}
+```
+
+---
+{% endif %}
+
+## Adding a Feature End-to-End
+
+Follow these steps every time you add a new resource or action. This is the workflow described in [ways-of-working.md](ways-of-working.md).
+
+### Step 1: Define the Entity (Symfony)
+
+Create a Doctrine entity in `apps/api/src/Entity/`:
+
+```php
+// apps/api/src/Entity/Product.php
+{% if api_style == "api-platform" %}
+use ApiPlatform\Metadata\ApiResource;
+use ApiPlatform\Metadata\Get;
+use ApiPlatform\Metadata\GetCollection;
+use ApiPlatform\Metadata\Post;
+use ApiPlatform\Metadata\Put;
+use ApiPlatform\Metadata\Delete;
+
+#[ApiResource(
+    operations: [
+        new Get(),
+        new GetCollection(),
+        new Post(security: "is_granted('ROLE_USER')"),
+        new Put(security: "is_granted('ROLE_USER') and object.owner == user"),
+        new Delete(security: "is_granted('ROLE_ADMIN')"),
+    ],
+    normalizationContext: ['groups' => ['product:read']],
+    denormalizationContext: ['groups' => ['product:write']],
+)]
+{% endif %}
+#[ORM\Entity(repositoryClass: ProductRepository::class)]
+class Product
+{
+    #[ORM\Id]
+    #[ORM\Column(type: 'uuid', unique: true)]
+    #[ORM\GeneratedValue(strategy: 'CUSTOM')]
+    #[ORM\CustomIdGenerator(class: UuidV7Generator::class)]
+    {% if api_style == "api-platform" %}#[Groups(['product:read'])]{% endif %}
+    private Uuid $id;
+
+    #[ORM\Column(length: 255)]
+    #[Assert\NotBlank]
+    #[Assert\Length(max: 255)]
+    {% if api_style == "api-platform" %}#[Groups(['product:read', 'product:write'])]{% endif %}
+    private string $name;
+
+    // ... getters/setters
+}
+```
+
+Generate and run the migration:
+```bash
+php bin/console doctrine:migrations:diff
+php bin/console doctrine:migrations:migrate
+```
+
+{% if api_style == "custom-controllers" %}
+### Step 2: Create the Controller
+
+```php
+// apps/api/src/Controller/ProductController.php
+#[Route('/api/products')]
+class ProductController extends AbstractController
+{
+    #[Route('', methods: ['GET'])]
+    public function list(ProductRepository $repository, Request $request): JsonResponse
+    {
+        $page = max(1, (int) $request->query->get('page', 1));
+        $perPage = min(100, max(1, (int) $request->query->get('perPage', 20)));
+
+        $paginator = $repository->paginate($page, $perPage);
+
+        return $this->json(
+            PaginationResponseBuilder::build($paginator, $page, $perPage),
+            Response::HTTP_OK,
+        );
+    }
+
+    #[Route('/{id}', methods: ['GET'])]
+    public function show(Product $product): JsonResponse
+    {
+        return $this->json($product);
+    }
+
+    #[Route('', methods: ['POST'])]
+    public function create(Request $request, ProductService $service): JsonResponse
+    {
+        $dto = $this->deserializeAndValidate($request, CreateProductDto::class);
+        $product = $service->create($dto);
+        return $this->json($product, Response::HTTP_CREATED);
+    }
+}
+```
+{% endif %}
+
+### Step 3: Generate / Update Shared Types
+
+{% if api_style == "api-platform" %}
+After changing the entity, regenerate the shared types:
+
+```bash
+# Requires the Symfony dev server to be running
+pnpm --filter shared-types generate
+```
+
+Commit the updated `packages/shared-types/src/index.ts` in the same PR.
+{% else %}
+Update `packages/shared-types/src/index.ts` by hand:
+
+```typescript
+// packages/shared-types/src/index.ts
+export interface Product {
+  id: string;
+  name: string;
+  price: number;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+Ensure the shape exactly matches what the Symfony serializer outputs.
+{% endif %}
+
+### Step 4: Build the Frontend Service
+
+```typescript
+// apps/web/src/services/products.ts
+import { api } from '@/lib/api';
+import type { Product, PaginatedResponse } from '@{{ project_name }}/shared-types';
+
+export async function getProducts(page = 1, perPage = 20): Promise<PaginatedResponse<Product>> {
+  return api.get<PaginatedResponse<Product>>(`/products?page=${page}&perPage=${perPage}`);
+}
+
+export async function getProduct(id: string): Promise<Product> {
+  return api.get<Product>(`/products/${id}`);
+}
+
+export async function createProduct(data: CreateProductInput): Promise<Product> {
+  return api.post<Product>('/products', data);
+}
+
+export async function updateProduct(id: string, data: Partial<CreateProductInput>): Promise<Product> {
+  return api.patch<Product>(`/products/${id}`, data);
+}
+
+export async function deleteProduct(id: string): Promise<void> {
+  return api.delete(`/products/${id}`);
+}
+```
+
+The `api` helper in `lib/api.ts` handles base URL, auth headers, error parsing, and retry on 401.
+
+### Step 5: Build the UI
+
+See the page templates:
+- [Dashboard page](page-templates/dashboard.md) - list view with pagination
+- [Detail page](page-templates/detail.md) - single entity view
+- [Form page](page-templates/form.md) - create/edit form with validation
+
+A minimal list page using Server Components:
+
+```typescript
+// apps/web/src/app/(dashboard)/products/page.tsx
+import { getProducts } from '@/services/products';
+import { ProductTable } from '@/components/features/products/ProductTable';
+
+export default async function ProductsPage() {
+  // Fetched on the server - no client-side loading state needed
+  const { data: products, meta } = await getProducts();
+
+  return (
+    <main>
+      <h1>Products</h1>
+      <ProductTable products={products} />
+    </main>
+  );
+}
+```
+
+---
+
+## Filtering and Search
+
+Collection endpoints that support filtering accept query parameters:
+
+```
+GET /api/products?name=widget&status=active&createdAfter=2024-01-01
+```
+
+The frontend service function accepts a filter object:
+
+```typescript
+export async function getProducts(filters?: {
+  name?: string;
+  status?: 'active' | 'inactive';
+  createdAfter?: string;
+  page?: number;
+  perPage?: number;
+}): Promise<PaginatedResponse<Product>> {
+  const params = new URLSearchParams();
+  if (filters?.name) params.set('name', filters.name);
+  if (filters?.status) params.set('status', filters.status);
+  // ...
+  return api.get<PaginatedResponse<Product>>(`/products?${params}`);
+}
+```
+
+---
+
+## Versioning Policy
+
+The API is currently unversioned (no `/v1/` prefix). When a breaking change is needed:
+
+1. Write an ADR explaining the breaking change
+2. Add the new endpoint at a `/v2/` path
+3. Deprecate the old path with a `Deprecation` response header
+4. Remove the old path only after all consumers are updated
+
+Non-breaking changes (new optional fields, new endpoints) do not require versioning and can be deployed freely.

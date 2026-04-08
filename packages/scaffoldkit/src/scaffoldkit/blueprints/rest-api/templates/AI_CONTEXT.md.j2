@@ -1,0 +1,255 @@
+# AI Context: {{ display_name }}
+
+> Read this file before making any changes to this codebase.
+> It provides the architectural rules, conventions, and patterns that all code in this project must follow.
+
+## Project Overview
+
+**{{ display_name }}** is {{ description | lower }}.
+
+| Property | Value |
+|----------|-------|
+| Framework | {{ framework }} |
+| Database | {{ database }} |
+{% if use_auth %}
+| Auth | {{ auth_strategy | upper }} |
+{% endif %}
+| Test Strategy | {{ test_strategy }} |
+{% if use_openapi %}
+| API Docs | OpenAPI (auto-generated) |
+{% endif %}
+
+## Repository Structure
+
+```
+{{ project_name }}/
+├── src/
+│   ├── routes/           - HTTP route handlers and request validation only
+│   ├── models/           - Data schemas (request bodies, response shapes, DB models)
+│   ├── middleware/        - Cross-cutting: auth, logging, error handling, rate limiting
+│   └── config/           - Environment loading and typed configuration
+├── tests/
+│   ├── integration/       - Integration tests with a real {{ database }} instance
+│   └── *.test.*           - Unit tests (co-located or mirroring src/)
+├── docs/
+│   ├── architecture.md    - Layer responsibilities, framework conventions
+│   ├── ways-of-working.md - DoD, PR conventions, testing expectations
+│   ├── api-design.md      - REST conventions, pagination, filtering, error formats
+│   └── adrs/              - Architecture Decision Records
+└── AI_CONTEXT.md          - This file
+```
+
+## Architecture Rules
+
+These rules are non-negotiable. Do not violate them without an ADR.
+
+### Layer Separation
+
+1. **Routes call services. Services call repositories. Repositories query the database.**
+   - A route handler must never directly query the database.
+   - A service must never import or use HTTP framework types (`Request`, `Response`, `HTTPException`, etc.).
+   - A repository must never implement business logic.
+
+2. **Services own business logic.**
+   - Validation of business rules (e.g., "cannot cancel a shipped order") lives in the service layer.
+   - Input format validation (e.g., "email must be a valid email") lives in the route/schema layer.
+
+3. **Models define shapes, not behavior.**
+   - Models (schemas, types, dataclasses) are plain data structures.
+   - They are imported by all layers but own no logic beyond field validation.
+
+4. **Middleware is for cross-cutting concerns only.**
+   - Do not put resource-specific business logic in middleware.
+   - Middleware includes: authentication, CORS, rate limiting, request logging, error formatting.
+
+### Naming Conventions
+
+- Route files: `src/routes/<resource>.{% if framework == "fastapi" or framework == "django-rest" %}py{% elif framework == "express" %}js{% elif framework == "spring-boot" %}java{% endif %}` (plural, lowercase: `users`, `orders`, `api-keys`)
+- Service files: `<Resource>Service` class (e.g., `UserService`)
+- Repository files: `<Resource>Repository` class (e.g., `UserRepository`)
+- Model/schema files: `<Resource>Create`, `<Resource>Update`, `<Resource>Response` (e.g., `UserCreate`, `UserResponse`)
+- Test files: `test_<resource>_<scenario>_<expected_result>` (e.g., `test_create_user_with_duplicate_email_returns_409`)
+
+### API Conventions
+
+All endpoints must follow the rules in `docs/api-design.md`. Key points:
+
+- URL path: `/api/v1/<plural-resource>` (hyphens for multi-word, no trailing slash)
+- Field names in JSON: `camelCase`
+- Dates: ISO 8601 UTC (`"2024-06-15T09:30:00Z"`)
+- IDs: UUID strings
+- List responses: `{ "data": [...], "pagination": { ... } }`
+- Errors: `{ "error": { "code": "...", "message": "...", "details": [...], "requestId": "..." } }`
+- Success HTTP statuses: `200` (GET/PUT/PATCH), `201` (POST), `204` (DELETE)
+
+{% if use_auth %}
+### Authentication and Authorization Rules
+
+- Every route that accesses user data must require authentication via the `{{ auth_strategy | upper }}` middleware.
+- The route handler must not implement auth logic. Use the auth middleware/dependency.
+- Authorization (ownership and role checks) lives in the **service layer**, not the route.
+- Pattern:
+  1. Middleware validates the token and attaches the authenticated user to the request context.
+  2. The route handler passes the authenticated user ID to the service.
+  3. The service verifies the user has permission to access or modify the resource.
+- Resource ownership check: `if resource.ownerId != currentUserId and currentUserRole != 'admin': raise Forbidden`
+- Return `403 FORBIDDEN` for authorization failures. Return `404 NOT_FOUND` only if hiding the resource's existence is a security requirement.
+{% if auth_strategy == "jwt" %}
+- Never store the JWT secret in code. It is loaded from the `JWT_SECRET` environment variable.
+- Never embed sensitive data in the JWT payload. Only include `sub` (user ID), `iat`, and `exp`.
+{% elif auth_strategy == "oauth2" %}
+- Never store `OAUTH_CLIENT_SECRET` in code. Load from environment.
+- Always validate the `state` parameter in the OAuth callback to prevent CSRF.
+{% elif auth_strategy == "api-key" %}
+- Store only the SHA-256 hash of the API key in the database. Never the plaintext key.
+- Update `last_used_at` on every successful key authentication.
+{% endif %}
+
+{% endif %}
+
+## How to Add a New Resource
+
+Follow these steps in order when implementing a new REST resource (e.g., `Widget`):
+
+### Step 1: Define the Model
+
+Create `src/models/widget.{% if framework == "fastapi" or framework == "django-rest" %}py{% elif framework == "express" %}js{% elif framework == "spring-boot" %}java{% endif %}` with:
+- `WidgetCreate` - fields required to create a new widget
+- `WidgetUpdate` - all fields optional for PATCH updates
+- `WidgetResponse` - the shape returned to API clients (never include sensitive fields)
+- The database model/entity (if separate from the API schema)
+
+### Step 2: Create the Repository
+
+Create the repository with these standard methods:
+- `create(data)` - insert and return the created record
+- `find_by_id(id)` - return a single record or `None`
+- `list(filters, page, page_size)` - return paginated results
+- `update(id, data)` - update fields and return the updated record
+- `delete(id)` - hard delete (or soft delete via `deleted_at`)
+
+### Step 3: Create the Service
+
+Create the service with these standard methods:
+- `create_widget(data, current_user)` - validate, call repository, return response schema
+- `get_widget(id, current_user)` - fetch, check ownership/permission, return response schema
+- `list_widgets(filters, page, page_size, current_user)` - apply ownership filter, return page
+- `update_widget(id, data, current_user)` - check permission, call repository, return response schema
+- `delete_widget(id, current_user)` - check permission, call repository
+
+### Step 4: Create the Routes
+
+Create `src/routes/widgets.{% if framework == "fastapi" or framework == "django-rest" %}py{% elif framework == "express" %}js{% elif framework == "spring-boot" %}java{% endif %}` with:
+- `GET /api/v1/widgets` - list with pagination and filtering query params
+- `POST /api/v1/widgets` - create (body: `WidgetCreate`)
+- `GET /api/v1/widgets/{id}` - get single
+- `PUT /api/v1/widgets/{id}` - replace (body: `WidgetCreate`)
+- `PATCH /api/v1/widgets/{id}` - partial update (body: `WidgetUpdate`)
+- `DELETE /api/v1/widgets/{id}` - delete (returns 204)
+
+Register the router in the application entry point.
+
+### Step 5: Write Tests
+
+**Unit tests** for the service:
+- Happy path for create, get, list, update, delete
+- Authorization failure: accessing another user's widget returns Forbidden
+- Not found: getting a non-existent widget returns NotFound
+- Business rule violations (any custom rules for widgets)
+
+**Integration tests** for the routes:
+- Full cycle: create, read, update, delete via HTTP
+- List with filters (at minimum: by status if applicable, by owner)
+- Auth: unauthenticated request returns 401
+- Auth: wrong owner returns 403
+
+### Step 6: Verify the API Spec
+
+{% if use_openapi %}
+Start the server and confirm the new endpoints appear correctly in the OpenAPI UI (`/docs` or `/swagger-ui.html`). Verify request/response schemas are accurate.
+{% else %}
+Document the new endpoints in `docs/api-design.md` under a new section.
+{% endif %}
+
+## Code Quality Rules
+
+- Follow the project's lint configuration. Do not disable lint rules inline.
+- Keep functions and methods small: if a function exceeds ~40 lines, consider extracting.
+- Prefer explicit over implicit: name variables, parameters, and return types clearly.
+- Avoid `Any` type annotations. Use specific types everywhere.
+- Use `const` / `final` / immutable data structures by default; mutate only when necessary.
+- Never commit `.env`, secrets, or credentials.
+- Meaningful commit messages using conventional commits: `feat(users): ...`, `fix(auth): ...`
+{% if use_auth %}
+- Never log full request bodies in production (may contain credentials or PII).
+- Sanitize error messages before returning them to clients.
+{% endif %}
+
+## Testing Rules
+
+Strategy: **{{ test_strategy }}**
+
+{% if test_strategy == "unit-and-integration" %}
+**Unit tests:**
+- Mock only at the repository boundary in service unit tests
+- Do not mock internal utility functions - use them as-is
+- Cover every branch in service methods
+- Tests must not touch the network or database
+
+**Integration tests:**
+- Use a real {{ database }} instance (the CI environment provides one)
+- Seed the database in a `before` / `setup` hook; tear down in `after` / `teardown`
+- Each test is independent: do not rely on state from another test
+- Assert on HTTP status codes, response body shape, and database state after mutations
+{% elif test_strategy == "contract-testing" %}
+**Contract tests:**
+- Consumers own their contracts; the API is the provider
+- Run `pact verify` (or equivalent) as part of the CI pipeline
+- A failing contract test must be fixed before the PR merges - never skip it
+
+**Integration tests:**
+- Focus on the repository layer against a real {{ database }} instance
+- Service tests use real repositories (no mocking below the service)
+
+**Unit tests:**
+- Validation logic, transformation utilities, and complex conditionals
+{% elif test_strategy == "full-pyramid" %}
+**Unit tests (most numerous):**
+- All service methods with mocked repositories
+- All validation and transformation utilities
+- Target: >80% line coverage on `src/`
+
+**Integration tests (moderate):**
+- All repository methods against real {{ database }}
+- All routes via HTTP client
+- Auth and permission enforcement
+
+**Contract tests (few):**
+- Critical API consumers have Pact contracts
+- Run on every CI build
+{% endif %}
+
+## What NOT to Do
+
+- **Do not** put database queries in route handlers.
+- **Do not** put HTTP status codes or `Request`/`Response` types in services.
+- **Do not** return raw database error messages to API clients.
+- **Do not** skip writing tests for "simple" changes - there are no simple changes.
+- **Do not** add a new major dependency without an ADR.
+- **Do not** change the error response envelope format without updating `docs/api-design.md` and creating an ADR.
+{% if use_auth %}
+- **Do not** skip auth middleware on new endpoints unless they are intentionally public (document why).
+- **Do not** implement authorization checks in the route layer - they belong in the service.
+{% endif %}
+- **Do not** hardcode environment-specific values (URLs, secrets, timeouts) in source code.
+- **Do not** introduce a new naming or structural pattern without updating this file and `docs/architecture.md`.
+
+## Key Documentation Files
+
+| File | Purpose |
+|------|---------|
+| `docs/architecture.md` | Layer responsibilities, framework patterns, database conventions |
+| `docs/api-design.md` | REST URL rules, pagination, filtering, error format, versioning |
+| `docs/ways-of-working.md` | Definition of Done, PR conventions, testing expectations |
+| `docs/adrs/0001-architecture.md` | Why {{ framework }} and {{ database }} were chosen |
+| `AI_CONTEXT.md` | This file - architecture rules and how-to guides for AI agents |

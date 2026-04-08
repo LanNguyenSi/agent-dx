@@ -1,0 +1,29 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      APP_ROLE: app
+      DATABASE_URL: postgresql://app:password@db:5432/{{ project_name }}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/workspace
+    depends_on:
+      db:
+        condition: service_started
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: {{ project_name }}
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:

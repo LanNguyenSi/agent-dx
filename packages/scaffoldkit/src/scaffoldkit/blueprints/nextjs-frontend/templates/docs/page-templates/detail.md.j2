@@ -1,0 +1,269 @@
+# Page Template: Detail Page
+
+Reference structure for entity detail pages in **{{ display_name }}**.
+
+Design style: **{{ design_style }}**
+
+---
+
+## Purpose
+
+A detail page shows all information about a single entity. It answers "everything I need to know about X." It also provides the primary entry point for editing, status transitions, and related actions.
+
+---
+
+## Layout Structure
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Breadcrumbs: Home / Entities / Entity Name              │
+├──────────────────────────────────────────────────────────┤
+│  Entity Header                                           │
+│  ┌──────────┐  Entity Name (h1)                         │
+│  │  Avatar  │  Sub-label (status badge, entity type)     │
+│  │  or Icon │  Meta: Created 14 Mar 2025 by Alice        │
+│  └──────────┘                             [Edit] [More v]│
+├──────────────────────────────────────────────────────────┤
+│  Tab Bar: [Overview] [Activity] [Related Items] [Files]  │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  TAB: Overview                                           │
+│  ┌──────────────────────────────┐ ┌────────────────────┐│
+│  │  Details Section             │ │  Sidebar Panel     ││
+│  │  Field  Value                │ │  Status            ││
+│  │  Field  Value                │ │  Assignee          ││
+│  │  Field  Value                │ │  Tags              ││
+│  │                              │ │  Quick Actions     ││
+│  │  Description / Notes         │ └────────────────────┘│
+│  └──────────────────────────────┘                        │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Section Breakdown
+
+### Breadcrumbs
+
+Always show the full path to the current entity. The last item is the current page (not a link).
+
+```
+Home / [Entity List Name] / [Entity Name]
+```
+
+- Use `aria-label="Breadcrumb"` on the `<nav>` element
+- Separate items with `aria-hidden="true"` separator characters (not `>` as text content)
+- On mobile, collapse to show only the parent level
+
+{% if router == "app-router" %}
+```tsx
+// src/components/ui/Breadcrumbs.tsx
+import Link from "next/link";
+
+interface Crumb {
+  label: string;
+  href?: string;
+}
+
+export function Breadcrumbs({ crumbs }: { crumbs: Crumb[] }) {
+  return (
+    <nav aria-label="Breadcrumb">
+      <ol className="flex items-center gap-1 text-sm text-muted-foreground">
+        {crumbs.map((crumb, i) => (
+          <li key={i} className="flex items-center gap-1">
+            {i > 0 && <span aria-hidden="true">/</span>}
+            {crumb.href ? (
+              <Link href={crumb.href} className="hover:text-foreground">
+                {crumb.label}
+              </Link>
+            ) : (
+              <span className="text-foreground font-medium" aria-current="page">
+                {crumb.label}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+```
+{% endif %}
+
+### Entity Header
+
+The header conveys identity at a glance. It contains:
+
+- **Avatar or icon**: Entity visual representation (image, initials fallback, or domain icon)
+- **Name (h1)**: The entity's primary identifier - always an `<h1>` (only one per page)
+- **Status badge**: Coloured badge showing current state (Active, Pending, Archived, etc.)
+- **Meta row**: Created date, modified date, owner/author
+- **Action buttons (top-right):**
+  - Primary action: "Edit" (or the most common operation)
+  - Secondary actions: collapsed into a "More" dropdown (Delete, Archive, Export, etc.)
+
+{% if design_style == "minimal-clean" %}
+**Style guidance (minimal-clean):**
+- Clean horizontal layout with generous spacing
+- Status badge: small rounded pill, background tint of status colour
+- Action buttons: outlined or ghost, not filled (the content is the focus)
+{% elif design_style == "corporate-professional" %}
+**Style guidance (corporate-professional):**
+- Header has a light background panel separating it from the content
+- Status prominently displayed in a structured badge
+- Edit button is a filled primary button
+- Metadata in a small, structured grid below the title
+{% elif design_style == "playful-modern" %}
+**Style guidance (playful-modern):**
+- Colourful avatar background based on entity initials
+- Status uses emoji or icon alongside text
+- Rounded action buttons with hover animations
+{% endif %}
+
+### Tab Bar
+
+Tabs divide the entity's content into logical sections to avoid overwhelming the user.
+
+**Standard tabs for most entities:**
+
+| Tab | Content |
+|-----|---------|
+| Overview | Primary fields, description, key metadata |
+| Activity | Audit log, comments, timeline of changes |
+| Related Items | Linked entities (e.g. invoices on a customer) |
+| Files / Attachments | Documents, images attached to the entity |
+
+**Tab implementation rules:**
+- URL must reflect active tab so it is shareable: `/users/123?tab=activity`
+- Keyboard navigable (`ArrowLeft` / `ArrowRight` between tabs, `Enter` / `Space` to activate)
+- Tab content is lazy-loaded - do not fetch all tab data upfront
+
+```tsx
+// URL-synced tab state (App Router)
+"use client";
+import { useSearchParams, useRouter } from "next/navigation";
+
+const tabs = ["overview", "activity", "related", "files"] as const;
+type Tab = typeof tabs[number];
+
+function useActiveTab(): [Tab, (tab: Tab) => void] {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const tab = (searchParams.get("tab") ?? "overview") as Tab;
+  const setTab = (t: Tab) => router.push(`?tab=${t}`, { scroll: false });
+  return [tab, setTab];
+}
+```
+
+### Overview Tab: Details Section
+
+The main content area for field/value pairs.
+
+- Use a two-column definition list pattern for structured fields
+- Group related fields with a section heading
+- Long text fields (notes, description) get their own full-width row
+- Editable fields show a pencil icon on hover that opens an inline edit or the edit form
+
+### Overview Tab: Sidebar Panel
+
+The sidebar provides at-a-glance status and quick actions without navigating away.
+
+**Typical sidebar content:**
+
+- Current status with a change control (dropdown to transition state)
+- Assignee / owner with reassign action
+- Tags or labels with add/remove
+- Quick links to related entities
+- Timestamps (created, updated, due date)
+
+---
+
+## Data Fetching
+
+{% if router == "app-router" %}
+```tsx
+// src/app/(dashboard)/users/[id]/page.tsx
+import { notFound } from "next/navigation";
+import { getUserById } from "@/services/users";
+import { UserDetailHeader } from "@/components/features/users/UserDetailHeader";
+import { UserDetailTabs } from "@/components/features/users/UserDetailTabs";
+import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
+
+interface PageProps {
+  params: { id: string };
+  searchParams: { tab?: string };
+}
+
+export default async function UserDetailPage({ params, searchParams }: PageProps) {
+  const user = await getUserById(params.id);
+  if (!user) notFound();
+
+  return (
+    <div className="space-y-6 p-6">
+      <Breadcrumbs
+        crumbs={[
+          { label: "Home", href: "/" },
+          { label: "Users", href: "/users" },
+          { label: user.displayName },
+        ]}
+      />
+      <UserDetailHeader user={user} />
+      <UserDetailTabs user={user} activeTab={searchParams.tab ?? "overview"} />
+    </div>
+  );
+}
+
+export async function generateMetadata({ params }: PageProps) {
+  const user = await getUserById(params.id);
+  return {
+    title: user ? `${user.displayName} | {{ display_name }}` : "Not Found",
+  };
+}
+```
+{% else %}
+```tsx
+// src/pages/users/[id].tsx
+import type { GetServerSideProps } from "next";
+
+export const getServerSideProps: GetServerSideProps = async ({ params }) => {
+  const user = await getUserById(params?.id as string);
+  if (!user) return { notFound: true };
+  return { props: { user } };
+};
+```
+{% endif %}
+
+---
+
+## Empty and Error States
+
+| Scenario | Treatment |
+|----------|-----------|
+| Entity not found | `notFound()` renders the 404 page |
+| Permission denied | Redirect to login or render a 403 message with contact instructions |
+| Tab data fails to load | Inline error with "Retry" button; other tabs remain functional |
+| No related items | Illustration + "No [related items] yet" + add button |
+| No activity yet | "No activity recorded yet" - not an error, just empty |
+
+---
+
+## Responsiveness
+
+| Viewport | Layout |
+|----------|--------|
+| < 768 px | Single column: sidebar moves below details |
+| 768 - 1023 px | Two-column, but sidebar is narrower |
+| >= 1024 px | Full side-by-side layout |
+
+Tab bar scrolls horizontally on small screens rather than wrapping or truncating.
+
+---
+
+## Actions: Destructive Operations
+
+- **Delete** and other destructive actions must be behind a confirmation dialog
+- Confirmation dialog states the entity name explicitly ("Are you sure you want to delete John Smith?")
+- Use `role="alertdialog"` for confirmation dialogs
+- Primary button in the confirmation dialog is styled red/destructive
+- The cancel button is the default focused element (safer default)

@@ -1,0 +1,389 @@
+# Page Template: Form Page
+
+Reference structure for create / edit form pages in **{{ display_name }}**.
+
+Design style: **{{ design_style }}**
+
+---
+
+## Purpose
+
+Form pages let users create a new entity or edit an existing one. The form must be accessible, validate input clearly, and provide confident feedback on submit (success or error).
+
+---
+
+## Layout Structure
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Breadcrumbs: Home / Entities / New Entity               │
+├──────────────────────────────────────────────────────────┤
+│  Page Title: "New User" or "Edit: John Smith"            │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  ┌──────────────────────────────┐ ┌────────────────────┐│
+│  │  Form Sections               │ │  Contextual Help   ││
+│  │                              │ │  or Preview Panel  ││
+│  │  Section 1: Basic Info       │ │                    ││
+│  │  [Field] [Field]             │ └────────────────────┘│
+│  │  [Field]                     │                        │
+│  │                              │                        │
+│  │  Section 2: Details          │                        │
+│  │  [Field] [Field]             │                        │
+│  │  [Textarea]                  │                        │
+│  │                              │                        │
+│  │  Section 3: Settings         │                        │
+│  │  [Toggle] [Select]           │                        │
+│  │                              │                        │
+│  │  ──────────────────────────  │                        │
+│  │  [Cancel]           [Save]   │                        │
+│  └──────────────────────────────┘                        │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Technology Stack for Forms
+
+| Concern | Tool |
+|---------|------|
+| Form state | `react-hook-form` |
+| Validation schema | `zod` |
+| Schema-to-RHF bridge | `@hookform/resolvers/zod` |
+| Field components | `src/components/ui/` (controlled, forward `ref`) |
+
+---
+
+## Standard Single-Page Form Pattern
+
+```tsx
+// src/components/features/users/UserForm.tsx
+"use client";
+
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { FormField } from "@/components/ui/FormField";
+
+const userSchema = z.object({
+  displayName: z.string().min(2, "Name must be at least 2 characters"),
+  email: z.string().email("Enter a valid email address"),
+  role: z.enum(["admin", "editor", "viewer"]),
+  bio: z.string().max(500, "Bio must be 500 characters or fewer").optional(),
+});
+
+type UserFormValues = z.infer<typeof userSchema>;
+
+interface UserFormProps {
+  defaultValues?: Partial<UserFormValues>;
+  onSubmit: (values: UserFormValues) => Promise<void>;
+  onCancel: () => void;
+}
+
+export function UserForm({ defaultValues, onSubmit, onCancel }: UserFormProps) {
+  const form = useForm<UserFormValues>({
+    resolver: zodResolver(userSchema),
+    defaultValues: {
+      displayName: "",
+      email: "",
+      role: "viewer",
+      ...defaultValues,
+    },
+  });
+
+  const { isSubmitting } = form.formState;
+
+  return (
+    <form
+      onSubmit={form.handleSubmit(onSubmit)}
+      noValidate
+      aria-label="User form"
+    >
+      <FormField
+        label="Display name"
+        error={form.formState.errors.displayName?.message}
+        required
+      >
+        <Input
+          {...form.register("displayName")}
+          placeholder="Jane Smith"
+          aria-required="true"
+        />
+      </FormField>
+
+      {/* ... other fields */}
+
+      <div className="mt-8 flex justify-end gap-3">
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" isLoading={isSubmitting}>
+          Save
+        </Button>
+      </div>
+    </form>
+  );
+}
+```
+
+---
+
+## Zod Schema Conventions
+
+```ts
+// src/lib/schemas/user.schema.ts
+
+// Define schema in a dedicated file, not inside the component
+export const createUserSchema = z.object({
+  displayName: z.string().min(2).max(100),
+  email: z.string().email(),
+  role: z.enum(["admin", "editor", "viewer"]),
+});
+
+// For edit forms, all fields are optional (PATCH semantics)
+export const updateUserSchema = createUserSchema.partial();
+
+// Export inferred types for use across the app
+export type CreateUserInput = z.infer<typeof createUserSchema>;
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+```
+
+---
+
+## FormField Component
+
+Every form input must be wrapped in a `FormField` component that handles the label, error message, and accessibility wiring.
+
+```tsx
+// src/components/ui/FormField.tsx
+interface FormFieldProps {
+  label: string;
+  error?: string;
+  hint?: string;
+  required?: boolean;
+  children: React.ReactElement;
+}
+
+export function FormField({ label, error, hint, required, children }: FormFieldProps) {
+  const id = useId();
+  const errorId = `${id}-error`;
+  const hintId = `${id}-hint`;
+
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor={id}
+        className="block text-sm font-medium text-foreground"
+      >
+        {label}
+        {required && <span aria-hidden="true" className="ml-1 text-destructive">*</span>}
+      </label>
+      {hint && (
+        <p id={hintId} className="text-xs text-muted-foreground">{hint}</p>
+      )}
+      {React.cloneElement(children, {
+        id,
+        "aria-describedby": [error ? errorId : null, hint ? hintId : null]
+          .filter(Boolean)
+          .join(" ") || undefined,
+        "aria-invalid": error ? "true" : undefined,
+      })}
+      {error && (
+        <p id={errorId} role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## Multi-Step Forms
+
+Use multi-step forms when a single form has more than 6-8 fields or when the fields are logically grouped into distinct stages (e.g. an onboarding wizard).
+
+### State Management for Steps
+
+```tsx
+"use client";
+
+const STEPS = ["basics", "details", "review"] as const;
+type Step = typeof STEPS[number];
+
+export function MultiStepForm() {
+  const [currentStep, setCurrentStep] = useState<Step>("basics");
+  // Use react-hook-form with a combined schema or per-step schemas
+  const form = useForm<WizardFormValues>({
+    resolver: zodResolver(wizardSchema),
+    mode: "onTouched",
+  });
+
+  const stepIndex = STEPS.indexOf(currentStep);
+
+  const goNext = async () => {
+    // Validate only the current step's fields before advancing
+    const valid = await form.trigger(STEP_FIELDS[currentStep]);
+    if (valid) setCurrentStep(STEPS[stepIndex + 1]);
+  };
+
+  const goPrev = () => setCurrentStep(STEPS[stepIndex - 1]);
+
+  return (
+    <>
+      <StepIndicator steps={STEPS} currentStep={currentStep} />
+      <form onSubmit={form.handleSubmit(onSubmit)}>
+        {currentStep === "basics" && <BasicsStep form={form} />}
+        {currentStep === "details" && <DetailsStep form={form} />}
+        {currentStep === "review" && <ReviewStep form={form} />}
+
+        <FormNavigation
+          isFirstStep={stepIndex === 0}
+          isLastStep={stepIndex === STEPS.length - 1}
+          onBack={goPrev}
+          onNext={goNext}
+          isSubmitting={form.formState.isSubmitting}
+        />
+      </form>
+    </>
+  );
+}
+```
+
+### Step Indicator
+
+```
+[1: Basics] ---- [2: Details] ---- [3: Review]
+  (complete)       (current)        (upcoming)
+```
+
+- Completed steps show a checkmark icon
+- Current step shows a filled circle
+- Upcoming steps show an outline circle
+- Each step label is a button only when the step is already completed (allow going back, not skipping ahead)
+
+---
+
+## Error Handling
+
+### Field-Level Errors
+
+React Hook Form + Zod surfaces errors per field. Display them below the field, not in a summary.
+
+```tsx
+<FormField
+  label="Email"
+  error={form.formState.errors.email?.message}
+>
+  <Input {...form.register("email")} type="email" />
+</FormField>
+```
+
+### API / Server Errors
+
+When the server returns an error (validation failed, conflict, etc.), display it as a form-level banner above the submit button.
+
+```tsx
+const [serverError, setServerError] = useState<string | null>(null);
+
+const handleSubmit = async (values: FormValues) => {
+  setServerError(null);
+  try {
+    await onSubmit(values);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 422) {
+      // Map server validation errors to field errors
+      err.fieldErrors?.forEach(({ field, message }) => {
+        form.setError(field as keyof FormValues, { message });
+      });
+    } else {
+      setServerError(err instanceof Error ? err.message : "An unexpected error occurred.");
+    }
+  }
+};
+
+// In JSX:
+{serverError && (
+  <div role="alert" className="rounded-md bg-destructive/10 p-4 text-sm text-destructive">
+    {serverError}
+  </div>
+)}
+```
+
+---
+
+## Optimistic Updates
+
+For quick edit interactions (inline field save, toggle, status change), use optimistic updates to give instant feedback.
+
+```tsx
+// Using TanStack Query mutation with optimistic update
+const updateUser = useMutation({
+  mutationFn: (data: UpdateUserInput) => updateUserApi(user.id, data),
+  onMutate: async (newData) => {
+    await queryClient.cancelQueries({ queryKey: userKeys.detail(user.id) });
+    const previous = queryClient.getQueryData(userKeys.detail(user.id));
+    queryClient.setQueryData(userKeys.detail(user.id), (old: User) => ({
+      ...old,
+      ...newData,
+    }));
+    return { previous };
+  },
+  onError: (_err, _vars, ctx) => {
+    // Roll back on error
+    queryClient.setQueryData(userKeys.detail(user.id), ctx?.previous);
+    toast.error("Failed to save changes");
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: userKeys.detail(user.id) });
+  },
+});
+```
+
+---
+
+## Submit Button States
+
+The submit button must reflect the current form state:
+
+| State | Button |
+|-------|--------|
+| Form pristine | Enabled, normal label ("Save") |
+| Form dirty, valid | Enabled, normal label |
+| Form dirty, invalid | Enabled (do not disable - let the user try and see errors) |
+| Submitting | Disabled, loading spinner + "Saving..." |
+| Submit success | Brief "Saved!" state, then redirect or reset |
+
+---
+
+## Unsaved Changes Guard
+
+Warn the user before navigating away with unsaved changes.
+
+```tsx
+"use client";
+import { useBeforeUnload } from "@/hooks/useBeforeUnload";
+
+export function UserForm({ ... }) {
+  const form = useForm(...);
+  // Warn on browser tab close / refresh
+  useBeforeUnload(form.formState.isDirty);
+  // For in-app navigation, use router.beforeEach / prompt equivalent in Next.js
+}
+```
+
+---
+
+## Accessibility Checklist for Forms
+
+- [ ] All inputs have a visible `<label>` (or `aria-label` as a fallback)
+- [ ] Required fields are indicated visually AND with `aria-required="true"`
+- [ ] Error messages are associated with the input via `aria-describedby`
+- [ ] Error messages use `role="alert"` so screen readers announce them
+- [ ] The submit button is a `<button type="submit">`, not a `<div>`
+- [ ] Form layout is readable at 200% zoom without horizontal scrolling
+- [ ] Tab order follows the visual reading order
+- [ ] Multi-step: focus moves to the top of the new step after advancing

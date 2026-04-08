@@ -1,0 +1,33 @@
+.PHONY: dev build start test lint migrate
+
+dev:
+	npm run dev
+
+build:
+	npm run build
+
+start:
+	npm start
+
+test:
+	npm test
+
+lint:
+	npm run lint
+
+migrate:
+	npx prisma migrate dev
+
+generate:
+	npx prisma generate
+{% if use_docker %}
+
+docker-up:
+	docker compose -f docker-compose.dev.yml up -d
+
+docker-down:
+	docker compose -f docker-compose.dev.yml down
+
+docker-logs:
+	docker compose -f docker-compose.dev.yml logs -f
+{% endif %}

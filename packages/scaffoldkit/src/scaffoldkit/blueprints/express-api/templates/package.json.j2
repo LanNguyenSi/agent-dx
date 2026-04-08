@@ -1,0 +1,44 @@
+{
+  "name": "{{ project_name }}",
+  "version": "0.1.0",
+  "private": true,
+  "description": "{{ description }}",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "node --test",
+    "lint": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+{% if auth_strategy == "jwt" -%}
+    "jsonwebtoken": "^9.0.2",
+{% elif auth_strategy == "api-key" -%}
+    "bcryptjs": "^2.4.3",
+{% endif -%}
+{% if use_queue -%}
+    "bullmq": "^5.40.3",
+{% endif -%}
+{% if use_websockets -%}
+    "socket.io": "^4.8.1",
+{% endif -%}
+{% if use_redis or use_queue -%}
+    "ioredis": "^5.4.2",
+{% endif -%}
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.14",
+{% if auth_strategy == "jwt" -%}
+    "@types/jsonwebtoken": "^9.0.9",
+{% endif -%}
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

@@ -1,0 +1,52 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./:/app
+    ports:
+      - "8000:8000"
+    environment:
+{% if database == "postgresql" %}
+      DATABASE_URL: postgresql://app:password@db:5432/{{ project_name }}
+{% elif database == "mysql" %}
+      DATABASE_URL: mysql://app:password@db:3306/{{ project_name }}
+{% elif database == "sqlite" %}
+      DATABASE_URL: sqlite:///./var/{{ project_name }}.db
+{% endif %}
+    depends_on:
+{% if database != "sqlite" %}
+      db:
+        condition: service_started
+{% endif %}
+
+{% if database == "postgresql" %}
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: {{ project_name }}
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+{% elif database == "mysql" %}
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: {{ project_name }}
+      MYSQL_USER: app
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - db-data:/var/lib/mysql
+{% endif %}
+
+volumes:
+{% if database != "sqlite" %}
+  db-data:
+{% endif %}

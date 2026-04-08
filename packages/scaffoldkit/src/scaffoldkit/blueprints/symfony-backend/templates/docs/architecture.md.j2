@@ -1,0 +1,672 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+**{{ display_name }}** is a Symfony {{ symfony_version }} API backend targeting PHP {{ php_version }}+.
+
+- **API style:** {{ api_style }}
+- **Database:** {{ database }} via Doctrine ORM
+{% if use_ddd %}
+- **Architecture pattern:** Domain-Driven Design (DDD) with layered architecture
+{% else %}
+- **Architecture pattern:** Classic Symfony layered architecture
+{% endif %}
+{% if use_cqrs %}
+- **Command/Query separation:** CQRS via Symfony Messenger
+{% endif %}
+{% if use_auth %}
+- **Authentication:** {{ auth_method }}
+{% endif %}
+
+## Principles
+
+1. **Thin controllers:** Controllers handle HTTP concerns only - request parsing, response formatting, and dispatching to services. No business logic lives in controllers.
+2. **Services own business logic:** All domain operations live in service classes. Services are injected via constructor dependency injection.
+3. **Repositories abstract persistence:** Database queries are encapsulated in repository classes. No raw SQL or QueryBuilder calls outside repositories.
+4. **Type safety:** Every method and property is fully type-hinted. Return types are declared. PHP attributes replace YAML/XML configuration wherever possible.
+5. **Fail fast with validation:** Input validation occurs at the boundary (request DTOs or API Platform constraints) before any business logic runs.
+{% if use_ddd %}
+6. **Bounded contexts:** Domain concepts are encapsulated. The Domain layer has zero infrastructure dependencies.
+7. **Ubiquitous language:** Class and method names match the business vocabulary used in the problem domain.
+{% endif %}
+
+---
+
+{% if use_ddd %}
+## Layer Structure (DDD)
+
+```
+src/
+├── Domain/                  # Pure domain: zero framework or infrastructure dependencies
+│   ├── Model/               # Entities and Aggregate Roots (Doctrine-annotated but framework-agnostic logic)
+│   ├── ValueObject/         # Immutable value objects (Email, Money, Uuid, etc.)
+│   ├── Repository/          # Repository interfaces (contracts, not implementations)
+│   ├── Event/               # Domain events (raised inside aggregates)
+│   └── Exception/           # Domain-specific exceptions
+│
+├── Application/             # Orchestration: use cases, application services
+{% if use_cqrs %}
+│   ├── Command/             # Command objects (intent to change state)
+│   ├── CommandHandler/      # Command handlers (one per command)
+│   ├── Query/               # Query objects (intent to read data)
+│   ├── QueryHandler/        # Query handlers (one per query)
+{% else %}
+│   ├── Service/             # Application services (orchestrate domain objects)
+{% endif %}
+│   ├── DTO/                 # Data Transfer Objects (input/output shapes)
+│   └── EventListener/       # Application-level domain event listeners
+│
+├── Infrastructure/          # Concrete implementations of domain contracts
+│   ├── Persistence/         # Doctrine repositories implementing domain interfaces
+│   ├── Messenger/           # Symfony Messenger handlers and transports
+│   ├── Http/                # External HTTP clients (API integrations)
+│   └── Cache/               # Cache adapters and decorators
+│
+└── UI/                      # Entry points: HTTP, CLI, async consumers
+    ├── Controller/          # Symfony controllers (HTTP layer only)
+    ├── Command/             # Symfony console commands
+    └── Subscriber/          # Symfony event subscribers (kernel events, etc.)
+```
+
+### Domain Layer Rules
+
+The `Domain/` layer is the innermost layer and **must not** depend on anything outside itself:
+
+- No Symfony imports (`no use Symfony\...`)
+- No Doctrine annotations that carry infrastructure logic (collection strategy, lazy loading configuration may be in mapping files instead)
+- No use of container or service locator
+- Entities raise domain events internally; infrastructure dispatches them
+
+### Application Layer Rules
+
+The `Application/` layer orchestrates domain objects to fulfill use cases:
+
+- Depends only on `Domain/` interfaces, never on concrete `Infrastructure/` classes
+- Receives DTOs as input; returns DTOs or scalar values as output
+- Handles transactions at the use-case boundary
+{% if use_cqrs %}
+- Commands are write operations; they return `void` or a result ID
+- Queries are read operations; they never modify state
+{% endif %}
+
+### Infrastructure Layer Rules
+
+The `Infrastructure/` layer wires everything together with concrete implementations:
+
+- Implements repository interfaces defined in `Domain/`
+- Contains all Doctrine-specific query code (DQL, QueryBuilder)
+- Contains all external service clients
+
+{% else %}
+## Directory Structure (Standard Symfony)
+
+```
+src/
+├── Controller/              # HTTP layer: request handling and response building
+├── Entity/                  # Doctrine entities (data model)
+├── Repository/              # Doctrine repositories (query encapsulation)
+├── Service/                 # Business logic services
+├── DTO/                     # Data Transfer Objects for request/response shaping
+├── EventSubscriber/         # Symfony event subscribers
+├── Form/                    # Symfony Form types (if needed)
+└── Exception/               # Custom exception classes
+
+config/
+├── packages/                # Bundle configuration (doctrine.yaml, security.yaml, etc.)
+├── routes/                  # Route definitions (prefer PHP attributes)
+└── services.yaml            # Service container configuration
+
+migrations/                  # Doctrine migration files (auto-generated, never hand-edited)
+tests/
+├── Unit/                    # Unit tests (no framework, no database)
+├── Integration/             # Integration tests (database, real services)
+└── Functional/              # Functional/API tests (HTTP layer)
+```
+
+### Controller Layer
+
+Controllers are final classes annotated with `#[Route]`. They:
+
+1. Parse and validate the incoming request (delegates to Form or DTO validation)
+2. Call one service method
+3. Return a `JsonResponse` or a `Response`
+
+**Rule:** If a controller method exceeds ~20 lines, extract logic to a service.
+
+### Service Layer
+
+Services contain all business logic. They:
+
+- Are injected via constructor (never retrieved from container directly)
+- Depend on repository interfaces, not concrete classes (use type-hints against interfaces)
+- Throw domain exceptions for invalid states
+- Are unit-testable without a database
+
+### Repository Layer
+
+Repositories extend `ServiceEntityRepository` and:
+
+- Expose explicitly named query methods (`findByEmailVerified()`, not `findBy(['emailVerified' => true])`)
+- Never return raw arrays; return typed entity arrays or collections
+- Own all DQL and QueryBuilder logic
+
+### Entity Layer
+
+Entities are PHP objects with Doctrine ORM attributes:
+
+- Use `#[ORM\Entity]` and `#[ORM\Table]` attributes
+- Constructor sets mandatory fields; setters are avoided for invariant fields
+- Boolean and nullable fields have sensible defaults
+- Lifecycle callbacks (`#[ORM\PrePersist]`, etc.) handle `createdAt` / `updatedAt`
+
+{% endif %}
+
+---
+
+{% if use_cqrs %}
+## CQRS via Symfony Messenger
+
+Commands and Queries are plain PHP objects (no interface required by default, but `CommandInterface` and `QueryInterface` marker interfaces are recommended).
+
+```
+Application/
+├── Command/
+│   └── CreateUser/
+│       ├── CreateUserCommand.php      # readonly class CreateUserCommand
+│       └── CreateUserCommandHandler.php
+├── Query/
+│   └── GetUser/
+│       ├── GetUserQuery.php           # readonly class GetUserQuery
+│       └── GetUserQueryHandler.php
+```
+
+### Command Bus
+
+Commands represent intent to change state. A command handler:
+
+- Is registered automatically via `#[AsMessageHandler]`
+- Performs one unit of work
+- Wraps the operation in a database transaction
+- Returns `void` or a generated ID
+
+```php
+#[AsMessageHandler]
+final class CreateUserCommandHandler
+{
+    public function __construct(
+        private readonly UserRepositoryInterface $users,
+        private readonly PasswordHasherInterface $hasher,
+    ) {}
+
+    public function __invoke(CreateUserCommand $command): void
+    {
+        // validate, build aggregate, persist
+    }
+}
+```
+
+### Query Bus
+
+Queries return read models. A query handler never modifies state:
+
+```php
+#[AsMessageHandler]
+final class GetUserQueryHandler
+{
+    public function __invoke(GetUserQuery $query): UserReadModel
+    {
+        // fetch and return a DTO/read model
+    }
+}
+```
+
+### Messenger Configuration
+
+```yaml
+# config/packages/messenger.yaml
+framework:
+    messenger:
+        buses:
+            command.bus:
+                middleware:
+                    - doctrine_transaction
+            query.bus: ~
+```
+
+Dispatch from a controller:
+
+```php
+$this->commandBus->dispatch(new CreateUserCommand(...));
+$user = $this->queryBus->dispatch(new GetUserQuery($id));
+```
+
+{% endif %}
+
+---
+
+{% if api_style == "api-platform" %}
+## API Platform
+
+API Platform is the primary API layer. Key concepts:
+
+### Resources
+
+API resources are PHP classes annotated with `#[ApiResource]`:
+
+```php
+#[ApiResource(
+    operations: [
+        new GetCollection(),
+        new Get(),
+        new Post(processor: CreateUserProcessor::class),
+        new Put(processor: UpdateUserProcessor::class),
+        new Delete(),
+    ],
+    normalizationContext: ['groups' => ['user:read']],
+    denormalizationContext: ['groups' => ['user:write']],
+)]
+class User { ... }
+```
+
+### Serialization Groups
+
+Use Symfony Serializer groups consistently:
+
+| Group | Usage |
+|-------|-------|
+| `{resource}:read` | Exposed on GET responses |
+| `{resource}:write` | Accepted on POST/PUT/PATCH |
+| `{resource}:list` | Subset for collection responses |
+| `{resource}:admin` | Fields visible only to admins |
+
+### State Providers and Processors
+
+For custom data sources or write logic, use providers and processors instead of overriding controllers:
+
+- `StateProviderInterface` - custom read logic (replaces `CollectionDataProvider`)
+- `StateProcessorInterface` - custom write logic (replaces `DataPersister`)
+
+Never put business logic in providers/processors. They should call a service.
+
+### Filters and Pagination
+
+```php
+#[ApiFilter(SearchFilter::class, properties: ['email' => 'exact', 'name' => 'partial'])]
+#[ApiFilter(OrderFilter::class, properties: ['createdAt', 'name'])]
+#[ApiFilter(DateFilter::class, properties: ['createdAt'])]
+```
+
+Pagination is enabled by default. Configure via `config/packages/api_platform.yaml`:
+
+```yaml
+api_platform:
+    defaults:
+        pagination_items_per_page: 25
+        pagination_maximum_items_per_page: 100
+        pagination_client_items_per_page: true
+```
+
+{% elif api_style == "custom-controllers" %}
+## Custom Controllers
+
+All endpoints are implemented as Symfony controllers using PHP attribute routing.
+
+### Controller Conventions
+
+```php
+#[Route('/api/v1/users', name: 'api_users_')]
+final class UserController extends AbstractController
+{
+    public function __construct(
+        private readonly UserService $userService,
+        private readonly SerializerInterface $serializer,
+    ) {}
+
+    #[Route('', name: 'list', methods: ['GET'])]
+    public function list(Request $request): JsonResponse
+    {
+        $users = $this->userService->list($request->query->getInt('page', 1));
+        return $this->json($users, context: ['groups' => ['user:read']]);
+    }
+}
+```
+
+### Response Shape
+
+All API responses use a consistent envelope. See [API Conventions](api-conventions.md).
+
+{% elif api_style == "fos-rest" %}
+## FOSRestBundle
+
+FOSRestBundle provides view handling, format negotiation, and exception handling.
+
+### Controller Conventions
+
+```php
+#[Route('/api/v1')]
+final class UserController extends AbstractFOSRestController
+{
+    #[Rest\Get('/users', name: 'api_users_list')]
+    #[View(serializerGroups: ['user:read'])]
+    public function list(): QueryBuilder|array
+    {
+        return $this->userService->findAll();
+    }
+}
+```
+
+### Format Negotiation
+
+Configure accepted formats in `config/packages/fos_rest.yaml`. Enforce JSON-only for API routes.
+
+{% endif %}
+
+---
+
+## Database Schema Conventions
+
+- All tables use **snake_case** names derived from the entity class name (Doctrine default)
+- Primary keys are `id` columns of type `uuid` (preferred) or `bigint`
+- Every table has `created_at TIMESTAMP NOT NULL` and `updated_at TIMESTAMP NOT NULL`
+- Foreign key columns are named `{entity}_id` (e.g., `user_id`)
+- Boolean columns are named with the `is_` or `has_` prefix
+- Nullable columns are only used when `NULL` has a distinct semantic meaning
+
+### Migration Rules
+
+- **Always** generate migrations with `php bin/console make:migration`
+- **Never** edit a migration after it has been applied to any environment
+- **Never** write raw SQL in application code; use Doctrine entities and migrations
+- Migration files are committed and tracked in version control
+- Each migration has a descriptive docblock comment
+
+---
+
+{% if use_auth %}
+## Authentication Architecture
+
+{% if auth_method == "jwt" %}
+### JWT Authentication (LexikJWTAuthenticationBundle)
+
+Token flow:
+
+```
+POST /api/auth/token  ->  validate credentials  ->  return {token, refresh_token}
+GET  /api/...         ->  Authorization: Bearer <token>  ->  authenticate  ->  handle
+```
+
+- Tokens are signed with RSA keys (private/public key pair in `config/jwt/`)
+- Token TTL: configured via `JWT_TTL` env var (default 3600 seconds)
+- Refresh tokens extend sessions without re-authentication
+- Token payload contains: `sub` (user identifier), `roles`, `iat`, `exp`
+- Invalid or expired tokens return `401 Unauthorized`
+
+Security firewall configuration:
+
+```yaml
+# config/packages/security.yaml
+firewalls:
+    api:
+        pattern: ^/api
+        stateless: true
+        jwt: ~
+```
+
+{% elif auth_method == "oauth2" %}
+### OAuth2 Authentication (thephpleague/oauth2-server)
+
+Supported flows:
+
+- **Authorization Code** - for user-delegated access
+- **Client Credentials** - for machine-to-machine
+- **Refresh Token** - for token renewal
+
+All protected routes require `Authorization: Bearer <access_token>`. Scopes control access to specific resources.
+
+{% elif auth_method == "api-key" %}
+### API Key Authentication
+
+Each API consumer is issued an opaque API key stored (hashed) in the database.
+
+- Keys are passed via the `X-API-Key` request header
+- Keys are hashed at rest using `sodium_crypto_generichash`
+- A `KeyAuthenticator` implements `AuthenticatorInterface` and resolves the user from the key
+- Rate limiting is applied per key
+
+{% endif %}
+
+### Authorization
+
+Symfony Security voters handle authorization decisions:
+
+```php
+// In a controller or service
+$this->denyAccessUnlessGranted(UserVoter::EDIT, $user);
+```
+
+Never check roles directly (`isGranted('ROLE_ADMIN')`). Always use semantic permissions via voters.
+
+{% endif %}
+
+---
+
+{% if use_rabbitmq %}
+## Async Messaging (RabbitMQ)
+
+Symfony Messenger with the AMQP transport handles async workloads.
+
+### Transport Configuration
+
+```yaml
+# config/packages/messenger.yaml
+framework:
+    messenger:
+        transports:
+            async:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+            failed: 'doctrine://default?queue_name=failed'
+
+        routing:
+            App\Message\SendEmailMessage: async
+            App\Message\ProcessImportMessage: async
+```
+
+### Message Pattern
+
+```php
+// Message (plain object)
+final readonly class SendEmailMessage
+{
+    public function __construct(
+        public string $recipient,
+        public string $subject,
+        public string $template,
+    ) {}
+}
+
+// Handler
+#[AsMessageHandler]
+final class SendEmailMessageHandler
+{
+    public function __invoke(SendEmailMessage $message): void
+    {
+        // send the email
+    }
+}
+```
+
+### Running Workers
+
+```bash
+# Consume indefinitely (use Supervisor in production)
+php bin/console messenger:consume async --limit=100 --memory-limit=128M
+
+# Inspect the failed queue
+php bin/console messenger:failed:show
+
+# Retry a failed message
+php bin/console messenger:failed:retry
+```
+
+{% endif %}
+
+{% if use_redis %}
+## Caching (Redis)
+
+Redis is configured as a Symfony Cache adapter.
+
+### Cache Pools
+
+```yaml
+# config/packages/cache.yaml
+framework:
+    cache:
+        app: cache.adapter.redis
+        default_redis_provider: '%env(REDIS_URL)%'
+        pools:
+            cache.app:
+                adapter: cache.adapter.redis
+            cache.api_responses:
+                adapter: cache.adapter.redis
+                default_lifetime: 300
+```
+
+### Usage in Services
+
+```php
+public function __construct(
+    #[Autowire(service: 'cache.api_responses')]
+    private readonly CacheInterface $cache,
+) {}
+
+public function getExpensiveData(string $key): array
+{
+    return $this->cache->get($key, function (ItemInterface $item): array {
+        $item->expiresAfter(300);
+        return $this->doExpensiveQuery();
+    });
+}
+```
+
+### Cache Invalidation
+
+Use cache tags for grouped invalidation:
+
+```php
+$item->tag(['user_' . $userId, 'users']);
+$this->cache->invalidateTags(['user_' . $userId]);
+```
+
+{% endif %}
+
+---
+
+## Testing Architecture
+
+Strategy: **{{ test_strategy }}**
+
+### Test Directory Structure
+
+```
+tests/
+├── Unit/                    # Pure unit tests - no database, no HTTP, no framework
+│   ├── Service/
+│   ├── Entity/
+{% if use_ddd %}
+│   ├── Domain/
+│   └── Application/
+{% else %}
+│   └── Repository/          # Repository method tests with an in-memory implementation
+{% endif %}
+├── Integration/             # Tests against a real database (test schema)
+│   ├── Repository/
+│   └── Service/
+└── Functional/              # Full HTTP request/response tests via Symfony's test client
+    └── Api/
+```
+
+### Unit Tests
+
+- Test one class in isolation
+- Mock all collaborators with `createMock()` or Prophecy
+- No `setUp` database fixtures
+- Fast: entire suite runs in under 5 seconds
+
+### Integration Tests
+
+- Use a separate test database (`DATABASE_URL` in `.env.test`)
+- Load fixtures with `doctrine/data-fixtures` or `zenstruck/foundry`
+- Reset the database between tests using transactions (rollback after each test)
+- Test the full stack through the service layer
+
+### Functional Tests
+
+- Use `Symfony\Bundle\FrameworkBundle\Test\WebTestCase`
+- Make HTTP requests via `$client->request('GET', '/api/v1/users')`
+- Assert HTTP status codes, response structure, and headers
+- Use fixtures for predictable test data
+
+{% if test_strategy == "phpunit-and-behat" %}
+### Behat (BDD)
+
+Behat scenarios describe API behavior in business language:
+
+```gherkin
+Feature: User management
+  Scenario: Create a new user
+    Given I am authenticated as an admin
+    When I send a POST request to "/api/v1/users" with:
+      | email | test@example.com |
+      | name  | Test User        |
+    Then the response status code should be 201
+    And the response should contain "test@example.com"
+```
+
+Feature files live in `features/`. Step definitions live in `features/bootstrap/`.
+
+{% elif test_strategy == "pest" %}
+### Pest
+
+Tests use Pest's expressive syntax:
+
+```php
+it('returns a user by id', function () {
+    $user = UserFactory::createOne();
+    $response = $this->getJson('/api/v1/users/' . $user->getId());
+    $response->assertStatus(200)->assertJsonFragment(['email' => $user->getEmail()]);
+});
+```
+
+{% endif %}
+
+---
+
+{% if use_ci %}
+## CI/CD
+
+GitHub Actions runs on every push and pull request:
+
+| Job | Trigger | Steps |
+|-----|---------|-------|
+| `lint` | push, PR | PHP-CS-Fixer check, PHPStan, Rector dry-run |
+| `test` | push, PR | Composer install, DB setup, test suite |
+| `security` | push, PR | `composer audit` for known CVEs |
+| `build` | main branch | Production build verification |
+
+All jobs must pass before merging to `main`.
+
+{% endif %}
+
+## Decisions
+
+See the [ADR log](adrs/) for architectural decisions and their rationale.
+
+Current ADRs:
+
+| ADR | Title | Status |
+|-----|-------|--------|
+| [0001](adrs/0001-architecture.md) | Architecture, API style, and key technology choices | Accepted |

@@ -1,0 +1,405 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+{{ display_name }} is a **monorepo** containing two independently deployable applications that communicate over HTTP:
+
+- **`apps/api`** - Symfony {{ php_version }} REST API{% if api_style == "api-platform" %} powered by API Platform{% endif %}
+- **`apps/web`** - Next.js (Node {{ node_version }}) frontend using the App Router
+
+A third package, **`packages/shared-types`**, holds TypeScript interfaces generated from the API schema. It is the single source of truth for the data contract between the two apps.
+
+---
+
+## Monorepo Structure
+
+```
+{{ project_name }}/
+├── apps/
+│   ├── api/              # Symfony backend (PHP {{ php_version }})
+│   └── web/              # Next.js frontend (Node {{ node_version }})
+├── packages/
+│   └── shared-types/     # Auto-generated TypeScript interfaces
+├── docs/                 # Architecture, ADRs, page templates
+{% if use_docker %}
+├── docker/               # Dockerfiles and nginx config
+{% endif %}
+└── scripts/              # Developer helper scripts
+```
+
+**Why a monorepo?**
+Atomic commits that span both the API change and the consuming frontend code prevent the repo from getting into a state where the two sides disagree. Shared types catch breaking changes at compile time rather than at runtime.
+
+---
+
+## Communication: API-First
+
+The frontend **never accesses the database directly**. All data flows through the HTTP API.
+
+```
+┌──────────────┐     HTTPS/JSON     ┌──────────────────┐
+│  Next.js     │  ─────────────►   │  Symfony API     │
+│  (apps/web)  │  ◄─────────────   │  (apps/api)      │
+└──────────────┘                   └──────────┬───────┘
+                                              │ Doctrine ORM
+                                   ┌──────────▼───────┐
+                                   │  {{ database | capitalize }}  DB  │
+                                   └──────────────────┘
+```
+
+{% if api_style == "api-platform" %}
+API Platform generates an OpenAPI 3.1 spec at `/api/docs.json`. The `packages/shared-types` package runs `openapi-typescript` against this spec to produce TypeScript types. Run `pnpm --filter shared-types generate` after changing any API resource.
+{% else %}
+Shared types in `packages/shared-types/src/index.ts` are maintained by hand. When you change a response shape in Symfony, update the corresponding interface in that package before updating the frontend service layer.
+{% endif %}
+
+---
+
+## Backend Architecture (apps/api)
+
+The Symfony backend is responsible for all business logic, persistence, and auth. The frontend is treated as just another API consumer.
+
+{% if use_ddd %}
+### Domain-Driven Design Layers
+
+The backend is structured around DDD layers. Each layer has a strict dependency direction: Domain has no outward dependencies; Application depends only on Domain; Infrastructure depends on Application and Domain.
+
+```
+src/
+├── Domain/               # Pure business logic - no framework dependencies
+│   ├── Model/            # Entities, value objects, aggregates
+│   ├── Service/          # Domain services (stateless business rules)
+│   ├── Event/            # Domain events
+│   └── Repository/       # Repository interfaces (contracts)
+├── Application/          # Use cases / application services
+│   ├── Command/          # Write-side: commands and handlers (CQRS)
+│   ├── Query/            # Read-side: queries and handlers (CQRS)
+│   └── DTO/              # Data Transfer Objects for use case boundaries
+├── Infrastructure/       # Framework and external adapters
+│   ├── Persistence/      # Doctrine entity mappings, repository implementations
+│   ├── Http/             # Symfony controllers (thin - delegate to Application layer)
+│   └── Messaging/        # Symfony Messenger handlers and transports
+└── Shared/               # Cross-cutting: exceptions, interfaces, helpers
+```
+
+**Bounded Contexts:** Each major feature area is its own subdirectory under each layer (e.g. `Domain/Model/User/`, `Domain/Model/Order/`). A context owns its entities, services, and repository contracts.
+
+{% else %}
+### Layered Architecture
+
+```
+src/
+├── Controller/           # Symfony controllers - thin HTTP layer only
+├── Entity/               # Doctrine ORM entities
+├── Repository/           # Doctrine repositories with query methods
+├── Service/              # Business logic services
+├── DTO/                  # Request/response Data Transfer Objects
+├── EventListener/        # Symfony event listeners and subscribers
+└── Exception/            # Domain-specific exceptions
+```
+
+**Controllers are thin.** They validate the HTTP request, call a Service, and return a response. Business logic lives in Services, not Controllers.
+{% endif %}
+
+### Symfony Components in Use
+
+| Component | Purpose |
+|-----------|---------|
+| Doctrine ORM | Database abstraction and migrations |
+{% if api_style == "api-platform" %}
+| API Platform | Resource-based REST + OpenAPI generation |
+{% endif %}
+{% if use_auth and auth_method == "jwt" %}
+| LexikJWTAuthenticationBundle | JWT token issuance and validation |
+{% elif use_auth and auth_method == "oauth2" %}
+| league/oauth2-server | OAuth2 authorization server |
+{% endif %}
+| Symfony Validator | Server-side input validation |
+| Symfony Serializer | JSON serialization/deserialization |
+{% if use_rabbitmq %}
+| Symfony Messenger | Async message dispatch and handling |
+{% endif %}
+{% if use_redis %}
+| Symfony Cache | Redis-backed cache pools |
+{% endif %}
+
+### Error Handling
+
+All errors are returned as JSON with a consistent envelope (see [api-contract.md](api-contract.md)). Symfony's `kernel.exception` event listener normalizes exceptions before they reach the client. HTTP status codes follow RFC 9110.
+
+---
+
+## Frontend Architecture (apps/web)
+
+The frontend uses the **Next.js App Router**. The rendering strategy is chosen per page:
+
+- **Server Components** for initial data fetching (no client-side loading spinners for the first paint)
+- **Client Components** (`"use client"`) for interactive elements (forms, modals, real-time updates)
+
+### Directory Structure
+
+```
+src/
+├── app/                  # App Router - every folder is a route segment
+│   ├── layout.tsx        # Root layout (providers, global nav)
+│   ├── page.tsx          # Home / redirect
+│   ├── (auth)/           # Auth route group (login, register)
+│   └── (dashboard)/      # Dashboard route group (protected pages)
+├── components/
+│   ├── ui/               # Primitive components{% if ui_library == "shadcn-ui" %} (shadcn/ui wrappers){% elif ui_library == "radix-ui" %} (Radix UI wrappers){% endif %}
+│   └── features/         # Feature-specific composed components
+├── hooks/                # Custom React hooks (useAuth, usePagination, etc.)
+├── lib/
+│   ├── api.ts            # Configured fetch wrapper with auth headers
+│   └── utils.ts          # General utilities (cn, formatDate, etc.)
+├── services/             # One file per API resource (users.ts, products.ts)
+├── types/                # Local types not shared with the backend
+└── public/               # Static assets
+```
+
+### Data Fetching Pattern
+
+```
+Page (Server Component)
+  └── calls service function (services/users.ts)
+        └── calls lib/api.ts (fetch with Authorization header)
+              └── receives JSON from Symfony
+                    └── typed via packages/shared-types
+```
+
+Server Components fetch data during SSR. The rendered HTML arrives at the browser with data already present. Client Components are used only when the user needs to interact with the data (e.g. edit a form, trigger a mutation).
+
+### Styling
+
+{% if styling == "tailwind" %}
+**Tailwind CSS** is the primary styling tool. Utility classes are composed in component files. The `cn()` helper (from `clsx` + `tailwind-merge`) resolves class conflicts cleanly.
+{% elif styling == "css-modules" %}
+**CSS Modules** scope styles to individual components. Each component has a `.module.css` sibling file. Global styles and design tokens live in `src/app/globals.css`.
+{% elif styling == "scss" %}
+**SCSS** with CSS Modules scopes styles to components. Design tokens (colors, spacing, typography) are defined in `src/styles/_variables.scss` and imported where needed.
+{% endif %}
+
+{% if ui_library == "shadcn-ui" %}
+**shadcn/ui** provides copy-paste accessible components built on Radix UI primitives. Components live in `src/components/ui/` and are owned by this project (not installed as an opaque package).
+{% elif ui_library == "radix-ui" %}
+**Radix UI** primitives provide accessible, unstyled base components. Custom styles are applied on top via the project's styling approach.
+{% endif %}
+
+Design direction: **{{ design_style }}**
+{% if design_style == "minimal-clean" %}
+- Generous whitespace, restrained color palette (neutrals + one accent)
+- Strong typographic hierarchy
+- Subtle borders and shadows - no decorative chrome
+{% elif design_style == "corporate-professional" %}
+- Structured grid layouts, clear navigation hierarchy
+- Professional color scheme (blues, grays, white)
+- Data-dense tables and dashboards with clear affordances
+{% elif design_style == "playful-modern" %}
+- Rounded corners, vibrant accent colors, gradient highlights
+- Friendly micro-interactions and hover states
+- Illustrations and icon-forward navigation
+{% endif %}
+
+---
+
+## Shared Types (packages/shared-types)
+
+```
+packages/shared-types/
+├── src/
+│   └── index.ts          # All exported TypeScript interfaces
+├── package.json
+└── tsconfig.json
+```
+
+{% if api_style == "api-platform" %}
+Types are generated from the OpenAPI spec that API Platform exposes at `/api/docs.json`:
+
+```bash
+# Regenerate after any Entity or ApiResource change
+pnpm --filter shared-types generate
+```
+
+The generation script (`packages/shared-types/scripts/generate.ts`) calls `openapi-typescript` and writes the output to `src/index.ts`. Commit the generated file - it is the contract artefact.
+{% else %}
+Types are maintained by hand. The golden rule: **change the type in `shared-types` first, then update the Symfony serializer output and the frontend service simultaneously in the same commit**. This makes contract drift visible at review time.
+{% endif %}
+
+The frontend imports from `@{{ project_name }}/shared-types`:
+```typescript
+import type { User, PaginatedResponse } from '@{{ project_name }}/shared-types';
+```
+
+---
+
+{% if use_auth %}
+## Authentication Flow
+
+{% if auth_method == "jwt" %}
+### JWT Authentication (end-to-end)
+
+```
+1. User submits login form (apps/web)
+   └── POST /api/auth/login  { email, password }
+
+2. Symfony validates credentials
+   └── Returns { token, refresh_token, user }
+
+3. Next.js stores tokens
+   ├── access_token: httpOnly cookie (set by Next.js API route)
+   └── refresh_token: httpOnly cookie
+
+4. Subsequent requests
+   └── Next.js lib/api.ts reads the cookie and attaches
+       Authorization: Bearer <token>
+
+5. Token refresh (transparent)
+   └── If the API returns 401, lib/api.ts calls POST /api/auth/refresh
+       with the refresh_token cookie, gets a new access_token, and
+       retries the original request once.
+
+6. Logout
+   └── Next.js API route clears cookies + calls POST /api/auth/logout
+```
+
+**Token storage:** Tokens are stored in httpOnly cookies set by a Next.js API route (`/api/auth/callback`). They are never accessible from JavaScript in the browser, preventing XSS theft.
+
+**Server Component auth:** Server Components read the token from the cookie via `cookies()` from `next/headers` and pass it to `lib/api.ts` directly.
+{% elif auth_method == "oauth2" %}
+### OAuth2 Authentication (end-to-end)
+
+The Symfony backend acts as an OAuth2 Authorization Server (using `league/oauth2-server`). The frontend uses the Authorization Code flow with PKCE.
+
+```
+1. User clicks "Log in"
+   └── Frontend redirects to Symfony /oauth/authorize with code_challenge
+
+2. User authenticates at Symfony
+   └── Symfony redirects back to Next.js /api/auth/callback?code=...
+
+3. Next.js exchanges the code
+   └── POST /oauth/token  { code, code_verifier }
+       Returns { access_token, refresh_token, expires_in }
+
+4. Tokens stored in httpOnly cookies (Next.js API route)
+
+5. Subsequent requests attach Authorization: Bearer <access_token>
+
+6. Refresh is handled transparently by lib/api.ts
+```
+{% endif %}
+{% endif %}
+
+---
+
+{% if use_docker %}
+## Docker Architecture
+
+```
+┌────────────────────────────────────────────────────┐
+│  Docker Compose Network: {{ project_name }}_default              │
+│                                                    │
+│  nginx (:80/:443) ── reverse proxy                 │
+│    ├── /api/*  ──► symfony-fpm (:9000)             │
+│    └── /*      ──► nextjs (:3000)                  │
+│                                                    │
+│  symfony-fpm                                       │
+│    └── depends_on: {{ database }}{% if use_rabbitmq %}, rabbitmq{% endif %}{% if use_redis %}, redis{% endif %}                  │
+│                                                    │
+│  nextjs                                            │
+│    └── NEXT_PUBLIC_API_URL=http://nginx/api        │
+│                                                    │
+│  {{ database }}{% if database == "postgresql" %} (:5432){% else %} (:3306){% endif %}                                   │
+{% if use_redis %}│  redis (:6379)                                     │
+{% endif %}{% if use_rabbitmq %}│  rabbitmq (:5672, management :15672)               │
+{% endif %}└────────────────────────────────────────────────────┘
+```
+
+Each service has its own `Dockerfile`. The `docker/` directory holds:
+- `docker/php/Dockerfile` - PHP-FPM image for the Symfony app
+- `docker/node/Dockerfile` - Node image for the Next.js app
+- `docker/nginx/nginx.conf` - Reverse proxy routing
+
+`docker-compose.yml` is in the repo root. A `docker-compose.override.yml` (gitignored) can hold developer-specific overrides.
+{% endif %}
+
+---
+
+{% if use_rabbitmq %}
+## Asynchronous Messaging (Symfony Messenger + RabbitMQ)
+
+Long-running tasks (email sending, report generation, webhooks) are dispatched as messages via Symfony Messenger and processed asynchronously by a consumer worker.
+
+```
+Controller  ──dispatch()──►  MessageBus  ──►  RabbitMQ exchange
+                                                      │
+                                              Worker process
+                                              (bin/console messenger:consume)
+                                                      │
+                                              MessageHandler
+```
+
+The frontend does not interact with RabbitMQ directly. It may poll an endpoint or use a WebSocket channel to receive completion status.
+{% endif %}
+
+---
+
+{% if use_ci %}
+## CI/CD Pipeline
+
+GitHub Actions runs on every push:
+
+```
+.github/workflows/
+├── api.yml     # PHP linting + PHPUnit
+└── web.yml     # TypeScript check + Vitest{% if test_strategy == "full-pyramid" %} + Playwright{% endif %}
+```
+
+**Deployment sequence (enforced by CI gates):**
+1. Run API tests - must pass before deploying API
+2. Deploy API and run migrations
+3. Run frontend tests - must pass before deploying frontend
+4. Deploy frontend
+
+This order ensures the database is always in the state the new API version expects before the new frontend version goes live.
+{% endif %}
+
+---
+
+## Testing Strategy
+
+Approach: **{{ test_strategy }}**
+
+{% if test_strategy == "unit-and-integration" %}
+### Backend
+
+- **Unit tests:** Service classes and domain logic with mocked dependencies
+- **Integration tests:** API endpoints via `WebTestCase`, hitting a test database
+
+### Frontend
+
+- **Unit tests:** Utility functions and hooks with Vitest
+- **Component tests:** React Testing Library for interactive components
+
+Coverage targets: >80% on `src/Service/`{% if use_ddd %} and `src/Domain/`{% endif %}, >60% on controllers.
+{% elif test_strategy == "full-pyramid" %}
+### Backend
+
+- **Unit tests:** Service and domain logic (PHPUnit, mocked deps)
+- **Integration tests:** Full HTTP request/response via `WebTestCase` with real DB
+- **Contract tests:** Verify the OpenAPI spec matches actual responses
+
+### Frontend
+
+- **Unit tests:** Utilities, hooks, pure functions (Vitest)
+- **Component tests:** React Testing Library for component behavior
+- **E2E tests:** Playwright for top user journeys (login, CRUD, error states)
+
+Coverage targets: >80% unit, >70% integration, top 5 journeys have E2E coverage.
+{% endif %}
+
+---
+
+## Decisions
+
+See [ADR log](adrs/) for all architectural decisions and their rationale.

@@ -1,0 +1,29 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"{% if styling == "tailwind" %},
+    "tailwindcss": "^3.4.17"{% endif %}{% if ui_library == "radix-ui" %},
+    "@radix-ui/react-slot": "^1.1.2"{% elif ui_library == "shadcn-ui" %},
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1"{% endif %}
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@types/node": "^22.13.14",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "eslint": "^9.22.0",
+    "eslint-config-next": "^15.2.4",
+    "typescript": "^5.8.2"
+  }
+}

@@ -1,0 +1,570 @@
+# AI Context: {{ display_name }}
+
+> Read this file before making any changes to this codebase.
+> It provides the full project context, conventions, and patterns needed to contribute correctly.
+
+---
+
+## Project Overview
+
+**{{ display_name }}** - {{ description }}
+
+| Property | Value |
+|----------|-------|
+| PHP version | {{ php_version }}+ |
+| Symfony version | {{ symfony_version }} |
+| API style | {{ api_style }} |
+| Database | {{ database }} via Doctrine ORM |
+{% if use_auth %}
+| Authentication | {{ auth_method }} |
+{% endif %}
+{% if use_ddd %}
+| Architecture | DDD (Domain / Application / Infrastructure) |
+{% else %}
+| Architecture | Standard Symfony layered (Controller / Service / Repository / Entity) |
+{% endif %}
+{% if use_cqrs %}
+| Command/Query | CQRS via Symfony Messenger |
+{% endif %}
+| Test strategy | {{ test_strategy }} |
+
+---
+
+## Repository Structure
+
+```
+{{ project_name }}/
+{% if use_ddd %}
+├── src/
+│   ├── Domain/              # Pure domain: entities, value objects, repository interfaces, events
+│   ├── Application/         # Use cases: {% if use_cqrs %}commands, queries, handlers{% else %}application services{% endif %}, DTOs
+│   ├── Infrastructure/      # Concrete implementations: Doctrine repos, HTTP clients, cache
+│   └── UI/                  # Entry points: controllers, console commands, subscribers
+{% else %}
+├── src/
+│   ├── Controller/          # HTTP layer: routing and response building
+│   ├── Entity/              # Doctrine entities
+│   ├── Repository/          # Doctrine repository classes
+│   ├── Service/             # Business logic
+│   ├── DTO/                 # Request/response data shapes
+│   ├── EventSubscriber/     # Symfony kernel and domain event subscribers
+│   └── Exception/           # Custom exceptions
+{% endif %}
+├── config/
+│   ├── packages/            # Bundle configuration (doctrine, security, messenger, etc.)
+│   └── services.yaml        # Service container configuration
+├── migrations/              # Doctrine migration files (auto-generated only)
+├── tests/
+│   ├── Unit/                # Unit tests (no framework, no DB)
+│   ├── Integration/         # Tests against a real database
+│   └── Functional/          # HTTP-level tests via Symfony test client
+├── docs/
+│   ├── architecture.md      # System design and layer rules
+│   ├── ways-of-working.md   # Coding standards, DoD, PR conventions
+│   ├── api-conventions.md   # Endpoint naming, response format, error shapes
+│   └── adrs/                # Architecture Decision Records
+└── AI_CONTEXT.md            # This file
+```
+
+---
+
+## Adding a New Entity
+
+Follow these steps **in order**. Do not skip steps.
+
+### Step 1: Generate the entity
+
+```bash
+php bin/console make:entity
+```
+
+This creates `src/Entity/MyEntity.php` and `src/Repository/MyEntityRepository.php`.
+
+### Step 2: Define fields using PHP attributes
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Entity;
+
+use App\Repository\MyEntityRepository;
+use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Uid\Uuid;
+
+#[ORM\Entity(repositoryClass: MyEntityRepository::class)]
+#[ORM\Table(name: 'my_entities')]
+#[ORM\HasLifecycleCallbacks]
+class MyEntity
+{
+    #[ORM\Id]
+    #[ORM\Column(type: 'uuid', unique: true)]
+    private Uuid $id;
+
+    #[ORM\Column(length: 255)]
+    private string $name;
+
+    #[ORM\Column]
+    private \DateTimeImmutable $createdAt;
+
+    #[ORM\Column]
+    private \DateTimeImmutable $updatedAt;
+
+    public function __construct(string $name)
+    {
+        $this->id = Uuid::v7();
+        $this->name = $name;
+        $this->createdAt = new \DateTimeImmutable();
+        $this->updatedAt = new \DateTimeImmutable();
+    }
+
+    #[ORM\PreUpdate]
+    public function onPreUpdate(): void
+    {
+        $this->updatedAt = new \DateTimeImmutable();
+    }
+
+    public function getId(): Uuid { return $this->id; }
+    public function getName(): string { return $this->name; }
+    public function setName(string $name): void { $this->name = $name; }
+}
+```
+
+### Step 3: Generate and review the migration
+
+```bash
+php bin/console make:migration
+# Review the generated file in migrations/
+php bin/console doctrine:migrations:migrate --no-interaction
+```
+
+**Never skip the review.** Check for unexpected `DROP` statements.
+
+### Step 4: Write a repository method (never use generic `findBy` in services)
+
+```php
+// src/Repository/MyEntityRepository.php
+public function findByName(string $name): ?MyEntity
+{
+    return $this->createQueryBuilder('e')
+        ->andWhere('e.name = :name')
+        ->setParameter('name', $name)
+        ->getQuery()
+        ->getOneOrNullResult();
+}
+```
+
+### Step 5: Create or extend a service
+
+```php
+// src/Service/MyEntityService.php
+final class MyEntityService
+{
+    public function __construct(
+        private readonly MyEntityRepository $repository,
+        private readonly EntityManagerInterface $em,
+    ) {}
+
+    public function create(string $name): MyEntity
+    {
+        $entity = new MyEntity($name);
+        $this->em->persist($entity);
+        $this->em->flush();
+        return $entity;
+    }
+}
+```
+
+{% if use_ddd %}
+### DDD Placement Rules
+
+| What | Where |
+|------|-------|
+| Entity with business behaviour | `src/Domain/Model/` |
+| Value object (e.g., Email, Money) | `src/Domain/ValueObject/` |
+| Repository interface | `src/Domain/Repository/` |
+| Doctrine repository implementation | `src/Infrastructure/Persistence/` |
+{% if use_cqrs %}
+| Command + Handler | `src/Application/Command/{FeatureName}/` |
+| Query + Handler | `src/Application/Query/{FeatureName}/` |
+{% else %}
+| Application service (orchestrates domain) | `src/Application/Service/` |
+{% endif %}
+| Controller (HTTP wiring only) | `src/UI/Controller/` |
+
+{% endif %}
+
+---
+
+## Adding an API Endpoint
+
+{% if api_style == "api-platform" %}
+### API Platform Resource Approach
+
+1. Add `#[ApiResource]` to the entity or a dedicated API resource class
+2. Define operations and serialization groups
+3. For custom write logic: implement a `StateProcessorInterface`
+4. For custom read logic: implement a `StateProviderInterface`
+
+```php
+#[ApiResource(
+    operations: [
+        new GetCollection(),
+        new Get(),
+        new Post(
+            denormalizationContext: ['groups' => ['widget:write']],
+            processor: CreateWidgetProcessor::class,
+        ),
+    ],
+    normalizationContext: ['groups' => ['widget:read']],
+)]
+class Widget { ... }
+```
+
+Processor pattern:
+
+```php
+final class CreateWidgetProcessor implements ProcessorInterface
+{
+    public function __construct(private readonly WidgetService $service) {}
+
+    public function process(mixed $data, Operation $operation, array $uriVariables = [], array $context = []): Widget
+    {
+        // $data is the deserialized input DTO
+        return $this->service->create($data);
+    }
+}
+```
+
+{% elif api_style == "custom-controllers" %}
+### Custom Controller Approach
+
+1. Add a method to the relevant controller (or create a new controller)
+2. Use `#[Route]` attribute
+3. Parse input with a DTO and validate using `$this->validate()`
+4. Call one service method
+5. Return `$this->json($result, $status, [], ['groups' => [...]])`
+
+```php
+#[Route('/api/v1/widgets', name: 'api_widgets_')]
+final class WidgetController extends AbstractController
+{
+    #[Route('', name: 'create', methods: ['POST'])]
+    public function create(Request $request, WidgetService $service): JsonResponse
+    {
+        $dto = $this->deserializeAndValidate($request, CreateWidgetInput::class);
+        $widget = $service->create($dto);
+        return $this->json($widget, 201, [], ['groups' => ['widget:read']]);
+    }
+}
+```
+
+{% elif api_style == "fos-rest" %}
+### FOSRestBundle Approach
+
+1. Add a method to the relevant controller using `#[Rest\...]` attributes
+2. Annotate with `#[View]` for automatic serialization
+3. Call a service method and return the result
+
+```php
+#[Rest\Post('/widgets', name: 'api_widgets_create')]
+#[View(statusCode: 201, serializerGroups: ['widget:read'])]
+public function create(#[MapRequestPayload] CreateWidgetInput $input): Widget
+{
+    return $this->widgetService->create($input);
+}
+```
+
+{% endif %}
+
+---
+
+{% if use_cqrs %}
+## Adding a Command or Query
+
+### Command (write operation)
+
+1. Create `src/Application/Command/{Feature}/CreateXCommand.php`
+
+```php
+final readonly class CreateXCommand
+{
+    public function __construct(
+        public string $name,
+        public string $ownerId,
+    ) {}
+}
+```
+
+2. Create `src/Application/Command/{Feature}/CreateXCommandHandler.php`
+
+```php
+#[AsMessageHandler(bus: 'command.bus')]
+final class CreateXCommandHandler
+{
+    public function __construct(
+        private readonly XRepositoryInterface $repository,
+        private readonly EntityManagerInterface $em,
+    ) {}
+
+    public function __invoke(CreateXCommand $command): void
+    {
+        $x = new X($command->name, $command->ownerId);
+        $this->repository->save($x);
+    }
+}
+```
+
+3. Dispatch from the controller:
+
+```php
+$this->commandBus->dispatch(new CreateXCommand($input->name, $user->getId()));
+```
+
+### Query (read operation)
+
+1. Create `src/Application/Query/{Feature}/GetXQuery.php` (carries filter parameters)
+2. Create `src/Application/Query/{Feature}/GetXQueryHandler.php` (returns a DTO or read model)
+3. Dispatch from the controller:
+
+```php
+$result = $this->queryBus->dispatch(new GetXQuery($id));
+```
+
+**Rule:** Query handlers never modify state. Command handlers return `void` or a generated ID only.
+
+{% endif %}
+
+---
+
+## Symfony-Specific Rules
+
+These rules are enforced by code review and PHPStan. Violations will be rejected.
+
+### Always Do This
+
+1. **Use constructor injection for every dependency.** Never use `$this->container->get(...)`.
+2. **Declare `strict_types=1`** in every PHP file.
+3. **Mark classes `final`** unless explicitly designed for extension.
+4. **Use PHP attributes** for routing (`#[Route]`), validation (`#[Assert\...]`), serialization (`#[Groups]`), and Doctrine mapping (`#[ORM\...]`). No YAML or XML for application code.
+5. **Type-hint everything:** parameters, return types, properties. No `mixed` without a comment.
+6. **Use `readonly` on constructor-promoted properties** that are never reassigned.
+7. **Return typed values from repositories:** never `array` when you mean `User[]` or `?User`.
+8. **Throw named exceptions** (`UserNotFoundException`, `InsufficientStockException`) rather than generic `\RuntimeException`.
+9. **Use `\DateTimeImmutable`** for dates and times. Never use mutable `\DateTime` on entities.
+10. **Use `Symfony\Component\Uid\Uuid`** for UUIDs. Never use `ramsey/uuid` directly.
+
+### Never Do This
+
+1. **Never put business logic in controllers.** Controllers handle HTTP input/output only.
+2. **Never write raw SQL** unless you are using a Doctrine `NativeQuery` with a ResultSetMapping, and only in repositories.
+3. **Never call `$entityManager->flush()` from a controller.** Flush happens in the service layer.
+4. **Never use `findBy()` or `findOneBy()` in service code.** Add a named method to the repository.
+5. **Never use `static` methods for business logic.** Everything that has dependencies must be a service.
+6. **Never suppress PHPStan errors** with `@phpstan-ignore-line` without an inline comment explaining why.
+7. **Never edit a committed migration.** Create a new one.
+8. **Never bypass validation.** Every write endpoint must validate its input before calling a service.
+9. **Never store secrets in code.** Use `.env.local` (which is gitignored).
+10. **Never return `null` from a factory or constructor.** Use named constructors and throw if invalid.
+
+---
+
+## Testing Patterns
+
+### Unit Test Template
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Unit\Service;
+
+use App\Entity\User;
+use App\Repository\UserRepository;
+use App\Service\UserService;
+use PHPUnit\Framework\MockObject\MockObject;
+use PHPUnit\Framework\TestCase;
+
+final class UserServiceTest extends TestCase
+{
+    private UserRepository&MockObject $userRepository;
+    private UserService $userService;
+
+    protected function setUp(): void
+    {
+        $this->userRepository = $this->createMock(UserRepository::class);
+        $this->userService = new UserService($this->userRepository);
+    }
+
+    public function testFindByEmail_withExistingEmail_returnsUser(): void
+    {
+        $email = 'test@example.com';
+        $user = new User($email, 'hashed');
+        $this->userRepository->method('findByEmail')->with($email)->willReturn($user);
+
+        $result = $this->userService->findByEmail($email);
+
+        self::assertSame($user, $result);
+    }
+
+    public function testFindByEmail_withUnknownEmail_throwsNotFoundException(): void
+    {
+        $this->userRepository->method('findByEmail')->willReturn(null);
+        $this->expectException(UserNotFoundException::class);
+        $this->userService->findByEmail('nobody@example.com');
+    }
+}
+```
+
+### Functional Test Template
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Functional\Api;
+
+use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+
+final class UserApiTest extends WebTestCase
+{
+    public function testGetUsers_withoutAuth_returns401(): void
+    {
+        $client = static::createClient();
+        $client->request('GET', '/api/v1/users');
+        self::assertResponseStatusCodeSame(401);
+    }
+
+    public function testGetUsers_withValidToken_returns200WithList(): void
+    {
+        $client = static::createClient();
+        // Set up fixtures and auth headers
+        $client->request('GET', '/api/v1/users', [], [], [
+            'HTTP_AUTHORIZATION' => 'Bearer ' . $this->getTestToken(),
+        ]);
+        self::assertResponseIsSuccessful();
+        self::assertResponseHeaderSame('content-type', 'application/json');
+        $data = json_decode($client->getResponse()->getContent(), true);
+        self::assertArrayHasKey('items', $data);
+    }
+}
+```
+
+### Test Naming Convention
+
+```
+test{Method}_{scenario}_{expectedOutcome}
+```
+
+Examples:
+
+- `testCreateUser_withValidData_persistsAndReturns201`
+- `testCreateUser_withDuplicateEmail_returns422WithViolations`
+- `testCreateUser_withoutAuthentication_returns401`
+- `testGetOrder_withDifferentOwner_returns403`
+
+---
+
+## Common Pitfalls
+
+| Pitfall | Correct Approach |
+|---------|-----------------|
+| `$em->flush()` in controller | Move flush to the service method |
+| `findBy(['email' => $email])` in a service | Add `findByEmail(string $email)` to the repository |
+| `new DateTime()` on an entity | Use `new \DateTimeImmutable()` |
+| `$container->get(UserService::class)` | Inject `UserService` via constructor |
+| Editing a committed migration | Generate a new migration with `make:migration` |
+| Catching `\Exception` broadly | Catch specific exceptions; let unknown ones bubble up |
+| `ROLE_ADMIN` check in controller | Create a `UserVoter` with a semantic attribute |
+| Serializing a whole entity | Use serialization groups; never expose internal fields |
+| Skipping tests for "trivial" code | Write at least one test per public method |
+
+---
+
+## Dependencies Reference
+
+| Package | Purpose |
+|---------|---------|
+| `symfony/framework-bundle` | Core Symfony |
+| `symfony/security-bundle` | Authentication and authorization |
+| `doctrine/orm` | Object-Relational Mapper |
+| `doctrine/doctrine-bundle` | Doctrine Symfony integration |
+| `doctrine/doctrine-migrations-bundle` | Database migration management |
+| `symfony/serializer` | Object serialization/deserialization |
+| `symfony/validator` | Input validation |
+| `symfony/messenger` | Message bus (commands, queries, async) |
+{% if api_style == "api-platform" %}
+| `api-platform/core` | API Platform REST/GraphQL layer |
+{% elif api_style == "fos-rest" %}
+| `friendsofsymfony/rest-bundle` | REST view layer and format negotiation |
+| `nelmio/api-doc-bundle` | OpenAPI documentation generation |
+{% endif %}
+{% if use_auth and auth_method == "jwt" %}
+| `lexik/jwt-authentication-bundle` | JWT token creation and validation |
+| `gesdinet/jwt-refresh-token-bundle` | JWT refresh token support |
+{% endif %}
+{% if use_rabbitmq %}
+| `symfony/amqp-messenger` | AMQP transport for Symfony Messenger |
+{% endif %}
+{% if use_redis %}
+| `symfony/cache` | Cache component with Redis adapter |
+{% endif %}
+| `phpstan/phpstan` | Static analysis |
+| `friendsofphp/php-cs-fixer` | Code style enforcement |
+| `rector/rector` | Automated refactoring and upgrades |
+{% if test_strategy == "phpunit-only" or test_strategy == "phpunit-and-behat" %}
+| `phpunit/phpunit` | Testing framework |
+{% elif test_strategy == "pest" %}
+| `pestphp/pest` | Testing framework |
+{% endif %}
+{% if test_strategy == "phpunit-and-behat" %}
+| `behat/behat` | BDD test framework |
+| `behat/symfony2-extension` | Behat Symfony integration |
+{% endif %}
+| `zenstruck/foundry` | Test fixture factories |
+| `symfony/uid` | UUID and ULID generation |
+
+---
+
+## How to Run Everything Locally
+
+```bash
+# Install dependencies
+composer install
+
+# Set up database
+php bin/console doctrine:database:create
+php bin/console doctrine:migrations:migrate --no-interaction
+
+# Start dev server
+symfony server:start
+
+# Run all quality checks
+vendor/bin/phpstan analyse
+vendor/bin/php-cs-fixer check
+{% if test_strategy == "phpunit-only" or test_strategy == "phpunit-and-behat" %}
+php bin/phpunit
+{% elif test_strategy == "pest" %}
+./vendor/bin/pest
+{% endif %}
+{% if test_strategy == "phpunit-and-behat" %}
+vendor/bin/behat
+{% endif %}
+```
+
+---
+
+## When to Write an ADR
+
+Write a new ADR in `docs/adrs/` when:
+
+- Adding a new Composer dependency (especially a framework-level one)
+- Introducing a new architectural pattern not described in `docs/architecture.md`
+- Making a decision between two valid approaches
+- Changing the authentication or authorization strategy
+- Planning a breaking API change
+
+Use the format in `docs/ways-of-working.md`. File as `docs/adrs/NNNN-kebab-title.md`.

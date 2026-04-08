@@ -1,0 +1,116 @@
+# {{ display_name }}
+
+{{ description }}
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Framework | FastAPI |
+| Python | {{ python_version }} |
+| Package Manager | {{ package_manager }} |
+| Database | {{ db_provider }} |
+| Auth | {{ auth_strategy }} |
+| Test Strategy | {{ test_strategy }} |
+{% if api_docs %}
+| API Docs | OpenAPI at `/docs` and `/redoc` |
+{% endif %}
+
+## Intended Shape
+
+This blueprint is for a **service-oriented Python backend** where FastAPI is the real application framework, not just a generic REST placeholder. Use it when the project needs:
+
+- request/response models with strong schema validation
+- async-first HTTP handlers
+- a clear boundary between API, services, repositories, and background work
+- explicit operational guidance for auth, migrations, and testing
+
+## Quick Start
+
+{% if package_manager == "uv" %}
+```bash
+uv venv
+source .venv/bin/activate
+uv sync
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload --port 8000
+```
+{% elif package_manager == "poetry" %}
+```bash
+poetry install
+poetry run alembic upgrade head
+poetry run uvicorn app.main:app --reload --port 8000
+```
+{% else %}
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+alembic upgrade head
+uvicorn app.main:app --reload --port 8000
+```
+{% endif %}
+
+{% if api_docs %}
+API docs are expected at:
+
+- `http://localhost:8000/docs`
+- `http://localhost:8000/redoc`
+{% endif %}
+
+## Project Structure
+
+```text
+{{ project_name }}/
+├── app/
+│   ├── api/routes/       # FastAPI routers only
+│   ├── core/             # Settings, security, startup wiring
+│   ├── models/           # Pydantic models and persistence entities
+│   ├── repositories/     # Data access only
+│   ├── services/         # Business logic and orchestration
+│   └── workers/          # Background job entrypoints and handlers
+├── alembic/              # Migration configuration and revisions
+├── tests/
+│   └── integration/      # API and database integration tests
+├── docs/
+│   ├── architecture.md
+│   ├── api-conventions.md
+│   ├── ways-of-working.md
+│   └── adrs/
+{% if ai_context %}
+├── AI_CONTEXT.md
+{% endif %}
+├── .editorconfig
+├── .gitignore
+└── README.md
+```
+
+## Operational Guidance
+
+{% if auth_strategy == "jwt" %}
+- Use stateless JWT auth for machine-friendly and SPA-friendly flows.
+- Keep token verification in `app/core/security.py`; do not spread it across routers.
+{% elif auth_strategy == "oauth2" %}
+- Use OAuth2 flows for delegated auth and external identity providers.
+- Treat callback handling and token exchange as infrastructure concerns, not business logic.
+{% elif auth_strategy == "api-key" %}
+- Use hashed API keys for programmatic consumers.
+- Store only key digests, never plaintext values.
+{% else %}
+- No authentication is scaffolded. Confirm this is acceptable before production work starts.
+{% endif %}
+
+{% if use_background_jobs %}
+- Reserve `app/workers/` for Celery, Arq, RQ, or similar job handlers.
+- Route handlers should enqueue long-running work instead of blocking request threads.
+{% endif %}
+
+{% if use_redis %}
+- Redis is assumed for short-lived cache/session/queue coordination, not as the system of record.
+{% endif %}
+
+## Next Steps
+
+1. Confirm the domain model and resource boundaries in `docs/architecture.md`.
+2. Define API contracts and error envelopes in `docs/api-conventions.md`.
+3. Implement the first vertical slice end-to-end before broadening the surface area.

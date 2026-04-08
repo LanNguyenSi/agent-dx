@@ -1,0 +1,203 @@
+# ADR-0001: Language and Framework Choice
+
+## Status
+
+Accepted
+
+## Context
+
+{{ display_name }} is a new CLI tool: {{ description }}
+
+We needed to select an implementation language and a CLI framework. The following requirements
+guided the decision:
+
+- Distribute as: **{{ distribution }}**
+- Target users are developers comfortable with a terminal
+- The tool may be invoked in scripts and CI pipelines, so predictable exit codes and machine-readable output are required
+- The codebase should be approachable for contributors familiar with the chosen language
+
+### Options Evaluated
+
+#### Languages
+
+| Language | Strengths | Weaknesses |
+|----------|-----------|------------|
+| Python | Fast iteration, large library ecosystem, easy scripting | Requires runtime; distribution of executables is complex |
+| Go | Compiles to static binary, fast startup, good stdlib | Verbose error handling; less ergonomic for argument parsing |
+| Rust | Best performance, memory safety, excellent binary output | Steep learning curve; slower compile times |
+| TypeScript | Familiar for web developers, rich ecosystem | Requires Node.js runtime; startup time higher than compiled |
+
+#### CLI Frameworks
+
+| Framework | Language | Strengths |
+|-----------|----------|-----------|
+| Typer | Python | Type-annotation-first, auto-generates help, integrates with Rich |
+| Click | Python | Mature, flexible, decorator-based, well-documented |
+| Cobra | Go | De facto Go CLI standard, used by kubectl and many major tools |
+| Clap | Rust | Derive-macro ergonomics, excellent validation, shell completions |
+| Commander | TypeScript/Node | Most widely used Node CLI library, flexible |
+
+## Decision
+
+We chose **{{ language }}** with **{{ cli_framework }}**.
+
+{% if language == "python" and cli_framework == "typer" %}
+### Rationale
+
+**Python** was selected because the team has strong Python experience and the tool's logic
+benefits from Python's rich ecosystem of libraries. Distribution as a pip package is
+well-understood and widely supported.
+
+**Typer** was selected over Click because:
+
+- Commands map directly to typed Python functions - less boilerplate
+- Help text, types, and defaults are derived from function signatures
+- First-class integration with [Rich](https://github.com/Textualize/rich) for formatted output
+- Typer is built on Click, so Click patterns apply when needed
+
+{% elif language == "python" and cli_framework == "click" %}
+### Rationale
+
+**Python** was selected for the team's existing expertise and the tool's library requirements.
+
+**Click** was selected over Typer because:
+
+- More explicit control over argument and option definitions
+- Wider community familiarity and larger body of examples
+- Stable, battle-tested API
+- No dependency on type annotation conventions
+
+{% elif language == "go" and cli_framework == "cobra" %}
+### Rationale
+
+**Go** was selected because the tool is distributed as a static binary and needs fast startup
+time for use in shell scripts and CI pipelines. The single-binary distribution model eliminates
+runtime dependency management for end users.
+
+**Cobra** was selected because:
+
+- It is the industry standard for Go CLIs (kubectl, Helm, GitHub CLI all use it)
+- Strong subcommand support with automatic help generation
+- Built-in shell completion support (bash, zsh, fish, PowerShell)
+- Integrates with Viper for config file handling
+
+{% elif language == "rust" and cli_framework == "clap" %}
+### Rationale
+
+**Rust** was selected because performance and correctness are top priorities. The tool may
+process large inputs or run in resource-constrained environments. Static compilation produces
+a zero-dependency binary.
+
+**Clap** was selected because:
+
+- Derive macros produce ergonomic, self-documenting argument structs
+- Compile-time validation of argument definitions
+- Best-in-class shell completion generation
+- Active development and first-party support in the Rust ecosystem
+
+{% elif language == "typescript" and cli_framework == "commander" %}
+### Rationale
+
+**TypeScript** was selected because the team has deep JavaScript/TypeScript expertise and
+the tool shares logic with an existing Node.js codebase.
+
+**Commander** was selected because:
+
+- Widest adoption in the Node CLI ecosystem
+- Minimal, predictable API
+- First-class TypeScript support
+- No magic - explicit option and command registration
+
+{% else %}
+### Rationale
+
+**{{ language }}** was selected because it best fits the team's expertise, the distribution
+model ({{ distribution }}), and the tool's performance requirements.
+
+**{{ cli_framework }}** was selected because it is the most ergonomic and well-maintained
+CLI framework available for {{ language }}.
+{% endif %}
+
+### Distribution: {{ distribution }}
+
+{% if distribution == "pip-package" %}
+Distributing as a PyPI package allows users to install with `pip install {{ project_name }}`
+or `pipx install {{ project_name }}`. This is the standard Python CLI distribution method
+and integrates with existing Python toolchains.
+{% elif distribution == "binary" %}
+Distributing as a pre-compiled binary removes any runtime dependency for users. Binaries are
+cross-compiled for Linux, macOS (amd64 and arm64), and Windows using CI. Users download
+from GitHub Releases.
+{% elif distribution == "homebrew" %}
+Homebrew is the dominant package manager for macOS developers and is widely used on Linux.
+A Homebrew formula allows `brew install {{ project_name }}` with automatic update support.
+{% elif distribution == "docker" %}
+Docker distribution ensures a fully reproducible, dependency-free runtime. The image is
+published to a container registry and users run the tool with `docker run`. This is
+particularly useful for CI pipeline usage.
+{% endif %}
+
+## Consequences
+
+### Positive
+
+{% if language == "python" %}
+- Rapid iteration; new commands can be added in minutes
+- Full access to Python package ecosystem
+- Easy local development setup (`pip install -e ".[dev]"`)
+{% elif language == "go" %}
+- Single static binary with no runtime dependencies
+- Fast startup time suitable for shell aliases and scripts
+- Cross-compilation to all major platforms from a single CI job
+{% elif language == "rust" %}
+- Zero-cost abstractions and memory safety without a GC
+- Extremely fast startup and execution
+- Deterministic binary size and performance
+{% elif language == "typescript" %}
+- Shared code with existing Node.js services
+- Large npm ecosystem for parsing, formatting, and networking
+- Familiar toolchain for the team
+{% endif %}
+
+### Negative
+
+{% if language == "python" %}
+- End users must have Python installed (mitigated by pipx or binary packaging with PyInstaller)
+- Startup time is higher than compiled languages
+- Virtual environment management adds local dev friction
+{% elif language == "go" %}
+- More verbose error handling than scripting languages
+- Larger binary size than Rust for small tools
+- Less ergonomic string manipulation
+{% elif language == "rust" %}
+- Longer compile times slow down CI and local iteration
+- Steeper learning curve for new contributors
+- Smaller talent pool than Python or Go
+{% elif language == "typescript" %}
+- Requires Node.js runtime (typically not an issue for developer tools)
+- Startup time includes Node.js and module loading
+- Build step required before distribution
+{% endif %}
+
+### Risks
+
+- If the distribution model changes later (e.g., from pip to binary), the build pipeline
+  will need to be redesigned.
+- Adding a new command that requires a heavy dependency should trigger a new ADR to assess
+  the impact on binary size or install footprint.
+
+## References
+
+- [Architecture documentation](../architecture.md)
+- [Ways of working](../ways-of-working.md)
+{% if language == "python" and cli_framework == "typer" %}
+- [Typer documentation](https://typer.tiangolo.com)
+{% elif language == "python" and cli_framework == "click" %}
+- [Click documentation](https://click.palletsprojects.com)
+{% elif language == "go" and cli_framework == "cobra" %}
+- [Cobra documentation](https://cobra.dev)
+{% elif language == "rust" and cli_framework == "clap" %}
+- [Clap documentation](https://docs.rs/clap)
+{% elif language == "typescript" and cli_framework == "commander" %}
+- [Commander.js documentation](https://github.com/tj/commander.js)
+{% endif %}

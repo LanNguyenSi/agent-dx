@@ -1,0 +1,47 @@
+FROM ubuntu:24.04
+
+WORKDIR /workspace
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl git \
+{% if stack == "nextjs-fullstack" -%}
+        nodejs npm \
+{% elif stack == "symfony-api-react" -%}
+        nodejs npm php-cli composer \
+{% elif stack == "django-htmx" -%}
+        python3 python3-pip python3-venv \
+{% elif stack == "rails-hotwire" -%}
+        ruby-full build-essential \
+{% endif -%}
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+CMD ["bash", "-lc", "\
+{% if stack == 'nextjs-fullstack' -%}
+if [ \"$APP_ROLE\" = \"web\" ]; then \
+  cd apps/web && npm install && npm run dev -- --hostname 0.0.0.0 || npm run dev; \
+elif [ \"$APP_ROLE\" = \"api\" ]; then \
+  cd apps/api && npm install && npm run dev; \
+else \
+  echo 'Unknown APP_ROLE for nextjs-fullstack'; sleep infinity; \
+fi\
+{% elif stack == 'symfony-api-react' -%}
+if [ \"$APP_ROLE\" = \"web\" ]; then \
+  cd apps/web && npm install && npm run dev -- --host 0.0.0.0 || npm run dev; \
+elif [ \"$APP_ROLE\" = \"api\" ]; then \
+  cd apps/api && composer install --no-interaction --prefer-dist || true && php -S 0.0.0.0:8000 -t public; \
+else \
+  echo 'Unknown APP_ROLE for symfony-api-react'; sleep infinity; \
+fi\
+{% elif stack == 'django-htmx' -%}
+python3 -m venv /tmp/venv \
+&& . /tmp/venv/bin/activate \
+&& pip install -e . \
+&& cd apps/api \
+&& python manage.py runserver 0.0.0.0:8000\
+{% elif stack == 'rails-hotwire' -%}
+cd apps/api && ruby -wc config/application.rb config/routes.rb >/dev/null \
+&& ruby -run -e httpd ../web -p 8000\
+{% endif -%}
+"]

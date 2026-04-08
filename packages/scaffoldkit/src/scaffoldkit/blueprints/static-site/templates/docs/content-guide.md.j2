@@ -1,0 +1,488 @@
+# Content Guide: {{ display_name }}
+
+This guide covers everything needed to add and maintain content on this site: frontmatter conventions, image handling, Markdown extensions, SEO metadata, and how to use components inside content.
+
+## Content Structure
+
+Content files live in `src/content/` organised by type:
+
+{% if site_type == "docs" %}
+```
+src/content/
+  docs/
+    getting-started/
+      index.md           # Section landing page
+      installation.md
+      configuration.md
+    guides/
+      ...
+    reference/
+      ...
+```
+
+Documentation pages are nested to reflect the site navigation. Folder names become URL segments. A file named `index.md` becomes the section's root URL.
+{% elif site_type == "blog" %}
+```
+src/content/
+  blog/
+    2024-01-15-my-first-post.md
+    2024-02-03-another-post/
+      index.md
+      diagram.png       # Co-locate images with the post
+  authors/
+    jane-smith.md
+    john-doe.md
+```
+
+Blog posts are named with a date prefix for easy sorting. Co-locate images with the post by using a directory instead of a single file.
+{% elif site_type == "landing-page" %}
+```
+src/content/
+  sections/
+    hero.md
+    features.md
+    testimonials.md
+    pricing.md
+    faq.md
+  testimonials/
+    customer-a.md
+    customer-b.md
+```
+
+Landing page sections are Markdown files whose frontmatter drives the section's appearance. The content body is used for longer text (e.g., FAQ answers).
+{% elif site_type == "portfolio" %}
+```
+src/content/
+  projects/
+    project-slug/
+      index.md
+      hero.png
+      screenshot-1.png
+  skills/
+    languages.md
+    frameworks.md
+```
+
+Each project is a directory containing the `index.md` and its associated images. This keeps assets co-located and avoids naming collisions.
+{% endif %}
+
+## Frontmatter Reference
+
+### Required Fields (all pages)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `title` | string | Page title. Used in `<title>`, `<h1>`, and Open Graph. Keep under 60 characters. |
+| `description` | string | Short page summary. Used in meta description and Open Graph. 120-160 characters. |
+
+{% if site_type == "docs" %}
+### Documentation Page Frontmatter
+
+```yaml
+---
+title: "Installation"
+description: "How to install and set up the project in your local environment."
+sidebar:
+  order: 2          # Controls position in the sidebar within its section
+  label: "Install"  # Short label for the sidebar (defaults to title)
+draft: false        # Set to true to hide from the published site
+lastModified: "2024-06-01"
+---
+```
+
+Optional fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `sidebar.order` | number | 99 | Sort order within the section |
+| `sidebar.label` | string | title | Sidebar label (shorter than title) |
+| `draft` | boolean | false | Hide from published site |
+| `lastModified` | date string | - | Date of last significant update |
+| `tableOfContents` | boolean | true | Show the auto-generated TOC |
+| `editUrl` | string | auto | Override the "Edit this page" link |
+
+{% elif site_type == "blog" %}
+### Blog Post Frontmatter
+
+```yaml
+---
+title: "My Post Title"
+description: "A summary of what this post covers."
+pubDate: "2024-06-15"
+author: "jane-smith"      # Must match a file in src/content/authors/
+tags:
+  - web development
+  - performance
+draft: false
+cover:
+  src: "./hero.png"
+  alt: "Descriptive alt text for the hero image"
+---
+```
+
+Optional fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pubDate` | date string | required | Publication date (ISO 8601) |
+| `author` | string | - | Author slug (references authors collection) |
+| `tags` | string[] | [] | Topic tags |
+| `draft` | boolean | false | Hide from published site and feeds |
+| `cover.src` | string | - | Path to hero image (relative to the post file) |
+| `cover.alt` | string | required if cover | Alt text for the hero image |
+| `canonicalUrl` | string | auto | Override canonical URL |
+
+### Author Frontmatter
+
+```yaml
+---
+name: "Jane Smith"
+bio: "Jane writes about web performance and developer experience."
+avatar: "./avatar.jpg"
+social:
+  twitter: "janesmith"
+  github: "janesmith"
+---
+```
+
+{% elif site_type == "landing-page" %}
+### Section Frontmatter
+
+```yaml
+---
+title: "Why {{ display_name }}"
+sectionId: "features"   # Used as the element id for anchor links
+order: 2                # Display order on the page
+visible: true
+layout: "grid"          # Options: grid, list, centered, split
+---
+```
+
+### Testimonial Frontmatter
+
+```yaml
+---
+name: "Customer Name"
+role: "Job Title, Company"
+avatar: "./avatar.jpg"
+featured: true          # Show on homepage
+---
+```
+
+{% elif site_type == "portfolio" %}
+### Project Frontmatter
+
+```yaml
+---
+title: "Project Name"
+description: "A one-sentence description of the project."
+date: "2024-05-01"
+tags:
+  - React
+  - TypeScript
+  - Accessibility
+status: "completed"     # completed | in-progress | archived
+featured: true          # Include on homepage portfolio grid
+links:
+  live: "https://example.com"
+  github: "https://github.com/user/repo"
+  case_study: "/projects/project-name/case-study"
+cover:
+  src: "./hero.png"
+  alt: "Screenshot of the Project Name home page"
+---
+```
+
+{% endif %}
+
+## Markdown Extensions
+
+The following Markdown extensions are available beyond standard CommonMark:
+
+### Tables
+
+Standard GFM (GitHub Flavoured Markdown) tables are supported:
+
+```markdown
+| Column A | Column B | Column C |
+|----------|----------|----------|
+| Cell     | Cell     | Cell     |
+```
+
+### Task Lists
+
+```markdown
+- [x] Done item
+- [ ] Pending item
+```
+
+### Footnotes
+
+```markdown
+Here is a claim.[^1]
+
+[^1]: Source or clarification.
+```
+
+### Code Blocks with Syntax Highlighting
+
+Fenced code blocks with a language identifier get syntax highlighting:
+
+````markdown
+```typescript
+function greet(name: string): string {
+  return `Hello, ${name}`;
+}
+```
+````
+
+Supported languages include: `typescript`, `javascript`, `python`, `bash`, `yaml`, `json`, `css`, `html`, `markdown`, and many others.
+
+Add a filename by appending it after the language:
+
+````markdown
+```typescript title="src/utils/greet.ts"
+function greet(name: string): string {
+  return `Hello, ${name}`;
+}
+```
+````
+
+### Callouts / Admonitions
+
+Use the following syntax for callout blocks:
+
+{% if framework == "astro" %}
+Callouts use a custom `<Callout>` component imported in MDX files. In plain Markdown, use the blockquote convention:
+
+```markdown
+> [!NOTE]
+> This is a note callout.
+
+> [!WARNING]
+> This is a warning callout.
+
+> [!TIP]
+> This is a tip callout.
+```
+
+In MDX files:
+
+```mdx
+import Callout from '@/components/content/Callout.astro';
+
+<Callout type="warning">
+  This action cannot be undone.
+</Callout>
+```
+{% elif framework == "hugo" %}
+Use Hugo shortcodes:
+
+{% raw %}
+```
+{{< callout type="note" >}}
+This is a note.
+{{< /callout >}}
+
+{{< callout type="warning" >}}
+This is a warning.
+{{< /callout >}}
+```
+{% endraw %}
+{% else %}
+Use blockquote convention (transformed to styled callouts by the Markdown plugin):
+
+```markdown
+> [!NOTE]
+> This is a note callout.
+
+> [!WARNING]
+> This is a warning callout.
+```
+{% endif %}
+
+Available types: `note`, `tip`, `warning`, `danger`, `info`
+
+## Using Components in Content
+
+{% if framework == "astro" %}
+Files with a `.mdx` extension can import and use Astro or framework components directly:
+
+```mdx
+---
+title: "My Page"
+description: "..."
+---
+
+import VideoEmbed from '@/components/content/VideoEmbed.astro';
+import DataTable from '@/components/content/DataTable.astro';
+
+Standard Markdown content here.
+
+<VideoEmbed id="dQw4w9WgXcQ" title="Demo video" />
+
+More Markdown content.
+
+<DataTable
+  headers={["Name", "Value"]}
+  rows={[["Alpha", "1"], ["Beta", "2"]]}
+/>
+```
+
+Use `.mdx` when you need components; use `.md` for pure Markdown content.
+{% elif framework == "nextjs-static" %}
+MDX files can import React components:
+
+```mdx
+---
+title: "My Page"
+description: "..."
+---
+
+import { Callout } from '@/components/content/Callout';
+import { CodeSandbox } from '@/components/content/CodeSandbox';
+
+Standard Markdown content.
+
+<Callout type="tip">
+  Use MDX when you need interactive or styled components inside content.
+</Callout>
+```
+{% elif framework == "hugo" %}
+Hugo uses shortcodes for reusable content snippets. They live in `layouts/shortcodes/`:
+
+{% raw %}
+```
+{{< youtube id="dQw4w9WgXcQ" title="Demo video" >}}
+
+{{< figure src="./diagram.png" alt="System architecture diagram" caption="Figure 1: System overview" >}}
+```
+
+Shortcodes accept named parameters and can include inner content:
+
+```
+{{< callout type="warning" >}}
+  Content here is passed as `.Inner`.
+{{< /callout >}}
+```
+{% endraw %}
+{% elif framework == "eleventy" %}
+Nunjucks shortcodes registered in `.eleventy.js` can be used in content templates:
+
+```
+{% raw %}{% callout "warning" %}
+  Content here.
+{% endcallout %}{% endraw %}
+```
+
+For more complex interactivity, use web components that are self-contained in `src/assets/js/`.
+{% endif %}
+
+## SEO Metadata
+
+### Page Title
+
+The `title` frontmatter field is used in:
+- The browser `<title>` tag (format: `{title} - {{ display_name }}`)
+- The `<h1>` heading (on most layouts)
+- `og:title` Open Graph tag
+- `twitter:title` Twitter card tag
+
+Guidelines:
+- 50-60 characters including the site name suffix
+- Include the primary keyword near the beginning
+- Be specific and descriptive - avoid generic titles like "Home" or "Overview"
+
+### Meta Description
+
+The `description` frontmatter field is used in:
+- The `<meta name="description">` tag
+- `og:description` Open Graph tag
+- `twitter:description` Twitter card tag
+
+Guidelines:
+- 120-160 characters
+- Write for humans first - this appears in search results and link previews
+- Summarise what the reader will learn or accomplish, not just what the page is about
+- Include a natural keyword or phrase
+
+### Open Graph Images
+
+Set a custom OG image in frontmatter:
+
+```yaml
+ogImage: "./og-image.png"
+```
+
+If not set, the site's default OG image from `public/og-image.png` is used.
+
+OG image specifications:
+- Dimensions: 1200x630px
+- Format: PNG or JPG
+- File size: under 1MB
+- Include the page title as text in the image for recognisability in link previews
+
+### Structured Data
+
+{% if site_type == "blog" %}
+Blog posts automatically include `Article` schema markup. To add FAQ structured data to a post:
+
+```yaml
+faq:
+  - question: "What is this?"
+    answer: "It is a thing."
+  - question: "How does it work?"
+    answer: "Very well, thank you."
+```
+{% elif site_type == "docs" %}
+Documentation pages include `TechArticle` schema markup automatically.
+{% endif %}
+
+Additional structured data can be added via a `schema` frontmatter field accepting a JSON-LD object.
+
+## Image Handling
+
+### Images in `src/assets/` (processed)
+
+Reference images using a relative path from the content file:
+
+```markdown
+![Alt text describing the image](./screenshot.png)
+```
+
+The build pipeline will:
+- Generate multiple sizes (400w, 800w, 1200w) for responsive `srcset`
+- Convert to WebP with PNG/JPG fallback
+- Add `width` and `height` attributes to prevent layout shift
+- Apply lazy loading to images that are not in the initial viewport
+
+### Images in `public/` (unprocessed)
+
+Reference by absolute path from the site root:
+
+```markdown
+![Site logo](/logo.png)
+```
+
+Use `public/` only when the image needs a stable, predictable URL (e.g., an OG image referenced in email newsletters or external metadata).
+
+### Alt Text
+
+Write alt text that describes the image content for someone who cannot see it:
+
+| Situation | Example |
+|-----------|---------|
+| Screenshot with UI | "The settings panel showing notification toggles for email and push alerts" |
+| Chart or graph | "Line chart showing weekly active users growing from 1,200 in January to 4,500 in June" |
+| Logo | "{{ display_name }} logo" |
+| Decorative image | `alt=""` (empty) |
+| Image containing important text | Include the text verbatim in the alt attribute |
+
+## Writing Style
+
+- Use second person ("you") when addressing the reader directly
+- Write in active voice: "Click Save" not "The Save button should be clicked"
+- Use present tense for descriptions: "The panel shows..." not "The panel will show..."
+- Keep sentences under 25 words where possible
+- Define acronyms on first use: "Content Management System (CMS)"
+- Use numbered lists for sequential steps; use bullet lists for unordered items

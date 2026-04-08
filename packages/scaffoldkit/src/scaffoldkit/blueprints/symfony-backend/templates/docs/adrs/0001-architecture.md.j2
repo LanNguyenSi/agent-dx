@@ -1,0 +1,253 @@
+# ADR-0001: Architecture, API Style, and Key Technology Choices
+
+## Status
+
+Accepted
+
+## Context
+
+**{{ display_name }}** requires a clear architectural foundation before development begins. The team evaluated the primary technology and design choices that will shape the entire codebase.
+
+Key requirements driving these decisions:
+
+- Deliver a production-quality REST API backend
+- PHP {{ php_version }} as the minimum runtime
+- Long-term maintainability and testability
+- Onboarding of new developers should be fast via clear conventions
+{% if use_auth %}
+- Secure authentication for API consumers
+{% endif %}
+{% if use_ddd %}
+- Business logic complexity warrants a clear separation between domain, application, and infrastructure concerns
+{% endif %}
+
+---
+
+## Decision 1: Symfony {{ symfony_version }}
+
+**Chosen:** Symfony {{ symfony_version }}
+
+### Rationale
+
+{% if symfony_version == "7.2" or symfony_version == "7.1" %}
+Symfony 7.x was chosen because:
+
+- PHP 8.2+ as the minimum requirement enables full use of readonly properties, enums, fibers, and intersection types
+- The new `#[Autowire]` attribute reduces service configuration boilerplate
+- Improved Messenger ergonomics for CQRS and async messaging
+- Long-term support roadmap is well-defined (7.x LTS = 7.4)
+- Cleaner deprecation of legacy patterns (annotations, XML config) that create maintenance burden
+
+{% elif symfony_version == "6.4" %}
+Symfony 6.4 (LTS) was chosen because:
+
+- It is the current long-term support release, supported until November 2027
+- Provides a stable, well-documented API surface
+- Allows PHP 8.1+ which is widely available in hosting environments
+- LTS guarantees security patches without forced upgrades during the project lifespan
+{% endif %}
+
+### Alternatives Considered
+
+| Framework | Reason not chosen |
+|-----------|-------------------|
+| Laravel | Less explicit dependency injection; service container magic conflicts with strict type safety goals |
+| API Platform standalone | Too opinionated for custom business logic flows; better as a layer on top of Symfony |
+| Slim / Lumen | Minimal framework lacks the scaffolding needed (security, console, messenger, forms, serializer) |
+
+---
+
+## Decision 2: API Style - {{ api_style }}
+
+**Chosen:** {{ api_style }}
+
+### Rationale
+
+{% if api_style == "api-platform" %}
+**API Platform** was chosen because:
+
+- It generates OpenAPI 3.x documentation automatically from PHP attributes, eliminating drift between code and docs
+- Built-in support for pagination, filtering, sorting, and validation reduces boilerplate
+- State Providers and Processors provide clean extension points for custom logic without monkey-patching
+- JSON-LD, Hydra, and JSON:API support built-in for future extensibility
+- Strong community and Symfony integration via dedicated bundle
+
+The trade-off is that API Platform has a learning curve. New developers must understand the resource/operation model before contributing to API endpoints.
+
+{% elif api_style == "custom-controllers" %}
+**Custom Controllers** were chosen because:
+
+- Maximum transparency and control over request/response cycles
+- No magic: every endpoint is a named method in an explicit controller
+- Suitable for APIs with highly irregular or legacy-compatible shapes
+- Easier to reason about performance for complex endpoints
+
+The trade-off is more boilerplate: pagination, serialization groups, and error formatting must be implemented consistently by hand.
+
+{% elif api_style == "fos-rest" %}
+**FOSRestBundle** was chosen because:
+
+- Content negotiation (JSON, XML) without custom code
+- View layer abstraction lets controllers return objects, not responses
+- ParamFetcher simplifies query parameter handling and validation
+
+The trade-off is that FOSRestBundle adds a layer of indirection that can be confusing for developers unfamiliar with the bundle.
+
+{% endif %}
+
+---
+
+## Decision 3: Database - {{ database }}
+
+**Chosen:** {{ database }}
+
+### Rationale
+
+{% if database == "postgresql" %}
+**PostgreSQL** was chosen because:
+
+- Best-in-class support for complex queries, JSONB columns, full-text search, and window functions
+- Strong Doctrine ORM support including native UUID generation and array types
+- ACID compliance, strong durability guarantees, and mature replication
+- Preferred by the Symfony ecosystem for production workloads
+
+{% elif database == "mysql" %}
+**MySQL 8.0** was chosen because:
+
+- Most widely available managed database in cloud environments
+- Strong Doctrine ORM support
+- Good performance for read-heavy workloads with proper indexing
+
+{% elif database == "mariadb" %}
+**MariaDB** was chosen because:
+
+- Drop-in MySQL compatibility with additional features (column-store, virtual columns)
+- Strong open-source governance and active community
+- Available as a first-class managed option in many cloud providers
+
+{% endif %}
+
+All schema changes are managed via **Doctrine Migrations**. Raw DDL is never executed outside a migration.
+
+---
+
+{% if use_ddd %}
+## Decision 4: Domain-Driven Design Layer Architecture
+
+**Chosen:** DDD with Domain / Application / Infrastructure layers
+
+### Rationale
+
+DDD layers were chosen because:
+
+- The business domain has sufficient complexity that mixing infrastructure concerns with business logic would create long-term maintenance debt
+- Domain entities and value objects can be unit-tested without a database or HTTP context
+- Repository interfaces in the Domain layer allow swapping persistence implementations
+- The Application layer (use cases) provides a clear, documented API for what the system can do, independent of how it is delivered (HTTP, CLI, queue)
+- CQRS (if enabled) maps naturally onto Application layer commands and queries
+
+### Trade-offs
+
+- Initial setup takes longer than a flat Symfony structure
+- Developers must understand the layering rules before contributing
+- Simple CRUD features involve more files than in a flat structure
+
+The layering is enforced by PHPStan and code review. A DriftDetector rule in `phpstan.neon` can be added to fail the build if the Domain layer imports from Infrastructure.
+
+{% endif %}
+
+{% if use_cqrs %}
+## Decision 5: CQRS via Symfony Messenger
+
+**Chosen:** CQRS with separate Command Bus and Query Bus
+
+### Rationale
+
+- Clear separation of read and write models reduces cognitive load when evolving either side
+- Symfony Messenger provides a production-tested bus implementation with retry, failure handling, and async support
+- Command handlers map 1:1 to use cases, making the system's capabilities self-documenting
+- Enables future read-model optimization (denormalized views, read replicas) without touching write paths
+
+### Trade-offs
+
+- More files per feature (Command + Handler + Query + Handler)
+- Developers must dispatch via the bus, not call handlers directly
+- Testing requires dispatching through the bus or instantiating handlers directly (both patterns are acceptable)
+
+{% endif %}
+
+{% if use_auth %}
+## Decision 6: Authentication - {{ auth_method }}
+
+**Chosen:** {{ auth_method }}
+
+### Rationale
+
+{% if auth_method == "jwt" %}
+**JWT (LexikJWTAuthenticationBundle)** was chosen because:
+
+- Stateless authentication fits the API's design (no server-side sessions)
+- JWTs are self-contained: the server can verify tokens without a database lookup on every request
+- Short-lived access tokens (TTL: 1 hour) combined with refresh tokens balance security and usability
+- Widely understood by frontend and mobile consumers
+
+Consideration: JWTs cannot be revoked before expiry without a token blocklist. A Redis-backed blocklist will be used if immediate revocation is required.
+
+{% elif auth_method == "oauth2" %}
+**OAuth2** was chosen because:
+
+- Required for third-party application integrations
+- Scopes allow fine-grained permission delegation
+- Industry-standard protocol understood by all API consumers
+- thephpleague/oauth2-server is well-maintained and framework-agnostic
+
+{% elif auth_method == "api-key" %}
+**API Keys** were chosen because:
+
+- Simplest possible auth for machine-to-machine integrations
+- No token expiry management for consumers
+- Keys can be independently issued and revoked per client
+- Suitable when all consumers are known services under the organization's control
+
+{% endif %}
+
+{% endif %}
+
+---
+
+## Consequences
+
+### Positive
+
+- Clear conventions reduce onboarding time for new developers
+- Static analysis (PHPStan level 8) catches type errors before they reach production
+- Documentation-first approach (architecture.md, api-conventions.md, ADRs) supports long-term maintainability
+- Test strategy ({{ test_strategy }}) is defined upfront, preventing coverage debt
+
+### Negative
+
+- More initial setup than a minimal Symfony skeleton
+- Symfony {{ symfony_version }} requires PHP {{ php_version }}+ which may not be available in all environments
+{% if use_ddd %}
+- DDD layers add file count and require discipline to maintain boundaries
+{% endif %}
+{% if api_style == "api-platform" %}
+- API Platform has a significant learning curve for developers new to the resource/operation model
+{% endif %}
+
+### Risks
+
+- Technology choices are opinionated; future contributors must read this ADR before proposing alternatives
+- PHPStan level 8 may require extra work when integrating third-party libraries with incomplete type coverage
+
+---
+
+## References
+
+- [Symfony Documentation](https://symfony.com/doc/{{ symfony_version }}/index.html)
+{% if api_style == "api-platform" %}
+- [API Platform Documentation](https://api-platform.com/docs/)
+{% endif %}
+- [Architecture documentation](../architecture.md)
+- [Ways of Working](../ways-of-working.md)
+- [API Conventions](../api-conventions.md)

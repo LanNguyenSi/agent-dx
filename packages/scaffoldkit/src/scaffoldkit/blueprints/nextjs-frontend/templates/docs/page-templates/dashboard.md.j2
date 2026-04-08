@@ -1,0 +1,201 @@
+# Page Template: Dashboard
+
+Reference structure for overview / dashboard pages in **{{ display_name }}**.
+
+Design style: **{{ design_style }}**
+
+---
+
+## Purpose
+
+A dashboard page gives the user a high-level snapshot of the system. It answers "what is happening right now?" It should be scannable in under 10 seconds.
+
+---
+
+## Layout Structure
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  PageHeader                                              │
+│  Title: "Dashboard"     [Date range picker] [Export]     │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  KPI Cards Row                                           │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+│  │  Metric  │ │  Metric  │ │  Metric  │ │  Metric  │  │
+│  │  +12.5%  │ │  -3.2%   │ │  +8.1%   │ │  +0.4%   │  │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+│                                                          │
+│  ┌──────────────────────────────┐ ┌────────────────────┐│
+│  │  Primary Chart               │ │  Secondary Chart   ││
+│  │  (e.g. trend over time)      │ │  (e.g. breakdown)  ││
+│  │                              │ │                    ││
+│  │                              │ └────────────────────┘│
+│  │                              │ ┌────────────────────┐│
+│  │                              │ │  Top Items List    ││
+│  └──────────────────────────────┘ └────────────────────┘│
+│                                                          │
+│  ┌──────────────────────────────────────────────────────┐│
+│  │  Recent Activity Feed                                ││
+│  │  - Event 1                                           ││
+│  │  - Event 2                                           ││
+│  └──────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Section Breakdown
+
+### Page Header
+
+- **Title:** The page name ("Dashboard") plus an optional subtitle (e.g. "Last 30 days")
+- **Actions (top-right):** Date range picker, refresh button, export button
+- Primary actions are always top-right on desktop; collapse into a menu on mobile
+
+### KPI Cards
+
+Show 3-5 key metrics. Each card contains:
+
+- Metric name (short, 2-4 words)
+- Current value (formatted: currency, count, percentage)
+- Trend indicator: delta from previous period (+ green / - red)
+- Sparkline or trend arrow (optional)
+
+{% if design_style == "minimal-clean" %}
+**Style guidance (minimal-clean):**
+- Cards use a clean white background with a subtle border
+- Numbers are large and prominent (`text-3xl font-bold`)
+- Trend delta is small, muted, below the main figure
+- No decorative icons or gradients
+{% elif design_style == "corporate-professional" %}
+**Style guidance (corporate-professional):**
+- Cards have a light grey background with a left border accent in brand blue
+- Metric name in all-caps small text above the number
+- Trend shown with an up/down arrow icon and percentage text
+- Consistent spacing, no rounded corners
+{% elif design_style == "playful-modern" %}
+**Style guidance (playful-modern):**
+- Cards have a subtle gradient background unique to each metric
+- Metric icon (emoji or SVG) in top-right corner
+- Number is large with a bouncy font weight
+- Trend badge with rounded pill styling
+{% endif %}
+
+### Primary Chart
+
+A full-width (or 60% width) chart showing the main trend over the selected time range.
+
+**Choices:**
+- Time-series data: Line chart or area chart
+- Categorical comparison: Bar chart
+- Part-to-whole: Donut chart (avoid pie charts)
+
+**Implementation notes:**
+- Use `recharts` or `chart.js` via a wrapper component in `src/components/ui/`
+- Chart data is fetched server-side where possible; on the client via TanStack Query with a skeleton fallback
+- Always render an empty state when there is no data (never an empty chart area)
+
+### Secondary Charts / Top Items
+
+- Smaller supporting visualisations (right column on desktop, below primary on mobile)
+- "Top 5 X" lists are often more useful than a second chart
+- Use a simple ranked list with a small bar or percentage beside each item
+
+### Recent Activity Feed
+
+A reverse-chronological list of the last N events.
+
+Each item includes:
+- Action description (e.g. "Alice created invoice #1042")
+- Timestamp (relative: "3 minutes ago"; absolute on hover)
+- Optional: entity link, avatar, or status badge
+
+**Implementation:** Loaded client-side with polling or WebSocket. Use `aria-live="polite"` if auto-updating.
+
+---
+
+## Data Fetching
+
+{% if router == "app-router" %}
+```tsx
+// src/app/(dashboard)/dashboard/page.tsx
+import { Suspense } from "react";
+import { KpiCardsSkeleton } from "@/components/features/dashboard/KpiCards.skeleton";
+import { KpiCards } from "@/components/features/dashboard/KpiCards";
+import { PrimaryChart } from "@/components/features/dashboard/PrimaryChart";
+import { ActivityFeed } from "@/components/features/dashboard/ActivityFeed";
+
+export default function DashboardPage() {
+  return (
+    <div className="space-y-6 p-6">
+      <PageHeader title="Dashboard" />
+
+      {/* KPI cards stream in independently */}
+      <Suspense fallback={<KpiCardsSkeleton />}>
+        <KpiCards />
+      </Suspense>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <Suspense fallback={<ChartSkeleton />}>
+            <PrimaryChart />
+          </Suspense>
+        </div>
+        <div className="space-y-6">
+          <Suspense fallback={<TopItemsSkeleton />}>
+            <TopItems />
+          </Suspense>
+        </div>
+      </div>
+
+      <Suspense fallback={<ActivityFeedSkeleton />}>
+        <ActivityFeed />
+      </Suspense>
+    </div>
+  );
+}
+```
+{% else %}
+```tsx
+// src/pages/dashboard/index.tsx
+import type { GetServerSideProps } from "next";
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const [kpis, recentActivity] = await Promise.all([
+    getKpis(),
+    getRecentActivity({ limit: 10 }),
+  ]);
+  return { props: { kpis, recentActivity } };
+};
+```
+{% endif %}
+
+---
+
+## Empty and Error States
+
+| Scenario | Treatment |
+|----------|-----------|
+| No data for date range | Illustration + "No data for this period" + link to adjust range |
+| API error loading KPIs | Inline error card with "Retry" button |
+| API error loading chart | Chart container with error message, rest of page unaffected |
+| New account (no events) | Onboarding callout: "Start by creating your first X" |
+
+---
+
+## Responsiveness
+
+| Viewport | Layout |
+|----------|--------|
+| < 640 px | 1-column stack: KPIs scroll horizontally, charts full-width |
+| 640 - 1023 px | 2-column KPI grid, charts full-width |
+| >= 1024 px | Full layout as described above |
+
+---
+
+## Performance Notes
+
+- KPI numbers should be visible within 1 s (LCP target)
+- Lazy-load charts with `next/dynamic` and `ssr: false` if the chart library is large
+- Do not block page render on the activity feed - load it after the above-the-fold content

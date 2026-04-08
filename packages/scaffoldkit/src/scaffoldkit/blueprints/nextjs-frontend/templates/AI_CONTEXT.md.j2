@@ -1,0 +1,533 @@
+# AI Context: {{ display_name }}
+
+> Read this file before making any changes to this codebase.
+> It defines how this project is structured, what patterns to follow, and what to avoid.
+
+## Project Summary
+
+**{{ display_name }}** - {{ description }}
+
+| Setting | Value |
+|---------|-------|
+| Framework | Next.js {{ nextjs_version }} |
+| Router | {{ router }} |
+| Language | {{ language | title }} |
+| Styling | {{ styling }} |
+{% if ui_library != "none" %}
+| UI Library | {{ ui_library }} |
+{% endif %}
+| State | {{ state_management }} |
+| API Client | {{ api_client }} |
+{% if use_auth %}
+| Auth | {{ auth_provider }} |
+{% endif %}
+{% if use_i18n %}
+| i18n | next-intl |
+{% endif %}
+| Tests | {{ test_strategy }} |
+| Design | {{ design_style }} |
+
+---
+
+## Repository Structure
+
+```
+{{ project_name }}/
+{% if router == "app-router" %}
+src/app/                  # App Router: pages, layouts, API routes
+  (auth)/                 # Route group: login, register pages
+  (dashboard)/            # Route group: protected pages, shared layout
+  api/                    # API route handlers (BFF)
+  layout.tsx              # Root layout: fonts, providers, metadata
+  page.tsx                # Home page
+{% else %}
+src/pages/                # Pages Router: each file = one URL
+  api/                    # API routes
+  _app.tsx                # Global providers
+  _document.tsx           # HTML document shell
+{% endif %}
+src/components/
+  ui/                     # Generic UI primitives (no domain knowledge)
+  layout/                 # App shell components (Header, Sidebar)
+  features/               # Domain-specific feature components
+src/hooks/                # Custom React hooks
+src/lib/                  # Third-party client config, utilities, stores
+src/services/             # Typed API service functions
+src/types/                # TypeScript type definitions
+src/styles/               # Global CSS, design tokens
+public/                   # Static assets
+docs/
+  architecture.md         # Full architecture reference
+  ways-of-working.md      # DoD, conventions, PR process
+  component-guide.md      # How to build components
+  adrs/                   # Architecture Decision Records
+  page-templates/         # Reference designs for standard pages
+AI_CONTEXT.md             # This file
+```
+
+---
+
+## How to Add a New Page
+
+{% if router == "app-router" %}
+### App Router (file-based routing)
+
+1. Create a folder under `src/app/` matching the URL path.
+2. Add a `page.tsx` file - this is the page component.
+3. Add a `loading.tsx` for the Suspense fallback.
+4. Add a `error.tsx` for the error boundary.
+5. If the page needs data, fetch it directly in the `page.tsx` (it is a Server Component by default).
+
+**Example: adding `/products` page**
+
+```
+src/app/(dashboard)/products/
+├── page.tsx          # async Server Component - fetch data here
+├── loading.tsx       # skeleton shown while page data loads
+└── error.tsx         # error shown if page throws
+```
+
+```tsx
+// src/app/(dashboard)/products/page.tsx
+import { Suspense } from "react";
+import { getProducts } from "@/services/products";
+import { ProductTable } from "@/components/features/products/ProductTable";
+import { ProductTableSkeleton } from "@/components/features/products/ProductTable.skeleton";
+
+export const metadata = { title: "Products | {{ display_name }}" };
+
+export default async function ProductsPage() {
+  // Server Component: direct async call, no useEffect, no useState
+  const products = await getProducts();
+
+  return (
+    <div className="space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Products</h1>
+      <Suspense fallback={<ProductTableSkeleton />}>
+        <ProductTable products={products} />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+{% else %}
+### Pages Router (file-based routing)
+
+1. Create a `.tsx` file under `src/pages/` matching the URL.
+2. Export a default React component.
+3. Add `getServerSideProps` or `getStaticProps` for data fetching.
+
+**Example: adding `/products` page**
+
+```tsx
+// src/pages/products/index.tsx
+import type { GetServerSideProps, NextPage } from "next";
+import type { Product } from "@/types/product";
+import { ProductTable } from "@/components/features/products/ProductTable";
+import { getProducts } from "@/services/products";
+
+interface Props {
+  products: Product[];
+}
+
+const ProductsPage: NextPage<Props> = ({ products }) => {
+  return (
+    <div className="space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Products</h1>
+      <ProductTable products={products} />
+    </div>
+  );
+};
+
+export const getServerSideProps: GetServerSideProps<Props> = async () => {
+  const products = await getProducts();
+  return { props: { products } };
+};
+
+export default ProductsPage;
+```
+
+{% endif %}
+
+For the visual layout of standard page types, see:
+- `docs/page-templates/dashboard.md` - overview / KPI dashboard
+- `docs/page-templates/detail.md` - single entity detail
+- `docs/page-templates/form.md` - create / edit forms
+
+---
+
+## How to Add a Component
+
+1. **Determine the category:**
+   - No domain knowledge, reusable anywhere -> `src/components/ui/`
+   - Part of the app shell -> `src/components/layout/`
+   - Tied to a business concept -> `src/components/features/<domain>/`
+
+2. **Create the file** following the naming convention: `PascalCase.tsx`
+
+3. **Write a named export** (not default export for non-page files):
+   ```tsx
+   export function ProductCard({ product }: ProductCardProps) { ... }
+   ```
+
+4. **Add a skeleton** (`ProductCard.skeleton.tsx`) if the component loads data
+
+5. **Write a test** (`ProductCard.test.tsx`) - see Testing Patterns below
+
+6. **Export from barrel** (`src/components/features/products/index.ts`)
+
+See `docs/component-guide.md` for the full step-by-step and code examples.
+
+---
+
+## Server vs Client Component Rules
+
+{% if router == "app-router" %}
+**Default: everything is a Server Component.** Add `"use client"` only when required.
+
+| Situation | Server Component | Client Component |
+|-----------|-----------------|-----------------|
+| Fetch data from API / DB | YES | no |
+| Read environment variables (secrets) | YES | no |
+| Access request headers / cookies | YES | no |
+| Use `useState`, `useReducer` | no | YES |
+| Use `useEffect` | no | YES |
+| Use browser APIs (`window`, `document`) | no | YES |
+| Attach event listeners (`onClick`, `onChange`) | no | YES |
+| Use third-party hooks | no | YES (usually) |
+| Render other Server Components | YES | NO |
+
+### Key rules
+
+- **Never** use `useEffect` to fetch data in the App Router. Fetch in the Server Component directly.
+- Keep Client Components as **leaf nodes** - push `"use client"` as far down the tree as possible.
+- A Server Component can import and render a Client Component. The reverse is NOT possible.
+- Pass data from Server to Client via props - not via a global store.
+
+```tsx
+// Correct pattern: Server Component fetches, Client Component handles interaction
+// src/app/(dashboard)/products/[id]/page.tsx  (Server Component)
+import { ProductDetailClient } from "@/components/features/products/ProductDetail.client";
+
+export default async function ProductDetailPage({ params }) {
+  const product = await getProduct(params.id); // server-side fetch
+  return <ProductDetailClient product={product} />; // pass as prop
+}
+
+// src/components/features/products/ProductDetail.client.tsx
+"use client";
+export function ProductDetailClient({ product }: { product: Product }) {
+  const [editing, setEditing] = useState(false); // client interactivity
+  ...
+}
+```
+
+{% else %}
+In the Pages Router, all components are client-side by default. Use `getServerSideProps` or `getStaticProps` to fetch data server-side.
+
+For expensive computations, use `getServerSideProps` rather than `useEffect` + `fetch` in a component.
+{% endif %}
+
+---
+
+## Data Fetching Patterns
+
+{% if api_client == "tanstack-query" %}
+### TanStack Query (client-side)
+
+Use TanStack Query for data that:
+- Needs client-side caching with background refetch
+- Depends on user input (search, filters, pagination)
+- Must be updated after a mutation (optimistic updates)
+
+```ts
+// 1. Define service function and query key
+// src/services/products.ts
+export const productKeys = {
+  all: ["products"] as const,
+  list: (filters: ProductFilters) => ["products", "list", filters] as const,
+  detail: (id: string) => ["products", "detail", id] as const,
+};
+
+export function useProducts(filters: ProductFilters) {
+  return useQuery({
+    queryKey: productKeys.list(filters),
+    queryFn: () => fetchProducts(filters),
+    staleTime: 60_000,
+  });
+}
+
+// 2. Use in a Client Component
+"use client";
+export function ProductList({ initialFilters }) {
+  const [filters, setFilters] = useState(initialFilters);
+  const { data, isLoading, isError } = useProducts(filters);
+
+  if (isLoading) return <ProductTableSkeleton />;
+  if (isError) return <SectionError />;
+  return <ProductTable products={data} />;
+}
+```
+
+{% elif api_client == "fetch" or api_client == "axios" %}
+### Service Layer Pattern
+
+All API calls go through typed service functions in `src/services/`. Components never call `fetch` directly.
+
+```ts
+// src/services/products.ts
+import { apiFetch } from "@/lib/api"; // shared fetch wrapper
+
+export async function getProducts(filters?: ProductFilters): Promise<Product[]> {
+  return apiFetch<Product[]>("/products", {
+    params: filters,
+  });
+}
+
+export async function createProduct(data: CreateProductInput): Promise<Product> {
+  return apiFetch<Product>("/products", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+```
+
+{% endif %}
+
+{% if router == "app-router" %}
+### Server Components (preferred for static data)
+
+For data that does not change per user interaction, fetch in the Server Component:
+
+```tsx
+// No hook, no useEffect - direct async/await
+export default async function Page() {
+  const data = await getProducts(); // runs on the server
+  return <ProductTable products={data} />;
+}
+```
+
+{% endif %}
+
+---
+
+## Styling Conventions
+
+{% if styling == "tailwind" %}
+- Use Tailwind utility classes directly in JSX
+- For variant-based components, use `cva` from `class-variance-authority`
+- Merge conditional classes with `cn()` from `src/lib/utils.ts` (wraps `clsx` + `tailwind-merge`)
+- Use semantic colour tokens (`text-foreground`, `bg-card`, `border-border`) NOT raw values (`text-gray-900`)
+- Never use `@apply` in component files
+- Never use inline `style` props for visual styling
+
+```tsx
+// Good
+<div className={cn("rounded-lg border bg-card p-4", isActive && "border-primary")}>
+
+// Avoid
+{{ '<div style={{ borderRadius: "8px", background: "white" }}>' }}
+```
+
+{% elif styling == "css-modules" %}
+- Every component has a colocated `.module.css` file
+- Class names use camelCase: `styles.cardHeader`, not `styles['card-header']`
+- Global styles (tokens, resets) are in `src/styles/` only - never write global selectors in module files
+- Do not use inline `style` props for visual styling
+
+```tsx
+import styles from "./ProductCard.module.css";
+<div className={styles.card}>
+```
+
+{% elif styling == "styled-components" %}
+- All styles use `styled` components or the `css` helper from styled-components
+- Theme values come from `useTheme()` - never hardcode hex values
+- Do not mix styled-components with inline `style` props
+- Avoid deeply nested selectors - create a new styled component instead
+
+{% elif styling == "scss" %}
+- Component styles use colocated `.module.scss` files
+- Global tokens are in `src/styles/abstracts/` as SCSS variables and custom properties
+- Use SCSS variables for design tokens, CSS custom properties for runtime theming
+- Avoid nesting more than 2 levels deep in SCSS
+
+{% endif %}
+
+{% if design_style == "minimal-clean" %}
+### Design Guidance: Minimal-Clean
+
+- Generous whitespace: prefer `p-6`, `gap-6`, `space-y-6`
+- Restrained colour palette: `foreground`, `muted-foreground`, `primary` only
+- Subtle borders and shadows: `border`, `shadow-sm` - not `shadow-xl`
+- Typography hierarchy: `text-2xl font-semibold` (h1), `text-xl font-medium` (h2), `text-base` (body)
+- No decorative gradients or illustrations on functional pages
+
+{% elif design_style == "corporate-professional" %}
+### Design Guidance: Corporate-Professional
+
+- Structured, grid-based layouts with clear visual hierarchy
+- Blue/grey primary colour scheme (configure in `tailwind.config.ts`)
+- Data density: prefer tables and compact lists over cards
+- Formal language in empty states and error messages
+- Consistent action placement: primary actions always top-right
+
+{% elif design_style == "playful-modern" %}
+### Design Guidance: Playful-Modern
+
+- Rounded corners: `rounded-xl` or `rounded-2xl` for cards
+- Vibrant accent colours with gradients for hero elements
+- Micro-interactions: use CSS transitions for hover states, focus rings
+- Friendly, conversational empty state messages
+- Icons alongside labels for most actions
+
+{% endif %}
+
+---
+
+## Testing Patterns
+
+{% if test_strategy == "vitest-only" %}
+### Vitest + Testing Library
+
+```ts
+// Unit test: hook
+import { renderHook } from "@testing-library/react";
+import { useProductFilters } from "./useProductFilters";
+
+it("resets page to 1 when search query changes", () => {
+  const { result } = renderHook(() => useProductFilters());
+  act(() => result.current.setSearch("new query"));
+  expect(result.current.page).toBe(1);
+});
+
+// Component test
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
+it("calls onDelete when delete button is clicked", async () => {
+  const onDelete = vi.fn();
+  render(<ProductCard product={mockProduct} onDelete={onDelete} />);
+  await userEvent.click(screen.getByRole("button", { name: /delete/i }));
+  expect(onDelete).toHaveBeenCalledWith(mockProduct.id);
+});
+```
+
+**Mocking API calls:** use `msw` (Mock Service Worker) handlers in `src/test/handlers/`. Do NOT mock service functions directly with `vi.mock` - mock at the network boundary.
+
+{% elif test_strategy == "vitest-and-playwright" %}
+### Vitest (unit/component) + Playwright (e2e)
+
+Unit/component tests: same pattern as above.
+
+**Playwright e2e:**
+
+```ts
+// tests/e2e/products.spec.ts
+import { test, expect } from "@playwright/test";
+
+test("user can create a product", async ({ page }) => {
+  await page.goto("/products/new");
+  await page.getByLabel("Product name").fill("Widget Pro");
+  await page.getByLabel("Price").fill("29.99");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Widget Pro")).toBeVisible();
+});
+```
+
+Use Page Object Models for shared interactions:
+
+```ts
+// tests/e2e/pages/ProductsPage.ts
+export class ProductsPage {
+  constructor(private page: Page) {}
+  async goto() { await this.page.goto("/products"); }
+  async createProduct(name: string, price: string) { ... }
+}
+```
+
+{% elif test_strategy == "jest-and-cypress" %}
+### Jest (unit/component) + Cypress (e2e)
+
+Unit/component tests: same patterns using `jest` instead of `vitest` (API is near-identical).
+
+**Cypress e2e:**
+
+```ts
+// cypress/e2e/products.cy.ts
+describe("Products", () => {
+  it("creates a product", () => {
+    cy.visit("/products/new");
+    cy.findByLabelText("Product name").type("Widget Pro");
+    cy.findByRole("button", { name: /save/i }).click();
+    cy.findByText("Widget Pro").should("exist");
+  });
+});
+```
+
+{% endif %}
+
+---
+
+## What NOT to Do
+
+### Next.js-Specific
+
+{% if router == "app-router" %}
+- **Do NOT use `useEffect` to fetch data in App Router.** Fetch in Server Components directly. `useEffect` for data fetching is the Pages Router pattern.
+- **Do NOT add `"use client"` to a component just to use a prop callback.** Prop callbacks work fine in Server Components.
+- **Do NOT put secrets in `NEXT_PUBLIC_` env variables.** Only public values go in `NEXT_PUBLIC_`.
+- **Do NOT call `router.push()` in a Server Component.** Use `redirect()` from `next/navigation`.
+- **Do NOT nest a Server Component inside a Client Component.** Pass Server Component output as a prop (children) instead.
+{% else %}
+- **Do NOT use `useEffect` + `fetch` for data that can be fetched in `getServerSideProps`.** Server-side fetching is faster and more secure.
+- **Do NOT put secrets in `NEXT_PUBLIC_` env variables.**
+- **Do NOT write business logic inside page components.** Extract to service functions.
+{% endif %}
+
+### State Management
+
+- **Do NOT put server data (API responses) in {{ state_management }} store.** Use TanStack Query / Server Components for that. Stores are for UI state only.
+- **Do NOT prop-drill state more than 2 levels.** Use the state store instead.
+- **Do NOT share mutable store state across unrelated features.** Create separate store slices.
+
+### Styling
+
+- **Do NOT use inline styles** (`style={% raw %}{{ color: "red" }}{% endraw %}`). Use {{ styling }} classes.
+- **Do NOT hardcode colours.** Use design tokens from the theme.
+- **Do NOT use `!important`** in CSS. Fix the specificity issue properly.
+
+### Components
+
+- **Do NOT skip loading and error states.** Every data-fetching component must handle both.
+- **Do NOT import feature components into UI components.** The dependency must flow one way.
+- **Do NOT use `any` in TypeScript.** Use `unknown` and narrow the type, or add a proper type.
+- **Do NOT create a `useEffect` + `setState` chain.** Derive computed values directly from existing state or use `useMemo`.
+
+### General
+
+- **Do NOT install new dependencies without checking if the need is already met** by an existing package.
+- **Do NOT commit `.env.local` or any file containing secrets.**
+- **Do NOT bypass TypeScript errors with `// @ts-ignore`.** Use `// @ts-expect-error` with a comment explaining why, and only as a last resort.
+- **Do NOT write a component without thinking about accessibility.** Check the checklist in `docs/component-guide.md`.
+
+---
+
+## Quick Reference: File Locations
+
+| What you need | Where to look |
+|---------------|--------------|
+| Add a page | `src/app/` (App Router) or `src/pages/` (Pages Router) |
+| Add a UI primitive | `src/components/ui/` |
+| Add a feature component | `src/components/features/<domain>/` |
+| Add an API call | `src/services/<resource>.ts` |
+| Add a custom hook | `src/hooks/use<Name>.ts` |
+| Add a TypeScript type | `src/types/<resource>.types.ts` |
+| Add a store slice | `src/lib/stores/` (zustand) or `src/lib/atoms/` (jotai) |
+| Configure third-party lib | `src/lib/<libname>.ts` |
+| Add global styles | `src/styles/globals.css` |
+| Add a design token | `tailwind.config.ts` (tailwind) or `src/styles/abstracts/` (scss) |
+| Read architecture docs | `docs/architecture.md` |
+| Read component patterns | `docs/component-guide.md` |
+| Find page layout reference | `docs/page-templates/` |

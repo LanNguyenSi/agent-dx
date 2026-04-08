@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "release/*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up PHP {{ php_version }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "{{ php_version }}"
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate scaffold state
+        shell: bash
+        run: |
+          if [ ! -f composer.json ]; then
+            echo "composer.json is missing. Restore the Symfony application manifest to enable linting."
+            exit 0
+          fi
+
+      - name: Install PHP dependencies
+        shell: bash
+        run: |
+          if [ ! -f composer.json ]; then
+            echo "Skipping dependency installation because composer.json is missing."
+            exit 0
+          fi
+          composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run lint pipeline
+        shell: bash
+        run: |
+          if [ ! -f composer.json ]; then
+            echo "Skipping lint because composer.json is missing."
+            exit 0
+          fi
+          if composer run -l | grep -qE '(^| )lint( |$)'; then
+            composer run lint
+          elif [ -x vendor/bin/phpstan ]; then
+            vendor/bin/phpstan analyse
+          else
+            echo "No lint script or PHPStan binary found. Skipping lint step."
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up PHP {{ php_version }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "{{ php_version }}"
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate scaffold state
+        shell: bash
+        run: |
+          if [ ! -f composer.json ]; then
+            echo "composer.json is missing. Restore the Symfony application manifest to enable tests."
+            exit 0
+          fi
+
+      - name: Install PHP dependencies
+        shell: bash
+        run: |
+          if [ ! -f composer.json ]; then
+            echo "Skipping dependency installation because composer.json is missing."
+            exit 0
+          fi
+          composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run test suite
+        shell: bash
+        run: |
+          if [ ! -f composer.json ]; then
+            echo "Skipping tests because composer.json is missing."
+            exit 0
+          fi
+{% if test_strategy == "pest" %}
+          if [ -x vendor/bin/pest ]; then
+            vendor/bin/pest
+          else
+            echo "Pest is not installed yet. Skipping test step."
+          fi
+{% else %}
+          if [ -x vendor/bin/phpunit ]; then
+            vendor/bin/phpunit
+          elif [ -x bin/phpunit ]; then
+            bin/phpunit
+          else
+            echo "PHPUnit is not installed yet. Skipping test step."
+          fi
+{% endif %}
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up PHP {{ php_version }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "{{ php_version }}"
+          tools: composer:v2
+          coverage: none
+
+      - name: Audit dependencies
+        shell: bash
+        run: |
+          if [ -f composer.lock ]; then
+            composer audit
+          else
+            echo "composer.lock not present yet. Skipping security audit."
+          fi
+{% if use_docker %}
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -f docker/php/Dockerfile -t {{ project_name }}:ci .
+{% endif %}

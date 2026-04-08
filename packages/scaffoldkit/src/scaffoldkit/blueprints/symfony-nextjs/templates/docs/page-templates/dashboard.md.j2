@@ -1,0 +1,261 @@
+# Page Template: Dashboard
+
+This template describes the structure, data flow, and component breakdown for a **dashboard page** in {{ display_name }}. Use it as a reference when building any overview or list-based page.
+
+---
+
+## Purpose
+
+A dashboard page provides an at-a-glance view of key metrics and a primary list of entities. It is the first thing a user sees after login. It must load fast and communicate the most important information without requiring user interaction.
+
+---
+
+## Data Flow
+
+```
+Symfony API                Next.js Server Component        Browser
+──────────                 ──────────────────────          ───────
+
+GET /api/stats       ─►   DashboardPage (async)
+GET /api/users?perPage=5  (fetches in parallel)
+                     ◄─   renders HTML with data
+
+                                                    ─►   Page arrives
+                                                         with data already
+                                                         present (no spinner)
+
+                                                         <UserTable> is a
+                                                         Client Component -
+                                                         handles sort/filter
+                                                         interactions
+```
+
+Both API calls happen in the Server Component using `Promise.all`. The browser receives a fully rendered HTML page - no loading spinners on the initial paint.
+
+---
+
+## URL
+
+```
+/dashboard
+```
+
+Protected route - requires authentication. Redirect to `/login` if unauthenticated.
+
+---
+
+## Page Structure
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Page Header                                                │
+│  "Dashboard"                       [Primary Action Button] │
+├─────────────────────────────────────────────────────────────┤
+│  Stats Row (3-4 metric cards)                               │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │ Total    │  │ Active   │  │ Pending  │  │ Revenue  │   │
+│  │ Users    │  │ Today    │  │ Actions  │  │ (month)  │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+├─────────────────────────────────────────────────────────────┤
+│  Main Content Area                                          │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  Data Table / List                                  │   │
+│  │  [Search input]              [Filter] [Export]      │   │
+│  │  ─────────────────────────────────────────────────  │   │
+│  │  Row 1                                    [Actions] │   │
+│  │  Row 2                                    [Actions] │   │
+│  │  Row 3                                    [Actions] │   │
+│  │  ─────────────────────────────────────────────────  │   │
+│  │  Showing 1-20 of 84      [< Prev]  [1][2][3]  [>]  │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Component Breakdown
+
+| Component | Type | Responsibility |
+|-----------|------|----------------|
+| `DashboardPage` | Server Component | Fetch data, pass to children |
+| `StatsRow` | Server Component | Render metric cards (no interactivity) |
+| `MetricCard` | Server Component | Single stat (label + number + trend) |
+| `DataTable` | **Client Component** | Sort, filter, pagination interactions |
+| `TableRow` | Server Component | Render a single row (no state) |
+| `ActionMenu` | **Client Component** | Dropdown actions per row |
+| `SearchInput` | **Client Component** | Controlled search input with debounce |
+| `Pagination` | **Client Component** | Page change triggers router.push |
+
+The rule: if a component needs `useState`, `useEffect`, or an event handler, it is a Client Component. Everything else is a Server Component.
+
+---
+
+## Server Component Implementation
+
+```typescript
+// apps/web/src/app/(dashboard)/dashboard/page.tsx
+
+import { Suspense } from 'react';
+import { getStats } from '@/services/stats';
+import { getUsers } from '@/services/users';
+import { StatsRow } from '@/components/features/dashboard/StatsRow';
+import { DataTable } from '@/components/features/dashboard/DataTable';
+
+interface DashboardPageProps {
+  searchParams: { page?: string; search?: string };
+}
+
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+  const page = Number(searchParams.page ?? 1);
+  const search = searchParams.search ?? '';
+
+  // Parallel data fetching - both requests fire simultaneously
+  const [stats, usersPage] = await Promise.all([
+    getStats(),
+    getUsers({ page, search, perPage: 20 }),
+  ]);
+
+  return (
+    <main className="space-y-8 p-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Dashboard</h1>
+        <a href="/dashboard/new" className="btn btn-primary">
+          New Item
+        </a>
+      </div>
+
+      {/* Stats are static - no Suspense needed, they are fetched above */}
+      <StatsRow stats={stats} />
+
+      {/* DataTable is a Client Component but its initial data comes from the server */}
+      <DataTable
+        initialData={usersPage.data}
+        meta={usersPage.meta}
+        currentPage={page}
+        currentSearch={search}
+      />
+    </main>
+  );
+}
+
+export const metadata = {
+  title: 'Dashboard - {{ display_name }}',
+};
+```
+
+---
+
+## Client Component: DataTable
+
+The `DataTable` receives its initial data from the Server Component. Subsequent page changes and searches update the URL via `router.push`, causing the Server Component to re-render with new data from the API.
+
+```typescript
+// apps/web/src/components/features/dashboard/DataTable.tsx
+'use client';
+
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useTransition } from 'react';
+import type { User, PaginationMeta } from '@{{ project_name }}/shared-types';
+
+interface DataTableProps {
+  initialData: User[];
+  meta: PaginationMeta;
+  currentPage: number;
+  currentSearch: string;
+}
+
+export function DataTable({ initialData, meta, currentPage, currentSearch }: DataTableProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  const navigate = useCallback((params: Record<string, string | number>) => {
+    const sp = new URLSearchParams(window.location.search);
+    Object.entries(params).forEach(([k, v]) => sp.set(k, String(v)));
+    startTransition(() => router.push(`?${sp}`));
+  }, [router]);
+
+  return (
+    <div className={isPending ? 'opacity-60 pointer-events-none' : ''}>
+      {/* Search input, table rows, pagination controls */}
+    </div>
+  );
+}
+```
+
+**Key pattern:** The URL is the state. `searchParams` flow through the Server Component which re-fetches from the API. The Client Component only handles user interactions that update the URL.
+
+---
+
+## Loading and Error States
+
+### Loading
+
+Use React Suspense at the route level with a `loading.tsx` file:
+
+```typescript
+// apps/web/src/app/(dashboard)/dashboard/loading.tsx
+export default function DashboardLoading() {
+  return (
+    <main className="space-y-8 p-6">
+      <div className="h-8 w-48 animate-pulse rounded bg-gray-200" />
+      {/* Skeleton for stats row */}
+      <div className="grid grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-24 animate-pulse rounded-lg bg-gray-200" />
+        ))}
+      </div>
+      {/* Skeleton for table */}
+      <div className="h-96 animate-pulse rounded-lg bg-gray-200" />
+    </main>
+  );
+}
+```
+
+### Error
+
+```typescript
+// apps/web/src/app/(dashboard)/dashboard/error.tsx
+'use client';
+
+export default function DashboardError({ error, reset }: { error: Error; reset: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 p-12">
+      <p className="text-lg font-medium text-red-600">Failed to load dashboard</p>
+      <p className="text-sm text-gray-500">{error.message}</p>
+      <button onClick={reset} className="btn btn-secondary">Try again</button>
+    </div>
+  );
+}
+```
+
+---
+
+## API Calls Made by This Page
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/stats` | GET | Metric card totals |
+| `/api/users` | GET | Paginated list with search |
+
+Both are called from the Server Component. They use the `Authorization` header read from the cookie via `cookies()`.
+
+---
+
+## Design Notes ({{ design_style }})
+
+{% if design_style == "minimal-clean" %}
+- Metric cards: white background, 1px border, large number in font-semibold, muted label, subtle trend indicator
+- Table: minimal borders (bottom row separator only), ample cell padding, hover row highlight
+- Actions: text links rather than icon buttons; reveal on row hover
+- Spacing: `p-6` page padding, `gap-6` between sections
+{% elif design_style == "corporate-professional" %}
+- Metric cards: solid colored top border per category, icon aligned left, number prominent
+- Table: full bordered, alternating row backgrounds, header with sort indicators
+- Actions: icon button group per row, always visible
+- Dense layout: `p-4` padding, tighter `gap-4`
+{% elif design_style == "playful-modern" %}
+- Metric cards: gradient background per card, rounded-2xl, icon in colored circle
+- Table: card-style container with rounded corners, no outer border
+- Actions: colored pill badges, animated hover states
+- Spacing: `p-8` padding, `gap-8` between sections, extra breathing room
+{% endif %}

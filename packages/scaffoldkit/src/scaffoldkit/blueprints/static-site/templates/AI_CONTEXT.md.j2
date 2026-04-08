@@ -1,0 +1,244 @@
+# AI Context: {{ display_name }}
+
+> Read this file before making any changes to this project.
+> It contains the key decisions, patterns, and constraints an AI agent needs to work effectively.
+
+## Project Overview
+
+**{{ display_name }}** is a **{{ site_type }}** site.
+
+{{ description }}
+
+| Property | Value |
+|----------|-------|
+| Framework | {{ framework }} |
+| Styling | {{ styling }} |
+| Site type | {{ site_type }} |
+| Deploy target | {{ deploy_target }} |
+{% if use_cms %}
+| CMS | {{ cms_type }} |
+{% endif %}
+{% if use_i18n %}
+| i18n | enabled |
+{% endif %}
+
+## Repository Structure
+
+```
+{{ project_name }}/
+├── src/
+│   ├── pages/          # Route files - one file = one URL
+│   ├── components/     # Reusable UI components
+│   │   ├── navigation/ # Nav, breadcrumbs, pagination
+│   │   ├── content/    # Content-area components (callouts, cards)
+│   │   ├── layout/     # Structural components (header, footer, sidebar)
+│   │   └── seo/        # Meta, OG, structured data components
+│   ├── layouts/        # Full-page layout wrappers
+│   ├── content/        # Markdown/MDX content files
+│   └── assets/         # Build-processed images and fonts
+├── public/             # Verbatim-copied static files
+├── docs/
+│   ├── architecture.md
+│   ├── ways-of-working.md
+│   ├── content-guide.md
+│   └── adrs/
+└── AI_CONTEXT.md       # This file
+```
+
+## How to Add a Page
+
+{% if framework == "astro" %}
+1. Create a file in `src/pages/` with a `.astro` or `.md` extension.
+2. The file path becomes the URL: `src/pages/about.astro` = `/about`.
+3. Every page must import and use a layout from `src/layouts/`.
+4. Set SEO frontmatter (`title`, `description`) - see `docs/content-guide.md`.
+
+Example page:
+
+```astro
+---
+import PageLayout from '@/layouts/PageLayout.astro';
+---
+<PageLayout title="About" description="About {{ display_name }}.">
+  <h1>About</h1>
+  <p>Content here.</p>
+</PageLayout>
+```
+
+For content-driven pages (blog posts, docs), add a Markdown file to `src/content/` and create the route file in `src/pages/` using `getStaticPaths()`.
+{% elif framework == "nextjs-static" %}
+1. Create a `.tsx` file in `src/pages/`.
+2. The file path becomes the URL: `src/pages/about.tsx` = `/about`.
+3. Every page must use a layout from `src/layouts/`.
+4. Use `getStaticProps` for any data fetching - no server-side fetching is available in static export mode.
+5. Set SEO data using the `<Head>` component from `next/head` or the SEO wrapper in `src/components/seo/`.
+
+For dynamic routes (e.g., blog posts), use `getStaticPaths` to declare all paths.
+{% elif framework == "hugo" %}
+1. Create a Markdown file in `content/` - the directory structure becomes the URL.
+2. Specify a layout with `layout:` frontmatter, or let Hugo choose the layout by type.
+3. Set `title` and `description` frontmatter.
+4. Use shortcodes from `layouts/shortcodes/` for reusable content snippets.
+
+Hugo's lookup order for layouts: `layouts/{type}/{layout}.html` -> `layouts/_default/single.html`
+{% elif framework == "eleventy" %}
+1. Create a `.md` or `.njk` file in `src/`.
+2. Set the `layout` frontmatter key to a layout file in `src/_includes/layouts/`.
+3. Set `title` and `description` frontmatter.
+4. The URL is derived from the file path by default; override with `permalink` in frontmatter.
+
+For collection-based pages (blog, etc.), use Eleventy pagination over a collection defined in `.eleventy.js`.
+{% endif %}
+
+## Component Patterns
+
+### File Location
+
+| Component type | Location |
+|----------------|----------|
+| Navigation components | `src/components/navigation/` |
+| Content components (callouts, code blocks, embeds) | `src/components/content/` |
+| Layout components (header, footer, sidebar) | `src/components/layout/` |
+| SEO components (meta tags, structured data) | `src/components/seo/` |
+
+### Naming Conventions
+
+- Component files: PascalCase (`CalloutBlock.astro`, `SiteHeader.astro`)
+- One component per file
+- Props interface defined at the top of the component
+
+### Styling Components
+
+Approach: **{{ styling }}**
+
+{% if styling == "tailwind" %}
+- Use Tailwind utility classes directly in markup
+- Extract repeated patterns into component classes with `@apply` in `src/styles/components.css` only when a pattern appears 3+ times
+- Do not use arbitrary values (`w-[347px]`) - add a named token to `tailwind.config.mjs` instead
+- Responsive breakpoints: `sm:` (640px), `md:` (768px), `lg:` (1024px), `xl:` (1280px)
+{% elif styling == "vanilla-css" %}
+- Write a dedicated CSS file per component in `src/styles/components/`
+- Use custom properties from `src/styles/global.css` for all design tokens - never hardcode colors, spacing, or font sizes
+- Use BEM-like class naming: `.component-name`, `.component-name__element`, `.component-name--modifier`
+{% elif styling == "scss" %}
+- Write a dedicated SCSS partial per component in `src/styles/components/`
+- Import the partial in `src/styles/main.scss`
+- Use SCSS variables from `src/styles/_tokens.scss` for all design tokens
+- Maximum nesting depth: 3 levels
+{% endif %}
+
+## Content Patterns
+
+### Adding Content
+
+1. Create a file in the appropriate `src/content/` subdirectory.
+2. Include all required frontmatter fields (see `docs/content-guide.md` for the schema per content type).
+3. Follow the Markdown style guide in `docs/content-guide.md`.
+4. For images: place them alongside the content file (not in `public/`) and use relative paths.
+
+### Content Frontmatter Rules
+
+- `title`: required, 50-60 characters, no trailing period
+- `description`: required, 120-160 characters, human-readable sentence
+- Never omit required fields - the build will fail with a validation error
+{% if site_type == "blog" %}
+- `pubDate`: required for blog posts, ISO 8601 format (`YYYY-MM-DD`)
+- `draft: true` hides a post from the site and RSS feed - use this for work in progress
+{% endif %}
+{% if site_type == "docs" %}
+- `sidebar.order`: controls the position in the navigation sidebar
+{% endif %}
+
+### Images in Content
+
+- Use the framework's image component, never bare `<img>` tags in components
+- In Markdown content, use relative paths: `![Alt text](./image.png)`
+- Always write meaningful alt text (see `docs/content-guide.md` for guidelines)
+- Width and height must be inferrable by the build tool - use source images at actual dimensions
+
+## Styling Conventions
+
+{% if styling == "tailwind" %}
+### Tailwind Rules
+
+- Design tokens are in `tailwind.config.mjs` under `theme.extend`
+- Color palette uses semantic names (`primary`, `secondary`, `neutral`) not raw color names
+- Dark mode uses the `dark:` variant - the theme is toggled via a class on `<html>`
+- Typography: use the `@tailwindcss/typography` plugin's `prose` class for long-form content
+- Never write inline `style` attributes unless dynamically setting values that cannot be expressed as utilities
+{% elif styling == "vanilla-css" %}
+### CSS Rules
+
+- All design tokens are custom properties on `:root` in `src/styles/global.css`
+- Use `var(--token-name)` everywhere - never hardcode values
+- Media queries use the custom property breakpoints: `@media (min-width: var(--breakpoint-md))`
+- Color scheme switching: dark mode values are set in `@media (prefers-color-scheme: dark)` and optionally overridden by a `.dark` class
+{% elif styling == "scss" %}
+### SCSS Rules
+
+- All tokens are in `src/styles/_tokens.scss` as SCSS variables and maps
+- Import tokens with `@use '../tokens' as tokens;` in component partials
+- Use `tokens.$color-primary` syntax (namespace imports) to avoid pollution
+- No `@extend` - use mixins or utility classes instead
+{% endif %}
+
+## SEO Metadata Rules
+
+- Every page must have unique `title` and `description` frontmatter
+- The base layout automatically generates `<meta>`, Open Graph, and Twitter card tags from these
+- OG images default to `public/og-image.png` - override per page with `ogImage:` frontmatter
+- The sitemap is generated automatically at build time - no manual sitemap editing
+
+## Deployment Process
+
+Target: **{{ deploy_target }}**
+
+{% if deploy_target == "vercel" %}
+- Push to `main` triggers a production deployment automatically
+- Every PR branch gets a preview deployment URL (shown in the PR checks)
+- Environment variables are managed in the Vercel dashboard (not in code)
+- Do not commit `.vercel/` to version control
+{% elif deploy_target == "netlify" %}
+- Push to `main` triggers a production deployment automatically
+- Every PR gets a deploy preview URL (posted as a PR comment)
+- Build settings are in `netlify.toml` - do not change them in the Netlify dashboard
+- Environment variables are managed in the Netlify dashboard
+{% elif deploy_target == "github-pages" %}
+- Push to `main` triggers the GitHub Actions workflow in `.github/workflows/deploy.yml`
+- The workflow builds the site and pushes output to the `gh-pages` branch
+- There is no preview deployment - test locally or use a separate branch deployment
+- The site is served from the `gh-pages` branch, not `main`
+{% elif deploy_target == "cloudflare-pages" %}
+- Push to `main` triggers a production deployment
+- Every PR gets a preview deployment URL
+- Environment variables are managed in the Cloudflare Pages dashboard
+- Do not use Cloudflare-specific APIs unless there is no portable alternative
+{% endif %}
+
+Build command: `{{ 'npm run build' if framework != 'hugo' else 'hugo' }}`
+
+Output directory: `{{ 'dist' if framework == 'astro' else ('out' if framework == 'nextjs-static' else ('_site' if framework == 'eleventy' else 'public')) }}`
+
+## Architecture Rules
+
+1. **Static output only**: No server-side rendering at request time. All data must be available at build time.
+2. **Use the framework's image component**: Never use bare `<img>` tags in component code. This ensures optimisation, lazy loading, and correct dimensions.
+3. **Content in `src/content/`, not in components**: Editable text belongs in content files, not hardcoded in component markup.
+4. **One layout per page type**: Do not create one-off layouts for individual pages. Add a variant prop to an existing layout.
+5. **Accessibility is non-negotiable**: See `docs/ways-of-working.md` for WCAG 2.1 AA requirements. Do not merge changes that introduce accessibility regressions.
+6. **Check performance impact**: Avoid adding JavaScript that is not essential. If a feature can be done in HTML/CSS, do it that way.
+7. **Write an ADR for significant choices**: New dependencies, changed conventions, and new structural patterns all warrant an ADR in `docs/adrs/`.
+
+## What NOT to Do
+
+- Do not add server-side dependencies or runtime features that break static export
+- Do not use bare `<img>` tags - use the framework's image component
+- Do not hardcode content in component files - put it in `src/content/`
+- Do not skip frontmatter fields - the build will fail
+- Do not commit unoptimised images (over 2MB before processing)
+- Do not introduce a new design token without adding it to the theme config
+- Do not write CSS that overrides `outline` without providing a visible alternative focus style
+- Do not install new major dependencies without an ADR
+{% if use_analytics %}
+- Do not add additional analytics scripts - all tracking goes through the existing analytics integration
+{% endif %}

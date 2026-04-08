@@ -1,0 +1,78 @@
+# AI Context: {{ display_name }}
+
+Read this before making code changes.
+
+## System Summary
+
+{{ display_name }} is {{ description | lower }} built around **FastAPI** and **{{ db_provider }}**.
+
+| Property | Value |
+|----------|-------|
+| Python | {{ python_version }} |
+| Package Manager | {{ package_manager }} |
+| Auth | {{ auth_strategy }} |
+| Test Strategy | {{ test_strategy }} |
+
+## Repository Rules
+
+```text
+app/api/routes/      HTTP contracts only
+app/services/        business logic and orchestration
+app/repositories/    persistence access only
+app/models/          pydantic schemas and domain data shapes
+app/core/            settings, app bootstrap, auth wiring
+app/workers/         async jobs and out-of-band processing
+tests/integration/   API + persistence integration coverage
+```
+
+## Non-Negotiable Boundaries
+
+1. Route handlers may validate request shape and call services. They must not hold business logic.
+2. Services own workflow logic, permission checks, and orchestration.
+3. Repositories are the only layer allowed to talk to the database.
+4. Long-running work leaves the request path and goes into `app/workers/`.
+5. Configuration is loaded centrally from `app/core/settings.py`.
+
+## FastAPI Conventions
+
+- Prefer `APIRouter` per resource.
+- Prefer typed dependencies over ad-hoc globals.
+- Keep request models, response models, and domain entities separate when they diverge.
+- Return consistent error envelopes and do not leak stack traces.
+{% if api_docs %}
+- Keep OpenAPI output trustworthy; schema drift is a bug.
+{% endif %}
+
+## Authentication Rules
+
+{% if auth_strategy == "none" %}
+- No auth is configured. Do not add ad-hoc auth middleware without documenting the decision first.
+{% elif auth_strategy == "jwt" %}
+- JWT verification belongs in a shared dependency or security helper, not inside route functions.
+- Keep authorization checks in services after identity has been resolved.
+{% elif auth_strategy == "oauth2" %}
+- OAuth2 client, scopes, and callback handling belong in infrastructure code.
+- Services should work with resolved principals, not provider-specific token payloads.
+{% else %}
+- API key verification belongs in shared dependencies.
+- Store only hashed keys; never log raw key values.
+{% endif %}
+
+## Testing Rules
+
+{% if test_strategy == "pytest-only" %}
+- Keep service logic heavily unit-tested with pytest.
+- Add a small number of HTTP smoke integration tests.
+{% elif test_strategy == "pytest-and-integration" %}
+- Every business-critical service branch gets unit tests.
+- Every externally visible resource gets integration coverage for happy path and authorization failures.
+{% else %}
+- Treat unit, integration, and workflow-level verification as separate concerns.
+- Do not merge broad workflow changes without cross-layer verification.
+{% endif %}
+
+## Implementation Heuristics
+
+- Build one resource vertically first: schema -> repository -> service -> route -> test.
+- Prefer explicit types and small modules over shared utility dumping grounds.
+- Document structural exceptions in `docs/adrs/`.

@@ -1,0 +1,370 @@
+# AI Context: {{ display_name }}
+
+> Read this file before making any changes to the codebase.
+> It describes the project's structure, conventions, and rules for AI agents.
+
+## Project Overview
+
+**{{ display_name }}** is a CLI tool that {{ description | lower }}.
+
+- **Language:** {{ language }}
+- **Framework:** {{ cli_framework }}
+- **Distribution:** {{ distribution }}
+- **Test strategy:** {{ test_strategy }}
+{% if use_config_file %}
+- **Config format:** {{ config_format }} (at `~/.config/{{ project_name }}/config.{{ config_format }}`)
+{% endif %}
+
+## Repository Structure
+
+```
+{{ project_name }}/
+├── src/
+│   ├── commands/         # One file per subcommand
+│   ├── config/           # Config loading and validation
+│   └── main.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+├── tests/
+│   ├── commands/         # Tests for each command (mirrors src/commands/)
+│   └── config/           # Tests for config loading
+├── docs/
+│   ├── architecture.md   # Subsystem design, exit codes, output rules
+│   ├── ways-of-working.md
+│   └── adrs/             # Architecture Decision Records
+└── AI_CONTEXT.md         # This file
+```
+
+## How to Add a New Command
+
+Follow these steps exactly. Do not deviate from the file layout.
+
+### Step 1: Create the command file
+
+{% if language == "python" %}
+Create `src/commands/<name>.py`:
+
+```python
+"""{{ display_name }} - <name> command."""
+from __future__ import annotations
+
+{% if cli_framework == "typer" %}
+import typer
+from ..config.loader import Config
+
+app = typer.Typer()
+
+@app.command()
+def <name>(
+    # Add options here
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+) -> None:
+    """One-line description of what this command does."""
+    # Implementation here
+    pass
+{% elif cli_framework == "click" %}
+import click
+from ..config.loader import Config
+
+@click.command()
+@click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+def <name>(verbose: bool) -> None:
+    """One-line description of what this command does."""
+    # Implementation here
+    pass
+{% endif %}
+```
+{% elif language == "go" %}
+Create `src/commands/<name>.go`:
+
+```go
+package commands
+
+import (
+    "github.com/spf13/cobra"
+)
+
+var <name>Cmd = &cobra.Command{
+    Use:   "<name>",
+    Short: "One-line description of what this command does",
+    Long:  `Longer description shown in --help output.`,
+    RunE: func(cmd *cobra.Command, args []string) error {
+        // Implementation here
+        return nil
+    },
+}
+
+func init() {
+    <name>Cmd.Flags().BoolP("verbose", "v", false, "Verbose output")
+}
+```
+{% elif language == "rust" %}
+Create `src/commands/<name>.rs`:
+
+```rust
+use clap::Args;
+
+#[derive(Args)]
+pub struct <Name>Args {
+    /// Verbose output
+    #[arg(short, long)]
+    pub verbose: bool,
+}
+
+pub fn execute(args: <Name>Args) -> anyhow::Result<()> {
+    // Implementation here
+    Ok(())
+}
+```
+{% elif language == "typescript" %}
+Create `src/commands/<name>.ts`:
+
+```typescript
+import { Command } from "commander";
+
+export function register<Name>(program: Command): void {
+    program
+        .command("<name>")
+        .description("One-line description of what this command does")
+        .option("-v, --verbose", "Verbose output", false)
+        .action(async (options) => {
+            await execute<Name>(options);
+        });
+}
+
+async function execute<Name>(options: { verbose: boolean }): Promise<void> {
+    // Implementation here
+}
+```
+{% endif %}
+
+### Step 2: Register the command
+
+{% if language == "python" and cli_framework == "typer" %}
+In `src/main.py`, add:
+```python
+from .commands.<name> import app as <name>_app
+app.add_typer(<name>_app, name="<name>")
+```
+{% elif language == "python" and cli_framework == "click" %}
+In `src/main.py`, add:
+```python
+from .commands.<name> import <name>
+cli.add_command(<name>)
+```
+{% elif language == "go" %}
+In `src/main.go` or the root command `init()`, add:
+```go
+rootCmd.AddCommand(commands.<name>Cmd)
+```
+{% elif language == "rust" %}
+In `src/main.rs`, add the variant to the `Commands` enum and handle it in the match:
+```rust
+Commands::<Name>(args) => commands::<name>::execute(args)?,
+```
+{% elif language == "typescript" %}
+In `src/main.ts`, add:
+```typescript
+import { register<Name> } from "./commands/<name>";
+register<Name>(program);
+```
+{% endif %}
+
+### Step 3: Write tests
+
+{% if test_strategy == "unit-tests" %}
+Create `tests/commands/test_<name>.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}`.
+
+Test naming: `test_<name>_<scenario>_<expected_outcome>`
+
+Test the following cases:
+- Happy path with default options
+- Each optional flag changes behavior as expected
+- Invalid arguments produce exit code `2` and an error on stderr
+- Error conditions produce the correct exit code and message
+
+{% elif test_strategy == "snapshot-testing" %}
+Create `tests/commands/test_<name>.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}`.
+
+Capture stdout and stderr into snapshot files in `tests/snapshots/`.
+Run with `--snapshot-update` when output changes are intentional.
+
+{% elif test_strategy == "integration-tests" %}
+Create `tests/integration/test_<name>.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}`.
+
+Invoke the binary as a subprocess. Assert on:
+- `returncode` / exit code
+- `stdout` content
+- `stderr` content for error cases
+
+{% endif %}
+
+## Argument Patterns
+
+Use these patterns consistently across all commands.
+
+### Flags vs positional arguments
+
+- Use **positional arguments** for the primary subject (e.g., a file path, a name)
+- Use **flags** for options and modifiers
+- Never require a flag that has a sensible default
+
+### Standard flags every command should support
+
+| Flag | Short | Type | Description |
+|------|-------|------|-------------|
+| `--output` | `-o` | `text\|json\|yaml` | Output format (on commands with structured output) |
+| `--dry-run` | - | bool | Preview without changes (on mutating commands) |
+| `--verbose` | `-v` | bool | More diagnostic output to stderr |
+| `--quiet` | `-q` | bool | Suppress all non-error output |
+
+### Mutually exclusive flags
+
+When two flags cannot be used together:
+- Validate at parse time, not in business logic
+- Exit with code `2` and message: `error: --flag-a and --flag-b cannot be used together.`
+
+## Config Access Patterns
+
+{% if use_config_file %}
+Config is loaded once at startup by the main entrypoint and passed to each command as a parameter.
+Commands do not read config directly from disk.
+
+```
+main entrypoint
+  -> load config (src/config/loader)
+  -> pass config to command function
+     -> command uses config.field_name
+```
+
+### Adding a new config key
+
+1. Add the key to the config schema/struct in `src/config/loader.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}`
+2. Set a sensible default
+3. Document the key in README.md under the Configuration section
+4. Add an environment variable override: `{{ project_name | upper | replace("-", "_") }}_<KEY_NAME>`
+5. Write a test in `tests/config/` verifying the default, env var override, and file override
+
+Config values must never be read from global state. Always inject config as a parameter.
+
+{% else %}
+This tool has no persistent config file. All settings come from CLI flags and environment variables.
+Pass options through explicit function parameters - do not use global state.
+
+When adding a new environment variable, document it in README.md.
+{% endif %}
+
+## Output Formatting Rules
+
+**Never write to stdout with unstructured print/fmt/println statements inside command logic.**
+
+Use the output module in `src/output.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}`:
+
+- `output.success(message)` - green checkmark + message to stdout
+- `output.error(message)` - "error: message" to stderr
+- `output.warning(message)` - "warning: message" to stderr
+- `output.info(message)` - diagnostic message to stderr (suppressed with `--quiet`)
+- `output.result(data, format)` - structured data to stdout in the requested format
+
+Color rules:
+- Respect `NO_COLOR` environment variable
+- Respect `--no-color` flag
+- Disable color when stdout is not a TTY
+
+## Testing Patterns
+
+{% if test_strategy == "unit-tests" %}
+### Unit test structure
+
+```
+tests/
+├── commands/
+│   ├── test_run.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+│   └── test_config.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+└── config/
+    └── test_loader.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+```
+
+### What to test per command
+
+1. Default options produce expected output
+2. Each flag is tested independently
+3. Invalid input exits with code `2`
+4. Errors produce correct exit code and stderr message
+5. `--output json` produces valid parseable JSON
+
+### Mocking
+
+- Mock the filesystem using temp directories (never write to real paths in tests)
+- Mock external calls at the function boundary, not by patching internals
+- Do not mock the config loader - construct a Config object directly in the test
+
+{% elif test_strategy == "snapshot-testing" %}
+### Snapshot test structure
+
+```
+tests/
+├── commands/
+│   └── test_<name>.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+└── snapshots/
+    └── test_<name>_<scenario>.txt
+```
+
+### Rules for snapshots
+
+- Strip ANSI color codes before capturing
+- Use short, deterministic inputs (no timestamps, no random IDs)
+- Each test scenario has its own snapshot file
+- Review snapshot diffs carefully in PRs - they represent user-visible changes
+
+### Updating snapshots
+
+Run with `--snapshot-update` / equivalent flag when output changes are intentional.
+Always describe why the snapshot changed in the PR description.
+
+{% elif test_strategy == "integration-tests" %}
+### Integration test structure
+
+```
+tests/
+├── integration/
+│   └── test_<name>.{{ "py" if language == "python" else "go" if language == "go" else "rs" if language == "rust" else "ts" }}
+└── unit/
+    └── ...
+```
+
+### Integration test rules
+
+- Build the binary before running integration tests
+- Use subprocess / exec to invoke the binary
+- Always assert on exit code first
+- Assert on stdout content for happy paths
+- Assert on stderr content for error cases
+- Clean up any files created in the test
+
+{% endif %}
+
+## Exit Code Enforcement
+
+All commands must exit with one of these codes. Check against this list before completing any error path:
+
+| Code | When to use |
+|------|-------------|
+| `0` | Success |
+| `1` | Unexpected runtime error |
+| `2` | Bad arguments / usage error |
+| `3` | Config error |
+| `4` | External service / IO error |
+| `5` | Resource not found |
+
+If you are not sure which code to use, use `1` and leave a comment in the code.
+
+## What NOT to Do
+
+- Do not add a new dependency without checking if an existing one covers the use case
+- Do not write directly to stdout/stderr - use the output module
+- Do not call `sys.exit()` / `os.Exit()` inside command logic - propagate errors
+- Do not read environment variables or config files inside commands - receive config as a parameter
+- Do not add interactive prompts to commands that will be used in CI pipelines
+- Do not ignore error return values
+- Do not commit secrets, tokens, or real filesystem paths
+- Do not skip `--help` text for new flags or commands
+- Do not introduce a new pattern without updating this file and `docs/architecture.md`

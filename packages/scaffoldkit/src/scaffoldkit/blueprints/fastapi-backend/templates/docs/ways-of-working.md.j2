@@ -1,0 +1,47 @@
+# Ways of Working: {{ display_name }}
+
+## Definition of Done
+
+- code passes linting, typing, and tests
+- route changes include integration coverage
+- service changes include unit coverage
+- migrations and config changes are documented
+- API contract changes are reflected in docs and schemas
+- no secrets or environment-specific values are committed
+
+## Development Workflow
+
+1. implement one vertical slice at a time
+2. start with contracts and service boundaries
+3. add persistence only after the shape of the use case is clear
+4. write tests before expanding the next slice
+
+## Pull Request Expectations
+
+- small, reviewable scope
+- clear summary of endpoint, service, and persistence changes
+- note any schema or auth impact explicitly
+
+## Testing Expectations
+
+Current strategy: **{{ test_strategy }}**
+
+{% if test_strategy == "pytest-only" %}
+- prioritize service and utility tests
+- keep a minimal HTTP smoke suite
+{% elif test_strategy == "pytest-and-integration" %}
+- combine unit-tested services with integration coverage per resource
+- integration tests should verify auth, validation, and persistence behavior together
+{% else %}
+- maintain a full testing pyramid across unit, integration, and broader workflow verification
+{% endif %}
+
+## Review Triggers
+
+Request architectural review when:
+
+- auth model changes
+- persistence model changes substantially
+{% if use_background_jobs %}- queued or asynchronous workflows change semantics
+{% endif %}
+- a module crosses layer boundaries that this blueprint expects to stay separate

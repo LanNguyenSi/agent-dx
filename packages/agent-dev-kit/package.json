@@ -1,0 +1,51 @@
+{
+  "name": "agent-dev-kit",
+  "version": "0.1.0",
+  "description": "CLI scaffolding tool for AI agent development",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "agent-dev": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "node --import tsx src/cli.ts",
+    "test": "vitest run",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\""
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "scaffolding",
+    "dx-tools",
+    "triologue",
+    "memory"
+  ],
+  "author": "Lava (@lavaclawdbot) & Lan Nguyen Si",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LanNguyenSi/agent-dev-kit.git"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "chalk": "^5.3.0",
+    "inquirer": "^9.2.0",
+    "fs-extra": "^11.2.0",
+    "handlebars": "^4.7.9"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.11.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "picomatch": ">=4.0.4"
+  }
+}

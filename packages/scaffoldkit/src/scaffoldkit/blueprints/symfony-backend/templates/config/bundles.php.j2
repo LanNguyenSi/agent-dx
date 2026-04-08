@@ -1,0 +1,22 @@
+<?php
+
+return [
+    Symfony\Bundle\FrameworkBundle\FrameworkBundle::class => ['all' => true],
+    Doctrine\Bundle\DoctrineBundle\DoctrineBundle::class => ['all' => true],
+    Doctrine\Bundle\MigrationsBundle\DoctrineMigrationsBundle::class => ['all' => true],
+{% if use_auth -%}
+    Symfony\Bundle\SecurityBundle\SecurityBundle::class => ['all' => true],
+{% endif -%}
+{% if api_style == "api-platform" -%}
+    ApiPlatform\Symfony\Bundle\ApiPlatformBundle::class => ['all' => true],
+{% elif api_style == "fos-rest" -%}
+    FOS\RestBundle\FOSRestBundle::class => ['all' => true],
+    Nelmio\ApiDocBundle\NelmioApiDocBundle::class => ['dev' => true, 'test' => true],
+{% endif -%}
+{% if use_auth and auth_method == "jwt" -%}
+    Lexik\Bundle\JWTAuthenticationBundle\LexikJWTAuthenticationBundle::class => ['all' => true],
+{% endif -%}
+    Symfony\Bundle\DebugBundle\DebugBundle::class => ['dev' => true, 'test' => true],
+    Symfony\Bundle\MakerBundle\MakerBundle::class => ['dev' => true],
+    Symfony\Bundle\WebProfilerBundle\WebProfilerBundle::class => ['dev' => true, 'test' => true],
+];

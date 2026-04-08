@@ -1,0 +1,94 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+{% if package_manager == "poetry" -%}
+[tool.poetry]
+name = "{{ project_name }}"
+version = "0.1.0"
+description = "{{ description }}"
+authors = ["ScaffoldKit <noreply@example.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^{{ python_version }}"
+django = "^5.1.7"
+djangorestframework = "^3.15.2"
+{% if database == "postgresql" -%}
+psycopg = { extras = ["binary"], version = "^3.2.6" }
+{% elif database == "mysql" -%}
+mysqlclient = "^2.2.7"
+{% endif -%}
+{% if auth_strategy == "jwt" -%}
+djangorestframework-simplejwt = "^5.5.0"
+{% elif auth_strategy == "token" -%}
+django-rest-knox = "^5.0.2"
+{% elif auth_strategy == "oauth2" -%}
+django-oauth-toolkit = "^3.0.1"
+{% endif -%}
+{% if use_drf_spectacular -%}
+drf-spectacular = "^0.28.0"
+{% endif -%}
+{% if use_celery -%}
+celery = "^5.4.0"
+{% endif -%}
+{% if use_channels -%}
+channels = "^4.2.0"
+{% endif -%}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.5"
+pytest-django = "^4.10.0"
+ruff = "^0.11.2"
+{% else -%}
+[project]
+name = "{{ project_name }}"
+version = "0.1.0"
+description = "{{ description }}"
+readme = "README.md"
+requires-python = ">={{ python_version }}"
+dependencies = [
+  "django>=5.1.7,<5.2.0",
+  "djangorestframework>=3.15.2,<4.0.0",
+{% if database == "postgresql" -%}
+  "psycopg[binary]>=3.2.6,<4.0.0",
+{% elif database == "mysql" -%}
+  "mysqlclient>=2.2.7,<3.0.0",
+{% endif -%}
+{% if auth_strategy == "jwt" -%}
+  "djangorestframework-simplejwt>=5.5.0,<6.0.0",
+{% elif auth_strategy == "token" -%}
+  "django-rest-knox>=5.0.2,<6.0.0",
+{% elif auth_strategy == "oauth2" -%}
+  "django-oauth-toolkit>=3.0.1,<4.0.0",
+{% endif -%}
+{% if use_drf_spectacular -%}
+  "drf-spectacular>=0.28.0,<0.29.0",
+{% endif -%}
+{% if use_celery -%}
+  "celery>=5.4.0,<6.0.0",
+{% endif -%}
+{% if use_channels -%}
+  "channels>=4.2.0,<5.0.0",
+{% endif -%}
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5,<9.0.0",
+  "pytest-django>=4.10.0,<5.0.0",
+  "ruff>=0.11.2,<0.12.0",
+]
+
+[tool.uv]
+package = false
+{% endif %}
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py", "*_test.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py{{ python_version | replace('.', '') }}"

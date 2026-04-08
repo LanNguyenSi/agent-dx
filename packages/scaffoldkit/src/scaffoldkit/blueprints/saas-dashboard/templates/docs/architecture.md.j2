@@ -1,0 +1,121 @@
+# Architecture: {{ display_name }}
+
+## Overview
+
+{{ display_name }} follows a **{{ architecture_style }}** architecture using the **{{ stack }}** stack.
+
+## Principles
+
+1. **Separation of concerns**: UI, business logic, and data access are clearly separated.
+2. **Convention over configuration**: Follow established patterns to reduce decision fatigue.
+3. **Incremental complexity**: Start simple, add complexity only when needed.
+{% if use_ddd %}
+4. **Domain-Driven Design**: Business logic is organized around domain concepts.
+{% endif %}
+
+## System Structure
+
+```
+┌─────────────────────────────────────────┐
+│                  Client                  │
+│              (apps/web)                  │
+├─────────────────────────────────────────┤
+│                  API                     │
+│              (apps/api)                  │
+├─────────────────────────────────────────┤
+│            Shared Packages               │
+│     (packages/ui, packages/shared)       │
+└─────────────────────────────────────────┘
+```
+
+### apps/web - Frontend
+
+The web application serves the user-facing dashboard.
+
+- Server-side rendering where beneficial
+- Client-side interactivity for dashboard widgets
+- Shared UI component library from `packages/ui`
+
+### apps/api - Backend
+
+The API layer handles business logic and data persistence.
+
+{% if use_auth %}
+- Authentication and authorization
+{% endif %}
+- RESTful or GraphQL endpoints
+- Input validation and error handling
+- Database access and migrations
+
+### packages/ui - Shared Components
+
+Reusable UI components used across the frontend.
+
+- Design tokens and theme
+- Base components (buttons, inputs, cards)
+- Layout components (sidebar, header, content area)
+
+### packages/shared - Shared Utilities
+
+Cross-cutting utilities shared between apps.
+
+- TypeScript types and interfaces
+- Validation schemas
+- Constants and configuration
+
+{% if use_ddd %}
+## Domain Model
+
+The application is structured around bounded contexts:
+
+- **Identity**: User accounts, authentication, profiles
+- **Dashboard**: Widgets, layouts, data visualization
+- **Settings**: Application and user preferences
+- **Billing**: Subscriptions, invoices, payment (if applicable)
+
+Each context owns its data, API routes, and UI sections.
+{% endif %}
+
+{% if use_docker %}
+## Infrastructure
+
+Docker Compose is used for local development:
+
+- Application containers for web and API
+- Database container (PostgreSQL recommended)
+- Optional: Redis for caching/sessions
+{% endif %}
+
+{% if use_ci %}
+## CI/CD
+
+Continuous integration runs on every push:
+
+- Lint and format check
+- Unit tests
+- Integration tests
+- Build verification
+{% endif %}
+
+## Testing Strategy
+
+Approach: **{{ test_strategy }}**
+
+{% if test_strategy == "unit-and-integration" %}
+- Unit tests for business logic and utilities
+- Integration tests for API endpoints and database queries
+- Component tests for critical UI flows
+{% elif test_strategy == "e2e-focused" %}
+- End-to-end tests for critical user journeys
+- Smoke tests for API health
+- Visual regression tests for key pages
+{% elif test_strategy == "full-pyramid" %}
+- Unit tests for all business logic
+- Integration tests for service boundaries
+- End-to-end tests for critical paths
+- Contract tests for API consumers
+{% endif %}
+
+## Decisions
+
+See [ADR log](adrs/) for architectural decisions and their rationale.

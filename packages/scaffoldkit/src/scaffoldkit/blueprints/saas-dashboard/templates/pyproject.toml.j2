@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "{{ project_name }}"
+version = "0.1.0"
+description = "{{ description }}"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "django>=5.1.7,<5.2.0"
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5,<9.0.0"
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,210 @@
+name: springboot-backend
+display_name: "Spring Boot Backend"
+description: "Production-ready Spring Boot API backend with docs, architecture patterns, and AI context"
+version: "1.0.0"
+stack: "java-spring"
+
+metadata:
+  architecture: "spring-boot-api"
+  java_ecosystem: true
+
+variables:
+  - name: project_name
+    description: "Project slug (lowercase, hyphens)"
+    type: string
+    default: "my-spring-service"
+    required: true
+
+  - name: display_name
+    description: "Human-readable project name"
+    type: string
+    default: "My Spring Service"
+    required: true
+
+  - name: description
+    description: "Short project description"
+    type: string
+    default: "A Spring Boot API backend"
+    required: true
+
+  - name: base_package
+    description: "Java base package"
+    type: string
+    default: "com.example.app"
+    required: true
+
+  - name: java_version
+    description: "Java version to target"
+    type: choice
+    choices:
+      - "17"
+      - "21"
+    default: "21"
+    required: true
+
+  - name: spring_boot_version
+    description: "Spring Boot version"
+    type: choice
+    choices:
+      - "3.3"
+      - "3.4"
+    default: "3.4"
+    required: true
+
+  - name: build_tool
+    description: "Primary build tool"
+    type: choice
+    choices:
+      - "maven"
+      - "gradle"
+    default: "maven"
+    required: true
+
+  - name: api_style
+    description: "HTTP stack"
+    type: choice
+    choices:
+      - "spring-mvc"
+      - "webflux"
+    default: "spring-mvc"
+    required: true
+
+  - name: database
+    description: "Primary database engine"
+    type: choice
+    choices:
+      - "postgresql"
+      - "mysql"
+      - "mariadb"
+    default: "postgresql"
+    required: true
+
+  - name: use_ddd
+    description: "Use Domain-Driven Design package separation"
+    type: boolean
+    default: false
+
+  - name: use_auth
+    description: "Include authentication and authorization guidance"
+    type: boolean
+    default: true
+
+  - name: auth_method
+    description: "Authentication mechanism"
+    type: choice
+    choices:
+      - "jwt"
+      - "oauth2"
+      - "api-key"
+    default: "jwt"
+    required: true
+
+  - name: use_docker
+    description: "Include Docker and containerization guidance"
+    type: boolean
+    default: true
+
+  - name: use_ci
+    description: "Include CI/CD guidance"
+    type: boolean
+    default: true
+
+  - name: use_kafka
+    description: "Include Kafka integration guidance"
+    type: boolean
+    default: false
+
+  - name: use_redis
+    description: "Include Redis integration guidance"
+    type: boolean
+    default: false
+
+  - name: test_strategy
+    description: "Testing approach"
+    type: choice
+    choices:
+      - "junit-only"
+      - "junit-and-testcontainers"
+      - "full-pyramid"
+    default: "junit-and-testcontainers"
+    required: true
+
+  - name: ai_context
+    description: "Generate AI_CONTEXT.md for agent workflows"
+    type: boolean
+    default: true
+
+templates:
+  - source: README.md.j2
+    target: README.md
+
+  - source: pom.xml.j2
+    target: pom.xml
+    condition: is_maven
+
+  - source: build.gradle.j2
+    target: build.gradle
+    condition: is_gradle
+
+  - source: settings.gradle.j2
+    target: settings.gradle
+    condition: is_gradle
+
+  - source: src/main/java/Application.java.j2
+    target: src/main/java/{{ base_package | replace('.', '/') }}/Application.java
+
+  - source: src/main/resources/application.yml.j2
+    target: src/main/resources/application.yml
+
+  - source: .dockerignore.j2
+    target: .dockerignore
+    condition: use_docker
+
+  - source: Dockerfile.j2
+    target: Dockerfile
+    condition: use_docker
+
+  - source: docker-compose.yml.j2
+    target: docker-compose.yml
+    condition: use_docker
+
+  - source: .github/workflows/ci.yml.j2
+    target: .github/workflows/ci.yml
+    condition: use_ci
+
+  - source: docs/architecture.md.j2
+    target: docs/architecture.md
+
+  - source: docs/ways-of-working.md.j2
+    target: docs/ways-of-working.md
+
+  - source: docs/adrs/0001-architecture.md.j2
+    target: docs/adrs/0001-architecture.md
+
+  - source: docs/api-conventions.md.j2
+    target: docs/api-conventions.md
+
+  - source: AI_CONTEXT.md.j2
+    target: AI_CONTEXT.md
+    condition: ai_context
+
+static_files:
+  - source: .editorconfig
+    target: .editorconfig
+
+  - source: .gitignore
+    target: .gitignore
+
+directories:
+  - src/main/java/{{ base_package | replace('.', '/') }}
+  - src/main/java/{{ base_package | replace('.', '/') }}/config
+  - src/main/java/{{ base_package | replace('.', '/') }}/web
+  - src/main/java/{{ base_package | replace('.', '/') }}/web/dto
+  - src/main/java/{{ base_package | replace('.', '/') }}/service
+  - src/main/java/{{ base_package | replace('.', '/') }}/domain
+  - src/main/java/{{ base_package | replace('.', '/') }}/repository
+  - src/main/java/{{ base_package | replace('.', '/') }}/security
+  - src/main/resources
+  - src/test/java/{{ base_package | replace('.', '/') }}
+  - src/test/resources
+  - docs/adrs

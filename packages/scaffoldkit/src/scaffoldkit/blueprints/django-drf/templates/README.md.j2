@@ -1,0 +1,110 @@
+# {{ display_name }}
+
+{{ description }}
+
+## Overview
+
+| Property | Value |
+|----------|-------|
+| Framework | Django REST Framework |
+| Python | {{ python_version }} |
+| Package Manager | {{ package_manager }} |
+| Database | {{ database }} |
+| Auth | {{ auth_strategy }} |
+| Test Strategy | {{ test_strategy }} |
+{% if use_drf_spectacular %}
+| API Docs | OpenAPI via drf-spectacular |
+{% endif %}
+
+## Intended Shape
+
+This blueprint is for backend systems where **Django and DRF are the intended framework**, not just a generic Python API. It fits best when you want:
+
+- Django project/app structure
+- DRF serializers, viewsets, and permissions
+- strong admin/ORM ecosystem leverage
+- a clear path for auth, background jobs, and API documentation
+
+## Quick Start
+
+{% if package_manager == "uv" %}
+```bash
+uv venv
+source .venv/bin/activate
+uv sync
+uv run python manage.py migrate
+uv run python manage.py runserver 0.0.0.0:8000
+```
+{% elif package_manager == "poetry" %}
+```bash
+poetry install
+poetry run python manage.py migrate
+poetry run python manage.py runserver 0.0.0.0:8000
+```
+{% else %}
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python manage.py migrate
+python manage.py runserver 0.0.0.0:8000
+```
+{% endif %}
+
+{% if use_drf_spectacular %}
+Expected API docs:
+
+- `http://localhost:8000/api/schema/`
+- `http://localhost:8000/api/schema/swagger-ui/`
+{% endif %}
+
+## Project Structure
+
+```text
+{{ project_name }}/
+├── config/              # Django project config and settings split
+├── apps/
+│   ├── api/             # DRF resources and API composition
+│   ├── users/           # authentication and identity domain
+│   └── common/          # shared domain utilities
+├── tests/
+│   └── integration/     # API and persistence integration tests
+├── docs/
+│   ├── architecture.md
+│   ├── api-conventions.md
+│   ├── ways-of-working.md
+│   └── adrs/
+{% if ai_context %}
+├── AI_CONTEXT.md
+{% endif %}
+├── .editorconfig
+├── .gitignore
+└── README.md
+```
+
+## Operational Guidance
+
+{% if auth_strategy == "session" %}
+- Use Django session auth for admin- or browser-centric internal applications.
+{% elif auth_strategy == "jwt" %}
+- Use JWT for SPA or machine-consumable APIs and keep token handling centralized.
+{% elif auth_strategy == "token" %}
+- Use token auth for simple API consumer setups where session auth is not appropriate.
+{% elif auth_strategy == "oauth2" %}
+- Use OAuth2 when delegated auth or external identity providers are part of the system.
+{% else %}
+- No authentication is assumed. Confirm that this is a conscious decision before production work starts.
+{% endif %}
+
+{% if use_celery %}
+- Celery is part of the intended architecture. Keep task orchestration outside request handlers.
+{% endif %}
+{% if use_channels %}
+- Channels support is expected for websocket or asynchronous connection workflows.
+{% endif %}
+
+## Next Steps
+
+1. confirm project/app boundaries in `docs/architecture.md`
+2. define serializer/viewset/permission conventions in `docs/api-conventions.md`
+3. implement one end-to-end DRF resource before broadening the system surface

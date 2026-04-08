@@ -1,0 +1,3761 @@
+{
+    "policies": [
+        {
+            "id": "CAL-1.0",
+            "name": "CAL-1.0",
+            "family": "dummy1",
+            "reference": "https://spdx.org/licenses/CAL-1.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CAL-1.0-Combined-Work-Exception",
+            "name": "CAL-1.0-Combined-Work-Exception",
+            "family": "dummy2",
+            "reference": "https://spdx.org/licenses/CAL-1.0-Combined-Work-Exception.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Parity-6.0.0",
+            "name": "Parity-6.0.0",
+            "family": "dummy3",
+            "reference": "https://spdx.org/licenses/Parity-6.0.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Parity-7.0.0",
+            "name": "Parity-7.0.0",
+            "family": "dummy4",
+            "reference": "https://spdx.org/licenses/Parity-7.0.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "RPL-1.1",
+            "name": "RPL-1.1",
+            "family": "dummy5",
+            "reference": "https://spdx.org/licenses/RPL-1.1.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "RPL-1.5",
+            "name": "RPL-1.5",
+            "family": "dummy6",
+            "reference": "https://spdx.org/licenses/RPL-1.5.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AGPL-1.0-only",
+            "name": "AGPL-1.0-only",
+            "family": "AGPL",
+            "reference": "https://spdx.org/licenses/AGPL-1.0-only.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AGPL-1.0-or-later",
+            "name": "AGPL-1.0-or-later",
+            "family": "AGPL",
+            "reference": "https://spdx.org/licenses/AGPL-1.0-or-later.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AGPL-3.0-only",
+            "name": "AGPL-3.0-only",
+            "family": "AGPL",
+            "reference": "https://spdx.org/licenses/AGPL-3.0-only.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AGPL-3.0-or-later",
+            "name": "AGPL-3.0-or-later",
+            "family": "AGPL",
+            "reference": "https://spdx.org/licenses/AGPL-3.0-or-later.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "APSL-1.0",
+            "name": "APSL-1.0",
+            "family": "APSL",
+            "reference": "https://spdx.org/licenses/APSL-1.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "APSL-1.1",
+            "name": "APSL-1.1",
+            "family": "APSL",
+            "reference": "https://spdx.org/licenses/APSL-1.1.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "APSL-1.2",
+            "name": "APSL-1.2",
+            "family": "APSL",
+            "reference": "https://spdx.org/licenses/APSL-1.2.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "APSL-2.0",
+            "name": "APSL-2.0",
+            "family": "APSL",
+            "reference": "https://spdx.org/licenses/APSL-2.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CPAL-1.0",
+            "name": "CPAL-1.0",
+            "family": "dummy15",
+            "reference": "https://spdx.org/licenses/CPAL-1.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "EUPL-1.0",
+            "name": "EUPL-1.0",
+            "family": "EUPL",
+            "reference": "https://spdx.org/licenses/EUPL-1.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "EUPL-1.1",
+            "name": "EUPL-1.1",
+            "family": "EUPL",
+            "reference": "https://spdx.org/licenses/EUPL-1.1.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "EUPL-1.2",
+            "name": "EUPL-1.2",
+            "family": "EUPL",
+            "reference": "https://spdx.org/licenses/EUPL-1.2.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NPOSL-3.0",
+            "name": "NPOSL-3.0",
+            "family": "dummy19",
+            "reference": "https://spdx.org/licenses/NPOSL-3.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OSL-1.0",
+            "name": "OSL-1.0",
+            "family": "dummy20",
+            "reference": "https://spdx.org/licenses/OSL-1.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OSL-1.1",
+            "name": "OSL-1.1",
+            "family": "dummy21",
+            "reference": "https://spdx.org/licenses/OSL-1.1.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OSL-2.0",
+            "name": "OSL-2.0",
+            "family": "dummy22",
+            "reference": "https://spdx.org/licenses/OSL-2.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OSL-2.1",
+            "name": "OSL-2.1",
+            "family": "dummy23",
+            "reference": "https://spdx.org/licenses/OSL-2.1.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OSL-3.0",
+            "name": "OSL-3.0",
+            "family": "dummy24",
+            "reference": "https://spdx.org/licenses/OSL-3.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "RPSL-1.0",
+            "name": "RPSL-1.0",
+            "family": "dummy25",
+            "reference": "https://spdx.org/licenses/RPSL-1.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "SSPL-1.0",
+            "name": "SSPL-1.0",
+            "family": "SSPL",
+            "reference": "https://spdx.org/licenses/SSPL-1.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-Protection",
+            "name": "BSD-Protection",
+            "family": "BSD-Protection",
+            "reference": "https://spdx.org/licenses/BSD-Protection.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "copyleft-next-0.3.0",
+            "name": "copyleft-next-0.3.0",
+            "family": "dummy28",
+            "reference": "https://spdx.org/licenses/copyleft-next-0.3.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "copyleft-next-0.3.1",
+            "name": "copyleft-next-0.3.1",
+            "family": "dummy29",
+            "reference": "https://spdx.org/licenses/copyleft-next-0.3.1.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "GPL-1.0-only",
+            "name": "GPL-1.0-only",
+            "family": "GPL-1.0",
+            "reference": "https://spdx.org/licenses/GPL-1.0-only.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "GPL-1.0-or-later",
+            "name": "GPL-1.0-or-later",
+            "family": "GPL-1.0",
+            "reference": "https://spdx.org/licenses/GPL-1.0-or-later.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "GPL-2.0-only",
+            "name": "GPL-2.0-only",
+            "family": "GPL-2.0",
+            "reference": "https://spdx.org/licenses/GPL-2.0-only.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "GPL-2.0-or-later",
+            "name": "GPL-2.0-or-later",
+            "family": "GPL-2.0",
+            "reference": "https://spdx.org/licenses/GPL-2.0-or-later.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "GPL-3.0-only",
+            "name": "GPL-3.0-only",
+            "family": "GPL-3.0",
+            "reference": "https://spdx.org/licenses/GPL-3.0-only.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "GPL-3.0-or-later",
+            "name": "GPL-3.0-or-later",
+            "family": "GPL",
+            "reference": "https://spdx.org/licenses/GPL-3.0-or-later.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "QPL-1.0",
+            "name": "QPL-1.0",
+            "family": "dummy36",
+            "reference": "https://spdx.org/licenses/QPL-1.0.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Sleepycat",
+            "name": "Sleepycat",
+            "family": "dummy37",
+            "reference": "https://spdx.org/licenses/Sleepycat.html",
+            "usagePolicy": "deny",
+            "annotationRefs": [
+                "PROHIBITED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CDDL-1.0",
+            "name": "CDDL-1.0",
+            "family": "CDDL",
+            "reference": "https://spdx.org/licenses/CDDL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CDDL-1.1",
+            "name": "CDDL-1.1",
+            "family": "CDDL",
+            "reference": "https://spdx.org/licenses/CDDL-1.1.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CECILL-1.0",
+            "name": "CECILL-1.0",
+            "family": "dummy40",
+            "reference": "https://spdx.org/licenses/CECILL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CECILL-1.1",
+            "name": "CECILL-1.1",
+            "family": "dummy41",
+            "reference": "https://spdx.org/licenses/CECILL-1.1.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CECILL-2.0",
+            "name": "CECILL-2.0",
+            "family": "dummy42",
+            "reference": "https://spdx.org/licenses/CECILL-2.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CECILL-2.1",
+            "name": "CECILL-2.1",
+            "family": "dummy43",
+            "reference": "https://spdx.org/licenses/CECILL-2.1.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CECILL-C",
+            "name": "CECILL-C",
+            "family": "dummy44",
+            "reference": "https://spdx.org/licenses/CECILL-C.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CPL-1.0",
+            "name": "CPL-1.0",
+            "family": "CPL",
+            "reference": "https://spdx.org/licenses/CPL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "EPL-1.0",
+            "name": "EPL-1.0",
+            "family": "EPL",
+            "reference": "https://spdx.org/licenses/EPL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "EPL-2.0",
+            "name": "EPL-2.0",
+            "family": "EPL",
+            "reference": "https://spdx.org/licenses/EPL-2.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ErlPL-1.1",
+            "name": "ErlPL-1.1",
+            "family": "ErlPL",
+            "reference": "https://spdx.org/licenses/ErlPL-1.1.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "IPL-1.0",
+            "name": "IPL-1.0",
+            "family": "dummy49",
+            "reference": "https://spdx.org/licenses/IPL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LGPL-2.0-only",
+            "name": "LGPL-2.0-only",
+            "family": "LGPL-2.0",
+            "reference": "https://spdx.org/licenses/LGPL-2.0-only.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LGPL-2.0-or-later",
+            "name": "LGPL-2.0-or-later",
+            "family": "LGPL-2.0",
+            "reference": "https://spdx.org/licenses/LGPL-2.0-or-later.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LGPL-2.1-only",
+            "name": "LGPL-2.1-only",
+            "family": "LGPL-2.1",
+            "reference": "https://spdx.org/licenses/LGPL-2.1-only.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LGPL-2.1-or-later",
+            "name": "LGPL-2.1-or-later",
+            "family": "LGPL-2.1",
+            "reference": "https://spdx.org/licenses/LGPL-2.1-or-later.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LGPL-3.0-only",
+            "name": "LGPL-3.0-only",
+            "family": "LGPL-3.0",
+            "reference": "https://spdx.org/licenses/LGPL-3.0-only.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LGPL-3.0-or-later",
+            "name": "LGPL-3.0-or-later",
+            "family": "LGPL-3.0",
+            "reference": "https://spdx.org/licenses/LGPL-3.0-or-later.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MPL-1.0",
+            "name": "MPL-1.0",
+            "family": "MPL",
+            "reference": "https://spdx.org/licenses/MPL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MPL-1.1",
+            "name": "MPL-1.1",
+            "family": "MPL",
+            "reference": "https://spdx.org/licenses/MPL-1.1.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MPL-2.0",
+            "name": "MPL-2.0",
+            "family": "MPL",
+            "reference": "https://spdx.org/licenses/MPL-2.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MPL-2.0-no-copyleft-exception",
+            "name": "MPL-2.0-no-copyleft-exception",
+            "family": "MPL-2.0-no-copyleft-exception",
+            "reference": "https://spdx.org/licenses/MPL-2.0-no-copyleft-exception.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MS-RL",
+            "name": "MS-RL",
+            "family": "MS-RL",
+            "reference": "https://spdx.org/licenses/MS-RL.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "SPL-1.0",
+            "name": "SPL-1.0",
+            "family": "dummy61",
+            "reference": "https://spdx.org/licenses/SPL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "0BSD",
+            "name": "0BSD",
+            "family": "0BSD",
+            "reference": "https://spdx.org/licenses/0BSD.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AFL-1.1",
+            "name": "AFL-1.1",
+            "family": "AFL",
+            "reference": "https://spdx.org/licenses/AFL-1.1.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AFL-1.2",
+            "name": "AFL-1.2",
+            "family": "AFL",
+            "reference": "https://spdx.org/licenses/AFL-1.2.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AFL-2.0",
+            "name": "AFL-2.0",
+            "family": "AFL",
+            "reference": "https://spdx.org/licenses/AFL-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AFL-2.1",
+            "name": "AFL-2.1",
+            "family": "AFL",
+            "reference": "https://spdx.org/licenses/AFL-2.1.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AFL-3.0",
+            "name": "AFL-3.0",
+            "family": "AFL",
+            "reference": "https://spdx.org/licenses/AFL-3.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AMDPLPA",
+            "name": "AMDPLPA",
+            "family": "dummy68",
+            "reference": "https://spdx.org/licenses/AMDPLPA.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AML",
+            "name": "AML",
+            "family": "dummy69",
+            "reference": "https://spdx.org/licenses/AML.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AMPAS",
+            "name": "AMPAS",
+            "family": "dummy70",
+            "reference": "https://spdx.org/licenses/AMPAS.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ANTLR-PD",
+            "name": "ANTLR-PD",
+            "family": "dummy71",
+            "reference": "https://spdx.org/licenses/ANTLR-PD.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ANTLR-PD-fallback",
+            "name": "ANTLR-PD-fallback",
+            "family": "dummy72",
+            "reference": "https://spdx.org/licenses/ANTLR-PD-fallback.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Apache-1.0",
+            "name": "Apache-1.0",
+            "family": "Apache",
+            "reference": "https://spdx.org/licenses/Apache-1.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Apache-1.1",
+            "name": "Apache-1.1",
+            "family": "Apache",
+            "reference": "https://spdx.org/licenses/Apache-1.1.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Artistic-2.0",
+            "name": "Artistic-2.0",
+            "family": "Artistic",
+            "reference": "https://spdx.org/licenses/Artistic-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Bahyph",
+            "name": "Bahyph",
+            "family": "dummy76",
+            "reference": "https://spdx.org/licenses/Bahyph.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Barr",
+            "name": "Barr",
+            "family": "dummy77",
+            "reference": "https://spdx.org/licenses/Barr.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "bcrypt-Solar-Designer",
+            "name": "bcrypt-Solar-Designer",
+            "family": "dummy78",
+            "reference": "https://spdx.org/licenses/bcrypt-Solar-Designer.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause",
+            "name": "BSD-3-Clause",
+            "family": "BSD",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause-Attribution",
+            "name": "BSD-3-Clause-Attribution",
+            "family": "BSD",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause-Attribution.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause-Clear",
+            "name": "BSD-3-Clause-Clear",
+            "family": "BSD",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause-Clear.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause-HP",
+            "name": "BSD-3-Clause-HP",
+            "family": "dummy82",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause-HP.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause-LBNL",
+            "name": "BSD-3-Clause-LBNL",
+            "family": "dummy83",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause-LBNL.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause-Modification",
+            "name": "BSD-3-Clause-Modification",
+            "family": "dummy84",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause-Modification.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause-No-Nuclear-License-2014",
+            "name": "BSD-3-Clause-No-Nuclear-License-2014",
+            "family": "BSD-3-Clause-No-Nuclear",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause-No-Nuclear-License-2014.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause-No-Nuclear-Warranty",
+            "name": "BSD-3-Clause-No-Nuclear-Warranty",
+            "family": "BSD-3-Clause-No-Nuclear",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause-No-Nuclear-Warranty.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause-Open-MPI",
+            "name": "BSD-3-Clause-Open-MPI",
+            "family": "BSD-3-Clause-Open-MPI-variant",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause-Open-MPI.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-3-Clause-Sun",
+            "name": "BSD-3-Clause-Sun",
+            "family": "dummy88",
+            "reference": "https://spdx.org/licenses/BSD-3-Clause-Sun.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-4-Clause",
+            "name": "BSD-4-Clause",
+            "family": "BSD",
+            "reference": "https://spdx.org/licenses/BSD-4-Clause.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-4-Clause-Shortened",
+            "name": "BSD-4-Clause-Shortened",
+            "family": "BSD-4-Clause-Shortened",
+            "reference": "https://spdx.org/licenses/BSD-4-Clause-Shortened.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-4-Clause-UC",
+            "name": "BSD-4-Clause-UC",
+            "family": "BSD-4-Clause-UC",
+            "reference": "https://spdx.org/licenses/BSD-4-Clause-UC.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-Source-Code",
+            "name": "BSD-Source-Code",
+            "family": "BSD-Source-Code",
+            "reference": "https://spdx.org/licenses/BSD-Source-Code.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "bzip2-1.0.5",
+            "name": "bzip2-1.0.5",
+            "family": "dummy93",
+            "reference": "https://spdx.org/licenses/bzip2-1.0.5.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "bzip2-1.0.6",
+            "name": "bzip2-1.0.6",
+            "family": "bzip2",
+            "reference": "https://spdx.org/licenses/bzip2-1.0.6.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CC0-1.0",
+            "name": "CC0-1.0",
+            "family": "CC0",
+            "reference": "https://spdx.org/licenses/CC0-1.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CFITSIO",
+            "name": "CFITSIO",
+            "family": "dummy96",
+            "reference": "https://spdx.org/licenses/CFITSIO.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Clips",
+            "name": "Clips",
+            "family": "dummy97",
+            "reference": "https://spdx.org/licenses/Clips.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CNRI-Jython",
+            "name": "CNRI-Jython",
+            "family": "dummy98",
+            "reference": "https://spdx.org/licenses/CNRI-Jython.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CNRI-Python",
+            "name": "CNRI-Python",
+            "family": "dummy99",
+            "reference": "https://spdx.org/licenses/CNRI-Python.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CNRI-Python-GPL-Compatible",
+            "name": "CNRI-Python-GPL-Compatible",
+            "family": "dummy100",
+            "reference": "https://spdx.org/licenses/CNRI-Python-GPL-Compatible.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Cube",
+            "name": "Cube",
+            "family": "dummy101",
+            "reference": "https://spdx.org/licenses/Cube.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "curl",
+            "name": "curl",
+            "family": "curl",
+            "reference": "https://spdx.org/licenses/curl.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "eGenix",
+            "name": "eGenix",
+            "family": "eGenix",
+            "reference": "https://spdx.org/licenses/eGenix.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Entessa",
+            "name": "Entessa",
+            "family": "dummy104",
+            "reference": "https://spdx.org/licenses/Entessa.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "FTL",
+            "name": "FTL",
+            "family": "FTL",
+            "reference": "https://spdx.org/licenses/FTL.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "fwlw",
+            "name": "fwlw",
+            "family": "dummy106",
+            "reference": "https://spdx.org/licenses/fwlw.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "HPND-Fenneberg-Livingston",
+            "name": "HPND-Fenneberg-Livingston",
+            "family": "dummy107",
+            "reference": "https://spdx.org/licenses/HPND-Fenneberg-Livingston.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "HPND-sell-regexpr",
+            "name": "HPND-sell-regexpr",
+            "family": "dummy108",
+            "reference": "https://spdx.org/licenses/HPND-sell-regexpr.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "HTMLTIDY",
+            "name": "HTMLTIDY",
+            "family": "dummy109",
+            "reference": "https://spdx.org/licenses/HTMLTIDY.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "IBM-pibs",
+            "name": "IBM-pibs",
+            "family": "dummy110",
+            "reference": "https://spdx.org/licenses/IBM-pibs.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ICU",
+            "name": "ICU",
+            "family": "dummy111",
+            "reference": "https://spdx.org/licenses/ICU.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Info-ZIP",
+            "name": "Info-ZIP",
+            "family": "dummy112",
+            "reference": "https://spdx.org/licenses/Info-ZIP.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Intel",
+            "name": "Intel",
+            "family": "dummy113",
+            "reference": "https://spdx.org/licenses/Intel.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "JasPer-2.0",
+            "name": "JasPer-2.0",
+            "family": "dummy114",
+            "reference": "https://spdx.org/licenses/JasPer-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Libpng",
+            "name": "Libpng",
+            "family": "dummy115",
+            "reference": "https://spdx.org/licenses/Libpng.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "libpng-2.0",
+            "name": "libpng-2.0",
+            "family": "dummy116",
+            "reference": "https://spdx.org/licenses/libpng-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "libtiff",
+            "name": "libtiff",
+            "family": "dummy117",
+            "reference": "https://spdx.org/licenses/libtiff.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LPPL-1.3c",
+            "name": "LPPL-1.3c",
+            "family": "dummy118",
+            "reference": "https://spdx.org/licenses/LPPL-1.3c.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LZMA-SDK-9.22",
+            "name": "LZMA-SDK-9.22",
+            "family": "dummy119",
+            "reference": "https://spdx.org/licenses/LZMA-SDK-9.22.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT-0",
+            "name": "MIT-0",
+            "family": "MIT",
+            "reference": "https://spdx.org/licenses/MIT-0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT-advertising",
+            "name": "MIT-advertising",
+            "family": "MIT",
+            "reference": "https://spdx.org/licenses/MIT-advertising.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT-CMU",
+            "name": "MIT-CMU",
+            "family": "MIT",
+            "reference": "https://spdx.org/licenses/MIT-CMU.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT-enna",
+            "name": "MIT-enna",
+            "family": "MIT",
+            "reference": "https://spdx.org/licenses/MIT-enna.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT-feh",
+            "name": "MIT-feh",
+            "family": "MIT",
+            "reference": "https://spdx.org/licenses/MIT-feh.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT-open-group",
+            "name": "MIT-open-group",
+            "family": "dummy125",
+            "reference": "https://spdx.org/licenses/MIT-open-group.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MITNFA",
+            "name": "MITNFA",
+            "family": "dummy126",
+            "reference": "https://spdx.org/licenses/MITNFA.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MTLL",
+            "name": "MTLL",
+            "family": "dummy127",
+            "reference": "https://spdx.org/licenses/MTLL.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MulanPSL-2.0",
+            "name": "MulanPSL-2.0",
+            "family": "dummy128",
+            "reference": "https://spdx.org/licenses/MulanPSL-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Multics",
+            "name": "Multics",
+            "family": "dummy129",
+            "reference": "https://spdx.org/licenses/Multics.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Naumen",
+            "name": "Naumen",
+            "family": "dummy130",
+            "reference": "https://spdx.org/licenses/Naumen.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NCSA",
+            "name": "NCSA",
+            "family": "dummy131",
+            "reference": "https://spdx.org/licenses/NCSA.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Net-SNMP",
+            "name": "Net-SNMP",
+            "family": "Net",
+            "reference": "https://spdx.org/licenses/Net-SNMP.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NetCDF",
+            "name": "NetCDF",
+            "family": "dummy133",
+            "reference": "https://spdx.org/licenses/NetCDF.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NICTA-1.0",
+            "name": "NICTA-1.0",
+            "family": "dummy134",
+            "reference": "https://spdx.org/licenses/NICTA-1.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NIST-Software",
+            "name": "NIST-Software",
+            "family": "dummy135",
+            "reference": "https://spdx.org/licenses/NIST-Software.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NTP",
+            "name": "NTP",
+            "family": "dummy136",
+            "reference": "https://spdx.org/licenses/NTP.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OGL-Canada-2.0",
+            "name": "OGL-Canada-2.0",
+            "family": "dummy137",
+            "reference": "https://spdx.org/licenses/OGL-Canada-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.0",
+            "name": "OLDAP-2.0",
+            "family": "dummy138",
+            "reference": "https://spdx.org/licenses/OLDAP-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.0.1",
+            "name": "OLDAP-2.0.1",
+            "family": "dummy139",
+            "reference": "https://spdx.org/licenses/OLDAP-2.0.1.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.1",
+            "name": "OLDAP-2.1",
+            "family": "dummy140",
+            "reference": "https://spdx.org/licenses/OLDAP-2.1.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.2",
+            "name": "OLDAP-2.2",
+            "family": "dummy141",
+            "reference": "https://spdx.org/licenses/OLDAP-2.2.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.2.1",
+            "name": "OLDAP-2.2.1",
+            "family": "dummy142",
+            "reference": "https://spdx.org/licenses/OLDAP-2.2.1.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.2.2",
+            "name": "OLDAP-2.2.2",
+            "family": "dummy143",
+            "reference": "https://spdx.org/licenses/OLDAP-2.2.2.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.3",
+            "name": "OLDAP-2.3",
+            "family": "dummy144",
+            "reference": "https://spdx.org/licenses/OLDAP-2.3.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.4",
+            "name": "OLDAP-2.4",
+            "family": "dummy145",
+            "reference": "https://spdx.org/licenses/OLDAP-2.4.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.5",
+            "name": "OLDAP-2.5",
+            "family": "dummy146",
+            "reference": "https://spdx.org/licenses/OLDAP-2.5.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.6",
+            "name": "OLDAP-2.6",
+            "family": "dummy147",
+            "reference": "https://spdx.org/licenses/OLDAP-2.6.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.7",
+            "name": "OLDAP-2.7",
+            "family": "dummy148",
+            "reference": "https://spdx.org/licenses/OLDAP-2.7.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-2.8",
+            "name": "OLDAP-2.8",
+            "family": "dummy149",
+            "reference": "https://spdx.org/licenses/OLDAP-2.8.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OML",
+            "name": "OML",
+            "family": "dummy150",
+            "reference": "https://spdx.org/licenses/OML.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OpenSSL",
+            "name": "OpenSSL",
+            "family": "OpenSSL",
+            "reference": "https://spdx.org/licenses/OpenSSL.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "PHP-3.0",
+            "name": "PHP-3.0",
+            "family": "PHP",
+            "reference": "https://spdx.org/licenses/PHP-3.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "PHP-3.01",
+            "name": "PHP-3.01",
+            "family": "PHP",
+            "reference": "https://spdx.org/licenses/PHP-3.01.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Plexus",
+            "name": "Plexus",
+            "family": "Plexus",
+            "reference": "https://spdx.org/licenses/Plexus.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "PSF-2.0",
+            "name": "PSF-2.0",
+            "family": "dummy155",
+            "reference": "https://spdx.org/licenses/PSF-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Python-2.0",
+            "name": "Python-2.0",
+            "family": "Python-2.0",
+            "reference": "https://spdx.org/licenses/Python-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Ruby",
+            "name": "Ruby",
+            "family": "Ruby",
+            "reference": "https://spdx.org/licenses/Ruby.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Saxpath",
+            "name": "Saxpath",
+            "family": "dummy158",
+            "reference": "https://spdx.org/licenses/Saxpath.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "SGI-B-2.0",
+            "name": "SGI-B-2.0",
+            "family": "dummy159",
+            "reference": "https://spdx.org/licenses/SGI-B-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "SMLNJ",
+            "name": "SMLNJ",
+            "family": "dummy160",
+            "reference": "https://spdx.org/licenses/SMLNJ.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "SunPro",
+            "name": "SunPro",
+            "family": "dummy161",
+            "reference": "https://spdx.org/licenses/SunPro.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "SWL",
+            "name": "SWL",
+            "family": "dummy162",
+            "reference": "https://spdx.org/licenses/SWL.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Symlinks",
+            "name": "Symlinks",
+            "family": "dummy163",
+            "reference": "https://spdx.org/licenses/Symlinks.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "TCL",
+            "name": "TCL",
+            "family": "dummy164",
+            "reference": "https://spdx.org/licenses/TCL.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "TCP-wrappers",
+            "name": "TCP-wrappers",
+            "family": "dummy165",
+            "reference": "https://spdx.org/licenses/TCP-wrappers.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "UCAR",
+            "name": "UCAR",
+            "family": "dummy166",
+            "reference": "https://spdx.org/licenses/UCAR.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Unicode-DFS-2015",
+            "name": "Unicode-DFS-2015",
+            "family": "Unicode",
+            "reference": "https://spdx.org/licenses/Unicode-DFS-2015.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Unicode-DFS-2016",
+            "name": "Unicode-DFS-2016",
+            "family": "Unicode",
+            "reference": "https://spdx.org/licenses/Unicode-DFS-2016.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "UnixCrypt",
+            "name": "UnixCrypt",
+            "family": "UnixCrypt",
+            "reference": "https://spdx.org/licenses/UnixCrypt.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Unlicense",
+            "name": "Unlicense",
+            "family": "dummy170",
+            "reference": "https://spdx.org/licenses/Unlicense.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "VSL-1.0",
+            "name": "VSL-1.0",
+            "family": "dummy171",
+            "reference": "https://spdx.org/licenses/VSL-1.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "W3C",
+            "name": "W3C",
+            "family": "W3C",
+            "reference": "https://spdx.org/licenses/W3C.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "X11",
+            "name": "X11",
+            "family": "X11",
+            "reference": "https://spdx.org/licenses/X11.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "XFree86-1.1",
+            "name": "XFree86-1.1",
+            "family": "dummy174",
+            "reference": "https://spdx.org/licenses/XFree86-1.1.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "xlock",
+            "name": "xlock",
+            "family": "dummy175",
+            "reference": "https://spdx.org/licenses/xlock.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Xnet",
+            "name": "Xnet",
+            "family": "Xnet",
+            "reference": "https://spdx.org/licenses/Xnet.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "xpp",
+            "name": "xpp",
+            "family": "dummy177",
+            "reference": "https://spdx.org/licenses/xpp.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Zlib",
+            "name": "Zlib",
+            "family": "Zlib",
+            "reference": "https://spdx.org/licenses/Zlib.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "zlib-acknowledgement",
+            "name": "zlib-acknowledgement",
+            "family": "zlib",
+            "reference": "https://spdx.org/licenses/zlib-acknowledgement.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ZPL-2.0",
+            "name": "ZPL-2.0",
+            "family": "ZPL",
+            "reference": "https://spdx.org/licenses/ZPL-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ZPL-2.1",
+            "name": "ZPL-2.1",
+            "family": "ZPL",
+            "reference": "https://spdx.org/licenses/ZPL-2.1.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-2-Clause-Patent",
+            "name": "BSD-2-Clause-Patent",
+            "family": "BSD-2-Clause-Plus-Patent-License",
+            "reference": "https://spdx.org/licenses/BSD-2-Clause-Patent.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "AAL",
+            "name": "AAL",
+            "family": "dummy183",
+            "reference": "https://spdx.org/licenses/AAL.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Adobe-2006",
+            "name": "Adobe-2006",
+            "family": "Adobe",
+            "reference": "https://spdx.org/licenses/Adobe-2006.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Afmparse",
+            "name": "Afmparse",
+            "family": "dummy185",
+            "reference": "https://spdx.org/licenses/Afmparse.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Artistic-1.0",
+            "name": "Artistic-1.0",
+            "family": "Artistic",
+            "reference": "https://spdx.org/licenses/Artistic-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Artistic-1.0-cl8",
+            "name": "Artistic-1.0-cl8",
+            "family": "Artistic",
+            "reference": "https://spdx.org/licenses/Artistic-1.0-cl8.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Artistic-1.0-Perl",
+            "name": "Artistic-1.0-Perl",
+            "family": "Artistic",
+            "reference": "https://spdx.org/licenses/Artistic-1.0-Perl.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Beerware",
+            "name": "Beerware",
+            "family": "Beerware",
+            "reference": "https://spdx.org/licenses/Beerware.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "blessing",
+            "name": "blessing",
+            "family": "dummy190",
+            "reference": "https://spdx.org/licenses/blessing.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Borceux",
+            "name": "Borceux",
+            "family": "dummy191",
+            "reference": "https://spdx.org/licenses/Borceux.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-2-Clause-Darwin",
+            "name": "BSD-2-Clause-Darwin",
+            "family": "dummy192",
+            "reference": "https://spdx.org/licenses/BSD-2-Clause-Darwin.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CECILL-B",
+            "name": "CECILL-B",
+            "family": "dummy193",
+            "reference": "https://spdx.org/licenses/CECILL-B.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "check-cvs",
+            "name": "check-cvs",
+            "family": "dummy194",
+            "reference": "https://spdx.org/licenses/check-cvs.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ClArtistic",
+            "name": "ClArtistic",
+            "family": "ClArtistic",
+            "reference": "https://spdx.org/licenses/ClArtistic.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Condor-1.1",
+            "name": "Condor-1.1",
+            "family": "dummy196",
+            "reference": "https://spdx.org/licenses/Condor-1.1.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Crossword",
+            "name": "Crossword",
+            "family": "dummy197",
+            "reference": "https://spdx.org/licenses/Crossword.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CrystalStacker",
+            "name": "CrystalStacker",
+            "family": "dummy198",
+            "reference": "https://spdx.org/licenses/CrystalStacker.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "diffmark",
+            "name": "diffmark",
+            "family": "dummy199",
+            "reference": "https://spdx.org/licenses/diffmark.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "DOC",
+            "name": "DOC",
+            "family": "dummy200",
+            "reference": "https://spdx.org/licenses/DOC.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "EFL-1.0",
+            "name": "EFL-1.0",
+            "family": "dummy201",
+            "reference": "https://spdx.org/licenses/EFL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "EFL-2.0",
+            "name": "EFL-2.0",
+            "family": "dummy202",
+            "reference": "https://spdx.org/licenses/EFL-2.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Fair",
+            "name": "Fair",
+            "family": "dummy203",
+            "reference": "https://spdx.org/licenses/Fair.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "FSFAP",
+            "name": "FSFAP",
+            "family": "FSFAP",
+            "reference": "https://spdx.org/licenses/FSFAP.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "FSFUL",
+            "name": "FSFUL",
+            "family": "dummy205",
+            "reference": "https://spdx.org/licenses/FSFUL.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "FSFULLR",
+            "name": "FSFULLR",
+            "family": "dummy206",
+            "reference": "https://spdx.org/licenses/FSFULLR.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Giftware",
+            "name": "Giftware",
+            "family": "dummy207",
+            "reference": "https://spdx.org/licenses/Giftware.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "GLWTPL",
+            "name": "GLWTPL",
+            "family": "dummy208",
+            "reference": "https://spdx.org/licenses/GLWTPL.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "HPND",
+            "name": "HPND",
+            "family": "dummy209",
+            "reference": "https://spdx.org/licenses/HPND.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "HPND-export-US",
+            "name": "HPND-export-US",
+            "family": "dummy210",
+            "reference": "https://spdx.org/licenses/HPND-export-US.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "IJG",
+            "name": "IJG",
+            "family": "IJG",
+            "reference": "https://spdx.org/licenses/IJG.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "IJG-short",
+            "name": "IJG-short",
+            "family": "dummy212",
+            "reference": "https://spdx.org/licenses/IJG-short.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Jam",
+            "name": "Jam",
+            "family": "dummy213",
+            "reference": "https://spdx.org/licenses/Jam.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Kazlib",
+            "name": "Kazlib",
+            "family": "dummy214",
+            "reference": "https://spdx.org/licenses/Kazlib.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Leptonica",
+            "name": "Leptonica",
+            "family": "dummy215",
+            "reference": "https://spdx.org/licenses/Leptonica.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LPL-1.0",
+            "name": "LPL-1.0",
+            "family": "dummy216",
+            "reference": "https://spdx.org/licenses/LPL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "LPL-1.02",
+            "name": "LPL-1.02",
+            "family": "dummy217",
+            "reference": "https://spdx.org/licenses/LPL-1.02.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "McPhee-slideshow",
+            "name": "McPhee-slideshow",
+            "family": "dummy218",
+            "reference": "https://spdx.org/licenses/McPhee-slideshow.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MirOS",
+            "name": "MirOS",
+            "family": "dummy219",
+            "reference": "https://spdx.org/licenses/MirOS.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "mpich2",
+            "name": "mpich2",
+            "family": "dummy220",
+            "reference": "https://spdx.org/licenses/mpich2.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NAIST-2003",
+            "name": "NAIST-2003",
+            "family": "NAIST",
+            "reference": "https://spdx.org/licenses/NAIST-2003.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NASA-1.3",
+            "name": "NASA-1.3",
+            "family": "dummy222",
+            "reference": "https://spdx.org/licenses/NASA-1.3.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NBPL-1.0",
+            "name": "NBPL-1.0",
+            "family": "dummy223",
+            "reference": "https://spdx.org/licenses/NBPL-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Newsletr",
+            "name": "Newsletr",
+            "family": "dummy224",
+            "reference": "https://spdx.org/licenses/Newsletr.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NLPL",
+            "name": "NLPL",
+            "family": "dummy225",
+            "reference": "https://spdx.org/licenses/NLPL.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NRL",
+            "name": "NRL",
+            "family": "dummy226",
+            "reference": "https://spdx.org/licenses/NRL.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "NTP-0",
+            "name": "NTP-0",
+            "family": "dummy227",
+            "reference": "https://spdx.org/licenses/NTP-0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OFFIS",
+            "name": "OFFIS",
+            "family": "dummy228",
+            "reference": "https://spdx.org/licenses/OFFIS.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OGTSL",
+            "name": "OGTSL",
+            "family": "dummy229",
+            "reference": "https://spdx.org/licenses/OGTSL.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-1.1",
+            "name": "OLDAP-1.1",
+            "family": "dummy230",
+            "reference": "https://spdx.org/licenses/OLDAP-1.1.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-1.2",
+            "name": "OLDAP-1.2",
+            "family": "dummy231",
+            "reference": "https://spdx.org/licenses/OLDAP-1.2.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-1.3",
+            "name": "OLDAP-1.3",
+            "family": "dummy232",
+            "reference": "https://spdx.org/licenses/OLDAP-1.3.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "OLDAP-1.4",
+            "name": "OLDAP-1.4",
+            "family": "dummy233",
+            "reference": "https://spdx.org/licenses/OLDAP-1.4.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "psutils",
+            "name": "psutils",
+            "family": "dummy234",
+            "reference": "https://spdx.org/licenses/psutils.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "python-ldap",
+            "name": "python-ldap",
+            "family": "dummy235",
+            "reference": "https://spdx.org/licenses/python-ldap.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Qhull",
+            "name": "Qhull",
+            "family": "dummy236",
+            "reference": "https://spdx.org/licenses/Qhull.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Rdisc",
+            "name": "Rdisc",
+            "family": "dummy237",
+            "reference": "https://spdx.org/licenses/Rdisc.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "RSA-MD",
+            "name": "RSA-MD",
+            "family": "RSA",
+            "reference": "https://spdx.org/licenses/RSA-MD.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "snprintf",
+            "name": "snprintf",
+            "family": "dummy239",
+            "reference": "https://spdx.org/licenses/snprintf.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Spencer-86",
+            "name": "Spencer-86",
+            "family": "Spencer",
+            "reference": "https://spdx.org/licenses/Spencer-86.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Spencer-94",
+            "name": "Spencer-94",
+            "family": "Spencer",
+            "reference": "https://spdx.org/licenses/Spencer-94.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "SSH-short",
+            "name": "SSH-short",
+            "family": "dummy242",
+            "reference": "https://spdx.org/licenses/SSH-short.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "TU-Berlin-1.0",
+            "name": "TU-Berlin-1.0",
+            "family": "dummy243",
+            "reference": "https://spdx.org/licenses/TU-Berlin-1.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "TU-Berlin-2.0",
+            "name": "TU-Berlin-2.0",
+            "family": "dummy244",
+            "reference": "https://spdx.org/licenses/TU-Berlin-2.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Vim",
+            "name": "Vim",
+            "family": "Vim",
+            "reference": "https://spdx.org/licenses/Vim.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "W3C-19980720",
+            "name": "W3C-19980720",
+            "family": "W3C",
+            "reference": "https://spdx.org/licenses/W3C-19980720.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "W3C-20150513",
+            "name": "W3C-20150513",
+            "family": "W3C",
+            "reference": "https://spdx.org/licenses/W3C-20150513.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Wsuipa",
+            "name": "Wsuipa",
+            "family": "dummy248",
+            "reference": "https://spdx.org/licenses/Wsuipa.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "WTFPL",
+            "name": "WTFPL",
+            "family": "WTFPL",
+            "reference": "https://spdx.org/licenses/WTFPL.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "xinetd",
+            "name": "xinetd",
+            "family": "dummy250",
+            "reference": "https://spdx.org/licenses/xinetd.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "XSkat",
+            "name": "XSkat",
+            "family": "dummy251",
+            "reference": "https://spdx.org/licenses/XSkat.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Zed",
+            "name": "Zed",
+            "family": "dummy252",
+            "reference": "https://spdx.org/licenses/Zed.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Zend-2.0",
+            "name": "Zend-2.0",
+            "family": "Zend",
+            "reference": "https://spdx.org/licenses/Zend-2.0.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ZPL-1.1",
+            "name": "ZPL-1.1",
+            "family": "ZPL",
+            "reference": "https://spdx.org/licenses/ZPL-1.1.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BlueOak-1.0.0",
+            "name": "BlueOak-1.0.0",
+            "family": "dummy255",
+            "reference": "https://spdx.org/licenses/BlueOak-1.0.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ADSL",
+            "name": "ADSL",
+            "family": "ADSL",
+            "reference": "https://spdx.org/licenses/ADSL.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Apache-2.0",
+            "name": "Apache-2.0",
+            "family": "Apache",
+            "reference": "https://spdx.org/licenses/Apache-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "APAFML",
+            "name": "APAFML",
+            "family": "dummy258",
+            "reference": "https://spdx.org/licenses/APAFML.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-1-Clause",
+            "name": "BSD-1-Clause",
+            "family": "BSD",
+            "reference": "https://spdx.org/licenses/BSD-1-Clause.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-2-Clause",
+            "name": "BSD-2-Clause",
+            "family": "BSD",
+            "reference": "https://spdx.org/licenses/BSD-2-Clause.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-2-Clause-FreeBSD",
+            "name": "BSD-2-Clause-FreeBSD",
+            "family": "BSD",
+            "reference": "https://spdx.org/licenses/BSD-2-Clause-FreeBSD.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-2-Clause-NetBSD",
+            "name": "BSD-2-Clause-NetBSD",
+            "family": "BSD",
+            "reference": "https://spdx.org/licenses/BSD-2-Clause-NetBSD.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSD-2-Clause-Views",
+            "name": "BSD-2-Clause-Views",
+            "family": "BSD-2-Clause-with-views-sentence",
+            "reference": "https://spdx.org/licenses/BSD-2-Clause-Views.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "BSL-1.0",
+            "name": "BSL-1.0",
+            "family": "BSL",
+            "reference": "https://spdx.org/licenses/BSL-1.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "DSDP",
+            "name": "DSDP",
+            "family": "dummy265",
+            "reference": "https://spdx.org/licenses/DSDP.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ECL-1.0",
+            "name": "ECL-1.0",
+            "family": "ECL-1.0",
+            "reference": "https://spdx.org/licenses/ECL-1.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ECL-2.0",
+            "name": "ECL-2.0",
+            "family": "ECL-2.0",
+            "reference": "https://spdx.org/licenses/ECL-2.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "hdparm",
+            "name": "hdparm",
+            "family": "dummy268",
+            "reference": "https://spdx.org/licenses/hdparm.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ImageMagick",
+            "name": "ImageMagick",
+            "family": "dummy269",
+            "reference": "https://spdx.org/licenses/ImageMagick.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Intel-ACPI",
+            "name": "Intel-ACPI",
+            "family": "dummy270",
+            "reference": "https://spdx.org/licenses/Intel-ACPI.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "ISC",
+            "name": "ISC",
+            "family": "ISC",
+            "reference": "https://spdx.org/licenses/ISC.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Linux-OpenIB",
+            "name": "Linux-OpenIB",
+            "family": "dummy272",
+            "reference": "https://spdx.org/licenses/Linux-OpenIB.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT",
+            "name": "MIT",
+            "family": "MIT",
+            "reference": "https://spdx.org/licenses/MIT.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT-Modern-Variant",
+            "name": "MIT-Modern-Variant",
+            "family": "dummy274",
+            "reference": "https://spdx.org/licenses/MIT-Modern-Variant.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT-testregex",
+            "name": "MIT-testregex",
+            "family": "dummy275",
+            "reference": "https://spdx.org/licenses/MIT-testregex.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MIT-Wu",
+            "name": "MIT-Wu",
+            "family": "dummy276",
+            "reference": "https://spdx.org/licenses/MIT-Wu.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MS-PL",
+            "name": "MS-PL",
+            "family": "MS-PL",
+            "reference": "https://spdx.org/licenses/MS-PL.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "MulanPSL-1.0",
+            "name": "MulanPSL-1.0",
+            "family": "dummy278",
+            "reference": "https://spdx.org/licenses/MulanPSL-1.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Mup",
+            "name": "Mup",
+            "family": "dummy279",
+            "reference": "https://spdx.org/licenses/Mup.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "PostgreSQL",
+            "name": "PostgreSQL",
+            "family": "PostgreSQL",
+            "reference": "https://spdx.org/licenses/PostgreSQL.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "SHL-0.5",
+            "name": "SHL-0.5",
+            "family": "dummy281",
+            "reference": "https://spdx.org/licenses/SHL-0.5.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Spencer-99",
+            "name": "Spencer-99",
+            "family": "Spencer",
+            "reference": "https://spdx.org/licenses/Spencer-99.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "UPL-1.0",
+            "name": "UPL-1.0",
+            "family": "dummy283",
+            "reference": "https://spdx.org/licenses/UPL-1.0.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Xerox",
+            "name": "Xerox",
+            "family": "dummy284",
+            "reference": "https://spdx.org/licenses/Xerox.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Xfig",
+            "name": "Xfig",
+            "family": "dummy285",
+            "reference": "https://spdx.org/licenses/Xfig.html",
+            "usagePolicy": "allow",
+            "annotationRefs": [
+                "APPROVED"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "CC-BY-4.0 AND MIT AND Apache-2.0",
+            "name": "CC-BY-4.0 AND MIT AND Apache-2.0",
+            "family": "dummy286",
+            "reference": "https://spdx.org/licenses/.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "GPL-2.0-only OR (LGPL-2.1-only AND MIT)",
+            "name": "GPL-2.0-only OR (LGPL-2.1-only AND MIT)",
+            "family": "dummy287",
+            "reference": "https://spdx.org/licenses/.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "GPL-2.0+ WITH Classpath OR BSD",
+            "name": "GPL-2.0+ WITH Classpath OR BSD",
+            "family": "dummy288",
+            "reference": "https://spdx.org/licenses/.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        },
+        {
+            "id": "Weird unknown license",
+            "name": "Weird unknown license",
+            "family": "dummy289",
+            "reference": "https://spdx.org/licenses/.html",
+            "usagePolicy": "needs-review",
+            "annotationRefs": [
+                "NEEDS-APPROVAL"
+            ],
+            "urls": [
+                ""
+            ]
+        }
+    ]
+}

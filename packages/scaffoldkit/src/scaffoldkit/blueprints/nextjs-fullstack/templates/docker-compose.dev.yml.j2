@@ -1,0 +1,58 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+{% if db_provider == 'postgresql' %}      - DATABASE_URL=postgresql://dev:dev@db:5432/{{ project_name }}_dev
+{% elif db_provider == 'mysql' %}      - DATABASE_URL=mysql://dev:dev@db:3306/{{ project_name }}_dev
+{% else %}      - DATABASE_URL=file:./dev.db
+{% endif %}{% if db_provider != 'sqlite' %}    depends_on:
+      db:
+        condition: service_healthy
+{% endif %}    command: npm run dev
+{% if db_provider == 'postgresql' %}
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: {{ project_name }}_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+{% elif db_provider == 'mysql' %}
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: {{ project_name }}_dev
+      MYSQL_USER: dev
+      MYSQL_PASSWORD: dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+{% endif %}
+{% if db_provider != 'sqlite' %}
+volumes:
+{% if db_provider == 'postgresql' %}  postgres_data:
+{% elif db_provider == 'mysql' %}  mysql_data:
+{% endif %}{% endif %}

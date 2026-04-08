@@ -1,0 +1,109 @@
+# Architecture
+
+## System Overview
+
+{{agentName}} is an AI agent scaffold built with {{languageName}}.
+
+### Core Components
+
+- **Agent Entry** (`{{sourceEntry}}`) — Startup, environment loading and runtime wiring
+- **Smoke Test** (`{{testEntry}}`) — Default passing test for local development and CI
+{{#if hasMemory}}- **Memory Module** (`src/memory/`) — Local stub store for agent state and recall{{/if}}
+{{#if hasTriologue}}- **Triologue Wiring** (`{{sourceEntry}}`) — Optional client bootstrap when credentials exist{{/if}}
+{{#if hasSkills}}- **Skills Framework** (`src/skills/`) — Loader, example skill and a starter `SKILL.md`{{/if}}
+
+## Architecture Patterns
+
+### Agent Lifecycle
+
+1. **Initialization**
+   - Load environment variables from `.env`
+   - Initialize optional integrations enabled in the scaffold
+   - Prepare a small runtime summary for startup logs
+
+2. **Runtime**
+   - Execute agent logic from `Agent.run()`
+   - Use the memory stub for local context when enabled
+   - Use the skill loader as a registry for prompt-driven tasks
+   - Send or receive traffic via Triologue when configured
+
+3. **Shutdown**
+   - Exit after the current run completes
+   - Add cleanup hooks later if the runtime becomes long-lived
+
+### Data Flow
+
+```
+Input → Agent Core → Skills → Memory → Output
+         ↓           ↑
+    Triologue ←──────┘
+```
+
+{{#if hasMemory}}
+## Memory Architecture
+
+- **Backend:** {{memoryBackend}}
+- **Storage:** In-process list for local development
+- **Retention:** Process lifetime until a real backend is added
+{{/if}}
+
+{{#if hasTriologue}}
+## Triologue Integration
+
+- **SDK:** `triologue-sdk`
+- **Authentication:** BYOA token
+- **Activation:** Only created when `BYOA_TOKEN` is set
+{{/if}}
+
+{{#if hasSkills}}
+## Skills System
+
+- **Location:** `src/skills/`
+- **Format:** Loader module, example implementation and `SKILL.md`
+- **Loader:** Explicit registry via `loadSkills()`
+- **Execution:** Regular async functions you can replace later
+{{/if}}
+
+## Deployment
+
+### Development
+
+```bash
+npm run dev
+```
+
+### Production
+
+{{#if hasTypeScript}}
+```bash
+npm run build
+npm start
+```
+{{else}}
+```bash
+npm start
+```
+{{/if}}
+
+### Environment Variables
+
+```bash
+AGENT_NAME={{agentName}}
+{{#if hasTriologue}}BYOA_TOKEN=your-token
+TRIOLOGUE_URL=https://opentriologue.ai
+{{/if}}
+{{#if hasMemory}}MEMORY_BACKEND={{memoryBackend}}
+{{/if}}
+```
+
+## Monitoring
+
+- **Logs:** stdout/stderr
+- **Metrics:** Add later if the agent becomes service-like
+- **Health:** Add later if you expose HTTP endpoints
+
+## Security
+
+- Secrets via environment variables only
+- No hardcoded credentials
+- Validate external input before executing agent actions

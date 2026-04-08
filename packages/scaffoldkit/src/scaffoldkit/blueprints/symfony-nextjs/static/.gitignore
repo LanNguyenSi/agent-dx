@@ -1,0 +1,121 @@
+# =============================================================================
+# Symfony (apps/api/)
+# =============================================================================
+
+# Composer
+apps/api/vendor/
+
+# Symfony cache, logs, sessions
+apps/api/var/
+apps/api/.env.local
+apps/api/.env.local.php
+apps/api/.env.*.local
+
+# JWT keypair (generated locally - never commit)
+apps/api/config/jwt/private.pem
+apps/api/config/jwt/public.pem
+
+# PHPUnit cache and coverage
+apps/api/.phpunit.result.cache
+apps/api/var/coverage/
+
+# =============================================================================
+# Next.js (apps/web/)
+# =============================================================================
+
+# Dependencies
+apps/web/node_modules/
+apps/web/.pnp
+apps/web/.pnp.js
+
+# Build output
+apps/web/.next/
+apps/web/out/
+
+# Next.js cache
+apps/web/.next/cache/
+
+# Environment
+apps/web/.env.local
+apps/web/.env.*.local
+apps/web/.env.development.local
+apps/web/.env.test.local
+apps/web/.env.production.local
+
+# TypeScript build info
+apps/web/tsconfig.tsbuildinfo
+
+# Test coverage
+apps/web/coverage/
+
+# Playwright
+apps/web/playwright-report/
+apps/web/test-results/
+
+# =============================================================================
+# packages/
+# =============================================================================
+
+packages/shared-types/node_modules/
+packages/shared-types/dist/
+packages/shared-types/tsconfig.tsbuildinfo
+
+# =============================================================================
+# Root / monorepo
+# =============================================================================
+
+# pnpm
+node_modules/
+.pnp/
+.pnp.js
+
+# Environment files - NEVER commit these
+.env
+.env.local
+.env.*.local
+
+# =============================================================================
+# Docker
+# =============================================================================
+
+# Developer-local overrides (use this for port mapping, volume tweaks, etc.)
+docker-compose.override.yml
+
+# =============================================================================
+# Editor and OS
+# =============================================================================
+
+# JetBrains IDEs (PhpStorm, WebStorm)
+.idea/
+*.iml
+
+# VS Code (allow .vscode/settings.json but ignore personal extensions list)
+.vscode/extensions.json
+
+# Vim
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# =============================================================================
+# Logs and temporary files
+# =============================================================================
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+*.tmp
+*.temp

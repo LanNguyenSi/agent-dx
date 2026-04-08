@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "{{ project_name }}"
+version = "0.1.0"
+description = "{{ description }}"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+{% if cli_framework == "typer" -%}
+  "typer>=0.15.2,<0.16.0",
+{% else -%}
+  "click>=8.1.8,<9.0.0",
+{% endif -%}
+{% if config_format == "yaml" -%}
+  "pyyaml>=6.0.2,<7.0.0",
+{% elif config_format == "toml" -%}
+  "tomli>=2.2.1,<3.0.0; python_version < '3.11'",
+{% endif -%}
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.5,<9.0.0"
+]
+
+[project.scripts]
+{{ project_name | replace('-', '_') }} = "src.main:app"

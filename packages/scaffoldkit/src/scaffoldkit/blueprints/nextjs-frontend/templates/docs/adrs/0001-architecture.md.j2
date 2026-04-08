@@ -1,0 +1,268 @@
+# ADR-0001: Core Technology Decisions
+
+## Status
+
+Accepted
+
+## Context
+
+**{{ display_name }}** is a new frontend project. Before writing any application code, the team evaluated the key technology choices that define how the project is built, tested, and maintained.
+
+This ADR records the decisions made at project inception and their rationale so that future contributors understand why the project is structured the way it is.
+
+### Key Requirements
+
+- Fast initial page load and good Core Web Vitals
+- Strong developer experience with type safety
+- Clear conventions that an AI agent or new team member can follow
+- Maintainable component architecture as the project grows
+{% if use_auth %}
+- Secure authentication with session management
+{% endif %}
+{% if use_i18n %}
+- Support for multiple languages from the start
+{% endif %}
+
+---
+
+## Decision 1: Next.js {{ nextjs_version }} with {{ router | replace("-", " ") | title }}
+
+### Why Next.js {{ nextjs_version }}
+
+{% if nextjs_version == "15" %}
+Next.js 15 was chosen over alternatives (Remix, Vite + React Router, Astro) because:
+
+- Stable App Router with React Server Components is production-ready
+- Turbopack in `next dev` delivers fast HMR at scale
+- Built-in image optimisation, font loading, and metadata APIs eliminate boilerplate
+- Strong ecosystem - most third-party libraries have first-class Next.js support
+- Vercel deployment target, but also deployable to any Node.js host or via Docker
+{% else %}
+Next.js 14 was chosen for its stable App Router and proven production track record while Next.js 15 stabilises in the ecosystem.
+{% endif %}
+
+### Why {{ router | replace("-", " ") | title }}
+
+{% if router == "app-router" %}
+The App Router was chosen over the Pages Router because:
+
+- **React Server Components** allow data fetching in the component tree without client waterfalls
+- **Nested layouts** are a first-class concept - no custom layout wrapping needed
+- **Streaming** with Suspense delivers faster perceived performance
+- **Route Groups** allow fine-grained layout scoping without URL changes
+- The App Router is the future of Next.js - the Pages Router is in maintenance mode
+
+**Trade-off:** The App Router has a steeper learning curve (Server vs Client component boundaries, caching behaviour). This is mitigated by `docs/architecture.md` and `AI_CONTEXT.md`.
+{% else %}
+The Pages Router was chosen because:
+
+- The team is familiar with its data fetching model (`getServerSideProps`, `getStaticProps`)
+- All third-party libraries are well-tested against the Pages Router
+- The simpler mental model reduces onboarding time
+- Migration to App Router can happen incrementally if needed
+
+**Trade-off:** No React Server Components or nested layouts. Data fetching happens at the page level, not the component level.
+{% endif %}
+
+---
+
+## Decision 2: {{ language | title }}
+
+{% if language == "typescript" %}
+TypeScript strict mode was chosen because:
+
+- Catch type errors at compile time, not in production
+- Self-documenting component props and API contracts
+- IDE support (autocomplete, refactoring) is significantly better
+- Required for `shadcn/ui`, TanStack Query, and other key libraries
+
+`tsconfig.json` uses `"strict": true`. Disable rules sparingly with `// @ts-expect-error` and a comment explaining why.
+{% else %}
+JavaScript was chosen to reduce initial friction. JSDoc annotations are used for type hints where it matters.
+
+**Recommendation:** Plan a TypeScript migration. The project structure and component conventions are compatible with TypeScript adoption at any time.
+{% endif %}
+
+---
+
+## Decision 3: {{ styling }} for Styling
+
+{% if styling == "tailwind" %}
+**Tailwind CSS** was chosen over CSS Modules, SCSS, and Styled Components because:
+
+- Utility-first approach eliminates naming decisions for one-off styles
+- Co-located styles with JSX reduce context switching
+- Design token system via `tailwind.config.ts` ensures visual consistency
+- `cva` (class-variance-authority) handles component variants cleanly
+- Strong ecosystem: `shadcn/ui`, `tailwind-merge`, `tailwind-animate`
+
+**Trade-off:** Long className strings can be hard to read. Mitigated by `cva` for variant components and `cn()` helper for conditional class merging.
+{% elif styling == "css-modules" %}
+**CSS Modules** was chosen for scoped, collocated styles with zero runtime overhead.
+
+- No JavaScript-in-CSS runtime cost
+- Standard CSS - no new syntax to learn
+- Excellent IDE support for class name refactoring
+- Compatible with any CSS features (custom properties, `@layer`, `@container`)
+
+**Trade-off:** More file context switching than Tailwind; requires a naming convention for class names.
+{% elif styling == "styled-components" %}
+**Styled Components** was chosen for its component-first styling model and dynamic theming capabilities.
+
+- Theme tokens are TypeScript-typed
+- Dynamic styles based on props without extra CSS variables
+- Co-located styles in component files
+
+**Trade-off:** Runtime CSS-in-JS has a performance cost. Requires SSR configuration to avoid FOUC. Consider migrating to zero-runtime alternatives (Linaria, Panda CSS) if performance becomes critical.
+{% elif styling == "scss" %}
+**SCSS** was chosen for its familiar syntax and powerful features (nesting, mixins, functions).
+
+- Compiles to standard CSS with no runtime overhead
+- Partial system organises global tokens cleanly
+- Module files (`.module.scss`) provide component-level scoping
+
+**Trade-off:** Requires maintaining SCSS abstracts as the design system evolves. Nesting can lead to specificity problems if not disciplined.
+{% endif %}
+
+---
+
+## Decision 4: {{ state_management }} for State Management
+
+{% if state_management == "zustand" %}
+**Zustand** was chosen over Redux Toolkit, Jotai, and Recoil because:
+
+- Minimal boilerplate - a store is just a function
+- No providers needed in the component tree
+- Excellent DevTools integration
+- TypeScript support is first-class
+- Tiny bundle size (~1 kB)
+
+**Scope:** Zustand manages only **client UI state** (sidebar, modals, user preferences). **Server state** (API data) is managed by TanStack Query or React Server Components.
+
+{% elif state_management == "jotai" %}
+**Jotai** was chosen for its atomic model that minimises re-renders and keeps state granular.
+
+- Atoms are the smallest unit of state - compose, not accumulate
+- Derived atoms replace selectors cleanly
+- `atomWithStorage` provides persistence without middleware
+- Excellent for complex interdependent state
+
+{% elif state_management == "redux-toolkit" %}
+**Redux Toolkit** was chosen for its structured, predictable state management.
+
+- RTK Query handles server state caching alongside Redux slices
+- DevTools provide excellent debugging and time-travel
+- Well-understood by large teams
+
+**Trade-off:** More boilerplate than Zustand or Jotai. Justified if the team is already familiar with Redux.
+
+{% elif state_management == "react-query-only" %}
+**TanStack Query only** (no global client store) was chosen to keep client state minimal.
+
+- All persistent state lives on the server
+- TanStack Query caches server state with automatic invalidation
+- Local `useState` handles ephemeral UI state
+- Simpler mental model: no "where does this state live?" question
+
+**Rule:** If UI state needs to cross more than 2 component layers, introduce Zustand at that point.
+
+{% endif %}
+
+---
+
+## Decision 5: {{ api_client }} for Data Fetching
+
+{% if api_client == "tanstack-query" %}
+**TanStack Query** was chosen for client-side data fetching because:
+
+- Automatic caching, deduplication, and background refetching
+- `isLoading`, `isError`, `data` states eliminate manual state management
+- Optimistic updates and mutations are first-class
+- Query key system provides predictable cache invalidation
+
+{% elif api_client == "axios" %}
+**Axios** was chosen for its interceptor system and automatic JSON parsing.
+
+- Request interceptors apply auth headers globally
+- Response interceptors handle 401 redirects centrally
+- Easier to test than native `fetch` (cancelable requests)
+
+{% elif api_client == "fetch" %}
+**Native Fetch** was chosen to avoid an extra dependency.
+
+- Built into all modern browsers and Node.js 18+
+- Next.js extends `fetch` with caching and revalidation options on the server
+- A thin wrapper provides typed errors and auth headers
+
+{% endif %}
+
+---
+
+{% if use_auth %}
+## Decision 6: {{ auth_provider }} for Authentication
+
+{% if auth_provider == "next-auth" %}
+**NextAuth.js (Auth.js v5)** was chosen because:
+
+- Deep Next.js integration with middleware support
+- Supports dozens of OAuth providers out of the box
+- Session management handles token refresh automatically
+- Credentials provider available for username/password auth
+- No third-party service dependency
+
+{% elif auth_provider == "clerk" %}
+**Clerk** was chosen because:
+
+- Handles all auth UI (login, register, MFA, social login)
+- JWT session management with automatic refresh
+- User management dashboard
+- Reduces auth implementation time significantly
+
+**Trade-off:** Third-party service dependency and cost at scale.
+
+{% elif auth_provider == "custom-jwt" %}
+**Custom JWT** was chosen for maximum control over the auth flow.
+
+- Tokens stored in `HttpOnly` cookies (XSS-safe)
+- No third-party service dependency
+- Full control over token claims, expiry, and refresh logic
+
+**Trade-off:** More implementation effort. Requires careful attention to security (CSRF, token rotation).
+
+{% endif %}
+{% endif %}
+
+---
+
+## Consequences
+
+### Positive
+
+- Clear, opinionated stack reduces decision fatigue for all contributors
+- Type safety catches errors before runtime
+- Documented conventions enable AI-assisted development
+- Performance-first defaults (Server Components, `next/image`, `next/font`)
+
+### Negative
+
+- Opinionated choices mean friction if a team member prefers a different tool
+- App Router has a steeper learning curve than the Pages Router
+- {{ state_management }} and {{ api_client }} are separate concerns - the team must understand when to use each
+
+### Risks
+
+- Next.js App Router caching behaviour changed significantly in Next.js 15 - review the [Next.js 15 upgrade guide](https://nextjs.org/docs/app/building-your-application/upgrading/version-15) if upgrading
+- New contributors should read `docs/architecture.md` before writing any code
+
+## References
+
+- [Architecture documentation](../architecture.md)
+- [Ways of working](../ways-of-working.md)
+- [Next.js documentation](https://nextjs.org/docs)
+{% if use_auth %}
+{% if auth_provider == "next-auth" %}
+- [Auth.js documentation](https://authjs.dev)
+{% elif auth_provider == "clerk" %}
+- [Clerk Next.js documentation](https://clerk.com/docs/quickstarts/nextjs)
+{% endif %}
+{% endif %}

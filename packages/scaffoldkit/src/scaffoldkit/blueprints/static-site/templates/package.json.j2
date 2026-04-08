@@ -1,0 +1,39 @@
+{
+  "name": "{{ project_name }}",
+  "version": "0.1.0",
+  "private": true,
+  "description": "{{ description }}",
+  "scripts": {
+{% if framework == "astro" -%}
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+{% elif framework == "nextjs-static" -%}
+    "dev": "next dev",
+    "build": "next build",
+    "preview": "next start"
+{% elif framework == "eleventy" -%}
+    "dev": "npx @11ty/eleventy --serve",
+    "build": "npx @11ty/eleventy"
+{% else -%}
+    "dev": "hugo server --buildDrafts",
+    "build": "hugo",
+    "preview": "hugo server"
+{% endif %}
+  },
+  "engines": {
+    "node": ">=20"
+  }{% if framework != "hugo" %},
+  "dependencies": {
+{% if framework == "astro" -%}
+    "astro": "^5.5.2"
+{% elif framework == "nextjs-static" -%}
+    "next": "^15.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+{% else -%}
+    "@11ty/eleventy": "^3.0.0"
+{% endif %}
+  }
+{% endif %}
+}

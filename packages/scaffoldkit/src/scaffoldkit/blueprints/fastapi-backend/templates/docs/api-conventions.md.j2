@@ -1,0 +1,76 @@
+# API Conventions: {{ display_name }}
+
+This document defines the default HTTP contract style for the FastAPI service.
+
+## Base Path
+
+Use `/api/v1`.
+
+## Resource Style
+
+- plural resource names: `/users`, `/projects`, `/jobs`
+- UUID or opaque string identifiers
+- JSON field names in `camelCase`
+- ISO 8601 UTC timestamps
+
+## Response Envelopes
+
+Single resource:
+
+```json
+{
+  "data": {
+    "id": "01HX...",
+    "name": "Example"
+  }
+}
+```
+
+Collection response:
+
+```json
+{
+  "data": [],
+  "pagination": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 0
+  }
+}
+```
+
+Error response:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request payload",
+    "details": []
+  }
+}
+```
+
+## Route Rules
+
+- `GET /resources`
+- `POST /resources`
+- `GET /resources/{id}`
+- `PATCH /resources/{id}`
+- `DELETE /resources/{id}`
+
+Avoid framework-driven magic that hides business flow. Keep handlers explicit.
+
+## Validation
+
+- request models are Pydantic models
+- response models are explicit
+- service-level business validation is separate from schema validation
+
+## Documentation
+
+{% if api_docs %}
+OpenAPI must remain accurate. If the generated docs misrepresent the real API, fix the code or the models immediately.
+{% else %}
+The API contract must be updated manually in this document when the surface changes.
+{% endif %}

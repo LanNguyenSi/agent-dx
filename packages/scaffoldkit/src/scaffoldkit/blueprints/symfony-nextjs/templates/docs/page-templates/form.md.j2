@@ -1,0 +1,371 @@
+# Page Template: Form Page
+
+This template describes the structure, data flow, and component breakdown for a **form page** (create or edit) in {{ display_name }}. Use it for any page that accepts user input and POSTs or PATCHes to the Symfony API.
+
+---
+
+## Purpose
+
+A form page collects user input, validates it on the client side for UX, and submits it to the Symfony API. The API performs authoritative validation and returns either the created/updated entity or a 422 with field-level errors. The form maps these errors back to the correct fields without a full page reload.
+
+**Critical principle:** Client-side validation is a UX optimization, not a security measure. The Symfony Validator is the source of truth. Never skip server-side validation because the frontend "already checked".
+
+---
+
+## Two Modes: Create vs. Edit
+
+The same component handles both modes. The difference:
+
+| Mode | URL | HTTP method | Initial data |
+|------|-----|------------|-------------|
+| Create | `/users/new` | `POST /api/users` | Empty form |
+| Edit | `/users/[id]/edit` | `PATCH /api/users/[id]` | Pre-populated from `GET /api/users/[id]` |
+
+In edit mode, the Server Component fetches the existing entity and passes it as `defaultValues` to the form component.
+
+---
+
+## Data Flow
+
+### Create
+
+```
+User fills form
+  └── Client Component handles state
+        └── Submit button clicked
+              └── POST /api/users  { name, email, role }
+                    ├── 201 Created   ─► router.push('/users/new-id')
+                    └── 422 Unprocessable ─► map violations to field errors
+```
+
+### Edit
+
+```
+Page loads
+  └── Server Component: GET /api/users/[id]
+        └── Pass entity as defaultValues to form
+
+User edits, submits
+  └── PATCH /api/users/[id]  { email: "new@email.com" }
+        ├── 200 OK   ─► router.refresh() and show success toast
+        └── 422     ─► map violations to field errors
+```
+
+---
+
+## URL
+
+```
+/users/new               # create
+/users/[id]/edit         # edit
+```
+
+---
+
+## Page Structure
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Breadcrumb: Users / New User                               │
+├─────────────────────────────────────────────────────────────┤
+│  Page Header                                                │
+│  "New User"                                                 │
+│  "Fill in the details below to create a new user account." │
+├─────────────────────────────────────────────────────────────┤
+│  Form Card                                                  │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  Section: Basic Info                                │   │
+│  │  [Full Name *          ]  [Email Address *         ]│   │
+│  │                                                     │   │
+│  │  [Role ▼              ]  [Department              ] │   │
+│  │                                                     │   │
+│  │  Section: Access                                    │   │
+│  │  [ ] Send welcome email                             │   │
+│  │  [ ] Require password change on first login         │   │
+│  │                                                     │   │
+│  │  ─────────────────────────────────────────────────  │   │
+│  │  [Cancel]                        [Save]  [Save & Add another] │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Server Component (Edit Mode)
+
+```typescript
+// apps/web/src/app/(dashboard)/users/[id]/edit/page.tsx
+
+import { notFound } from 'next/navigation';
+import { getUser } from '@/services/users';
+import { UserForm } from '@/components/features/users/UserForm';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+
+interface EditUserPageProps {
+  params: { id: string };
+}
+
+export default async function EditUserPage({ params }: EditUserPageProps) {
+  const user = await getUser(params.id).catch(() => null);
+  if (!user) notFound();
+
+  return (
+    <main className="space-y-6 p-6 max-w-2xl">
+      <Breadcrumb
+        items={[
+          { label: 'Users', href: '/users' },
+          { label: user.name, href: `/users/${user.id}` },
+          { label: 'Edit' },
+        ]}
+      />
+      <div>
+        <h1 className="text-2xl font-semibold">Edit {user.name}</h1>
+        <p className="text-gray-500 mt-1">Update the account details below.</p>
+      </div>
+      {/* UserForm is a Client Component - it handles all form state */}
+      <UserForm mode="edit" defaultValues={user} userId={user.id} />
+    </main>
+  );
+}
+```
+
+```typescript
+// apps/web/src/app/(dashboard)/users/new/page.tsx
+
+import { UserForm } from '@/components/features/users/UserForm';
+import { Breadcrumb } from '@/components/ui/Breadcrumb';
+
+export default function NewUserPage() {
+  return (
+    <main className="space-y-6 p-6 max-w-2xl">
+      <Breadcrumb
+        items={[
+          { label: 'Users', href: '/users' },
+          { label: 'New User' },
+        ]}
+      />
+      <div>
+        <h1 className="text-2xl font-semibold">New User</h1>
+        <p className="text-gray-500 mt-1">Fill in the details to create a new account.</p>
+      </div>
+      <UserForm mode="create" />
+    </main>
+  );
+}
+```
+
+---
+
+## Client Component: UserForm
+
+The form component handles all input state, client-side validation, submission, error mapping, and navigation.
+
+```typescript
+// apps/web/src/components/features/users/UserForm.tsx
+'use client';
+
+import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { createUser, updateUser } from '@/services/users';
+import type { User } from '@{{ project_name }}/shared-types';
+
+interface ApiViolation {
+  field: string;
+  message: string;
+}
+
+interface UserFormProps {
+  mode: 'create' | 'edit';
+  defaultValues?: Partial<User>;
+  userId?: string;
+}
+
+export function UserForm({ mode, defaultValues, userId }: UserFormProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  const [values, setValues] = useState({
+    name: defaultValues?.name ?? '',
+    email: defaultValues?.email ?? '',
+    role: defaultValues?.role ?? 'ROLE_USER',
+  });
+
+  // Field-level errors from the Symfony API (422 violations) or client validation
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const validate = (): boolean => {
+    const next: Record<string, string> = {};
+    if (!values.name.trim()) next.name = 'Name is required.';
+    if (!values.email.trim()) next.email = 'Email is required.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) {
+      next.email = 'Enter a valid email address.';
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitError(null);
+
+    // Client-side validation first (UX only - API will also validate)
+    if (!validate()) return;
+
+    startTransition(async () => {
+      try {
+        if (mode === 'create') {
+          const created = await createUser(values);
+          router.push(`/users/${created.id}`);
+        } else {
+          await updateUser(userId!, values);
+          router.refresh();
+        }
+      } catch (err: unknown) {
+        // Map 422 violations from the API to field errors
+        if (isApiError(err) && err.status === 422 && err.violations) {
+          const fieldErrors: Record<string, string> = {};
+          (err.violations as ApiViolation[]).forEach(({ field, message }) => {
+            fieldErrors[field] = message;
+          });
+          setErrors(fieldErrors);
+        } else {
+          setSubmitError('An unexpected error occurred. Please try again.');
+        }
+      }
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+      {submitError && (
+        <div role="alert" className="text-red-600 text-sm p-3 rounded bg-red-50 border border-red-200">
+          {submitError}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor="name" className="form-label">
+            Full Name <span aria-hidden="true">*</span>
+          </label>
+          <input
+            id="name"
+            type="text"
+            value={values.name}
+            onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
+            aria-invalid={!!errors.name}
+            aria-describedby={errors.name ? 'name-error' : undefined}
+            className={`form-input ${errors.name ? 'border-red-500' : ''}`}
+          />
+          {errors.name && (
+            <p id="name-error" role="alert" className="text-red-600 text-xs mt-1">
+              {errors.name}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="email" className="form-label">
+            Email <span aria-hidden="true">*</span>
+          </label>
+          <input
+            id="email"
+            type="email"
+            value={values.email}
+            onChange={(e) => setValues((v) => ({ ...v, email: e.target.value }))}
+            aria-invalid={!!errors.email}
+            aria-describedby={errors.email ? 'email-error' : undefined}
+            className={`form-input ${errors.email ? 'border-red-500' : ''}`}
+          />
+          {errors.email && (
+            <p id="email-error" role="alert" className="text-red-600 text-xs mt-1">
+              {errors.email}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex gap-3 pt-4 justify-end">
+        <a href={mode === 'edit' && userId ? `/users/${userId}` : '/users'}
+           className="btn btn-secondary">
+          Cancel
+        </a>
+        <button type="submit" disabled={isPending} className="btn btn-primary">
+          {isPending ? (mode === 'create' ? 'Creating...' : 'Saving...') : (mode === 'create' ? 'Create User' : 'Save Changes')}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function isApiError(err: unknown): err is { status: number; violations?: unknown[] } {
+  return typeof err === 'object' && err !== null && 'status' in err;
+}
+```
+
+---
+
+## Validation Mapping: Symfony to Frontend
+
+The Symfony API returns 422 violations in this format (see [api-contract.md](../api-contract.md)):
+
+```json
+{
+  "status": 422,
+  "violations": [
+    { "field": "name", "message": "This value should not be blank." },
+    { "field": "email", "message": "This value is not a valid email address." }
+  ]
+}
+```
+
+The frontend maps the `field` key directly to form field names. **Field names in the API response must match the HTML input `name`/`id` attributes.** This is a contract requirement documented in `docs/api-contract.md`.
+
+If the API returns a violation for a field that does not exist in the frontend form (e.g. `passwordHash`), it falls into the `submitError` bucket as a generic error.
+
+---
+
+## Accessibility Requirements
+
+Every form field must have:
+- A `<label>` with `htmlFor` matching the input `id`
+- `aria-invalid="true"` when the field has an error
+- `aria-describedby` pointing to the error message element when an error exists
+- The error message element must have `role="alert"`
+- Submit button must be disabled during submission (prevent double-submit)
+- The form must work without JavaScript (progressive enhancement where possible)
+
+---
+
+## API Calls Made by This Page
+
+| Endpoint | Method | Mode | Purpose |
+|----------|--------|------|---------|
+| `GET /api/users/{id}` | GET | Edit | Pre-populate form |
+| `POST /api/users` | POST | Create | Submit new entity |
+| `PATCH /api/users/{id}` | PATCH | Edit | Submit changes |
+
+---
+
+## Design Notes ({{ design_style }})
+
+{% if design_style == "minimal-clean" %}
+- Form fields: clean `border border-gray-300 rounded-md` inputs, focus ring in accent color
+- Labels: `text-sm font-medium text-gray-700`, no uppercase
+- Error messages: `text-xs text-red-600`, inline below the field
+- Submit button: solid accent color, label text only (no icon)
+- Max form width: `max-w-2xl` centered, card-in-card layout avoided
+{% elif design_style == "corporate-professional" %}
+- Form fields: slightly inset look with gray background, defined borders
+- Labels: `text-xs uppercase tracking-wide text-gray-500`, prominent
+- Required indicator: asterisk with tooltip explanation
+- Error messages: red background strip across the top of the form (summary) + inline field errors
+- Submit button: prominent, full-width at mobile, right-aligned at desktop
+{% elif design_style == "playful-modern" %}
+- Form fields: rounded-xl, soft shadow on focus, accent color border on active
+- Labels: emoji prefix per field type, friendly copy ("What should we call you?")
+- Error messages: shaking animation on submit with inline tooltip errors
+- Submit button: gradient, rounded-xl, hover scale animation
+- Success: confetti animation on create success
+{% endif %}
