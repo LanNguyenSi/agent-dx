@@ -63,7 +63,8 @@ For teams that want a clearer model for review depth and implementation quality,
 
 - [Review Levels and Implementation Standards (English)](references/review-levels-and-implementation-standards.md)
 - [Review-Stufen und Qualitätsstandards (Deutsch)](references/review-stufen-und-qualitaetsstandards.md)
-- [Implementation Agent Standard](standards/implementation-agent-standard.md)
+- [Implementation Agent Standard (English)](standards/implementation-agent-standard.md)
+- [Implementierungs-Agent-Standard (Deutsch)](standards/implementierungs-agent-standard.md)
 
 These companion documents describe the difference between no review, normal review, and rigorous review, and propose a practical `Role + Skill + Standard` model for implementation agents.
 
