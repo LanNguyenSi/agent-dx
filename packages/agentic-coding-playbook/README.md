@@ -1,54 +1,48 @@
 # Agentic Coding Playbook
 
-**A practical playbook for teams: when to use AI agents, when humans must decide, and what systems must enforce.**
+**A practical playbook for teams: when to use AI agents, when humans should stay in the loop, and how to make agentic coding safer and more accountable.**
 
-*Lan Nguyen Si | CC BY 4.0 | v0.1*
+*Lan Nguyen Si | CC BY 4.0*
 
----
+## Core thesis
 
-## The Core Thesis
+**Agents may optimize. Humans must remain accountable. Systems must enforce the difference.**
 
-The competitive edge in software development is shifting. Not: who has the best developers? But: who has the best system of agents, humans, and structural guardrails?
+This package focuses on the human and organizational side of agentic coding:
 
-```
-Agents may optimize.
-Humans must be accountable.
-Systems must enforce.
-```
+- when to use agents
+- when not to use agents
+- what kinds of review are needed
+- how to reduce operational and quality risk
 
-## What's in this Playbook
+## Main playbooks
 
 **[PLAYBOOK-EN.md](PLAYBOOK-EN.md)** — Executive playbook (English)
 
 **[PLAYBOOK.md](PLAYBOOK.md)** — Executive playbook (Deutsch)
 
-Both contain:
-- Agent / Human / System roles
-- Three-tier permission model (Autonomous / Assisted / Prohibited)
-- Greenfield vs. Brownfield guidance (Ratchet Principle)
-- Minimum governance setup
-- Three decision questions for every agent task
-- Real-world examples from practice
-
-**[assets/onepager.svg](assets/onepager.svg)** — One-page visual reference
-
----
-
-## One-Page Overview
+## One-page overview
 
 **English:** ![Agentic Coding Playbook](assets/onepager-en.svg)
 
 **Deutsch:** ![Agentic Coding Playbook](assets/onepager.svg)
 
----
+## Additional reference material
 
-## Related Projects
+For teams that want a clearer model for review depth and implementation quality:
+
+- [Review Levels and Implementation Standards (English)](references/review-levels-and-implementation-standards.md)
+- [Review-Stufen und Qualitätsstandards (Deutsch)](references/review-stufen-und-qualitaetsstandards.md)
+- [Implementation Agent Standard (English)](standards/implementation-agent-standard.md)
+- [Implementierungs-Agent-Standard (Deutsch)](standards/implementierungs-agent-standard.md)
+
+These companion documents describe the difference between no review, normal review, and rigorous review, and propose a practical `Role + Skill + Standard` model for implementation agents.
+
+## Related projects
 
 - **[agent-engineering-playbook](https://github.com/LanNguyenSi/agent-engineering-playbook)** — Full technical reference with checklists and templates
 - **[project-forge](https://github.com/LanNguyenSi/project-forge)** — Greenfield scaffolding with built-in gates
 - **[depsight](https://github.com/LanNguyenSi/depsight)** — Security and dependency health for brownfield
-
----
 
 ## Contributing
 
