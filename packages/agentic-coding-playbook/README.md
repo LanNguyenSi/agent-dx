@@ -55,3 +55,14 @@ Both contain:
 This is a living document. Feedback, corrections and additions are welcome via Issues and Pull Requests.
 
 **License:** CC BY 4.0
+
+
+## Additional reference material
+
+For teams that want a clearer model for review depth and implementation quality, see:
+
+- [Review Levels and Implementation Standards](references/review-levels-and-implementation-standards.md)
+- [Implementation Agent Standard](standards/implementation-agent-standard.md)
+
+These companion documents describe the difference between no review, normal review, and rigorous review, and propose a practical `Role + Skill + Standard` model for implementation agents.
+
