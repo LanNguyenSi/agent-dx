@@ -131,6 +131,7 @@ Beispiele:
 - Symfony-Implementierungsagent
 - Next.js-Implementierungsagent
 - Backend-Integrationsagent
+- Frontend-Refactor-Agent
 
 Die Rolle beschreibt den primären Verantwortungsbereich des Agents.
 

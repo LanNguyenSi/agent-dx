@@ -2,7 +2,8 @@
 
 **Status:** Entwurf  
 **Sprache:** Deutsch  
-**Companion:** [English](implementation-agent-standard.md)
+**Companion:** [English](implementation-agent-standard.md)  
+**Kanonische operative Quelle:** [Implementation Agent Standard (English)](implementation-agent-standard.md)
 
 Ein leichter operativer Standard für Implementierungs-Agents.
 
@@ -27,8 +28,8 @@ Dieser Standard ist für die tägliche Implementierung gedacht.
 Definiere den Implementierungsbereich klar.
 
 Beispiele:
-- Next.js-Implementierungsagent
 - Symfony-Implementierungsagent
+- Next.js-Implementierungsagent
 - Backend-Integrationsagent
 - Frontend-Refactor-Agent
 
