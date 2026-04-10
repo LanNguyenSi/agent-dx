@@ -1,10 +1,24 @@
 # Implementierungs-Agent-Standard
 
-Ein leichter operativer Standard für implementierungsorientierte Coding-Agents.
+**Status:** Entwurf  
+**Sprache:** Deutsch  
+**Companion:** [English](implementation-agent-standard.md)
+
+Ein leichter operativer Standard für Implementierungs-Agents.
 
 ## Zweck
 
 Nutze diesen Standard, wenn ein Team möchte, dass ein Implementierungs-Agent Änderungen unter expliziten Qualitätsgrenzen liefert, statt sich auf informelle Erwartungen zu verlassen.
+
+## Dieses Dokument ist operativ
+
+Dieses Dokument ist die operative Schwester zum übergeordneten Referenzpapier:
+
+- [Review Levels and Implementation Standards (English)](../references/review-levels-and-implementation-standards.md)
+- [Review-Stufen und Qualitätsstandards (Deutsch)](../references/review-stufen-und-qualitaetsstandards.md)
+
+Die Referenz erklärt das Modell.
+Dieser Standard ist für die tägliche Implementierung gedacht.
 
 ## Struktur
 
@@ -13,22 +27,21 @@ Nutze diesen Standard, wenn ein Team möchte, dass ein Implementierungs-Agent Ä
 Definiere den Implementierungsbereich klar.
 
 Beispiele:
-- Next.js Implementer
-- Symfony Implementer
-- Backend Integrations Implementer
-- Frontend Refactor Implementer
+- Next.js-Implementierungsagent
+- Symfony-Implementierungsagent
+- Backend-Integrationsagent
+- Frontend-Refactor-Agent
 
 ### Erforderliche Skills
 
 Liste die Fähigkeiten auf, die der Agent zuverlässig einsetzen soll.
 
 Beispiele:
-- Testing
-- Security
-- Failure Handling
-- API Design
-- Refactoring Discipline
-- Clean Code
+- Testen
+- Sicherheit
+- API-Gestaltung
+- Fehlerbehandlung
+- Refactoring-Disziplin
 
 ### Standard
 
@@ -53,9 +66,9 @@ Empfohlene Paarung:
 - interne Tools: mindestens normales Review
 - Produktion und Brownfield-Systeme: bevorzugt rigoroses Review
 
-## Handoff-Erwartung
+## Übergabe-Erwartung
 
-Ein Implementierungs-Agent, der nach diesem Standard arbeitet, sollte beim Handoff benennen:
+Ein Implementierungs-Agent, der nach diesem Standard arbeitet, sollte bei der Übergabe benennen:
 
 - was geändert wurde
 - welche Annahmen getroffen wurden

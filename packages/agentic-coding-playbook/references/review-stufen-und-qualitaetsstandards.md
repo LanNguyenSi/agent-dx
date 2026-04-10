@@ -1,11 +1,15 @@
-# Review-Stufen und Qualitätsstandards für Implementierungs-Agents
+# Review-Stufen und Qualitätsstandards
 
-Dieses Dokument ergänzt das Agentic Coding Playbook um zwei eng zusammenhängende Themen:
+**Status:** Entwurf  
+**Sprache:** Deutsch  
+**Companion:** [English](review-levels-and-implementation-standards.md)
+
+Dieses Referenzdokument erläutert zwei eng zusammenhängende Ideen, die die Qualität von Agentic Coding in der Praxis stark beeinflussen:
 
 1. den Unterschied zwischen keiner Prüfung, normalem Review und rigorosem Review
 2. die Notwendigkeit expliziter Qualitätsstandards für Implementierungs-Agents
 
-Es ist die deutschsprachige Schwesterfassung des englischen Referenzdokuments zu Review Levels and Implementation Standards.
+Es ist als konzeptionelle Ergänzung zum Agentic Coding Playbook gedacht, nicht als operativer Standard selbst.
 
 ## Warum das wichtig ist
 
@@ -13,7 +17,7 @@ Starke Teams brauchen nicht nur gute Agents, sondern gute Prüfmechanismen.
 
 Der Unterschied zwischen Agentic Coding ohne Review, mit Review und mit rigorosem Review ist oft größer als der Unterschied zwischen den verwendeten Modellen.
 
-Ebenso wichtig ist ein klarer Qualitätsstandard für Implementierungs-Agents: Nicht nur *was* ein Agent tun soll, sondern *wie* er implementieren soll.
+Ebenso wichtig ist ein klarer Qualitätsstandard für Implementierungs-Agents: nicht nur *was* ein Agent tun soll, sondern *wie* er implementieren soll.
 
 ## 1. Ohne Review
 
@@ -109,87 +113,80 @@ Hier wird nicht nur der Code angeschaut, sondern die gesamte Behauptung des Erge
 Man kann es grob so sehen:
 
 - **ohne Review** → der Agent optimiert auf „eine plausible Antwort“
-- **mit Review** → der Agent optimiert auf „eine prüfbare Antwort“
+- **mit Review** → das System optimiert auf „eine prüfbare Antwort“
 - **mit rigorosem Review** → das System optimiert auf „eine verantwortbare Änderung“
 
 Das ist ein riesiger Unterschied.
 
 ## Was starke Teams zusätzlich brauchen
 
-In der Praxis ist das genau das, was starke Teams bauen sollten:
-
-Nicht nur Skills für den Agenten, sondern einen klaren Qualitätsstandard für Implementation.
+Starke Teams brauchen nicht nur leistungsfähige Agents, sondern ein klares Qualitätsmodell für Implementierung.
 
 Ein belastbares Modell besteht aus drei Teilen:
 
-## 1. Role
+## 1. Rolle
 
-Beispiel:
+Beispiele:
 
-- Symfony Implementer
-- Next.js Implementer
-- Backend Integrations Implementer
+- Symfony-Implementierungsagent
+- Next.js-Implementierungsagent
+- Backend-Integrationsagent
 
 Die Rolle beschreibt den primären Verantwortungsbereich des Agents.
 
 ## 2. Skill
 
-Beispiel:
+Beispiele:
 
-- Clean Code
-- Testing
-- Security
-- Refactoring Discipline
-- API Design
-- Failure Handling
+- Testen
+- Sicherheit
+- API-Gestaltung
+- Fehlerbehandlung
+- Refactoring-Disziplin
 
-Skills beschreiben, *worin* der Agent besonders gut und verlässlich arbeiten soll.
+Skill beschreibt, worin der Agent besonders verlässlich arbeiten soll.
 
 ## 3. Standard
 
-Beispiel:
+Beispiele:
 
 - Quality-First Implementation Rules
 - Safe Change Rules
 - Brownfield Change Discipline
 
-Der Standard definiert, *wie* der Agent Änderungen umsetzen darf und welche Qualitätsmaßstäbe dabei gelten.
+Der Standard definiert, wie der Agent Änderungen umsetzen darf und welche Qualitätsmaßstäbe gelten.
 
 ## Warum dieses Modell stärker ist
 
-Das Modell **Role + Skill + Standard** ist deutlich belastbarer als bloß:
+Das Modell **Rolle + Skill + Standard** ist deutlich belastbarer als bloß:
 
 > „Du bist Senior Engineer.“
 
 Denn es trennt sauber:
 
-- **wofür** der Agent zuständig ist
-- **welche Fähigkeiten** er einsetzen soll
-- **welchen Qualitätsregeln** er folgen muss
+- wofür der Agent zuständig ist
+- welche Fähigkeiten er einsetzen soll
+- welchen Qualitätsregeln er folgen muss
 
 Genau diese Trennung macht Implementierungs-Agents in echten Teams verlässlicher.
 
-## Beispiel für einen Qualitätsstandard für Implementierungs-Agents
+## Was dieses Dokument ist, und was nicht
 
-### Quality-First Implementation Rules
+Dieses Dokument ist ein **Referenz- und Einordnungsdokument**.
+Es erklärt das Modell und begründet, warum es sinnvoll ist.
 
-1. Implementiere nur den angeforderten Scope.
-2. Bevorzuge die kleinste saubere Änderung.
-3. Folge bestehenden Patterns und Architekturgrenzen.
-4. Verändere keine Security-, Auth- oder Infrastruktur-Logik ohne expliziten Auftrag.
-5. Ergänze oder aktualisiere Tests, wenn Verhalten verändert wird.
-6. Markiere Annahmen, Risiken und Unsicherheiten explizit.
-7. Keine ungefragten Refactorings, Dependencies oder Nebenänderungen.
-8. Liefere nur Ergebnisse ab, die technisch prüfbar sind.
+Für die operative Nutzung siehe die eigentlichen Standards:
+
+- [Implementation Agent Standard (English)](../standards/implementation-agent-standard.md)
+- [Implementierungs-Agent-Standard (Deutsch)](../standards/implementierungs-agent-standard.md)
 
 ## Praktische Schlussfolgerung
 
 Für Agentic Coding reicht es nicht, nur gute Modelle zu wählen.
-
 Entscheidend ist:
 
 - welches Review-Niveau verwendet wird
-- welcher Qualitätsstandard für Implementation gilt
+- welcher Qualitätsstandard für Implementierung gilt
 - welche Rollen, Skills und Grenzen dem Agenten vorgegeben werden
 
 Die eigentliche Reife zeigt sich also nicht nur im Output des Agents, sondern in der Kombination aus:
@@ -201,7 +198,9 @@ Die eigentliche Reife zeigt sich also nicht nur im Output des Agents, sondern in
 ## Merksätze
 
 **Ohne Review:** schnell, aber fragil.
+
 **Mit Review:** brauchbar, aber nicht tief abgesichert.
+
 **Mit rigorosem Review:** langsamer, aber verantwortbar.
 
 Und für Implementierungs-Agents:

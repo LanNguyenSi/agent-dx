@@ -1,10 +1,24 @@
 # Implementation Agent Standard
 
+**Status:** Draft  
+**Language:** English  
+**Companion:** [Deutsch](implementierungs-agent-standard.md)
+
 A lightweight operational standard for implementation-focused coding agents.
 
 ## Purpose
 
 Use this standard when a team wants an implementation agent to deliver code changes under explicit quality constraints instead of relying on informal expectations.
+
+## This document is operational
+
+This document is the operational companion to the broader reference paper:
+
+- [Review Levels and Implementation Standards (English)](../references/review-levels-and-implementation-standards.md)
+- [Review-Stufen und Qualitätsstandards (Deutsch)](../references/review-stufen-und-qualitaetsstandards.md)
+
+The reference explains the model.
+This standard is for day-to-day implementation use.
 
 ## Structure
 
@@ -25,10 +39,9 @@ List the capabilities the agent must apply.
 Examples:
 - Testing
 - Security
-- Failure handling
 - API design
+- Failure handling
 - Refactoring discipline
-- Clean code
 
 ### Standard
 

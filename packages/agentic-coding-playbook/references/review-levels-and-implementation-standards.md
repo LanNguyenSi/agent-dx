@@ -1,11 +1,15 @@
 # Review Levels and Implementation Standards
 
-This paper explains two related ideas that strongly affect real-world outcomes in agentic coding:
+**Status:** Draft  
+**Language:** English  
+**Companion:** [Deutsch](review-stufen-und-qualitaetsstandards.md)
+
+This reference paper explains two related ideas that strongly affect real-world outcomes in agentic coding:
 
 1. the difference between no review, normal review, and rigorous review
-2. the need for explicit implementation standards for coding agents
+2. the need for explicit implementation standards for implementation agents
 
-It is meant as a reference companion to the Agentic Coding Playbook.
+It is meant as a conceptual companion to the Agentic Coding Playbook, not as the operational standard itself.
 
 ## Why this matters
 
@@ -146,12 +150,11 @@ Role defines the primary responsibility of the agent.
 
 Examples:
 
-- Clean Code
 - Testing
 - Security
-- Refactoring Discipline
-- API Design
-- Failure Handling
+- API design
+- Failure handling
+- Refactoring discipline
 
 Skill defines what the agent is expected to be particularly reliable at.
 
@@ -177,18 +180,17 @@ Because it separates:
 - what capabilities it should apply
 - what quality rules constrain implementation
 
-That separation makes implementation agents much more reliable in real teams.
+That separation makes implementation agents more reliable in real teams.
 
-## Example: Quality-First Implementation Rules
+## What this document is, and what it is not
 
-1. implement only the requested scope
-2. prefer the smallest clean change
-3. follow existing patterns and architecture boundaries
-4. do not change security, auth, or infrastructure logic without explicit instruction
-5. add or update tests when behavior changes
-6. mark assumptions, risks, and uncertainties explicitly
-7. do not introduce unrequested refactors, dependencies, or side changes
-8. deliver only results that can be technically verified
+This document is a **reference / framing paper**.
+It explains the concepts and argues for the model.
+
+For operational use, see the actual standards:
+
+- [Implementation Agent Standard (English)](../standards/implementation-agent-standard.md)
+- [Implementierungs-Agent-Standard (Deutsch)](../standards/implementierungs-agent-standard.md)
 
 ## Practical conclusion
 
