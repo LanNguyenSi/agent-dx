@@ -1,6 +1,10 @@
 # Agent DX
 
-Developer experience tools and playbooks for building with AI agents.
+**Developer Experience · Playbooks and tooling for teams building with AI agents.** Ship agent systems the way you'd ship any production software — with scaffolds, entrypoints, and playbooks that keep humans and agents in sync.
+
+## Role in the Project OS pipeline
+
+Agent DX is the onboarding and day-to-day surface of the [Project OS](https://github.com/LanNguyenSi/project-os) pipeline. It sits alongside [agent-tasks](https://github.com/LanNguyenSi/agent-tasks) (work coordination), [agent-preflight](https://github.com/LanNguyenSi/agent-preflight) (pre-merge gates), and [agent-planforge](https://github.com/LanNguyenSi/agent-planforge) (planning) — Agent DX is where engineers pick up the conventions, scaffolds, and entrypoints the rest of the pipeline expects.
 
 ## Packages
 
