@@ -42,6 +42,9 @@ examples/slop-sample.md
 | Lint AI fingerprints out of a PR or a directory tree | [`packages/slop-detector`](packages/slop-detector) |
 | Scaffold a new agent-ready project from a blueprint | [`packages/agent-dev-kit`](packages/agent-dev-kit) |
 | Generate / validate `AGENT_ENTRYPOINT.yaml` for a repo | [`packages/agent-entrypoint`](packages/agent-entrypoint) |
+| Cut a release with changelog and tag | [`packages/release-prep`](packages/release-prep) |
+| Drive issues, PRs, and standups from the GitHub API | [`packages/github-api-tool`](packages/github-api-tool) |
+| Run safe batch git ops across many local repos | [`packages/git-batch-cli`](packages/git-batch-cli) |
 | Learn how to design production-ready AI agent systems | [`packages/agent-engineering-playbook`](packages/agent-engineering-playbook) |
 | Onboard a team to working with AI in a coding workflow | [`packages/agentic-coding-playbook`](packages/agentic-coding-playbook) |
 
@@ -57,6 +60,13 @@ examples/slop-sample.md
 |---------|-------------|
 | [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding tool for AI agent development. Creates the file layout, hooks, and entrypoints that the rest of the stack expects. |
 | [agent-entrypoint](packages/agent-entrypoint) | Generate and validate `AGENT_ENTRYPOINT.yaml` for repos: a single declarative file that tells an agent what this repo is and how to enter it. |
+
+### Workflow CLIs
+| Package | Description |
+|---------|-------------|
+| [release-prep](packages/release-prep) | Automate release preparation. Generates changelogs from conventional commits, suggests semver bumps, creates annotated tags and GitHub releases. |
+| [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests). Designed for agents to call via `exec`, with JSON output mode. |
+| [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder. Sync, status, dirty checks, fetch, with `--strict` for automation. |
 
 ### Playbooks
 | Package | Description |
