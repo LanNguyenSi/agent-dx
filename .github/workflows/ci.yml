@@ -23,6 +23,7 @@ jobs:
         package:
           - agent-dev-kit
           - agent-entrypoint
+          - slop-detector
     defaults:
       run:
         working-directory: packages/${{ matrix.package }}
