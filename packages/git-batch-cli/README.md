@@ -46,7 +46,7 @@ Checks all repositories on one level, skips dirty repositories by default, switc
 
 ```bash
 git-batch sync ~/git
-git-batch sync /home/lan/git/pandora
+git-batch sync ~/projects
 git-batch sync ~/git --only api,worker
 git-batch sync --protected main,develop --dry-run
 ```
