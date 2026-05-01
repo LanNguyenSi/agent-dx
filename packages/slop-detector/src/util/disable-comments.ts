@@ -2,8 +2,8 @@ export interface DisableMap {
   lineDisabled(line: number, ruleId: string, pack: string): boolean;
 }
 
-const DISABLE_LINE = /slop-detector:disable-line(?:=([^\s*/]+))?/;
-const DISABLE_NEXT_LINE = /slop-detector:disable-next-line(?:=([^\s*/]+))?/;
+const DISABLE_LINE = /slop-detector:disable-line(?:=([^\s>]+))?/;
+const DISABLE_NEXT_LINE = /slop-detector:disable-next-line(?:=([^\s>]+))?/;
 
 export function buildDisableMap(text: string): DisableMap {
   const lines = text.split("\n");

@@ -100,4 +100,37 @@ describe("agent-tics", () => {
     const v = checkText("```\n</result>\n```\n", "x.ts", baseOpts());
     expect(v.find((x) => x.ruleId === "agent-tics/stray-result-tag")).toBeDefined();
   });
+
+  it("doubled-summary-heading does not fire on Summary inside fenced code", () => {
+    const text = "```md\n## Summary\nTemplate stub\n```\n\n## Summary\nMy actual summary";
+    const v = checkText(text, "x.md", baseOpts());
+    expect(v.find((x) => x.ruleId === "agent-tics/doubled-summary-heading")).toBeUndefined();
+  });
+
+  it("placeholder-todo does not fire inside fenced code", () => {
+    const text = "Example template:\n\n```\nTODO: [insert details]\n```\n";
+    const v = checkText(text, "x.md", baseOpts());
+    expect(v.find((x) => x.ruleId === "agent-tics/placeholder-todo")).toBeUndefined();
+  });
+
+  it("claude-code-footer does not fire inside fenced code", () => {
+    const text = "Document the footer:\n\n```\n🤖 Generated with Claude Code\n```\n";
+    const v = checkText(text, "x.md", baseOpts());
+    expect(v.find((x) => x.ruleId === "agent-tics/claude-code-footer")).toBeUndefined();
+  });
+
+  it("scoped disable on a specific rule-id leaves sibling rules active", () => {
+    const text = "</result> seamless cutting-edge <!-- slop-detector:disable-line=prose-slop/marketing-adjectives -->";
+    const v = checkText(text, "x.md", baseOpts());
+    expect(v.find((x) => x.ruleId === "prose-slop/marketing-adjectives")).toBeUndefined();
+    expect(v.find((x) => x.ruleId === "agent-tics/stray-result-tag")).toBeDefined();
+  });
+
+  it("disable directive accepts comma-separated rule-ids with slashes", () => {
+    const text =
+      "</result> seamless <!-- slop-detector:disable-line=agent-tics/stray-result-tag,prose-slop/marketing-adjectives -->";
+    const v = checkText(text, "x.md", baseOpts());
+    expect(v.find((x) => x.ruleId === "agent-tics/stray-result-tag")).toBeUndefined();
+    expect(v.find((x) => x.ruleId === "prose-slop/marketing-adjectives")).toBeUndefined();
+  });
 });

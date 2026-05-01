@@ -88,7 +88,7 @@ const claudeCodeFooter: Rule = {
     return file.kind === "prose";
   },
   check({ file }) {
-    return findAllRegex(file.text, CLAUDE_CODE_FOOTER).map((m) =>
+    return findAllRegex(scanText(file), CLAUDE_CODE_FOOTER).map((m) =>
       makeViolation(claudeCodeFooter, file, m, "Auto-appended Claude Code attribution footer — remove or replace with project-specific provenance"),
     );
   },
@@ -103,7 +103,7 @@ const coauthoredByClaude: Rule = {
     "`Co-Authored-By: Claude` trailers are standard provenance for Claude Code commits, but some teams strip them for cleaner history. Off by default; opt in to flag.",
   appliesTo: appliesEverywhere,
   check({ file }) {
-    return findAllRegex(file.text, COAUTHORED_BY_CLAUDE).map((m) =>
+    return findAllRegex(scanText(file), COAUTHORED_BY_CLAUDE).map((m) =>
       makeViolation(coauthoredByClaude, file, m, "Claude Code commit trailer — strip if your project does not want agent attribution in git log"),
     );
   },
@@ -118,7 +118,7 @@ const doubledSummaryHeading: Rule = {
     "Two `## Summary` headings in the same PR body / README means the agent re-summarised at the bottom after already summarising at the top — pick one.",
   appliesTo: appliesToProse,
   check({ file }) {
-    const matches = findAllRegex(file.text, DOUBLED_SUMMARY_HEADING);
+    const matches = findAllRegex(scanText(file), DOUBLED_SUMMARY_HEADING);
     if (matches.length < 2) return [];
     return matches.slice(1).map((m) =>
       makeViolation(doubledSummaryHeading, file, m, "Second `Summary` heading in the same document — collapse into one"),
@@ -135,7 +135,7 @@ const placeholderTodo: Rule = {
     "Template-style `TODO: [insert ...]` / `TODO: describe ...` placeholders mean the agent left a fill-in-the-blank stub instead of actual content. Either resolve or delete.",
   appliesTo: appliesEverywhere,
   check({ file }) {
-    return findAllRegex(file.text, PLACEHOLDER_TODO).map((m) =>
+    return findAllRegex(scanText(file), PLACEHOLDER_TODO).map((m) =>
       makeViolation(placeholderTodo, file, m, "Unresolved template placeholder — replace with real content or remove"),
     );
   },

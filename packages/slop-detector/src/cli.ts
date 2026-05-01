@@ -5,7 +5,7 @@ import { Command } from "commander";
 import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
-import type { CheckSummary, Severity, Violation } from "./types.js";
+import type { CheckSummary, Severity } from "./types.js";
 
 const program = new Command();
 
@@ -22,7 +22,6 @@ program
   .option("-f, --format <fmt>", "Output format: text | json", "text")
   .option("--explain", "Print rule rationale alongside each violation")
   .option("--stdin-path <path>", "Filename to assume when reading stdin", "<stdin>")
-  .option("--info-as-warn", "Promote info-severity violations to warn in exit-code calculation")
   .action(async (rawPath: string | undefined, opts) => {
     try {
       await runCheck(rawPath, opts);
@@ -68,7 +67,6 @@ interface CheckOpts {
   format: "text" | "json";
   explain?: boolean;
   stdinPath: string;
-  infoAsWarn?: boolean;
 }
 
 async function runCheck(rawPath: string | undefined, rawOpts: unknown): Promise<void> {
@@ -94,7 +92,7 @@ async function runCheck(rawPath: string | undefined, rawOpts: unknown): Promise<
   } else {
     renderText(summary, opts.explain ?? false);
   }
-  process.exit(exitCodeFor(summary, opts.infoAsWarn ?? false));
+  process.exit(summary.blockCount > 0 ? 1 : 0);
 }
 
 function normalizeOpts(raw: unknown): CheckOpts {
@@ -108,7 +106,6 @@ function normalizeOpts(raw: unknown): CheckOpts {
     format: r.format === "json" ? "json" : "text",
     explain: Boolean(r.explain),
     stdinPath: typeof r.stdinPath === "string" ? r.stdinPath : "<stdin>",
-    infoAsWarn: Boolean(r.infoAsWarn),
   };
 }
 
@@ -157,12 +154,6 @@ function severityLabel(s: Severity): string {
   }
 }
 
-function exitCodeFor(summary: CheckSummary, infoAsWarn: boolean): number {
-  if (summary.blockCount > 0) return 1;
-  if (infoAsWarn && summary.infoCount + summary.warnCount > 0) return 0;
-  return 0;
-}
-
 function groupBy<T, K>(items: T[], key: (t: T) => K): Map<K, T[]> {
   const map = new Map<K, T[]>();
   for (const item of items) {
@@ -185,5 +176,3 @@ function readVersion(): string {
   }
 }
 
-// Silence unused-import: keep Violation in module graph for downstream consumers
-export type { Violation };

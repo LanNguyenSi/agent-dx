@@ -97,7 +97,7 @@ export function summarize(violations: Violation[], filesScanned: number): CheckS
 function walk(rootPath: string, config: ResolvedConfig): string[] {
   const stat = fs.statSync(rootPath);
   if (stat.isFile()) {
-    return shouldIgnore(rootPath, config) ? [] : [rootPath];
+    return shouldIgnore(rootPath, config, false) ? [] : [rootPath];
   }
   const out: string[] = [];
   const stack: string[] = [rootPath];
@@ -111,8 +111,9 @@ function walk(rootPath: string, config: ResolvedConfig): string[] {
     }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
-      if (shouldIgnore(full, config)) continue;
-      if (entry.isDirectory()) {
+      const isDir = entry.isDirectory();
+      if (shouldIgnore(full, config, isDir)) continue;
+      if (isDir) {
         stack.push(full);
       } else if (entry.isFile()) {
         out.push(full);
@@ -122,7 +123,16 @@ function walk(rootPath: string, config: ResolvedConfig): string[] {
   return out;
 }
 
-function shouldIgnore(filePath: string, config: ResolvedConfig): boolean {
+function shouldIgnore(filePath: string, config: ResolvedConfig, isDirectory: boolean): boolean {
   const normalized = filePath.split(path.sep).join("/");
-  return config.ignorePaths.some((glob) => globToRegex(glob).test(normalized));
+  const candidates = isDirectory ? [normalized, normalized + "/"] : [normalized];
+  return config.ignorePaths.some((glob) => {
+    const re = globToRegex(glob);
+    if (candidates.some((c) => re.test(c))) return true;
+    if (isDirectory && glob.endsWith("/**")) {
+      const dirGlob = glob.slice(0, -3);
+      if (globToRegex(dirGlob).test(normalized)) return true;
+    }
+    return false;
+  });
 }
