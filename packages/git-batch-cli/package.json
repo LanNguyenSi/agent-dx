@@ -1,0 +1,39 @@
+{
+  "name": "git-batch-cli",
+  "version": "0.1.0",
+  "description": "Batch CLI for syncing multiple git repositories in a shared workspace",
+  "type": "commonjs",
+  "bin": {
+    "git-batch": "./bin/git-batch.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "test:ci": "node --test && env npm_config_cache=.npm-cache npm pack --dry-run"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LanNguyenSi/git-batch-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LanNguyenSi/git-batch-cli/issues"
+  },
+  "homepage": "https://github.com/LanNguyenSi/git-batch-cli#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "git",
+    "cli",
+    "batch",
+    "workspace",
+    "automation",
+    "developer-tools"
+  ],
+  "license": "MIT"
+}

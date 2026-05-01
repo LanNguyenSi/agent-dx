@@ -10,9 +10,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Only the npm packages are matrix entries — `agent-engineering-playbook`
+# Only the npm packages are matrix entries. `agent-engineering-playbook`
 # and `agentic-coding-playbook` are pure documentation directories (no
-# package.json) so nothing to build/test there.
+# package.json), and `scaffoldkit` is a Python sub-package (handled in its
+# own toolchain), so nothing to build/test for those here.
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -23,6 +24,9 @@ jobs:
         package:
           - agent-dev-kit
           - agent-entrypoint
+          - git-batch-cli
+          - github-api-tool
+          - release-prep
           - slop-detector
     defaults:
       run:
