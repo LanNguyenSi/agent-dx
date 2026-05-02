@@ -238,4 +238,14 @@ describe("code-slop applies-to gating", () => {
       expect(rule.appliesTo(proseFile)).toBe(false);
     }
   });
+
+  it("returns 0 violations when the file has a syntax error (parser fails gracefully)", () => {
+    // Garbage that can't be parsed as TS/JS. The parser-cache wrapper
+    // returns ok:false and rules opt out cleanly rather than throwing.
+    const broken = code(`function ( {} { let x = 1`);
+    for (const rule of codeSlopPack.rules) {
+      expect(() => rule.check({ file: broken, config })).not.toThrow();
+      expect(rule.check({ file: broken, config })).toEqual([]);
+    }
+  });
 });

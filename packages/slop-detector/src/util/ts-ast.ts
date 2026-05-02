@@ -76,35 +76,3 @@ export function walk(node: AnyNode, visit: (node: AnyNode, parent: AnyNode | nul
   recurse(node, null);
 }
 
-export function leadingCommentsBefore(
-  ast: ParsedTsFile,
-  node: TSESTree.Node,
-): TSESTree.Comment[] {
-  const comments = ast.comments ?? [];
-  const out: TSESTree.Comment[] = [];
-  const targetStart = node.range?.[0];
-  if (targetStart == null) return out;
-  for (const comment of comments) {
-    const commentEnd = comment.range?.[1] ?? -1;
-    if (commentEnd <= targetStart) {
-      out.push(comment);
-    }
-  }
-  if (out.length === 0) return out;
-  // Keep only comments contiguous with the node (i.e. nothing between the
-  // comment block and the node except whitespace/newlines).
-  const result: TSESTree.Comment[] = [];
-  for (let i = out.length - 1; i >= 0; i--) {
-    const c = out[i];
-    const nextStart = result.length === 0 ? targetStart : result[0].range![0];
-    if (nextStart - (c.range?.[1] ?? 0) <= 2) {
-      // 2 covers "\n\n" gap; tighter than typical block-spacing.
-      result.unshift(c);
-    } else if (nextStart - (c.range?.[1] ?? 0) <= 1) {
-      result.unshift(c);
-    } else {
-      break;
-    }
-  }
-  return result;
-}

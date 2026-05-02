@@ -147,7 +147,11 @@ function paramTypeIsRequired(typeAnnotation: TSESTree.TSTypeAnnotation | undefin
     t.type === "TSAnyKeyword" ||
     t.type === "TSUnknownKeyword" ||
     t.type === "TSUndefinedKeyword" ||
-    t.type === "TSVoidKeyword"
+    t.type === "TSVoidKeyword" ||
+    // A type-reference may be a generic parameter (`<T>`) that gets
+    // instantiated with `undefined` at the call site, or a type alias whose
+    // body we cannot inspect statically. Be conservative.
+    t.type === "TSTypeReference"
   ) {
     return false;
   }
@@ -335,25 +339,38 @@ interface Origin {
   packageVersion: string | null;
 }
 
+// Per-directory memoisation for package.json walks. A scan over a 10k-file
+// repo would otherwise stat ~package.json up to 10x per file; this collapses
+// to one lookup per directory containing files, then cache hits.
+const packageVersionCache = new Map<string, string | null>();
+
 function readPackageVersion(filePath: string): string | null {
-  // Synchronous fs is fine — this runs once per file at lint time. Walks
-  // upward from the file's directory looking for the nearest package.json
-  // and reads its `version` field.
+  let dir = path.dirname(path.resolve(filePath));
+  const visited: string[] = [];
   try {
-    let dir = path.dirname(path.resolve(filePath));
     for (let i = 0; i < 10; i++) {
+      if (packageVersionCache.has(dir)) {
+        const hit = packageVersionCache.get(dir) ?? null;
+        for (const v of visited) packageVersionCache.set(v, hit);
+        return hit;
+      }
+      visited.push(dir);
       const pkg = path.join(dir, "package.json");
       if (fs.existsSync(pkg)) {
         const raw = JSON.parse(fs.readFileSync(pkg, "utf8")) as { version?: string };
-        return typeof raw.version === "string" ? raw.version : null;
+        const version = typeof raw.version === "string" ? raw.version : null;
+        for (const v of visited) packageVersionCache.set(v, version);
+        return version;
       }
       const parent = path.dirname(dir);
       if (parent === dir) break;
       dir = parent;
     }
   } catch {
+    for (const v of visited) packageVersionCache.set(v, null);
     return null;
   }
+  for (const v of visited) packageVersionCache.set(v, null);
   return null;
 }
 
@@ -426,8 +443,14 @@ const backcompatShimUnreleased: Rule = {
       const offset = c.range?.[1] ?? -1;
       if (offset < 0) continue;
       const after = ctx.file.text.slice(offset, offset + 200);
+      // The declaration must be the *next* significant token after the
+      // comment — only whitespace, async, and decorators allowed in between.
+      // Otherwise we'd flag any comment that has a function declaration
+      // somewhere in the next 200 chars.
       if (
-        /\b(?:export\s+(?:default\s+)?)?(?:function|const|class|let|var|interface|type)\b/.test(after)
+        /^\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:async\s+)?(?:export\s+(?:default\s+)?)?(?:function|const|class|let|var|interface|type)\b/.test(
+          after,
+        )
       ) {
         violations.push(
           makeViolation(

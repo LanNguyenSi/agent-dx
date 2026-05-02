@@ -35,7 +35,14 @@ export function checkText(
 
   for (const pack of options.packs) {
     if (options.packFilter && !options.packFilter.includes(pack.id)) continue;
-    if (!options.config.packs[pack.id]) continue;
+    // `--pack <id>` (packFilter) is documented as the opt-in path for
+    // off-by-default packs (`comment-slop`, `code-slop`). A bare config
+    // gate would mean `--pack code-slop` silently scans nothing — which
+    // is exactly what users would not expect when they explicitly named
+    // the pack on the CLI. So if the pack is in the explicit filter,
+    // treat it as enabled regardless of `config.packs[pack.id]`.
+    const explicitlyRequested = options.packFilter?.includes(pack.id) ?? false;
+    if (!explicitlyRequested && !options.config.packs[pack.id]) continue;
 
     for (const rule of pack.rules) {
       if (!isRuleEnabled(rule.id, rule.pack, rule.enabledByDefault, options.config)) continue;
