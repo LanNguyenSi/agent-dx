@@ -10,7 +10,9 @@
   "exports": {
     ".": "./dist/index.js",
     "./packs/agent-tics": "./dist/packs/agent-tics.js",
-    "./packs/prose-slop": "./dist/packs/prose-slop.js"
+    "./packs/prose-slop": "./dist/packs/prose-slop.js",
+    "./packs/comment-slop": "./dist/packs/comment-slop.js",
+    "./packs/code-slop": "./dist/packs/code-slop.js"
   },
   "files": [
     "dist",
@@ -42,6 +44,8 @@
     "directory": "packages/slop-detector"
   },
   "dependencies": {
+    "@typescript-eslint/parser": "^8.59.1",
+    "@typescript-eslint/types": "^8.59.1",
     "commander": "^12.0.0",
     "yaml": "^2.5.0",
     "zod": "^3.23.0"

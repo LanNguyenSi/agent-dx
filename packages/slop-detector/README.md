@@ -43,8 +43,8 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 |------|---------|---------|
 | `agent-tics` | on | Stray `</result>` / `</invoke>` tags, auto-appended Claude Code footers, doubled Summary headings, template TODO placeholders |
 | `prose-slop` | on | Em-dashes in prose, hedging openers, empty marketing adjectives, signature LLM idioms like `delve into`, `tapestry of`, `leverage the power of` |
-| `comment-slop` | off (M2) | JSDoc on trivial functions, comments that restate the next line, `// removed` orphans |
-| `code-slop` | off (M2) | try/catch around code that cannot throw, default values for never-undefined params, unused re-exports |
+| `comment-slop` | off | JSDoc on trivial getters, comments that restate the next line, orphan markers (`// removed`, `// kept for backcompat`), comment-heavier-than-body helpers, ASCII banner dividers |
+| `code-slop` | off | try/catch around code that cannot throw, default values on required-typed params, empty/rethrow catches, async without await, backcompat shims for unreleased APIs |
 | `ui-slop` | off (M3) | Visual tells of AI-generated UIs, modeled on [impeccable.style/slop](https://impeccable.style/slop/) |
 
 Run `npx slop-detector list-rules` for the full rule catalogue with severities and rationales.
@@ -159,8 +159,8 @@ A dedicated GitHub Action with PR annotations is planned for M3.
 
 ## Roadmap
 
-- M1 (this release): `agent-tics` + `prose-slop` packs, CLI, config loader, per-line disables.
-- M2: `comment-slop` + `code-slop` packs (TypeScript AST via `@typescript-eslint/parser`).
+- M1: `agent-tics` + `prose-slop` packs, CLI, config loader, per-line disables.
+- M2 (this release): `comment-slop` + `code-slop` packs (TypeScript AST via `@typescript-eslint/parser`). Both off by default; opt in via config or `--pack`. Within-file analysis only; cross-file rules (unused exports, single-callsite helpers) are tracked as a separate task.
 - M3: `ui-slop` pack, GitHub Action, optional LLM-judged heuristic rules.
 
 Track progress at [agent-dx](https://github.com/LanNguyenSi/agent-dx) issues and tasks.
