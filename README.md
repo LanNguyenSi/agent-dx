@@ -1,10 +1,10 @@
 # agent-dx
 
-**Developer experience tooling for teams shipping with AI agents.** Linters, scaffolds, and playbooks that keep what an agent commits from looking like an agent committed it.
+**[`slop-detector`](packages/slop-detector) is the AI-slop linter for PRs.** It catches the visible tells of agent-generated content: leaked tool-call XML, doubled `## Summary` headings, hedging openers, marketing adjectives, JSDoc on trivial getters, `try/catch` around code that cannot throw. This repo is its home, plus the toolkit that grew up around it.
 
-> Most agent tooling helps a model *write* the code. `agent-dx` helps you keep what shipped from looking like an AI wrote it: it lints AI fingerprints out of PRs, scaffolds repos that agents can navigate, and codifies the conventions a human-and-agent team needs to share.
+> Most agent tooling helps a model *write* the code. `slop-detector` keeps what shipped from looking like an AI wrote it. The siblings in this monorepo (scaffolds, entrypoint generators, release helpers) are the workbench it grew on.
 
-## Try it in 60 seconds
+## Try slop-detector in 60 seconds
 
 ```bash
 git clone https://github.com/LanNguyenSi/agent-dx && cd agent-dx
@@ -14,7 +14,18 @@ cd packages/slop-detector && npm install && npm run build && cd ../..
 node packages/slop-detector/dist/cli.js check examples/slop-sample.md --explain
 ```
 
-`slop-detector` is the headline package: 14 deterministic rules across two packs (`agent-tics`, `prose-slop`) that catch the visible tells of agent-generated content. Configurable per repo via `slop.config.yml`, with per-line escape hatches when a real em-dash or template `<invoke>` block is wanted. The shipped example fires on a curated sample of common AI-tic prose.
+Twenty-four deterministic rules across four packs:
+
+| Pack | Default | What it catches |
+|------|---------|-----------------|
+| `agent-tics` (7 rules) | on | leaked `</result>` / `</invoke>` tags, auto-appended Claude Code footers, doubled Summary headings, template TODO placeholders |
+| `prose-slop` (7 rules) | on | em-dashes, hedging openers, marketing adjectives, signature LLM idioms (`delve into`, `tapestry of`, `leverage the power of`) |
+| `comment-slop` (5 rules) | off, opt in via `--pack` | JSDoc on trivial getters, comments that restate the next line, orphan markers, ASCII banner dividers |
+| `code-slop` (5 rules) | off, opt in via `--pack` | `try/catch` around non-throwing code, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs |
+
+The two AST-based packs (`comment-slop`, `code-slop`) shipped in M2 (2026-05-02). They're off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack code-slop` or set `packs.code-slop: true` in `slop.config.yml`.
+
+Configurable per repo via `slop.config.yml`, with per-line escape hatches when a real em-dash or template `<invoke>` block is wanted. Husky and lint-staged recipes in [`packages/slop-detector/README.md`](packages/slop-detector).
 
 ## What a run looks like
 
@@ -35,64 +46,35 @@ examples/slop-sample.md
 
 `--explain` adds a one-line rationale per violation. Promote any rule to `block` per repo via `slop.config.yml`; the two `agent-tics` rules that catch leaked tool-call XML wrappers (`</result>`, `</invoke>`) ship as `block` by default since those are objectively wrong.
 
-## Next steps
-
-| If you want to... | Read |
-|------|------|
-| Lint AI fingerprints out of a PR or a directory tree | [`packages/slop-detector`](packages/slop-detector) |
-| Scaffold a new agent-ready project from a blueprint | [`packages/agent-dev-kit`](packages/agent-dev-kit) |
-| Generate / validate `AGENT_ENTRYPOINT.yaml` for a repo | [`packages/agent-entrypoint`](packages/agent-entrypoint) |
-| Cut a release with changelog and tag | [`packages/release-prep`](packages/release-prep) |
-| Drive issues, PRs, and standups from the GitHub API | [`packages/github-api-tool`](packages/github-api-tool) |
-| Run safe batch git ops across many local repos | [`packages/git-batch-cli`](packages/git-batch-cli) |
-| Learn how to design production-ready AI agent systems | [`packages/agent-engineering-playbook`](packages/agent-engineering-playbook) |
-| Onboard a team to working with AI in a coding workflow | [`packages/agentic-coding-playbook`](packages/agentic-coding-playbook) |
-
-## Packages
-
-### Linting
-| Package | Description |
-|---------|-------------|
-| [slop-detector](packages/slop-detector) | Configurable AI-slop linter for PRs and committed content. Two regex packs in v0.1 (`agent-tics`, `prose-slop`); AST and UI packs roadmapped. |
-
-### Scaffolding
-| Package | Description |
-|---------|-------------|
-| [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding tool for AI agent development. Creates the file layout, hooks, and entrypoints that the rest of the stack expects. |
-| [agent-entrypoint](packages/agent-entrypoint) | Generate and validate `AGENT_ENTRYPOINT.yaml` for repos: a single declarative file that tells an agent what this repo is and how to enter it. |
-
-### Workflow CLIs
-| Package | Description |
-|---------|-------------|
-| [release-prep](packages/release-prep) | Automate release preparation. Generates changelogs from conventional commits, suggests semver bumps, creates annotated tags and GitHub releases. |
-| [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests). Designed for agents to call via `exec`, with JSON output mode. |
-| [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder. Sync, status, dirty checks, fetch, with `--strict` for automation. |
-
-### Playbooks
-| Package | Description |
-|---------|-------------|
-| [agent-engineering-playbook](packages/agent-engineering-playbook) | Guide for building production-ready AI agent systems. |
-| [agentic-coding-playbook](packages/agentic-coding-playbook) | Practical playbook for teams using AI agents in coding. |
-
 ## Why this exists
 
 LLMs leave fingerprints. Some are objectively wrong, like leaked `</result>` artefacts from MCP serialisation. Others are stylistic tics the team has already decided to avoid: em-dashes in prose, `It is important to note` openers, empty marketing adjectives, doubled `## Summary` blocks. None are caught by tests, typecheck, or human reviewers under load. They accumulate.
 
 Concrete data point: when `slop-detector` ran for the first time against the bodies of the 20 most recent merged PRs across LanNguyenSi/, it found 38 real violations (27 em-dashes, 11 auto-appended Claude Code footers) across 13 of the 20 PRs. Zero false positives. Every one of those PRs had been written by an agent, reviewed, and merged before the linter existed. The tool's first run was a quiet receipt.
 
-`agent-dx` is the kit that closes that loop:
+The pitch: lint at commit time, not at "I noticed three months later". `slop-detector` runs in pre-commit, in CI as a status check, or as `npx slop-detector check` ad-hoc.
 
-- **Lint at commit time**, not at "I noticed three months later". `slop-detector` runs in pre-commit, in CI as a status check, or as `npx slop-detector check` ad-hoc.
-- **Scaffold once**, get the conventions for free. `agent-dev-kit` and `agent-entrypoint` shape repos so agents can navigate them without prompting tricks.
-- **Codify the conventions** so a new contributor (human or agent) can read them. The two playbooks are the written form of the rules the linter encodes.
+## Other tools in the workshop
+
+These were built alongside `slop-detector` for the same human-and-agent workflow. Each stands alone, none is the headline.
+
+| Package | What it does |
+|---------|--------------|
+| [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. |
+| [agent-entrypoint](packages/agent-entrypoint) | Generate and validate `AGENT_ENTRYPOINT.yaml` so an agent can find its way into a repo without prompting tricks. |
+| [release-prep](packages/release-prep) | Changelog from conventional commits, semver bump suggestions, annotated tags, GitHub releases. |
+| [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. |
+| [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder: sync, status, dirty checks, fetch, with `--strict` for automation. |
+| [agent-engineering-playbook](packages/agent-engineering-playbook) | Guide for building production-ready AI agent systems. |
+| [agentic-coding-playbook](packages/agentic-coding-playbook) | Practical playbook for teams using AI agents in coding. |
 
 ## Status
 
-Experimental: functional tools with tests, APIs may evolve at minor-version bumps. Each package has its own README with install + usage; this top-level README is a routing index.
+Experimental: each package has its own version, README, and CI. APIs may evolve at minor-version bumps. `slop-detector` is the most polished and the only one with active distribution intent (npm, hooks, planned GitHub Action).
 
 ## Where this fits
 
-`agent-dx` contributes the authoring-side tooling to the [Project OS](https://github.com/LanNguyenSi/project-os) human-agent dev lifecycle: scaffolds before code is written, lints before code is committed, playbooks that codify the team's conventions. It sits alongside the rest of the stack:
+`slop-detector` and the workshop around it contribute the authoring-side tooling to the [Project OS](https://github.com/LanNguyenSi/project-os) human-agent dev lifecycle. It sits alongside:
 
 - [agent-planforge](https://github.com/LanNguyenSi/agent-planforge) plans
 - [agent-tasks](https://github.com/LanNguyenSi/agent-tasks) coordinates
