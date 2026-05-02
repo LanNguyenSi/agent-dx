@@ -91,11 +91,14 @@ export function effectiveSeverity(
 
 export function isRuleEnabled(
   ruleId: string,
-  pack: PackId,
+  _pack: PackId,
   enabledByDefault: boolean,
   config: ResolvedConfig,
 ): boolean {
-  if (config.packs[pack] === false) return false;
+  // Pack-level gating is the engine's job (so `--pack` can override the
+  // config). This function only owns the per-rule override layer:
+  //   1. explicit `rules.<id>.enabled: true|false` in slop.config.yml
+  //   2. otherwise the rule's own `enabledByDefault`
   const override = config.ruleOverrides[ruleId]?.enabled;
   if (override !== undefined) return override;
   return enabledByDefault;
