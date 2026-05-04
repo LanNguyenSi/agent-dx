@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a new capability or rule
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options:
+        - slop-detector
+        - scaffoldkit
+        - release-prep
+        - github-api-tool
+        - git-batch-cli
+        - agent-entrypoint
+        - agent-dev-kit
+        - agentic-coding-playbook
+        - agent-engineering-playbook
+        - new package
+        - other / unsure
+    validations:
+      required: true
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use case
+      description: What problem does this solve? Who feels the pain today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Sketch the API, flag, rule, or workflow.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
