@@ -6,4 +6,4 @@ By participating, you agree to uphold its standards.
 
 ## Reporting
 
-Report incidents to **raylsreturn@googlemail.com**. Reports are kept confidential.
+Report incidents to **contact@lan-nguyen-si.de**. Reports are kept confidential.
