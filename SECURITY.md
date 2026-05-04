@@ -14,4 +14,4 @@ Email **raylsreturn@googlemail.com** with:
 - Reproduction steps or proof-of-concept
 - Impact assessment
 
-You will get an acknowledgement within 72 hours and a fix timeline within 7 days.
+You will get an acknowledgement within 72 hours and an initial assessment within 7 days. A fix timeline depends on severity and complexity, communicated in the assessment.

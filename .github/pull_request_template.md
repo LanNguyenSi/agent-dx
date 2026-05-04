@@ -8,11 +8,9 @@
 
 ## Test plan
 
-<!--
 - [ ] `npm run build` in affected package(s)
 - [ ] `npm test` in affected package(s)
-- [ ] Manual smoke check: <command or scenario>
--->
+- [ ] Manual smoke check: <!-- command or scenario -->
 
 ## Notes for reviewer
 
