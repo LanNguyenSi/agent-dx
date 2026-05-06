@@ -44,5 +44,8 @@
     "dist",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "overrides": {
+    "postcss": "^8.5.10"
+  }
 }
