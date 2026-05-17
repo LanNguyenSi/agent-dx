@@ -62,6 +62,7 @@ These were built alongside `slop-detector` for the same human-and-agent workflow
 |---------|--------------|
 | [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. |
 | [agent-entrypoint](packages/agent-entrypoint) | Generate and validate `AGENT_ENTRYPOINT.yaml` so an agent can find its way into a repo without prompting tricks. |
+| [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. M1: `log`, `list`, `file`. |
 | [release-prep](packages/release-prep) | Changelog from conventional commits, semver bump suggestions, annotated tags, GitHub releases. |
 | [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. |
 | [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder: sync, status, dirty checks, fetch, with `--strict` for automation. |

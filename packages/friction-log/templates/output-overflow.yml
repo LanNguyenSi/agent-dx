@@ -1,0 +1,25 @@
+name: output-overflow
+title: "{{tool}}: output overflows agent context"
+priority: HIGH
+labels:
+  - tooling
+  - friction
+  - output-overflow
+body: |
+  ## Symptom
+
+  `{{tool}}` returned output large enough to overflow the agent's context window or significantly degrade performance.
+
+  {{description}}
+
+  ## Context
+
+  - Tool surface: `{{tool}}`
+  - Captured: {{capturedAt}}
+  - Session: `{{sessionId}}`
+
+  ## Suggested fixes
+
+  - Add server-side pagination or filtering defaults.
+  - Add a `--summary` or `--ids-only` mode that returns a compact representation.
+  - Document a recommended page size in the tool's README.

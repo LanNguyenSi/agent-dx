@@ -1,0 +1,26 @@
+name: workflow-friction
+title: "{{title}}"
+priority: MEDIUM
+labels:
+  - tooling
+  - friction
+body: |
+  ## What happened
+
+  {{description}}
+
+  ## Context
+
+  - Tool surface: `{{tool}}`
+  - Category: `{{category}}`
+  - Captured: {{capturedAt}}
+  - Session: `{{sessionId}}`
+  - Source: `{{source}}`
+
+  ## Why this matters
+
+  _Describe how this friction slows down or breaks the workflow._
+
+  ## Possible next steps
+
+  _List the smallest change that would remove the friction._

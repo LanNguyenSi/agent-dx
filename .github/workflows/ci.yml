@@ -24,6 +24,7 @@ jobs:
         package:
           - agent-dev-kit
           - agent-entrypoint
+          - friction-log
           - git-batch-cli
           - github-api-tool
           - release-prep
