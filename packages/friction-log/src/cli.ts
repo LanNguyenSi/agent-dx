@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { Command, Option } from 'commander';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runBilanz } from './commands/bilanz.js';
 import { runFile } from './commands/file.js';
 import { formatTable, runList } from './commands/list.js';
@@ -14,6 +17,18 @@ import {
 import { runUpdate } from './commands/update.js';
 import type { FrictionSource, FrictionStatus, Severity } from './types.js';
 
+function readPackageVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkgPath = join(here, '..', 'package.json');
+    const raw = readFileSync(pkgPath, 'utf8');
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === 'string' ? parsed.version : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 const SEVERITY_CHOICES = ['low', 'medium', 'high', 'critical'] as const;
 const STATUS_CHOICES = ['open', 'filed', 'resolved', 'wontfix'] as const;
 const SOURCE_CHOICES = ['scan', 'manual', 'import'] as const;
@@ -24,7 +39,7 @@ const program = new Command();
 program
   .name('friction-log')
   .description('Capture, query, and infer agent-workflow frictions.')
-  .version('0.1.0');
+  .version(readPackageVersion());
 
 program
   .command('log')

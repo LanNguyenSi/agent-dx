@@ -1,6 +1,6 @@
 {
   "name": "friction-log",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default.",
   "main": "dist/index.js",
   "type": "module",
