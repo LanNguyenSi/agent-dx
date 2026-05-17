@@ -4,6 +4,12 @@ export { defaultDbPath, defaultConfigPath, defaultMarkdownSinkDir } from './path
 export { loadTemplate, listTemplates, pickTemplateForCategory, render } from './templates.js';
 export { loadSink, availableSinks } from './sinks/index.js';
 export { MarkdownFileSink } from './sinks/markdown-file.js';
+export { loadScanner, availableScanners } from './scanners/index.js';
+export { ClaudeCodeAdapter } from './scanners/claude-code.js';
 export { runLog } from './commands/log.js';
 export { runList, formatTable, parseAge } from './commands/list.js';
 export { runFile } from './commands/file.js';
+export { runScan, payloadToScanInput, summarize } from './commands/scan.js';
+export { runBilanz, formatBilanz } from './commands/bilanz.js';
+export { runRm } from './commands/rm.js';
+export { runUpdate } from './commands/update.js';

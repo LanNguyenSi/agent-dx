@@ -300,6 +300,44 @@ export class FrictionDb {
     this.db.prepare(`UPDATE frictions SET status = ? WHERE id = ?`).run(status, id);
   }
 
+  deleteFriction(id: number): boolean {
+    const tx = this.db.transaction((fid: number) => {
+      this.db.prepare(`DELETE FROM tasks WHERE friction_id = ?`).run(fid);
+      this.db.prepare(`DELETE FROM tags WHERE friction_id = ?`).run(fid);
+      return this.db.prepare(`DELETE FROM frictions WHERE id = ?`).run(fid).changes > 0;
+    });
+    return tx(id);
+  }
+
+  findFrictionByTriple(sessionId: string | null, toolSurface: string | null, title: string): Friction | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM frictions
+         WHERE coalesce(session_id, '') = coalesce(@sessionId, '')
+           AND coalesce(tool_surface, '') = coalesce(@toolSurface, '')
+           AND title = @title
+         LIMIT 1`
+      )
+      .get({ sessionId: sessionId ?? null, toolSurface: toolSurface ?? null, title }) as
+      | FrictionRow
+      | undefined;
+    return row ? rowToFriction(row) : null;
+  }
+
+  listFrictionsForSession(sessionId: string): Friction[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM frictions WHERE session_id = ? ORDER BY captured_at ASC`)
+      .all(sessionId) as FrictionRow[];
+    return rows.map(rowToFriction);
+  }
+
+  getMostRecentSession(): Session | null {
+    const row = this.db
+      .prepare(`SELECT * FROM sessions ORDER BY coalesce(ended_at, started_at) DESC LIMIT 1`)
+      .get() as SessionRow | undefined;
+    return row ? rowToSession(row) : null;
+  }
+
   listFrictions(filter: ListFrictionsFilter = {}): Friction[] {
     const where: string[] = [];
     const params: Record<string, unknown> = {};
