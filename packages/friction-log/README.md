@@ -6,7 +6,7 @@ Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggabl
 
 ## Status
 
-M1 (this release): `log`, `list`, `file` commands, SQLite storage, `markdown-file` sink, three shipped templates. Auto-capture from transcripts (`scan` / `bilanz`), FTS5 `search`, `digest` aggregations, and additional sinks (`github-issues`, `agent-tasks`, `linear`, `stdout-json`) land in subsequent milestones, see [#followups](#whats-next).
+M2 (this release): adds `scan` (Claude Code transcript adapter), `bilanz` (session-boundary summary), `rm`, and `update` on top of the M1 surface. The Stop-hook integration documented below closes the per-session capture loop. FTS5 `search`, `digest` aggregations, and additional sinks (`github-issues`, `agent-tasks`, `linear`, `stdout-json`) land in subsequent milestones, see [#followups](#whats-next).
 
 ## Try it in 60 seconds
 
@@ -41,15 +41,56 @@ Discipline alone loses to momentum. `friction-log` lowers the cost of both patte
 
 The data isn't the goal. The goal is the inferences that the data enables once a few weeks accumulate: which tools cause the most friction, which categories recur, how long frictions take to become fixes. Those queries are trivial on SQLite + FTS5, so the schema is the foundation everything else builds on.
 
-## Commands (M1)
+## Commands
 
 | Command | What it does |
 |---------|--------------|
 | `log` | Manually record a friction with title, tool, category, severity. Returns the new id. |
 | `list` | List frictions with filters: `--status`, `--tool`, `--category`, `--source`, `--age 14d`, `--limit`. Use `--json` for piping. |
 | `file <id>` | Push a friction through a sink. Default sink is `markdown-file`, default template matches the friction's category and falls back to `workflow-friction`. |
+| `scan` | Parse a transcript and extract candidate frictions (tool-call errors, non-zero Bash exits, friction phrases). Flags: `--transcript <path>`, `--session <id>`, `--adapter claude-code`, `--silent`, `--stdin-payload`. Idempotent on re-run. |
+| `bilanz` | Print a session-boundary summary: tools exercised, frictions noticed, tasks filed, plus a highlighted list of open frictions that have not been filed yet. `--session <id>` defaults to the most recent session. |
+| `rm <id>` | Delete a friction and any task rows pointing at it from the local store. |
+| `update <id> --status <state>` | Change a friction's status. Useful when the agent-tasks or github-issues sinks land in M4 and you want to retroactively mark older rows. |
 
 Run any command with `--help` for the full flag list.
+
+## Auto-capture via Claude Code Stop-hook
+
+To run `friction-log scan` automatically at the end of every Claude Code session, add this entry to your `~/.claude/settings.json`:
+
+```jsonc
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "friction-log scan --silent --stdin-payload"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook passes a JSON payload to stdin with `session_id` and `transcript_path`. `--stdin-payload` reads it and feeds the scan. `--silent` keeps the hook non-blocking: if anything fails, the error goes to stderr and exit is always 0 so the session shutdown is never delayed.
+
+After the hook is wired, run `friction-log bilanz` whenever you want a summary of the most recent session.
+
+## Manually scanning a past session
+
+```bash
+friction-log scan \
+  --transcript ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl
+
+friction-log bilanz --session <sessionId>
+```
+
+Re-running `scan` against the same transcript is idempotent, so it is safe to run on every project sync.
 
 ## Storage
 
@@ -90,7 +131,6 @@ The `--template <name>` flag on `file` overrides the auto-selection.
 
 | Milestone | Scope |
 |-----------|-------|
-| M2 | `scan` plus a Claude Code transcript adapter, `bilanz`, Stop-hook integration. |
 | M3 | `search` (FTS5), `digest`, `export` (JSON, CSV, Markdown). |
 | M4 | Additional sinks: `github-issues`, `agent-tasks`, `linear`, `stdout-json`. |
 | M5 | `init` (interactive setup), `import` (markdown-frontmatter), remaining templates. |
@@ -101,7 +141,7 @@ Public-tool framing: zero LanNguyenSi-stack assumptions in the core. The default
 
 Local SQLite, single-user, single-machine. No sync, no server, no cloud. Friction records are personal observation data, the smallest store that lets queries answer questions is the right one.
 
-Deterministic detection only (when M2 lands): regex on tool-call errors, non-zero exits, friction phrases. No LLM API calls in the default Stop-hook so it stays free and fast. An opt-in `--with-llm` flag is on the M2+ roadmap for deeper end-of-week reviews.
+Deterministic detection only: regex on tool-call errors, non-zero exits, friction phrases. No LLM API calls in the default Stop-hook so it stays free and fast. An opt-in `--with-llm` flag is on the M3+ roadmap for deeper end-of-week reviews.
 
 ## Where this fits
 
