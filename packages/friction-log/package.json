@@ -19,7 +19,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && node scripts/copy-templates.mjs",
+    "build": "tsc && node scripts/copy-templates.mjs && chmod +x dist/cli.js",
     "typecheck": "tsc --noEmit",
     "dev": "node --import tsx src/cli.ts",
     "test": "vitest run",
