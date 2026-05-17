@@ -141,7 +141,7 @@ Public-tool framing: zero LanNguyenSi-stack assumptions in the core. The default
 
 Local SQLite, single-user, single-machine. No sync, no server, no cloud. Friction records are personal observation data, the smallest store that lets queries answer questions is the right one.
 
-Deterministic detection only (when M2 lands): regex on tool-call errors, non-zero exits, friction phrases. No LLM API calls in the default Stop-hook so it stays free and fast. An opt-in `--with-llm` flag is on the M2+ roadmap for deeper end-of-week reviews.
+Deterministic detection only: regex on tool-call errors, non-zero exits, friction phrases. No LLM API calls in the default Stop-hook so it stays free and fast. An opt-in `--with-llm` flag is on the M3+ roadmap for deeper end-of-week reviews.
 
 ## Where this fits
 
