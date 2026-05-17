@@ -1,0 +1,34 @@
+name: tool-error
+title: "{{tool}}: {{title}}"
+priority: MEDIUM
+labels:
+  - tooling
+  - friction
+  - tool-error
+body: |
+  ## Symptom
+
+  {{description}}
+
+  ## Context
+
+  - Tool surface: `{{tool}}`
+  - Captured: {{capturedAt}}
+  - Session: `{{sessionId}}`
+  - Source: `{{source}}`
+
+  ## Expected
+
+  Behaviour documented for `{{tool}}`.
+
+  ## Actual
+
+  See symptom above.
+
+  ## Reproduction
+
+  TODO: add the exact invocation that produced this. Friction-log capture is the receipt, not the repro.
+
+  ## Suggested next step
+
+  Triage whether this is a documentation gap (update docs), a real defect (fix tool), or expected behaviour the workflow needs to adapt to.
