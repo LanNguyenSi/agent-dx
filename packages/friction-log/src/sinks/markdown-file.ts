@@ -40,7 +40,7 @@ function renderMarkdown(friction: Friction, rendered: RenderedTemplate): string 
     `friction_id: ${friction.id}`,
     `captured_at: ${friction.capturedAt}`,
     `priority: ${rendered.priority}`,
-    `labels: [${rendered.labels.join(', ')}]`,
+    `labels: [${rendered.labels.map((l) => JSON.stringify(l)).join(', ')}]`,
   ];
   if (friction.toolSurface) frontmatter.push(`tool_surface: ${friction.toolSurface}`);
   if (friction.category) frontmatter.push(`category: ${friction.category}`);

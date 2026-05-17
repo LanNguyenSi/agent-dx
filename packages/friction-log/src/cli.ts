@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { runFile } from './commands/file.js';
 import { formatTable, runList } from './commands/list.js';
 import { runLog } from './commands/log.js';
 import type { FrictionSource, FrictionStatus, Severity } from './types.js';
+
+const SEVERITY_CHOICES = ['low', 'medium', 'high', 'critical'] as const;
+const STATUS_CHOICES = ['open', 'filed', 'resolved', 'wontfix'] as const;
+const SOURCE_CHOICES = ['scan', 'manual', 'import'] as const;
 
 const program = new Command();
 
@@ -19,7 +23,7 @@ program
   .option('--description <text>', 'Longer description / reproduction notes')
   .option('--tool <surface>', 'Tool surface that caused the friction (e.g. mcp:agent-tasks/tasks_list)')
   .option('--category <name>', 'Category (e.g. output-overflow, tool-error)')
-  .option('--severity <level>', 'low | medium | high | critical')
+  .addOption(new Option('--severity <level>', 'Severity level').choices([...SEVERITY_CHOICES]))
   .option('--session <id>', 'Session id to associate with this friction')
   .option('--db <path>', 'Override database path (default: XDG)')
   .action((opts: Record<string, string>) => {
@@ -38,10 +42,10 @@ program
 program
   .command('list')
   .description('List frictions with optional filters.')
-  .option('--status <status>', 'open | filed | resolved | wontfix')
+  .addOption(new Option('--status <status>', 'Filter by status').choices([...STATUS_CHOICES]))
   .option('--tool <surface>', 'Filter by tool surface')
   .option('--category <name>', 'Filter by category')
-  .option('--source <source>', 'scan | manual | import')
+  .addOption(new Option('--source <source>', 'Filter by source').choices([...SOURCE_CHOICES]))
   .option('--age <span>', 'Only frictions newer than e.g. 14d, 4w, 12h')
   .option('--limit <n>', 'Max rows (default 100)', (v) => Number(v))
   .option('--json', 'Emit JSON instead of a table')

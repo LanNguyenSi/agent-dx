@@ -324,9 +324,11 @@ export class FrictionDb {
       params.sinceIso = filter.sinceIso;
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const limit = filter.limit ?? 100;
+    const rawLimit = filter.limit ?? 100;
+    const limit = Math.max(1, Math.min(10_000, Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : 100));
+    params.limit = limit;
     const rows = this.db
-      .prepare(`SELECT * FROM frictions ${whereSql} ORDER BY captured_at DESC LIMIT ${limit}`)
+      .prepare(`SELECT * FROM frictions ${whereSql} ORDER BY captured_at DESC LIMIT @limit`)
       .all(params) as FrictionRow[];
     return rows.map(rowToFriction);
   }
