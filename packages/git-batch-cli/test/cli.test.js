@@ -1,9 +1,9 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const test = require("node:test");
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
+// `test` is provided as a Vitest global (see vitest.config.mjs).
 
 const {
   collectRepoStatus,

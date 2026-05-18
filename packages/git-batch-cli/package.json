@@ -7,8 +7,8 @@
     "git-batch": "./bin/git-batch.js"
   },
   "scripts": {
-    "test": "node --test",
-    "test:ci": "node --test && env npm_config_cache=.npm-cache npm pack --dry-run"
+    "test": "vitest run",
+    "test:ci": "vitest run && env npm_config_cache=.npm-cache npm pack --dry-run"
   },
   "files": [
     "bin",
@@ -16,6 +16,9 @@
     "README.md",
     "LICENSE"
   ],
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/LanNguyenSi/agent-dx.git",
