@@ -15,6 +15,17 @@ concurrency:
 # package.json), and `scaffoldkit` is a Python sub-package (handled in its
 # own toolchain), so nothing to build/test for those here.
 jobs:
+  lint-cli-flag-order:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check commander flag order (-short, --long)
+        run: node scripts/check-cli-flag-order.mjs
+
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 10
