@@ -39,7 +39,10 @@ export function buildProgram(handlers: CliHandlers = {}): Command {
       "Full release preparation (changelog + version + tag + release)",
     )
     .option("-t, --type <type>", "Version bump type (major|minor|patch)")
-    .option("-v, --version <version>", "Explicit version (overrides --type)")
+    .option(
+      "-v, --target-version <version>",
+      "Explicit target version (overrides --type). Named --target-version to avoid colliding with commander's built-in --version on the root program.",
+    )
     .option("--no-tag", "Don't create git tag")
     .option("--no-release", "Don't create GitHub release")
     .option("-d, --dry-run", "Show what would be done without doing it")

@@ -14,7 +14,7 @@ import {
 
 interface PrepOptions {
   type?: string;
-  version?: string;
+  targetVersion?: string;
   tag?: boolean;
   release?: boolean;
   dryRun?: boolean;
@@ -31,7 +31,7 @@ export async function runPrep(options: PrepOptions): Promise<void> {
     const nextVersion = computePlannedVersion(
       context,
       requestedBump,
-      options.version,
+      options.targetVersion,
     );
     const tagName = formatTagName(nextVersion);
     const changelog = buildChangelogMarkdown(context, tagName);
@@ -42,7 +42,7 @@ export async function runPrep(options: PrepOptions): Promise<void> {
       currentVersion: context.currentVersion,
       previousTag: context.previousTag,
       recommendedBump: context.recommendedBump,
-      versionStrategy: options.version
+      versionStrategy: options.targetVersion
         ? "explicit"
         : requestedBump
           ? requestedBump

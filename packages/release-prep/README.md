@@ -42,7 +42,7 @@ node dist/cli.js prep --dry-run --no-tag --no-release
 node dist/cli.js prep --type minor
 
 # Force an explicit version
-node dist/cli.js prep --version 1.4.0
+node dist/cli.js prep --target-version 1.4.0
 ```
 
 ## Release Rules
