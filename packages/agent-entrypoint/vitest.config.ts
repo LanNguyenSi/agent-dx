@@ -8,6 +8,10 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html"],
       reportsDirectory: "coverage",
+      // src/index.ts is the commander CLI wrapper; meaningful coverage
+      // there needs a buildProgram-factory refactor like release-prep
+      // got (filed as a follow-up). lib.ts holds the testable logic.
+      exclude: ["src/index.ts"],
       thresholds: {
         lines: 80,
         functions: 80,
