@@ -55,7 +55,7 @@
     "prettier": "^3.8.1",
     "tsx": "^4.19.3",
     "typescript": "^5.3.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.6"
   },
   "engines": {
     "node": ">=20"
