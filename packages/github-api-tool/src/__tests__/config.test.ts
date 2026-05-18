@@ -3,9 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ORIGINAL_HOME = process.env.HOME;
-const ORIGINAL_TOKEN = process.env.GITHUB_TOKEN;
-
 async function loadConfigModuleFresh() {
   vi.resetModules();
   return (await import('../utils/config.js')) as typeof import('../utils/config.js');
@@ -13,8 +10,13 @@ async function loadConfigModuleFresh() {
 
 describe('config', () => {
   let tempHome: string;
+  let originalHome: string | undefined;
+  let originalToken: string | undefined;
 
   beforeEach(async () => {
+    originalHome = process.env.HOME;
+    originalToken = process.env.GITHUB_TOKEN;
+
     tempHome = await mkdtemp(join(tmpdir(), 'github-api-tool-config-'));
     process.env.HOME = tempHome;
     delete process.env.GITHUB_TOKEN;
@@ -22,11 +24,16 @@ describe('config', () => {
 
   afterEach(async () => {
     await rm(tempHome, { recursive: true, force: true });
-    process.env.HOME = ORIGINAL_HOME;
-    if (ORIGINAL_TOKEN === undefined) {
+
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalToken === undefined) {
       delete process.env.GITHUB_TOKEN;
     } else {
-      process.env.GITHUB_TOKEN = ORIGINAL_TOKEN;
+      process.env.GITHUB_TOKEN = originalToken;
     }
   });
 
