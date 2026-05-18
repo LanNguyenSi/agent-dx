@@ -1,3 +1,4 @@
+import { loadConfig, mergeSinkOpts, type SinkConfig } from '../config.js';
 import { FrictionDb } from '../db.js';
 import { defaultDbPath } from '../paths.js';
 import { loadSink } from '../sinks/index.js';
@@ -8,6 +9,8 @@ export interface FileCommandInput {
   sink?: string;
   template?: string;
   sinkTarget?: string;
+  sinkOpts?: SinkConfig;
+  configPath?: string;
   dbPath?: string;
 }
 
@@ -27,11 +30,17 @@ export async function runFile(input: FileCommandInput): Promise<FileCommandOutpu
       throw new Error(`friction-log: friction id=${input.frictionId} not found`);
     }
     const sinkName = input.sink ?? 'markdown-file';
-    const sink = loadSink(sinkName);
+    const sink = await loadSink(sinkName);
     const templateName = input.template ?? pickTemplateForCategory(friction.category);
     const template = loadTemplate(templateName);
     const rendered = render(template, friction);
-    const result = await sink.file(friction, rendered, { sinkTarget: input.sinkTarget });
+    // Merge per-sink config-file defaults with CLI overrides. CLI wins.
+    const config = loadConfig(input.configPath);
+    const mergedSinkOpts = mergeSinkOpts(config.sinks[sinkName], input.sinkOpts);
+    const result = await sink.file(friction, rendered, {
+      sinkTarget: input.sinkTarget,
+      sinkOpts: mergedSinkOpts,
+    });
     if (!result.ok) {
       throw new Error(`friction-log: sink "${sinkName}" failed: ${result.message ?? 'unknown error'}`);
     }

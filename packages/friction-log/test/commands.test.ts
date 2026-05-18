@@ -116,8 +116,8 @@ describe('runFile', () => {
 
   it('throws on unknown sink', async () => {
     const logged = runLog({ title: 't', dbPath });
-    await expect(runFile({ frictionId: logged.id, sink: 'github-issues', dbPath })).rejects.toThrow(
-      /unknown sink/
-    );
+    await expect(
+      runFile({ frictionId: logged.id, sink: 'does-not-exist', dbPath })
+    ).rejects.toThrow(/unknown sink/);
   });
 });
