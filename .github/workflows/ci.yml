@@ -54,4 +54,12 @@ jobs:
         run: npm run lint --if-present
 
       - name: Test
-        run: npm test --if-present
+        shell: bash
+        run: |
+          if node -e "process.exit((require('./package.json').scripts || {})['test:ci'] ? 0 : 1)"; then
+            echo "Running npm run test:ci"
+            npm run test:ci
+          else
+            echo "test:ci not defined, falling back to npm test"
+            npm test --if-present
+          fi
