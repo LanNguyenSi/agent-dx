@@ -6,8 +6,12 @@ import * as yaml from 'js-yaml';
 import { FILENAME } from '../lib';
 import { handleGenerate, handleShow, handleValidate } from '../index';
 
+const tempDirs: string[] = [];
+
 function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'aep-handlers-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aep-handlers-'));
+  tempDirs.push(dir);
+  return dir;
 }
 
 class ExitError extends Error {
@@ -34,6 +38,10 @@ describe('agent-entrypoint handlers', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop()!;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   describe('handleGenerate', () => {
@@ -50,7 +58,6 @@ describe('agent-entrypoint handlers', () => {
       expect(written.primary_docs).toContain('README.md');
       expect(logs.some((l) => l.includes('Generated'))).toBe(true);
 
-      fs.rmSync(dir, { recursive: true });
     });
 
     it('aborts with exit 1 when the file already exists and --force is not set', () => {
@@ -61,7 +68,6 @@ describe('agent-entrypoint handlers', () => {
       expect(exits).toEqual([1]);
       expect(logs.join('\n')).toContain('already exists');
 
-      fs.rmSync(dir, { recursive: true });
     });
 
     it('overwrites an existing file when --force is set', () => {
@@ -74,7 +80,6 @@ describe('agent-entrypoint handlers', () => {
       expect(written).not.toContain('old: true');
       expect(written).toContain('project:');
 
-      fs.rmSync(dir, { recursive: true });
     });
   });
 
@@ -99,7 +104,6 @@ describe('agent-entrypoint handlers', () => {
       expect(exits).toEqual([]);
       expect(logs.join('\n')).toContain('is valid');
 
-      fs.rmSync(dir, { recursive: true });
     });
 
     it('exits 1 with a hint when the file is missing', () => {
@@ -110,7 +114,6 @@ describe('agent-entrypoint handlers', () => {
       expect(logs.join('\n')).toContain('not found');
       expect(logs.join('\n')).toContain('agent-entrypoint generate');
 
-      fs.rmSync(dir, { recursive: true });
     });
 
     it('exits 1 on invalid YAML', () => {
@@ -121,7 +124,6 @@ describe('agent-entrypoint handlers', () => {
       expect(exits).toEqual([1]);
       expect(logs.join('\n')).toContain('YAML parse error');
 
-      fs.rmSync(dir, { recursive: true });
     });
 
     it('exits 1 and enumerates issues when required fields are missing', () => {
@@ -134,7 +136,6 @@ describe('agent-entrypoint handlers', () => {
       expect(out).toContain('Validation failed');
       expect(out).toContain('primary_docs');
 
-      fs.rmSync(dir, { recursive: true });
     });
   });
 
@@ -161,7 +162,6 @@ describe('agent-entrypoint handlers', () => {
       expect(out).toContain('app');
       expect(out).toContain('npm test');
 
-      fs.rmSync(dir, { recursive: true });
     });
 
     it('exits 1 when the file is missing', () => {
@@ -171,7 +171,6 @@ describe('agent-entrypoint handlers', () => {
       expect(exits).toEqual([1]);
       expect(logs.join('\n')).toContain('not found');
 
-      fs.rmSync(dir, { recursive: true });
     });
   });
 });
