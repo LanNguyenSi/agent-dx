@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runBilanz } from './commands/bilanz.js';
+import { formatDigest, runDigest } from './commands/digest.js';
+import { runExport, type ExportFormat } from './commands/export.js';
 import { runFile } from './commands/file.js';
 import { formatTable, runList } from './commands/list.js';
 import { runLog } from './commands/log.js';
@@ -14,7 +16,9 @@ import {
   summarize,
   type StopHookPayload,
 } from './commands/scan.js';
+import { runSearch } from './commands/search.js';
 import { runUpdate } from './commands/update.js';
+import type { DigestGroupBy } from './db.js';
 import type { FrictionSource, FrictionStatus, Severity } from './types.js';
 
 function readPackageVersion(): string {
@@ -33,6 +37,8 @@ const SEVERITY_CHOICES = ['low', 'medium', 'high', 'critical'] as const;
 const STATUS_CHOICES = ['open', 'filed', 'resolved', 'wontfix'] as const;
 const SOURCE_CHOICES = ['scan', 'manual', 'import'] as const;
 const SCANNER_CHOICES = ['claude-code'] as const;
+const DIGEST_GROUP_CHOICES = ['tool', 'category', 'severity', 'source'] as const;
+const EXPORT_FORMAT_CHOICES = ['json', 'csv', 'md'] as const;
 
 const program = new Command();
 
@@ -50,18 +56,30 @@ program
   .option('--category <name>', 'Category (e.g. output-overflow, tool-error)')
   .addOption(new Option('--severity <level>', 'Severity level').choices([...SEVERITY_CHOICES]))
   .option('--session <id>', 'Session id to associate with this friction')
+  .option('--recurrence-of <id>', 'Mark this friction as a recurrence of an existing one', (v) => Number(v))
   .option('--db <path>', 'Override database path (default: XDG)')
-  .action((opts: Record<string, string>) => {
+  .action((opts: Record<string, unknown>) => {
+    const recurrenceOfRaw = opts.recurrenceOf;
+    let recurrenceOfId: number | undefined;
+    if (recurrenceOfRaw !== undefined) {
+      if (typeof recurrenceOfRaw !== 'number' || !Number.isInteger(recurrenceOfRaw) || recurrenceOfRaw <= 0) {
+        process.stderr.write(`friction-log: --recurrence-of must be a positive integer, got "${String(recurrenceOfRaw)}"\n`);
+        process.exit(2);
+      }
+      recurrenceOfId = recurrenceOfRaw;
+    }
     const out = runLog({
-      title: opts.title,
-      description: opts.description,
-      tool: opts.tool,
-      category: opts.category,
+      title: opts.title as string,
+      description: opts.description as string | undefined,
+      tool: opts.tool as string | undefined,
+      category: opts.category as string | undefined,
       severity: opts.severity as Severity | undefined,
-      sessionId: opts.session,
-      dbPath: opts.db,
+      sessionId: opts.session as string | undefined,
+      recurrenceOfId,
+      dbPath: opts.db as string | undefined,
     });
-    process.stdout.write(`friction id=${out.id} captured_at=${out.capturedAt}\n`);
+    const recurrenceTag = out.recurrenceOfId != null ? ` recurrence_of=${out.recurrenceOfId}` : '';
+    process.stdout.write(`friction id=${out.id} captured_at=${out.capturedAt}${recurrenceTag}\n`);
   });
 
 program
@@ -211,6 +229,111 @@ program
     try {
       const out = runUpdate({ frictionId: id, status: opts.status as FrictionStatus, dbPath: opts.db });
       process.stdout.write(`updated friction id=${out.id} status=${out.status}\n`);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('search <query>')
+  .description('Full-text search over title + description (FTS5).')
+  .addOption(new Option('--status <status>', 'Filter by status').choices([...STATUS_CHOICES]))
+  .option('--tool <surface>', 'Filter by tool surface')
+  .option('--category <name>', 'Filter by category')
+  .addOption(new Option('--source <source>', 'Filter by source').choices([...SOURCE_CHOICES]))
+  .option('--age <span>', 'Only frictions newer than e.g. 14d, 4w, 12h')
+  .option('--limit <n>', 'Max rows (default 100)', (v) => Number(v))
+  .option('--json', 'Emit JSON instead of a table')
+  .option('--db <path>', 'Override database path')
+  .action((query: string, opts: Record<string, unknown>) => {
+    try {
+      const out = runSearch({
+        query,
+        status: opts.status as FrictionStatus | undefined,
+        tool: opts.tool as string | undefined,
+        category: opts.category as string | undefined,
+        source: opts.source as FrictionSource | undefined,
+        age: opts.age as string | undefined,
+        limit: typeof opts.limit === 'number' ? opts.limit : undefined,
+        dbPath: opts.db as string | undefined,
+      });
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(out.frictions, null, 2) + '\n');
+      } else {
+        process.stdout.write(formatTable(out.frictions) + '\n');
+      }
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('digest')
+  .description('Aggregations over frictions: counts, open-vs-filed, recurrences, avg hours to triage.')
+  .addOption(
+    new Option('--group-by <field>', 'Group by field')
+      .choices([...DIGEST_GROUP_CHOICES])
+      .makeOptionMandatory(true)
+  )
+  .option('--last <span>', 'Restrict to frictions newer than e.g. 30d, 4w, 12h')
+  .option('--json', 'Emit JSON instead of a table')
+  .option('--db <path>', 'Override database path')
+  .action((opts: Record<string, unknown>) => {
+    try {
+      const out = runDigest({
+        groupBy: opts.groupBy as DigestGroupBy,
+        last: opts.last as string | undefined,
+        dbPath: opts.db as string | undefined,
+      });
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+      } else {
+        process.stdout.write(formatDigest(out) + '\n');
+      }
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('export')
+  .description('Export frictions as JSON, CSV, or Markdown.')
+  .addOption(
+    new Option('--format <fmt>', 'Output format')
+      .choices([...EXPORT_FORMAT_CHOICES])
+      .default('json')
+  )
+  .option('--out <path>', 'Write to a file instead of stdout')
+  .option('--query <text>', 'Only export frictions matching an FTS5 query')
+  .addOption(new Option('--status <status>', 'Filter by status').choices([...STATUS_CHOICES]))
+  .option('--tool <surface>', 'Filter by tool surface')
+  .option('--category <name>', 'Filter by category')
+  .addOption(new Option('--source <source>', 'Filter by source').choices([...SOURCE_CHOICES]))
+  .option('--age <span>', 'Only frictions newer than e.g. 14d, 4w, 12h')
+  .option('--limit <n>', 'Max rows (default 100)', (v) => Number(v))
+  .option('--db <path>', 'Override database path')
+  .action((opts: Record<string, unknown>) => {
+    try {
+      const out = runExport({
+        format: opts.format as ExportFormat,
+        out: opts.out as string | undefined,
+        query: opts.query as string | undefined,
+        status: opts.status as FrictionStatus | undefined,
+        tool: opts.tool as string | undefined,
+        category: opts.category as string | undefined,
+        source: opts.source as FrictionSource | undefined,
+        age: opts.age as string | undefined,
+        limit: typeof opts.limit === 'number' ? opts.limit : undefined,
+        dbPath: opts.db as string | undefined,
+      });
+      if (out.out) {
+        process.stderr.write(`exported ${out.count} records (${out.format}) to ${out.out}\n`);
+      } else {
+        process.stdout.write(out.rendered);
+      }
     } catch (err) {
       process.stderr.write(`${(err as Error).message}\n`);
       process.exit(1);

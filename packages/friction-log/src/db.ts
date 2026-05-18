@@ -12,6 +12,69 @@ import type {
 
 const MIGRATIONS: Array<{ version: number; sql: string }> = [
   {
+    version: 2,
+    sql: `
+      -- Add a CHECK constraint on severity so the programmatic API matches
+      -- the CLI's commander-choices validation. SQLite can't ALTER ADD
+      -- CONSTRAINT, so we recreate the table. Pre-migration we normalize any
+      -- rogue values to NULL so the copy doesn't fail.
+      UPDATE frictions
+         SET severity = NULL
+       WHERE severity IS NOT NULL
+         AND severity NOT IN ('low', 'medium', 'high', 'critical');
+
+      CREATE TABLE frictions_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT REFERENCES sessions(id),
+        tool_surface TEXT,
+        title TEXT NOT NULL,
+        description TEXT,
+        captured_at TEXT NOT NULL,
+        severity TEXT CHECK(severity IS NULL OR severity IN ('low', 'medium', 'high', 'critical')),
+        category TEXT,
+        status TEXT NOT NULL DEFAULT 'open',
+        recurrence_of_id INTEGER REFERENCES frictions(id),
+        source TEXT NOT NULL CHECK(source IN ('scan', 'manual', 'import'))
+      );
+
+      INSERT INTO frictions_new
+        (id, session_id, tool_surface, title, description, captured_at, severity, category, status, recurrence_of_id, source)
+      SELECT id, session_id, tool_surface, title, description, captured_at, severity, category, status, recurrence_of_id, source
+        FROM frictions;
+
+      DROP TABLE frictions;
+      ALTER TABLE frictions_new RENAME TO frictions;
+
+      -- Indexes and FTS triggers were dropped with the old table; recreate them.
+      CREATE INDEX idx_frictions_status ON frictions(status);
+      CREATE INDEX idx_frictions_tool ON frictions(tool_surface);
+      CREATE INDEX idx_frictions_category ON frictions(category);
+      CREATE INDEX idx_frictions_captured ON frictions(captured_at);
+
+      -- Rebuild the FTS5 shadow rows; the virtual table itself survives the
+      -- DROP because it lives in a separate sqlite_master row, but its
+      -- content reference is now stale, so refresh it.
+      INSERT INTO frictions_fts(frictions_fts) VALUES ('rebuild');
+
+      CREATE TRIGGER frictions_ai AFTER INSERT ON frictions BEGIN
+        INSERT INTO frictions_fts(rowid, title, description)
+        VALUES (new.id, new.title, coalesce(new.description, ''));
+      END;
+
+      CREATE TRIGGER frictions_ad AFTER DELETE ON frictions BEGIN
+        INSERT INTO frictions_fts(frictions_fts, rowid, title, description)
+        VALUES ('delete', old.id, old.title, coalesce(old.description, ''));
+      END;
+
+      CREATE TRIGGER frictions_au AFTER UPDATE ON frictions BEGIN
+        INSERT INTO frictions_fts(frictions_fts, rowid, title, description)
+        VALUES ('delete', old.id, old.title, coalesce(old.description, ''));
+        INSERT INTO frictions_fts(rowid, title, description)
+        VALUES (new.id, new.title, coalesce(new.description, ''));
+      END;
+    `,
+  },
+  {
     version: 1,
     sql: `
       CREATE TABLE schema_version (
@@ -188,6 +251,19 @@ export interface ListFrictionsFilter {
   limit?: number;
 }
 
+export type DigestGroupBy = 'tool' | 'category' | 'severity' | 'source';
+
+export interface DigestRow {
+  group: string;
+  total: number;
+  open: number;
+  filed: number;
+  resolved: number;
+  wontfix: number;
+  recurrences: number;
+  avgHoursToTriage: number | null;
+}
+
 export interface InsertTaskInput {
   frictionId: number;
   sinkName: string;
@@ -221,14 +297,30 @@ export class FrictionDb {
           | undefined)?.v ?? 0)
       : 0;
 
-    for (const m of MIGRATIONS) {
+    const ordered = [...MIGRATIONS].sort((a, b) => a.version - b.version);
+    for (const m of ordered) {
       if (m.version <= currentVersion) continue;
-      this.db.transaction(() => {
-        this.db.exec(m.sql);
-        this.db
-          .prepare(`INSERT INTO schema_version (version, applied_at) VALUES (?, ?)`)
-          .run(m.version, new Date().toISOString());
-      })();
+      // foreign_keys can only be toggled outside a transaction. Some
+      // migrations (notably v2's DROP+RENAME on `frictions`) trip incoming
+      // FKs from `tasks` and `tags`, so we drop enforcement, run the
+      // migration, then re-enable and re-check before moving on.
+      this.db.pragma('foreign_keys = OFF');
+      try {
+        this.db.transaction(() => {
+          this.db.exec(m.sql);
+          this.db
+            .prepare(`INSERT INTO schema_version (version, applied_at) VALUES (?, ?)`)
+            .run(m.version, new Date().toISOString());
+        })();
+        const violations = this.db.pragma('foreign_key_check') as unknown[];
+        if (violations.length > 0) {
+          throw new Error(
+            `friction-log: migration v${m.version} left orphan foreign keys: ${JSON.stringify(violations)}`
+          );
+        }
+      } finally {
+        this.db.pragma('foreign_keys = ON');
+      }
     }
   }
 
@@ -269,6 +361,12 @@ export class FrictionDb {
 
   insertFriction(input: InsertFrictionInput): Friction {
     const capturedAt = input.capturedAt ?? new Date().toISOString();
+    // recurrence_of_id semantics (M3 cheap rule): explicit value wins, else
+    // auto-link to the oldest open root friction with the same tool_surface
+    // and title. The chain always points to a root, so callers reading
+    // recurrence_of_id see a stable parent.
+    const recurrenceOfId =
+      input.recurrenceOfId ?? this.findRecurrenceRoot(input.toolSurface ?? null, input.title);
     const result = this.db
       .prepare(
         `INSERT INTO frictions
@@ -284,9 +382,27 @@ export class FrictionDb {
         severity: input.severity ?? null,
         category: input.category ?? null,
         source: input.source,
-        recurrenceOfId: input.recurrenceOfId ?? null,
+        recurrenceOfId,
       });
     return this.getFriction(Number(result.lastInsertRowid))!;
+  }
+
+  findRecurrenceRoot(toolSurface: string | null, title: string): number | null {
+    if (!title) return null;
+    const row = this.db
+      .prepare(
+        `SELECT id FROM frictions
+         WHERE status = 'open'
+           AND recurrence_of_id IS NULL
+           AND title = @title
+           AND coalesce(tool_surface, '') = coalesce(@toolSurface, '')
+         ORDER BY captured_at ASC
+         LIMIT 1`
+      )
+      .get({ title, toolSurface: toolSurface ?? null }) as
+      | { id: number }
+      | undefined;
+    return row?.id ?? null;
   }
 
   getFriction(id: number): Friction | null {
@@ -413,6 +529,110 @@ export class FrictionDb {
       .prepare(`SELECT tag FROM tags WHERE friction_id = ? ORDER BY tag`)
       .all(frictionId) as Array<{ tag: string }>;
     return rows.map((r) => r.tag);
+  }
+
+  searchFrictions(query: string, filter: ListFrictionsFilter = {}): Friction[] {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+    const where: string[] = [`frictions_fts MATCH @query`];
+    const params: Record<string, unknown> = { query: trimmed };
+    if (filter.status) {
+      where.push(`f.status = @status`);
+      params.status = filter.status;
+    }
+    if (filter.tool) {
+      where.push(`f.tool_surface = @tool`);
+      params.tool = filter.tool;
+    }
+    if (filter.category) {
+      where.push(`f.category = @category`);
+      params.category = filter.category;
+    }
+    if (filter.source) {
+      where.push(`f.source = @source`);
+      params.source = filter.source;
+    }
+    if (filter.sinceIso) {
+      where.push(`f.captured_at >= @sinceIso`);
+      params.sinceIso = filter.sinceIso;
+    }
+    const rawLimit = filter.limit ?? 100;
+    const limit = Math.max(1, Math.min(10_000, Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : 100));
+    params.limit = limit;
+    const sql = `
+      SELECT f.* FROM frictions f
+      JOIN frictions_fts fts ON fts.rowid = f.id
+      WHERE ${where.join(' AND ')}
+      ORDER BY rank
+      LIMIT @limit
+    `;
+    const rows = this.db.prepare(sql).all(params) as FrictionRow[];
+    return rows.map(rowToFriction);
+  }
+
+  digest(groupBy: DigestGroupBy, sinceIso?: string): DigestRow[] {
+    const columnByGroup: Record<DigestGroupBy, string> = {
+      tool: 'tool_surface',
+      category: 'category',
+      severity: 'severity',
+      source: 'source',
+    };
+    const column = columnByGroup[groupBy];
+    const where: string[] = [];
+    const params: Record<string, unknown> = {};
+    if (sinceIso) {
+      where.push(`f.captured_at >= @sinceIso`);
+      params.sinceIso = sinceIso;
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    // Subquery picks each friction's earliest task creation, then we compute
+    // hours from captured_at to that first sink-file event ("time to triage").
+    // Frictions never filed contribute NULL and are excluded from the average.
+    const sql = `
+      SELECT
+        coalesce(f.${column}, '(unset)') AS grp,
+        count(*) AS total,
+        sum(CASE WHEN f.status = 'open'     THEN 1 ELSE 0 END) AS open_count,
+        sum(CASE WHEN f.status = 'filed'    THEN 1 ELSE 0 END) AS filed_count,
+        sum(CASE WHEN f.status = 'resolved' THEN 1 ELSE 0 END) AS resolved_count,
+        sum(CASE WHEN f.status = 'wontfix'  THEN 1 ELSE 0 END) AS wontfix_count,
+        sum(CASE WHEN f.recurrence_of_id IS NOT NULL THEN 1 ELSE 0 END) AS recurrences,
+        avg(
+          CASE
+            WHEN t.first_created IS NOT NULL
+            THEN (julianday(t.first_created) - julianday(f.captured_at)) * 24.0
+          END
+        ) AS avg_hours_to_triage
+      FROM frictions f
+      LEFT JOIN (
+        SELECT friction_id, min(created_at) AS first_created
+        FROM tasks
+        GROUP BY friction_id
+      ) t ON t.friction_id = f.id
+      ${whereSql}
+      GROUP BY grp
+      ORDER BY total DESC, grp ASC
+    `;
+    const rows = this.db.prepare(sql).all(params) as Array<{
+      grp: string;
+      total: number;
+      open_count: number;
+      filed_count: number;
+      resolved_count: number;
+      wontfix_count: number;
+      recurrences: number;
+      avg_hours_to_triage: number | null;
+    }>;
+    return rows.map((r) => ({
+      group: r.grp,
+      total: r.total,
+      open: r.open_count,
+      filed: r.filed_count,
+      resolved: r.resolved_count,
+      wontfix: r.wontfix_count,
+      recurrences: r.recurrences,
+      avgHoursToTriage: r.avg_hours_to_triage,
+    }));
   }
 
   close(): void {
