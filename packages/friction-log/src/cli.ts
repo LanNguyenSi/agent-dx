@@ -7,6 +7,8 @@ import { runBilanz } from './commands/bilanz.js';
 import { formatDigest, runDigest } from './commands/digest.js';
 import { runExport, type ExportFormat } from './commands/export.js';
 import { runFile } from './commands/file.js';
+import { runImport, type ImportFormat } from './commands/import.js';
+import { runInit } from './commands/init.js';
 import { formatTable, runList } from './commands/list.js';
 import { runLog } from './commands/log.js';
 import { runRm } from './commands/rm.js';
@@ -41,6 +43,7 @@ const SOURCE_CHOICES = ['scan', 'manual', 'import'] as const;
 const SCANNER_CHOICES = ['claude-code'] as const;
 const DIGEST_GROUP_CHOICES = ['tool', 'category', 'severity', 'source'] as const;
 const EXPORT_FORMAT_CHOICES = ['json', 'csv', 'md'] as const;
+const IMPORT_FORMAT_CHOICES = ['markdown-frontmatter'] as const;
 
 const program = new Command();
 
@@ -350,6 +353,68 @@ program
         process.stderr.write(`exported ${out.count} records (${out.format}) to ${out.out}\n`);
       } else {
         process.stdout.write(out.rendered);
+      }
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('init')
+  .description('Interactive setup: write config.yml, optionally install Stop-hook.')
+  .addOption(new Option('--sink <name>', 'Default sink (skips the interactive prompt)').choices([...availableSinks]))
+  .option('-y, --yes', 'Non-interactive; use --sink (or markdown-file fallback) and skip Stop-hook offer')
+  .option('--install-stop-hook', 'Force-install the Claude Code Stop-hook (skip the interactive y/N)')
+  .option('--config <path>', 'Override config file path')
+  .action(async (opts: Record<string, unknown>) => {
+    try {
+      const out = await runInit({
+        configPath: opts.config as string | undefined,
+        sink: opts.sink as NonNullable<Parameters<typeof runInit>[0]>['sink'],
+        yes: Boolean(opts.yes),
+        installStopHook: opts.installStopHook === true ? true : undefined,
+      });
+      process.stdout.write(
+        `init: ${out.configWritten ? 'wrote' : 'no change to'} ${out.configPath}\n` +
+          (out.stopHookWrittenTo ? `init: Stop-hook installed at ${out.stopHookWrittenTo}\n` : '') +
+          '\nNext steps:\n' +
+          out.nextSteps.map((s) => `  ${s}`).join('\n') +
+          '\n'
+      );
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('import <path>')
+  .description('Bulk-ingest frictions from a directory of markdown files.')
+  .addOption(
+    new Option('--format <fmt>', 'Source format')
+      .choices([...IMPORT_FORMAT_CHOICES])
+      .default('markdown-frontmatter')
+  )
+  .option('--db <path>', 'Override database path')
+  .action((path: string, opts: Record<string, unknown>) => {
+    try {
+      const out = runImport({
+        format: opts.format as ImportFormat,
+        path,
+        dbPath: opts.db as string | undefined,
+      });
+      process.stdout.write(
+        `import: scanned=${out.scanned} imported=${out.imported} skipped=${out.skipped}\n`
+      );
+      if (out.errors.length) {
+        process.stderr.write(`import: ${out.errors.length} errors:\n`);
+        for (const e of out.errors.slice(0, 10)) {
+          process.stderr.write(`  ${e.file}: ${e.reason}\n`);
+        }
+        if (out.errors.length > 10) {
+          process.stderr.write(`  ... and ${out.errors.length - 10} more\n`);
+        }
       }
     } catch (err) {
       process.stderr.write(`${(err as Error).message}\n`);

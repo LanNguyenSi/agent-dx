@@ -6,7 +6,7 @@ Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggabl
 
 ## Status
 
-M4 (this release): closes the discipline loop end-to-end. The four planned sinks ship behind a lazy-loading registry, so `friction-log file <id> --sink <name>` can now push directly into GitHub Issues, agent-tasks, Linear, or stdout-as-JSON. `FileOptions` was widened (`sinkOpts: Record<string, unknown>`) and is fed by a YAML config file plus optional `--sink-opt key=value` CLI overrides. See [Sinks](#sinks) for the per-sink config schema and [ADR: FileOptions widening](#adr-fileoptions-widening) for the design rationale.
+M5 (this release): completes the v1 surface. `init` writes a YAML config and optionally installs the Claude Code Stop-hook in one command (with a `--yes` non-interactive mode for scripted bootstrap). `import --format markdown-frontmatter <dir>` bulk-loads existing markdown notes into the database, idempotent on re-run via a content-hash dedup. Four new templates round out the v1 set (`tool-missing-capability`, `auth-expiry`, `schema-drift`, `doc-gap`), all auto-picked by matching the friction's `category`.
 
 ## Try it in 60 seconds
 
@@ -45,6 +45,8 @@ The data isn't the goal. The goal is the inferences that the data enables once a
 
 | Command | What it does |
 |---------|--------------|
+| `init` | One-command setup: detects the local environment (Claude Code dir, `gh` CLI, Linear key, agent-tasks token), suggests a default sink, writes `~/.config/friction-log/config.yml`, and (when Claude Code is present) offers to install the Stop-hook. Non-interactive: `init --sink <name> --yes`. Idempotent. |
+| `import <path>` | Bulk-ingest frictions from a directory of markdown files. `--format markdown-frontmatter` (the only format in M5) parses YAML frontmatter, falls back to the first `# H1` for the title, preserves unknown frontmatter keys as `key:value` tags, and dedupes on a content hash so re-running the same import is a no-op. |
 | `log` | Manually record a friction with title, tool, category, severity. Returns the new id. Optional `--recurrence-of <id>` to explicitly mark a duplicate; otherwise auto-links on matching (tool, title) against an open root, see [recurrence semantics](#recurrence_of_id-semantics). |
 | `list` | List frictions with filters: `--status`, `--tool`, `--category`, `--source`, `--age 14d`, `--limit`. Use `--json` for piping. |
 | `search <query>` | FTS5 MATCH over title and description, plus the same structured filters as `list`. Use `--json` for piping. Accepts the full [FTS5 query syntax](https://sqlite.org/fts5.html#full_text_query_syntax). |
@@ -54,7 +56,7 @@ The data isn't the goal. The goal is the inferences that the data enables once a
 | `scan` | Parse a transcript and extract candidate frictions (tool-call errors, non-zero Bash exits, friction phrases). Flags: `--transcript <path>`, `--session <id>`, `--adapter claude-code`, `--silent`, `--stdin-payload`. Idempotent on re-run. |
 | `bilanz` | Print a session-boundary summary: tools exercised, frictions noticed, tasks filed, plus a highlighted list of open frictions that have not been filed yet. `--session <id>` defaults to the most recent session. |
 | `rm <id>` | Delete a friction and any task rows pointing at it from the local store. |
-| `update <id> --status <state>` | Change a friction's status. Useful when the agent-tasks or github-issues sinks land in M4 and you want to retroactively mark older rows. |
+| `update <id> --status <state>` | Change a friction's status. |
 
 Run any command with `--help` for the full flag list.
 
@@ -208,13 +210,17 @@ The pre-M4 `FileOptions { sinkTarget?: string }` was too narrow for sinks that n
 
 ## Templates
 
-Three generic categories ship with M1:
+Seven categories ship in v1:
 
 | Template | When to use |
 |----------|-------------|
 | `tool-error` | Tool, CLI, or MCP verb behaves differently than its docs claim. |
 | `output-overflow` | Tool output overflows the agent's context window or significantly degrades performance. |
 | `workflow-friction` | Generic catch-all. Used as the fallback when no category matches. |
+| `tool-missing-capability` | Tool lacks a capability the workflow needs; not a defect, a gap. |
+| `auth-expiry` | Token, JWT, session, or OAuth refresh lifecycle issue. |
+| `schema-drift` | Tool schema contradicts the workflow's expected contract. |
+| `doc-gap` | Tool behavior contradicts its documentation; usually a one-line doc PR upstream. |
 
 Each template is a YAML file under `packages/friction-log/templates/`. Mustache-style `{{var}}` substitution: `id`, `title`, `description`, `tool`, `category`, `severity`, `capturedAt`, `sessionId`, `source`.
 
@@ -222,9 +228,7 @@ The `--template <name>` flag on `file` overrides the auto-selection.
 
 ## What's next
 
-| Milestone | Scope |
-|-----------|-------|
-| M5 | `init` (interactive setup), `import` (markdown-frontmatter), remaining templates. |
+The v1 surface is complete. Future ideas (no scheduled milestone): web dashboard, vector-based recurrence detection, additional import formats (github-issues, agent-tasks backfill), `digest --with-llm` for end-of-week reviews.
 
 ## Design notes
 

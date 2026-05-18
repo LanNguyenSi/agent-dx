@@ -1,0 +1,26 @@
+name: schema-drift
+title: "{{tool}}: schema contradicts workflow docs"
+priority: MEDIUM
+labels:
+  - tooling
+  - friction
+  - schema-drift
+body: |
+  ## Symptom
+
+  {{description}}
+
+  ## Context
+
+  - Tool surface: `{{tool}}`
+  - Captured: {{capturedAt}}
+  - Session: `{{sessionId}}`
+  - Source: `{{source}}`
+
+  ## Drift detected
+
+  The schema returned (or accepted) by `{{tool}}` does not match what the workflow docs / call-site expects. This is the class of bug that quietly corrupts downstream code paths until something explodes far from the cause.
+
+  ## Suggested next step
+
+  Pin both sides: snapshot the actual schema (`--help`, sample response, OpenAPI dump) and the expected schema (workflow contract / type declaration). File the diff so the next contributor finds it before they hit the same wall.

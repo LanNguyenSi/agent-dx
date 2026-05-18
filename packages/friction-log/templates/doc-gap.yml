@@ -1,0 +1,30 @@
+name: doc-gap
+title: "{{tool}}: behavior contradicts documentation"
+priority: LOW
+labels:
+  - tooling
+  - friction
+  - doc-gap
+body: |
+  ## Symptom
+
+  {{description}}
+
+  ## Context
+
+  - Tool surface: `{{tool}}`
+  - Captured: {{capturedAt}}
+  - Session: `{{sessionId}}`
+  - Source: `{{source}}`
+
+  ## What the docs claim
+
+  _Quote the exact passage that misled the workflow. Link to the URL or path._
+
+  ## What actually happened
+
+  See symptom. The gap is small enough to fix in docs alone, no tool change needed.
+
+  ## Suggested next step
+
+  Send a one-line doc PR upstream, or pin the corrected note in the team's internal playbook so future runs do not pay this cost again.
