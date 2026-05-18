@@ -1,0 +1,30 @@
+name: auth-expiry
+title: "{{tool}}: auth / token lifecycle issue"
+priority: HIGH
+labels:
+  - tooling
+  - friction
+  - auth-expiry
+body: |
+  ## Symptom
+
+  {{description}}
+
+  ## Context
+
+  - Tool surface: `{{tool}}`
+  - Captured: {{capturedAt}}
+  - Session: `{{sessionId}}`
+  - Source: `{{source}}`
+
+  ## Suspected cause
+
+  Token, JWT, session, or OAuth refresh lifecycle. Common shapes: skew at the issuer, expiry window too tight, refresh not wired, scope drift.
+
+  ## Reproduction
+
+  _Capture the failing request, the credential's iat / exp, and the wall-clock at failure time. Without those three the next debug pass restarts from scratch._
+
+  ## Suggested next step
+
+  Check the credential's exp vs `date -u +%s` at failure, then widen the issuance window or wire a refresh. If skew is in play, document the deployment environment's clock source.

@@ -1,0 +1,26 @@
+name: tool-missing-capability
+title: "{{tool}}: missing capability for workflow"
+priority: MEDIUM
+labels:
+  - tooling
+  - friction
+  - tool-missing-capability
+body: |
+  ## Symptom
+
+  {{description}}
+
+  ## What the workflow needs
+
+  `{{tool}}` is the natural place for this capability, but the surface does not expose it. The workflow currently has to either route around the gap, file a manual ticket, or stop early.
+
+  ## Context
+
+  - Tool surface: `{{tool}}`
+  - Captured: {{capturedAt}}
+  - Session: `{{sessionId}}`
+  - Source: `{{source}}`
+
+  ## Suggested next step
+
+  Decide whether to: (a) request the capability upstream, (b) ship a sibling tool that fills the gap, or (c) document the workaround so future runs do not pay this cost again.
