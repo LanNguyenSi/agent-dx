@@ -8,10 +8,13 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html"],
       reportsDirectory: "coverage",
-      // src/index.ts is the commander CLI wrapper; meaningful coverage
-      // there needs a buildProgram-factory refactor like release-prep
-      // got (filed as a follow-up). lib.ts holds the testable logic.
-      exclude: ["src/index.ts"],
+      // Scope coverage strictly to source. CI builds before running
+      // tests, so without an explicit include the report counts dist/
+      // compiled output too. src/index.ts is the commander CLI wrapper;
+      // meaningful coverage there needs a buildProgram-factory refactor
+      // like release-prep got (filed as a follow-up).
+      include: ["src/**/*.ts"],
+      exclude: ["src/index.ts", "src/**/*.test.ts", "src/**/__tests__/**"],
       thresholds: {
         lines: 80,
         functions: 80,
