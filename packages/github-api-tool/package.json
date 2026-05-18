@@ -30,7 +30,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^4.1.1"
+    "vitest": "^4.1.6"
   },
   "overrides": {
     "postcss": "^8.5.10"
