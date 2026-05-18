@@ -6,7 +6,7 @@ Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggabl
 
 ## Status
 
-M2 (this release): adds `scan` (Claude Code transcript adapter), `bilanz` (session-boundary summary), `rm`, and `update` on top of the M1 surface. The Stop-hook integration documented below closes the per-session capture loop. FTS5 `search`, `digest` aggregations, and additional sinks (`github-issues`, `agent-tasks`, `linear`, `stdout-json`) land in subsequent milestones, see [#followups](#whats-next).
+M3 (this release): turns the accumulated data into queries. `search` exposes the FTS5 virtual table that has existed since M1, `digest` aggregates frictions by tool / category / severity / source with open-vs-filed ratios and a time-to-triage proxy, `export` ships JSON / CSV / Markdown, and a cheap auto-link for `recurrence_of_id` makes "this happened again" visible without manual cross-referencing. Schema v2 adds a CHECK constraint on `severity` so the programmatic API matches the CLI's validation. Additional sinks (`github-issues`, `agent-tasks`, `linear`, `stdout-json`) still land in M4, see [#followups](#whats-next).
 
 ## Try it in 60 seconds
 
@@ -45,8 +45,11 @@ The data isn't the goal. The goal is the inferences that the data enables once a
 
 | Command | What it does |
 |---------|--------------|
-| `log` | Manually record a friction with title, tool, category, severity. Returns the new id. |
+| `log` | Manually record a friction with title, tool, category, severity. Returns the new id. Optional `--recurrence-of <id>` to explicitly mark a duplicate; otherwise auto-links on matching (tool, title) against an open root, see [recurrence semantics](#recurrence_of_id-semantics). |
 | `list` | List frictions with filters: `--status`, `--tool`, `--category`, `--source`, `--age 14d`, `--limit`. Use `--json` for piping. |
+| `search <query>` | FTS5 MATCH over title and description, plus the same structured filters as `list`. Use `--json` for piping. Accepts the full [FTS5 query syntax](https://sqlite.org/fts5.html#full_text_query_syntax). |
+| `digest --group-by <field>` | Aggregations over frictions: total, open / filed / resolved / wontfix counts, open percentage, recurrence count, and average hours from `captured_at` to the first `tasks.created_at` (time-to-triage proxy). `--group-by tool|category|severity|source`. Optional `--last <span>` window. |
+| `export --format <json\|csv\|md>` | Render frictions for offline analysis or hand-off. Same filter combinators as `list`, plus `--query <text>` for an FTS pre-filter. `--out <path>` writes to a file, otherwise stdout. |
 | `file <id>` | Push a friction through a sink. Default sink is `markdown-file`, default template matches the friction's category and falls back to `workflow-friction`. |
 | `scan` | Parse a transcript and extract candidate frictions (tool-call errors, non-zero Bash exits, friction phrases). Flags: `--transcript <path>`, `--session <id>`, `--adapter claude-code`, `--silent`, `--stdin-payload`. Idempotent on re-run. |
 | `bilanz` | Print a session-boundary summary: tools exercised, frictions noticed, tasks filed, plus a highlighted list of open frictions that have not been filed yet. `--session <id>` defaults to the most recent session. |
@@ -98,6 +101,21 @@ SQLite under `~/.local/share/friction-log/db.sqlite` (XDG-compliant). Override w
 
 Schema (M1): `sessions`, `frictions` (plus FTS5 virtual table), `tasks` (records what was filed to which sink), `tags`, `schema_version`.
 
+Schema v2 (M3): adds `CHECK(severity IN ('low','medium','high','critical') OR severity IS NULL)` to `frictions`. On upgrade the migration normalizes any rogue severity values to `NULL` before swapping the table in, so existing rows survive. The FTS5 virtual table and triggers are recreated against the new physical table.
+
+### `recurrence_of_id` semantics
+
+When `log` (or `scan`) inserts a new friction without an explicit `--recurrence-of` flag, the database looks for an existing friction that is:
+
+1. `status = 'open'`,
+2. itself a root (`recurrence_of_id IS NULL`),
+3. with the same `tool_surface`,
+4. and the same `title` (exact match).
+
+The oldest such match becomes the new friction's `recurrence_of_id`. The chain therefore always points one level deep, at the root; downstream queries can `GROUP BY coalesce(recurrence_of_id, id)` to fold recurrences into their root for free.
+
+This is the cheap, deterministic rule, deliberately small enough to predict by eye. A future milestone may add fuzzier matching (template-aware, vector-based) behind an opt-in flag, but the cheap rule is the default so the database remains explainable from a glance at the source.
+
 ## Sinks
 
 A sink is the thing that receives a rendered friction. v1 ships `markdown-file` only, but the interface is pluggable:
@@ -131,7 +149,6 @@ The `--template <name>` flag on `file` overrides the auto-selection.
 
 | Milestone | Scope |
 |-----------|-------|
-| M3 | `search` (FTS5), `digest`, `export` (JSON, CSV, Markdown). |
 | M4 | Additional sinks: `github-issues`, `agent-tasks`, `linear`, `stdout-json`. |
 | M5 | `init` (interactive setup), `import` (markdown-frontmatter), remaining templates. |
 
@@ -141,7 +158,7 @@ Public-tool framing: zero LanNguyenSi-stack assumptions in the core. The default
 
 Local SQLite, single-user, single-machine. No sync, no server, no cloud. Friction records are personal observation data, the smallest store that lets queries answer questions is the right one.
 
-Deterministic detection only: regex on tool-call errors, non-zero exits, friction phrases. No LLM API calls in the default Stop-hook so it stays free and fast. An opt-in `--with-llm` flag is on the M3+ roadmap for deeper end-of-week reviews.
+Deterministic detection only: regex on tool-call errors, non-zero exits, friction phrases. No LLM API calls in the default Stop-hook so it stays free and fast. An opt-in `--with-llm` flag for deeper end-of-week reviews is on the M5+ roadmap.
 
 ## Where this fits
 

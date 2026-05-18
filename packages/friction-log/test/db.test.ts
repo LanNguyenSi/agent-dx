@@ -6,10 +6,10 @@ function memDb(): FrictionDb {
 }
 
 describe('FrictionDb', () => {
-  it('applies the initial migration and reports schema version 1', () => {
+  it('applies all migrations and reports the latest schema version', () => {
     const db = memDb();
     try {
-      expect(db.schemaVersion()).toBe(1);
+      expect(db.schemaVersion()).toBe(2);
     } finally {
       db.close();
     }
