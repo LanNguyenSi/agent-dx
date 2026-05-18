@@ -58,7 +58,16 @@ export interface RenderedTemplate {
 }
 
 export interface FileOptions {
+  // Legacy shortcut used by markdown-file's CLI flag. Equivalent to
+  // sinkOpts.target for that sink, kept on FileOptions so the old call shape
+  // (`{ sinkTarget }`) keeps compiling.
   sinkTarget?: string;
+  // Sink-specific configuration. The `file` command merges the config-file
+  // section for the sink with any --sink-opt CLI overrides and passes the
+  // result here. Each sink validates the keys it cares about; unknown keys
+  // are passed through untouched so a forward-compatible CLI doesn't fail
+  // against an older sink build.
+  sinkOpts?: Record<string, unknown>;
 }
 
 export interface FileResult {

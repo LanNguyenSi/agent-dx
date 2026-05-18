@@ -18,7 +18,9 @@ import {
 } from './commands/scan.js';
 import { runSearch } from './commands/search.js';
 import { runUpdate } from './commands/update.js';
+import { parseSinkOpts } from './config.js';
 import type { DigestGroupBy } from './db.js';
+import { availableSinks } from './sinks/index.js';
 import type { FrictionSource, FrictionStatus, Severity } from './types.js';
 
 function readPackageVersion(): string {
@@ -113,23 +115,38 @@ program
 program
   .command('file <frictionId>')
   .description('Push a friction to a configured sink. Default sink: markdown-file.')
-  .option('--sink <name>', 'Sink to use (M1: markdown-file)')
+  .addOption(
+    new Option('--sink <name>', 'Sink to use')
+      .choices([...availableSinks])
+      .default('markdown-file')
+  )
   .option('--template <name>', 'Template override (defaults to friction.category match)')
-  .option('--sink-target <value>', 'Sink-specific target (e.g. directory path for markdown-file)')
+  .option('--sink-target <value>', 'Sink-specific target (markdown-file: directory path)')
+  .option(
+    '--sink-opt <key=value>',
+    'Per-sink option override, repeatable (e.g. --sink-opt repo=owner/name)',
+    (value: string, previous: string[] = []) => [...previous, value],
+    [] as string[]
+  )
+  .option('--config <path>', 'Override config file path (default: $XDG_CONFIG_HOME/friction-log/config.yml)')
   .option('--db <path>', 'Override database path')
-  .action(async (frictionId: string, opts: Record<string, string>) => {
+  .action(async (frictionId: string, opts: Record<string, unknown>) => {
     const id = Number(frictionId);
     if (!Number.isInteger(id) || id <= 0) {
       process.stderr.write(`friction-log: <frictionId> must be a positive integer, got "${frictionId}"\n`);
       process.exit(2);
     }
     try {
+      const sinkOptPairs = Array.isArray(opts.sinkOpt) ? (opts.sinkOpt as string[]) : [];
+      const sinkOpts = sinkOptPairs.length ? parseSinkOpts(sinkOptPairs) : undefined;
       const out = await runFile({
         frictionId: id,
-        sink: opts.sink,
-        template: opts.template,
-        sinkTarget: opts.sinkTarget,
-        dbPath: opts.db,
+        sink: opts.sink as string,
+        template: opts.template as string | undefined,
+        sinkTarget: opts.sinkTarget as string | undefined,
+        sinkOpts,
+        configPath: opts.config as string | undefined,
+        dbPath: opts.db as string | undefined,
       });
       process.stdout.write(
         `filed friction id=${id} via sink=${out.sinkName} target=${out.sinkTarget}\n${out.message}\n`

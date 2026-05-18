@@ -6,7 +6,7 @@ Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggabl
 
 ## Status
 
-M3 (this release): turns the accumulated data into queries. `search` exposes the FTS5 virtual table that has existed since M1, `digest` aggregates frictions by tool / category / severity / source with open-vs-filed ratios and a time-to-triage proxy, `export` ships JSON / CSV / Markdown, and a cheap auto-link for `recurrence_of_id` makes "this happened again" visible without manual cross-referencing. Schema v2 adds a CHECK constraint on `severity` so the programmatic API matches the CLI's validation. Additional sinks (`github-issues`, `agent-tasks`, `linear`, `stdout-json`) still land in M4, see [#followups](#whats-next).
+M4 (this release): closes the discipline loop end-to-end. The four planned sinks ship behind a lazy-loading registry, so `friction-log file <id> --sink <name>` can now push directly into GitHub Issues, agent-tasks, Linear, or stdout-as-JSON. `FileOptions` was widened (`sinkOpts: Record<string, unknown>`) and is fed by a YAML config file plus optional `--sink-opt key=value` CLI overrides. See [Sinks](#sinks) for the per-sink config schema and [ADR: FileOptions widening](#adr-fileoptions-widening) for the design rationale.
 
 ## Try it in 60 seconds
 
@@ -118,18 +118,93 @@ This is the cheap, deterministic rule, deliberately small enough to predict by e
 
 ## Sinks
 
-A sink is the thing that receives a rendered friction. v1 ships `markdown-file` only, but the interface is pluggable:
+A sink is the thing that receives a rendered friction. Five sinks ship, all behind a lazy-loaded registry (the Linear API client and the agent-tasks REST helper only get imported when those sinks are actually picked):
 
 ```ts
 interface Sink {
   readonly name: string;
   file(friction: Friction, rendered: RenderedTemplate, opts: FileOptions): Promise<FileResult>;
 }
+
+interface FileOptions {
+  sinkTarget?: string;                   // markdown-file legacy shortcut
+  sinkOpts?: Record<string, unknown>;    // merged config-file defaults + CLI overrides
+}
 ```
 
-The default `markdown-file` sink writes a file under `~/.local/share/friction-log/frictions/` (override with `FRICTION_LOG_MARKDOWN_DIR` or `--sink-target /path/to/dir`). The file has YAML frontmatter with `friction_id`, `captured_at`, `priority`, `labels`, plus tool surface, category, and severity when set.
+Sink-specific configuration lives in `$XDG_CONFIG_HOME/friction-log/config.yml` (override with `FRICTION_LOG_CONFIG=/path` or `--config /path`). CLI overrides via `--sink-opt key=value` (repeatable) win on key collision. Heuristic value coercion: commas split into arrays, `true`/`false`/`null` are literal, integers parse as numbers, prefix `s:` for a literal that would otherwise coerce.
 
-Planned for later milestones: `github-issues` (via `gh` CLI), `agent-tasks` (via MCP), `linear` (via API token), `stdout-json` (for piping).
+### `markdown-file` (default)
+
+Writes a markdown file under `~/.local/share/friction-log/frictions/` (override with `FRICTION_LOG_MARKDOWN_DIR` or `--sink-target /path/to/dir`). YAML frontmatter with `friction_id`, `captured_at`, `priority`, `labels`, plus tool surface, category, and severity when set. No external dependencies.
+
+### `stdout-json`
+
+Emits a single-line JSON record to stdout and returns. Useful for piping into custom workflows:
+
+```bash
+friction-log file 7 --sink stdout-json | jq '.rendered.body'
+```
+
+The schema is stable: any future field is additive.
+
+### `github-issues`
+
+Spawns `gh issue create` under the hood, so authentication, retries, and proxy config stay with the `gh` CLI. Required: `repo` (`owner/name`). Optional: `labels`, `assignee`, `milestone`.
+
+```yaml
+# config.yml
+sinks:
+  github-issues:
+    repo: LanNguyenSi/agent-dx
+    labels: [bug, friction]
+    assignee: lavaclawdbot
+```
+
+```bash
+friction-log file 7 --sink github-issues
+# or override per-call:
+friction-log file 7 --sink github-issues --sink-opt repo=other/repo --sink-opt labels=quick-fix
+```
+
+### `agent-tasks`
+
+Two modes, both honest about what they do:
+
+- **`mode: rest` (default)**: POSTs to `<apiBase>/api/projects/<id>/tasks` with bearer auth. Requires `apiBase`, `projectId`, and a token from `AGENT_TASKS_TOKEN` env or `token:` in config.
+- **`mode: mcp-emit`**: prints the equivalent `mcp__agent-tasks__task_create` invocation JSON to stdout and returns; no network call is made. This is the version of "the MCP path" that an honest standalone Node CLI can actually offer. An agent-harness wrapper can pick the line up and execute it under its own MCP scope.
+
+```yaml
+sinks:
+  agent-tasks:
+    mode: rest
+    apiBase: https://agent-tasks.opentriologue.ai
+    projectId: 8238805d-8185-4ad8-9f2b-36677ac4521d
+    # token: # set AGENT_TASKS_TOKEN env var instead in production
+```
+
+### `linear`
+
+GraphQL `issueCreate` against `api.linear.app/graphql`. Required: `teamId` and an API key (`LINEAR_API_KEY` env or `apiKey:` in config). Optional: `state` (matched case-insensitively against the team's workflow-state names; one extra query resolves it to a state id) and `assignee`.
+
+```yaml
+sinks:
+  linear:
+    teamId: TEAM-UUID
+    state: Backlog
+```
+
+> Note: Linear allows duplicate state names across a team's workflow. If two states share a name, the sink picks the first match in the API response and emits no warning. Pass the state's UUID directly via `--sink-opt state=<uuid>` when the name is not unique.
+
+## ADR: FileOptions widening
+
+The pre-M4 `FileOptions { sinkTarget?: string }` was too narrow for sinks that need a project id, an api base, a team id, etc. Three options were considered (per the M4 task description):
+
+- **A. Discriminated union per sink.** Strictest, but every sink change becomes a type bump in `types.ts`; doesn't compose with config files cleanly.
+- **B. Open `Record<string, unknown>` bag validated per sink.** Flexible, forward-compatible CLI, but loses the type-level guarantee that a given key exists.
+- **C. Drop CLI options entirely, read everything from `config.yml`.** Simplest CLI, but blocks one-off `--sink-opt repo=other/repo` overrides that are convenient when scripting.
+
+**Shipped: B with a config-file layer.** Each sink reads `opts.sinkOpts`, which is the merge of the per-sink section in `config.yml` and any `--sink-opt key=value` CLI overrides (CLI wins on collision). Each sink validates the keys it cares about and surfaces missing-required-key with a single-line error pointing at both the config path and the equivalent `--sink-opt` flag. Unknown keys pass through untouched so a forward-compatible CLI does not fail against an older sink build. The C option (drop CLI options entirely) was rejected because `--sink-opt repo=other/repo` overrides are convenient when scripting one-off file calls.
 
 ## Templates
 
@@ -149,7 +224,6 @@ The `--template <name>` flag on `file` overrides the auto-selection.
 
 | Milestone | Scope |
 |-----------|-------|
-| M4 | Additional sinks: `github-issues`, `agent-tasks`, `linear`, `stdout-json`. |
 | M5 | `init` (interactive setup), `import` (markdown-frontmatter), remaining templates. |
 
 ## Design notes
