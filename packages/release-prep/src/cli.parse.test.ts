@@ -64,7 +64,27 @@ describe("release-prep CLI parser", () => {
     });
   });
 
-  it("accepts the -v alias for an explicit version on `prep`", async () => {
+  it("forwards `prep --target-version <value>` to runPrep (df353865 fix)", async () => {
+    const runPrep = vi.fn().mockResolvedValue(undefined);
+    const program = makeProgram({ runPrep });
+
+    await program.parseAsync([
+      "node",
+      "release-prep",
+      "prep",
+      "--target-version",
+      "9.9.9",
+      "--dry-run",
+    ]);
+
+    expect(runPrep).toHaveBeenCalledOnce();
+    expect(runPrep.mock.calls[0]?.[0]).toMatchObject({
+      targetVersion: "9.9.9",
+      dryRun: true,
+    });
+  });
+
+  it("accepts the -v short alias for --target-version on `prep`", async () => {
     const runPrep = vi.fn().mockResolvedValue(undefined);
     const program = makeProgram({ runPrep });
 
@@ -79,46 +99,31 @@ describe("release-prep CLI parser", () => {
 
     expect(runPrep).toHaveBeenCalledOnce();
     expect(runPrep.mock.calls[0]?.[0]).toMatchObject({
-      version: "9.9.9",
+      targetVersion: "9.9.9",
       dryRun: true,
     });
   });
 
-  // Regression for df353865-7e8b-4935-89a8-0074cfe884cc: the `prep` subcommand
-  // declares `-v, --version <version>` but the root program also exposes
-  // commander's built-in `--version` (from `.version("0.1.0")`). When invoked
-  // as `prep --version <value>`, commander short-circuits on the root flag and
-  // prints "0.1.0" instead of forwarding to the prep handler.
-  //
-  // `it.fails` documents the bug without breaking CI. When df353865 is fixed
-  // (e.g. by renaming the subcommand flag to `--target-version`), this test
-  // must be flipped to `it(...)`, which gives the fix a clean ratchet.
-  it.fails(
-    "forwards `prep --version <value>` to runPrep without colliding with root --version (df353865)",
-    async () => {
-      const runPrep = vi.fn().mockResolvedValue(undefined);
-      const program = makeProgram({ runPrep });
+  // The subcommand option was renamed from --version to --target-version in
+  // df353865. Commander's built-in --version on the root program now owns the
+  // long form unambiguously; invoking `prep --version` short-circuits to the
+  // root version-printer (and exitOverride throws CommanderError version), the
+  // prep handler is never called. This test pins that contract so a future
+  // change that re-introduces a subcommand --version trips it.
+  it("treats `prep --version` as the root version short-circuit, not a prep option", async () => {
+    const runPrep = vi.fn().mockResolvedValue(undefined);
+    const program = makeProgram({ runPrep });
 
-      try {
-        await program.parseAsync([
-          "node",
-          "release-prep",
-          "prep",
-          "--version",
-          "9.9.9",
-          "--dry-run",
-        ]);
-      } catch {
-        // commander.exitOverride() throws when --version short-circuits.
-      }
-
-      expect(runPrep).toHaveBeenCalledOnce();
-      expect(runPrep.mock.calls[0]?.[0]).toMatchObject({
-        version: "9.9.9",
-        dryRun: true,
-      });
-    },
-  );
+    await expect(
+      program.parseAsync([
+        "node",
+        "release-prep",
+        "prep",
+        "--version",
+      ]),
+    ).rejects.toThrow();
+    expect(runPrep).not.toHaveBeenCalled();
+  });
 
   it("rejects an unknown subcommand", async () => {
     const program = makeProgram();

@@ -261,7 +261,7 @@ export function computeNextVersion(
 
   if (!requestedBump) {
     throw new Error(
-      "No commits found to derive the next version. Use --version to set one explicitly.",
+      "No commits found to derive the next version. Use --target-version to set one explicitly.",
     );
   }
 
