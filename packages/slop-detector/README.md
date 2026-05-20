@@ -149,6 +149,37 @@ For a faster, staged-files-only variant pair with [lint-staged](https://github.c
 
 A dedicated GitHub Action with PR annotations is planned for M3.
 
+## MCP server
+
+slop-detector also ships a stdio [MCP](https://modelcontextprotocol.io) server (`bin`: `slop-detector-mcp`, entry point `dist/mcp.js`), so an agent can scan commit messages, PR bodies, and files as a native tool call instead of shelling out to the CLI.
+
+It exposes one tool, `slop_check`:
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `text` | string | In-memory string to scan. Mutually exclusive with `path`. |
+| `path` | string | File or directory to scan. Mutually exclusive with `text`. |
+| `filename` | string | Filename assumed for `text` input (prose-vs-code detection). |
+| `packs` | string[] | Restrict to these packs; off-by-default packs only run when named. |
+| `configPath` | string | Path to a `slop.config.yml` / `.json`. |
+
+It returns each violation as `SEVERITY line:col rule message`, grouped by file, plus a one-line tally.
+
+Register it with your runtime by pointing at the built entry point:
+
+```json
+{
+  "mcpServers": {
+    "slop-detector": {
+      "command": "node",
+      "args": ["/absolute/path/to/slop-detector/dist/mcp.js"]
+    }
+  }
+}
+```
+
+Run `npm run build` first so `dist/mcp.js` exists.
+
 ## Exit codes
 
 | Code | Meaning |
