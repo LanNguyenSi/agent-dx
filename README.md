@@ -75,7 +75,7 @@ Experimental: each package has its own version, README, and CI. APIs may evolve 
 
 ## Where this fits
 
-`slop-detector` and the workshop around it contribute the authoring-side tooling to the [Project OS](https://github.com/LanNguyenSi/project-os) human-agent dev lifecycle. It sits alongside:
+`slop-detector` and the workshop around it contribute the authoring-side tooling to the [Project OS](https://github.com/LanNguyenSi/project-pilot) human-agent dev lifecycle. It sits alongside:
 
 - [agent-planforge](https://github.com/LanNguyenSi/agent-planforge) plans
 - [agent-tasks](https://github.com/LanNguyenSi/agent-tasks) coordinates
