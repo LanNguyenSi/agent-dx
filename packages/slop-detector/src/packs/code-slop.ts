@@ -729,10 +729,128 @@ const phantomImport: Rule = {
   },
 };
 
+// ─────────────────────────── Rule 7: placeholder (stub) function body ─────
+
+// Placeholder-ish text in a thrown error message, or in the error
+// constructor name (`NotImplementedError`).
+const STUB_THROW_TEXT =
+  /\b(?:not[\s-]*(?:yet[\s-]*)?implement|unimplement|todo|fixme|tbd|stub|placeholder|not[\s-]*supported|coming[\s-]*soon)/i;
+const STUB_THROW_CTOR = /^(?:not.?implement|unimplement)/i;
+
+type StubKind = "empty" | "throw" | "return";
+
+const STUB_BODY_MESSAGE: Record<StubKind, string> = {
+  empty: "has an empty body",
+  throw: "only throws a not-implemented error",
+  return: "only returns a trivial placeholder value (null / undefined / {} / [])",
+};
+
+// A string literal or a no-substitution template literal, else null.
+function staticStringValue(node: TSESTree.Node | undefined): string | null {
+  if (!node) return null;
+  if (node.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node.type === "TemplateLiteral" && node.expressions.length === 0 && node.quasis.length === 1) {
+    return node.quasis[0].value.cooked ?? node.quasis[0].value.raw;
+  }
+  return null;
+}
+
+// `throw new Error("not implemented")` / `throw new NotImplementedError()`.
+function isPlaceholderThrow(stmt: TSESTree.ThrowStatement): boolean {
+  const arg = stmt.argument;
+  if (arg.type !== "NewExpression") return false;
+  if (arg.callee.type === "Identifier" && STUB_THROW_CTOR.test(arg.callee.name)) return true;
+  const msg = staticStringValue(arg.arguments[0]);
+  return msg !== null && STUB_THROW_TEXT.test(msg);
+}
+
+// `return;` / `return null` / `return undefined` / `return void 0` /
+// `return {}` / `return []`.
+function isTrivialReturn(stmt: TSESTree.ReturnStatement): boolean {
+  const arg = stmt.argument;
+  if (!arg) return true;
+  if (arg.type === "Literal" && arg.value === null) return true;
+  if (arg.type === "Identifier" && arg.name === "undefined") return true;
+  if (arg.type === "UnaryExpression" && arg.operator === "void") return true;
+  if (arg.type === "ObjectExpression" && arg.properties.length === 0) return true;
+  if (arg.type === "ArrayExpression" && arg.elements.length === 0) return true;
+  return false;
+}
+
+// Classify a block body as a placeholder, or null when it is real code.
+function classifyStubBody(body: TSESTree.BlockStatement): StubKind | null {
+  if (body.body.length === 0) return "empty";
+  if (body.body.length !== 1) return null;
+  const stmt = body.body[0];
+  if (stmt.type === "ThrowStatement" && isPlaceholderThrow(stmt)) return "throw";
+  if (stmt.type === "ReturnStatement" && isTrivialReturn(stmt)) return "return";
+  return null;
+}
+
+function memberName(key: TSESTree.Node): string {
+  if (key.type === "Identifier") return key.name;
+  if (key.type === "Literal") return String(key.value);
+  if (key.type === "PrivateIdentifier") return `#${key.name}`;
+  return "method";
+}
+
+const stubBody: Rule = {
+  id: "code-slop/stub-body",
+  pack: "code-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    "A named function or method whose whole body is empty, a not-implemented throw, or a trivial `return null`/`undefined`/`{}`/`[]` is a scaffolded signature that was never finished. Implement it or delete the stub.",
+  // Ambient `.d.ts` files are declaration-only by design — never flag them.
+  appliesTo: (file) => appliesToCode(file) && !/\.d\.[cm]?ts$/i.test(file.path),
+  check(ctx: RuleContext): Violation[] {
+    const result = parseTsFile(ctx.file);
+    if (!result.ok) return [];
+    const violations: Violation[] = [];
+    const flag = (node: TSESTree.Node, name: string, kind: StubKind): void => {
+      violations.push(
+        makeViolation(
+          stubBody,
+          ctx.file,
+          nodeLoc(node),
+          `\`${name}\` ${STUB_BODY_MESSAGE[kind]} — finish the implementation or delete the stub`,
+          snippet(ctx.file, node),
+        ),
+      );
+    };
+
+    walk(result.ast as unknown as AnyNode, (node) => {
+      // Named function declarations. `export default function () {}` has no
+      // id (anonymous) and is skipped; overload signatures parse as
+      // TSDeclareFunction and never reach here.
+      if (node.type === "FunctionDeclaration") {
+        if (!node.id) return;
+        const kind = classifyStubBody(node.body);
+        if (kind) flag(node, node.id.name, kind);
+        return;
+      }
+      // Class methods. v1 stays conservative: only `method` kind, not
+      // constructors or accessors. Abstract methods parse as
+      // TSAbstractMethodDefinition and never match; an overload signature's
+      // value is a TSEmptyBodyFunctionExpression, skipped by the
+      // FunctionExpression guard below.
+      if (node.type === "MethodDefinition") {
+        if (node.kind !== "method") return;
+        const fn = node.value;
+        if (fn.type !== "FunctionExpression" || fn.body?.type !== "BlockStatement") return;
+        const kind = classifyStubBody(fn.body);
+        if (kind) flag(node, memberName(node.key), kind);
+        return;
+      }
+    });
+    return violations;
+  },
+};
+
 export const codeSlopPack: PackDefinition = {
   id: "code-slop",
   description:
-    "AST-based catches for AI-tic code: try/catch around non-throwing code, defaults on required-typed params, empty/rethrow catches, async without await, backcompat shims for unreleased APIs, imports of undeclared packages.",
+    "AST-based catches for AI-tic code: try/catch around non-throwing code, defaults on required-typed params, empty/rethrow catches, async without await, backcompat shims for unreleased APIs, imports of undeclared packages, placeholder function bodies.",
   rules: [
     tryCatchCannotThrow,
     defaultOnRequiredParam,
@@ -740,5 +858,6 @@ export const codeSlopPack: PackDefinition = {
     asyncWithoutAwait,
     backcompatShimUnreleased,
     phantomImport,
+    stubBody,
   ],
 };
