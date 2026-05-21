@@ -1,13 +1,12 @@
-# GitHub API Tool - OpenClaw Skill
+# GitHub API Tool Skill
 
 **Skill Name:** github-api-tool  
-**Purpose:** Enable OpenClaw agents to perform GitHub operations (issues, PRs, projects)  
-**Author:** Ice 🧊  
+**Purpose:** Enable AI agents to perform GitHub operations (issues, PRs, projects)  
 **Version:** 0.1.0
 
 ## Overview
 
-This skill provides direct GitHub API access for OpenClaw agents, enabling:
+This skill provides direct GitHub API access for AI agents, enabling:
 - Issue creation, assignment, and management
 - Pull request reviews and comments
 - Repository information queries
@@ -23,10 +22,11 @@ This skill provides direct GitHub API access for OpenClaw agents, enabling:
 
 2. **Tool Installation:**
    ```bash
-   cd /root/.openclaw/workspace/git/github-api-tool/cli
+   git clone https://github.com/LanNguyenSi/agent-dx.git
+   cd agent-dx/packages/github-api-tool
    npm install
    npm run build
-   npm link  # Makes 'github' command globally available
+   npm link  # Makes the 'github' command globally available
    ```
 
 3. **Verify Installation:**
@@ -41,28 +41,28 @@ This skill provides direct GitHub API access for OpenClaw agents, enabling:
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `issue create` | Create new issue | `github issue create --repo LanNguyenSi/frost --title "Bug: X" --body "..." --labels bug` |
-| `issue list` | List issues | `github issue list --repo LanNguyenSi/frost --state open` |
-| `issue assign` | Assign issue | `github issue assign --repo LanNguyenSi/frost --issue 42 --assignee lavaclawdbot` |
-| `issue comment` | Add comment | `github issue comment --repo LanNguyenSi/frost --issue 42 --body "Fixed!"` |
-| `issue close` | Close issue | `github issue close --repo LanNguyenSi/frost --issue 42` |
+| `issue create` | Create new issue | `github issue create --repo owner/repo --title "Bug: X" --body "..." --labels bug` |
+| `issue list` | List issues | `github issue list --repo owner/repo --state open` |
+| `issue assign` | Assign issue | `github issue assign --repo owner/repo --issue 42 --assignee octocat` |
+| `issue comment` | Add comment | `github issue comment --repo owner/repo --issue 42 --body "Fixed!"` |
+| `issue close` | Close issue | `github issue close --repo owner/repo --issue 42` |
 
 ### Pull Request Operations
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `pr list` | List PRs | `github pr list --repo LanNguyenSi/frost --state open` |
-| `pr comment` | Comment on PR | `github pr comment --repo LanNguyenSi/frost --pr 43 --body "LGTM!"` |
-| `pr review` | Submit review | `github pr review --repo LanNguyenSi/frost --pr 43 --event APPROVE --body "Approved!"` |
-| `pr merge` | Merge PR | `github pr merge --repo LanNguyenSi/frost --pr 43 --method squash` |
+| `pr list` | List PRs | `github pr list --repo owner/repo --state open` |
+| `pr comment` | Comment on PR | `github pr comment --repo owner/repo --pr 43 --body "LGTM!"` |
+| `pr review` | Submit review | `github pr review --repo owner/repo --pr 43 --event APPROVE --body "Approved!"` |
+| `pr merge` | Merge PR | `github pr merge --repo owner/repo --pr 43 --method squash` |
 
 ### Repository Info
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `repo commits` | List commits | `github repo commits --repo LanNguyenSi/frost --limit 10` |
-| `repo contributors` | List contributors | `github repo contributors --repo LanNguyenSi/frost` |
-| `repo info` | Get repo info | `github repo info --repo LanNguyenSi/frost` |
+| `repo commits` | List commits | `github repo commits --repo owner/repo --limit 10` |
+| `repo contributors` | List contributors | `github repo contributors --repo owner/repo` |
+| `repo info` | Get repo info | `github repo info --repo owner/repo` |
 
 ## Usage Patterns
 
@@ -71,11 +71,11 @@ This skill provides direct GitHub API access for OpenClaw agents, enabling:
 ```typescript
 // You discovered a security bug during review
 exec(`github issue create \
-  --repo LanNguyenSi/frost \
+  --repo owner/repo \
   --title "Security: SSRF vulnerability in auth.ts" \
   --body "Found SSRF vulnerability at line 42. External URL not validated before fetch()." \
   --labels security,bug,priority:high \
-  --assignee lavaclawdbot \
+  --assignee octocat \
   --json`);
 ```
 
@@ -83,10 +83,10 @@ exec(`github issue create \
 
 ```typescript
 // Get all open issues to report status
-const result = exec(`github issue list --repo LanNguyenSi/frost --state open --json`);
+const result = exec(`github issue list --repo owner/repo --state open --json`);
 const issues = JSON.parse(result.stdout);
 
-// Report to Lan
+// Report the open-issue count
 console.log(`Open issues: ${issues.length}`);
 issues.forEach(issue => {
   console.log(`#${issue.number}: ${issue.title} (${issue.labels.join(', ')})`);
@@ -98,10 +98,10 @@ issues.forEach(issue => {
 ```typescript
 // You completed thorough security review
 exec(`github pr review \
-  --repo LanNguyenSi/frost \
+  --repo owner/repo \
   --pr 43 \
   --event APPROVE \
-  --body "Security review complete. All 50+ checkpoints validated. LGTM! 🧊"`);
+  --body "Security review complete. All 50+ checkpoints validated. LGTM!"`);
 ```
 
 ### 4. Request Changes on PR
@@ -115,7 +115,7 @@ const issues = [
 ];
 
 exec(`github pr review \
-  --repo LanNguyenSi/frost \
+  --repo owner/repo \
   --pr 43 \
   --event REQUEST_CHANGES \
   --body "Found ${issues.length} issues:\n\n${issues.map((i, idx) => `${idx + 1}. ${i}`).join('\n')}"`);
@@ -126,7 +126,7 @@ exec(`github pr review \
 ```typescript
 // After completing 8KB review document
 exec(`github pr comment \
-  --repo LanNguyenSi/frost \
+  --repo owner/repo \
   --pr 43 \
   --body "Comprehensive review complete! See full analysis: [REVIEW-2026-03-16.md](link).\n\n**Summary:**\n- Security: ✅ No issues\n- Type Safety: ✅ All strict\n- Error Handling: ⚠️ 2 minor improvements suggested\n\n**Overall:** 9/10 - Excellent work! 🔥"`);
 ```
@@ -136,10 +136,10 @@ exec(`github pr comment \
 ```typescript
 // Create issue and assign based on label
 const issueType = "frontend";  // or "backend", "security", etc.
-const assignee = issueType === "frontend" ? "lavaclawdbot" : "ice";
+const assignee = issueType === "frontend" ? "frontend-team" : "backend-team";
 
 exec(`github issue create \
-  --repo LanNguyenSi/frost \
+  --repo owner/repo \
   --title "Feature: Add dark mode toggle" \
   --body "User requested dark mode in dashboard." \
   --labels feature,${issueType} \
@@ -151,7 +151,7 @@ exec(`github issue create \
 
 ```typescript
 // Get recent commits for daily log
-const result = exec(`github repo commits --repo LanNguyenSi/frost --limit 10 --json`);
+const result = exec(`github repo commits --repo owner/repo --limit 10 --json`);
 const commits = JSON.parse(result.stdout);
 
 // Analyze activity
@@ -165,7 +165,7 @@ The CLI handles errors gracefully:
 
 ```typescript
 try {
-  const result = exec(`github issue create --repo LanNguyenSi/frost --title "Bug" --body "..." --json`);
+  const result = exec(`github issue create --repo owner/repo --title "Bug" --body "..." --json`);
   const issue = JSON.parse(result.stdout);
   console.log(`Issue #${issue.number} created`);
 } catch (error) {
@@ -180,10 +180,10 @@ Always use `--json` flag when programmatically parsing output:
 
 ```typescript
 // ❌ BAD - Human-readable output (hard to parse)
-exec(`github issue list --repo LanNguyenSi/frost`);
+exec(`github issue list --repo owner/repo`);
 
 // ✅ GOOD - JSON output (easy to parse)
-const result = exec(`github issue list --repo LanNguyenSi/frost --json`);
+const result = exec(`github issue list --repo owner/repo --json`);
 const issues = JSON.parse(result.stdout);
 ```
 
@@ -193,10 +193,10 @@ const issues = JSON.parse(result.stdout);
 
 ```typescript
 // ❌ BAD
-exec(`github issue create --repo LanNguyenSi/frost --title "Bug" --body "Fix this"`);
+exec(`github issue create --repo owner/repo --title "Bug" --body "Fix this"`);
 
 // ✅ GOOD
-exec(`github issue create --repo LanNguyenSi/frost \
+exec(`github issue create --repo owner/repo \
   --title "Bug: Authentication fails with OAuth2" \
   --body "**Issue:** OAuth2 login returns 500 error\n**Expected:** Should return 401 with clear error message\n**Steps to Reproduce:**\n1. Click Login\n2. Enter invalid credentials\n3. Observe 500 error\n\n**Files:** src/auth/oauth.ts:42"`);
 ```
@@ -211,9 +211,8 @@ exec(`github issue create --repo LanNguyenSi/frost \
 ### 3. **Assign Based on Expertise**
 
 ```typescript
-// Frontend issues → Lava (fast prototyper)
-// Security/Backend → Ice (rigorous reviewer)
-const assignee = labels.includes("frontend") ? "lavaclawdbot" : "ice";
+// Route issues to the team that owns the area
+const assignee = labels.includes("frontend") ? "frontend-team" : "backend-team";
 ```
 
 ### 4. **Link Issues to PRs**
@@ -235,7 +234,7 @@ const assignee = labels.includes("frontend") ? "lavaclawdbot" : "ice";
 ### With Code Review Workflow
 
 ```typescript
-// 1. Review code (Ice's strength)
+// 1. Review code
 const review = performCodeReview(prNumber);
 
 // 2. Create issues for critical bugs
@@ -252,11 +251,11 @@ exec(`github pr review --repo ${repo} --pr ${prNumber} --event ${verdict} --body
 
 ```typescript
 // Log GitHub activity to memory
-const issues = JSON.parse(exec(`github issue list --repo LanNguyenSi/frost --json`).stdout);
-memory.write(`ice-logbook/2026-03-16.md`, `
+const issues = JSON.parse(exec(`github issue list --repo owner/repo --json`).stdout);
+memory.write(`activity-log/2026-03-16.md`, `
 ## GitHub Activity
 
-Created ${issues.filter(i => i.author === "ice").length} issues today:
+Created ${issues.filter(i => i.author === "octocat").length} issues today:
 ${issues.map(i => `- #${i.number}: ${i.title}`).join('\n')}
 `);
 ```
@@ -277,10 +276,10 @@ export GITHUB_TOKEN=ghp_...
 
 ```bash
 # ❌ Wrong
---repo frost
+--repo repo
 
 # ✅ Correct
---repo LanNguyenSi/frost
+--repo owner/repo
 ```
 
 ### "Failed to create issue" (403 Forbidden)
@@ -306,6 +305,5 @@ export GITHUB_TOKEN=ghp_...
 
 ## Support
 
-- **Author:** Ice 🧊
-- **Repository:** /root/.openclaw/workspace/git/github-api-tool
-- **Issues:** Use this tool to create issues about itself! 🎯
+- **Repository:** https://github.com/LanNguyenSi/agent-dx (packages/github-api-tool)
+- **Issues:** Use this tool to create issues about itself.

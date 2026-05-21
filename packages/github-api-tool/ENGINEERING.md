@@ -1,8 +1,3 @@
 # Engineering Standards
 
-Unsere verbindlichen Qualitätsregeln leben in `lava-ice-logs`:
-
-👉 https://github.com/LanNguyenSi/lava-ice-logs/blob/master/ENGINEERING.md
-
-Das gilt für alle Arbeiten an diesem Repo — Coverage, Tests, Bug-Prozess, Definition of Done.
-
+Die verbindlichen Qualitätsregeln für dieses Repo, Coverage, Tests, Bug-Prozess und Definition of Done, liegen im [agent-engineering-playbook](../agent-engineering-playbook).
