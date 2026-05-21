@@ -1,8 +1,6 @@
-# agent-entrypoint 🧊
+# agent-entrypoint
 
-> CLI to generate and validate `AGENT_ENTRYPOINT.yaml` — machine-readable project orientation files for AI agents.
-
-Built by Ice. Based on [lan-tools spec #7](https://github.com/LanNguyenSi/lava-ice-logs/blob/master/lan-tools/07-agent-entrypoint-manifest.md).
+> CLI to generate and validate `AGENT_ENTRYPOINT.yaml`, machine-readable project orientation files for AI agents.
 
 ## The Problem
 
@@ -40,8 +38,8 @@ authoritative_sources:
 ## Install
 
 ```bash
-git clone https://github.com/LanNguyenSi/agent-entrypoint
-cd agent-entrypoint
+git clone https://github.com/LanNguyenSi/agent-dx
+cd agent-dx/packages/agent-entrypoint
 npm install && npm run build
 # Optional: link globally
 npm link

@@ -63,17 +63,17 @@ git-batch status ~/git --fetch --json   # structured output for scripts / agents
 
 Per-repo JSON fields added beyond the base shape:
 
-- `upstream` — the tracking branch name (e.g. `origin/master`), or `null` when the current branch has no upstream configured (new local branch, detached HEAD).
-- `ahead` — commits on the current branch not yet on the upstream. `null` when there is no upstream.
-- `behind` — commits on the upstream not yet on the current branch. `null` when there is no upstream.
+- `upstream`: the tracking branch name (e.g. `origin/master`), or `null` when the current branch has no upstream configured (new local branch, detached HEAD).
+- `ahead`: commits on the current branch not yet on the upstream. `null` when there is no upstream.
+- `behind`: commits on the upstream not yet on the current branch. `null` when there is no upstream.
 
-`ahead`/`behind` are computed against the **local** copy of the upstream ref. Without `--fetch` they can be stale — the check is only as fresh as the last `git fetch`. Pass `--fetch` (or run `git-batch fetch ~/git` beforehand) to force a refresh.
+`ahead`/`behind` are computed against the **local** copy of the upstream ref. Without `--fetch` they can be stale, the check is only as fresh as the last `git fetch`. Pass `--fetch` (or run `git-batch fetch ~/git` beforehand) to force a refresh.
 
 #### `--fetch` error handling
 
 `--fetch` runs `git fetch --quiet` per repository. If a single repo's fetch fails (network error, unreachable remote, bad credentials), its entry is tagged `outcome: "fetch_failed"` but the batch continues. The remaining status fields still come from whatever refs happen to exist locally, so you get partial information instead of a hard stop.
 
-A repo with no remote configured at all is not a fetch failure — `git fetch --quiet` exits 0 silently, and `outcome` stays `ok`.
+A repo with no remote configured at all is not a fetch failure: `git fetch --quiet` exits 0 silently, and `outcome` stays `ok`.
 
 #### `--fetch` performance
 
@@ -81,7 +81,7 @@ A repo with no remote configured at all is not a fetch failure — `git fetch --
 
 #### Text output shape
 
-The plain-text `status` row inserts the new columns between `target=…` and `clean=…` — it is not a pure append:
+The plain-text `status` row inserts the new columns between `target=…` and `clean=…`, it is not a pure append:
 
 ```
 <repo>: branch=X target=Y upstream=U ahead=D behind=E clean=Z staged=… unstaged=… untracked=… [outcome=F]

@@ -134,7 +134,7 @@ interface FileOptions {
 }
 ```
 
-Sink-specific configuration lives in `$XDG_CONFIG_HOME/friction-log/config.yml` (override with `FRICTION_LOG_CONFIG=/path` or `--config /path`). CLI overrides via `--sink-opt key=value` (repeatable) win on key collision. Heuristic value coercion: commas split into arrays, `true`/`false`/`null` are literal, integers parse as numbers, prefix `s:` for a literal that would otherwise coerce.
+Sink-specific configuration lives in `~/.config/friction-log/config.yml` (override with `FRICTION_LOG_CONFIG=/path` or `--config /path`). CLI overrides via `--sink-opt key=value` (repeatable) win on key collision. Heuristic value coercion: commas split into arrays, `true`/`false`/`null` are literal, integers parse as numbers, prefix `s:` for a literal that would otherwise coerce.
 
 ### `markdown-file` (default)
 
@@ -160,7 +160,7 @@ sinks:
   github-issues:
     repo: LanNguyenSi/agent-dx
     labels: [bug, friction]
-    assignee: lavaclawdbot
+    assignee: octocat
 ```
 
 ```bash
