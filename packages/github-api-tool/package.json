@@ -1,7 +1,7 @@
 {
   "name": "github-api-tool",
   "version": "0.1.0",
-  "description": "GitHub API CLI tool for OpenClaw agents",
+  "description": "GitHub API CLI tool for AI agents",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -15,10 +15,9 @@
   "keywords": [
     "github",
     "api",
-    "cli",
-    "openclaw"
+    "cli"
   ],
-  "author": "Ice",
+  "author": "Lan Nguyen Si",
   "license": "MIT",
   "dependencies": {
     "@octokit/rest": "^20.0.0",
