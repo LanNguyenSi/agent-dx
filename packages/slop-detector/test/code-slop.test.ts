@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codeSlopPack } from "../src/packs/code-slop.js";
@@ -228,6 +228,152 @@ export function legacy() { return 1; }
     writeFileSync(filePath, text);
     const v = run("code-slop/backcompat-shim-unreleased", { path: filePath, text, kind: "code" });
     expect(v.length).toBeGreaterThan(0);
+  });
+});
+
+describe("code-slop/phantom-import", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "slop-phantom-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // Writes a package.json and a source file into tmpDir, returns the target.
+  function withPackage(pkgJson: object, source: string): FileTarget {
+    writeFileSync(join(tmpDir, "package.json"), JSON.stringify(pkgJson));
+    const filePath = join(tmpDir, "x.ts");
+    writeFileSync(filePath, source);
+    return { path: filePath, text: source, kind: "code" };
+  }
+
+  it("does not flag an import of a declared dependency", () => {
+    const f = withPackage(
+      { name: "fixture", dependencies: { lodash: "^4.0.0" } },
+      `import _ from "lodash";\n`,
+    );
+    expect(run("code-slop/phantom-import", f)).toHaveLength(0);
+  });
+
+  it("flags an import of an undeclared package", () => {
+    const f = withPackage(
+      { name: "fixture", dependencies: { lodash: "^4.0.0" } },
+      `import x from "hallucinated-pkg";\n`,
+    );
+    const v = run("code-slop/phantom-import", f);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("hallucinated-pkg");
+  });
+
+  it("reduces a subpath import to its package name", () => {
+    // `lodash/fp` resolves via the declared `lodash`; `missing/sub` does not.
+    const f = withPackage(
+      { name: "fixture", dependencies: { lodash: "^4.0.0" } },
+      `import fp from "lodash/fp";\nimport s from "missing/sub";\n`,
+    );
+    const v = run("code-slop/phantom-import", f);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("`missing`");
+  });
+
+  it("reduces a scoped specifier to `@scope/pkg`", () => {
+    const f = withPackage(
+      { name: "fixture", devDependencies: { "@scope/declared": "^1.0.0" } },
+      `import a from "@scope/declared/sub";\nimport b from "@scope/phantom";\n`,
+    );
+    const v = run("code-slop/phantom-import", f);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("@scope/phantom");
+  });
+
+  it("treats peerDependencies and optionalDependencies as declared", () => {
+    const f = withPackage(
+      {
+        name: "fixture",
+        peerDependencies: { react: "^18.0.0" },
+        optionalDependencies: { fsevents: "^2.0.0" },
+      },
+      `import r from "react";\nconst fse = require("fsevents");\n`,
+    );
+    expect(run("code-slop/phantom-import", f)).toHaveLength(0);
+  });
+
+  it("does not flag node builtins (bare, `node:`-prefixed, or a subpath)", () => {
+    const f = withPackage(
+      { name: "fixture" },
+      `import fs from "fs";\nimport path from "node:path";\nimport { readFile } from "fs/promises";\n`,
+    );
+    expect(run("code-slop/phantom-import", f)).toHaveLength(0);
+  });
+
+  it("does not flag relative imports or a self-import", () => {
+    const f = withPackage(
+      { name: "fixture" },
+      `import a from "./local.js";\nimport b from "../sibling.js";\nimport c from "fixture";\n`,
+    );
+    expect(run("code-slop/phantom-import", f)).toHaveLength(0);
+  });
+
+  it("flags an undeclared `require()` call", () => {
+    const f = withPackage({ name: "fixture" }, `const x = require("phantom-cjs");\n`);
+    const v = run("code-slop/phantom-import", f);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("phantom-cjs");
+  });
+
+  it("flags a re-export and a dynamic import of undeclared packages", () => {
+    const f = withPackage(
+      { name: "fixture" },
+      `export { thing } from "phantom-reexport";\nasync function load() { return import("phantom-dynamic"); }\n`,
+    );
+    const v = run("code-slop/phantom-import", f);
+    expect(v).toHaveLength(2);
+    const names = v.map((x) => x.message).join(" ");
+    expect(names).toContain("phantom-reexport");
+    expect(names).toContain("phantom-dynamic");
+  });
+
+  it("flags an undeclared `import = require()` declaration", () => {
+    const f = withPackage({ name: "fixture" }, `import legacy = require("phantom-equals");\n`);
+    const v = run("code-slop/phantom-import", f);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("phantom-equals");
+  });
+
+  it("is a no-op when no package.json is found above the file", () => {
+    // A loose file written into the tmp root with no package.json anywhere.
+    const filePath = join(tmpDir, "loose.ts");
+    const source = `import x from "anything-at-all";\n`;
+    writeFileSync(filePath, source);
+    expect(
+      run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" }),
+    ).toHaveLength(0);
+  });
+
+  it("does not flag a workspace sibling imported without a dependency entry", () => {
+    // tmpDir/ is the workspace root; packages/sib is a sibling of packages/app.
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "root", private: true, workspaces: ["packages/*"] }),
+    );
+    const sibDir = join(tmpDir, "packages", "sib");
+    mkdirSync(sibDir, { recursive: true });
+    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/sib" }));
+    const appDir = join(tmpDir, "packages", "app");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/app" }));
+    const filePath = join(appDir, "x.ts");
+    // The sibling is excluded, but a genuinely undeclared import from inside
+    // the same workspace package must still be flagged — the workspace logic
+    // must not widen `known` to "anything".
+    const source = `import s from "@ws/sib";\nimport q from "actually-phantom";\n`;
+    writeFileSync(filePath, source);
+    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("actually-phantom");
   });
 });
 
