@@ -17,9 +17,9 @@ This package focuses on the human and organizational side of agentic coding:
 
 ## Main playbooks
 
-**[PLAYBOOK-EN.md](PLAYBOOK-EN.md)** — Executive playbook (English)
+**[PLAYBOOK-EN.md](PLAYBOOK-EN.md)**: Executive playbook (English)
 
-**[PLAYBOOK.md](PLAYBOOK.md)** — Executive playbook (Deutsch)
+**[PLAYBOOK.md](PLAYBOOK.md)**: Executive playbook (Deutsch)
 
 ## One-page overview
 
@@ -40,9 +40,9 @@ These companion documents describe the difference between no review, normal revi
 
 ## Related projects
 
-- **[agent-engineering-playbook](https://github.com/LanNguyenSi/agent-engineering-playbook)** — Full technical reference with checklists and templates
-- **[project-forge](https://github.com/LanNguyenSi/project-forge)** — Greenfield scaffolding with built-in gates
-- **[depsight](https://github.com/LanNguyenSi/depsight)** — Security and dependency health for brownfield
+- **[agent-engineering-playbook](../agent-engineering-playbook)**: Full technical reference with checklists and templates
+- **[project-forge](https://github.com/LanNguyenSi/project-forge)**: Greenfield scaffolding with built-in gates
+- **[depsight](https://github.com/LanNguyenSi/depsight)**: Security and dependency health for brownfield
 
 ## Contributing
 

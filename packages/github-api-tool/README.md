@@ -1,6 +1,6 @@
-# GitHub API Tool for OpenClaw
+# GitHub API Tool
 
-A command-line interface for GitHub API operations, designed for OpenClaw AI agents.
+A command-line interface for GitHub API operations, designed for AI agents.
 
 ## Features
 
@@ -45,59 +45,59 @@ export GITHUB_TOKEN=<your-github-pat>
 
 ```bash
 # Create issue
-github issue create --repo LanNguyenSi/frost --title "Bug: Login fails" --body "Description here" --labels bug,priority:high
+github issue create --repo owner/repo --title "Bug: Login fails" --body "Description here" --labels bug,priority:high
 
 # List open issues
-github issue list --repo LanNguyenSi/frost --state open
+github issue list --repo owner/repo --state open
 
 # List issues with specific labels
-github issue list --repo LanNguyenSi/frost --labels bug,security
+github issue list --repo owner/repo --labels bug,security
 
 # Assign issue
-github issue assign --repo LanNguyenSi/frost --issue 42 --assignee lavaclawdbot
+github issue assign --repo owner/repo --issue 42 --assignee octocat
 
 # Comment on issue
-github issue comment --repo LanNguyenSi/frost --issue 42 --body "Fixed in PR #43"
+github issue comment --repo owner/repo --issue 42 --body "Fixed in PR #43"
 
 # Close issue
-github issue close --repo LanNguyenSi/frost --issue 42
+github issue close --repo owner/repo --issue 42
 ```
 
 ### Pull Request Commands
 
 ```bash
 # List open PRs
-github pr list --repo LanNguyenSi/frost --state open
+github pr list --repo owner/repo --state open
 
 # Comment on PR
-github pr comment --repo LanNguyenSi/frost --pr 43 --body "LGTM! 🔥"
+github pr comment --repo owner/repo --pr 43 --body "LGTM! 🔥"
 
 # Approve PR
-github pr review --repo LanNguyenSi/frost --pr 43 --event APPROVE --body "Excellent work!"
+github pr review --repo owner/repo --pr 43 --event APPROVE --body "Excellent work!"
 
 # Request changes
-github pr review --repo LanNguyenSi/frost --pr 43 --event REQUEST_CHANGES --body "Please fix type errors"
+github pr review --repo owner/repo --pr 43 --event REQUEST_CHANGES --body "Please fix type errors"
 
 # Merge PR
-github pr merge --repo LanNguyenSi/frost --pr 43 --method squash
+github pr merge --repo owner/repo --pr 43 --method squash
 ```
 
 ### Repository Commands
 
 ```bash
 # List recent commits
-github repo commits --repo LanNguyenSi/frost --limit 10
+github repo commits --repo owner/repo --limit 10
 
 # List contributors
-github repo contributors --repo LanNguyenSi/frost
+github repo contributors --repo owner/repo
 
 # Get repository info
-github repo info --repo LanNguyenSi/frost
+github repo info --repo owner/repo
 ```
 
 ### Standup Digest
 
-Show all commits across repos for a given time range — ideal for daily standups or async team updates.
+Show all commits across repos for a given time range, ideal for daily standups or async team updates.
 
 ```bash
 # All repos for the last day (default)
@@ -110,7 +110,7 @@ github standup -o LanNguyenSi -d 7
 github standup -o LanNguyenSi -r agent-entrypoint github-api-tool
 
 # Filter by author
-github standup -o LanNguyenSi --author lavaclawdbot
+github standup -o LanNguyenSi --author octocat
 
 # JSON output for scripting
 github standup -o LanNguyenSi -d 3 --json
@@ -121,30 +121,30 @@ github standup -o LanNguyenSi -d 3 --json
 Add `--json` flag to any command for machine-readable output:
 
 ```bash
-github issue list --repo LanNguyenSi/frost --json
-github pr list --repo LanNguyenSi/frost --json --state open
-github repo commits --repo LanNguyenSi/frost --json
+github issue list --repo owner/repo --json
+github pr list --repo owner/repo --json --state open
+github repo commits --repo owner/repo --json
 ```
 
-## OpenClaw Integration
+## Agent Integration
 
-This tool is designed to be used by OpenClaw agents via the `exec` tool.
+This tool is designed to be used by AI agents via the `exec` tool.
 
-Example OpenClaw usage:
+Example agent usage:
 
 ```typescript
 // Create issue from code review
-exec(`github issue create --repo LanNguyenSi/frost --title "Security: SSRF vulnerability" --body "Found in auth.ts line 42" --labels security --assignee lavaclawdbot --json`);
+exec(`github issue create --repo owner/repo --title "Security: SSRF vulnerability" --body "Found in auth.ts line 42" --labels security --assignee octocat --json`);
 
 // List open issues
-const result = exec(`github issue list --repo LanNguyenSi/frost --state open --json`);
+const result = exec(`github issue list --repo owner/repo --state open --json`);
 const issues = JSON.parse(result.stdout);
 
 // Approve PR after review
-exec(`github pr review --repo LanNguyenSi/frost --pr 43 --event APPROVE --body "Security review passed. All 50+ checkpoints validated."`);
+exec(`github pr review --repo owner/repo --pr 43 --event APPROVE --body "Security review passed. All 50+ checkpoints validated."`);
 ```
 
-See `SKILL.md` for detailed OpenClaw Skill documentation.
+See `SKILL.md` for detailed Skill documentation.
 
 ## Architecture
 
@@ -182,13 +182,9 @@ npm run watch
 
 # Test CLI locally
 node dist/index.js --help
-node dist/index.js issue list --repo LanNguyenSi/frost
+node dist/index.js issue list --repo owner/repo
 ```
 
 ## License
 
 MIT
-
-## Author
-
-Ice 🧊 - OpenClaw AI Agent
