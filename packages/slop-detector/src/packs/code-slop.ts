@@ -475,15 +475,270 @@ const backcompatShimUnreleased: Rule = {
 
 void semverGreater; // keep export-graph honest under noUnusedLocals when imported by tests.
 
+// ─────────────────────────── Rule 6: phantom (undeclared) import ──────────
+
+// Bare Node builtins. The `node:`-prefixed form is always a builtin and is
+// handled before this lookup; subpaths like `fs/promises` reduce to `fs`
+// first, so only the top-level names are listed here.
+const NODE_BUILTINS: ReadonlySet<string> = new Set([
+  "assert", "async_hooks", "buffer", "child_process", "cluster", "console",
+  "constants", "crypto", "dgram", "diagnostics_channel", "dns", "domain",
+  "events", "fs", "http", "http2", "https", "inspector", "module", "net",
+  "os", "path", "perf_hooks", "process", "punycode", "querystring",
+  "readline", "repl", "stream", "string_decoder", "sys", "timers", "tls",
+  "trace_events", "tty", "url", "util", "v8", "vm", "wasi",
+  "worker_threads", "zlib",
+]);
+
+interface PackageJsonShape {
+  name?: string;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+  workspaces?: string[] | { packages?: string[] };
+}
+
+interface PackageContext {
+  // Every specifier the rule must treat as legitimately importable: declared
+  // dependency names (all four blocks), the package's own name, and workspace
+  // sibling names.
+  known: ReadonlySet<string>;
+  // false when no package.json was found above the file — the rule cannot
+  // decide and stays a no-op.
+  found: boolean;
+}
+
+// Per-directory memoisation, mirroring readPackageVersion: a scan over a large
+// repo would otherwise re-walk package.json for every file in a directory.
+const packageContextCache = new Map<string, PackageContext>();
+
+function readJsonSafe(file: string): PackageJsonShape | null {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as PackageJsonShape;
+  } catch {
+    return null;
+  }
+}
+
+function collectDepNames(pkg: PackageJsonShape, into: Set<string>): void {
+  for (const block of [
+    pkg.dependencies,
+    pkg.devDependencies,
+    pkg.peerDependencies,
+    pkg.optionalDependencies,
+  ]) {
+    if (block && typeof block === "object") {
+      for (const name of Object.keys(block)) into.add(name);
+    }
+  }
+}
+
+function workspacePatterns(pkg: PackageJsonShape): string[] {
+  const ws = pkg.workspaces;
+  if (Array.isArray(ws)) return ws.filter((p): p is string => typeof p === "string");
+  if (ws && typeof ws === "object" && Array.isArray(ws.packages)) {
+    return ws.packages.filter((p): p is string => typeof p === "string");
+  }
+  return [];
+}
+
+// Resolve workspace globs to the `name` of each sibling package. Only the
+// common `dir/*` form and exact directory paths are handled — a conservative
+// v1 that covers npm / yarn / pnpm `packages/*` layouts without a glob dep.
+function collectWorkspaceSiblings(rootDir: string, patterns: string[], into: Set<string>): void {
+  for (const pattern of patterns) {
+    const starIdx = pattern.indexOf("*");
+    if (starIdx === -1) {
+      const pkg = readJsonSafe(path.join(rootDir, pattern, "package.json"));
+      if (pkg?.name) into.add(pkg.name);
+      continue;
+    }
+    const prefix = pattern.slice(0, starIdx).replace(/[\\/]+$/, "");
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(path.join(rootDir, prefix));
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const pkg = readJsonSafe(path.join(rootDir, prefix, entry, "package.json"));
+      if (pkg?.name) into.add(pkg.name);
+    }
+  }
+}
+
+function readPackageContext(filePath: string): PackageContext {
+  const startDir = path.dirname(path.resolve(filePath));
+  const cached = packageContextCache.get(startDir);
+  if (cached) return cached;
+
+  // Phase 1 — walk up to the nearest package.json (the file's own package).
+  const chain: string[] = [];
+  let dir = startDir;
+  let ownPkg: PackageJsonShape | null = null;
+  let ownDir = "";
+  for (let i = 0; i < 40; i++) {
+    chain.push(dir);
+    if (fs.existsSync(path.join(dir, "package.json"))) {
+      ownPkg = readJsonSafe(path.join(dir, "package.json"));
+      ownDir = dir;
+      break;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  // ownPkg is null when no package.json exists above the file, or when the
+  // nearest one is malformed JSON. Both fail open to a no-op: a broken
+  // manifest yields no declared names, so scanning it would flag every
+  // import — worse than staying silent for a warn-severity rule.
+  if (!ownPkg) {
+    const miss: PackageContext = { known: new Set(), found: false };
+    for (const d of chain) packageContextCache.set(d, miss);
+    return miss;
+  }
+
+  const known = new Set<string>();
+  collectDepNames(ownPkg, known);
+  if (ownPkg.name) known.add(ownPkg.name);
+
+  // Phase 2 — find the nearest workspace root at or above the own package and
+  // add every sibling package name. A workspace sibling imported without a
+  // dependency entry is legal in a monorepo, so it must not be flagged.
+  let wsDir = ownDir;
+  for (let i = 0; i < 40; i++) {
+    const pkg = wsDir === ownDir ? ownPkg : readJsonSafe(path.join(wsDir, "package.json"));
+    const patterns = pkg ? workspacePatterns(pkg) : [];
+    if (patterns.length > 0) {
+      collectWorkspaceSiblings(wsDir, patterns, known);
+      break;
+    }
+    const parent = path.dirname(wsDir);
+    if (parent === wsDir) break;
+    wsDir = parent;
+  }
+
+  const ctx: PackageContext = { known, found: true };
+  for (const d of chain) packageContextCache.set(d, ctx);
+  return ctx;
+}
+
+type SpecifierClass = { kind: "skip" } | { kind: "package"; name: string };
+
+// Reduce a module specifier to the package name to look up, or classify it as
+// not-our-concern (relative, absolute, builtin, protocol URL, `#imports`).
+function classifySpecifier(spec: string): SpecifierClass {
+  if (spec.length === 0) return { kind: "skip" };
+  if (spec.startsWith(".")) return { kind: "skip" }; // ./ ../ . ..
+  if (spec.startsWith("/")) return { kind: "skip" }; // absolute posix
+  if (spec.startsWith("#")) return { kind: "skip" }; // package.json `imports`
+  if (/^[a-zA-Z]:[\\/]/.test(spec)) return { kind: "skip" }; // absolute windows
+  if (/^[a-z][a-z0-9+.-]*:/i.test(spec)) return { kind: "skip" }; // node:, data:, http:, ...
+  let name: string;
+  if (spec.startsWith("@")) {
+    const parts = spec.split("/");
+    if (parts.length < 2 || parts[0].length < 2 || parts[1].length === 0) {
+      return { kind: "skip" }; // malformed scoped specifier
+    }
+    name = `${parts[0]}/${parts[1]}`;
+  } else {
+    name = spec.split("/")[0];
+  }
+  if (NODE_BUILTINS.has(name)) return { kind: "skip" };
+  return { kind: "package", name };
+}
+
+const phantomImport: Rule = {
+  id: "code-slop/phantom-import",
+  pack: "code-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    "An import of a package that no package.json in scope declares is a hallucinated dependency — it will fail to install or silently resolve to the wrong thing. Declare the dependency or fix the specifier.",
+  appliesTo: appliesToCode,
+  check(ctx: RuleContext): Violation[] {
+    const result = parseTsFile(ctx.file);
+    if (!result.ok) return [];
+    const pkg = readPackageContext(ctx.file.path);
+    if (!pkg.found) return []; // no package.json above the file — cannot decide.
+
+    const violations: Violation[] = [];
+    const consider = (spec: string, node: TSESTree.Node): void => {
+      const cls = classifySpecifier(spec);
+      if (cls.kind !== "package") return;
+      if (pkg.known.has(cls.name)) return;
+      violations.push(
+        makeViolation(
+          phantomImport,
+          ctx.file,
+          nodeLoc(node),
+          `\`${cls.name}\` is imported but not declared in package.json (dependencies, devDependencies, peerDependencies or optionalDependencies)`,
+          snippet(ctx.file, node),
+        ),
+      );
+    };
+
+    walk(result.ast as unknown as AnyNode, (node) => {
+      switch (node.type) {
+        case "ImportDeclaration":
+        case "ExportAllDeclaration":
+        case "ExportNamedDeclaration": {
+          const source = node.source;
+          if (source && source.type === "Literal" && typeof source.value === "string") {
+            consider(source.value, source);
+          }
+          return;
+        }
+        case "ImportExpression": {
+          const source = node.source;
+          if (source.type === "Literal" && typeof source.value === "string") {
+            consider(source.value, source);
+          }
+          return;
+        }
+        case "TSImportEqualsDeclaration": {
+          const ref = node.moduleReference;
+          if (
+            ref.type === "TSExternalModuleReference" &&
+            ref.expression.type === "Literal" &&
+            typeof ref.expression.value === "string"
+          ) {
+            consider(ref.expression.value, ref.expression);
+          }
+          return;
+        }
+        case "CallExpression": {
+          if (
+            node.callee.type === "Identifier" &&
+            node.callee.name === "require" &&
+            node.arguments.length === 1 &&
+            node.arguments[0].type === "Literal" &&
+            typeof node.arguments[0].value === "string"
+          ) {
+            consider(node.arguments[0].value, node.arguments[0]);
+          }
+          return;
+        }
+        default:
+          return;
+      }
+    });
+    return violations;
+  },
+};
+
 export const codeSlopPack: PackDefinition = {
   id: "code-slop",
   description:
-    "AST-based catches for AI-tic code: try/catch around non-throwing code, defaults on required-typed params, empty/rethrow catches, async without await, backcompat shims for unreleased APIs.",
+    "AST-based catches for AI-tic code: try/catch around non-throwing code, defaults on required-typed params, empty/rethrow catches, async without await, backcompat shims for unreleased APIs, imports of undeclared packages.",
   rules: [
     tryCatchCannotThrow,
     defaultOnRequiredParam,
     emptyOrRethrowCatch,
     asyncWithoutAwait,
     backcompatShimUnreleased,
+    phantomImport,
   ],
 };
