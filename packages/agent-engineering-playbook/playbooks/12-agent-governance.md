@@ -127,6 +127,31 @@ Agent-generated code must meet the same quality bar as human code. Additional re
 - code patterns inconsistent with the existing codebase
 - security-sensitive changes buried in large refactors
 
+## Agent-Authored Commands In Handoff Notes
+
+Agents write handoff notes as well as code: task comments, status updates, and review notes that often suggest a command for a human to run later, outside the agent session. A command in a note bypasses the feedback loop that catches agent error, because the agent never runs it and never sees it fail.
+
+### The Rule
+
+Before an agent writes a concrete command into a note for a human to run, it must do one of two things:
+
+- run that exact command itself inside the session, or
+- verify every flag and subcommand against the tool's own `--help` output.
+
+A command that was neither executed nor `--help`-checked must not be presented as a recipe.
+
+### Why It Matters
+
+A command an agent runs itself fails in seconds on a hallucinated flag, and the agent corrects it before moving on. A command written into a note skips that check: the fabricated flag is committed to the task history and surfaces only when a human runs it, after already spending time on the surrounding setup.
+
+For example, an agent once left a smoke-test recipe containing `claude -p "..." --output-dir /tmp/...`. The note was otherwise sound, but the `--output-dir` flag was fabricated: a human ran the recipe verbatim, hit `unknown option '--output-dir'`, and lost the clone and install work the recipe depended on. Running the command once, or checking `claude --help`, would have caught the fabrication before the note was written.
+
+### Convention
+
+For command-heavy notes, add a short footer recording how the commands were checked, so a later reader can spot stale flags quickly:
+
+> Verified against `claude --help` (v<version>).
+
 ## Multi-Agent Coordination
 
 When multiple agents operate in the same codebase:
