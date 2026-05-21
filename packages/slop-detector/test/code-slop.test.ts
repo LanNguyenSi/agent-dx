@@ -377,6 +377,148 @@ describe("code-slop/phantom-import", () => {
   });
 });
 
+describe("code-slop/stub-body", () => {
+  it("flags a function whose body is a not-implemented throw", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`function fetchUser(id: string) { throw new Error("not implemented"); }`),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("fetchUser");
+  });
+
+  it("flags a throw of a NotImplementedError constructor", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`function save() { throw new NotImplementedError(); }`),
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("does not flag a throw with a non-placeholder message", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`function parse(s: string) { throw new Error("invalid input: " + s); }`),
+    );
+    expect(v).toHaveLength(0);
+  });
+
+  it("does not flag a real implementation", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`function add(a: number, b: number) { const sum = a + b; return sum; }`),
+    );
+    expect(v).toHaveLength(0);
+  });
+
+  it("flags an empty named function", () => {
+    const v = run("code-slop/stub-body", code(`function setup() {}`));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("empty body");
+  });
+
+  it("flags trivial placeholder returns (null, undefined, void 0, {}, [], bare)", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`
+function a() { return null; }
+function b() { return undefined; }
+function c() { return {}; }
+function d() { return []; }
+function e() { return; }
+function f() { return void 0; }
+`),
+    );
+    expect(v).toHaveLength(6);
+  });
+
+  it("does not flag a return of a non-trivial value", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`
+function a() { return 0; }
+function b() { return computeResult(); }
+function c() { return { id: 1 }; }
+`),
+    );
+    expect(v).toHaveLength(0);
+  });
+
+  it("flags a class method whose body is a not-implemented throw or trivial return", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`
+class Api {
+  fetch() { throw new Error("not implemented yet"); }
+  list() { return []; }
+}
+`),
+    );
+    expect(v).toHaveLength(2);
+  });
+
+  it("flags an empty class method but not an empty constructor or accessor", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`
+class Service {
+  constructor() {}
+  get ready() { return null; }
+  set ready(v: boolean) {}
+  start() {}
+}
+`),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("start");
+  });
+
+  it("does not flag an abstract method or an interface member", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`
+interface Repo {
+  find(id: string): User;
+}
+abstract class Base {
+  abstract load(): void;
+}
+`),
+    );
+    expect(v).toHaveLength(0);
+  });
+
+  it("does not flag an overload signature, only the stub implementation body", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`
+function fmt(x: number): string;
+function fmt(x: string): string;
+function fmt(x: number | string): string { throw new Error("TODO"); }
+`),
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("does not flag an anonymous arrow function with an empty body", () => {
+    const v = run(
+      "code-slop/stub-body",
+      code(`function withDefault(cb: () => void = () => {}) { cb(); }`),
+    );
+    expect(v).toHaveLength(0);
+  });
+
+  it("does not run on .d.ts declaration files", () => {
+    const dts: FileTarget = {
+      path: "types.d.ts",
+      text: `export function helper(): void;`,
+      kind: "code",
+    };
+    const rule = codeSlopPack.rules.find((r) => r.id === "code-slop/stub-body")!;
+    expect(rule.appliesTo(dts)).toBe(false);
+  });
+});
+
 describe("code-slop applies-to gating", () => {
   it("does not run on .md files", () => {
     const proseFile: FileTarget = { path: "a.md", text: "try { 1 } catch {}", kind: "prose" };
