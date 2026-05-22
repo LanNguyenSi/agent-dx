@@ -40,6 +40,7 @@ function renderGroup(title: string, results: SearchResult[]): string {
       result.score !== undefined ? ` [${result.score.toFixed(3)}]` : "";
     lines.push(`  ${result.source}  ${location}${score}`);
     lines.push(`    ${result.snippet}`);
+    lines.push(`    why: ${result.relevance.reason}`);
   }
   return lines.join("\n");
 }
