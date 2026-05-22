@@ -1,0 +1,59 @@
+{
+  "name": "pattern-scout",
+  "version": "0.1.0",
+  "description": "Federated pattern search for refactor research: fans out across opensrc-cached exemplar repos and your codebase-oracle index",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "pattern-scout": "./dist/cli.js",
+    "pattern-scout-mcp": "./dist/mcp.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "node --import tsx src/cli.ts",
+    "test": "vitest run",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "refactor",
+    "code-search",
+    "opensrc",
+    "codebase-oracle",
+    "mcp",
+    "dx",
+    "claude"
+  ],
+  "author": "Lan Nguyen Si",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LanNguyenSi/agent-dx.git",
+    "directory": "packages/pattern-scout"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "commander": "^12.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.6"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
