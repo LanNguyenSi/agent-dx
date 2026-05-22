@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { oneLine, splitCommand, truncate } from "./util.js";
+import { oracleRelevance } from "./relevance.js";
 import type { SearchResult } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -23,6 +24,7 @@ export function parseOracleSearch(stdout: string): SearchResult[] {
       path,
       line,
       snippet: truncate(current.body.join(" ").replace(/\s+/g, " ").trim(), 200),
+      relevance: oracleRelevance(path),
     });
   };
 

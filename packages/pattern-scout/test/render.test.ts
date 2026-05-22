@@ -3,7 +3,7 @@ import { renderSummary } from "../src/render.js";
 import type { SearchSummary } from "../src/types.js";
 
 describe("renderSummary", () => {
-  it("renders both groups, locations, and source status", () => {
+  it("renders both groups, locations, relevance, and source status", () => {
     const summary: SearchSummary = {
       query: "needle",
       results: [
@@ -13,6 +13,10 @@ describe("renderSummary", () => {
           path: "/x/a.ts",
           line: 3,
           snippet: "const a = needle;",
+          relevance: {
+            reason: "definition in an implementation file",
+            signals: ["impl-file", "definition"],
+          },
         },
         {
           kind: "ours",
@@ -20,6 +24,11 @@ describe("renderSummary", () => {
           path: "src/b.ts",
           line: 0,
           snippet: "needle here",
+          relevance: {
+            reason:
+              "semantic match in an implementation file (codebase-oracle)",
+            signals: ["semantic", "impl-file"],
+          },
         },
       ],
       exemplarCount: 1,
@@ -33,6 +42,7 @@ describe("renderSummary", () => {
     expect(text).toContain('pattern-scout: "needle"');
     expect(text).toContain("exemplars (opensrc): 1 match(es)");
     expect(text).toContain("zod  /x/a.ts:3");
+    expect(text).toContain("why: definition in an implementation file");
     expect(text).toContain("ours (codebase-oracle): 1 match(es)");
     // line 0 renders as the bare path, with no `:0` suffix
     expect(text).toContain("agent-tasks  src/b.ts");

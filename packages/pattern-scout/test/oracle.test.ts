@@ -30,6 +30,7 @@ describe("parseOracleSearch", () => {
       path: "src/cli.ts",
       line: 3,
     });
+    expect(results[0].relevance.signals).toContain("semantic");
   });
 
   it("handles a location with no line number", () => {

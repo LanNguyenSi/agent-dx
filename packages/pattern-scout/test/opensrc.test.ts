@@ -97,6 +97,8 @@ describe("searchCachedRepos", () => {
     expect(results[0].source).toBe("demo");
     expect(results[0].line).toBe(2);
     expect(results[0].snippet).toContain("needle");
+    // `src/x.ts`, matched line is a bare `const` (a local binding) => usage
+    expect(results[0].relevance.signals).toEqual(["impl-file", "usage"]);
   });
 
   it("respects the limit", () => {

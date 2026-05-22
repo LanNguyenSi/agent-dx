@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { promisify } from "node:util";
 import { escapeRegExp, splitCommand, truncate } from "./util.js";
 import { walkTextFiles } from "./walk.js";
+import { exemplarRelevance } from "./relevance.js";
 import type { SearchResult } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -127,6 +128,7 @@ export function searchCachedRepos(
             path: file,
             line: i + 1,
             snippet: truncate(fileLines[i].trim(), 200),
+            relevance: exemplarRelevance(file, fileLines[i]),
           });
         }
       }

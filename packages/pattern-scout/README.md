@@ -21,6 +21,10 @@ The asymmetry is deliberate. The oracle answers a natural-language `query` seman
 
 The oracle source is optional. If `codebase-oracle` is not installed or fails, exemplar hits are still returned and the source is reported as unavailable.
 
+### Relevance hints
+
+Every result carries a `relevance` hint so an agent can self-filter instead of weighting every hit equally. It has a short `reason` and structured `signals`, derived from cheap heuristics: the file category (`impl`, `test`, `example`, `doc`, `config`) and, for exemplar hits, whether the matched line is a definition, a usage, or a comment. A hit reading "definition in an implementation file" is worth more for a refactor than "comment mention in test code"; oracle hits are tagged "semantic match". The hint shows per result in text output and is carried in full under `--format json`.
+
 ## Install
 
 ```bash
@@ -102,5 +106,6 @@ The tool takes `query`, `pattern`, `limit`, `repo`, `exemplarsOnly`, and `config
 ## Limitations
 
 - The exemplar side is lexical, not semantic. A `--pattern` regex gives the most control.
+- Relevance hints are heuristic (file path plus a line-shape regex), not AST-precise. Treat them as a triage signal, not a verdict.
 - The codebase-oracle side reflects whatever that index already holds; `pattern-scout` does not index anything itself.
 - `setup` does not yet have an interactive installer, and exemplar hits are not embedded on the fly. Both are tracked as follow-ups.

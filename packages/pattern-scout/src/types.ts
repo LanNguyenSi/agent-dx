@@ -1,6 +1,14 @@
 /** Which corpus a result came from. */
 export type SourceKind = "exemplar" | "ours";
 
+/** Why a hit is worth weight: a heuristic signal for agent self-filtering. */
+export interface Relevance {
+  /** Short agent-readable reason, e.g. "definition in an implementation file". */
+  reason: string;
+  /** Structured kebab-case tags, e.g. ["impl-file", "definition"]. */
+  signals: string[];
+}
+
 /** A single search hit, normalised across both federated sources. */
 export interface SearchResult {
   kind: SourceKind;
@@ -12,6 +20,8 @@ export interface SearchResult {
   line: number;
   /** The matching line (exemplar) or chunk excerpt (oracle), trimmed. */
   snippet: string;
+  /** Heuristic hint on why this hit is (or is not) worth weight. */
+  relevance: Relevance;
   /**
    * Similarity score, present only when the source reports one. The
    * `codebase-oracle search` CLI does not currently emit scores, so this is

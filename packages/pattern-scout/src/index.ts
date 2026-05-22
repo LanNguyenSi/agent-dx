@@ -1,4 +1,5 @@
 export type {
+  Relevance,
   ResolvedConfig,
   SearchResult,
   SearchSummary,
@@ -39,3 +40,11 @@ export type { OracleSearchOptions, OracleSearchOutcome } from "./oracle.js";
 
 export { walkTextFiles } from "./walk.js";
 export type { WalkOptions } from "./walk.js";
+
+export {
+  classifyMatchLine,
+  classifyPath,
+  exemplarRelevance,
+  oracleRelevance,
+} from "./relevance.js";
+export type { MatchContext, PathCategory } from "./relevance.js";
