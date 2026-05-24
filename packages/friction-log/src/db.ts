@@ -352,6 +352,24 @@ export class FrictionDb {
       });
   }
 
+  /**
+   * Create a minimal sessions row for `id` if none exists yet. Used by
+   * the `log` command path so `friction-log log --session <fresh-id>`
+   * can attribute a friction to a live runtime session without a prior
+   * `friction-log import`. Defaults: started_at = now, adapter =
+   * 'manual' (mirrors `frictions.source = 'manual'` for log-path rows).
+   * Idempotent: a subsequent `upsertSession` from an `import` or `scan`
+   * later overwrites the placeholder with full metadata.
+   */
+  ensureSession(id: string): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO sessions (id, started_at, adapter)
+         VALUES (?, ?, ?)`
+      )
+      .run(id, new Date().toISOString(), 'manual');
+  }
+
   getSession(id: string): Session | null {
     const row = this.db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as
       | SessionRow
