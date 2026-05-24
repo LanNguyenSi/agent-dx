@@ -34,6 +34,86 @@ describe('runLog', () => {
       db.close();
     }
   });
+
+  it('upserts a sessions row for an unknown --session id so the FK never fires', () => {
+    // Pre-task-a44a7f53 repro: passing a fresh session id (e.g. the live
+    // $CLAUDE_CODE_SESSION_ID from inside an agent shell) blew up with
+    // `friction-log: FOREIGN KEY constraint failed` because
+    // frictions.session_id references sessions(id) and the row was
+    // never created. runLog now ensures the row exists before insert.
+    const freshSessionId = '2019227f-ce4e-4142-879c-6628d3efbd2a';
+    const out = runLog({
+      title: 'live-session friction',
+      sessionId: freshSessionId,
+      dbPath,
+    });
+    expect(out.id).toBeGreaterThan(0);
+    const db = new FrictionDb(dbPath);
+    try {
+      const f = db.getFriction(out.id);
+      expect(f?.sessionId).toBe(freshSessionId);
+      // The session placeholder row was created with adapter='manual'
+      // (mirrors frictions.source='manual' for log-path rows).
+      const s = db.getSession(freshSessionId);
+      expect(s?.id).toBe(freshSessionId);
+      expect(s?.adapter).toBe('manual');
+      expect(s?.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('preserves a pre-existing session row instead of clobbering it (INSERT OR IGNORE)', () => {
+    // If a session was already imported with full metadata (adapter:
+    // 'claude-code', project_paths, transcript_path), a subsequent
+    // `friction-log log --session <same-id>` must not downgrade those
+    // fields to the log-path placeholder defaults.
+    const sessionId = 'aaaa1111-bbbb-2222-cccc-333344445555';
+    const importedAt = '2026-05-01T08:00:00.000Z';
+    {
+      const db = new FrictionDb(dbPath);
+      try {
+        db.upsertSession({
+          id: sessionId,
+          startedAt: importedAt,
+          endedAt: null,
+          projectPaths: ['/home/lan/git/pandora/harness'],
+          transcriptPath: '/transcripts/foo.jsonl',
+          adapter: 'claude-code',
+        });
+      } finally {
+        db.close();
+      }
+    }
+    runLog({ title: 'something else', sessionId, dbPath });
+    const db = new FrictionDb(dbPath);
+    try {
+      const s = db.getSession(sessionId);
+      expect(s?.adapter).toBe('claude-code');
+      expect(s?.startedAt).toBe(importedAt);
+      expect(s?.transcriptPath).toBe('/transcripts/foo.jsonl');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('does not create a sessions row when --session is omitted or empty', () => {
+    // Backwards-compatible: the original sessionless path must not
+    // silently populate the sessions table with anonymous rows. Empty
+    // string is treated as omitted too.
+    const out1 = runLog({ title: 'no-session friction', dbPath });
+    const out2 = runLog({ title: 'empty-string-session', sessionId: '', dbPath });
+    const db = new FrictionDb(dbPath);
+    try {
+      expect(db.getFriction(out1.id)?.sessionId).toBeNull();
+      expect(db.getFriction(out2.id)?.sessionId).toBeNull();
+      // The all-sessions accessor stays empty; no anonymous placeholder
+      // rows leaked through.
+      expect(db.getMostRecentSession()).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
 });
 
 describe('runList', () => {
