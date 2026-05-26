@@ -69,6 +69,16 @@ These were built alongside `slop-detector` for the same human-and-agent workflow
 | [agent-engineering-playbook](packages/agent-engineering-playbook) | Guide for building production-ready AI agent systems. |
 | [agentic-coding-playbook](packages/agentic-coding-playbook) | Practical playbook for teams using AI agents in coding. |
 
+## Repo layout
+
+`agent-dx` is a folder of independent packages, not an npm workspaces / pnpm / lerna monorepo. There is no root `package.json`, no workspace manifest, and no shared root `node_modules`. Each package under `packages/` carries its own `package.json`, install, build, test, and version, so the install pattern for any of them is the same one shown above for `slop-detector`:
+
+```bash
+cd packages/<name> && npm install && npm run build
+```
+
+If you only care about one package, work in its directory; nothing at the root needs to be set up first.
+
 ## Status
 
 Experimental: each package has its own version, README, and CI. APIs may evolve at minor-version bumps. `slop-detector` is the most polished and the only one with active distribution intent (npm, hooks, planned GitHub Action).
