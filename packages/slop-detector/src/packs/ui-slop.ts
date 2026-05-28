@@ -386,6 +386,12 @@ const LAYOUT_PROPS = new Set([
   "bottom",
 ]);
 
+// `transition: all <duration>` is the single biggest layout-trash offender
+// in agent-generated CSS — it animates every property change, including
+// width/height/padding/margin. Flag separately from LAYOUT_PROPS because
+// `all` is not a real CSS property and must not match inside @keyframes.
+const TRANSITION_BLANKET_PROPS = new Set(["all"]);
+
 const animateLayoutProperties: Rule = {
   id: "ui-slop/animate-layout-properties",
   pack: "ui-slop",
@@ -454,18 +460,16 @@ const animateLayoutProperties: Rule = {
         const tokens = part.trim().split(/\s+/);
         const propName = tokens[0]?.toLowerCase();
         if (!propName) continue;
-        if (LAYOUT_PROPS.has(propName)) {
+        const isLayout = LAYOUT_PROPS.has(propName);
+        const isBlanket = TRANSITION_BLANKET_PROPS.has(propName);
+        if (isLayout || isBlanket) {
           const start = tm.index;
           const end = tm.index + tm[0].length;
+          const reason = isBlanket
+            ? `\`transition: all\` animates every changed property, including width/height/padding/margin. Name the properties you actually want to transition.`
+            : `\`transition\` on layout property \`${propName}\` — animates layout on every frame. Use \`transform\` / \`opacity\`.`;
           violations.push(
-            makeViolation(
-              animateLayoutProperties,
-              file,
-              start,
-              end,
-              tm[0],
-              `\`transition\` on layout property \`${propName}\` — animates layout on every frame. Use \`transform\` / \`opacity\`.`,
-            ),
+            makeViolation(animateLayoutProperties, file, start, end, tm[0], reason),
           );
           break; // one violation per declaration is enough
         }
@@ -487,7 +491,11 @@ const skippedHeadingLevels: Rule = {
     "Skipping heading levels (e.g. h1 → h3 with no h2) breaks document structure for screen readers and is a tell that the agent generated visual hierarchy without thinking about semantics.",
   appliesTo: appliesToHeadingHosts,
   check({ file }: RuleContext): Violation[] {
-    const headingRe = /<h([1-6])\b[^>]*>/gi;
+    // Case-sensitive on purpose: HTML5 headings are lowercase, and JSX
+    // intrinsic-element headings are lowercase by convention. PascalCase
+    // `<H1>` / `<H3>` are React components, not headings — flagging them
+    // would be a false positive.
+    const headingRe = /<h([1-6])\b[^>]*>/g;
     const violations: Violation[] = [];
     let prevLevel = 0;
     let m: RegExpExecArray | null;
@@ -638,15 +646,18 @@ const flatTypeHierarchy: Rule = {
     }
     if (seen.size < 3) return [];
     const sorted = [...seen.keys()].sort((a, b) => a - b);
-    let tooFlat = false;
+    // Require EVERY consecutive ratio to be below 1.125 — a single healthy
+    // jump in the scale (e.g. 8 → 16 → 17 → 18) means the hierarchy is
+    // fine; only flag when the whole scale is uniformly flat.
+    let allFlat = true;
     for (let i = 1; i < sorted.length; i++) {
       const ratio = sorted[i] / sorted[i - 1];
-      if (ratio < 1.125) {
-        tooFlat = true;
+      if (ratio >= 1.125) {
+        allFlat = false;
         break;
       }
     }
-    if (!tooFlat) return [];
+    if (!allFlat) return [];
     // Report on the smallest font-size declaration as the anchor.
     const anchor = seen.get(sorted[0])!;
     return [

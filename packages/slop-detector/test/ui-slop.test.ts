@@ -195,6 +195,24 @@ describe("ui-slop/animate-layout-properties", () => {
     expect(v).toHaveLength(0);
   });
 
+  it("flags transition: all (blanket transition is the biggest layout-trash offender)", () => {
+    const v = run(
+      "ui-slop/animate-layout-properties",
+      css(`.panel { transition: all 0.3s ease; }`),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toMatch(/transition: all/);
+  });
+
+  it("flags a width animation inside minified single-line CSS", () => {
+    const v = run(
+      "ui-slop/animate-layout-properties",
+      css(`@keyframes g{from{width:100px}to{width:200px}}`),
+    );
+    expect(v.length).toBeGreaterThanOrEqual(1);
+    expect(v[0].line).toBe(1);
+  });
+
   it("does not flag a static width declaration outside @keyframes", () => {
     const v = run(
       "ui-slop/animate-layout-properties",
@@ -257,6 +275,28 @@ export function Page() {
   it("does not apply to a .ts file (no JSX)", () => {
     const rule = findRule("ui-slop/skipped-heading-levels");
     expect(rule.appliesTo({ path: "lib.ts", text: "<h1></h1><h3></h3>", kind: "code" })).toBe(false);
+  });
+
+  it("does NOT flag PascalCase React component tags (<H1> <H3>)", () => {
+    // PascalCase tags are React components, not HTML headings.
+    const v = run(
+      "ui-slop/skipped-heading-levels",
+      tsx(`
+import { H1, H3 } from "./typography";
+export function Page() {
+  return (<div><H1>Title</H1><H3>Sub</H3></div>);
+}
+`),
+    );
+    expect(v).toHaveLength(0);
+  });
+
+  it("flags a self-closing skip pattern (<h1 /><h3 />)", () => {
+    const v = run(
+      "ui-slop/skipped-heading-levels",
+      markup(`<section><h1 /><h3 /></section>`),
+    );
+    expect(v).toHaveLength(1);
   });
 });
 
@@ -337,6 +377,21 @@ describe("ui-slop/flat-type-hierarchy", () => {
 .a { font-size: 14px; }
 .b { font-size: 14px; }
 .c { font-size: 18px; }
+`),
+    );
+    expect(v).toHaveLength(0);
+  });
+
+  it("does not flag when only ONE consecutive ratio is below 1.125 (mixed scale)", () => {
+    // 8 → 16 is a 2× jump (healthy); 16 → 17 → 18 are close. The scale as
+    // a whole is not flat, so the rule should stay quiet.
+    const v = run(
+      "ui-slop/flat-type-hierarchy",
+      css(`
+.a { font-size: 8px; }
+.b { font-size: 16px; }
+.c { font-size: 17px; }
+.d { font-size: 18px; }
 `),
     );
     expect(v).toHaveLength(0);
