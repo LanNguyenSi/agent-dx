@@ -45,9 +45,44 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 | `prose-slop` | on | Em-dashes in prose, hedging openers, empty marketing adjectives, signature LLM idioms like `delve into`, `tapestry of`, `leverage the power of` |
 | `comment-slop` | off | JSDoc on trivial getters, comments that restate the next line, orphan markers (`// removed`, `// kept for backcompat`), comment-heavier-than-body helpers, ASCII banner dividers |
 | `code-slop` | off | try/catch around code that cannot throw, default values on required-typed params, empty/rethrow catches, async without await, backcompat shims for unreleased APIs |
-| `ui-slop` | off (M3) | Visual tells of AI-generated UIs, modeled on [impeccable.style/slop](https://impeccable.style/slop/) |
+| `ui-slop` | off, opt in via `--pack ui-slop` | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, monospace-everywhere, flat type hierarchy. Scans CSS / SCSS / LESS / HTML / JSX. |
 
 Run `npx slop-detector list-rules` for the full rule catalogue with severities and rationales.
+
+### `ui-slop` (M3 v1) by example
+
+Opt in with `--pack ui-slop`. Examples that trip the four default-on rules:
+
+```css
+/* ui-slop/gradient-text */
+.headline {
+  background: linear-gradient(90deg, #7c3aed, #06b6d4);
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+/* ui-slop/ai-color-palette */
+.hero {
+  background: radial-gradient(circle, hsl(270, 70%, 50%), hsl(185, 80%, 50%));
+}
+
+/* ui-slop/animate-layout-properties */
+@keyframes grow {
+  from { width: 100px; }
+  to   { width: 200px; }
+}
+.panel { transition: height 0.3s ease; }
+```
+
+```html
+<!-- ui-slop/skipped-heading-levels -->
+<section>
+  <h1>Title</h1>
+  <h3>Subtitle</h3>   <!-- skipped h2 -->
+</section>
+```
+
+The two off-by-default info rules (`ui-slop/monospace-everywhere`, `ui-slop/flat-type-hierarchy`) need an explicit `rules.<id>.enabled: true` in `slop.config.yml` or a CLI override; they remain off because both have legitimate counter-uses (technical-product landing pages, mature design systems with subtle steps).
 
 ## Severity model
 
@@ -191,8 +226,8 @@ Run `npm run build` first so `dist/mcp.js` exists.
 ## Roadmap
 
 - M1: `agent-tics` + `prose-slop` packs, CLI, config loader, per-line disables.
-- M2 (this release): `comment-slop` + `code-slop` packs (TypeScript AST via `@typescript-eslint/parser`). Both off by default; opt in via config or `--pack`. Within-file analysis only; cross-file rules (unused exports, single-callsite helpers) are tracked as a separate task.
-- M3: `ui-slop` pack, GitHub Action, optional LLM-judged heuristic rules.
+- M2: `comment-slop` + `code-slop` packs (TypeScript AST via `@typescript-eslint/parser`). Both off by default; opt in via config or `--pack`. Within-file analysis only; cross-file rules (unused exports, single-callsite helpers) are tracked as a separate task.
+- M3 (this release): `ui-slop` v1 pack with 4 default-on warn rules (gradient text, purple+cyan palette, animated layout properties, skipped heading levels) and 2 default-off info rules (monospace-everywhere, flat type hierarchy). Regex-driven over CSS plus tag-shape scan for headings, no new dependencies. Tailwind class strings, JSX inline `style={{...}}` literals, headless-browser contrast/WCAG rules, GitHub Action wrapper, and LLM-judged rules remain on the M3 backlog.
 
 Track progress at [agent-dx](https://github.com/LanNguyenSi/agent-dx) issues and tasks.
 
