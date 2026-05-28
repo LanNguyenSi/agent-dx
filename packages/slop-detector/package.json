@@ -1,6 +1,6 @@
 {
   "name": "slop-detector",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Configurable AI-slop linter for PRs — catches the visible tells of AI-generated code, prose, and UIs",
   "main": "dist/index.js",
   "type": "module",
