@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, chmod } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync } from 'fs';
@@ -42,9 +42,16 @@ export async function loadConfig(): Promise<Config> {
  */
 export async function saveConfig(config: Config): Promise<void> {
   if (!existsSync(CONFIG_DIR)) {
-    await mkdir(CONFIG_DIR, { recursive: true });
+    await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
   }
-  await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  // Persist the GitHub token with owner-only permissions. writeFile's mode is
+  // only applied when the file is created, so chmod the path afterwards to also
+  // harden the overwrite of an existing, world-readable config file.
+  await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
+  await chmod(CONFIG_FILE, 0o600);
 }
 
 /**
