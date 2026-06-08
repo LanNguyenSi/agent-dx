@@ -281,6 +281,16 @@ Diese Beispiele stammen aus realer Arbeit mit KI-Agents. Kein Gedankenexperiment
 - **[project-forge](https://github.com/LanNguyenSi/project-forge)**: Greenfield-Scaffolding mit integrierten Gates
 - **[depsight](https://github.com/LanNguyenSi/depsight)**: Security und Dependency Health für Brownfield
 
+## Operative Artefakte
+
+Für Teams, die dieses Modell direkt in Repositories anwenden wollen, enthält dieses Package zusätzlich:
+
+- [`templates/`](templates/) für Specs mit Evals, Task-Slicing, Reviews und PR-Beschreibungen
+- [`policies/`](policies/) für beispielhafte Risk-Tiers, Protected Files, Approval Rules und Quality Gates
+- [`skills/`](skills/) für wiederverwendbare Agentenrollen wie Task Slicer, Implementation Agent und Reviewer Agent
+
+Diese Artefakte sind tool-agnostisch und zweisprachig. Sie müssen an den jeweiligen Harness, CI-Prozess und Teamkontext angepasst werden; sie sind für sich genommen keine Enforcement-Schicht.
+
 ---
 
 Unternehmen skalieren Agents nicht dadurch, dass sie ihnen mehr Freiheit geben, sondern dadurch, dass sie Verantwortung und Systemgrenzen sauber designen.
