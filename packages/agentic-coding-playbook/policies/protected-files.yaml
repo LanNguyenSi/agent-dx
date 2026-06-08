@@ -1,0 +1,42 @@
+# Reference example, NOT active enforcement. See ./README.md.
+# Glob patterns are interpreted differently by different harnesses; treat this
+# as a policy example, not a universally executable configuration.
+status: example
+
+protected_files:
+  secrets:
+    deny_read:
+      - ".env"
+      - ".env.*"
+      - "**/*secret*"
+      - "**/*credential*"
+      - "**/*private-key*"
+      - "**/*.pem"
+      - "**/*.key"
+    reason: "Agents must not read secrets directly."
+
+  production_config:
+    require_explicit_approval:
+      - "**/*prod*.yaml"
+      - "**/*prod*.yml"
+      - "**/*production*.yaml"
+      - "**/*production*.yml"
+      - "k8s/**"
+      - "helm/**"
+      - "terraform/**"
+    reason: "Production-impacting changes require explicit human review."
+
+  ci_cd:
+    require_review:
+      - ".github/workflows/**"
+      - ".gitlab-ci.yml"
+      - "Jenkinsfile"
+      - "azure-pipelines.yml"
+    reason: "CI/CD changes can alter enforcement guarantees."
+
+  database:
+    require_rigorous_review:
+      - "migrations/**"
+      - "database/migrations/**"
+      - "prisma/migrations/**"
+    reason: "Schema changes and migrations can be hard to reverse."

@@ -1,0 +1,63 @@
+# Reference example, NOT active enforcement. See ./README.md.
+# Machine-readable mirror of the playbook's Tier model (PLAYBOOK / PLAYBOOK-EN).
+status: example
+
+tiers:
+  tier_1_autonomous:
+    label: "Tier 1: Autonomous"
+    description: "Local, reversible, no production effect."
+    allowed_without_prior_review: true
+    examples:
+      - "Read, analyze, and summarize code"
+      - "Generate draft code, tests, or documentation"
+      - "Run local tests and linters"
+      - "Propose architecture options"
+      - "Draft tickets or descriptions"
+    allowed_actions:
+      - "read_files"
+      - "write_non_protected_files"
+      - "run_local_tests"
+      - "run_linters"
+    required_review: "optional"
+    forbidden:
+      - "production_data_access"
+      - "secret_reading"
+      - "production_deployment"
+      - "approval_of_own_work"
+
+  tier_2_assisted:
+    label: "Tier 2: Assisted"
+    description: "Agent may prepare changes, but a human reviews before effect."
+    allowed_without_prior_review: false
+    examples:
+      - "Create commits and pull requests"
+      - "Modify CI/CD configuration"
+      - "Prepare database schemas and migrations"
+      - "Edit auth, crypto, or access control code"
+      - "Integrate features into legacy code"
+    allowed_actions:
+      - "read_files"
+      - "write_files"
+      - "run_tests"
+      - "create_pr"
+    required_review: "human_review"
+    escalation_triggers:
+      - "auth_or_authorization_changed"
+      - "database_migration_required"
+      - "ci_or_infrastructure_changed"
+      - "public_api_changed"
+      - "brownfield_core_path_changed"
+
+  tier_3_prohibited:
+    label: "Tier 3: Prohibited"
+    description: "Agent must not execute autonomously. Explicit human-controlled system action required."
+    allowed_without_prior_review: false
+    examples:
+      - "Approve own pull request"
+      - "Deploy to production without explicit sign-off"
+      - "Delete production data or backups"
+      - "Disable monitoring or security controls"
+      - "Create or modify credentials autonomously"
+      - "Bypass required review gates"
+    allowed_actions: []
+    required_review: "explicit_human_approval"
