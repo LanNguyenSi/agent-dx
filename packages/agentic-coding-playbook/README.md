@@ -38,6 +38,17 @@ For teams that want a clearer model for review depth and implementation quality:
 
 These companion documents describe the difference between no review, normal review, and rigorous review, and propose a practical `Role + Skill + Standard` model for implementation agents.
 
+## Operational artifacts
+
+For teams that want to apply this model directly in a repository, this package also contains reusable artifacts:
+
+- [`templates/`](templates/): specs with evals, task slicing, review reports, and PR descriptions
+- [`policies/`](policies/): example risk tiers, protected files, approval rules, and quality gates
+- [`skills/`](skills/): reusable agent role prompts (task slicer, implementation agent, reviewer, skeptic, release gate)
+- [`examples/`](examples/): stack-specific and workflow-specific examples
+
+These artifacts are tool-agnostic and bilingual. Adapt them to your harness, CI system, and team workflow; they are not an enforcement layer on their own.
+
 ## Related projects
 
 - **[agent-engineering-playbook](../agent-engineering-playbook)**: Full technical reference with checklists and templates

@@ -281,6 +281,16 @@ These examples come from real work with AI agents. Not thought experiments.
 - **[project-forge](https://github.com/LanNguyenSi/project-forge)**: greenfield scaffolding with built-in gates
 - **[depsight](https://github.com/LanNguyenSi/depsight)**: security and dependency health for brownfield
 
+## Operational Artifacts
+
+For teams that want to apply this model directly in repositories, this package also contains:
+
+- [`templates/`](templates/) for specs with evals, task slicing, reviews, and PR descriptions
+- [`policies/`](policies/) for example risk tiers, protected files, approval rules, and quality gates
+- [`skills/`](skills/) for reusable agent roles such as task slicer, implementation agent, and reviewer agent
+
+These artifacts are tool-agnostic and bilingual. They should be adapted to the local harness, CI process, and team context; they are not an enforcement layer on their own.
+
 ---
 
 Organizations do not scale agents by giving them more freedom. They scale agents by designing accountability and system boundaries clearly.
