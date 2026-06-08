@@ -1,0 +1,29 @@
+# Reference example, NOT active enforcement. See ./README.md.
+# Derives review/approval requirements from task risk. Trigger identifiers draw
+# on the same vocabulary as task-risk-tiers.yaml; the two lists are not 1:1.
+status: example
+
+approval_rules:
+  default:
+    required_human_reviewers: 1
+    required_ci_checks:
+      - build
+      - test
+      - lint
+
+  rigorous_review_required_when:
+    - "auth_or_authorization_changed"
+    - "crypto_changed"
+    - "database_migration_required"
+    - "public_api_changed"
+    - "production_config_changed"
+    - "brownfield_core_path_changed"
+    - "security_control_changed"
+
+  explicit_human_approval_required_when:
+    - "production_deployment"
+    - "production_data_access"
+    - "credential_rotation"
+    - "security_gate_disabled"
+    - "monitoring_disabled"
+    - "agent_requests_to_approve_own_pr"

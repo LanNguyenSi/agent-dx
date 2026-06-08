@@ -1,0 +1,44 @@
+# Reference example, NOT active enforcement. See ./README.md.
+# Typical gate sets per maturity phase, without committing to a build system.
+status: example
+
+quality_gates:
+  base:
+    description: "Minimum checks for early projects."
+    checks:
+      - build
+      - human_review
+      - no_direct_push
+
+  standard:
+    description: "Recommended product-build checks."
+    checks:
+      - build
+      - tests
+      - lint
+      - static_analysis
+      - human_review
+
+  mature:
+    description: "Recommended production checks."
+    checks:
+      - build
+      - tests
+      - lint
+      - static_analysis
+      - security_scan
+      - coverage_threshold
+      - human_review
+
+  enterprise:
+    description: "Recommended enterprise checks."
+    checks:
+      - build
+      - tests
+      - lint
+      - static_analysis
+      - security_scan
+      - coverage_threshold
+      - performance_budget
+      - compliance_gate
+      - rigorous_review
