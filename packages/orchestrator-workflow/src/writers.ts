@@ -52,6 +52,9 @@ export function installFile(
 export const SECTION_BEGIN = "<!-- orchestrator-workflow:begin -->";
 export const SECTION_END = "<!-- orchestrator-workflow:end -->";
 
+/** Heading used when init creates AGENTS.md itself. */
+export const AGENTS_MD_HEADING = "# Agent instructions";
+
 /**
  * Creates AGENTS.md or replaces exactly the marker-fenced workflow section in
  * it. Content outside the markers is never touched. Markers only count when
@@ -65,7 +68,7 @@ export function upsertMarkerSection(
 ): void {
   const block = section.trimEnd();
   if (!existsSync(path)) {
-    write(path, `# Agent instructions\n\n${block}\n`);
+    write(path, `${AGENTS_MD_HEADING}\n\n${block}\n`);
     report.written.push(path);
     return;
   }
@@ -107,16 +110,17 @@ export function upsertMarkerSection(
 
 export const CLAUDE_IMPORT_LINE = "@AGENTS.md";
 
+/** The exact CLAUDE.md that init creates from scratch; uninstall relies on
+ * recognizing this byte-identically before removing the whole file. */
+export const CLAUDE_MD_BOILERPLATE = `# CLAUDE.md\n\nProject agent instructions live in AGENTS.md.\n\n${CLAUDE_IMPORT_LINE}\n`;
+
 /**
  * Claude Code reads CLAUDE.md, not AGENTS.md. Ensure CLAUDE.md exists and
  * imports AGENTS.md so the policy section is loaded there too.
  */
 export function ensureClaudeImport(report: Report, path: string): void {
   if (!existsSync(path)) {
-    write(
-      path,
-      `# CLAUDE.md\n\nProject agent instructions live in AGENTS.md.\n\n${CLAUDE_IMPORT_LINE}\n`,
-    );
+    write(path, CLAUDE_MD_BOILERPLATE);
     report.written.push(path);
     return;
   }

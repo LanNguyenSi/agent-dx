@@ -51,10 +51,14 @@ Two effects fall out of this shape:
 npx orchestrator-workflow init
 ```
 
-Run it at the root of the target repository. The installer is interactive by
-default: it locates existing harness configs (`.claude/`, `CLAUDE.md`,
-`.opencode/`, `opencode.json`, `.agents/`, `.codex/`), preselects what it
-found, and asks which model each subagent role should use.
+Run it at the root of the target repository: **without a directory argument,
+files are created in the current working directory.** The CLI prints the
+resolved target (`Installing into ...`) before it writes anything and warns
+when the target is not a git repository root; pass `init <dir>` to install
+into a different directory. The installer is interactive by default: it
+locates existing harness configs (`.claude/`, `CLAUDE.md`, `.opencode/`,
+`opencode.json`, `.agents/`, `.codex/`), preselects what it found, and asks
+which model each subagent role should use.
 
 Non-interactive:
 
@@ -127,6 +131,20 @@ in `.ai/workflow/manifest.json` and reused as the default on later re-runs.
 - `.ai/workflow/manifest.json` is the kit's state file. It records the applied
   version, harnesses, models, and file hashes, and is rewritten whenever that
   state changes; do not edit it by hand.
+
+## Uninstall
+
+```bash
+npx orchestrator-workflow uninstall
+```
+
+Removes exactly what `init` created, driven by the manifest's file hashes:
+unedited kit files are deleted, locally edited ones are kept and reported
+(`--force` removes those too). The AGENTS.md section and the CLAUDE.md
+import line are taken out; either file is deleted only when nothing but
+init's own boilerplate remains. Kit directories are pruned only when empty,
+and run history under `.ai/runs/` is always kept. Interactive runs ask for
+confirmation; non-interactive runs require `--yes`.
 
 ## Relation to agentic-coding-playbook
 
