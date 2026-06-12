@@ -1,6 +1,17 @@
-export type Role = "task-slicer" | "implementer" | "reviewer";
+export type Role = "explorer" | "task-slicer" | "implementer" | "reviewer";
 
-export const ROLES: Role[] = ["task-slicer", "implementer", "reviewer"];
+export const ROLES: Role[] = [
+  "explorer",
+  "task-slicer",
+  "implementer",
+  "reviewer",
+];
+
+/**
+ * Roles that map the terrain or judge work without changing it. They are
+ * installed with a read-only posture (no file-mutation tools).
+ */
+export const READ_ONLY_ROLES: ReadonlySet<Role> = new Set<Role>(["explorer"]);
 
 export type ModelAlias = "sonnet" | "opus" | "haiku";
 
@@ -11,6 +22,7 @@ export const MODEL_ALIASES: ModelAlias[] = ["sonnet", "opus", "haiku"];
  * deliberately not configured here.
  */
 export const DEFAULT_MODELS: Record<Role, string> = {
+  explorer: "sonnet",
   "task-slicer": "sonnet",
   implementer: "sonnet",
   reviewer: "opus",

@@ -29,6 +29,10 @@ the apparatus changes.
   validates task slices, assigns implementation and review, decides acceptance,
   reports back. The orchestrator must not become a passive transcript
   collector; it maintains compact run state.
+- **Explorer** (optional, read-only): maps the relevant terrain before
+  planning when the goal or solution is unclear or the codebase is unfamiliar.
+  Reports what exists, how it connects, the constraints to respect, and the
+  viable options. Never writes code.
 - **Task slicer** (optional): breaks a large change into small, testable tasks
   with dependencies and risk markers.
 - **Implementer**: implements exactly one narrow task, touches only relevant
@@ -37,8 +41,8 @@ the apparatus changes.
   tests, security, and edge cases. Classifies severity, recommends fixes,
   avoids unsolicited rewrites.
 
-Where the harness supports subagent definitions, the slicer, implementer, and
-reviewer roles are installed as named subagents (Claude Code:
+Where the harness supports subagent definitions, the explorer, slicer,
+implementer, and reviewer roles are installed as named subagents (Claude Code:
 `.claude/agents/`, opencode: `.opencode/agents/`) with preselected models.
 Spawn those instead of improvising role prompts. Extended role prompts live in
 the [agentic-coding-playbook skills](https://github.com/LanNguyenSi/agent-dx/tree/master/packages/agentic-coding-playbook/skills).
@@ -71,31 +75,63 @@ directory and the subagents.
 1. **Understand the goal.** Create the run directory and fill `00-goal.md`:
    operator request, goal, non-goals, constraints, assumptions, open questions.
    If the task can proceed on reasonable assumptions, proceed without blocking.
-2. **Plan.** Fill `01-plan.md`: approach, affected areas, risks, test strategy,
+2. **Discover (optional, read-only).** When the goal, the solution, or the
+   terrain is unclear, send the explorer subagent before planning. Fold its
+   findings into a "Terrain" section of `01-plan.md`. Skip this step when the
+   change is well understood. If the explorer surfaces a question only the
+   operator can answer, ask the operator instead of guessing.
+3. **Plan.** Fill `01-plan.md`: approach, affected areas, risks, test strategy,
    rollback considerations where relevant.
-3. **Slice tasks.** For non-trivial changes, fill `02-tasks.md`. Delegate to
+4. **Slice tasks.** For non-trivial changes, fill `02-tasks.md`. Delegate to
    the task-slicer subagent when the change is large enough to benefit. Each
    task carries: id, goal, relevant files, acceptance criteria, constraints,
    suggested tests, dependencies, risk.
-4. **Validate tasks.** Check the slices are independently understandable, small
+5. **Validate tasks.** Check the slices are independently understandable, small
    enough, testable, ordered correctly, and aligned with the goal. Fix the
    slicing before any implementation starts.
-5. **Delegate implementation.** Send each implementer subagent one narrow task
+6. **Delegate implementation.** Send each implementer subagent one narrow task
    contract (format below). Record meaningful decisions in `03-decisions.md`
    and consolidate evidence in `04-implementation-summary.md`.
-6. **Delegate review.** Send the diff to the reviewer subagent. The reviewer
+7. **Delegate review.** Send the diff to the reviewer subagent. The reviewer
    checks spec compliance, architecture consistency, edge cases, security,
    test adequacy (including whether new tests would fail if the change were
    reverted), and maintainability. Findings go to `05-review-findings.md`.
-7. **Decide acceptance.** Accept, request fixes, defer a known issue, or
+8. **Decide acceptance.** Accept, request fixes, defer a known issue, or
    escalate to the operator. Record the decision in `03-decisions.md`.
-8. **Hand off.** Fill `06-handoff.md` and report to the operator: what changed,
+9. **Hand off.** Fill `06-handoff.md` and report to the operator: what changed,
    why, how it was verified, known risks, suggested next step.
+
+## Explorer output contract
+
+```yaml
+status: done | partial | blocked
+role: explorer
+summary:
+  - ""
+relevant_terrain:
+  - path: ""
+    role: ""
+    notes: ""
+how_it_connects:
+  - ""
+constraints_and_conventions:
+  - ""
+solution_options:
+  - option: ""
+    pros:
+      - ""
+    cons:
+      - ""
+    risk: low | medium | high
+open_questions:
+  - ""
+recommendation: ""
+```
 
 ## Subagent input contract
 
 ```yaml
-role: implementer | reviewer | task_slicer
+role: explorer | implementer | reviewer | task_slicer
 task_id: T-000
 goal: ""
 context:
@@ -194,7 +230,8 @@ open_questions:
 ## Harness notes
 
 - **Claude Code**: spawn the installed `.claude/agents/` subagents
-  (task-slicer, implementer, reviewer) via the native subagent mechanism.
+  (explorer, task-slicer, implementer, reviewer) via the native subagent
+  mechanism.
 - **opencode**: invoke the installed `.opencode/agents/` subagents
   (`mode: subagent`).
 - **OpenAI Codex**: there is no standardized project-level subagent definition

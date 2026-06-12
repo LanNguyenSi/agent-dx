@@ -13,23 +13,23 @@ evidence. Every unit of work leaves an auditable run directory behind.
 ## Why this shape
 
 ```text
-              Operator
-          goal |    ^ handoff: what changed, how verified,
-               v    | what remains open
-          Orchestrator  . . . . . . .  .ai/runs/<date>-<slug>/
-          session model                  00-goal       04-implementation-summary
-          plans, validates slices,       01-plan       05-review-findings
-          decides acceptance             02-tasks      06-handoff
-               |                         03-decisions
-    narrow     |     ^ structured        (state lives in files,
-    contracts  v     | YAML evidence      not in chat history)
-      +--------------+--------------+
-      |              |              |
-  task-slicer    implementer    reviewer
-    sonnet         sonnet         opus
-  small,         one narrow     skeptical, severity-rated
-  testable       task, plus     findings, no rewrites
-  slices         tests
+                 Operator
+             goal |    ^ handoff: what changed, how verified,
+                  v    | what remains open
+  explorer  -->  Orchestrator  . . . . .  .ai/runs/<date>-<slug>/
+  optional,      session model             00-goal       04-implementation-summary
+  read-only      plans, validates slices,  01-plan       05-review-findings
+  terrain map    decides acceptance        02-tasks      06-handoff
+                      |                     03-decisions
+     narrow           |    ^ structured     (state lives in files,
+     contracts        v    | YAML evidence   not in chat history)
+        +-------------+-------------+
+        |             |             |
+    task-slicer   implementer   reviewer
+      sonnet        sonnet        opus
+    small,        one narrow    skeptical, severity-rated
+    testable      task, plus    findings, no rewrites
+    slices        tests
 ```
 
 Two effects fall out of this shape:
@@ -40,7 +40,8 @@ Two effects fall out of this shape:
   in run files that survive context compaction. The cheap models do the
   volume work; the strongest model is spent only on orchestration decisions
   and the skeptical review. The ceremony scales to the task: a trivial change
-  is done directly, the full flow is for non-trivial work.
+  is done directly, the full flow is for non-trivial work, and a read-only
+  explorer maps the terrain first only when the solution is unclear.
 - **Quality through structure.** Writing and reviewing are separated by
   role and model, task slices are validated before any implementation
   starts, acceptance is decided on evidence (tests executed, findings
@@ -96,9 +97,9 @@ Per selected harness:
 
 | Harness | Files | Notes |
 |---|---|---|
-| Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{task-slicer,implementer,reviewer}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter. |
+| Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{explorer,task-slicer,implementer,reviewer}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter; the read-only explorer also gets `disallowedTools: Edit, Write, NotebookEdit`. |
 | OpenAI Codex | `.agents/skills/orchestrator-workflow/SKILL.md` | Codex reads `AGENTS.md` natively. There is no standardized project-level subagent definition; the skill instructs running the roles inline with the same contracts. |
-| opencode | `.opencode/agents/{task-slicer,implementer,reviewer}.md` | opencode reads `AGENTS.md` natively and cross-discovers `.claude/skills/`. Subagents get `mode: subagent` plus a fully qualified `provider/model-id`. |
+| opencode | `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` | opencode reads `AGENTS.md` natively and cross-discovers `.claude/skills/`. Subagents get `mode: subagent` plus a fully qualified `provider/model-id`; the explorer also gets `permission: edit: deny`. |
 
 ## Model preselection
 

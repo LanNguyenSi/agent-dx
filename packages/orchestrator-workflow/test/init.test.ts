@@ -317,12 +317,48 @@ describe("upgrades via the manifest hash ledger", () => {
   });
 });
 
+describe("explorer role", () => {
+  it("installs the explorer with a read-only posture on both harnesses", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "opencode"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    const claudeExplorer = readFileSync(
+      join(target, ".claude", "agents", "explorer.md"),
+      "utf8",
+    );
+    expect(claudeExplorer).toContain("name: explorer");
+    expect(claudeExplorer).toContain("model: sonnet");
+    expect(claudeExplorer).toContain(
+      "disallowedTools: Edit, Write, NotebookEdit",
+    );
+
+    const opencodeExplorer = readFileSync(
+      join(target, ".opencode", "agents", "explorer.md"),
+      "utf8",
+    );
+    expect(opencodeExplorer).toContain("mode: subagent");
+    expect(opencodeExplorer).toContain("permission:");
+    expect(opencodeExplorer).toContain("edit: deny");
+
+    // The mutating roles must NOT carry the read-only marker.
+    const claudeImplementer = readFileSync(
+      join(target, ".claude", "agents", "implementer.md"),
+      "utf8",
+    );
+    expect(claudeImplementer).not.toContain("disallowedTools");
+  });
+});
+
 describe("harness selection and model mapping", () => {
-  it("installs all three adapters with mapped model ids", () => {
+  it("installs all four adapters with mapped model ids", () => {
     runInit({
       targetDir: target,
       harnesses: ["claude", "codex", "opencode"],
       models: {
+        explorer: "sonnet",
         "task-slicer": "haiku",
         implementer: "sonnet",
         reviewer: "opus",
@@ -354,6 +390,7 @@ describe("harness selection and model mapping", () => {
       targetDir: target,
       harnesses: ["claude", "opencode"],
       models: {
+        explorer: "sonnet",
         "task-slicer": "sonnet",
         implementer: "claude-sonnet-4-6",
         reviewer: "openrouter/some-model",
