@@ -93,4 +93,44 @@ jobs:
       - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+          VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./package.json').name")
+
+          # Idempotency: a re-run (workflow_dispatch, or "Re-run failed jobs")
+          # can land on a version a prior attempt already published.
+          if npm view "${pkg}@${VERSION}" version > /dev/null 2>&1; then
+            echo "::notice::${pkg}@${VERSION} is already on the registry; nothing to publish."
+            exit 0
+          fi
+
+          # Sigstore Rekor occasionally returns a transient TLOG_CREATE_ENTRY
+          # 409 (npm/cli#6892) that fails --provenance even though the tarball
+          # is fine. Retry up to 3 times with backoff, and treat "already
+          # published" as success in case a failed attempt actually reached
+          # the registry.
+          max=3
+          attempt=1
+          while true; do
+            echo "npm publish attempt ${attempt}/${max}"
+            if npm publish --access public --provenance; then
+              echo "::notice::Published ${pkg}@${VERSION} on attempt ${attempt}."
+              exit 0
+            fi
+            # A failed --provenance publish can still have landed the tarball;
+            # give the registry a moment to settle before checking.
+            sleep 5
+            if npm view "${pkg}@${VERSION}" version > /dev/null 2>&1; then
+              echo "::notice::${pkg}@${VERSION} reached the registry despite a non-zero publish exit; treating as success."
+              exit 0
+            fi
+            if [ "${attempt}" -ge "${max}" ]; then
+              echo "::error::npm publish failed after ${max} attempts. If the failure is a Sigstore TLog 409, re-run this workflow once the Rekor service recovers." >&2
+              exit 1
+            fi
+            backoff=$((2 ** attempt * 5))
+            echo "publish failed; retrying in ${backoff}s"
+            sleep "${backoff}"
+            attempt=$((attempt + 1))
+          done
