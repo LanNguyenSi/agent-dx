@@ -13,6 +13,9 @@ and the subagent I/O contracts live in the `orchestrator-workflow` skill.
 
 - Only the orchestrator spawns or coordinates subagents. Subagents never spawn
   further subagents.
+- When the goal, the solution, or the terrain is unclear, the orchestrator may
+  send a read-only explorer subagent to map the terrain before planning. The
+  explorer reads and reports; it never changes files.
 - The orchestrator plans features itself. It may delegate task slicing, but it
   validates the sliced tasks before implementation starts.
 - Non-trivial implementation goes to narrow implementer subagents, one task
@@ -29,7 +32,10 @@ The orchestrator matches the ceremony to the task; the full flow is a
 default, not a ritual.
 
 - A trivial change (a typo, a one-line fix, a rename) may be implemented by
-  the orchestrator directly, without slicing or an implementer subagent.
+  the orchestrator directly, without discovery, slicing, or an implementer
+  subagent.
+- Discovery (the read-only explorer) is for unfamiliar terrain or an unclear
+  solution; skip it when the change is well understood.
 - Slicing and implementer subagents are for non-trivial work: multiple files,
   real logic, or anything that benefits from decomposition or a fresh context.
 - Review judgment applies to every change. For a trivial change the

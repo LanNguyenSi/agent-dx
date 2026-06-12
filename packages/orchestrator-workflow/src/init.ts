@@ -12,6 +12,7 @@ import type { Harness } from "./detect.js";
 import { HARNESSES } from "./detect.js";
 import type { Role } from "./models.js";
 import {
+  READ_ONLY_ROLES,
   ROLES,
   assertValidModelId,
   claudeModelValue,
@@ -130,30 +131,33 @@ function yamlQuote(value: string): string {
 
 function composeClaudeAgent(role: Role, model: string): string {
   const asset = readAgentAsset(role);
-  return [
+  const frontmatter = [
     "---",
     `name: ${asset.name}`,
     `description: ${yamlQuote(asset.description)}`,
     `model: ${claudeModelValue(model)}`,
-    "---",
-    "",
-    asset.body.trimEnd(),
-    "",
-  ].join("\n");
+  ];
+  // Read-only roles keep every read/search tool but cannot mutate files.
+  if (READ_ONLY_ROLES.has(role)) {
+    frontmatter.push("disallowedTools: Edit, Write, NotebookEdit");
+  }
+  frontmatter.push("---");
+  return [...frontmatter, "", asset.body.trimEnd(), ""].join("\n");
 }
 
 function composeOpencodeAgent(role: Role, model: string): string {
   const asset = readAgentAsset(role);
-  return [
+  const frontmatter = [
     "---",
     `description: ${yamlQuote(asset.description)}`,
     "mode: subagent",
     `model: ${opencodeModelValue(model)}`,
-    "---",
-    "",
-    asset.body.trimEnd(),
-    "",
-  ].join("\n");
+  ];
+  if (READ_ONLY_ROLES.has(role)) {
+    frontmatter.push("permission:", "  edit: deny");
+  }
+  frontmatter.push("---");
+  return [...frontmatter, "", asset.body.trimEnd(), ""].join("\n");
 }
 
 export function runInit(options: InitOptions): Report {

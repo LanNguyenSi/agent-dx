@@ -4,6 +4,11 @@
 
 <!-- Short summary of the intended approach. -->
 
+## Terrain
+
+<!-- Optional. Discovery findings from the explorer subagent: what exists,
+how it connects, constraints to respect. Omit when no discovery was needed. -->
+
 ## Affected Areas
 
 - <!-- area/file/module -->
