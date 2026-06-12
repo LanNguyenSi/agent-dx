@@ -5,10 +5,9 @@ This repository uses an orchestrator-led agent workflow, installed and updated b
 [orchestrator-workflow](https://github.com/LanNguyenSi/agent-dx/tree/master/packages/orchestrator-workflow).
 
 The primary agent acts as the orchestrator. It owns the goal, planning, task
-validation, delegation, final acceptance, and the operator handoff.
-Implementation and technical review are delegated to narrow subagents. The full
-procedure and the subagent I/O contracts live in the `orchestrator-workflow`
-skill.
+validation, delegation, final acceptance, and the operator handoff. Non-trivial
+implementation and review are delegated to narrow subagents. The full procedure
+and the subagent I/O contracts live in the `orchestrator-workflow` skill.
 
 ### Core rules
 
@@ -18,8 +17,9 @@ skill.
   validates the sliced tasks before implementation starts.
 - Non-trivial implementation goes to narrow implementer subagents, one task
   per subagent.
-- Technical review goes to a separate reviewer subagent. Review is never
-  skipped, not even for docs or batch changes.
+- Non-trivial review goes to a separate reviewer subagent (see Scaling
+  delegation). Review itself is never skipped, not even for docs or batch
+  changes.
 - Final acceptance and the final answer to the operator stay with the
   orchestrator.
 
