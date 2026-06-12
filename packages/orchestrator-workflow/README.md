@@ -17,9 +17,9 @@ evidence. Every unit of work leaves an auditable run directory behind.
           goal |    ^ handoff: what changed, how verified,
                v    | what remains open
           Orchestrator  . . . . . . .  .ai/runs/<date>-<slug>/
-          session model                  00-goal      04-impl-summary
-          plans, validates slices,       01-plan      05-review-findings
-          decides acceptance             02-tasks     06-handoff
+          session model                  00-goal       04-implementation-summary
+          plans, validates slices,       01-plan       05-review-findings
+          decides acceptance             02-tasks      06-handoff
                |                         03-decisions
     narrow     |     ^ structured        (state lives in files,
     contracts  v     | YAML evidence      not in chat history)
@@ -27,8 +27,9 @@ evidence. Every unit of work leaves an auditable run directory behind.
       |              |              |
   task-slicer    implementer    reviewer
     sonnet         sonnet         opus
-  small testable one narrow     skeptical, severity-rated
-  slices         task + tests   findings, no rewrites
+  small,         one narrow     skeptical, severity-rated
+  testable       task, plus     findings, no rewrites
+  slices         tests
 ```
 
 Two effects fall out of this shape:

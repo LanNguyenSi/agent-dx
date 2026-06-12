@@ -52,9 +52,11 @@ The install creates or touches only these paths:
 - `.opencode/agents/{task-slicer,implementer,reviewer}.md` (opencode)
 
 Nothing else in the repository is modified. Locally edited files are
-reported as conflicts and left alone, never overwritten silently; the one
-exception is `.ai/workflow/manifest.json`, the kit's own state file, which
-is rewritten whenever the applied state changes. Network access is limited
+reported as conflicts and left alone, never overwritten silently; the
+exceptions are the kit-owned surfaces: `.ai/workflow/manifest.json` (the
+kit's state file, rewritten whenever the applied state changes) and the
+fenced AGENTS.md section itself, which is restored on re-run. Network
+access is limited
 to the npm registry (for `npx`) and, in the manual fallback, this
 repository on github.com / raw.githubusercontent.com.
 
