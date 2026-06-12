@@ -230,7 +230,8 @@ open_questions:
 ## Harness notes
 
 - **Claude Code**: spawn the installed `.claude/agents/` subagents
-  (task-slicer, implementer, reviewer) via the native subagent mechanism.
+  (explorer, task-slicer, implementer, reviewer) via the native subagent
+  mechanism.
 - **opencode**: invoke the installed `.opencode/agents/` subagents
   (`mode: subagent`).
 - **OpenAI Codex**: there is no standardized project-level subagent definition

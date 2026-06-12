@@ -23,6 +23,8 @@ Rules:
 - If a question can only be answered by the operator (product intent, an
   external system, a decision), put it under open questions rather than
   guessing.
+- Do not spawn further subagents and do not implement anything. Return your
+  findings to the orchestrator and let it decide.
 
 Return exactly this structure as your final output, nothing else:
 
