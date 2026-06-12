@@ -10,6 +10,41 @@ plan, task validation, acceptance, and the operator handoff. Implementation
 and review are delegated to narrow subagents that return structured YAML
 evidence. Every unit of work leaves an auditable run directory behind.
 
+## Why this shape
+
+```text
+              Operator
+          goal |    ^ handoff: what changed, how verified,
+               v    | what remains open
+          Orchestrator  . . . . . . .  .ai/runs/<date>-<slug>/
+          session model                  00-goal       04-implementation-summary
+          plans, validates slices,       01-plan       05-review-findings
+          decides acceptance             02-tasks      06-handoff
+               |                         03-decisions
+    narrow     |     ^ structured        (state lives in files,
+    contracts  v     | YAML evidence      not in chat history)
+      +--------------+--------------+
+      |              |              |
+  task-slicer    implementer    reviewer
+    sonnet         sonnet         opus
+  small,         one narrow     skeptical, severity-rated
+  testable       task, plus     findings, no rewrites
+  slices         tests
+```
+
+Two effects fall out of this shape:
+
+- **Token efficiency.** The orchestrator's context stays small: subagents
+  receive narrow task contracts instead of the whole conversation, return
+  structured YAML evidence instead of transcripts, and durable state lives
+  in run files that survive context compaction. The cheap models do the
+  volume work; the strongest model is spent only on orchestration decisions
+  and the skeptical review.
+- **Quality through structure.** Writing and reviewing are separated by
+  role and model, task slices are validated before any implementation
+  starts, acceptance is decided on evidence (tests executed, findings
+  addressed), and every run leaves an auditable trail in `.ai/runs/`.
+
 ## Install
 
 ```bash
@@ -28,10 +63,18 @@ npx orchestrator-workflow init --yes
 npx orchestrator-workflow init --harness claude,codex,opencode --models "implementer=sonnet,reviewer=opus" --yes
 ```
 
-To let a coding agent do the install, paste the prompt from
-[INSTALL-AGENT.md](INSTALL-AGENT.md): the agent asks the operator the
-harness and model questions in chat, then runs the non-interactive CLI, or
-scaffolds manually where npx is unavailable.
+To let a coding agent do the install, give it this single line:
+
+```text
+Follow the install instructions at https://raw.githubusercontent.com/LanNguyenSi/agent-dx/master/packages/orchestrator-workflow/INSTALL-AGENT.md
+```
+
+The agent then asks you the harness and model questions in chat and runs the
+non-interactive CLI (manual scaffolding where npx is unavailable).
+[INSTALL-AGENT.md](INSTALL-AGENT.md) documents, step by step, what the
+linked instructions make the agent do and which files it may touch, so the
+prompt can be audited before delegating. The link tracks `master`; pin it
+to a commit SHA for a stable audit.
 
 ## What gets installed
 
