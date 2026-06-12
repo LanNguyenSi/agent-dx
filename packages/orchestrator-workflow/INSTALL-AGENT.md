@@ -55,10 +55,12 @@ Nothing else in the repository is modified. Locally edited files are
 reported as conflicts and left alone, never overwritten silently; the
 exceptions are the kit-owned surfaces: `.ai/workflow/manifest.json` (the
 kit's state file, rewritten whenever the applied state changes) and the
-fenced AGENTS.md section itself, which is restored on re-run. Network
-access is limited
-to the npm registry (for `npx`) and, in the manual fallback, this
-repository on github.com / raw.githubusercontent.com.
+fenced AGENTS.md section itself, which is restored on re-run. The install
+is fully reversible: `npx orchestrator-workflow uninstall` removes exactly
+this write surface again, keeping run history under `.ai/runs/` and any
+locally edited files. Network access is limited to the npm registry (for
+`npx`) and, in the manual fallback, this repository on github.com /
+raw.githubusercontent.com.
 
 ## Instructions for the agent
 

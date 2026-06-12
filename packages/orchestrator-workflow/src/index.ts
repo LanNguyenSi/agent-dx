@@ -1,5 +1,7 @@
 export { runInit } from "./init.js";
 export type { InitOptions } from "./init.js";
+export { runUninstall } from "./uninstall.js";
+export type { UninstallReport } from "./uninstall.js";
 export { detectHarnesses, parseHarnessList, HARNESSES } from "./detect.js";
 export type { Harness } from "./detect.js";
 export {
