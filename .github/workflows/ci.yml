@@ -38,6 +38,7 @@ jobs:
           - friction-log
           - git-batch-cli
           - github-api-tool
+          - orchestrator-workflow
           - release-prep
           - slop-detector
     defaults:

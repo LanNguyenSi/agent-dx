@@ -1,0 +1,58 @@
+{
+  "name": "orchestrator-workflow",
+  "version": "0.1.0",
+  "description": "Installer for an orchestrator-led agent workflow: .ai/ run state, an AGENTS.md policy section, and per-harness subagent definitions for Claude Code, OpenAI Codex, and opencode",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "orchestrator-workflow": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "README.md",
+    "INSTALL-AGENT.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build && npm test",
+    "typecheck": "tsc --noEmit",
+    "dev": "node --import tsx src/cli.ts",
+    "test": "vitest run",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "orchestrator",
+    "workflow",
+    "subagents",
+    "claude-code",
+    "codex",
+    "opencode",
+    "dx-tools"
+  ],
+  "author": "Lan Nguyen Si",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LanNguyenSi/agent-dx.git",
+    "directory": "packages/orchestrator-workflow"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "inquirer": "^9.2.0"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.11.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.6"
+  }
+}
