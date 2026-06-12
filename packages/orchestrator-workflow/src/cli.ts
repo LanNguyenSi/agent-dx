@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { Command } from "commander";
@@ -12,16 +13,21 @@ import {
   DEFAULT_MODELS,
   MODEL_ALIASES,
   ROLES,
+  assertValidModelId,
   parseModelsSpec,
 } from "./models.js";
-import { runInit } from "./init.js";
+import { readInstalledManifest, runInit } from "./init.js";
 
 function isInteractive(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-async function promptHarnesses(detected: Harness[]): Promise<Harness[]> {
-  const preselected = detected.length > 0 ? detected : ["claude" as Harness];
+async function promptHarnesses(
+  detected: Harness[],
+  installed: Harness[],
+): Promise<Harness[]> {
+  const known = [...new Set([...detected, ...installed])];
+  const preselected = known.length > 0 ? known : ["claude" as Harness];
   const { harnesses } = await inquirer.prompt<{ harnesses: Harness[] }>([
     {
       type: "checkbox",
@@ -65,8 +71,14 @@ async function promptModels(
           type: "input",
           name: "custom",
           message: `Custom model id for ${role}:`,
-          validate: (value: string) =>
-            value.trim().length > 0 || "Model id must not be empty",
+          validate: (value: string) => {
+            try {
+              assertValidModelId(value.trim());
+              return true;
+            } catch (error) {
+              return error instanceof Error ? error.message : String(error);
+            }
+          },
         },
       ]);
       models[role] = custom.trim();
@@ -111,6 +123,11 @@ program
       },
     ) => {
       const targetDir = resolve(dir);
+      if (!existsSync(targetDir) || !statSync(targetDir).isDirectory()) {
+        console.error(`Target is not a directory: ${targetDir}`);
+        process.exitCode = 1;
+        return;
+      }
       const interactive = !opts.yes && isInteractive();
 
       const detected = detectHarnesses(targetDir);
@@ -119,19 +136,32 @@ program
           ? `Detected harness configs: ${detected.join(", ")}`
           : "No existing harness configs detected",
       );
+      // A previous install is the baseline; re-runs refresh it instead of
+      // resetting harnesses and models to the shipped defaults.
+      const previous = readInstalledManifest(targetDir);
+      if (previous) {
+        console.log(
+          `Found existing install (v${previous.version}, harnesses: ${previous.harnesses.join(", ")})`,
+        );
+      }
 
       let harnesses: Harness[];
       if (opts.harness) {
         harnesses = parseHarnessList(opts.harness);
       } else {
+        const installed = previous?.harnesses ?? [];
+        const fallback = [...new Set([...detected, ...installed])];
         harnesses = interactive
-          ? await promptHarnesses(detected)
-          : detected.length > 0
-            ? detected
+          ? await promptHarnesses(detected, installed)
+          : fallback.length > 0
+            ? fallback
             : ["claude"];
       }
 
-      let models: Record<Role, string> = { ...DEFAULT_MODELS };
+      let models: Record<Role, string> = {
+        ...DEFAULT_MODELS,
+        ...(previous?.models ?? {}),
+      };
       if (opts.models) models = parseModelsSpec(opts.models, models);
       if (interactive && !opts.models) models = await promptModels(models);
 

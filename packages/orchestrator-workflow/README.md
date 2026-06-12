@@ -59,9 +59,10 @@ Each subagent role gets a model, chosen interactively or via `--models`:
 
 The orchestrator itself runs on the session's main model; use the strongest
 reasoning model available. Aliases (`sonnet`, `opus`, `haiku`) map to fully
-qualified ids for opencode (for example `anthropic/claude-opus-4-8`); custom
-ids pass through unchanged. The chosen mapping is recorded in
-`.ai/workflow/manifest.json`.
+qualified ids for opencode (for example `anthropic/claude-opus-4-8`). Custom
+ids pass through as given for Claude Code; for opencode, a bare id without a
+provider prefix gets `anthropic/` prepended. The chosen mapping is recorded
+in `.ai/workflow/manifest.json` and reused as the default on later re-runs.
 
 ## Ownership and re-runs
 
@@ -69,10 +70,15 @@ ids pass through unchanged. The chosen mapping is recorded in
 
 - `AGENTS.md` and `CLAUDE.md` belong to you. The installer only appends its
   fenced section or the import line, and on re-run replaces only the content
-  between its own markers.
-- Everything else it writes is kit-owned. Local edits to kit-owned files are
-  never overwritten silently: the installer reports them as conflicts and
-  leaves them alone unless you pass `--force`.
+  between its own markers. A broken or duplicated marker fence is reported as
+  a conflict and left alone.
+- Templates, skills, and subagent definitions are kit-owned. The manifest
+  records a hash of each file as installed, so a re-run after a kit upgrade
+  updates files you never touched and reports files you edited as conflicts
+  instead of overwriting them; `--force` overwrites those too.
+- `.ai/workflow/manifest.json` is the kit's state file. It records the applied
+  version, harnesses, models, and file hashes, and is rewritten whenever that
+  state changes; do not edit it by hand.
 
 ## Relation to agentic-coding-playbook
 

@@ -14,6 +14,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build && npm test",
     "typecheck": "tsc --noEmit",
     "dev": "node --import tsx src/cli.ts",
     "test": "vitest run",

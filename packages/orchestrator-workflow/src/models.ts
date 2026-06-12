@@ -45,6 +45,21 @@ export function opencodeModelValue(model: string): string {
 }
 
 /**
+ * Model values are interpolated into YAML frontmatter as plain scalars;
+ * reject anything that could break out of that position.
+ */
+export function assertValidModelId(model: string): void {
+  if (model.length === 0) {
+    throw new Error("Model id must not be empty");
+  }
+  if (/[:"'#\n\\]/.test(model) || model !== model.trim()) {
+    throw new Error(
+      `Invalid model id "${model}"; expected an alias (${MODEL_ALIASES.join(", ")}) or a plain id like anthropic/claude-opus-4-8`,
+    );
+  }
+}
+
+/**
  * Parses a `--models` spec like `implementer=haiku,reviewer=opus` on top of
  * the given base mapping. Unknown roles and empty values are rejected.
  */
@@ -69,6 +84,7 @@ export function parseModelsSpec(
         `Unknown role "${role}" in --models; valid roles: ${ROLES.join(", ")}`,
       );
     }
+    assertValidModelId(model);
     result[role as Role] = model;
   }
   return result;

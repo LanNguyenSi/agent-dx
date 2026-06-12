@@ -54,7 +54,9 @@ export const SECTION_END = "<!-- orchestrator-workflow:end -->";
 
 /**
  * Creates AGENTS.md or replaces exactly the marker-fenced workflow section in
- * it. Content outside the markers is never touched.
+ * it. Content outside the markers is never touched. Markers only count when
+ * they are a whole line, so prose merely mentioning a marker cannot shift the
+ * fence; anything other than exactly one well-ordered pair is a conflict.
  */
 export function upsertMarkerSection(
   report: Report,
@@ -63,32 +65,43 @@ export function upsertMarkerSection(
 ): void {
   const block = section.trimEnd();
   if (!existsSync(path)) {
-    write(path, `# AGENTS.md\n\n${block}\n`);
+    write(path, `# Agent instructions\n\n${block}\n`);
     report.written.push(path);
     return;
   }
   const existing = readFileSync(path, "utf8");
-  const beginAt = existing.indexOf(SECTION_BEGIN);
-  const endAt = existing.indexOf(SECTION_END);
-  if (beginAt !== -1 && endAt !== -1 && endAt > beginAt) {
-    const replaced =
-      existing.slice(0, beginAt) +
-      block +
-      existing.slice(endAt + SECTION_END.length);
-    if (replaced === existing) {
-      report.skipped.push(path);
-      return;
-    }
-    write(path, replaced);
+  const lines = existing.split("\n");
+  const beginLines: number[] = [];
+  const endLines: number[] = [];
+  lines.forEach((line, index) => {
+    if (line.trim() === SECTION_BEGIN) beginLines.push(index);
+    if (line.trim() === SECTION_END) endLines.push(index);
+  });
+  if (beginLines.length === 0 && endLines.length === 0) {
+    const base = existing.trimEnd();
+    write(path, base === "" ? `${block}\n` : `${base}\n\n${block}\n`);
     report.updated.push(path);
     return;
   }
-  if (beginAt !== -1 || endAt !== -1) {
-    // Half a fence is local damage we must not guess about.
+  if (
+    beginLines.length !== 1 ||
+    endLines.length !== 1 ||
+    endLines[0] < beginLines[0]
+  ) {
+    // A broken or duplicated fence is local damage we must not guess about.
     report.conflicted.push(path);
     return;
   }
-  write(path, `${existing.trimEnd()}\n\n${block}\n`);
+  const replaced = [
+    ...lines.slice(0, beginLines[0]),
+    ...block.split("\n"),
+    ...lines.slice(endLines[0] + 1),
+  ].join("\n");
+  if (replaced === existing) {
+    report.skipped.push(path);
+    return;
+  }
+  write(path, replaced);
   report.updated.push(path);
 }
 
@@ -108,13 +121,21 @@ export function ensureClaudeImport(report: Report, path: string): void {
     return;
   }
   const existing = readFileSync(path, "utf8");
+  // Claude Code resolves @-imports anywhere in the file, so an inline
+  // mention like "see @AGENTS.md" already imports it.
   const hasImport = existing
     .split("\n")
-    .some((line) => line.trim() === CLAUDE_IMPORT_LINE);
+    .some((line) => line.split(/\s+/).includes(CLAUDE_IMPORT_LINE));
   if (hasImport) {
     report.skipped.push(path);
     return;
   }
-  write(path, `${existing.trimEnd()}\n\n${CLAUDE_IMPORT_LINE}\n`);
+  const base = existing.trimEnd();
+  write(
+    path,
+    base === ""
+      ? `${CLAUDE_IMPORT_LINE}\n`
+      : `${base}\n\n${CLAUDE_IMPORT_LINE}\n`,
+  );
   report.updated.push(path);
 }
