@@ -15,6 +15,12 @@ tasks to specialized subagents. The goal is to improve quality, reduce
 context-window pressure, and keep the operator informed through structured
 handoffs.
 
+Scale the ceremony to the task. The workflow below is the default for
+non-trivial work; a trivial change (a typo, a one-line fix) may be done
+directly by the orchestrator and reviewed by it, without slicing or spawning
+subagents. Review judgment still applies to every change; only the size of
+the apparatus changes.
+
 ## Roles
 
 - **Operator**: the human requester. Provides goal and constraints, approves or
@@ -57,6 +63,10 @@ the files as the run progresses. The newest run directory is the active one;
 older directories are the auditable history. Do not edit past runs.
 
 ## Workflow
+
+For a non-trivial change, run the full flow below. For a trivial change, do
+the work directly, review it, and still leave a short handoff; skip the run
+directory and the subagents.
 
 1. **Understand the goal.** Create the run directory and fill `00-goal.md`:
    operator request, goal, non-goals, constraints, assumptions, open questions.

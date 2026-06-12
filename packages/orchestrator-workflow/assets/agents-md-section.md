@@ -16,11 +16,26 @@ skill.
   further subagents.
 - The orchestrator plans features itself. It may delegate task slicing, but it
   validates the sliced tasks before implementation starts.
-- Implementation goes to narrow implementer subagents, one task per subagent.
+- Non-trivial implementation goes to narrow implementer subagents, one task
+  per subagent.
 - Technical review goes to a separate reviewer subagent. Review is never
   skipped, not even for docs or batch changes.
 - Final acceptance and the final answer to the operator stay with the
   orchestrator.
+
+### Scaling delegation
+
+The orchestrator matches the ceremony to the task; the full flow is a
+default, not a ritual.
+
+- A trivial change (a typo, a one-line fix, a rename) may be implemented by
+  the orchestrator directly, without slicing or an implementer subagent.
+- Slicing and implementer subagents are for non-trivial work: multiple files,
+  real logic, or anything that benefits from decomposition or a fresh context.
+- Review judgment applies to every change. For a trivial change the
+  orchestrator may review it itself; reserve the reviewer subagent for
+  changes whose risk or size warrants an independent skeptical pass. Either
+  way, review is never skipped.
 
 ### Context discipline
 
