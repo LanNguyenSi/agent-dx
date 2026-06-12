@@ -9,8 +9,14 @@ import {
   readAsset,
 } from "./assets.js";
 import type { Harness } from "./detect.js";
+import { HARNESSES } from "./detect.js";
 import type { Role } from "./models.js";
-import { ROLES, claudeModelValue, opencodeModelValue } from "./models.js";
+import {
+  ROLES,
+  assertValidModelId,
+  claudeModelValue,
+  opencodeModelValue,
+} from "./models.js";
 import type { Report } from "./writers.js";
 import {
   emptyReport,
@@ -46,15 +52,60 @@ function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-/** Reads the manifest of a previous install, if any. */
+/**
+ * Reads the manifest of a previous install, if any. Manifests can be written
+ * by hand (manual agent installs) or damaged, so every field is sanitized;
+ * anything invalid degrades to "no record" instead of crashing or leaking
+ * unvalidated values into generated frontmatter.
+ */
 export function readInstalledManifest(targetDir: string): Manifest | undefined {
   const path = join(targetDir, MANIFEST_PATH);
   if (!existsSync(path)) return undefined;
+  let raw: unknown;
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as Manifest;
+    raw = JSON.parse(readFileSync(path, "utf8"));
   } catch {
     return undefined;
   }
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const candidate = raw as Record<string, unknown>;
+  if (candidate.kit !== SKILL_NAME) return undefined;
+
+  const harnesses = (
+    Array.isArray(candidate.harnesses) ? candidate.harnesses : []
+  ).filter((value): value is Harness =>
+    (HARNESSES as string[]).includes(value as string),
+  );
+  const models: Partial<Record<Role, string>> = {};
+  if (typeof candidate.models === "object" && candidate.models !== null) {
+    for (const role of ROLES) {
+      const value = (candidate.models as Record<string, unknown>)[role];
+      if (typeof value !== "string") continue;
+      try {
+        assertValidModelId(value);
+        models[role] = value;
+      } catch {
+        // Invalid model ids are dropped; the role falls back to defaults.
+      }
+    }
+  }
+  const files: Record<string, string> = {};
+  if (typeof candidate.files === "object" && candidate.files !== null) {
+    for (const [key, value] of Object.entries(
+      candidate.files as Record<string, unknown>,
+    )) {
+      if (typeof value === "string") files[key] = value;
+    }
+  }
+  return {
+    kit: SKILL_NAME,
+    version: typeof candidate.version === "string" ? candidate.version : "",
+    harnesses,
+    models: models as Record<Role, string>,
+    files,
+    installedAt:
+      typeof candidate.installedAt === "string" ? candidate.installedAt : "",
+  };
 }
 
 function yamlQuote(value: string): string {
@@ -195,7 +246,7 @@ export function runInit(options: InitOptions): Report {
   } else {
     const manifest: Manifest = {
       ...desired,
-      installedAt: previous?.installedAt ?? new Date().toISOString(),
+      installedAt: previous?.installedAt || new Date().toISOString(),
     };
     installFile(
       report,

@@ -264,6 +264,39 @@ describe("upgrades via the manifest hash ledger", () => {
     expect(readFileSync(templatePath, "utf8")).toContain("# Goal");
   });
 
+  it("survives a malformed hand-written manifest without crashing", () => {
+    runInit(defaultOptions());
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          kit: "orchestrator-workflow",
+          version: "0.1.0",
+          harnesses: "claude",
+          models: { reviewer: 'opus: "x"', implementer: "haiku" },
+          files: null,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "src/cli.ts", "init", target, "--yes"],
+      { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+    );
+    expect(result.status, result.stderr).toBe(0);
+
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.harnesses).toEqual(["claude"]);
+    // The invalid reviewer id is dropped (back to default), the valid
+    // implementer override survives.
+    expect(manifest.models.reviewer).toBe("opus");
+    expect(manifest.models.implementer).toBe("haiku");
+  });
+
   it("keeps a user-edited kit file as a conflict and preserves the record", () => {
     runInit(defaultOptions());
     const templateRel = join(".ai", "workflow", "templates", "00-goal.md");

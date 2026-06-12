@@ -140,8 +140,13 @@ program
       // resetting harnesses and models to the shipped defaults.
       const previous = readInstalledManifest(targetDir);
       if (previous) {
+        const version = previous.version || "unknown version";
+        const installedFor =
+          previous.harnesses.length > 0
+            ? previous.harnesses.join(", ")
+            : "none recorded";
         console.log(
-          `Found existing install (v${previous.version}, harnesses: ${previous.harnesses.join(", ")})`,
+          `Found existing install (${version.startsWith("unknown") ? version : `v${version}`}, harnesses: ${installedFor})`,
         );
       }
 

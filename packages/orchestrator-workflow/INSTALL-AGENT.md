@@ -13,8 +13,9 @@ Paste the prompt below to your agent, as is.
 Install the orchestrator-workflow kit into this repository.
 
 1. Detect existing harness configs in the repo root: `.claude/` or
-   `CLAUDE.md` (Claude Code), `.opencode/` or `opencode.json` (opencode),
-   `.agents/` or `.codex/` (Codex). Tell the operator what you found.
+   `CLAUDE.md` (Claude Code), `.opencode/`, `opencode.json` or
+   `opencode.jsonc` (opencode), `.agents/` or `.codex/` (Codex). Tell the
+   operator what you found.
 
 2. Ask the operator, do not guess:
    - Which harnesses should get adapters: claude, codex, opencode?
@@ -46,18 +47,38 @@ Install the orchestrator-workflow kit into this repository.
      markers.
    - Claude Code: `.claude/skills/orchestrator-workflow/SKILL.md` from
      `assets/skill/SKILL.md`. For each role, `.claude/agents/<role>.md` from
-     `assets/agents/<role>.md` with `model: <operator's choice>` added to the
-     frontmatter. Ensure `CLAUDE.md` exists and contains a line `@AGENTS.md`.
+     `assets/agents/<role>.md` with `model: <operator's choice>` added as a
+     new line directly after the `description:` line (that placement matches
+     the installer's output byte for byte). Ensure `CLAUDE.md` exists and
+     contains a line `@AGENTS.md`.
    - Codex: `.agents/skills/orchestrator-workflow/SKILL.md`, same skill file.
    - opencode: `.opencode/agents/<role>.md` from `assets/agents/<role>.md`,
-     with the `name:` frontmatter line replaced by `mode: subagent` and
-     `model: <provider/model-id>` (aliases map to
+     with the frontmatter rewritten to exactly this order: `description:`
+     (unchanged), then `mode: subagent`, then `model: <provider/model-id>`;
+     the `name:` line is dropped. Aliases map to
      `anthropic/claude-sonnet-4-6`, `anthropic/claude-opus-4-8`,
-     `anthropic/claude-haiku-4-5`).
-   - `.ai/workflow/manifest.json` recording kit name, version, harnesses,
-     and the chosen models. A manual install may omit the `files` hash map;
-     a later `init` run will then treat existing kit files conservatively
-     and report conflicts rather than overwrite.
+     `anthropic/claude-haiku-4-5`.
+   - `.ai/workflow/manifest.json`, exactly this shape (harnesses MUST be an
+     array, models keyed by role):
+
+     ```json
+     {
+       "kit": "orchestrator-workflow",
+       "version": "0.1.0",
+       "harnesses": ["claude", "opencode"],
+       "models": {
+         "task-slicer": "sonnet",
+         "implementer": "sonnet",
+         "reviewer": "opus"
+       },
+       "files": {},
+       "installedAt": "2026-06-12T00:00:00.000Z"
+     }
+     ```
+
+     A manual install may leave the `files` hash map empty; a later `init`
+     run then treats existing kit files conservatively and reports conflicts
+     rather than overwriting them.
 
 5. Report back to the operator: which harnesses were installed, which model
    each role uses, and any conflicts that were left in place.
