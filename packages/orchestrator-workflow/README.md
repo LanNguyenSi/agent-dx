@@ -28,6 +28,11 @@ npx orchestrator-workflow init --yes
 npx orchestrator-workflow init --harness claude,codex,opencode --models "implementer=sonnet,reviewer=opus" --yes
 ```
 
+To let a coding agent do the install, paste the prompt from
+[INSTALL-AGENT.md](INSTALL-AGENT.md): the agent asks the operator the
+harness and model questions in chat, then runs the non-interactive CLI, or
+scaffolds manually where npx is unavailable.
+
 ## What gets installed
 
 ```text

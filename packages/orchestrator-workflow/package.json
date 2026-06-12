@@ -10,7 +10,8 @@
   "files": [
     "dist",
     "assets",
-    "README.md"
+    "README.md",
+    "INSTALL-AGENT.md"
   ],
   "scripts": {
     "build": "tsc",
