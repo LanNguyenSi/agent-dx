@@ -43,6 +43,22 @@ default, not a ritual.
   changes whose risk or size warrants an independent skeptical pass. Either
   way, review is never skipped.
 
+### Review gate
+
+High or critical reviewer findings block final acceptance until fixed or
+explicitly waived. Deferring such a finding counts as a waiver, and the gate
+applies to every review pass, including the orchestrator's own review of a
+trivial change.
+
+- Critical findings are fixed, or waived by the operator. The orchestrator
+  never waives a critical finding on its own.
+- High findings are fixed, or waived by the orchestrator with a recorded
+  rationale.
+- Every waiver is recorded in the run's `03-decisions.md` and summarized in
+  the Accepted Waivers section of `06-handoff.md`.
+- Medium and low findings are addressed or consciously accepted at the
+  orchestrator's judgment.
+
 ### Context discipline
 
 - Prefer task-local context over repository-wide context.
@@ -80,8 +96,8 @@ A task is done only when:
   satisfied,
 - relevant tests were added or updated where appropriate, and existing tests
   were executed or the gap is documented with a reason,
-- the reviewer findings were addressed or consciously accepted by the
-  orchestrator,
+- the review gate passed: no high or critical reviewer finding is unresolved
+  without a recorded waiver, and remaining findings were consciously accepted,
 - the operator handoff describes what changed, how it was verified, and what
   remains open.
 <!-- orchestrator-workflow:end -->
