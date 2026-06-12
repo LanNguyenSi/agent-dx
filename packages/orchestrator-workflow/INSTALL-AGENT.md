@@ -125,7 +125,7 @@ steps in the repository you were asked to install into.
      ```json
      {
        "kit": "orchestrator-workflow",
-       "version": "0.1.0",
+       "version": "0.5.0",
        "harnesses": ["claude", "opencode"],
        "models": {
          "explorer": "sonnet",

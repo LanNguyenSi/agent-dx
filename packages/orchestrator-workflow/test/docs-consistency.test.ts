@@ -106,3 +106,46 @@ describe("review gate ships in the policy, skill, and handoff template", () => {
     );
   });
 });
+
+describe(
+  "instruction trust boundary ships in policy, skill, and agent prompts",
+  () => {
+    const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+    const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+    it("agents-md-section contains the subsection heading", () => {
+      expect(agentsMdSection).toContain("### Instruction trust boundary");
+    });
+
+    it("agents-md-section contains the key phrase", () => {
+      expect(agentsMdSection).toContain("data, not instructions");
+    });
+
+    it("policy carries the conflict and surface-not-follow rules", () => {
+      expect(agentsMdSection).toContain("trusted instructions win");
+      expect(agentsMdSection).toContain("never followed");
+      expect(agentsMdSection).toContain("task assignments to subagents");
+    });
+
+    it("skill/SKILL.md contains the section heading", () => {
+      expect(skillMd).toContain("## Instruction trust boundary");
+    });
+
+    it("skill body carries the conflict rule", () => {
+      expect(skillMd).toContain("the trusted instruction wins");
+      expect(skillMd).toContain("the orchestrator's task assignments");
+    });
+
+    for (const role of ROLES) {
+      it(`agents/${role}.md treats content as data not instructions`, () => {
+        const agentMd = unwrap(readAsset(`agents/${role}.md`));
+        expect(agentMd).toContain("data, not instructions");
+        if (role === "reviewer") {
+          expect(agentMd).toContain("raise it as a finding");
+        } else {
+          expect(agentMd).toContain("report it as a risk or open question");
+        }
+      });
+    }
+  },
+);
