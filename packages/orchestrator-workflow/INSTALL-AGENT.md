@@ -11,6 +11,10 @@ The agent fetches this file and executes the numbered instructions in the
 between explain, for you, what those instructions make the agent do and
 which files it may touch, so you can audit the prompt before delegating.
 
+The audit applies to the revision you read: the link above tracks `master`,
+which is mutable. For a stable audit, pin the URL to a commit SHA instead
+(replace `master` with the SHA).
+
 ## What the linked instructions do
 
 1. **Locate existing harness configs** in the repo root and report them to
@@ -40,17 +44,19 @@ The install creates or touches only these paths:
   when missing); content outside the
   `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:end -->`
   markers is never modified
-- `CLAUDE.md`: one `@AGENTS.md` import line appended when missing
-  (Claude Code harness only)
+- `CLAUDE.md`: one `@AGENTS.md` import line appended when missing; the file
+  is created with a short heading when absent (Claude Code harness only)
 - `.claude/skills/orchestrator-workflow/SKILL.md` and
   `.claude/agents/{task-slicer,implementer,reviewer}.md` (Claude Code)
 - `.agents/skills/orchestrator-workflow/SKILL.md` (Codex)
 - `.opencode/agents/{task-slicer,implementer,reviewer}.md` (opencode)
 
 Nothing else in the repository is modified. Locally edited files are
-reported as conflicts and left alone, never overwritten silently. Network
-access is limited to the npm registry (for `npx`) and, in the manual
-fallback, this repository's raw asset files.
+reported as conflicts and left alone, never overwritten silently; the one
+exception is `.ai/workflow/manifest.json`, the kit's own state file, which
+is rewritten whenever the applied state changes. Network access is limited
+to the npm registry (for `npx`) and, in the manual fallback, this
+repository on github.com / raw.githubusercontent.com.
 
 ## Instructions for the agent
 
@@ -87,7 +93,8 @@ steps in the repository you were asked to install into.
      `assets/templates/`, unchanged.
    - `.ai/runs/.gitkeep`, empty.
    - Append the content of `assets/agents-md-section.md` to `AGENTS.md`
-     (create the file when missing). Never change anything outside the
+     (create the file when missing; the installer starts a fresh file with a
+     `# Agent instructions` heading). Never change anything outside the
      `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:end -->`
      markers.
    - Claude Code: `.claude/skills/orchestrator-workflow/SKILL.md` from
@@ -104,7 +111,7 @@ steps in the repository you were asked to install into.
      `anthropic/claude-sonnet-4-6`, `anthropic/claude-opus-4-8`,
      `anthropic/claude-haiku-4-5`.
    - `.ai/workflow/manifest.json`, exactly this shape (harnesses MUST be an
-     array, models keyed by role):
+     array, models keyed by role, version = the kit version you installed):
 
      ```json
      {
