@@ -1,0 +1,136 @@
+name: Publish to npm
+
+# Publishes packages/orchestrator-workflow on a pushed tag matching
+# `orchestrator-workflow/v<semver>` (agent-dx tag convention: <pkg>/v<version>).
+# The workflow_dispatch path exists so a tag that predates this workflow
+# (orchestrator-workflow/v0.1.0) can be published once the NPM_TOKEN secret
+# is configured.
+#
+# Extending to another package later: add its tag pattern under on.push.tags
+# and a matching case below. slop-detector is deliberately NOT wired up:
+# the npm name `slop-detector` is owned by a third party (see task eb4ab564).
+#
+# Push tags ONE AT A TIME. GitHub coalesces a multi-tag push into a single
+# push event, which fires the workflow only once with one arbitrary tag.
+
+on:
+  push:
+    tags:
+      - "orchestrator-workflow/v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish (e.g. orchestrator-workflow/v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  # id-token is required for `npm publish --provenance` to mint signed
+  # attestations.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/orchestrator-workflow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Parse tag
+        id: parse
+        env:
+          RESOLVED_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version="${RESOLVED_TAG#orchestrator-workflow/v}"
+          if [ "$version" = "$RESOLVED_TAG" ]; then
+            echo "::error::Tag $RESOLVED_TAG does not match expected pattern orchestrator-workflow/v<semver>" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Publishing orchestrator-workflow@${version}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/orchestrator-workflow/package-lock.json
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Preflight, verify NPM_TOKEN secret is set
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN secret is not configured. Add it under Settings -> Secrets and variables -> Actions before publishing." >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify package.json version matches tag
+        env:
+          EXPECTED_VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "$pkg_version" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Tag version ($EXPECTED_VERSION) does not match packages/orchestrator-workflow/package.json ($pkg_version)" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./package.json').name")
+
+          # Idempotency: a re-run (workflow_dispatch, or "Re-run failed jobs")
+          # can land on a version a prior attempt already published.
+          if npm view "${pkg}@${VERSION}" version > /dev/null 2>&1; then
+            echo "::notice::${pkg}@${VERSION} is already on the registry; nothing to publish."
+            exit 0
+          fi
+
+          # Sigstore Rekor occasionally returns a transient TLOG_CREATE_ENTRY
+          # 409 (npm/cli#6892) that fails --provenance even though the tarball
+          # is fine. Retry up to 3 times with backoff, and treat "already
+          # published" as success in case a failed attempt actually reached
+          # the registry.
+          max=3
+          attempt=1
+          while true; do
+            echo "npm publish attempt ${attempt}/${max}"
+            if npm publish --access public --provenance; then
+              echo "::notice::Published ${pkg}@${VERSION} on attempt ${attempt}."
+              exit 0
+            fi
+            # A failed --provenance publish can still have landed the tarball;
+            # give the registry a moment to settle before checking.
+            sleep 5
+            if npm view "${pkg}@${VERSION}" version > /dev/null 2>&1; then
+              echo "::notice::${pkg}@${VERSION} reached the registry despite a non-zero publish exit; treating as success."
+              exit 0
+            fi
+            if [ "${attempt}" -ge "${max}" ]; then
+              echo "::error::npm publish failed after ${max} attempts. If the failure is a Sigstore TLog 409, re-run this workflow once the Rekor service recovers." >&2
+              exit 1
+            fi
+            backoff=$((2 ** attempt * 5))
+            echo "publish failed; retrying in ${backoff}s"
+            sleep "${backoff}"
+            attempt=$((attempt + 1))
+          done
