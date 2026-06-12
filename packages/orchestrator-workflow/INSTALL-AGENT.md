@@ -21,9 +21,9 @@ which is mutable. For a stable audit, pin the URL to a commit SHA instead
    you (Claude Code, opencode, Codex marker files; full list in step 1
    below).
 2. **Ask you, not guess**: which harnesses should get adapters, and which
-   model each subagent role (task-slicer, implementer, reviewer) should use.
-   Suggested defaults: task-slicer `sonnet`, implementer `sonnet`, reviewer
-   `opus`.
+   model each subagent role (explorer, task-slicer, implementer, reviewer)
+   should use. Suggested defaults: explorer `sonnet`, task-slicer `sonnet`,
+   implementer `sonnet`, reviewer `opus`.
 3. **Run the non-interactive installer** with your answers:
    `npx orchestrator-workflow init --yes --harness ... --models ...`.
    If the installer reports conflicts with locally edited files, the agent
@@ -47,9 +47,9 @@ The install creates or touches only these paths:
 - `CLAUDE.md`: one `@AGENTS.md` import line appended when missing; the file
   is created with a short heading when absent (Claude Code harness only)
 - `.claude/skills/orchestrator-workflow/SKILL.md` and
-  `.claude/agents/{task-slicer,implementer,reviewer}.md` (Claude Code)
+  `.claude/agents/{explorer,task-slicer,implementer,reviewer}.md` (Claude Code)
 - `.agents/skills/orchestrator-workflow/SKILL.md` (Codex)
-- `.opencode/agents/{task-slicer,implementer,reviewer}.md` (opencode)
+- `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` (opencode)
 
 Nothing else in the repository is modified. Locally edited files are
 reported as conflicts and left alone, never overwritten silently; the
@@ -76,15 +76,16 @@ steps in the repository you were asked to install into.
    - Which harnesses should get adapters: claude, codex, opencode?
      Suggest the detected ones.
    - Which model for each subagent role? Suggest the defaults:
-     task-slicer `sonnet`, implementer `sonnet`, reviewer `opus`.
-     Accept the aliases `sonnet`, `opus`, `haiku` or a full model id.
+     explorer `sonnet`, task-slicer `sonnet`, implementer `sonnet`,
+     reviewer `opus`. Accept the aliases `sonnet`, `opus`, `haiku` or a
+     full model id.
 
 3. Run the non-interactive installer with the operator's answers:
 
    ```bash
    npx orchestrator-workflow init --yes \
      --harness <claude,codex,opencode> \
-     --models "task-slicer=<model>,implementer=<model>,reviewer=<model>"
+     --models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>"
    ```
 
    If the command reports conflicts, show them to the operator and ask
@@ -105,14 +106,18 @@ steps in the repository you were asked to install into.
      `assets/skill/SKILL.md`. For each role, `.claude/agents/<role>.md` from
      `assets/agents/<role>.md` with `model: <operator's choice>` added as a
      new line directly after the `description:` line (that placement matches
-     the installer's output byte for byte). Ensure `CLAUDE.md` exists and
+     the installer's output byte for byte). For the explorer role
+     additionally, `disallowedTools: Edit, Write, NotebookEdit` goes on a new
+     line directly after the `model:` line. Ensure `CLAUDE.md` exists and
      contains a line `@AGENTS.md`.
    - Codex: `.agents/skills/orchestrator-workflow/SKILL.md`, same skill file.
    - opencode: `.opencode/agents/<role>.md` from `assets/agents/<role>.md`,
      with the frontmatter rewritten to exactly this order: `description:`
      (unchanged), then `mode: subagent`, then `model: <provider/model-id>`;
-     the `name:` line is dropped. Aliases map to
-     `anthropic/claude-sonnet-4-6`, `anthropic/claude-opus-4-8`,
+     the `name:` line is dropped. For the explorer role additionally,
+     `permission:` goes on a new line directly after the `model:` line,
+     followed by `  edit: deny` (two-space indent) on the next line. Aliases
+     map to `anthropic/claude-sonnet-4-6`, `anthropic/claude-opus-4-8`,
      `anthropic/claude-haiku-4-5`.
    - `.ai/workflow/manifest.json`, exactly this shape (harnesses MUST be an
      array, models keyed by role, version = the kit version you installed):
@@ -123,6 +128,7 @@ steps in the repository you were asked to install into.
        "version": "0.1.0",
        "harnesses": ["claude", "opencode"],
        "models": {
+         "explorer": "sonnet",
          "task-slicer": "sonnet",
          "implementer": "sonnet",
          "reviewer": "opus"

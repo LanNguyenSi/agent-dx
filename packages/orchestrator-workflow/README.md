@@ -107,6 +107,7 @@ Each subagent role gets a model, chosen interactively or via `--models`:
 
 | Role | Default | Why |
 |---|---|---|
+| explorer | `sonnet` | read-only terrain mapping is broad reading, not deep reasoning |
 | task-slicer | `sonnet` | structured decomposition, no deep reasoning needed |
 | implementer | `sonnet` | fast, cheap, good enough for narrow pre-sliced tasks |
 | reviewer | `opus` | skeptical review benefits from the strongest model |
