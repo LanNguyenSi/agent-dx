@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { runInit } from "../src/init.js";
+import { isContainedRelativePath, runInit } from "../src/init.js";
 import { runUninstall } from "../src/uninstall.js";
 import { DEFAULT_MODELS } from "../src/models.js";
 
@@ -142,9 +142,40 @@ describe("path traversal safety", () => {
     writeFileSync(victim, "x\n");
     writeManifestFiles({ [victim]: "deadbeef" });
 
-    runUninstall({ targetDir: target, force: true });
+    const report = runUninstall({ targetDir: target, force: true });
+    // The absolute key is dropped by readInstalledManifest before the loop
+    // ever runs, so it cannot be removed. The guard itself is pinned
+    // directly in the isContainedRelativePath unit test below.
     expect(existsSync(victim)).toBe(true);
+    expect(report.removed).not.toContain(victim);
     rmSync(victim, { force: true });
+  });
+});
+
+describe("isContainedRelativePath", () => {
+  it("accepts paths that stay inside the target", () => {
+    for (const path of [
+      ".ai/workflow/templates/00-goal.md",
+      ".claude/agents/reviewer.md",
+      "a/../00-goal.md",
+      "./CLAUDE.md",
+    ]) {
+      expect(isContainedRelativePath(path), path).toBe(true);
+    }
+  });
+
+  it("rejects absolute and escaping paths", () => {
+    for (const path of [
+      "",
+      "/etc/passwd",
+      "..",
+      "../victim",
+      "../../victim",
+      "a/../../victim",
+      "foo/bar/../../../victim",
+    ]) {
+      expect(isContainedRelativePath(path), path).toBe(false);
+    }
   });
 });
 
