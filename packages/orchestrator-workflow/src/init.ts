@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, normalize, sep } from "node:path";
 
 import {
   PACKAGE_VERSION,
@@ -53,6 +53,18 @@ function sha256(content: string): string {
 }
 
 /**
+ * A manifest can be hand-written or tampered with, and uninstall deletes by
+ * these paths. Only relative paths that stay inside the target are accepted;
+ * an absolute path or one that normalizes to a `..` escape is rejected so it
+ * can never reach an unlink.
+ */
+export function isContainedRelativePath(relativePath: string): boolean {
+  if (relativePath === "" || isAbsolute(relativePath)) return false;
+  const normalized = normalize(relativePath);
+  return normalized !== ".." && !normalized.startsWith(`..${sep}`);
+}
+
+/**
  * Reads the manifest of a previous install, if any. Manifests can be written
  * by hand (manual agent installs) or damaged, so every field is sanitized;
  * anything invalid degrades to "no record" instead of crashing or leaking
@@ -94,7 +106,11 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     for (const [key, value] of Object.entries(
       candidate.files as Record<string, unknown>,
     )) {
-      if (typeof value === "string") files[key] = value;
+      // Drop absolute or directory-escaping keys: uninstall deletes by these
+      // paths, so a tampered key must never enter the record.
+      if (typeof value === "string" && isContainedRelativePath(key)) {
+        files[key] = value;
+      }
     }
   }
   return {

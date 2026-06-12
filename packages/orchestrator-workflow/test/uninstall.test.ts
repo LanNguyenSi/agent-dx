@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -98,6 +99,66 @@ describe("edited kit files", () => {
 
     runUninstall({ targetDir: target, force: true });
     expect(existsSync(template)).toBe(false);
+  });
+});
+
+describe("path traversal safety", () => {
+  function writeManifestFiles(files: Record<string, string>): void {
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.files = { ...manifest.files, ...files };
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+
+  it("never deletes a file outside the target, even with a matching hash", () => {
+    initAll();
+    const victim = join(target, "..", "VICTIM-roundtrip.txt");
+    writeFileSync(victim, "precious\n");
+    const victimHash = createHash("sha256")
+      .update("precious\n", "utf8")
+      .digest("hex");
+    writeManifestFiles({ "../VICTIM-roundtrip.txt": victimHash });
+
+    const report = runUninstall({ targetDir: target });
+    expect(existsSync(victim)).toBe(true);
+    expect(report.removed).not.toContain(victim);
+    rmSync(victim, { force: true });
+  });
+
+  it("never deletes an escaping path even with --force", () => {
+    initAll();
+    const victim = join(target, "..", "VICTIM-force.txt");
+    writeFileSync(victim, "unpredictable\n");
+    writeManifestFiles({ "../VICTIM-force.txt": "deadbeef" });
+
+    runUninstall({ targetDir: target, force: true });
+    expect(existsSync(victim)).toBe(true);
+    rmSync(victim, { force: true });
+  });
+
+  it("ignores an absolute manifest path", () => {
+    initAll();
+    const victim = join(tmpdir(), "VICTIM-absolute.txt");
+    writeFileSync(victim, "x\n");
+    writeManifestFiles({ [victim]: "deadbeef" });
+
+    runUninstall({ targetDir: target, force: true });
+    expect(existsSync(victim)).toBe(true);
+    rmSync(victim, { force: true });
+  });
+});
+
+describe("CLAUDE.md import removal", () => {
+  it("keeps an inline @AGENTS.md mention", () => {
+    writeFileSync(
+      join(target, "CLAUDE.md"),
+      "Rules: see @AGENTS.md for the workflow.\n",
+    );
+    initAll();
+    runUninstall({ targetDir: target });
+    expect(readFileSync(join(target, "CLAUDE.md"), "utf8")).toBe(
+      "Rules: see @AGENTS.md for the workflow.\n",
+    );
   });
 });
 

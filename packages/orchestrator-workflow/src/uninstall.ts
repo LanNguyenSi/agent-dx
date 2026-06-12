@@ -3,12 +3,13 @@ import {
   existsSync,
   readFileSync,
   rmdirSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 
-import { readInstalledManifest } from "./init.js";
+import { isContainedRelativePath, readInstalledManifest } from "./init.js";
 import {
   AGENTS_MD_HEADING,
   CLAUDE_IMPORT_LINE,
@@ -131,9 +132,24 @@ export function runUninstall(options: {
   };
 
   for (const [relativePath, recordedHash] of Object.entries(manifest.files)) {
+    // Defense in depth: readInstalledManifest already drops escaping keys,
+    // but never unlink a path that is absolute, escapes the target, or is a
+    // directory rather than a kit file.
+    if (!isContainedRelativePath(relativePath)) {
+      report.kept.push(relativePath);
+      report.notes.push(
+        `${relativePath}: manifest path is outside the target; ignored.`,
+      );
+      continue;
+    }
     const path = join(targetDir, relativePath);
     if (!existsSync(path)) {
       report.missing.push(path);
+      continue;
+    }
+    if (!statSync(path).isFile()) {
+      report.kept.push(path);
+      report.notes.push(`${path}: not a regular file; ignored.`);
       continue;
     }
     const content = readFileSync(path, "utf8");
