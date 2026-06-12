@@ -1,0 +1,84 @@
+# orchestrator-workflow
+
+Installs an orchestrator-led agent workflow into any repository: one `.ai/`
+directory for run state, one marker-fenced policy section in `AGENTS.md`, and
+subagent definitions with preselected models for the harnesses you actually
+use (Claude Code, OpenAI Codex, opencode).
+
+The workflow itself: the primary agent acts as the orchestrator. It owns goal,
+plan, task validation, acceptance, and the operator handoff. Implementation
+and review are delegated to narrow subagents that return structured YAML
+evidence. Every unit of work leaves an auditable run directory behind.
+
+## Install
+
+```bash
+npx orchestrator-workflow init
+```
+
+Run it at the root of the target repository. The installer is interactive by
+default: it locates existing harness configs (`.claude/`, `CLAUDE.md`,
+`.opencode/`, `opencode.json`, `.agents/`, `.codex/`), preselects what it
+found, and asks which model each subagent role should use.
+
+Non-interactive:
+
+```bash
+npx orchestrator-workflow init --yes
+npx orchestrator-workflow init --harness claude,codex,opencode --models "implementer=sonnet,reviewer=opus" --yes
+```
+
+## What gets installed
+
+```text
+.ai/
+  workflow/
+    templates/        00-goal.md ... 06-handoff.md (canonical run templates)
+    manifest.json     kit version, chosen harnesses, per-role models
+  runs/               one directory per unit of work, newest = active
+AGENTS.md             marker-fenced "Agentic Coding Workflow" policy section
+```
+
+Per selected harness:
+
+| Harness | Files | Notes |
+|---|---|---|
+| Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{task-slicer,implementer,reviewer}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter. |
+| OpenAI Codex | `.agents/skills/orchestrator-workflow/SKILL.md` | Codex reads `AGENTS.md` natively. There is no standardized project-level subagent definition; the skill instructs running the roles inline with the same contracts. |
+| opencode | `.opencode/agents/{task-slicer,implementer,reviewer}.md` | opencode reads `AGENTS.md` natively and cross-discovers `.claude/skills/`. Subagents get `mode: subagent` plus a fully qualified `provider/model-id`. |
+
+## Model preselection
+
+Each subagent role gets a model, chosen interactively or via `--models`:
+
+| Role | Default | Why |
+|---|---|---|
+| task-slicer | `sonnet` | structured decomposition, no deep reasoning needed |
+| implementer | `sonnet` | fast, cheap, good enough for narrow pre-sliced tasks |
+| reviewer | `opus` | skeptical review benefits from the strongest model |
+
+The orchestrator itself runs on the session's main model; use the strongest
+reasoning model available. Aliases (`sonnet`, `opus`, `haiku`) map to fully
+qualified ids for opencode (for example `anthropic/claude-opus-4-8`); custom
+ids pass through unchanged. The chosen mapping is recorded in
+`.ai/workflow/manifest.json`.
+
+## Ownership and re-runs
+
+`init` is idempotent: a second run changes nothing. The rules:
+
+- `AGENTS.md` and `CLAUDE.md` belong to you. The installer only appends its
+  fenced section or the import line, and on re-run replaces only the content
+  between its own markers.
+- Everything else it writes is kit-owned. Local edits to kit-owned files are
+  never overwritten silently: the installer reports them as conflicts and
+  leaves them alone unless you pass `--force`.
+
+## Relation to agentic-coding-playbook
+
+This kit ships the orchestration layer: who coordinates whom, where state
+lives, and the I/O contracts between roles. The extended role prompts and the
+organizational guidance (when to use agents at all, review depth, risk tiers)
+live in the sibling package
+[agentic-coding-playbook](../agentic-coding-playbook), which the skill
+references.
