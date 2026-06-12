@@ -68,9 +68,9 @@ Workflow state lives under `.ai/`:
 
 - The orchestrator runs on the session's main model. Use the strongest
   reasoning model available.
-- Per-role model preferences (task slicer, implementer, reviewer) are recorded
-  in `.ai/workflow/manifest.json` and, where the harness supports per-agent
-  models, in the subagent definitions themselves.
+- Per-role model preferences (explorer, task slicer, implementer, reviewer) are
+  recorded in `.ai/workflow/manifest.json` and, where the harness supports
+  per-agent models, in the subagent definitions themselves.
 
 ### Definition of done
 
