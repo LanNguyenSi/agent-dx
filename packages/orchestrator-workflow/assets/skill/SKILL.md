@@ -96,10 +96,15 @@ directory and the subagents.
    checks spec compliance, architecture consistency, edge cases, security,
    test adequacy (including whether new tests would fail if the change were
    reverted), and maintainability. Findings go to `05-review-findings.md`.
-8. **Decide acceptance.** Accept, request fixes, defer a known issue, or
-   escalate to the operator. Record the decision in `03-decisions.md`.
+8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
+   operator. High or critical findings block acceptance until fixed or
+   explicitly waived: critical findings require operator sign-off; high
+   findings require the orchestrator to record a rationale. Deferring a high
+   or critical finding counts as a waiver and follows the same rules. Record
+   all decisions and waivers in `03-decisions.md` and summarize waivers in
+   the Accepted Waivers section of `06-handoff.md`.
 9. **Hand off.** Fill `06-handoff.md` and report to the operator: what changed,
-   why, how it was verified, known risks, suggested next step.
+   why, how it was verified, known risks, accepted waivers, suggested next step.
 
 ## Explorer output contract
 

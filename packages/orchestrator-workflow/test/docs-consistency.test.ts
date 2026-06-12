@@ -69,3 +69,40 @@ describe("docs enumerate every installed role", () => {
     expect(listed.sort()).toEqual(sortedRoles);
   });
 });
+
+/** Collapse line wraps so phrase assertions hold regardless of wrapping. */
+function unwrap(text: string): string {
+  return text.replace(/\s+/g, " ");
+}
+
+describe("review gate ships in the policy, skill, and handoff template", () => {
+  const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const handoffTemplate = readAsset("templates/06-handoff.md");
+
+  it("policy section carries the review gate", () => {
+    expect(agentsMdSection).toContain("### Review gate");
+    expect(agentsMdSection).toContain(
+      "block final acceptance until fixed or explicitly waived",
+    );
+    expect(agentsMdSection).toContain("waived by the operator");
+  });
+
+  it("skill decide-acceptance step carries the gate", () => {
+    expect(skillMd).toContain(
+      "block acceptance until fixed or explicitly waived",
+    );
+    expect(skillMd).toContain("Accepted Waivers section of `06-handoff.md`");
+  });
+
+  it("handoff template has the Accepted Waivers section", () => {
+    expect(handoffTemplate).toContain("## Accepted Waivers");
+    expect(handoffTemplate).toContain("| Finding | Severity | Rationale |");
+  });
+
+  it("the soft definition-of-done wording stays gone", () => {
+    expect(agentsMdSection).not.toContain(
+      "addressed or consciously accepted by the orchestrator",
+    );
+  });
+});
