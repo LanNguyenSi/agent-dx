@@ -39,7 +39,8 @@ Two effects fall out of this shape:
   structured YAML evidence instead of transcripts, and durable state lives
   in run files that survive context compaction. The cheap models do the
   volume work; the strongest model is spent only on orchestration decisions
-  and the skeptical review.
+  and the skeptical review. The ceremony scales to the task: a trivial change
+  is done directly, the full flow is for non-trivial work.
 - **Quality through structure.** Writing and reviewing are separated by
   role and model, task slices are validated before any implementation
   starts, acceptance is decided on evidence (tests executed, findings
