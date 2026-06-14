@@ -10,29 +10,37 @@ Agents leave fingerprints. Some are objectively wrong: `</result>` artefacts fro
 
 ## Install
 
+slop-detector is not yet published to npm (the bare `slop-detector` name there is an unrelated third-party package), so run it from a local build of this monorepo:
+
 ```bash
-npm install --save-dev slop-detector
-# or run ad-hoc
-npx slop-detector check README.md
+git clone https://github.com/LanNguyenSi/agent-dx
+cd agent-dx
+npm install
+npm run build -w slop-detector
+
+# alias the local CLI for this shell; the examples below use the bare `slop-detector` command
+alias slop-detector="node $PWD/packages/slop-detector/dist/cli.js"
 ```
+
+Without the alias, invoke the built CLI directly: `node packages/slop-detector/dist/cli.js check README.md`.
 
 ## Quick start
 
 ```bash
 # scan a path (file or directory)
-npx slop-detector check packages/
+slop-detector check packages/
 
 # scan stdin (use in pre-commit pipes)
-git diff --cached --name-only | xargs cat | npx slop-detector check --stdin-path PR_BODY.md
+git diff --cached --name-only | xargs cat | slop-detector check --stdin-path PR_BODY.md
 
 # only run a specific pack
-npx slop-detector check . --pack agent-tics
+slop-detector check . --pack agent-tics
 
 # see why a rule fires
-npx slop-detector check . --explain
+slop-detector check . --explain
 
 # JSON output for tooling
-npx slop-detector check . --format json
+slop-detector check . --format json
 ```
 
 ## Rule packs
@@ -47,7 +55,7 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 | `code-slop` | off | try/catch around code that cannot throw, default values on required-typed params, empty/rethrow catches, async without await, backcompat shims for unreleased APIs |
 | `ui-slop` | off, opt in via `--pack ui-slop` | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, monospace-everywhere, flat type hierarchy. Scans CSS / SCSS / LESS / HTML / JSX. |
 
-Run `npx slop-detector list-rules` for the full rule catalogue with severities and rationales.
+Run `slop-detector list-rules` for the full rule catalogue with severities and rationales.
 
 ### `ui-slop` (M3 v1) by example
 
@@ -186,7 +194,9 @@ For a faster, staged-files-only variant pair with [lint-staged](https://github.c
 
 ```yaml
 - name: Slop check
-  run: npx slop-detector check . --format json > slop-report.json
+  run: |
+    npm run build -w slop-detector
+    node packages/slop-detector/dist/cli.js check . --format json > slop-report.json
 ```
 
 A dedicated GitHub Action with PR annotations is planned for M3.

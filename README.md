@@ -53,7 +53,7 @@ LLMs leave fingerprints. Some are objectively wrong, like leaked `</result>` art
 
 Concrete data point: when `slop-detector` ran for the first time against the bodies of the 20 most recent merged PRs across LanNguyenSi/, it found 38 real violations (27 em-dashes, 11 auto-appended Claude Code footers) across 13 of the 20 PRs. Zero false positives. Every one of those PRs had been written by an agent, reviewed, and merged before the linter existed. The tool's first run was a quiet receipt.
 
-The pitch: lint at commit time, not at "I noticed three months later". `slop-detector` runs in pre-commit, in CI as a status check, or as `npx slop-detector check` ad-hoc.
+The pitch: lint at commit time, not at "I noticed three months later". `slop-detector` runs in pre-commit, in CI as a status check, or ad-hoc against a path. It is not yet published to npm (the bare `slop-detector` name there is an unrelated third-party package), so run it from a local build: see the [package README](packages/slop-detector/README.md#install).
 
 ## Other tools in the workshop
 
