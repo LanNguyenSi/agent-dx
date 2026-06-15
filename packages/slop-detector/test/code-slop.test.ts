@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { codeSlopPack } from "../src/packs/code-slop.js";
+import { codeSlopPack, __resetCaches } from "../src/packs/code-slop.js";
 import type { FileTarget, ResolvedConfig, Rule } from "../src/types.js";
 
 function code(text: string, fileName = "fixture.ts"): FileTarget {
@@ -235,6 +235,7 @@ describe("code-slop/phantom-import", () => {
   let tmpDir: string;
 
   beforeEach(() => {
+    __resetCaches();
     tmpDir = mkdtempSync(join(tmpdir(), "slop-phantom-"));
   });
 
@@ -353,7 +354,7 @@ describe("code-slop/phantom-import", () => {
     ).toHaveLength(0);
   });
 
-  it("does not flag a workspace sibling imported without a dependency entry", () => {
+  it("does not flag a workspace sibling imported without a dependency entry (regression)", () => {
     // tmpDir/ is the workspace root; packages/sib is a sibling of packages/app.
     writeFileSync(
       join(tmpDir, "package.json"),
@@ -374,6 +375,154 @@ describe("code-slop/phantom-import", () => {
     const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("actually-phantom");
+  });
+
+  // ── Gap 1: pnpm-workspace.yaml ────────────────────────────────────────────
+
+  it("resolves siblings declared in pnpm-workspace.yaml (positive + negative)", () => {
+    // Root has only pnpm-workspace.yaml, no workspaces in package.json.
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "root", private: true }),
+    );
+    writeFileSync(
+      join(tmpDir, "pnpm-workspace.yaml"),
+      "packages:\n  - \"packages/*\"\n",
+    );
+    const sibDir = join(tmpDir, "packages", "sib");
+    mkdirSync(sibDir, { recursive: true });
+    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/sib" }));
+    const appDir = join(tmpDir, "packages", "app");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/app" }));
+    const filePath = join(appDir, "x.ts");
+    const source = `import s from "@ws/sib";\nimport q from "actually-phantom";\n`;
+    writeFileSync(filePath, source);
+    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("actually-phantom");
+  });
+
+  // ── Gap 2: generalized glob handling ─────────────────────────────────────
+
+  it("resolves siblings via nested glob `packages/*/*`", () => {
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "root", private: true, workspaces: ["packages/*/*"] }),
+    );
+    const sibDir = join(tmpDir, "packages", "group", "sib");
+    mkdirSync(sibDir, { recursive: true });
+    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/sib" }));
+    const appDir = join(tmpDir, "packages", "group", "app");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/app" }));
+    const filePath = join(appDir, "x.ts");
+    const source = `import s from "@ws/sib";\nimport q from "phantom-nested";\n`;
+    writeFileSync(filePath, source);
+    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("phantom-nested");
+  });
+
+  it("resolves siblings via globstar `apps/**`", () => {
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "root", private: true, workspaces: ["apps/**"] }),
+    );
+    const sibDir = join(tmpDir, "apps", "deep", "sib");
+    mkdirSync(sibDir, { recursive: true });
+    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/deep-sib" }));
+    const appDir = join(tmpDir, "apps", "consumer");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/consumer" }));
+    const filePath = join(appDir, "x.ts");
+    const source = `import s from "@ws/deep-sib";\nimport q from "phantom-globstar";\n`;
+    writeFileSync(filePath, source);
+    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("phantom-globstar");
+  });
+
+  it("resolves siblings via mid-segment star `packages/eslint-*`", () => {
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "root", private: true, workspaces: ["packages/eslint-*"] }),
+    );
+    const sibDir = join(tmpDir, "packages", "eslint-config-base");
+    mkdirSync(sibDir, { recursive: true });
+    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/eslint-config-base" }));
+    const appDir = join(tmpDir, "packages", "app");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/app" }));
+    const filePath = join(appDir, "x.ts");
+    const source = `import s from "@ws/eslint-config-base";\nimport q from "phantom-midseg";\n`;
+    writeFileSync(filePath, source);
+    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("phantom-midseg");
+  });
+
+  it("does not throw on a pathological workspace glob (fail-open)", () => {
+    // A `?`-containing segment would build an invalid RegExp if unescaped; the
+    // resolver must swallow it and still run the rule rather than abort the
+    // scan of the whole repo.
+    const appDir = join(tmpDir, "packages", "app");
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "root", private: true, workspaces: ["packages/?*"] }),
+    );
+    const filePath = join(appDir, "x.ts");
+    const source = `import x from "definitely-phantom";\n`;
+    writeFileSync(filePath, source);
+    let v: ReturnType<typeof run>;
+    expect(() => {
+      v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    }).not.toThrow();
+    expect(v!).toHaveLength(1);
+    expect(v![0].message).toContain("definitely-phantom");
+  });
+
+  // ── Gap 3: require.resolve ────────────────────────────────────────────────
+
+  it("flags `require.resolve` of a phantom package", () => {
+    const f = withPackage(
+      { name: "fixture" },
+      `const p = require.resolve("phantom-resolve");\n`,
+    );
+    const v = run("code-slop/phantom-import", f);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("phantom-resolve");
+  });
+
+  it("does not flag `require.resolve` of a declared dependency", () => {
+    const f = withPackage(
+      { name: "fixture", dependencies: { lodash: "^4.0.0" } },
+      `const p = require.resolve("lodash");\n`,
+    );
+    expect(run("code-slop/phantom-import", f)).toHaveLength(0);
+  });
+
+  // ── Gap 4: __resetCaches actually clears stale package context ─────────────
+
+  it("__resetCaches lets an in-place package.json change be re-read", () => {
+    // First run caches the package context for tmpDir: lodash is undeclared,
+    // so the import is flagged.
+    const f = withPackage({ name: "fixture", dependencies: {} }, `import _ from "lodash";\n`);
+    expect(run("code-slop/phantom-import", f)).toHaveLength(1);
+
+    // Declare lodash in place. Without a reset the cached (stale) context wins,
+    // so the import is still flagged — proving the cache is consulted.
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "fixture", dependencies: { lodash: "^4.0.0" } }),
+    );
+    expect(run("code-slop/phantom-import", f)).toHaveLength(1);
+
+    // After clearing the caches the fresh package.json is read and the import
+    // is no longer phantom. If __resetCaches were inert this would still be 1.
+    __resetCaches();
+    expect(run("code-slop/phantom-import", f)).toHaveLength(0);
   });
 });
 

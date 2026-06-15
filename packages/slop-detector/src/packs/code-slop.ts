@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import YAML from "yaml";
 import type { TSESTree } from "@typescript-eslint/types";
 import type { FileTarget, PackDefinition, Rule, RuleContext, Violation } from "../types.js";
 import { isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode, type ParsedTsFile } from "../util/ts-ast.js";
@@ -521,6 +522,27 @@ function readJsonSafe(file: string): PackageJsonShape | null {
   }
 }
 
+// Mirror of readJsonSafe for YAML files (e.g. pnpm-workspace.yaml).
+// Returns the parsed object, or null on any read/parse error.
+function readYamlSafe(file: string): unknown {
+  try {
+    return YAML.parse(fs.readFileSync(file, "utf8")) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+// Extract the `packages` array from a pnpm-workspace.yaml file at the given
+// path. Returns an empty array when the file is absent or has no string-typed
+// `packages` entries.
+function pnpmWorkspacePatterns(wsYamlPath: string): string[] {
+  const raw = readYamlSafe(wsYamlPath);
+  if (!raw || typeof raw !== "object") return [];
+  const pkgs = (raw as Record<string, unknown>).packages;
+  if (!Array.isArray(pkgs)) return [];
+  return pkgs.filter((p): p is string => typeof p === "string");
+}
+
 function collectDepNames(pkg: PackageJsonShape, into: Set<string>): void {
   for (const block of [
     pkg.dependencies,
@@ -543,26 +565,83 @@ function workspacePatterns(pkg: PackageJsonShape): string[] {
   return [];
 }
 
-// Resolve workspace globs to the `name` of each sibling package. Only the
-// common `dir/*` form and exact directory paths are handled — a conservative
-// v1 that covers npm / yarn / pnpm `packages/*` layouts without a glob dep.
+// Resolve workspace globs to the `name` of each sibling package. Handles:
+//   - exact paths (no star): `packages/my-lib`
+//   - single-level wildcard: `packages/*`, `packages/eslint-*`
+//   - nested wildcard: `packages/*/*`
+//   - globstar: `apps/**` (any depth below the prefix)
+// Does NOT add a glob dependency — the resolver is hand-rolled and conservative.
+// Known fail-open limitations (each can only UNDER-flag, never over-flag, so
+// they are safe for a warn-severity rule): negation patterns (`!packages/x`)
+// are not subtracted, symlinked package dirs are skipped (readdir reports them
+// as non-directories), and only `*` is honored as a wildcard (other glob
+// metacharacters are matched literally).
 function collectWorkspaceSiblings(rootDir: string, patterns: string[], into: Set<string>): void {
+  // Walk the pattern segments and return the set of concrete directory paths
+  // that match. A literal segment descends into a single child; a segment with
+  // `*` (other than `**`) matches directory entries against an anchored regex;
+  // `**` matches zero or more directory levels.
+  function resolveGlob(currentDirs: string[], segments: string[]): string[] {
+    if (segments.length === 0) return currentDirs;
+    const [seg, ...rest] = segments;
+    const next: string[] = [];
+    for (const dir of currentDirs) {
+      if (seg === "**") {
+        // Collect this dir and all nested subdirs, then continue with remainder.
+        const allDirs: string[] = [dir];
+        function collectSubdirs(d: string, depth: number): void {
+          if (depth > 10) return;
+          let ents: fs.Dirent[];
+          try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+          for (const e of ents) {
+            if (e.isDirectory()) {
+              allDirs.push(path.join(d, e.name));
+              collectSubdirs(path.join(d, e.name), depth + 1);
+            }
+          }
+        }
+        collectSubdirs(dir, 0);
+        next.push(...resolveGlob(allDirs, rest));
+      } else if (seg.includes("*")) {
+        // Escape regex metacharacters except `*`, then replace `*` with `.*`.
+        // `?` is escaped too (we only honor `*`), and the RegExp build is
+        // wrapped so a pathological segment from a scanned repo's manifest can
+        // never throw out of the rule — it just resolves no siblings.
+        const regexSrc = seg.replace(/[.+^${}()|[\]\\?]/g, "\\$&").replace(/\*/g, ".*");
+        let re: RegExp;
+        try {
+          re = new RegExp(`^${regexSrc}$`);
+        } catch {
+          continue; // invalid glob segment — fail open
+        }
+        let ents: fs.Dirent[];
+        try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+        for (const e of ents) {
+          if (e.isDirectory() && re.test(e.name)) {
+            next.push(path.join(dir, e.name));
+          }
+        }
+      } else {
+        // Literal segment — descend unconditionally (let downstream catch ENOENT).
+        next.push(path.join(dir, seg));
+      }
+    }
+    return resolveGlob(next, rest);
+  }
+
   for (const pattern of patterns) {
-    const starIdx = pattern.indexOf("*");
-    if (starIdx === -1) {
+    if (!pattern.includes("*")) {
+      // Exact path — try to read its package.json directly.
       const pkg = readJsonSafe(path.join(rootDir, pattern, "package.json"));
       if (pkg?.name) into.add(pkg.name);
       continue;
     }
-    const prefix = pattern.slice(0, starIdx).replace(/[\\/]+$/, "");
-    let entries: string[];
-    try {
-      entries = fs.readdirSync(path.join(rootDir, prefix));
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const pkg = readJsonSafe(path.join(rootDir, prefix, entry, "package.json"));
+    // resolveGlob expands every wildcard — including `**`, which yields every
+    // directory at every depth below its prefix — so each resolved directory is
+    // itself a candidate package directory. Read its package.json name.
+    const segments = pattern.split(/[\\/]+/).filter(Boolean);
+    for (const dir of resolveGlob([rootDir], segments)) {
+      const pkg = readJsonSafe(path.join(dir, "package.json"));
       if (pkg?.name) into.add(pkg.name);
     }
   }
@@ -607,10 +686,14 @@ function readPackageContext(filePath: string): PackageContext {
   // Phase 2 — find the nearest workspace root at or above the own package and
   // add every sibling package name. A workspace sibling imported without a
   // dependency entry is legal in a monorepo, so it must not be flagged.
+  // Patterns are gathered from BOTH package.json `workspaces` AND a
+  // `pnpm-workspace.yaml` file at the same directory (union of both sources).
   let wsDir = ownDir;
   for (let i = 0; i < 40; i++) {
     const pkg = wsDir === ownDir ? ownPkg : readJsonSafe(path.join(wsDir, "package.json"));
-    const patterns = pkg ? workspacePatterns(pkg) : [];
+    const pkgPatterns = pkg ? workspacePatterns(pkg) : [];
+    const pnpmPatterns = pnpmWorkspacePatterns(path.join(wsDir, "pnpm-workspace.yaml"));
+    const patterns = Array.from(new Set([...pkgPatterns, ...pnpmPatterns]));
     if (patterns.length > 0) {
       collectWorkspaceSiblings(wsDir, patterns, known);
       break;
@@ -710,10 +793,26 @@ const phantomImport: Rule = {
           return;
         }
         case "CallExpression": {
+          // Bare `require("pkg")` call.
           if (
             node.callee.type === "Identifier" &&
             node.callee.name === "require" &&
             node.arguments.length === 1 &&
+            node.arguments[0].type === "Literal" &&
+            typeof node.arguments[0].value === "string"
+          ) {
+            consider(node.arguments[0].value, node.arguments[0]);
+            return;
+          }
+          // `require.resolve("pkg")` — equally broken for undeclared packages.
+          if (
+            node.callee.type === "MemberExpression" &&
+            !node.callee.computed &&
+            node.callee.object.type === "Identifier" &&
+            node.callee.object.name === "require" &&
+            node.callee.property.type === "Identifier" &&
+            node.callee.property.name === "resolve" &&
+            node.arguments.length >= 1 &&
             node.arguments[0].type === "Literal" &&
             typeof node.arguments[0].value === "string"
           ) {
@@ -728,6 +827,13 @@ const phantomImport: Rule = {
     return violations;
   },
 };
+
+// Exported test-only helper: clears all module-level caches so that test cases
+// that create temporary directories cannot observe stale results from prior runs.
+export function __resetCaches(): void {
+  packageContextCache.clear();
+  packageVersionCache.clear();
+}
 
 // ─────────────────────────── Rule 7: placeholder (stub) function body ─────
 
