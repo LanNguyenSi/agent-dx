@@ -10,9 +10,35 @@ export interface FileTarget {
 
 export type FileKind = "prose" | "code" | "style" | "markup" | "binary";
 
+export interface Corpus {
+  /**
+   * Every exported symbol in the scan root, keyed as "file::symbol".
+   * Built by `buildCorpus` when the corpus feature flag is active.
+   */
+  exports: Map<string, { file: string; symbol: string }>;
+  /**
+   * Identifiers referenced (imported or called) per file.
+   * Key = absolute file path; value = Set of identifier names.
+   */
+  referencesByFile: Map<string, Set<string>>;
+  /**
+   * Source files reachable from the nearest package.json
+   * via `main`, `bin`, or `exports` fields.
+   */
+  entrypoints: Set<string>;
+  /**
+   * Total count of CallExpression nodes whose callee is a plain Identifier,
+   * aggregated across all scanned files.  Used by corpus-aware rules to
+   * detect single-call-site helpers.
+   */
+  callCountBySymbol: Map<string, number>;
+}
+
 export interface RuleContext {
   file: FileTarget;
   config: ResolvedConfig;
+  /** Present only when SLOP_CORPUS=1 env var or config.corpus:true is active. */
+  corpus?: Corpus;
 }
 
 export interface Violation {
@@ -56,6 +82,8 @@ export interface ResolvedConfig {
   ignorePaths: string[];
   treatAsProse: string[];
   treatAsCode: string[];
+  /** When true, `checkFiles`/`checkPath` will build a corpus for cross-file rules. */
+  corpus?: boolean;
 }
 
 export interface CheckSummary {

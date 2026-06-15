@@ -147,6 +147,56 @@ treatAsCode:
 
 Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles.
 
+## Cross-file rules (experimental)
+
+Two `code-slop` rules analyse symbols across all files in the scan root rather than per file.  They are **off by default** and require a corpus pre-pass that parses every TypeScript/JavaScript file once before the rule loop runs.
+
+| Rule | Default severity | What it finds |
+|------|-----------------|---------------|
+| `code-slop/unused-export` | warn | Exported symbols not imported by any other file and not reachable via `package.json` entrypoints (`main`, `bin`, `exports`). |
+| `code-slop/single-callsite-helper` | warn | Named functions/`const`s with a body of at most 3 statements that are called from at most one place in the package — candidates for inlining. |
+
+### Enabling the corpus pre-pass
+
+Three equivalent switches — use whichever fits your workflow:
+
+**Environment variable** (one-off or CI step):
+```sh
+SLOP_CORPUS=1 slop-detector check src/
+```
+
+**Config file** (`slop.config.yml`):
+```yaml
+corpus: true
+```
+
+**Programmatic API** (`CheckOptions`):
+```ts
+import { checkFiles } from "slop-detector";
+checkFiles(files, { packs, config, corpusEnabled: true });
+```
+
+### Opting individual rules in
+
+Because both rules are `enabledByDefault: false` you must also enable them via `ruleOverrides`:
+
+```yaml
+# slop.config.yml
+corpus: true          # enable the pre-pass
+
+rules:
+  code-slop/unused-export:
+    enabled: true
+  code-slop/single-callsite-helper:
+    enabled: true
+```
+
+### Known limitations (v1)
+
+- **Entrypoint resolution uses dist paths.** `package.json` `main`/`exports` fields typically point at compiled output (`dist/index.js`).  When you scan `src/`, the entrypoint files are not matched and every symbol in the public API entry file will appear as an unused export.  Workaround: add the entry file to `ignorePaths`, or scope the scan to a sub-directory that does not contain the public API boundary.  A symbol-level entrypoint glob is tracked as a follow-up.
+- **Name-only symbol matching.** The corpus matches symbols by identifier name across files, not by import binding.  Two unrelated exports with the same name in different files will be counted as references to each other (false negative on `unused-export`).  Likewise, a local variable shadowing an imported name may suppress a violation (false positive suppression).
+- **Each file is parsed twice** when both the corpus pre-pass and the per-file rule loop run: once in `buildCorpus` and once inside the rule `check()` call (the second parse is cache-hit via `parseTsFile`'s `WeakMap`, so no disk I/O, but the AST walk repeats).
+
 ## Per-line opt-out
 
 Disable on a single line:
@@ -243,7 +293,7 @@ Run `npm run build` first so `dist/mcp.js` exists.
 ## Roadmap
 
 - M1: `agent-tics` + `prose-slop` packs, CLI, config loader, per-line disables.
-- M2: `comment-slop` + `code-slop` packs (TypeScript AST via `@typescript-eslint/parser`). Both off by default; opt in via config or `--pack`. Within-file analysis only; cross-file rules (unused exports, single-callsite helpers) are tracked as a separate task.
+- M2: `comment-slop` + `code-slop` packs (TypeScript AST via `@typescript-eslint/parser`). Both off by default; opt in via config or `--pack`. Within-file analysis only for all rules except the two experimental cross-file rules (`code-slop/unused-export`, `code-slop/single-callsite-helper`), which require the corpus pre-pass (see [Cross-file rules](#cross-file-rules-experimental)).
 - M3 (this release): `ui-slop` v1 pack with 4 default-on warn rules (gradient text, purple+cyan palette, animated layout properties, skipped heading levels) and 2 default-off info rules (monospace-everywhere, flat type hierarchy). Regex-driven over CSS plus tag-shape scan for headings, no new dependencies. Tailwind class strings, JSX inline `style={{...}}` literals, headless-browser contrast/WCAG rules, GitHub Action wrapper, and LLM-judged rules remain on the M3 backlog.
 
 Track progress at [agent-dx](https://github.com/LanNguyenSi/agent-dx) issues and tasks.

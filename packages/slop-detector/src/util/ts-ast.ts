@@ -56,6 +56,46 @@ export function parseTsFile(file: FileTarget): ParseResult | ParseFailure {
 
 export type AnyNode = TSESTree.Node;
 
+/**
+ * Extract declared identifier names from an export declaration subtree.
+ *
+ * Handles FunctionDeclaration, TSDeclareFunction, ClassDeclaration,
+ * VariableDeclaration, TSTypeAliasDeclaration, TSInterfaceDeclaration,
+ * and TSEnumDeclaration.  Returns an empty array for unknown node types.
+ */
+export function extractDeclaredNames(decl: AnyNode): string[] {
+  const names: string[] = [];
+  switch (decl.type) {
+    case "FunctionDeclaration":
+    case "TSDeclareFunction": {
+      const id = (decl as TSESTree.FunctionDeclaration).id;
+      if (id) names.push(id.name);
+      break;
+    }
+    case "ClassDeclaration": {
+      const id = (decl as TSESTree.ClassDeclaration).id;
+      if (id) names.push(id.name);
+      break;
+    }
+    case "VariableDeclaration": {
+      for (const d of (decl as TSESTree.VariableDeclaration).declarations) {
+        if (d.id.type === "Identifier") names.push(d.id.name);
+      }
+      break;
+    }
+    case "TSTypeAliasDeclaration":
+      names.push((decl as TSESTree.TSTypeAliasDeclaration).id.name);
+      break;
+    case "TSInterfaceDeclaration":
+      names.push((decl as TSESTree.TSInterfaceDeclaration).id.name);
+      break;
+    case "TSEnumDeclaration":
+      names.push((decl as TSESTree.TSEnumDeclaration).id.name);
+      break;
+  }
+  return names;
+}
+
 export function walk(node: AnyNode, visit: (node: AnyNode, parent: AnyNode | null) => void): void {
   function recurse(current: AnyNode, parent: AnyNode | null): void {
     visit(current, parent);

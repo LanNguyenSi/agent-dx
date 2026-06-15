@@ -3,7 +3,7 @@ import path from "node:path";
 import YAML from "yaml";
 import type { TSESTree } from "@typescript-eslint/types";
 import type { FileTarget, PackDefinition, Rule, RuleContext, Violation } from "../types.js";
-import { isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode, type ParsedTsFile } from "../util/ts-ast.js";
+import { extractDeclaredNames, isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode, type ParsedTsFile } from "../util/ts-ast.js";
 
 function appliesToCode(file: FileTarget): boolean {
   return isTypeScriptOrJavaScript(file);
@@ -953,10 +953,159 @@ const stubBody: Rule = {
   },
 };
 
+// ─────────────────────────── Rule 8: unused export (corpus-aware) ────────────
+
+const unusedExport: Rule = {
+  id: "code-slop/unused-export",
+  pack: "code-slop",
+  defaultSeverity: "warn",
+  // Off by default — requires the corpus pre-pass (SLOP_CORPUS=1 or config.corpus:true).
+  enabledByDefault: false,
+  rationale:
+    "An exported symbol with no consumers inside the package and no coverage via package.json entrypoints (bin/main/exports) is dead public surface — either consume it internally, expose it via the public API map, or delete it.",
+  appliesTo: appliesToCode,
+  check(ctx: RuleContext): Violation[] {
+    // Bail early when corpus is absent; preserves backward compat with direct
+    // rule.check() calls in unit tests that do not build a corpus.
+    if (!ctx.corpus) return [];
+
+    const { referencesByFile, entrypoints } = ctx.corpus;
+
+    // Skip every symbol in files that are package.json entrypoints — those
+    // symbols ARE the public API regardless of whether they're imported
+    // elsewhere in the scan root.
+    const absPath = path.resolve(ctx.file.path);
+    if (entrypoints.has(absPath) || entrypoints.has(ctx.file.path)) return [];
+
+    const result = parseTsFile(ctx.file);
+    if (!result.ok) return [];
+
+    // Collect (symbol-name, AST-node) pairs for all exports in this file.
+    const fileExports: Array<{ name: string; node: TSESTree.Node }> = [];
+    walk(result.ast as unknown as AnyNode, (node) => {
+      if (node.type === "ExportNamedDeclaration") {
+        const exportNode = node as TSESTree.ExportNamedDeclaration;
+        if (exportNode.declaration) {
+          for (const name of extractDeclaredNames(exportNode.declaration as AnyNode)) {
+            fileExports.push({ name, node: exportNode });
+          }
+        }
+        for (const spec of exportNode.specifiers) {
+          const exported = spec.exported;
+          const name = exported.type === "Identifier" ? exported.name : null;
+          if (name) fileExports.push({ name, node: spec });
+        }
+        return;
+      }
+      if (node.type === "ExportDefaultDeclaration") {
+        fileExports.push({ name: "default", node });
+      }
+    });
+
+    const violations: Violation[] = [];
+    for (const { name, node } of fileExports) {
+      // Does any OTHER file reference this symbol?
+      const hasConsumer = Array.from(referencesByFile.entries()).some(
+        ([file, refs]) => file !== ctx.file.path && refs.has(name),
+      );
+      if (!hasConsumer) {
+        violations.push(
+          makeViolation(
+            unusedExport,
+            ctx.file,
+            nodeLoc(node),
+            `\`${name}\` is exported but not imported by any other file in the package`,
+            snippet(ctx.file, node),
+          ),
+        );
+      }
+    }
+    return violations;
+  },
+};
+
+// ─────────────────────────── Rule 9: single-callsite helper (corpus-aware) ────
+
+const singleCallsiteHelper: Rule = {
+  id: "code-slop/single-callsite-helper",
+  pack: "code-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: false,
+  rationale:
+    "A named function or `const` with a body of ≤ 3 statements that is called from at most one place across the entire package is a candidate for inlining. Merging it with its sole caller reduces indirection and makes the flow easier to follow.",
+  appliesTo: appliesToCode,
+  check(ctx: RuleContext): Violation[] {
+    if (!ctx.corpus) return [];
+
+    const { callCountBySymbol } = ctx.corpus;
+
+    const result = parseTsFile(ctx.file);
+    if (!result.ok) return [];
+
+    const violations: Violation[] = [];
+
+    walk(result.ast as unknown as AnyNode, (node) => {
+      let funcName: string | null = null;
+      let body: TSESTree.BlockStatement | null = null;
+
+      // Named function declarations: `function foo() { ... }`
+      if (node.type === "FunctionDeclaration") {
+        const fn = node as TSESTree.FunctionDeclaration;
+        if (!fn.id || !fn.body) return;
+        funcName = fn.id.name;
+        body = fn.body;
+      }
+      // `const foo = (...) => { ... }` or `const foo = function() { ... }`
+      else if (node.type === "VariableDeclaration") {
+        const varDecl = node as TSESTree.VariableDeclaration;
+        if (varDecl.declarations.length !== 1) return;
+        const d = varDecl.declarations[0];
+        if (d.id.type !== "Identifier") return;
+        const init = d.init;
+        if (!init) return;
+        if (
+          (init.type === "ArrowFunctionExpression" || init.type === "FunctionExpression") &&
+          init.body &&
+          init.body.type === "BlockStatement"
+        ) {
+          funcName = d.id.name;
+          body = init.body;
+        }
+      }
+
+      if (!funcName || !body) return;
+
+      // Only flag helpers with a small (≤ 3 statements) body.
+      if (body.body.length > 3) return;
+
+      // Zero body is already caught by stub-body; skip to avoid duplicate noise.
+      if (body.body.length === 0) return;
+
+      // Count total call-expression occurrences across the whole package.
+      const callCount = callCountBySymbol.get(funcName) ?? 0;
+      if (callCount > 1) return;
+
+      violations.push(
+        makeViolation(
+          singleCallsiteHelper,
+          ctx.file,
+          nodeLoc(node),
+          `\`${funcName}\` has a ≤ 3-statement body and is called from ${
+            callCount === 0 ? "nowhere in the package" : "exactly one place"
+          } — consider inlining or deleting it`,
+          snippet(ctx.file, node),
+        ),
+      );
+    });
+
+    return violations;
+  },
+};
+
 export const codeSlopPack: PackDefinition = {
   id: "code-slop",
   description:
-    "AST-based catches for AI-tic code: try/catch around non-throwing code, defaults on required-typed params, empty/rethrow catches, async without await, backcompat shims for unreleased APIs, imports of undeclared packages, placeholder function bodies.",
+    "AST-based catches for AI-tic code: try/catch around non-throwing code, defaults on required-typed params, empty/rethrow catches, async without await, backcompat shims for unreleased APIs, imports of undeclared packages, placeholder function bodies, unused exports, single-callsite helpers.",
   rules: [
     tryCatchCannotThrow,
     defaultOnRequiredParam,
@@ -965,5 +1114,7 @@ export const codeSlopPack: PackDefinition = {
     backcompatShimUnreleased,
     phantomImport,
     stubBody,
+    unusedExport,
+    singleCallsiteHelper,
   ],
 };

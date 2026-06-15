@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codeSlopPack, __resetCaches } from "../src/packs/code-slop.js";
+import { checkFiles } from "../src/engine.js";
 import type { FileTarget, ResolvedConfig, Rule } from "../src/types.js";
 
 function code(text: string, fileName = "fixture.ts"): FileTarget {
@@ -665,6 +666,183 @@ function fmt(x: number | string): string { throw new Error("TODO"); }
     };
     const rule = codeSlopPack.rules.find((r) => r.id === "code-slop/stub-body")!;
     expect(rule.appliesTo(dts)).toBe(false);
+  });
+});
+
+// ─────────────────────────── Corpus-aware rules ───────────────────────────────
+
+/**
+ * Helper: write multiple source files into a temp dir, then run checkFiles
+ * with the corpus pre-pass enabled.  Returns violations for a single
+ * named rule.
+ */
+function runCorpusRule(
+  ruleId: string,
+  files: Record<string, string>,
+  tmpDir: string,
+  pkgJson?: object,
+): ReturnType<typeof checkFiles>["violations"] {
+  if (pkgJson) {
+    writeFileSync(join(tmpDir, "package.json"), JSON.stringify(pkgJson));
+  }
+  const paths: string[] = [];
+  for (const [name, src] of Object.entries(files)) {
+    const p = join(tmpDir, name);
+    mkdirSync(p.substring(0, p.lastIndexOf("/")), { recursive: true });
+    writeFileSync(p, src);
+    paths.push(p);
+  }
+  const cfg: ResolvedConfig = {
+    packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false },
+    ruleOverrides: { [ruleId]: { enabled: true } },
+    ignorePaths: [],
+    treatAsProse: [],
+    treatAsCode: [],
+  };
+  const summary = checkFiles(paths, {
+    packs: [codeSlopPack],
+    config: cfg,
+    corpusEnabled: true,
+    scanRoot: tmpDir,
+  });
+  return summary.violations.filter((v) => v.ruleId === ruleId);
+}
+
+describe("code-slop/unused-export", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    __resetCaches();
+    tmpDir = mkdtempSync(join(tmpdir(), "slop-unused-export-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("flags an exported symbol that is not imported by any sibling file", () => {
+    // a.ts exports `helperA`; no other file imports it.
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "a.ts": `export function helperA() { return 1; }\n`,
+        "b.ts": `export function helperB() { return 2; }\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.message.includes("`helperA`"))).toBe(true);
+    expect(violations.some((v) => v.message.includes("`helperB`"))).toBe(true);
+  });
+
+  it("does not flag an exported symbol that IS imported by a sibling file", () => {
+    // a.ts exports `helperA`; b.ts imports it.
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "a.ts": `export function helperA() { return 1; }\n`,
+        "b.ts": `import { helperA } from "./a.js";\nconsole.log(helperA());\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.message.includes("`helperA`"))).toBe(false);
+  });
+
+  it("does not flag symbols in a file that is listed as a package.json entrypoint", () => {
+    // a.ts is the package `main`; its exports must never be flagged.
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "a.ts": `export function publicApi() { return 1; }\n`,
+        "b.ts": `export function alsoUnused() { return 2; }\n`,
+      },
+      tmpDir,
+      { name: "fixture", main: "./a.ts" },
+    );
+    // a.ts is an entrypoint — publicApi must be safe
+    expect(violations.some((v) => v.message.includes("`publicApi`"))).toBe(false);
+    // b.ts is NOT an entrypoint — alsoUnused should still be flagged
+    expect(violations.some((v) => v.message.includes("`alsoUnused`"))).toBe(true);
+  });
+
+  it("returns empty results when corpus is absent (backward compat)", () => {
+    const rule = codeSlopPack.rules.find((r) => r.id === "code-slop/unused-export")!;
+    const file: FileTarget = {
+      path: "a.ts",
+      text: `export function helperA() { return 1; }\n`,
+      kind: "code",
+    };
+    // No corpus in context — must return []
+    expect(rule.check({ file, config })).toEqual([]);
+  });
+});
+
+describe("code-slop/single-callsite-helper", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    __resetCaches();
+    tmpDir = mkdtempSync(join(tmpdir(), "slop-single-callsite-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("flags a ≤3-statement function called from exactly one place", () => {
+    // add() has 1 statement body and is called once in b.ts
+    const violations = runCorpusRule(
+      "code-slop/single-callsite-helper",
+      {
+        "a.ts": `export function add(x: number, y: number) { return x + y; }\n`,
+        "b.ts": `import { add } from "./a.js";\nconst r = add(1, 2);\nconsole.log(r);\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.message.includes("`add`"))).toBe(true);
+  });
+
+  it("does not flag a ≤3-statement function called from multiple files", () => {
+    // add() is called in both b.ts AND c.ts → 2 callsites
+    const violations = runCorpusRule(
+      "code-slop/single-callsite-helper",
+      {
+        "a.ts": `export function add(x: number, y: number) { return x + y; }\n`,
+        "b.ts": `import { add } from "./a.js";\nconsole.log(add(1, 2));\n`,
+        "c.ts": `import { add } from "./a.js";\nconsole.log(add(3, 4));\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.message.includes("`add`"))).toBe(false);
+  });
+
+  it("does not flag a function reached via a package.json entrypoint (entrypoint file exempt from unused-export, callsite rule still applies)", () => {
+    // The single-callsite rule does NOT use entrypoints — it purely counts callsites.
+    // A function with >1 callsite should still be safe.
+    const violations = runCorpusRule(
+      "code-slop/single-callsite-helper",
+      {
+        "a.ts": `export function helper(x: number) { return x * 2; }\n`,
+        "b.ts": `import { helper } from "./a.js";\nconsole.log(helper(1));\nconsole.log(helper(2));\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    // b.ts calls helper() twice — corpus counts 2 → not flagged
+    expect(violations.some((v) => v.message.includes("`helper`"))).toBe(false);
+  });
+
+  it("returns empty results when corpus is absent (backward compat)", () => {
+    const rule = codeSlopPack.rules.find((r) => r.id === "code-slop/single-callsite-helper")!;
+    const file: FileTarget = {
+      path: "a.ts",
+      text: `function helper(x: number) { return x + 1; }\n`,
+      kind: "code",
+    };
+    expect(rule.check({ file, config })).toEqual([]);
   });
 });
 
