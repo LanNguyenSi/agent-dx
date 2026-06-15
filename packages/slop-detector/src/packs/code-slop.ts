@@ -3,41 +3,7 @@ import path from "node:path";
 import YAML from "yaml";
 import type { TSESTree } from "@typescript-eslint/types";
 import type { FileTarget, PackDefinition, Rule, RuleContext, Violation } from "../types.js";
-import { isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode, type ParsedTsFile } from "../util/ts-ast.js";
-
-// ── Local helper: extract exported names from a declaration node ─────────────
-function extractDeclaredNames(decl: AnyNode): string[] {
-  const names: string[] = [];
-  switch (decl.type) {
-    case "FunctionDeclaration":
-    case "TSDeclareFunction": {
-      const id = (decl as TSESTree.FunctionDeclaration).id;
-      if (id) names.push(id.name);
-      break;
-    }
-    case "ClassDeclaration": {
-      const id = (decl as TSESTree.ClassDeclaration).id;
-      if (id) names.push(id.name);
-      break;
-    }
-    case "VariableDeclaration": {
-      for (const d of (decl as TSESTree.VariableDeclaration).declarations) {
-        if (d.id.type === "Identifier") names.push(d.id.name);
-      }
-      break;
-    }
-    case "TSTypeAliasDeclaration":
-      names.push((decl as TSESTree.TSTypeAliasDeclaration).id.name);
-      break;
-    case "TSInterfaceDeclaration":
-      names.push((decl as TSESTree.TSInterfaceDeclaration).id.name);
-      break;
-    case "TSEnumDeclaration":
-      names.push((decl as TSESTree.TSEnumDeclaration).id.name);
-      break;
-  }
-  return names;
-}
+import { extractDeclaredNames, isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode, type ParsedTsFile } from "../util/ts-ast.js";
 
 function appliesToCode(file: FileTarget): boolean {
   return isTypeScriptOrJavaScript(file);

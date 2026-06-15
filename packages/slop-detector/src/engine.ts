@@ -14,7 +14,7 @@ import type {
 import { effectiveSeverity, isRuleEnabled } from "./config.js";
 import { detectFileKind, globToRegex } from "./util/file-kind.js";
 import { buildDisableMap } from "./util/disable-comments.js";
-import { isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode } from "./util/ts-ast.js";
+import { extractDeclaredNames, isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode } from "./util/ts-ast.js";
 
 export interface CheckOptions {
   packs: PackDefinition[];
@@ -165,7 +165,7 @@ export function buildCorpus(
       if (node.type === "ExportNamedDeclaration") {
         const exportNode = node as TSESTree.ExportNamedDeclaration;
         if (exportNode.declaration) {
-          for (const name of _declaredNames(exportNode.declaration as AnyNode)) {
+          for (const name of extractDeclaredNames(exportNode.declaration as AnyNode)) {
             exports.set(`${filePath}::${name}`, { file: filePath, symbol: name });
           }
         }
@@ -214,40 +214,6 @@ export function buildCorpus(
   if (pkgRoot) _resolveEntrypoints(pkgRoot, entrypoints);
 
   return { exports, referencesByFile, entrypoints, callCountBySymbol };
-}
-
-/** Extract declared identifier names from an export declaration subtree. */
-function _declaredNames(decl: AnyNode): string[] {
-  const names: string[] = [];
-  switch (decl.type) {
-    case "FunctionDeclaration":
-    case "TSDeclareFunction": {
-      const id = (decl as TSESTree.FunctionDeclaration).id;
-      if (id) names.push(id.name);
-      break;
-    }
-    case "ClassDeclaration": {
-      const id = (decl as TSESTree.ClassDeclaration).id;
-      if (id) names.push(id.name);
-      break;
-    }
-    case "VariableDeclaration": {
-      for (const d of (decl as TSESTree.VariableDeclaration).declarations) {
-        if (d.id.type === "Identifier") names.push(d.id.name);
-      }
-      break;
-    }
-    case "TSTypeAliasDeclaration":
-      names.push((decl as TSESTree.TSTypeAliasDeclaration).id.name);
-      break;
-    case "TSInterfaceDeclaration":
-      names.push((decl as TSESTree.TSInterfaceDeclaration).id.name);
-      break;
-    case "TSEnumDeclaration":
-      names.push((decl as TSESTree.TSEnumDeclaration).id.name);
-      break;
-  }
-  return names;
 }
 
 /** Walk up from the first file looking for a package.json directory. */
