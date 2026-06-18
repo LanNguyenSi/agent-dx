@@ -15,8 +15,7 @@ slop-detector is not yet published to npm (the bare `slop-detector` name there i
 ```bash
 git clone https://github.com/LanNguyenSi/agent-dx
 cd agent-dx
-npm install
-npm run build -w slop-detector
+cd packages/slop-detector && npm install && npm run build && cd ../..
 
 # alias the local CLI for this shell; the examples below use the bare `slop-detector` command
 alias slop-detector="node $PWD/packages/slop-detector/dist/cli.js"
@@ -245,7 +244,7 @@ For a faster, staged-files-only variant pair with [lint-staged](https://github.c
 ```yaml
 - name: Slop check
   run: |
-    npm run build -w slop-detector
+    (cd packages/slop-detector && npm install && npm run build)
     node packages/slop-detector/dist/cli.js check . --format json > slop-report.json
 ```
 
