@@ -18,7 +18,7 @@ Thanks for your interest. This is a TypeScript monorepo of small, independent to
 
 The monorepo is mixed:
 
-- **npm packages** (`slop-detector`, `release-prep`, `github-api-tool`, `git-batch-cli`, `agent-entrypoint`, `agent-dev-kit`):
+- **npm packages** (`slop-detector`, `release-prep`, `github-api-tool`, `git-batch-cli`, `agent-entrypoint`, `agent-dev-kit`, `friction-log`, `orchestrator-workflow`):
 
   ```bash
   git clone https://github.com/LanNguyenSi/agent-dx
@@ -28,7 +28,6 @@ The monorepo is mixed:
   npm test
   ```
 
-- **Python package** (`scaffoldkit`): see [`packages/scaffoldkit/README.md`](packages/scaffoldkit/README.md) for the `uv` setup.
 - **Doc-only packages** (`agentic-coding-playbook`, `agent-engineering-playbook`): no install step, just edit Markdown.
 
 Each package is self-contained, no root install.

@@ -14,14 +14,14 @@ cd packages/slop-detector && npm install && npm run build && cd ../..
 node packages/slop-detector/dist/cli.js check examples/slop-sample.md --explain
 ```
 
-Thirty-two deterministic rules across five packs:
+Thirty-four deterministic rules across five packs:
 
 | Pack | Default | What it catches |
 |------|---------|-----------------|
 | `agent-tics` (7 rules) | on | leaked `</result>` / `</invoke>` tags, auto-appended Claude Code footers, doubled Summary headings, template TODO placeholders |
 | `prose-slop` (7 rules) | on | em-dashes, hedging openers, marketing adjectives, signature LLM idioms (`delve into`, `tapestry of`, `leverage the power of`) |
 | `comment-slop` (5 rules) | off, opt in via `--pack` | JSDoc on trivial getters, comments that restate the next line, orphan markers, ASCII banner dividers |
-| `code-slop` (7 rules) | off, opt in via `--pack` | `try/catch` around non-throwing code, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies |
+| `code-slop` (9 rules) | off, opt in via `--pack` | `try/catch` around non-throwing code, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers |
 | `ui-slop` (6 rules) | off, opt in via `--pack` | gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX. |
 
 The three opt-in packs (`comment-slop`, `code-slop`, `ui-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
@@ -64,7 +64,7 @@ These were built alongside `slop-detector` for the same human-and-agent workflow
 | [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. |
 | [orchestrator-workflow](packages/orchestrator-workflow) | Installer for an orchestrator-led agent workflow: `.ai/` run state, an `AGENTS.md` policy section, and subagent definitions with preselected models for Claude Code, Codex, and opencode. |
 | [agent-entrypoint](packages/agent-entrypoint) | Generate and validate `AGENT_ENTRYPOINT.yaml` so an agent can find its way into a repo without prompting tricks. |
-| [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. M1: `log`, `list`, `file`. |
+| [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. v1 surface: `log`, `list`, `search`, `digest`, `export`, `file`, `scan`, `bilanz`, plus `init`/`import`/`rm`/`update`. |
 | [release-prep](packages/release-prep) | Changelog from conventional commits, semver bump suggestions, annotated tags, GitHub releases. |
 | [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. |
 | [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder: sync, status, dirty checks, fetch, with `--strict` for automation. |
