@@ -28,17 +28,6 @@ export const DEFAULT_MODELS: Record<Role, string> = {
   reviewer: "opus",
 };
 
-/**
- * opencode expects fully qualified `provider/model-id` strings (models.dev
- * ids). These are the current Anthropic ids for the three aliases; targets
- * with a different provider setup can pass a custom id instead.
- */
-const OPENCODE_MODEL_IDS: Record<ModelAlias, string> = {
-  sonnet: "anthropic/claude-sonnet-4-6",
-  opus: "anthropic/claude-opus-4-8",
-  haiku: "anthropic/claude-haiku-4-5",
-};
-
 export function isModelAlias(value: string): value is ModelAlias {
   return (MODEL_ALIASES as string[]).includes(value);
 }
@@ -51,9 +40,15 @@ export function claudeModelValue(model: string): string {
   return model;
 }
 
-export function opencodeModelValue(model: string): string {
-  if (isModelAlias(model)) return OPENCODE_MODEL_IDS[model];
-  return model.includes("/") ? model : `anthropic/${model}`;
+/**
+ * opencode requires fully qualified `provider/model-id` strings. Returns the
+ * value unchanged when it already contains a provider prefix, or `undefined`
+ * for bare aliases and bare ids that cannot be resolved without a live
+ * catalog. A `undefined` return means the `model:` frontmatter line should be
+ * omitted so the subagent inherits the session model.
+ */
+export function opencodeModelValue(model: string): string | undefined {
+  return model.includes("/") ? model : undefined;
 }
 
 /**

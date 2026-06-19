@@ -31,6 +31,14 @@ export interface InitOptions {
   harnesses: Harness[];
   models: Record<Role, string>;
   force?: boolean;
+  /**
+   * Resolved fully-qualified opencode model ids per role, or `undefined` to
+   * omit the `model:` frontmatter line (subagent inherits the session model).
+   * When this field is absent the fallback is `opencodeModelValue(models[role])`,
+   * which passes through a fully-qualified id and returns `undefined` for bare
+   * aliases, producing the same inherit-session-model behaviour for bare inputs.
+   */
+  opencodeModels?: Record<Role, string | undefined>;
 }
 
 const SKILL_NAME = "orchestrator-workflow";
@@ -145,14 +153,21 @@ function composeClaudeAgent(role: Role, model: string): string {
   return [...frontmatter, "", asset.body.trimEnd(), ""].join("\n");
 }
 
-function composeOpencodeAgent(role: Role, model: string): string {
+function composeOpencodeAgent(
+  role: Role,
+  modelValue: string | undefined,
+): string {
   const asset = readAgentAsset(role);
   const frontmatter = [
     "---",
     `description: ${yamlQuote(asset.description)}`,
     "mode: subagent",
-    `model: ${opencodeModelValue(model)}`,
   ];
+  // Only emit `model:` when a resolved, non-empty FQ id is available.
+  // Omitting it lets the subagent inherit the session/default model.
+  if (modelValue) {
+    frontmatter.push(`model: ${modelValue}`);
+  }
   if (READ_ONLY_ROLES.has(role)) {
     frontmatter.push("permission:", "  edit: deny");
   }
@@ -234,10 +249,15 @@ export function runInit(options: InitOptions): Report {
   }
 
   if (options.harnesses.includes("opencode")) {
+    installKitFile(join(".opencode", "skills", SKILL_NAME, "SKILL.md"), skill);
     for (const role of ROLES) {
+      const modelValue =
+        options.opencodeModels !== undefined
+          ? options.opencodeModels[role]
+          : opencodeModelValue(options.models[role]);
       installKitFile(
         join(".opencode", "agents", `${role}.md`),
-        composeOpencodeAgent(role, options.models[role]),
+        composeOpencodeAgent(role, modelValue),
       );
     }
   }

@@ -49,7 +49,8 @@ The install creates or touches only these paths:
 - `.claude/skills/orchestrator-workflow/SKILL.md` and
   `.claude/agents/{explorer,task-slicer,implementer,reviewer}.md` (Claude Code)
 - `.agents/skills/orchestrator-workflow/SKILL.md` (Codex)
-- `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` (opencode)
+- `.opencode/skills/orchestrator-workflow/SKILL.md` and
+  `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` (opencode)
 
 Nothing else in the repository is modified. Locally edited files are
 reported as conflicts and left alone, never overwritten silently; the
@@ -111,14 +112,31 @@ steps in the repository you were asked to install into.
      line directly after the `model:` line. Ensure `CLAUDE.md` exists and
      contains a line `@AGENTS.md`.
    - Codex: `.agents/skills/orchestrator-workflow/SKILL.md`, same skill file.
-   - opencode: `.opencode/agents/<role>.md` from `assets/agents/<role>.md`,
-     with the frontmatter rewritten to exactly this order: `description:`
-     (unchanged), then `mode: subagent`, then `model: <provider/model-id>`;
-     the `name:` line is dropped. For the explorer role additionally,
-     `permission:` goes on a new line directly after the `model:` line,
-     followed by `  edit: deny` (two-space indent) on the next line. Aliases
-     map to `anthropic/claude-sonnet-4-6`, `anthropic/claude-opus-4-8`,
-     `anthropic/claude-haiku-4-5`.
+   - opencode: `.opencode/skills/orchestrator-workflow/SKILL.md` from
+     `assets/skill/SKILL.md`, unchanged.
+     `.opencode/agents/<role>.md` from `assets/agents/<role>.md`, with the
+     frontmatter rewritten to this order: `description:` (unchanged), then
+     `mode: subagent`; the `name:` line is dropped. Only emit a
+     `model: <provider/model-id>` line when you have a fully-qualified id
+     (i.e. the value contains a `/`, such as
+     `github-copilot/claude-sonnet-4.6`). For a bare alias (`sonnet`, `opus`,
+     `haiku`) or any bare id without a provider prefix, **omit the `model:`
+     line entirely** — the subagent then inherits the session/default model,
+     which is the safe portable fallback. The installed CLI resolves aliases
+     to fully-qualified ids by running `opencode models` at install time; in a
+     manual install you may not have a live catalog, so omitting `model:` is
+     correct. For the explorer role additionally, `permission:` goes on a new
+     line directly after `mode: subagent` (or after `model:` when that line is
+     present), followed by `  edit: deny` (two-space indent) on the next line.
+     Example explorer frontmatter when no model is resolved:
+     ```yaml
+     ---
+     description: "..."
+     mode: subagent
+     permission:
+       edit: deny
+     ---
+     ```
    - `.ai/workflow/manifest.json`, exactly this shape (harnesses MUST be an
      array, models keyed by role, version = the kit version you installed):
 

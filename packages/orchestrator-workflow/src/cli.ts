@@ -16,6 +16,7 @@ import {
   assertValidModelId,
   parseModelsSpec,
 } from "./models.js";
+import { loadOpencodeCatalog, resolveOpencodeModels } from "./opencode.js";
 import { readInstalledManifest, runInit } from "./init.js";
 import type { UninstallReport } from "./uninstall.js";
 import { runUninstall } from "./uninstall.js";
@@ -130,6 +131,10 @@ program
     "--models <spec>",
     'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
   )
+  .option(
+    "--opencode-provider <id>",
+    "opencode provider id for alias resolution (e.g. github-copilot); auto-detected when omitted",
+  )
   .action(
     async (
       dir: string,
@@ -138,6 +143,7 @@ program
         force?: boolean;
         harness?: string;
         models?: string;
+        opencodeProvider?: string;
       },
     ) => {
       const targetDir = requireDirectory(dir);
@@ -193,11 +199,28 @@ program
       if (opts.models) models = parseModelsSpec(opts.models, models);
       if (interactive && !opts.models) models = await promptModels(models);
 
+      // Resolve opencode model aliases against the live catalog when the opencode
+      // harness is selected. The shell-out stays here in the CLI so runInit
+      // remains pure.
+      let opencodeModels: Record<Role, string | undefined> | undefined;
+      if (harnesses.includes("opencode")) {
+        const catalog = loadOpencodeCatalog();
+        const { resolved, warnings } = resolveOpencodeModels(models, {
+          catalog,
+          explicitProvider: opts.opencodeProvider,
+        });
+        opencodeModels = resolved;
+        for (const w of warnings) {
+          process.stderr.write(`Warning: ${w}\n`);
+        }
+      }
+
       const report = runInit({
         targetDir,
         harnesses,
         models,
         force: opts.force,
+        opencodeModels,
       });
 
       showPaths("Created", report.written);
