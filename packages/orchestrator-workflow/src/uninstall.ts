@@ -108,6 +108,8 @@ const PRUNE_CANDIDATES = [
   join(".agents", "skills", "orchestrator-workflow"),
   join(".agents", "skills"),
   ".agents",
+  join(".opencode", "skills", "orchestrator-workflow"),
+  join(".opencode", "skills"),
   join(".opencode", "agents"),
   ".opencode",
 ];

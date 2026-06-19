@@ -99,7 +99,7 @@ Per selected harness:
 |---|---|---|
 | Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{explorer,task-slicer,implementer,reviewer}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter; the read-only explorer also gets `disallowedTools: Edit, Write, NotebookEdit`. |
 | OpenAI Codex | `.agents/skills/orchestrator-workflow/SKILL.md` | Codex reads `AGENTS.md` natively. There is no standardized project-level subagent definition; the skill instructs running the roles inline with the same contracts. |
-| opencode | `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` | opencode reads `AGENTS.md` natively and cross-discovers `.claude/skills/`. Subagents get `mode: subagent` plus a fully qualified `provider/model-id`; the explorer also gets `permission: edit: deny`. |
+| opencode | `.opencode/skills/orchestrator-workflow/SKILL.md`, `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` | opencode reads `AGENTS.md` natively. Subagents get `mode: subagent`; the explorer also gets `permission: edit: deny`. Model resolution is described below. |
 
 ## Model preselection
 
@@ -113,11 +113,25 @@ Each subagent role gets a model, chosen interactively or via `--models`:
 | reviewer | `opus` | skeptical review benefits from the strongest model |
 
 The orchestrator itself runs on the session's main model; use the strongest
-reasoning model available. Aliases (`sonnet`, `opus`, `haiku`) map to fully
-qualified ids for opencode (for example `anthropic/claude-opus-4-8`). Custom
-ids pass through as given for Claude Code; for opencode, a bare id without a
-provider prefix gets `anthropic/` prepended. The chosen mapping is recorded
-in `.ai/workflow/manifest.json` and reused as the default on later re-runs.
+reasoning model available. The chosen mapping is recorded in
+`.ai/workflow/manifest.json` and reused as the default on later re-runs.
+
+**opencode model resolution.** opencode requires fully-qualified `provider/model-id`
+strings (e.g. `github-copilot/claude-sonnet-4.6`). At install time the CLI
+runs `opencode models` to fetch the live catalog and auto-detects which
+provider to use (the one that offers Claude models). When exactly one such
+provider exists the aliases are resolved to the highest-version matching id in
+the catalog. When multiple providers offer Claude models the CLI warns and asks
+you to pass `--opencode-provider <id>` to disambiguate, or to supply
+fully-qualified ids per role via `--models`. If no resolution is possible
+(catalog empty, `opencode` binary absent, ambiguous provider) the `model:`
+frontmatter line is omitted entirely and the subagent inherits the
+session/default model — a safe, portable fallback. Fully-qualified ids in
+`--models` always pass through unchanged regardless of the catalog.
+Nested-path providers like `openrouter` (whose ids look like
+`openrouter/anthropic/claude-...`) are not auto-resolved from aliases and must
+be supplied as a fully-qualified `--models` entry, e.g.
+`reviewer=openrouter/anthropic/claude-opus-4.8`.
 
 ## Ownership and re-runs
 

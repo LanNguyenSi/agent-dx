@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runInit } from "../src/init.js";
-import { DEFAULT_MODELS, parseModelsSpec } from "../src/models.js";
+import { DEFAULT_MODELS, ROLES, parseModelsSpec } from "../src/models.js";
 import { detectHarnesses } from "../src/detect.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -342,6 +342,8 @@ describe("explorer role", () => {
     expect(opencodeExplorer).toContain("mode: subagent");
     expect(opencodeExplorer).toContain("permission:");
     expect(opencodeExplorer).toContain("edit: deny");
+    // Default alias with no opencodeModels → no model: line
+    expect(opencodeExplorer).not.toContain("model:");
 
     // The mutating roles must NOT carry the read-only marker.
     const claudeImplementer = readFileSync(
@@ -350,10 +352,30 @@ describe("explorer role", () => {
     );
     expect(claudeImplementer).not.toContain("disallowedTools");
   });
+
+  it("opencode-only install writes .opencode/skills/orchestrator-workflow/SKILL.md", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+    });
+    expect(
+      existsSync(
+        join(
+          target,
+          ".opencode",
+          "skills",
+          "orchestrator-workflow",
+          "SKILL.md",
+        ),
+      ),
+    ).toBe(true);
+    expect(existsSync(join(target, ".claude"))).toBe(false);
+  });
 });
 
 describe("harness selection and model mapping", () => {
-  it("installs all four adapters with mapped model ids", () => {
+  it("installs all four adapters; opencode agents omit model: when aliases given without catalog", () => {
     runInit({
       targetDir: target,
       harnesses: ["claude", "codex", "opencode"],
@@ -371,12 +393,26 @@ describe("harness selection and model mapping", () => {
       ),
     ).toBe(true);
 
+    // opencode skill is now installed for the opencode harness too
+    expect(
+      existsSync(
+        join(
+          target,
+          ".opencode",
+          "skills",
+          "orchestrator-workflow",
+          "SKILL.md",
+        ),
+      ),
+    ).toBe(true);
+
     const slicer = readFileSync(
       join(target, ".opencode", "agents", "task-slicer.md"),
       "utf8",
     );
     expect(slicer).toContain("mode: subagent");
-    expect(slicer).toContain("model: anthropic/claude-haiku-4-5");
+    // Bare alias without opencodeModels → no model: line (inherits session model)
+    expect(slicer).not.toContain("model:");
 
     const claudeSlicer = readFileSync(
       join(target, ".claude", "agents", "task-slicer.md"),
@@ -385,7 +421,7 @@ describe("harness selection and model mapping", () => {
     expect(claudeSlicer).toContain("model: haiku");
   });
 
-  it("passes custom model ids through, qualifying bare ids for opencode", () => {
+  it("passes FQ model ids through for opencode; bare ids without provider are omitted", () => {
     runInit({
       targetDir: target,
       harnesses: ["claude", "opencode"],
@@ -400,12 +436,39 @@ describe("harness selection and model mapping", () => {
       join(target, ".opencode", "agents", "implementer.md"),
       "utf8",
     );
-    expect(implementer).toContain("model: anthropic/claude-sonnet-4-6");
+    // Bare id without `/` → undefined → no model: line
+    expect(implementer).not.toContain("model:");
     const reviewer = readFileSync(
       join(target, ".opencode", "agents", "reviewer.md"),
       "utf8",
     );
+    // FQ id passes through unchanged
     expect(reviewer).toContain("model: openrouter/some-model");
+  });
+
+  it("emits model: line when opencodeModels provides a FQ id", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      opencodeModels: {
+        explorer: "github-copilot/claude-sonnet-4.6",
+        "task-slicer": "github-copilot/claude-sonnet-4.6",
+        implementer: "github-copilot/claude-sonnet-4.6",
+        reviewer: "github-copilot/claude-opus-4.8",
+      },
+    });
+    const explorer = readFileSync(
+      join(target, ".opencode", "agents", "explorer.md"),
+      "utf8",
+    );
+    expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");
+    expect(explorer).toContain("mode: subagent");
+    const reviewer = readFileSync(
+      join(target, ".opencode", "agents", "reviewer.md"),
+      "utf8",
+    );
+    expect(reviewer).toContain("model: github-copilot/claude-opus-4.8");
   });
 });
 
@@ -506,5 +569,90 @@ describe("cli smoke", () => {
     expect(
       readFileSync(join(target, ".claude", "agents", "implementer.md"), "utf8"),
     ).toContain("model: haiku");
+  });
+});
+
+describe("cli smoke — opencode harness", () => {
+  // Each test gets a fresh empty bin dir that the spawned process uses as its
+  // PATH. This ensures `opencode` cannot be found regardless of the host
+  // environment, making the catalog-empty path hermetic. The spawn itself
+  // uses process.execPath (full path to node) and resolves tsx from the
+  // package's node_modules, so restricting PATH does not break compilation.
+  let emptyBinDir: string;
+
+  beforeEach(() => {
+    emptyBinDir = mkdtempSync(join(tmpdir(), "no-opencode-"));
+  });
+
+  afterEach(() => {
+    rmSync(emptyBinDir, { recursive: true, force: true });
+  });
+
+  const runOpencodeCli = (
+    args: string[],
+    envOverrides: Record<string, string> = {},
+  ) =>
+    spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "src/cli.ts",
+        "init",
+        target,
+        "--yes",
+        "--harness",
+        "opencode",
+        ...args,
+      ],
+      {
+        cwd: PACKAGE_DIR,
+        encoding: "utf8",
+        timeout: 60_000,
+        env: { ...process.env, ...envOverrides },
+      },
+    );
+
+  it("exits 0 and creates .opencode/agents/explorer.md", () => {
+    // PATH unrestricted — `opencode` may or may not be present, but the
+    // install must succeed either way.
+    const result = runOpencodeCli([]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(join(target, ".opencode", "agents", "explorer.md"))).toBe(
+      true,
+    );
+  });
+
+  it("omits model: from all agent files when opencode binary is unavailable", () => {
+    const result = runOpencodeCli([], { PATH: emptyBinDir });
+    expect(result.status, result.stderr).toBe(0);
+    for (const role of ROLES) {
+      const content = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(content, `${role}.md must not contain model:`).not.toContain(
+        "model:",
+      );
+    }
+  });
+
+  it("writes the --opencode-provider hint to STDERR (not stdout) when catalog is empty", () => {
+    const result = runOpencodeCli([], { PATH: emptyBinDir });
+    expect(result.status, result.stderr).toBe(0);
+    // The combined warning from resolveOpencodeModels is forwarded to stderr
+    // by the CLI; it must not bleed onto stdout.
+    expect(result.stderr).toContain("--opencode-provider");
+    expect(result.stdout).not.toContain("--opencode-provider");
+  });
+
+  it("accepts --opencode-provider as a valid flag and exits 0", () => {
+    // With an empty catalog the provider is found but has no matching models,
+    // so models fall back to undefined (no model: line). The important
+    // assertion is that the flag is recognised — not "unknown option".
+    const result = runOpencodeCli(["--opencode-provider", "github-copilot"], {
+      PATH: emptyBinDir,
+    });
+    expect(result.status, result.stderr).toBe(0);
   });
 });
