@@ -106,6 +106,12 @@ directory and the subagents.
 9. **Hand off.** Fill `06-handoff.md` and report to the operator: what changed,
    why, how it was verified, known risks, accepted waivers, suggested next step.
 
+When finalizing `05-review-findings.md` and `06-handoff.md`, replace the `TODO`
+in each `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
+value. That marker line is the machine-readable signal the harness
+solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
+non-accepting (fail-closed).
+
 ## Explorer output contract
 
 ```yaml

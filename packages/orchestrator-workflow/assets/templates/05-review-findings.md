@@ -21,3 +21,5 @@
 ## Acceptance Recommendation
 
 accept | accept_with_notes | fix_required | reject
+
+<!-- solution-acceptance: acceptance-recommendation = TODO -->
