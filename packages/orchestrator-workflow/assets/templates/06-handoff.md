@@ -31,3 +31,5 @@
 ## Final Status
 
 accepted | accepted_with_notes | needs_followup | blocked
+
+<!-- solution-acceptance: final-status = TODO -->
