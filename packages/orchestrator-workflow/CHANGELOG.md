@@ -5,6 +5,18 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-06-24
+
+### Security
+
+- The installed `reviewer` subagent now carries the same read-only tool posture
+  as the explorer: `disallowedTools: Edit, Write, NotebookEdit` (Claude Code) and
+  `permission: edit: deny` (opencode). Previously only the explorer was
+  tool-restricted and the reviewer was restrained by prose alone ("Do not rewrite
+  the change yourself"), leaving a misled or prompt-injected reviewer free to
+  mutate the working tree. The reviewer's job is to judge work without changing
+  it, so it is now installed read-only on both harnesses.
+
 ## [0.7.0] - 2026-06-22
 
 ### Added

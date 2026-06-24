@@ -97,9 +97,9 @@ Per selected harness:
 
 | Harness | Files | Notes |
 |---|---|---|
-| Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{explorer,task-slicer,implementer,reviewer}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter; the read-only explorer also gets `disallowedTools: Edit, Write, NotebookEdit`. |
+| Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{explorer,task-slicer,implementer,reviewer}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter; the read-only explorer and reviewer also get `disallowedTools: Edit, Write, NotebookEdit`. |
 | OpenAI Codex | `.agents/skills/orchestrator-workflow/SKILL.md` | Codex reads `AGENTS.md` natively. There is no standardized project-level subagent definition; the skill instructs running the roles inline with the same contracts. |
-| opencode | `.opencode/skills/orchestrator-workflow/SKILL.md`, `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` | opencode reads `AGENTS.md` natively. Subagents get `mode: subagent`; the explorer also gets `permission: edit: deny`. Model resolution is described below. |
+| opencode | `.opencode/skills/orchestrator-workflow/SKILL.md`, `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` | opencode reads `AGENTS.md` natively. Subagents get `mode: subagent`; the read-only explorer and reviewer also get `permission: edit: deny`. Model resolution is described below. |
 
 ## Model preselection
 
