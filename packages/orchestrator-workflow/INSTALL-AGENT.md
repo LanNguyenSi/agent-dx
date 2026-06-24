@@ -107,8 +107,8 @@ steps in the repository you were asked to install into.
      `assets/skill/SKILL.md`. For each role, `.claude/agents/<role>.md` from
      `assets/agents/<role>.md` with `model: <operator's choice>` added as a
      new line directly after the `description:` line (that placement matches
-     the installer's output byte for byte). For the explorer role
-     additionally, `disallowedTools: Edit, Write, NotebookEdit` goes on a new
+     the installer's output byte for byte). For the explorer and reviewer
+     roles additionally, `disallowedTools: Edit, Write, NotebookEdit` goes on a new
      line directly after the `model:` line. Ensure `CLAUDE.md` exists and
      contains a line `@AGENTS.md`.
    - Codex: `.agents/skills/orchestrator-workflow/SKILL.md`, same skill file.
@@ -125,10 +125,11 @@ steps in the repository you were asked to install into.
      which is the safe portable fallback. The installed CLI resolves aliases
      to fully-qualified ids by running `opencode models` at install time; in a
      manual install you may not have a live catalog, so omitting `model:` is
-     correct. For the explorer role additionally, `permission:` goes on a new
+     correct. For the explorer and reviewer roles additionally, `permission:` goes on a new
      line directly after `mode: subagent` (or after `model:` when that line is
      present), followed by `  edit: deny` (two-space indent) on the next line.
-     Example explorer frontmatter when no model is resolved:
+     Example read-only role frontmatter (explorer or reviewer) when no model
+     is resolved:
      ```yaml
      ---
      description: "..."

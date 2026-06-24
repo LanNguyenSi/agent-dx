@@ -317,7 +317,7 @@ describe("upgrades via the manifest hash ledger", () => {
   });
 });
 
-describe("explorer role", () => {
+describe("read-only roles (explorer, reviewer)", () => {
   it("installs the explorer with a read-only posture on both harnesses", () => {
     runInit({
       targetDir: target,
@@ -351,6 +351,45 @@ describe("explorer role", () => {
       "utf8",
     );
     expect(claudeImplementer).not.toContain("disallowedTools");
+  });
+
+  it("installs the reviewer with a read-only posture on both harnesses", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "opencode"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // The reviewer judges work without changing it, so it must carry the
+    // same read-only posture as the explorer (no file-mutation tools).
+    const claudeReviewer = readFileSync(
+      join(target, ".claude", "agents", "reviewer.md"),
+      "utf8",
+    );
+    expect(claudeReviewer).toContain("name: reviewer");
+    expect(claudeReviewer).toContain(
+      "disallowedTools: Edit, Write, NotebookEdit",
+    );
+
+    const opencodeReviewer = readFileSync(
+      join(target, ".opencode", "agents", "reviewer.md"),
+      "utf8",
+    );
+    expect(opencodeReviewer).toContain("permission:");
+    expect(opencodeReviewer).toContain("edit: deny");
+
+    // The implementer (a mutating role) must still NOT carry the marker.
+    const claudeImplementer = readFileSync(
+      join(target, ".claude", "agents", "implementer.md"),
+      "utf8",
+    );
+    expect(claudeImplementer).not.toContain("disallowedTools");
+
+    const opencodeImplementer = readFileSync(
+      join(target, ".opencode", "agents", "implementer.md"),
+      "utf8",
+    );
+    expect(opencodeImplementer).not.toContain("edit: deny");
   });
 
   it("opencode-only install writes .opencode/skills/orchestrator-workflow/SKILL.md", () => {

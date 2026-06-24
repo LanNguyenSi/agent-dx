@@ -11,7 +11,10 @@ export const ROLES: Role[] = [
  * Roles that map the terrain or judge work without changing it. They are
  * installed with a read-only posture (no file-mutation tools).
  */
-export const READ_ONLY_ROLES: ReadonlySet<Role> = new Set<Role>(["explorer"]);
+export const READ_ONLY_ROLES: ReadonlySet<Role> = new Set<Role>([
+  "explorer",
+  "reviewer",
+]);
 
 export type ModelAlias = "sonnet" | "opus" | "haiku";
 
