@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { ROLES } from "../src/models.js";
+import { READ_ONLY_ROLES, ROLES } from "../src/models.js";
 import { readAsset } from "../src/assets.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -145,4 +145,57 @@ describe("instruction trust boundary ships in policy, skill, and agent prompts",
       }
     });
   }
+});
+
+describe("read-only posture is documented for exactly the read-only roles", () => {
+  const installAgentMd = unwrap(readDoc("INSTALL-AGENT.md"));
+  const readmeMd = unwrap(readDoc("README.md"));
+  const writableRoles = ROLES.filter((role) => !READ_ONLY_ROLES.has(role));
+
+  // Each doc names the applicable roles immediately before the tool-restriction
+  // marker. Capture that role phrase and assert it lists exactly the read-only
+  // roles, so adding a role to READ_ONLY_ROLES without documenting it (or
+  // documenting a writable role as read-only) fails here. Guards the
+  // INSTALL-AGENT.md / README.md sibling-drift that the 0.7.1 reviewer fix hit.
+  function assertPostureScopedToReadOnly(
+    doc: string,
+    phraseRegex: RegExp,
+    label: string,
+  ): void {
+    const phrases = [...doc.matchAll(phraseRegex)].map((match) => match[1]);
+    expect(
+      phrases.length,
+      `${label}: no read-only posture phrase matched ${phraseRegex}`,
+    ).toBeGreaterThan(0);
+    for (const phrase of phrases) {
+      for (const role of READ_ONLY_ROLES) {
+        expect(
+          phrase,
+          `${label}: read-only role "${role}" missing from "${phrase}"`,
+        ).toMatch(new RegExp(`\\b${role}\\b`));
+      }
+      for (const role of writableRoles) {
+        expect(
+          phrase,
+          `${label}: writable role "${role}" wrongly documented as read-only in "${phrase}"`,
+        ).not.toMatch(new RegExp(`\\b${role}\\b`));
+      }
+    }
+  }
+
+  it("INSTALL-AGENT.md scopes the read-only posture to the read-only roles", () => {
+    assertPostureScopedToReadOnly(
+      installAgentMd,
+      /[Ff]or the ([-\w ,]+?) roles? additionally/g,
+      "INSTALL-AGENT.md",
+    );
+  });
+
+  it("README.md scopes the read-only posture to the read-only roles", () => {
+    assertPostureScopedToReadOnly(
+      readmeMd,
+      /read-only ([-\w ,]+?) also gets?/g,
+      "README.md",
+    );
+  });
 });

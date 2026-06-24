@@ -384,6 +384,12 @@ describe("read-only roles (explorer, reviewer)", () => {
       "utf8",
     );
     expect(claudeImplementer).not.toContain("disallowedTools");
+
+    const opencodeImplementer = readFileSync(
+      join(target, ".opencode", "agents", "implementer.md"),
+      "utf8",
+    );
+    expect(opencodeImplementer).not.toContain("edit: deny");
   });
 
   it("opencode-only install writes .opencode/skills/orchestrator-workflow/SKILL.md", () => {

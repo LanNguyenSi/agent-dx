@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the explorer: `disallowedTools: Edit, Write, NotebookEdit` (Claude Code) and
   `permission: edit: deny` (opencode). Previously only the explorer was
   tool-restricted and the reviewer was restrained by prose alone ("Do not rewrite
-  the change yourself"), leaving a misled or prompt-injected reviewer free to
-  mutate the working tree. The reviewer's job is to judge work without changing
-  it, so it is now installed read-only on both harnesses.
+  the change yourself"), so a misled or prompt-injected reviewer could edit files
+  through the edit tools. The reviewer's job is to judge work without changing it,
+  so it is now installed read-only on both harnesses, matching the explorer.
+  (Bash is intentionally not restricted by this posture on either read-only role,
+  unchanged from before.)
 
 ## [0.7.0] - 2026-06-22
 
