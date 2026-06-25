@@ -2,6 +2,8 @@
   "name": "github-api-tool",
   "version": "0.1.0",
   "description": "GitHub API CLI tool for AI agents",
+  "private": true,
+  "//": "Internal/local CLI — intentionally NOT published to npm (no consumers; this repo publishes only orchestrator-workflow). The HIGH token-config owner-only-perms fix (PR #42) ships in source and runs from source. Posture recorded for agent-tasks 36f8439e.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
