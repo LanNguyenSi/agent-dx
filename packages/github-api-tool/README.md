@@ -2,6 +2,8 @@
 
 A command-line interface for GitHub API operations, designed for AI agents.
 
+> **Internal tool — not published to npm.** This CLI is used from source within this repo and is intentionally not a published package (`private: true`). Build and run it from the repo (`npm run build`) rather than installing from npm.
+
 ## Features
 
 ✅ **Issue Management:** Create, list, assign, comment, close  
