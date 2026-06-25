@@ -47,6 +47,56 @@ examples/slop-sample.md
 
 `--explain` adds a one-line rationale per violation. Promote any rule to `block` per repo via `slop.config.yml`; the two `agent-tics` rules that catch leaked tool-call XML wrappers (`</result>`, `</invoke>`) ship as `block` by default since those are objectively wrong.
 
+## Scan pipeline
+
+The scan pipeline shows how slop-detector routes input through config and pack selection into the rule engine, then fans out to the three output surfaces.
+
+```mermaid
+flowchart LR
+    subgraph In["Inputs"]
+        A["files / directory"]
+        B["text / stdin<br/>commit msg, PR body"]
+    end
+
+    subgraph Cfg["Configuration"]
+        C[("slop.config.yml")]
+        D["config.ts<br/>loadConfig / mergeConfig"]
+    end
+
+    subgraph Packs["Packs: packs/registry.ts"]
+        E["registry.ts<br/>allPacks / packsByFilter"]
+        F["agent-tics.ts"]
+        G["prose-slop.ts"]
+        H["comment-slop.ts<br/>off by default"]
+        I["code-slop.ts<br/>off by default"]
+        J["ui-slop.ts<br/>off by default"]
+    end
+
+    K["engine.ts<br/>checkPath / checkFiles / checkText"]
+    L["Violations<br/>block / warn / info"]
+
+    subgraph Out["Output modes"]
+        M["cli.ts<br/>exit code + report"]
+        N["mcp.ts + mcp-check.ts<br/>slop_check MCP tool"]
+        O["pre-commit hook<br/>Husky / lint-staged"]
+    end
+
+    A --> K
+    B --> K
+    C --> D
+    D --> K
+    F --> E
+    G --> E
+    H --> E
+    I --> E
+    J --> E
+    E --> K
+    K --> L
+    L --> M
+    L --> N
+    M --> O
+```
+
 ## Why this exists
 
 LLMs leave fingerprints. Some are objectively wrong, like leaked `</result>` artefacts from MCP serialisation. Others are stylistic tics the team has already decided to avoid: em-dashes in prose, `It is important to note` openers, empty marketing adjectives, doubled `## Summary` blocks. None are caught by tests, typecheck, or human reviewers under load. They accumulate.
