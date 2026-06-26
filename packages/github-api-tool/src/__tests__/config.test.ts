@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -91,5 +91,18 @@ describe('config', () => {
       token: 'persisted-token',
       defaultOwner: 'lan',
     });
+  });
+
+  it('re-hardens a pre-existing CONFIG_DIR with loose perms to 0o700', async () => {
+    // Simulate a directory created before the perms fix: world-readable.
+    const configDir = join(tempHome, '.github-api-tool');
+    await mkdir(configDir, { recursive: true });
+    await chmod(configDir, 0o755);
+
+    const { saveConfig } = await loadConfigModuleFresh();
+    await saveConfig({ token: 'persisted-token' });
+
+    const mode = (await stat(configDir)).mode & 0o777;
+    expect(mode).toBe(0o700);
   });
 });

@@ -41,9 +41,11 @@ export async function loadConfig(): Promise<Config> {
  * Save config to file
  */
 export async function saveConfig(config: Config): Promise<void> {
-  if (!existsSync(CONFIG_DIR)) {
-    await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
-  }
+  // Ensure the config dir exists with owner-only perms. mkdir's mode is only
+  // applied when the directory is created, so a CONFIG_DIR created earlier with
+  // looser perms is never re-hardened by mkdir alone, so chmod it unconditionally.
+  await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  await chmod(CONFIG_DIR, 0o700);
   // Persist the GitHub token with owner-only permissions. writeFile's mode is
   // only applied when the file is created, so chmod the path afterwards to also
   // harden the overwrite of an existing, world-readable config file.
