@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateChangelog } from "./commands/changelog.js";
 import { runPrep } from "./commands/prep.js";
 import { suggestVersion } from "./commands/version.js";
+import { createGitClient, ensureTagDoesNotExist } from "./lib/release.js";
 
 const tempRepos: string[] = [];
 
@@ -109,7 +110,78 @@ describe("release-prep commands", () => {
     expect(output).toContain("Dry run: no tag or GitHub release was created.");
     expect(tagsAfter).toEqual(["v0.4.0"]);
   });
+
+  // ── live path tests (non-dry-run) ──────────────────────────────────────────
+
+  it("creates an annotated tag when dryRun is false and tag option is on", async () => {
+    const repoPath = await createFixtureRepo({
+      packageVersion: "1.0.0",
+      commits: [
+        { message: "chore: initial release", tag: "v1.0.0" },
+        { message: "feat: add search endpoint" },
+      ],
+    });
+
+    await captureConsoleOutput(() =>
+      withCwd(repoPath, () =>
+        runPrep({ dryRun: false, tag: true, release: false }),
+      ),
+    );
+
+    const tags = await listTags(repoPath);
+    expect(tags).toContain("v1.1.0");
+    // Confirm the tag is annotated (has a message)
+    const { stdout } = await execa(
+      "git",
+      ["cat-file", "-t", "v1.1.0"],
+      { cwd: repoPath },
+    );
+    expect(stdout.trim()).toBe("tag");
+  });
+
+  it("throws when the computed tag already exists (conflict guard)", async () => {
+    const repoPath = await createFixtureRepo({
+      packageVersion: "2.0.0",
+      commits: [
+        { message: "chore: initial release", tag: "v2.0.0" },
+        { message: "feat: new API" },
+      ],
+    });
+
+    // Pre-create the would-be next tag v2.1.0 so runPrep hits the conflict
+    await execa("git", ["tag", "v2.1.0"], { cwd: repoPath });
+
+    await expect(
+      withCwd(repoPath, () =>
+        runPrep({ dryRun: false, tag: true, release: false }),
+      ),
+    ).rejects.toThrow("Tag v2.1.0 already exists.");
+  });
 });
+
+describe("ensureTagDoesNotExist", () => {
+  it("resolves when the tag does not exist", async () => {
+    const repoPath = await createFixtureRepo({
+      packageVersion: "1.0.0",
+      commits: [{ message: "chore: initial" }],
+    });
+    const git = createGitClient(repoPath);
+    await expect(ensureTagDoesNotExist(git, "v9.9.9")).resolves.toBeUndefined();
+  });
+
+  it("throws when the tag already exists", async () => {
+    const repoPath = await createFixtureRepo({
+      packageVersion: "1.0.0",
+      commits: [{ message: "chore: initial", tag: "v1.0.0" }],
+    });
+    const git = createGitClient(repoPath);
+    await expect(ensureTagDoesNotExist(git, "v1.0.0")).rejects.toThrow(
+      "Tag v1.0.0 already exists.",
+    );
+  });
+});
+
+// ── shared helpers ────────────────────────────────────────────────────────────
 
 async function captureConsoleOutput(run: () => Promise<void>): Promise<string> {
   const lines: string[] = [];
