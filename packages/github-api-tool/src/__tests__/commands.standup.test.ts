@@ -33,11 +33,10 @@ const makeCommit = (sha = 'abc1234567', msg = 'fix: bug', date = '2024-01-01T10:
 });
 
 describe('standup — with explicit repos', () => {
-  let exitSpy: ReturnType<typeof vi.spyOn>;
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const mockOctokit = {
@@ -58,6 +57,7 @@ describe('standup — with explicit repos', () => {
 
   it('passes the --since date boundary to the API with days=1', async () => {
     const frozenNow = new Date('2024-06-15T12:00:00Z');
+    vi.useFakeTimers();
     vi.setSystemTime(frozenNow);
 
     // Keep a direct reference to the spy
@@ -78,6 +78,7 @@ describe('standup — with explicit repos', () => {
 
   it('passes the --since date boundary correctly for days=7 (off-by-one check)', async () => {
     const frozenNow = new Date('2024-06-15T08:00:00Z');
+    vi.useFakeTimers();
     vi.setSystemTime(frozenNow);
 
     const listCommitsSpy = vi.fn().mockResolvedValue({ data: [makeCommit()] });
