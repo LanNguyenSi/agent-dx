@@ -12,7 +12,8 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:ci": "vitest run --coverage"
   },
   "keywords": [
     "github",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
     "typescript": "^5.0.0",
     "vitest": "^4.1.6"
   },
