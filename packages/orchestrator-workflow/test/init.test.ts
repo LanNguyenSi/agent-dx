@@ -353,6 +353,41 @@ describe("read-only roles (explorer, reviewer)", () => {
     expect(claudeImplementer).not.toContain("disallowedTools");
   });
 
+  it("pins the Bash no-mutation guard in both installed read-only agents", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "opencode"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // Bash cannot be tool-disallowed (the roles must run tests), so the
+    // guard is instruction-level and lives in the agent prompt body. This
+    // test is the mutation tripwire: removing the guard from either asset
+    // fails it for every install target.
+    const GUARD =
+      "Bash is for running tests, linters, and read-only inspection ONLY";
+    for (const harnessDir of [".claude", ".opencode"]) {
+      for (const role of ["explorer", "reviewer"]) {
+        const installed = readFileSync(
+          join(target, harnessDir, "agents", `${role}.md`),
+          "utf8",
+        );
+        expect(installed, `${harnessDir}/agents/${role}.md`).toContain(GUARD);
+        // The forbidden-command list must stay explicit, not a vague
+        // "read-only" claim.
+        expect(installed, `${harnessDir}/agents/${role}.md`).toContain(
+          "`git checkout`",
+        );
+      }
+      // The implementer is the mutating role and must NOT carry the guard.
+      const implementer = readFileSync(
+        join(target, harnessDir, "agents", "implementer.md"),
+        "utf8",
+      );
+      expect(implementer).not.toContain(GUARD);
+    }
+  });
+
   it("installs the reviewer with a read-only posture on both harnesses", () => {
     runInit({
       targetDir: target,

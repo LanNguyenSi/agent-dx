@@ -101,6 +101,19 @@ Per selected harness:
 | OpenAI Codex | `.agents/skills/orchestrator-workflow/SKILL.md` | Codex reads `AGENTS.md` natively. There is no standardized project-level subagent definition; the skill instructs running the roles inline with the same contracts. |
 | opencode | `.opencode/skills/orchestrator-workflow/SKILL.md`, `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` | opencode reads `AGENTS.md` natively. Subagents get `mode: subagent`; the read-only explorer and reviewer also get `permission: edit: deny`. Model resolution is described below. |
 
+**Read-only posture, honestly stated.** For the explorer and reviewer the
+read-only posture is enforced at the tool level only for the file-mutation
+tools (`disallowedTools: Edit, Write, NotebookEdit` on Claude Code,
+`permission: edit: deny` on opencode). Bash stays available because both roles
+must run tests and linters, so shell-level mutation (`git checkout`,
+`git restore`, `git clean`, `git stash`, `sed -i`, redirecting output into a
+file) is guarded by instruction only: the agent prompts forbid it explicitly,
+but nothing technically prevents it. This residual has bitten in practice (a
+reviewer ran `git checkout` and discarded uncommitted work), which is why the
+prompts now name the forbidden commands instead of just saying "read-only".
+Marker- or verdict-style enforcement of the Bash residual (sandboxing,
+PreToolUse hooks) is harness territory and out of this kit's scope.
+
 ## Model preselection
 
 Each subagent role gets a model, chosen interactively or via `--models`:
