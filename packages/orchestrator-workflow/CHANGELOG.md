@@ -5,6 +5,26 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-07-02
+
+### Security
+
+- The read-only explorer and reviewer prompts now carry an explicit Bash
+  no-mutation guard: Bash is for tests, linters, and read-only inspection
+  only; `git checkout` / `git restore` / `git clean` / `git stash` /
+  `git reset`, `sed -i`, and redirecting output into a file are named as
+  forbidden, and a
+  wrong-looking working tree must be reported (finding / risk) instead of
+  "fixed". Background: 0.7.1 made both roles tool-level read-only for
+  Edit/Write/NotebookEdit, but Bash necessarily stays available, and exactly
+  this residual bit in practice (a reviewer ran `git checkout` and discarded
+  uncommitted work). The guard is instruction-level; tests pin its presence
+  in the installed output for both harness targets.
+- README now states the posture honestly: tool-level for the edit tools,
+  instruction-level for Bash, with marker/verdict-style enforcement named as
+  harness territory outside this kit's scope. A docs-consistency test pins
+  the wording.
+
 ## [0.7.1] - 2026-06-24
 
 ### Security

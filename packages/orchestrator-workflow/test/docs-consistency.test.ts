@@ -199,3 +199,18 @@ describe("read-only posture is documented for exactly the read-only roles", () =
     );
   });
 });
+
+/**
+ * The read-only posture is tool-level only for Edit/Write/NotebookEdit; Bash
+ * mutation is guarded by instruction alone. README must say so honestly
+ * instead of implying full closure (the residual bit in practice: a reviewer
+ * ran `git checkout` and discarded uncommitted work).
+ */
+describe("README names the Bash residual honestly", () => {
+  it("states instruction-only guarding for Bash without claiming closure", () => {
+    const readmeMd = unwrap(readDoc("README.md"));
+    expect(readmeMd).toContain("guarded by instruction only");
+    expect(readmeMd).toContain("nothing technically prevents it");
+    expect(readmeMd).toContain("out of this kit's scope");
+  });
+});
