@@ -106,9 +106,9 @@ read-only posture is enforced at the tool level only for the file-mutation
 tools (`disallowedTools: Edit, Write, NotebookEdit` on Claude Code,
 `permission: edit: deny` on opencode). Bash stays available because both roles
 must run tests and linters, so shell-level mutation (`git checkout`,
-`git restore`, `git clean`, `git stash`, `sed -i`, redirecting output into a
-file) is guarded by instruction only: the agent prompts forbid it explicitly,
-but nothing technically prevents it. This residual has bitten in practice (a
+`git restore`, `git clean`, `git stash`, `git reset`, `sed -i`, redirecting
+output into a file) is guarded by instruction only: the agent prompts forbid
+it explicitly, but nothing technically prevents it. This residual has bitten in practice (a
 reviewer ran `git checkout` and discarded uncommitted work), which is why the
 prompts now name the forbidden commands instead of just saying "read-only".
 Marker- or verdict-style enforcement of the Bash residual (sandboxing,

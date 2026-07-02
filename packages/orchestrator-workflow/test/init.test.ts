@@ -374,9 +374,14 @@ describe("read-only roles (explorer, reviewer)", () => {
         );
         expect(installed, `${harnessDir}/agents/${role}.md`).toContain(GUARD);
         // The forbidden-command list must stay explicit, not a vague
-        // "read-only" claim.
+        // "read-only" claim. Pin both git-discard siblings and the
+        // file-mutation escape hatch.
+        for (const token of ["`git checkout`", "`git reset`", "`sed -i`"]) {
+          expect(installed, `${harnessDir}/agents/${role}.md`).toContain(token);
+        }
+        // The escalation rule must survive too: report, never repair.
         expect(installed, `${harnessDir}/agents/${role}.md`).toContain(
-          "`git checkout`",
+          "leave the tree",
         );
       }
       // The implementer is the mutating role and must NOT carry the guard.

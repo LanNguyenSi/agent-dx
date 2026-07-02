@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The read-only explorer and reviewer prompts now carry an explicit Bash
   no-mutation guard: Bash is for tests, linters, and read-only inspection
-  only; `git checkout` / `git restore` / `git clean` / `git stash`, `sed -i`,
-  and redirecting output into a file are named as forbidden, and a
+  only; `git checkout` / `git restore` / `git clean` / `git stash` /
+  `git reset`, `sed -i`, and redirecting output into a file are named as
+  forbidden, and a
   wrong-looking working tree must be reported (finding / risk) instead of
   "fixed". Background: 0.7.1 made both roles tool-level read-only for
   Edit/Write/NotebookEdit, but Bash necessarily stays available, and exactly
