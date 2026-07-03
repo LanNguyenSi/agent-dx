@@ -72,4 +72,74 @@ describe("okf-kit cli", () => {
     const result = run(["check", path.join(FIXTURES_DIR, "does-not-exist")]);
     expect(result.status).toBe(2);
   });
+
+  it("exits 2 on an unknown option, distinct from exit 1 (bundle has findings)", () => {
+    const result = run([
+      "check",
+      path.join(FIXTURES_DIR, "valid-bundle"),
+      "--bogus",
+    ]);
+    expect(result.status).toBe(2);
+  });
+
+  it("exits 2 when the bundleDir argument is missing", () => {
+    const result = run(["check"]);
+    expect(result.status).toBe(2);
+  });
+
+  it("exits 1 on a broken link with a quoted title", () => {
+    const result = run([
+      "check",
+      path.join(FIXTURES_DIR, "broken-link-titled"),
+    ]);
+    expect(result.status).toBe(1);
+  });
+
+  it("exits 1 on a broken link in angle-bracket form", () => {
+    const result = run(["check", path.join(FIXTURES_DIR, "broken-link-angle")]);
+    expect(result.status).toBe(1);
+  });
+
+  interface JsonReport {
+    findings: Array<{ ruleId: string }>;
+  }
+
+  it("includes frontmatter-required in --json findings for the missing-frontmatter fixture (exit 1)", () => {
+    const result = run([
+      "check",
+      path.join(FIXTURES_DIR, "missing-frontmatter"),
+      "--json",
+    ]);
+    expect(result.status).toBe(1);
+    const parsed = JSON.parse(result.stdout) as JsonReport;
+    expect(
+      parsed.findings.some((f) => f.ruleId === "frontmatter-required"),
+    ).toBe(true);
+  });
+
+  it("includes reserved-files-bare in --json findings for the frontmatter-on-reserved fixture (exit 1)", () => {
+    const result = run([
+      "check",
+      path.join(FIXTURES_DIR, "frontmatter-on-reserved"),
+      "--json",
+    ]);
+    expect(result.status).toBe(1);
+    const parsed = JSON.parse(result.stdout) as JsonReport;
+    expect(
+      parsed.findings.some((f) => f.ruleId === "reserved-files-bare"),
+    ).toBe(true);
+  });
+
+  it("includes sources-shape in --json findings for the bad-sources-shape fixture (exit 1)", () => {
+    const result = run([
+      "check",
+      path.join(FIXTURES_DIR, "bad-sources-shape"),
+      "--json",
+    ]);
+    expect(result.status).toBe(1);
+    const parsed = JSON.parse(result.stdout) as JsonReport;
+    expect(parsed.findings.some((f) => f.ruleId === "sources-shape")).toBe(
+      true,
+    );
+  });
 });

@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { Command } from "commander";
+import { Command, CommanderError } from "commander";
 import { loadBundle } from "./bundle.js";
 import { allRules } from "./rules/index.js";
 import { renderJson, renderText, summarize } from "./report.js";
@@ -45,6 +45,14 @@ export function runCheck(
 
 const program = new Command();
 
+// Route commander's own usage errors (unknown option, missing argument, no
+// matching command, ...) through a thrown CommanderError instead of an
+// implicit process.exit(1), so they can be told apart from "the bundle has
+// findings" (also 1) below. Must be called before `.command()` so the
+// subcommand inherits it via copyInheritedSettings; also set explicitly on
+// the subcommand for clarity.
+program.exitOverride();
+
 program
   .name("okf-kit")
   .description("Validate OKF v0.1 knowledge bundles")
@@ -59,6 +67,7 @@ program
   )
   .option("-j, --json", "Output findings as JSON")
   .option("-s, --strict", "Also fail (exit 1) when warnings are present")
+  .exitOverride()
   .action(
     (
       bundleDir: string,
@@ -86,7 +95,28 @@ program
     },
   );
 
+// Commander codes for an explicit `-h`/`--help` or `-V`/`--version` flag:
+// keep commander's own exit code (0) for these. Note `commander.help` is
+// deliberately NOT in this set: in this commander version that code only
+// fires for the "subcommands exist, none given, no action handler" path
+// (Command.prototype._parseCommand calling `this.help({ error: true })`),
+// which is itself a usage error and must fall through to exit 2 below, not
+// be passed through as 0 or 1.
+const PASSTHROUGH_EXIT_CODES = new Set([
+  "commander.helpDisplayed",
+  "commander.version",
+]);
+
 program.parseAsync().catch((err) => {
+  if (err instanceof CommanderError) {
+    if (PASSTHROUGH_EXIT_CODES.has(err.code)) {
+      process.exit(err.exitCode);
+    }
+    // Commander already wrote its own error message to stderr before
+    // throwing; a usage error (unknown option, missing argument, missing
+    // command, ...) is exit 2, distinct from exit 1 (bundle has findings).
+    process.exit(2);
+  }
   process.stderr.write(
     `okf-kit: ${err instanceof Error ? err.message : String(err)}\n`,
   );

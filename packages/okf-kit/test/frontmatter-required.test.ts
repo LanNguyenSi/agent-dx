@@ -28,6 +28,11 @@ describe("frontmatter-required", () => {
       severity: "error",
       file: "doc.md",
     });
+    // Pin the parse-error branch specifically (distinct from the
+    // missing-block and missing-type messages) so deleting it can't pass.
+    expect(findings[0].message).toContain("not parseable");
+    expect(typeof findings[0].detail).toBe("string");
+    expect(findings[0].detail).not.toBe("");
   });
 
   it("flags an empty `type` value", () => {

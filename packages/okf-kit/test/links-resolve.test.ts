@@ -24,4 +24,24 @@ describe("links-resolve", () => {
     const findings = linksResolveRule.run(loadFixture("absolute-link"));
     expect(findings).toEqual([]);
   });
+
+  it("flags a broken link that carries a quoted title", () => {
+    const findings = linksResolveRule.run(loadFixture("broken-link-titled"));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "links-resolve",
+      severity: "error",
+      file: "doc.md",
+    });
+  });
+
+  it("flags a broken link written in angle-bracket form", () => {
+    const findings = linksResolveRule.run(loadFixture("broken-link-angle"));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "links-resolve",
+      severity: "error",
+      file: "doc.md",
+    });
+  });
 });

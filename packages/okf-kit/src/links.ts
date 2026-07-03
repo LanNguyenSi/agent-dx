@@ -1,5 +1,5 @@
 export interface LinkRef {
-  /** The link target exactly as written, including any `#anchor`. */
+  /** The link destination after normalization, including any `#anchor`. */
   target: string;
   /** `target` with an optional trailing `#anchor` stripped. */
   pathPart: string;
@@ -21,7 +21,7 @@ export function extractMarkdownLinks(body: string): LinkRef[] {
   LINK_PATTERN.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = LINK_PATTERN.exec(stripped)) !== null) {
-    const target = match[1].trim();
+    const target = normalizeDestination(match[1]);
     if (
       target.startsWith("http://") ||
       target.startsWith("https://") ||
@@ -34,6 +34,34 @@ export function extractMarkdownLinks(body: string): LinkRef[] {
     refs.push({ target, pathPart });
   }
   return refs;
+}
+
+/**
+ * Normalizes a raw CommonMark link destination capture (the text between the
+ * link's parens) down to a bare path:
+ *  - `<x.md>` form: unwrap the angle brackets (the destination can contain
+ *    whitespace inside them; anything after the closing `>` is a title).
+ *  - bare form: a link title, if present, is separated from the destination
+ *    by whitespace and written as "t", 't', or (t); take the first
+ *    whitespace-delimited token as the destination and drop the rest.
+ *  - percent-decode the result (falling back to the raw string if it is not
+ *    valid percent-encoding) so an encoded path compares equal to the real
+ *    filename on disk.
+ */
+function normalizeDestination(raw: string): string {
+  let dest = raw.trim();
+  if (dest.startsWith("<")) {
+    const closeIdx = dest.indexOf(">", 1);
+    dest = closeIdx === -1 ? dest.slice(1) : dest.slice(1, closeIdx);
+  } else {
+    const spaceIdx = dest.search(/\s/);
+    if (spaceIdx !== -1) dest = dest.slice(0, spaceIdx);
+  }
+  try {
+    return decodeURIComponent(dest);
+  } catch {
+    return dest;
+  }
 }
 
 function stripFencedCode(text: string): string {
