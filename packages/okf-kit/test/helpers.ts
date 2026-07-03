@@ -26,10 +26,15 @@ export interface RunResult {
 }
 
 // Spawns the built CLI as a real subprocess so exit codes can be asserted
-// without process.exit() inside cli.ts killing the test runner.
-export function runCli(args: string[]): RunResult {
+// without process.exit() inside cli.ts killing the test runner. `cwd`
+// defaults to this package's root; pass it explicitly to exercise
+// cwd-relative behavior (e.g. `init`'s default `docs/okf` target).
+export function runCli(args: string[], cwd: string = PKG_ROOT): RunResult {
   try {
-    const stdout = execFileSync("node", [CLI, ...args], { encoding: "utf8" });
+    const stdout = execFileSync("node", [CLI, ...args], {
+      encoding: "utf8",
+      cwd,
+    });
     return { status: 0, stdout, stderr: "" };
   } catch (err) {
     const e = err as { status: number; stdout: string; stderr: string };

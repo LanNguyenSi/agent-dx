@@ -32,6 +32,32 @@ node dist/cli.js check path/to/bundle --json
 node dist/cli.js check path/to/bundle --strict
 ```
 
+## Scaffold a bundle (`init`)
+
+```bash
+# scaffold docs/okf (the default target, relative to the current directory)
+node dist/cli.js init
+
+# scaffold a specific directory instead
+node dist/cli.js init path/to/bundle
+
+# an existing, non-empty target directory is refused (exit 2) unless forced;
+# --force overwrites only the files init owns, nothing else in the directory
+node dist/cli.js init path/to/bundle --force
+```
+
+`init` writes `index.md`, `log.md`, and one template doc per concept type: `overview-template.md`, `module-template.md`, `invariant-template.md`, `runbook-template.md`, plus `benchmark-template.md` for measuring whether the bundle helps. `index.md` and `log.md` carry no frontmatter (`reserved-files-bare`); every template doc carries full frontmatter (`type`, `title`, `description`, `tags`, `timestamp`, and, except for the benchmark template, `sources`) plus inline HTML-comment guidance on writing dense, source-verified, pointer-carrying docs instead of filler. All generated links are same-directory relative (`name.md`), never a leading-slash form.
+
+### Placeholder sources are intentional
+
+Every template doc except `benchmark-template.md` ships with `sources: [path/to/covered/source]`, a placeholder, not a real path. Running `okf-kit check` against the freshly scaffolded bundle (with a repo root available, explicit or auto-detected) will report that placeholder as a `sources-shape` "does not exist" error on every template doc. That is intentional: it is the tool telling you which docs still need a real source path, not a bug in the scaffold. The `init` completion message repeats this so it isn't missed. Replace each placeholder with the real repo-root-relative path(s) the doc describes as you write it, and the error clears doc by doc.
+
+### Authoring guidance baked into the templates
+
+- **`timestamp` means "last verified against sources," not "created on."** Bump it, and add a line to `log.md`, every time you re-verify a doc against its sources. Always use the real instant of verification (`new Date().toISOString()` or equivalent); never hand-write an artificial midnight datetime, `sources-fresh` staleness comparisons depend on it being real.
+- **Never list the bundle's own directory in `sources`.** A bundle directory changes on every doc edit inside it, so a self-referential `sources` entry goes permanently stale. This happened to the OKF pilot's own `BENCHMARK.md` (`agent-tasks` `docs/okf/BENCHMARK.md`, `sources: [docs/okf/]`); `benchmark-template.md` here omits `sources` entirely for the same reason, since a benchmark record measures the bundle rather than describing a piece of the codebase.
+- **Keep all links same-directory relative.** Use `name.md`, not `/name.md`; see `no-absolute-links` above for why a leading slash breaks once the bundle is viewed outside its own repository.
+
 ## Check catalog
 
 | Rule | Severity | What it enforces |
@@ -75,7 +101,7 @@ Known limitation: a `git log` call that fails for a reason other than "no histor
 |------|---------|
 | 0 | No errors (and, under `--strict`, no warnings either). |
 | 1 | At least one error (or, under `--strict`, at least one warning). |
-| 2 | CLI invocation error: bundle directory does not exist, or a commander usage error (unknown option, missing argument, missing/unknown command). `--help` and `--version` still exit 0. |
+| 2 | CLI invocation error: bundle directory does not exist, `init`'s target directory is non-empty without `--force`, or a commander usage error (unknown option, missing argument, missing/unknown command). `--help` and `--version` still exit 0. |
 
 ## CI usage
 

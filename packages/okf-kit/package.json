@@ -1,6 +1,6 @@
 {
   "name": "okf-kit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI that validates OKF v0.1 knowledge bundles for structural correctness",
   "type": "module",
   "bin": {
