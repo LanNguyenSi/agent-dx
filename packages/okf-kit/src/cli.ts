@@ -5,12 +5,14 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { Command, CommanderError } from "commander";
 import { loadBundle } from "./bundle.js";
+import { UsageError } from "./errors.js";
 import { detectRepoRoot } from "./git.js";
+import { formatInitSummary, runInit } from "./init.js";
 import { allRules } from "./rules/index.js";
 import { renderJson, renderText, summarize } from "./report.js";
 import type { Finding, RunGit } from "./types.js";
 
-export class UsageError extends Error {}
+export { UsageError };
 
 export interface CheckOptions {
   repoRoot?: string;
@@ -104,6 +106,32 @@ program
       }
     },
   );
+
+program
+  .command("init [dir]")
+  .description(
+    "Scaffold a starter OKF v0.1 knowledge bundle (default target: docs/okf)",
+  )
+  .option(
+    "-f, --force",
+    "Overwrite the scaffold files in a non-empty target directory (other existing files are left alone)",
+  )
+  .exitOverride()
+  .action((dir: string | undefined, opts: { force?: boolean }) => {
+    try {
+      const result = runInit(dir ?? "docs/okf", { force: opts.force });
+      process.stdout.write(formatInitSummary(result));
+      process.exit(0);
+    } catch (err) {
+      if (err instanceof UsageError) {
+        process.stderr.write(`okf-kit: ${err.message}\n`);
+        process.exit(2);
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`okf-kit: ${msg}\n`);
+      process.exit(2);
+    }
+  });
 
 // Commander codes for an explicit `-h`/`--help` or `-V`/`--version` flag:
 // keep commander's own exit code (0) for these. Note `commander.help` is
