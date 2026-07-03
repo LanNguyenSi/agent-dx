@@ -4,6 +4,7 @@ import { reservedFilesBareRule } from "./reserved-files-bare.js";
 import { linksResolveRule } from "./links-resolve.js";
 import { noAbsoluteLinksRule } from "./no-absolute-links.js";
 import { sourcesShapeRule } from "./sources-shape.js";
+import { sourcesFreshRule } from "./sources-fresh.js";
 
 export const allRules: Rule[] = [
   frontmatterRequiredRule,
@@ -11,6 +12,7 @@ export const allRules: Rule[] = [
   linksResolveRule,
   noAbsoluteLinksRule,
   sourcesShapeRule,
+  sourcesFreshRule,
 ];
 
 export {
@@ -19,4 +21,5 @@ export {
   linksResolveRule,
   noAbsoluteLinksRule,
   sourcesShapeRule,
+  sourcesFreshRule,
 };
