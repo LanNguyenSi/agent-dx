@@ -118,6 +118,7 @@ These were built alongside `slop-detector` for the same human-and-agent workflow
 | [release-prep](packages/release-prep) | Changelog from conventional commits, semver bump suggestions, annotated tags, GitHub releases. |
 | [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. |
 | [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder: sync, status, dirty checks, fetch, with `--strict` for automation. |
+| [okf-kit](packages/okf-kit) | CLI that validates OKF v0.1 knowledge bundles: frontmatter shape, reserved files, link resolution, absolute-link warnings, `sources` shape. |
 | [agent-engineering-playbook](packages/agent-engineering-playbook) | Guide for building production-ready AI agent systems. |
 | [agentic-coding-playbook](packages/agentic-coding-playbook) | Practical playbook for teams using AI agents in coding. |
 

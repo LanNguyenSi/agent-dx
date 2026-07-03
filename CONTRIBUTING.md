@@ -18,7 +18,7 @@ Thanks for your interest. This is a TypeScript monorepo of small, independent to
 
 The monorepo is mixed:
 
-- **npm packages** (`slop-detector`, `release-prep`, `github-api-tool`, `git-batch-cli`, `agent-entrypoint`, `agent-dev-kit`, `friction-log`, `orchestrator-workflow`):
+- **npm packages** (`slop-detector`, `release-prep`, `github-api-tool`, `git-batch-cli`, `agent-entrypoint`, `agent-dev-kit`, `friction-log`, `orchestrator-workflow`, `okf-kit`):
 
   ```bash
   git clone https://github.com/LanNguyenSi/agent-dx
