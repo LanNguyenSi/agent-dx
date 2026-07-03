@@ -1,13 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import type { BundleContext, BundleDoc, FrontmatterInfo } from "./types.js";
+import type {
+  BundleContext,
+  BundleDoc,
+  FrontmatterInfo,
+  RunGit,
+} from "./types.js";
 
 const RESERVED_BASENAMES = new Set(["index.md", "log.md"]);
 
 export function loadBundle(
   bundleDir: string,
   repoRoot?: string,
+  runGit?: RunGit,
 ): BundleContext {
   const files = walkMarkdownFiles(bundleDir);
   const docs: BundleDoc[] = files.map((absPath) => {
@@ -25,7 +31,7 @@ export function loadBundle(
     };
   });
   docs.sort((a, b) => a.relPath.localeCompare(b.relPath));
-  return { bundleDir, repoRoot, docs };
+  return { bundleDir, repoRoot, docs, runGit };
 }
 
 function walkMarkdownFiles(dir: string): string[] {

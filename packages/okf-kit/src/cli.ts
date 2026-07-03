@@ -2,17 +2,21 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 import { Command, CommanderError } from "commander";
 import { loadBundle } from "./bundle.js";
+import { detectRepoRoot } from "./git.js";
 import { allRules } from "./rules/index.js";
 import { renderJson, renderText, summarize } from "./report.js";
-import type { Finding } from "./types.js";
+import type { Finding, RunGit } from "./types.js";
 
 export class UsageError extends Error {}
 
 export interface CheckOptions {
   repoRoot?: string;
   strict?: boolean;
+  /** Test-only override for git access; production code shells out to the real `git` binary. */
+  runGit?: RunGit;
 }
 
 export interface CheckResult {
@@ -29,10 +33,15 @@ export function runCheck(
     throw new UsageError(`Bundle directory does not exist: ${bundleDir}`);
   }
   const resolvedBundleDir = path.resolve(bundleDir);
+  // When --repo-root is omitted, try to find the enclosing git work tree so
+  // sources-shape's existence check and sources-fresh's staleness check are
+  // active by default for any bundle that lives inside a git repo. A bundle
+  // outside any git work tree falls back to the pre-detection behavior
+  // (existence check skipped; sources-fresh reports one skip notice).
   const repoRoot = options.repoRoot
     ? path.resolve(options.repoRoot)
-    : undefined;
-  const ctx = loadBundle(resolvedBundleDir, repoRoot);
+    : detectRepoRoot(resolvedBundleDir, options.runGit);
+  const ctx = loadBundle(resolvedBundleDir, repoRoot, options.runGit);
 
   const findings = allRules.flatMap((rule) => rule.run(ctx));
   const summary = summarize(findings);
@@ -63,7 +72,8 @@ program
   .description("Check a knowledge bundle for OKF structural violations")
   .option(
     "-r, --repo-root <path>",
-    "Repo root to verify frontmatter `sources` paths exist under",
+    "Repo root to verify frontmatter `sources` paths exist under and assess staleness against " +
+      "(auto-detected via `git rev-parse --show-toplevel` from the bundle dir when omitted)",
   )
   .option("-j, --json", "Output findings as JSON")
   .option("-s, --strict", "Also fail (exit 1) when warnings are present")
@@ -107,21 +117,32 @@ const PASSTHROUGH_EXIT_CODES = new Set([
   "commander.version",
 ]);
 
-program.parseAsync().catch((err) => {
-  if (err instanceof CommanderError) {
-    if (PASSTHROUGH_EXIT_CODES.has(err.code)) {
-      process.exit(err.exitCode);
+// Only run the CLI (and its process.exit calls) when this file is executed
+// directly (`node dist/cli.js ...`), not when it is merely imported for its
+// exported runCheck/UsageError (as tests do): otherwise importing this
+// module would parse the importer's own process.argv and could exit the
+// importing process.
+const isMainModule =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMainModule) {
+  program.parseAsync().catch((err) => {
+    if (err instanceof CommanderError) {
+      if (PASSTHROUGH_EXIT_CODES.has(err.code)) {
+        process.exit(err.exitCode);
+      }
+      // Commander already wrote its own error message to stderr before
+      // throwing; a usage error (unknown option, missing argument, missing
+      // command, ...) is exit 2, distinct from exit 1 (bundle has findings).
+      process.exit(2);
     }
-    // Commander already wrote its own error message to stderr before
-    // throwing; a usage error (unknown option, missing argument, missing
-    // command, ...) is exit 2, distinct from exit 1 (bundle has findings).
+    process.stderr.write(
+      `okf-kit: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
     process.exit(2);
-  }
-  process.stderr.write(
-    `okf-kit: ${err instanceof Error ? err.message : String(err)}\n`,
-  );
-  process.exit(2);
-});
+  });
+}
 
 function readVersion(): string {
   try {
