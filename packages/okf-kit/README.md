@@ -65,6 +65,8 @@ Pass `--repo-root` explicitly to pin a specific root (useful in CI when the bund
 
 STALE findings are warnings, so they are advisory by default; run with `--strict` to fail the build on them.
 
+Known limitation: a `git log` call that fails for a reason other than "no history for this path" (for example a corrupt object or a transient git error) is reported the same way as a genuinely untracked path, the `untracked by git, staleness unknown` notice; okf-kit does not currently distinguish a real git failure from "no commits touch this path".
+
 **Authoring guidance:** when you re-verify a doc against its sources, bump its frontmatter `timestamp` (and add a line to the bundle's `log.md`) so `sources-fresh` reflects that the doc is current again.
 
 ## Exit codes
@@ -77,7 +79,7 @@ STALE findings are warnings, so they are advisory by default; run with `--strict
 
 ## CI usage
 
-okf-kit is not published, so a CI step checks out this repo and builds it before use. This is advisory: don't fail the build on warnings unless you pass `--strict`. Run this from a normal (non-shallow) checkout of the repo that owns the bundle, with the working directory inside that checkout: okf-kit is cloned to a separate path for its own build, but `check` still runs against the bundle in the CI-checked-out repo, so `git rev-parse --show-toplevel` from the bundle dir auto-detects *that* repo as the root, not `/tmp/agent-dx`.
+okf-kit is not published, so a CI step checks out this repo and builds it before use. This is advisory: don't fail the build on warnings unless you pass `--strict`. Use a normal (non-shallow) checkout of the repo that owns the bundle: repo-root detection runs `git rev-parse --show-toplevel` from the `path/to/bundle` argument itself, not from the shell's working directory, so it auto-detects the repo containing that bundle path, not `/tmp/agent-dx` (okf-kit is cloned there only to build its own CLI).
 
 ```yaml
 - name: OKF bundle check

@@ -8,7 +8,7 @@ const RULE_ID = "sources-shape";
 export const sourcesShapeRule: Rule = {
   id: RULE_ID,
   description:
-    "Frontmatter `sources`, when present, must be a non-empty array of non-empty strings; with --repo-root, each path must exist.",
+    "Frontmatter `sources`, when present, must be a non-empty array of non-empty strings; with a repo root (explicit --repo-root or auto-detected), each path must exist.",
   run(ctx) {
     const findings: Finding[] = [];
     for (const doc of ctx.docs) {
@@ -35,7 +35,7 @@ export const sourcesShapeRule: Rule = {
             ruleId: RULE_ID,
             severity: "error",
             file: doc.relPath,
-            message: `Source path does not exist under --repo-root: \`${source}\``,
+            message: `Source path does not exist under repo root: \`${source}\``,
           });
         }
       }

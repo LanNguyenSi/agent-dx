@@ -27,12 +27,21 @@ export function getValidSources(parsed: unknown): string[] | undefined {
 
 /**
  * Returns the frontmatter `timestamp` as a Unix epoch (seconds), or
- * undefined when absent, not a string, or not parseable as a date. Used by
- * sources-fresh to compare against a source path's last-commit time.
+ * undefined when absent, not a Date/string, or not parseable as a date.
+ * Used by sources-fresh to compare against a source path's last-commit
+ * time. Accepts a `Date` instance first: the `yaml` package's default
+ * (core) schema resolves timestamp scalars to strings, but a YAML 1.1
+ * `!!timestamp` tag (or a caller constructing frontmatter programmatically)
+ * can hand back a native `Date`, and that should be assessed rather than
+ * degrade to the no-valid-timestamp notice.
  */
 export function getTimestampEpoch(parsed: unknown): number | undefined {
   if (!isRecord(parsed)) return undefined;
   const timestamp = parsed.timestamp;
+  if (timestamp instanceof Date) {
+    const ms = timestamp.getTime();
+    return Number.isNaN(ms) ? undefined : Math.floor(ms / 1000);
+  }
   if (typeof timestamp !== "string" || timestamp.trim() === "")
     return undefined;
   const ms = Date.parse(timestamp);

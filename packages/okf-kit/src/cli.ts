@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 import { Command, CommanderError } from "commander";
 import { loadBundle } from "./bundle.js";
 import { detectRepoRoot } from "./git.js";
@@ -116,21 +117,32 @@ const PASSTHROUGH_EXIT_CODES = new Set([
   "commander.version",
 ]);
 
-program.parseAsync().catch((err) => {
-  if (err instanceof CommanderError) {
-    if (PASSTHROUGH_EXIT_CODES.has(err.code)) {
-      process.exit(err.exitCode);
+// Only run the CLI (and its process.exit calls) when this file is executed
+// directly (`node dist/cli.js ...`), not when it is merely imported for its
+// exported runCheck/UsageError (as tests do): otherwise importing this
+// module would parse the importer's own process.argv and could exit the
+// importing process.
+const isMainModule =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMainModule) {
+  program.parseAsync().catch((err) => {
+    if (err instanceof CommanderError) {
+      if (PASSTHROUGH_EXIT_CODES.has(err.code)) {
+        process.exit(err.exitCode);
+      }
+      // Commander already wrote its own error message to stderr before
+      // throwing; a usage error (unknown option, missing argument, missing
+      // command, ...) is exit 2, distinct from exit 1 (bundle has findings).
+      process.exit(2);
     }
-    // Commander already wrote its own error message to stderr before
-    // throwing; a usage error (unknown option, missing argument, missing
-    // command, ...) is exit 2, distinct from exit 1 (bundle has findings).
+    process.stderr.write(
+      `okf-kit: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
     process.exit(2);
-  }
-  process.stderr.write(
-    `okf-kit: ${err instanceof Error ? err.message : String(err)}\n`,
-  );
-  process.exit(2);
-});
+  });
+}
 
 function readVersion(): string {
   try {

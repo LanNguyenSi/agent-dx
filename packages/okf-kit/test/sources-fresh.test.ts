@@ -83,6 +83,19 @@ describe("sources-fresh", () => {
     expect(sourcesFreshRule.run(freshCtx)).toEqual([]);
   });
 
+  it("does not flag a source committed at exactly the doc's timestamp second (pins > over >=)", () => {
+    const boundary = "2026-03-15T12:00:00Z";
+    repo.commitFile("source.ts", "export const a = 1;\n", boundary);
+    writeDoc(repo.dir, "bundle/doc.md", {
+      type: "concept",
+      timestamp: boundary,
+      sources: ["source.ts"],
+    });
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    expect(sourcesFreshRule.run(ctx)).toEqual([]);
+  });
+
   it("flags an untracked source path as a notice, not STALE", () => {
     fs.writeFileSync(path.join(repo.dir, "source.ts"), "export const a = 1;\n");
     writeDoc(repo.dir, "bundle/doc.md", {
