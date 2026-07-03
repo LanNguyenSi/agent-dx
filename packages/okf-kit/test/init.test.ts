@@ -67,6 +67,16 @@ describe("runInit", () => {
     );
   });
 
+  it("refuses when the target path exists and is a file, not a directory", () => {
+    const targetPath = path.join(workDir, "not-a-dir");
+    fs.writeFileSync(targetPath, "I am a file\n");
+
+    expect(() => runInit(targetPath)).toThrow(UsageError);
+    // Must not have touched or replaced the file.
+    expect(fs.statSync(targetPath).isDirectory()).toBe(false);
+    expect(fs.readFileSync(targetPath, "utf8")).toBe("I am a file\n");
+  });
+
   it("with --force, overwrites only the files it owns and leaves other files alone", () => {
     const targetDir = path.join(workDir, "nonempty-forced");
     fs.mkdirSync(targetDir);
@@ -84,6 +94,23 @@ describe("runInit", () => {
     for (const name of SCAFFOLD_FILENAMES) {
       expect(fs.existsSync(path.join(targetDir, name))).toBe(true);
     }
+  });
+
+  it("stamps every doc's frontmatter timestamp and the log.md entry with the exact injected `now`, proving the seam is wired", () => {
+    const fixed = new Date("2030-05-17T08:15:30.000Z");
+    const targetDir = path.join(workDir, "fixed-now");
+    runInit(targetDir, { now: () => fixed });
+
+    const ctx = loadBundle(targetDir);
+    const timestamped = ctx.docs.filter((d) => d.frontmatter.present);
+    expect(timestamped.length).toBeGreaterThan(0);
+    for (const doc of timestamped) {
+      const parsed = doc.frontmatter.parsed as { timestamp?: unknown };
+      expect(parsed.timestamp).toBe(fixed.toISOString());
+    }
+
+    const logRaw = fs.readFileSync(path.join(targetDir, "log.md"), "utf8");
+    expect(logRaw).toContain(fixed.toISOString());
   });
 
   it("every generated file's timestamp (where present) is a valid ISO string within a few minutes of now", () => {

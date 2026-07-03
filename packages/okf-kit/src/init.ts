@@ -92,8 +92,9 @@ export function formatInitSummary(result: InitResult): string {
     "  - Replace the `path/to/covered/source` placeholder in each doc's `sources:` list with the",
     "    real repo-root-relative path(s) it describes.",
     "  - Until you do, `okf-kit check` will report those placeholders as missing source paths",
-    "    (`sources-shape` errors); that is intentional, not a bug, it flags unwritten sources so you",
-    "    don't forget them.",
+    "    (`sources-shape` errors) whenever it has a repo root to check against (inside a git repo, or",
+    "    with --repo-root); that is intentional, not a bug, it flags unwritten sources so you don't",
+    "    forget them.",
   ];
   return lines.join("\n") + "\n";
 }

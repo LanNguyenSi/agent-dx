@@ -75,6 +75,8 @@ map of the docs in this bundle as you add and rename them.
 export function logTemplate(timestamp: string): string {
   return `# Log
 
+<!-- Add new entries at the top, newest first. -->
+
 - ${timestamp}, bundle scaffolded by \`okf-kit init\`.
 `;
 }
