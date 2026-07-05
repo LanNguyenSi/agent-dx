@@ -58,4 +58,27 @@ describe("05-review-findings.md findings-table header convention", () => {
   it("documents the header as load-bearing above the table", () => {
     expect(reviewTemplate).toMatch(/<!--[^>]*load-bearing[^>]*-->/i);
   });
+
+  it("invites only the reader's resolved Decision vocabulary in the example row", () => {
+    // grounding-mcp's completeness reader treats a high/critical finding as
+    // resolved ONLY when its Decision is `accepted` or `defer` (RESOLVED_DECISIONS).
+    // The example row must not offer arming values (fix/reject) as if they were
+    // resolutions, or an operator following the template hits a surprising gate.
+    const exampleRow = reviewTemplate
+      .split(/\r?\n/)
+      .find((line) => line.trim().startsWith("|") && /low\/medium\/high\/critical/i.test(line));
+    expect(exampleRow).toBeDefined();
+    const cells = (exampleRow ?? "").split("|").slice(1, -1).map((cell) => cell.trim());
+    const decisionCell = cells[cells.length - 1];
+    const tokens = decisionCell.split("/").map((token) => token.trim()).filter(Boolean);
+    // Mutation-check: re-adding fix/reject to the example cell fails this.
+    expect(tokens).toEqual(["accepted", "defer"]);
+  });
+
+  it("documents that non-resolved Decision values arm the completeness gate", () => {
+    // The legend must name the arming behavior so the narrowed example reads as
+    // "these resolve; others arm", not "these are the only legal values".
+    expect(reviewTemplate).toMatch(/RESOLVED_DECISIONS\s*=\s*\{\s*accepted\s*,\s*defer\s*\}/);
+    expect(reviewTemplate).toMatch(/arms? the (?:completeness )?gate/i);
+  });
 });
