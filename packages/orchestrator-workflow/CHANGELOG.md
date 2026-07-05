@@ -5,6 +5,22 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-07-05
+
+### Changed
+
+- `05-review-findings.md` Decision legend now matches the grounding-mcp
+  completeness reader's resolved vocabulary. The example row previously
+  invited `accepted/fix/defer/reject`, but the reader's
+  `RESOLVED_DECISIONS = {accepted, defer}` treats a high/critical finding
+  marked `fix` or `reject` as unresolved, so the gate arms (fail-closed but
+  surprising). The example is narrowed to `accepted/defer` and a Decision
+  legend comment now spells out that every other value (`fix`, `reject`,
+  blank, `open`, `TODO`) arms the completeness gate until resolved. Docs
+  only, no runtime behavior change; a template-vocabulary test pins the
+  reconciliation. Reader left untouched (its fail-closed design is
+  deliberate); this is the single-repo path (a).
+
 ## [0.7.3] - 2026-07-05
 
 ### Fixed
