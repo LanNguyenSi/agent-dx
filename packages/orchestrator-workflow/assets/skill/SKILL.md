@@ -95,7 +95,10 @@ directory and the subagents.
 7. **Delegate review.** Send the diff to the reviewer subagent. The reviewer
    checks spec compliance, architecture consistency, edge cases, security,
    test adequacy (including whether new tests would fail if the change were
-   reverted), and maintainability. Findings go to `05-review-findings.md`.
+   reverted), and maintainability. Findings go to `05-review-findings.md`;
+   transfer each finding from the reviewer output contract into the table's
+   columns as-is, keeping the Severity and Decision headers unchanged, since
+   those two are what the orchestrator-workflow completeness reader verifies.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high
