@@ -28,3 +28,34 @@ describe("solution-acceptance markers in run templates", () => {
     expect(matches[0][1]).toBe("TODO");
   });
 });
+
+/**
+ * The grounding-mcp orchestrator-workflow completeness reader locates the
+ * findings table by its header row (a table row whose cells include both
+ * `Severity` and `Decision`, case-insensitive) rather than by heading text,
+ * and yields an explicit blocker when a findings section has content but no
+ * such header row anywhere in the file. This pins the shipped header row so
+ * the template cannot silently drift onto a convention (e.g. a
+ * Decision-less `| Severity | Finding | Resolution |` table) the reader
+ * cannot verify.
+ */
+describe("05-review-findings.md findings-table header convention", () => {
+  const reviewTemplate = readAsset("templates/05-review-findings.md");
+
+  it("carries a header row with both Severity and Decision columns", () => {
+    const headerRow = reviewTemplate
+      .split(/\r?\n/)
+      .find((line) => line.trim().startsWith("|") && /severity/i.test(line));
+    expect(headerRow).toBeDefined();
+    const cells = (headerRow ?? "")
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim().toLowerCase());
+    expect(cells).toContain("severity");
+    expect(cells).toContain("decision");
+  });
+
+  it("documents the header as load-bearing above the table", () => {
+    expect(reviewTemplate).toMatch(/<!--[^>]*load-bearing[^>]*-->/i);
+  });
+});

@@ -5,6 +5,24 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-07-05
+
+### Fixed
+
+- `05-review-findings.md` now carries a load-bearing comment above the
+  findings table naming the Severity and Decision columns: grounding-mcp's
+  orchestrator-workflow completeness reader (0.6.0) locates the table by a
+  header row whose cells include both, and fails closed with an explicit
+  "not in the expected table format" blocker when a run drifts onto a
+  Decision-less convention (a live run had used
+  `| Severity | Finding | Resolution |`, which the reader cannot verify).
+  The shipped header itself was already correct
+  (`| Severity | Category | Description | Suggested Fix | Decision |`); this
+  adds the comment plus a one-sentence rule in `SKILL.md`'s review step
+  telling the orchestrator to transfer reviewer findings into the table
+  as-is, keeping those two headers, and a test pinning the header row so
+  the convention cannot silently drift again.
+
 ## [0.7.2] - 2026-07-02
 
 ### Security
