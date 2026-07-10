@@ -1,0 +1,115 @@
+name: Deprecate an npm version
+
+# Operator tool. Marks ONE published version of ONE allowlisted package as
+# deprecated on the npm registry. Runs here rather than on a workstation
+# because the write-capable NPM_TOKEN lives only as a repository secret.
+#
+# Why the inputs are validated rather than trusted:
+#
+#   npm deprecate <pkg> "<msg>"          # deprecates EVERY version
+#   npm deprecate <pkg>@1.2.3 "<msg>"    # deprecates exactly one
+#
+# A missing or range-shaped version silently widens the blast radius to the
+# whole package, including the fixed release people are supposed to move to.
+# So `version` must be an exact semver, and `package` must be on the same
+# allowlist publish-npm.yml uses. An empty `message` is npm's UN-deprecate
+# signal; that is a deliberate act, not something to reach by leaving a form
+# field blank, so it is refused here too.
+#
+# The run prints the registry's deprecation state before and after. Read that,
+# not the exit code: `npm deprecate` can exit non-zero on a transient registry
+# error after the write landed, and it masks an unauthorized write as a 404.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package name (must be on the publishable allowlist)"
+        required: true
+        type: string
+      version:
+        description: "Exact version to deprecate, e.g. 0.3.0 (never a range)"
+        required: true
+        type: string
+      message:
+        description: "Deprecation message shown to installers (must not be empty)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deprecate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate inputs
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          MESSAGE: ${{ inputs.message }}
+          # Keep in step with publish-npm.yml's PUBLISHABLE list.
+          ALLOWLIST: "orchestrator-workflow okf-kit"
+        run: |
+          set -euo pipefail
+
+          case " ${ALLOWLIST} " in
+            *" ${PACKAGE} "*) ;;
+            *)
+              echo "::error::Package '${PACKAGE}' is not in the allowlist (${ALLOWLIST})" >&2
+              exit 1
+              ;;
+          esac
+
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Version '${VERSION}' is not an exact semver. A range or empty value would deprecate every version of ${PACKAGE}." >&2
+            exit 1
+          fi
+
+          if [ -z "${MESSAGE//[[:space:]]/}" ]; then
+            echo "::error::An empty message UN-deprecates. Refusing; run an explicit un-deprecate if that is the intent." >&2
+            exit 1
+          fi
+
+          echo "Will deprecate ${PACKAGE}@${VERSION}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Preflight, verify NPM_TOKEN secret is set
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN secret is not configured." >&2
+            exit 1
+          fi
+
+      - name: Registry state BEFORE
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: node .github/scripts/print-deprecations.mjs "$PACKAGE"
+
+      - name: Deprecate
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          set -euo pipefail
+          # Quoted spec: the @ must reach npm as part of one argument.
+          npm deprecate "${PACKAGE}@${VERSION}" "${MESSAGE}"
+
+      - name: Registry state AFTER, and assert the blast radius
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # The registry is eventually consistent for this field; give it a moment.
+          sleep 10
+          node .github/scripts/print-deprecations.mjs "$PACKAGE" --assert-only "$VERSION"
