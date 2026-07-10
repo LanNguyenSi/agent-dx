@@ -150,9 +150,24 @@ const PASSTHROUGH_EXIT_CODES = new Set([
 // exported runCheck/UsageError (as tests do): otherwise importing this
 // module would parse the importer's own process.argv and could exit the
 // importing process.
+// argv[1] is the path the shell invoked. Every real install path routes
+// through a symlink (`node_modules/.bin/okf-kit` -> `../okf-kit/dist/cli.js`,
+// which is what `npx` and `npm i -g` create), so comparing it verbatim against
+// `import.meta.url` (always the resolved realpath) never matches and the CLI
+// silently no-ops with exit 0. Resolve argv[1] before comparing. realpathSync
+// throws on a path that does not exist; fall back to the raw value so a exotic
+// argv[1] degrades to the old comparison rather than crashing at import time.
+function resolvedArgvUrl(argv1: string): string {
+  try {
+    return pathToFileURL(fs.realpathSync(argv1)).href;
+  } catch {
+    return pathToFileURL(argv1).href;
+  }
+}
+
 const isMainModule =
   process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href;
+  import.meta.url === resolvedArgvUrl(process.argv[1]);
 
 if (isMainModule) {
   program.parseAsync().catch((err) => {
