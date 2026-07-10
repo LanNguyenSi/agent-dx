@@ -1,14 +1,18 @@
 name: Publish to npm
 
-# Publishes packages/orchestrator-workflow on a pushed tag matching
-# `orchestrator-workflow/v<semver>` (agent-dx tag convention: <pkg>/v<version>).
+# Publishes a package under packages/ on a pushed tag matching the agent-dx
+# tag convention `<pkg>/v<semver>`. The package directory and version are
+# derived from the tag, so adding a package means adding its tag pattern to
+# `on.push.tags` and its name to PUBLISHABLE below, nothing else.
+#
 # The workflow_dispatch path exists so a tag that predates this workflow
 # (orchestrator-workflow/v0.1.0) can be published once the NPM_TOKEN secret
 # is configured.
 #
-# Extending to another package later: add its tag pattern under on.push.tags
-# and a matching case below. slop-detector is deliberately NOT wired up:
-# the npm name `slop-detector` is owned by a third party (see task eb4ab564).
+# PUBLISHABLE is an allowlist, not a convenience: a tag naming any other
+# directory is rejected before checkout-adjacent steps can act on it. It is
+# also where slop-detector is deliberately absent, the npm name
+# `slop-detector` is owned by a third party (see task eb4ab564).
 #
 # Push tags ONE AT A TIME. GitHub coalesces a multi-tag push into a single
 # push event, which fires the workflow only once with one arbitrary tag.
@@ -17,10 +21,11 @@ on:
   push:
     tags:
       - "orchestrator-workflow/v*"
+      - "okf-kit/v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag to publish (e.g. orchestrator-workflow/v0.1.0)"
+        description: "Existing release tag to publish (e.g. okf-kit/v0.3.0)"
         required: true
         type: string
 
@@ -31,35 +36,55 @@ permissions:
   id-token: write
 
 jobs:
+  parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pkg: ${{ steps.parse.outputs.pkg }}
+      version: ${{ steps.parse.outputs.version }}
+    steps:
+      - name: Parse tag
+        id: parse
+        env:
+          RESOLVED_TAG: ${{ inputs.tag || github.ref_name }}
+          # Space-separated allowlist of publishable package directories.
+          PUBLISHABLE: "orchestrator-workflow okf-kit"
+        run: |
+          set -euo pipefail
+          pkg="${RESOLVED_TAG%%/v*}"
+          version="${RESOLVED_TAG#"${pkg}"/v}"
+          if [ "$pkg" = "$RESOLVED_TAG" ] || [ "$version" = "$RESOLVED_TAG" ] || [ -z "$version" ]; then
+            echo "::error::Tag $RESOLVED_TAG does not match the expected pattern <pkg>/v<semver>" >&2
+            exit 1
+          fi
+          case " ${PUBLISHABLE} " in
+            *" ${pkg} "*) ;;
+            *)
+              echo "::error::Package '${pkg}' is not in the publishable allowlist (${PUBLISHABLE})" >&2
+              exit 1
+              ;;
+          esac
+          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${pkg}@${version}"
+
   publish:
+    needs: parse
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: packages/orchestrator-workflow
+        working-directory: packages/${{ needs.parse.outputs.pkg }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Parse tag
-        id: parse
-        env:
-          RESOLVED_TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          version="${RESOLVED_TAG#orchestrator-workflow/v}"
-          if [ "$version" = "$RESOLVED_TAG" ]; then
-            echo "::error::Tag $RESOLVED_TAG does not match expected pattern orchestrator-workflow/v<semver>" >&2
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Publishing orchestrator-workflow@${version}"
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: packages/orchestrator-workflow/package-lock.json
+          cache-dependency-path: packages/${{ needs.parse.outputs.pkg }}/package-lock.json
           registry-url: "https://registry.npmjs.org"
 
       - name: Preflight, verify NPM_TOKEN secret is set
@@ -76,11 +101,12 @@ jobs:
 
       - name: Verify package.json version matches tag
         env:
-          EXPECTED_VERSION: ${{ steps.parse.outputs.version }}
+          EXPECTED_VERSION: ${{ needs.parse.outputs.version }}
+          PKG_DIR: ${{ needs.parse.outputs.pkg }}
         run: |
           pkg_version=$(node -p "require('./package.json').version")
           if [ "$pkg_version" != "$EXPECTED_VERSION" ]; then
-            echo "::error::Tag version ($EXPECTED_VERSION) does not match packages/orchestrator-workflow/package.json ($pkg_version)" >&2
+            echo "::error::Tag version ($EXPECTED_VERSION) does not match packages/${PKG_DIR}/package.json ($pkg_version)" >&2
             exit 1
           fi
 
@@ -93,7 +119,7 @@ jobs:
       - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          VERSION: ${{ steps.parse.outputs.version }}
+          VERSION: ${{ needs.parse.outputs.version }}
         run: |
           set -euo pipefail
           pkg=$(node -p "require('./package.json').name")

@@ -6,44 +6,45 @@ Part of [agent-dx](https://github.com/LanNguyenSi/agent-dx), playbooks and tooli
 
 ## Install
 
-okf-kit is not yet published to npm, so run it from a local build of this monorepo:
-
 ```bash
-git clone https://github.com/LanNguyenSi/agent-dx
-cd agent-dx/packages/okf-kit
-npm install
-npm run build
+# one-off, no install
+npx okf-kit check path/to/bundle
+
+# or install it
+npm install -g okf-kit
 ```
+
+Requires Node >= 20.
 
 ## Quick start
 
 ```bash
-node dist/cli.js check path/to/bundle
+okf-kit check path/to/bundle
 
 # explicit repo root, used for both sources-shape existence checks and
 # sources-fresh staleness checks (see "repo-root auto-detection" below for
 # what happens when you omit this)
-node dist/cli.js check path/to/bundle --repo-root /path/to/repo
+okf-kit check path/to/bundle --repo-root /path/to/repo
 
 # JSON output for tooling
-node dist/cli.js check path/to/bundle --json
+okf-kit check path/to/bundle --json
 
 # fail on warnings too, not just errors (STALE findings are warnings)
-node dist/cli.js check path/to/bundle --strict
+okf-kit check path/to/bundle --strict
 ```
 
 ## Scaffold a bundle (`init`)
 
 ```bash
 # scaffold docs/okf (the default target, relative to the current directory)
-node dist/cli.js init
+okf-kit init
 
 # scaffold a specific directory instead
-node dist/cli.js init path/to/bundle
+okf-kit init path/to/bundle
 
 # an existing, non-empty target directory is refused (exit 2) unless forced;
 # --force overwrites only the files init owns, nothing else in the directory
-node dist/cli.js init path/to/bundle --force
+okf-kit init path/to/bundle --force
 ```
 
 `init` writes `index.md`, `log.md`, and one template doc per concept type: `overview-template.md`, `module-template.md`, `invariant-template.md`, `runbook-template.md`, plus `benchmark-template.md` for measuring whether the bundle helps. `index.md` and `log.md` carry no frontmatter (`reserved-files-bare`); every template doc carries full frontmatter (`type`, `title`, `description`, `tags`, `timestamp`, and, except for the benchmark template, `sources`) plus inline HTML-comment guidance on writing dense, source-verified, pointer-carrying docs instead of filler. All generated links are same-directory relative (`name.md`), never a leading-slash form.
@@ -105,15 +106,14 @@ Known limitation: a `git log` call that fails for a reason other than "no histor
 
 ## CI usage
 
-okf-kit is not published, so a CI step checks out this repo and builds it before use. This is advisory: don't fail the build on warnings unless you pass `--strict`. Use a normal (non-shallow) checkout of the repo that owns the bundle: repo-root detection runs `git rev-parse --show-toplevel` from the `path/to/bundle` argument itself, not from the shell's working directory, so it auto-detects the repo containing that bundle path, not `/tmp/agent-dx` (okf-kit is cloned there only to build its own CLI).
+This is advisory: don't fail the build on warnings unless you pass `--strict`. Use a normal (non-shallow) checkout of the repo that owns the bundle: repo-root detection runs `git rev-parse --show-toplevel` from the `path/to/bundle` argument itself, not from the shell's working directory, and `sources-fresh` reads `git log`, so a shallow clone reports paths as untracked.
 
 ```yaml
 - name: OKF bundle check
-  run: |
-    git clone https://github.com/LanNguyenSi/agent-dx /tmp/agent-dx
-    (cd /tmp/agent-dx/packages/okf-kit && npm install && npm run build)
-    node /tmp/agent-dx/packages/okf-kit/dist/cli.js check path/to/bundle
+  run: npx okf-kit@0.3.0 check path/to/bundle
 ```
+
+Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
 
 ## Where this fits
 
