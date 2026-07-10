@@ -1,0 +1,142 @@
+name: Deprecate an npm version
+
+# Operator tool. Marks ONE published version of ONE allowlisted package as
+# deprecated on the npm registry. Runs here rather than on a workstation
+# because the write-capable NPM_TOKEN lives only as a repository secret.
+#
+# Why the inputs are validated rather than trusted:
+#
+#   npm deprecate <pkg> "<msg>"          # deprecates EVERY version
+#   npm deprecate <pkg>@">=1" "<msg>"    # deprecates every matching version
+#   npm deprecate <pkg>@1.2.3 "<msg>"    # deprecates exactly one
+#
+# A missing or range-shaped version silently widens the blast radius to the
+# whole package, including the fixed release people are supposed to move to.
+# So `version` must be an exact semver, and `package` must match an entry on
+# the same allowlist publish-npm.yml uses. An empty `message` is npm's
+# UN-deprecate signal; that is a deliberate act, not something to reach by
+# leaving a form field blank, so it is refused here too.
+#
+# Evidence comes from the registry, never from npm's exit code: `npm deprecate`
+# masks an unauthorized write as a 404 and can exit non-zero after the write
+# landed. The Deprecate step therefore does not gate the job (continue-on-error)
+# and the AFTER assertion is the sole verdict. It compares against a BEFORE
+# snapshot, so a package with a legitimate deprecation history keeps working,
+# and it distinguishes "not yet visible" (exit 3, retry) from "did not land"
+# (exit 1).
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package name (must be on the publishable allowlist)"
+        required: true
+        type: string
+      version:
+        description: "Exact version to deprecate, e.g. 0.3.0 (never a range)"
+        required: true
+        type: string
+      message:
+        description: "Deprecation message shown to installers (must not be empty)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deprecate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          MESSAGE: ${{ inputs.message }}
+          # Keep in step with publish-npm.yml's PUBLISHABLE list.
+          ALLOWLIST: "orchestrator-workflow okf-kit"
+        run: |
+          set -euo pipefail
+
+          # Exact-match over tokens, not a substring test: a PACKAGE containing
+          # whitespace must never satisfy the allowlist.
+          allowed=""
+          for entry in $ALLOWLIST; do
+            if [ "$entry" = "$PACKAGE" ]; then allowed=yes; fi
+          done
+          if [ -z "$allowed" ]; then
+            echo "::error::Package '${PACKAGE}' is not in the allowlist (${ALLOWLIST})" >&2
+            exit 1
+          fi
+
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Version '${VERSION}' is not an exact semver. A range, dist-tag, or empty value would deprecate more than one version of ${PACKAGE}." >&2
+            exit 1
+          fi
+
+          if [ -z "${MESSAGE//[[:space:]]/}" ]; then
+            echo "::error::An empty message UN-deprecates. Refusing; run an explicit un-deprecate if that is the intent." >&2
+            exit 1
+          fi
+
+          echo "Will deprecate ${PACKAGE}@${VERSION}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Preflight, verify NPM_TOKEN secret is set
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN secret is not configured." >&2
+            exit 1
+          fi
+
+      - name: Self-test the assertion logic
+        # The assertion below is the only thing standing between a typo and a
+        # dead package. Prove it still works before touching the registry.
+        run: node .github/scripts/print-deprecations.mjs --self-test
+
+      - name: Registry state BEFORE
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          node .github/scripts/print-deprecations.mjs "$PACKAGE"
+          # Snapshot the pre-existing deprecations so the AFTER assertion only
+          # holds this run responsible for what it changed.
+          node .github/scripts/print-deprecations.mjs "$PACKAGE" --json > "${RUNNER_TEMP}/before.json"
+
+      - name: Deprecate
+        id: deprecate
+        # Deliberately non-gating: a non-zero exit here is not evidence of
+        # failure (npm can fail after the write lands). The AFTER step decides.
+        continue-on-error: true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          # Quoted spec: the @ must reach npm as part of one argv element.
+          npm deprecate "${PACKAGE}@${VERSION}" "${MESSAGE}"
+
+      - name: Registry state AFTER, and assert the blast radius
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          echo "npm deprecate step outcome: ${{ steps.deprecate.outcome }} (not the verdict; the registry is)"
+          node .github/scripts/print-deprecations.mjs "$PACKAGE" \
+            --expect "$VERSION" --baseline "${RUNNER_TEMP}/before.json"
