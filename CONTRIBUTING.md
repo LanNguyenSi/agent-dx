@@ -32,6 +32,13 @@ The monorepo is mixed:
 
 Each package is self-contained, no root install.
 
+## Releases and npm credentials
+
+All npm writes (publish, deprecate) run in CI via the `NPM_TOKEN` repository
+secret (see `.github/workflows/publish-npm.yml` and `npm-deprecate.yml`).
+There is no working local npm token; do not debug a local `E401`/`E404`,
+trigger the workflow instead.
+
 ## Style
 
 Match the surrounding code. Prefer small, reviewable diffs.
