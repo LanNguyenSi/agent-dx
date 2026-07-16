@@ -256,3 +256,202 @@ describe("README names the Bash residual honestly", () => {
     expect(readmeMd).toContain("out of this kit's scope");
   });
 });
+
+/**
+ * The task-slicer output schema must be a lossless superset of the subagent
+ * input contract, so the orchestrator copies task-slicer fields into the
+ * implementer contract instead of inventing them. These checks pin the
+ * list-shaped task fields in both places that carry the slicer output shape
+ * (SKILL.md's contract block and the installed task-slicer.md prompt's
+ * output structure), derive the required field set from the subagent input
+ * contract itself (so a field added there cannot silently go missing here),
+ * pin the 02-tasks.md template sections they map to, and pin the
+ * 1:1-mapping sentence. Extraction targets the specific yaml block / task
+ * item rather than the whole document, so a field present only in prose
+ * elsewhere still fails here.
+ */
+describe("task slicer output schema is a superset of the implementer input contract", () => {
+  const skillMdRaw = readAsset("skill/SKILL.md");
+  const taskSlicerRaw = readAsset("agents/task-slicer.md");
+  const tasksTemplate = readAsset("templates/02-tasks.md");
+
+  // Every list-shaped field a slicer task carries; suggested_tests has no
+  // counterpart in the subagent input contract (tests are not part of that
+  // contract) but is required by the 02-tasks.md template and the workflow
+  // narrative, so it ships alongside the mirrored fields.
+  const listShapedTaskFields = [
+    "relevant_files",
+    "relevant_docs",
+    "acceptance_criteria",
+    "constraints",
+    "suggested_tests",
+    "allowed_changes",
+    "forbidden_changes",
+  ];
+
+  /** Extracts the first ```yaml fenced block found after `heading` in `doc`. */
+  function yamlBlockAfter(doc: string, heading: string): string {
+    const headingIndex = doc.indexOf(heading);
+    expect(headingIndex, `heading "${heading}" not found`).toBeGreaterThanOrEqual(0);
+    const match = doc.slice(headingIndex).match(/```yaml\n([\s\S]*?)```/);
+    expect(match, `no yaml block found after "${heading}"`).toBeTruthy();
+    return (match as RegExpMatchArray)[1];
+  }
+
+  /** A field at task-item indentation, carrying the same `- ""` list shape
+   * as the subagent input contract's list fields. */
+  function fieldWithListShape(field: string): RegExp {
+    return new RegExp(`^ {4}${field}:\\n {6}- ""$`, "m");
+  }
+
+  it("SKILL.md's task slicer output contract block carries the list-shaped task fields with the mirrored list shape", () => {
+    const block = yamlBlockAfter(skillMdRaw, "## Task slicer output contract");
+    for (const field of listShapedTaskFields) {
+      expect(
+        block,
+        `missing "${field}:" (or wrong list shape) in SKILL.md's task slicer output contract`,
+      ).toMatch(fieldWithListShape(field));
+    }
+  });
+
+  it("task-slicer.md's output structure carries the list-shaped task fields with the mirrored list shape", () => {
+    const block = yamlBlockAfter(taskSlicerRaw, "Return exactly this structure");
+    for (const field of listShapedTaskFields) {
+      expect(
+        block,
+        `missing "${field}:" (or wrong list shape) in task-slicer.md's output structure`,
+      ).toMatch(fieldWithListShape(field));
+    }
+  });
+
+  it("no field required by the subagent input contract is absent from the slicer output schema", () => {
+    const subagentBlock = yamlBlockAfter(skillMdRaw, "## Subagent input contract");
+    const slicerBlock = yamlBlockAfter(skillMdRaw, "## Task slicer output contract");
+    // Derive the required set from the subagent input contract itself so a
+    // field added there cannot silently go missing from the slicer output.
+    // Delegation mechanics are what the orchestrator supplies when spawning
+    // (role, task_id, the context/expected_output wrappers), not per-task
+    // planning output the slicer must produce.
+    const delegationMechanics = ["role", "task_id", "context", "expected_output", "format"];
+    const topLevel = [...subagentBlock.matchAll(/^(\w+):/gm)].map((m) => m[1]);
+    const contextChildren = [...subagentBlock.matchAll(/^ {2}(\w+):/gm)].map((m) => m[1]);
+    const required = [...topLevel, ...contextChildren].filter(
+      (field) => !delegationMechanics.includes(field),
+    );
+    // Guard the extraction itself: these two must be part of the derived set,
+    // otherwise the regexes above rotted and the loop below proves nothing.
+    expect(required).toContain("relevant_docs");
+    expect(required).toContain("goal");
+    for (const field of required) {
+      expect(
+        slicerBlock,
+        `subagent input contract requires "${field}" but the slicer output schema does not carry it`,
+      ).toMatch(new RegExp(`^ {4}${field}:`, "m"));
+    }
+  });
+
+  it("both slicer output copies carry the same task fields in the same order", () => {
+    const fieldsOf = (block: string) =>
+      [...block.matchAll(/^ {4}(\w+):/gm)].map((m) => m[1]);
+    const skillFields = fieldsOf(
+      yamlBlockAfter(skillMdRaw, "## Task slicer output contract"),
+    );
+    const slicerFields = fieldsOf(
+      yamlBlockAfter(taskSlicerRaw, "Return exactly this structure"),
+    );
+    expect(skillFields.length).toBeGreaterThan(0);
+    expect(slicerFields).toEqual(skillFields);
+  });
+
+  it("SKILL.md's task slicer output contract keeps id, title, goal, relevant_files, acceptance_criteria, dependencies, and risk in order around the new fields", () => {
+    const block = yamlBlockAfter(skillMdRaw, "## Task slicer output contract");
+    const order = [
+      "id: T-001",
+      "title:",
+      "goal:",
+      "relevant_files:",
+      "relevant_docs:",
+      "acceptance_criteria:",
+      "constraints:",
+      "suggested_tests:",
+      "allowed_changes:",
+      "forbidden_changes:",
+      "dependencies:",
+      "risk:",
+    ];
+    let cursor = -1;
+    for (const token of order) {
+      const idx = block.indexOf(token);
+      expect(idx, `"${token}" not found in task slicer output contract`).toBeGreaterThan(cursor);
+      cursor = idx;
+    }
+  });
+
+  it("02-tasks.md carries Allowed Changes and Forbidden Changes sections", () => {
+    expect(tasksTemplate).toContain("**Allowed Changes**");
+    expect(tasksTemplate).toContain("**Forbidden Changes**");
+  });
+
+  it("02-tasks.md sections map 1:1 to the slicer output fields, in order", () => {
+    const sectionOrder = [
+      "**Goal**",
+      "**Relevant Files / Areas**",
+      "**Relevant Docs**",
+      "**Acceptance Criteria**",
+      "**Constraints**",
+      "**Suggested Tests**",
+      "**Allowed Changes**",
+      "**Forbidden Changes**",
+      "**Dependencies**",
+      "**Risk**",
+    ];
+    let cursor = -1;
+    for (const heading of sectionOrder) {
+      const idx = tasksTemplate.indexOf(heading);
+      expect(idx, `section "${heading}" not found`).toBeGreaterThan(cursor);
+      cursor = idx;
+    }
+  });
+
+  it("SKILL.md documents the 1:1 field mapping from slicer output into the subagent input contract", () => {
+    const unwrapped = unwrap(skillMdRaw);
+    expect(unwrapped).toContain(
+      "copies each task's goal, relevant_files, relevant_docs, acceptance_criteria, constraints, allowed_changes, and forbidden_changes 1:1 into the subagent input contract",
+    );
+  });
+
+  it("the step-4 narrative and the task-slicer rule enumerate the contract's per-task field set", () => {
+    const enumerationAfter = (doc: string, anchor: string): string => {
+      const idx = doc.indexOf(anchor);
+      expect(idx, `anchor "${anchor}" not found`).toBeGreaterThanOrEqual(0);
+      return doc.slice(idx, doc.indexOf(".", idx));
+    };
+    const proseFields = [
+      "title",
+      "goal",
+      "relevant files",
+      "relevant docs",
+      "acceptance",
+      "criteria",
+      "constraints",
+      "suggested tests",
+      "allowed",
+      "forbidden",
+      "changes",
+      "dependencies",
+      "risk",
+    ];
+    const step4 = enumerationAfter(unwrap(skillMdRaw), "task carries:");
+    const rule = enumerationAfter(unwrap(taskSlicerRaw), "include id, title");
+    for (const field of proseFields) {
+      expect(step4, `step-4 narrative missing "${field}"`).toContain(field);
+      expect(rule, `task-slicer rule missing "${field}"`).toContain(field);
+    }
+  });
+
+  it("task-slicer.md frames allowed/forbidden changes as scope boundaries, not implementation instructions", () => {
+    const unwrapped = unwrap(taskSlicerRaw);
+    expect(unwrapped).toContain("scope boundaries for the task");
+    expect(unwrapped).toContain("not implementation instructions");
+  });
+});

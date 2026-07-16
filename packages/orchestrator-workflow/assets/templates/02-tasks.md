@@ -12,6 +12,10 @@
 
 - <!-- path or area -->
 
+**Relevant Docs**
+
+- <!-- doc, ADR, or run file the task relies on, or none -->
+
 **Acceptance Criteria**
 
 - [ ] <!-- criterion -->
@@ -23,6 +27,14 @@
 **Suggested Tests**
 
 - <!-- test -->
+
+**Allowed Changes**
+
+- <!-- path or area the implementer may change -->
+
+**Forbidden Changes**
+
+- <!-- path, area, or action the implementer must not touch -->
 
 **Dependencies**
 

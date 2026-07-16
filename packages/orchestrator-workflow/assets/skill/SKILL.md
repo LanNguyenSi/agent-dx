@@ -102,8 +102,9 @@ directory and the subagents.
    rollback considerations where relevant.
 4. **Slice tasks.** For non-trivial changes, fill `02-tasks.md`. Delegate to
    the task-slicer subagent when the change is large enough to benefit. Each
-   task carries: id, goal, relevant files, acceptance criteria, constraints,
-   suggested tests, dependencies, risk.
+   task carries: id, title, goal, relevant files, relevant docs, acceptance
+   criteria, constraints, suggested tests, allowed changes, forbidden
+   changes, dependencies, risk.
 5. **Validate tasks.** Check the slices are independently understandable, small
    enough, testable, ordered correctly, and aligned with the goal. Fix the
    slicing before any implementation starts.
@@ -239,7 +240,17 @@ tasks:
     goal: ""
     relevant_files:
       - ""
+    relevant_docs:
+      - ""
     acceptance_criteria:
+      - ""
+    constraints:
+      - ""
+    suggested_tests:
+      - ""
+    allowed_changes:
+      - ""
+    forbidden_changes:
       - ""
     dependencies:
       - ""
@@ -249,6 +260,11 @@ recommended_order:
 open_questions:
   - ""
 ```
+
+The orchestrator copies each task's goal, relevant_files, relevant_docs,
+acceptance_criteria, constraints, allowed_changes, and forbidden_changes 1:1
+into the subagent input contract when delegating implementation, rather than
+inventing new field values.
 
 ## Context budget rules
 
