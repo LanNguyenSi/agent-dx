@@ -76,10 +76,15 @@ directory and the subagents.
    operator request, goal, non-goals, constraints, assumptions, open questions.
    If the task can proceed on reasonable assumptions, proceed without blocking.
 2. **Discover (optional, read-only).** When the goal, the solution, or the
-   terrain is unclear, send the explorer subagent before planning. Fold its
-   findings into a "Terrain" section of `01-plan.md`. Skip this step when the
-   change is well understood. If the explorer surfaces a question only the
-   operator can answer, ask the operator instead of guessing.
+   terrain is unclear, send the explorer subagent before planning. Have it
+   check for a curated knowledge bundle (for example a `docs/okf/` directory
+   with an index) before mapping terrain by hand, treating any claims found
+   there as leads to verify, not as ground truth, and prefer a connected
+   semantic code-search tool over raw grep for orientation questions. Fold its
+   findings into a
+   "Terrain" section of `01-plan.md`. Skip this step when the change is well
+   understood. If the explorer surfaces a question only the operator can
+   answer, ask the operator instead of guessing.
 3. **Plan.** Fill `01-plan.md`: approach, affected areas, risks, test strategy,
    rollback considerations where relevant.
 4. **Slice tasks.** For non-trivial changes, fill `02-tasks.md`. Delegate to

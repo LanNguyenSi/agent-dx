@@ -200,6 +200,38 @@ describe("read-only posture is documented for exactly the read-only roles", () =
   });
 });
 
+describe("discovery prefers curated knowledge before hand-mapping terrain", () => {
+  const explorerMd = unwrap(readAsset("agents/explorer.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("explorer prompt checks for a curated knowledge bundle before mapping terrain by hand", () => {
+    expect(explorerMd).toContain("Before mapping terrain by hand");
+    expect(explorerMd).toContain("curated knowledge bundle");
+    expect(explorerMd).toContain("docs/okf/");
+    expect(explorerMd).toContain("leads to verify, not as ground truth");
+  });
+
+  it("explorer prompt prefers a connected semantic code-search tool over raw grep", () => {
+    expect(explorerMd).toContain("semantic code-search tool is connected");
+    expect(explorerMd).toContain("prefer it over raw grep for");
+  });
+
+  it("SKILL.md Discover step mentions checking for a curated knowledge bundle", () => {
+    expect(skillMd).toContain("**Discover (optional, read-only).**");
+    expect(skillMd).toContain("check for a curated knowledge bundle");
+    expect(skillMd).toContain("before mapping terrain by hand");
+    expect(skillMd).toContain("semantic code-search tool over raw grep");
+  });
+
+  it("the guidance stays tool-agnostic: no specific tool name is hardcoded", () => {
+    for (const doc of [explorerMd, skillMd]) {
+      expect(doc).not.toContain("codebase-oracle");
+      expect(doc).not.toContain("oracle_search");
+      expect(doc).not.toContain("oracle_query");
+    }
+  });
+});
+
 /**
  * The read-only posture is tool-level only for Edit/Write/NotebookEdit; Bash
  * mutation is guarded by instruction alone. README must say so honestly

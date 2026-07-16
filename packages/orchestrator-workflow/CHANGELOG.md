@@ -5,6 +5,21 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-16
+
+### Added
+
+- The explorer role prompt and the skill's Discover step now tell discovery
+  to check for a curated knowledge bundle (for example a `docs/okf/`
+  directory with an `index.md`) before mapping terrain by hand, reading the
+  relevant docs it points to and treating their claims as leads to verify,
+  not as ground truth. Both locations also prefer a connected semantic
+  code-search tool over raw grep for orientation questions. Wording
+  is deliberately tool-agnostic: OKF/`docs/okf/` is named only as an
+  example, and semantic search is phrased generically with no dependency on
+  a specific MCP tool. Docs-consistency tests pin both locations, including
+  a negative pin that no specific tool name is hardcoded.
+
 ## [0.7.4] - 2026-07-05
 
 ### Changed
