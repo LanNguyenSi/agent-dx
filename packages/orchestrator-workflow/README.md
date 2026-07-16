@@ -41,7 +41,10 @@ Two effects fall out of this shape:
   volume work; the strongest model is spent only on orchestration decisions
   and the skeptical review. The ceremony scales to the task: a trivial change
   is done directly, the full flow is for non-trivial work, and a read-only
-  explorer maps the terrain first only when the solution is unclear.
+  explorer maps the terrain first only when the solution is unclear. When
+  available, the explorer prefers a repo's curated knowledge bundle (for
+  example a `docs/okf/` directory) or a connected semantic code-search tool
+  over hand-mapping terrain with grep.
 - **Quality through structure.** Writing and reviewing are separated by
   role and model, task slices are validated before any implementation
   starts, acceptance is decided on evidence (tests executed, findings
