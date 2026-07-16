@@ -26,7 +26,7 @@ See [packages/okf-kit](packages/okf-kit) for the full install and usage guide.
 
 ## slop-detector
 
-[`slop-detector`](packages/slop-detector) is the AI-slop linter for PRs: it catches leaked tool-call XML, doubled `## Summary` headings, hedging openers, marketing adjectives, JSDoc on trivial getters, and other agent-generated tells across five rule packs (`agent-tics`, `prose-slop`, `comment-slop`, `code-slop`, `ui-slop`). It runs in pre-commit, in CI as a status check, or ad-hoc against a path.
+[`slop-detector`](packages/slop-detector) is the AI-slop linter for PRs: it catches leaked tool-call XML, doubled `## Summary` headings, hedging openers, marketing adjectives, JSDoc on trivial getters, and other agent-generated tells across five rule packs (`agent-tics`, `prose-slop`, `comment-slop`, `code-slop`, `ui-slop`; some packs are opt-in). It runs in pre-commit, in CI as a status check, or ad-hoc against a path.
 
 Not yet published to npm (the bare `slop-detector` name belongs to an unrelated third-party package), so it runs from a local build:
 
