@@ -5,6 +5,25 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-16
+
+### Added
+
+- `00-goal.md` now carries a `<!-- solution-acceptance: run-base = TODO -->`
+  marker, following the same pattern as the existing final-status and
+  acceptance-recommendation markers. grounding-mcp 0.6.0 reads this marker
+  to bind run-completeness precisely to the change under review; a run that
+  fills it with a valid sha gets an exact binding, a malformed value blocks
+  explicitly (7-40 hex guard), and a run that leaves it as `TODO`
+  falls back to the tolerant day-granular date heuristic. `SKILL.md`'s Run
+  state section now instructs the orchestrator to replace `TODO` with the
+  repo HEAD sha (`git rev-parse HEAD`) when creating the run directory,
+  before the first implementation commit, and states the consumer
+  semantics: the recorded base must resolve in the repo, be an ancestor of
+  HEAD, and not lie behind the merge-base with the remote default branch.
+  A template-markers test pins the new marker the same way as the existing
+  two.
+
 ## [0.8.0] - 2026-07-16
 
 ### Added

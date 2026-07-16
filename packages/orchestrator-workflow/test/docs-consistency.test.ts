@@ -232,6 +232,16 @@ describe("discovery prefers curated knowledge before hand-mapping terrain", () =
   });
 });
 
+describe("run-base fill instruction ships in the skill", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("SKILL.md instructs filling the run-base marker at run creation", () => {
+    expect(skillMd).toContain("run-base");
+    expect(skillMd).toContain("git rev-parse HEAD");
+    expect(skillMd).toContain("before the first implementation commit");
+  });
+});
+
 /**
  * The read-only posture is tool-level only for Edit/Write/NotebookEdit; Bash
  * mutation is guarded by instruction alone. README must say so honestly
