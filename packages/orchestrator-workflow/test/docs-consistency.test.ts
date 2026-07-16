@@ -246,9 +246,12 @@ describe("hand off keeps a curated knowledge bundle current", () => {
   const handoffTemplate = readAsset("templates/06-handoff.md");
 
   it("SKILL.md Hand off step checks for a curated knowledge bundle", () => {
-    expect(skillMd).toContain("**Hand off.**");
-    expect(skillMd).toContain("curated knowledge bundle");
-    expect(skillMd).toContain("docs/okf/");
+    // Anchored to the hook's own opening phrase: "curated knowledge bundle"
+    // and "docs/okf/" also occur in the step-2 discovery rule, so pinning
+    // them alone would not detect deletion of the Hand off hook.
+    expect(skillMd).toContain(
+      "Before filling `06-handoff.md`, apply this optional guidance: when the repo carries a curated knowledge bundle",
+    );
   });
 
   it("the hook performs a source-overlap check", () => {
@@ -269,7 +272,7 @@ describe("hand off keeps a curated knowledge bundle current", () => {
   });
 
   it("the hook states the non-gate optionality explicitly", () => {
-    expect(skillMd).toContain("check as optional guidance");
+    expect(skillMd).toContain("apply this optional guidance");
     expect(skillMd).toContain("Repos without a bundle are unaffected");
   });
 

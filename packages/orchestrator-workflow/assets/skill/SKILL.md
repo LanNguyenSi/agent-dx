@@ -125,13 +125,13 @@ directory and the subagents.
    or critical finding counts as a waiver and follows the same rules. Record
    all decisions and waivers in `03-decisions.md` and summarize waivers in
    the Accepted Waivers section of `06-handoff.md`.
-9. **Hand off.** Before filling `06-handoff.md`, when the repo carries a
-   curated knowledge bundle (for example a `docs/okf/` directory with an
-   index), check as optional guidance whether the change touches paths any
-   bundle doc claims as sources: if so, update the affected docs (re-verify
-   and re-stamp) or record a follow-up task, and run the bundle validator
-   when one is available (for example `okf-kit check`). Repos without a
-   bundle are unaffected. Then fill `06-handoff.md` and report to the
+9. **Hand off.** Before filling `06-handoff.md`, apply this optional
+   guidance: when the repo carries a curated knowledge bundle (for example a
+   `docs/okf/` directory with an index), check whether the change touches
+   paths any bundle doc claims as sources; if so, update the affected docs
+   (re-verify and re-stamp) or record a follow-up task, and run the bundle
+   validator when one is available (for example `okf-kit check`). Repos
+   without a bundle are unaffected. Then fill `06-handoff.md` and report to the
    operator: what changed, why, how it was verified, known risks, accepted
    waivers, suggested next step.
 
