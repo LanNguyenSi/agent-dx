@@ -232,6 +232,65 @@ describe("discovery prefers curated knowledge before hand-mapping terrain", () =
   });
 });
 
+/**
+ * 0.12.0's symmetric counterpart to the 0.8.0 discovery-side rule above:
+ * discovery consumes a curated knowledge bundle before mapping terrain by
+ * hand, and this hook keeps that bundle current after the change lands.
+ * Each check pins one load-bearing element (source-overlap check, the two
+ * possible responses, the validator run, and the explicit non-gate
+ * optionality) so hollowing out the hook's wording fails at least one
+ * assertion.
+ */
+describe("hand off keeps a curated knowledge bundle current", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const handoffTemplate = readAsset("templates/06-handoff.md");
+
+  it("SKILL.md Hand off step checks for a curated knowledge bundle", () => {
+    expect(skillMd).toContain("**Hand off.**");
+    expect(skillMd).toContain("curated knowledge bundle");
+    expect(skillMd).toContain("docs/okf/");
+  });
+
+  it("the hook performs a source-overlap check", () => {
+    expect(skillMd).toContain(
+      "whether the change touches paths any bundle doc claims as sources",
+    );
+  });
+
+  it("the hook names both responses: update the docs or record a follow-up task", () => {
+    expect(skillMd).toContain(
+      "update the affected docs (re-verify and re-stamp) or record a follow-up task",
+    );
+  });
+
+  it("the hook runs the bundle validator when one is available, framed as an example", () => {
+    expect(skillMd).toContain("run the bundle validator when one is available");
+    expect(skillMd).toContain("okf-kit check");
+  });
+
+  it("the hook states the non-gate optionality explicitly", () => {
+    expect(skillMd).toContain("check as optional guidance");
+    expect(skillMd).toContain("Repos without a bundle are unaffected");
+  });
+
+  it("06-handoff.md carries the optional Knowledge Bundle section with the outcome vocabulary", () => {
+    expect(handoffTemplate).toContain("## Knowledge Bundle");
+    expect(unwrap(handoffTemplate)).toContain(
+      "Outcome: updated | not affected | follow-up filed.",
+    );
+  });
+
+  it("06-handoff.md marks the Knowledge Bundle section as optional and bundle-scoped", () => {
+    const start = handoffTemplate.indexOf("## Knowledge Bundle");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const end = handoffTemplate.indexOf("## Follow-Ups");
+    expect(end).toBeGreaterThan(start);
+    const section = handoffTemplate.slice(start, end);
+    expect(section).toContain("Optional");
+    expect(section).toContain("curated knowledge bundle");
+  });
+});
+
 describe("run-base fill instruction ships in the skill", () => {
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
 
