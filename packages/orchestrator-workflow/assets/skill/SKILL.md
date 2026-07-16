@@ -66,14 +66,27 @@ Create it at the start of a run by copying `.ai/workflow/templates/` and fill
 the files as the run progresses. The newest run directory is the active one;
 older directories are the auditable history. Do not edit past runs.
 
+When creating the run directory, replace the `TODO` in `00-goal.md`'s
+`<!-- solution-acceptance: run-base = TODO -->` marker with the base commit
+this run branches from — the pre-change repo HEAD (`git rev-parse HEAD`),
+recorded before the first implementation commit of the run. Unlike the
+acceptance markers below, run-base is a change-binding signal for
+run-completeness readers, not an acceptance verdict, and it fails open:
+left as `TODO` it does not block anything, the reader just falls back to a
+tolerant day-granular date heuristic. The recorded base must resolve in the
+repo, be an ancestor of HEAD, and must not lie behind the fork point of the
+change (the merge-base with the remote default branch); see the
+grounding-mcp 0.6.0 docs for the full consumer semantics.
+
 ## Workflow
 
 For a non-trivial change, run the full flow below. For a trivial change, do
 the work directly, review it, and still leave a short handoff; skip the run
 directory and the subagents.
 
-1. **Understand the goal.** Create the run directory and fill `00-goal.md`:
-   operator request, goal, non-goals, constraints, assumptions, open questions.
+1. **Understand the goal.** Create the run directory and fill `00-goal.md`,
+   including the run-base marker (see Run state): operator request, goal,
+   non-goals, constraints, assumptions, open questions.
    If the task can proceed on reasonable assumptions, proceed without blocking.
 2. **Discover (optional, read-only).** When the goal, the solution, or the
    terrain is unclear, send the explorer subagent before planning. Have it

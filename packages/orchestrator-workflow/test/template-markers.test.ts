@@ -11,10 +11,12 @@ import { readAsset } from "../src/assets.js";
 describe("solution-acceptance markers in run templates", () => {
   const handoffTemplate = readAsset("templates/06-handoff.md");
   const reviewTemplate = readAsset("templates/05-review-findings.md");
+  const goalTemplate = readAsset("templates/00-goal.md");
 
   const finalStatusRe = /solution-acceptance:\s*final-status\s*=\s*(\S+)/g;
   const recommendationRe =
     /solution-acceptance:\s*acceptance-recommendation\s*=\s*(\S+)/g;
+  const runBaseRe = /solution-acceptance:\s*run-base\s*=\s*(\S+)/g;
 
   it("06-handoff.md has exactly one final-status marker, defaulting to TODO", () => {
     const matches = [...handoffTemplate.matchAll(finalStatusRe)];
@@ -26,6 +28,18 @@ describe("solution-acceptance markers in run templates", () => {
     const matches = [...reviewTemplate.matchAll(recommendationRe)];
     expect(matches).toHaveLength(1);
     expect(matches[0][1]).toBe("TODO");
+  });
+
+  it("00-goal.md has exactly one run-base marker, defaulting to TODO", () => {
+    const matches = [...goalTemplate.matchAll(runBaseRe)];
+    expect(matches).toHaveLength(1);
+    expect(matches[0][1]).toBe("TODO");
+  });
+
+  it("00-goal.md carries the run-base marker line byte-exactly, wrapper included", () => {
+    expect(goalTemplate).toContain(
+      "<!-- solution-acceptance: run-base = TODO -->",
+    );
   });
 });
 
