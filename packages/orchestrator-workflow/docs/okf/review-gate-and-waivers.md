@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-07-16T12:03:00Z
+timestamp: 2026-07-16T12:18:30Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -97,9 +97,11 @@ The two column headers are load-bearing for a second, independent reason:
 completeness reader uses to locate the table at all (a header row whose
 cells include both `Severity` and `Decision`, case-insensitive). Renaming or
 dropping either header hides the table from the reader regardless of
-Decision values; this comment and the current header were added in 0.7.3
-after a live run drifted onto an unparseable `Severity | Finding |
-Resolution` convention (`CHANGELOG.md:134-150`).
+Decision values; the load-bearing comment (plus a one-sentence transfer
+rule in SKILL.md) was added in 0.7.3 after a live run drifted onto an
+unparseable `Severity | Finding | Resolution` convention, while the shipped
+header itself was already correct (`CHANGELOG.md:134-150`, the
+already-correct-header statement at 145-146).
 
 ## Fail-closed acceptance markers
 

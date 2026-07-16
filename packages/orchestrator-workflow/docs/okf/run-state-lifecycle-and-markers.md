@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status) and findings-table header, which carry opposite fail postures despite one shared comment prefix.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff]
-timestamp: 2026-07-16T12:03:30Z
+timestamp: 2026-07-16T12:18:30Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/05-review-findings.md
@@ -87,11 +87,12 @@ template, default `TODO`).
 
 The `## Findings` table in `05-review-findings.md` is itself a read
 surface, not just prose backing the acceptance-recommendation marker. A
-load-bearing comment above the table states: "grounding-mcp's
-orchestrator-workflow completeness reader locates this table by its header
-row and verifies unresolved findings from those two columns [Severity,
-Decision]. Do not rename or drop them"
-(05-review-findings.md:9). This was a reactive fix (0.7.3,
+load-bearing comment above the table declares the Severity and Decision
+headers load-bearing: "the orchestrator-workflow completeness reader
+locates this table by its header row and verifies unresolved findings from
+those two columns. Do not rename or drop them."
+(05-review-findings.md:9; line 10 and the 0.7.3 changelog entry attribute
+that reader to grounding-mcp). This was a reactive fix (0.7.3,
 CHANGELOG.md:134-151): a live run had drifted onto
 `| Severity | Finding | Resolution |` (no Decision column), and the reader
 failed closed with an explicit "not in the expected table format" blocker
