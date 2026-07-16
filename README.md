@@ -1,128 +1,59 @@
 # agent-dx
 
-**[`slop-detector`](packages/slop-detector) is the AI-slop linter for PRs.** It catches the visible tells of agent-generated content: leaked tool-call XML, doubled `## Summary` headings, hedging openers, marketing adjectives, JSDoc on trivial getters, `try/catch` around code that cannot throw. This repo is its home, plus the toolkit that grew up around it.
+A monorepo workshop for agent-development tooling: CLIs, linters, and playbooks built while shipping AI-agent coding workflows in practice. Two packages ship on npm; the rest are working tools used inside this workshop and its sibling repos.
 
-> Most agent tooling helps a model *write* the code. `slop-detector` keeps what shipped from looking like an AI wrote it. The siblings in this monorepo (scaffolds, entrypoint generators, release helpers) are the workbench it grew on.
+## Shipping on npm
 
-## Try slop-detector in 60 seconds
+### orchestrator-workflow
+
+Installer for an orchestrator-led agent workflow: a `.ai/` directory for run state, a marker-fenced policy section in `AGENTS.md`, and subagent definitions with preselected models for Claude Code, OpenAI Codex, and opencode.
 
 ```bash
-git clone https://github.com/LanNguyenSi/agent-dx && cd agent-dx
-cd packages/slop-detector && npm install && npm run build && cd ../..
+npx orchestrator-workflow init
+```
 
-# Scan a deliberately-sloppy markdown sample
+See [packages/orchestrator-workflow](packages/orchestrator-workflow) for the full install and usage guide.
+
+### okf-kit
+
+Validates knowledge bundles against the Open Knowledge Format (OKF) v0.1 spec: frontmatter shape, reserved files, link resolution, absolute-link warnings, `sources` shape.
+
+```bash
+npx okf-kit check path/to/bundle
+```
+
+See [packages/okf-kit](packages/okf-kit) for the full install and usage guide.
+
+## slop-detector
+
+[`slop-detector`](packages/slop-detector) is the AI-slop linter for PRs: it catches leaked tool-call XML, doubled `## Summary` headings, hedging openers, marketing adjectives, JSDoc on trivial getters, and other agent-generated tells across five rule packs (`agent-tics`, `prose-slop`, `comment-slop`, `code-slop`, `ui-slop`; some packs are opt-in). It runs in pre-commit, in CI as a status check, or ad-hoc against a path.
+
+Not yet published to npm (the bare `slop-detector` name belongs to an unrelated third-party package), so it runs from a local build:
+
+```bash
+cd packages/slop-detector && npm install && npm run build && cd ../..
 node packages/slop-detector/dist/cli.js check examples/slop-sample.md --explain
 ```
 
-Thirty-four deterministic rules across five packs:
+Full pack reference, sample output, the scan pipeline, and the rationale (including a data point from running it against 20 recently merged PRs): [packages/slop-detector/README.md](packages/slop-detector/README.md).
 
-| Pack | Default | What it catches |
-|------|---------|-----------------|
-| `agent-tics` (7 rules) | on | leaked `</result>` / `</invoke>` tags, auto-appended Claude Code footers, doubled Summary headings, template TODO placeholders |
-| `prose-slop` (7 rules) | on | em-dashes, hedging openers, marketing adjectives, signature LLM idioms (`delve into`, `tapestry of`, `leverage the power of`) |
-| `comment-slop` (5 rules) | off, opt in via `--pack` | JSDoc on trivial getters, comments that restate the next line, orphan markers, ASCII banner dividers |
-| `code-slop` (9 rules) | off, opt in via `--pack` | `try/catch` around non-throwing code, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers |
-| `ui-slop` (6 rules) | off, opt in via `--pack` | gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX. |
+## Packages
 
-The three opt-in packs (`comment-slop`, `code-slop`, `ui-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
-
-Configurable per repo via `slop.config.yml`, with per-line escape hatches when a real em-dash or template `<invoke>` block is wanted. Husky and lint-staged recipes in [`packages/slop-detector/README.md`](packages/slop-detector).
-
-## What a run looks like
-
-```
-examples/slop-sample.md
-  WARN  3:1    prose-slop/hedging-opener     Hedging opener `It is important to note that`
-  WARN  3:40   prose-slop/marketing-adjectives  Empty marketing adjective `cutting-edge`
-  WARN  3:121  prose-slop/delve-tapestry     LLM idiom `leverage the power of`
-  WARN  7:42   prose-slop/delve-tapestry     LLM idiom `delve into`
-  WARN  12:42  prose-slop/em-dash            Em-dash in prose
-  WARN  15:1   agent-tics/doubled-summary-heading  Second `Summary` heading
-  WARN  19:1   agent-tics/placeholder-todo   Unresolved template placeholder
-  WARN  21:1   agent-tics/claude-code-footer Auto-appended Claude Code attribution footer
-  ... 12 more
-
-1 files scanned, 20 violations (block 0, warn 20, info 0)
-```
-
-`--explain` adds a one-line rationale per violation. Promote any rule to `block` per repo via `slop.config.yml`; the two `agent-tics` rules that catch leaked tool-call XML wrappers (`</result>`, `</invoke>`) ship as `block` by default since those are objectively wrong.
-
-## Scan pipeline
-
-The scan pipeline shows how slop-detector routes input through config and pack selection into the rule engine, then fans out to the three output surfaces.
-
-```mermaid
-flowchart LR
-    subgraph In["Inputs"]
-        A["files / directory"]
-        B["text / stdin<br/>commit msg, PR body"]
-    end
-
-    subgraph Cfg["Configuration"]
-        C[("slop.config.yml")]
-        D["config.ts<br/>loadConfig / mergeConfig"]
-    end
-
-    subgraph Packs["Packs: packs/registry.ts"]
-        E["registry.ts<br/>allPacks / packsByFilter"]
-        F["agent-tics.ts"]
-        G["prose-slop.ts"]
-        H["comment-slop.ts<br/>off by default"]
-        I["code-slop.ts<br/>off by default"]
-        J["ui-slop.ts<br/>off by default"]
-    end
-
-    K["engine.ts<br/>checkPath / checkFiles / checkText"]
-    L["Violations<br/>block / warn / info"]
-
-    subgraph Out["Output modes"]
-        M["cli.ts<br/>exit code + report"]
-        N["mcp.ts + mcp-check.ts<br/>slop_check MCP tool"]
-        O["pre-commit hook<br/>Husky / lint-staged"]
-    end
-
-    A --> K
-    B --> K
-    C --> D
-    D --> K
-    F --> E
-    G --> E
-    H --> E
-    I --> E
-    J --> E
-    E --> K
-    K --> L
-    L --> M
-    L --> N
-    M --> O
-```
-
-## Why this exists
-
-LLMs leave fingerprints. Some are objectively wrong, like leaked `</result>` artefacts from MCP serialisation. Others are stylistic tics the team has already decided to avoid: em-dashes in prose, `It is important to note` openers, empty marketing adjectives, doubled `## Summary` blocks. None are caught by tests, typecheck, or human reviewers under load. They accumulate.
-
-Concrete data point: when `slop-detector` ran for the first time against the bodies of the 20 most recent merged PRs across LanNguyenSi/, it found 38 real violations (27 em-dashes, 11 auto-appended Claude Code footers) across 13 of the 20 PRs. Zero false positives. Every one of those PRs had been written by an agent, reviewed, and merged before the linter existed. The tool's first run was a quiet receipt.
-
-The pitch: lint at commit time, not at "I noticed three months later". `slop-detector` runs in pre-commit, in CI as a status check, or ad-hoc against a path. It is not yet published to npm (the bare `slop-detector` name there is an unrelated third-party package), so run it from a local build: see the [package README](packages/slop-detector/README.md#install).
-
-## Other tools in the workshop
-
-These were built alongside `slop-detector` for the same human-and-agent workflow. Each stands alone, none is the headline.
-
-| Package | What it does |
-|---------|--------------|
-| [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. |
-| [orchestrator-workflow](packages/orchestrator-workflow) | Installer for an orchestrator-led agent workflow: `.ai/` run state, an `AGENTS.md` policy section, and subagent definitions with preselected models for Claude Code, Codex, and opencode. |
-| [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. v1 surface: `log`, `list`, `search`, `digest`, `export`, `file`, `scan`, `bilanz`, plus `init`/`import`/`rm`/`update`. |
-| [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. |
-| [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder: sync, status, dirty checks, fetch, with `--strict` for automation. |
-| [okf-kit](packages/okf-kit) | CLI that validates OKF v0.1 knowledge bundles: frontmatter shape, reserved files, link resolution, absolute-link warnings, `sources` shape. |
-| [agent-engineering-playbook](packages/agent-engineering-playbook) | Guide for building production-ready AI agent systems. |
-| [agentic-coding-playbook](packages/agentic-coding-playbook) | Practical playbook for teams using AI agents in coding. |
+| Package | What it does | npm |
+|---------|--------------|-----|
+| [orchestrator-workflow](packages/orchestrator-workflow) | Installer for an orchestrator-led agent workflow: `.ai/` run state, an `AGENTS.md` policy section, and subagent definitions with preselected models for Claude Code, Codex, and opencode. | published |
+| [okf-kit](packages/okf-kit) | CLI that validates OKF v0.1 knowledge bundles: frontmatter shape, reserved files, link resolution, absolute-link warnings, `sources` shape. | published |
+| [slop-detector](packages/slop-detector) | AI-slop linter for PRs: leaked tool-call XML, doubled Summary headings, hedging openers, marketing adjectives, and more across five rule packs. | not published (name taken; run from a local build) |
+| [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. | not published |
+| [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. | not published |
+| [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. | private |
+| [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder: sync, status, dirty checks, fetch, with `--strict` for automation. | not published |
+| [agent-engineering-playbook](packages/agent-engineering-playbook) | Guide for building production-ready AI agent systems. | doc package |
+| [agentic-coding-playbook](packages/agentic-coding-playbook) | Practical playbook for teams using AI agents in coding. | doc package |
 
 ## Repo layout
 
-`agent-dx` is a folder of independent packages, not an npm workspaces / pnpm / lerna monorepo. There is no root `package.json`, no workspace manifest, and no shared root `node_modules`. Each package under `packages/` carries its own `package.json`, install, build, test, and version, so the install pattern for any of them is the same one shown above for `slop-detector`:
+`agent-dx` is a folder of independent packages, not an npm workspaces / pnpm / lerna monorepo. There is no root `package.json`, no workspace manifest, and no shared root `node_modules`. Each package under `packages/` carries its own `package.json`, install, build, test, and version, so the install pattern for any local-build package is the same one shown above for `slop-detector`:
 
 ```bash
 cd packages/<name> && npm install && npm run build
@@ -132,7 +63,7 @@ If you only care about one package, work in its directory; nothing at the root n
 
 ## Status
 
-Experimental: each package has its own version, README, and CI. APIs may evolve at minor-version bumps. `slop-detector` is the most polished and the only one with active distribution intent (npm, hooks, planned GitHub Action).
+Experimental: each package has its own version, README, and CI. APIs may evolve at minor-version bumps. `orchestrator-workflow` and `okf-kit` are published to npm with tagged releases. `slop-detector` is deliberately unpublished (the bare name on npm belongs to an unrelated package) and ships an MCP server alongside the CLI. `agent-dev-kit`, `friction-log`, and `git-batch-cli` are functional CLIs, not yet on npm. `github-api-tool` is marked private in its own `package.json`. `agent-engineering-playbook` and `agentic-coding-playbook` are documentation packages, not code.
 
 ## Where this fits
 
