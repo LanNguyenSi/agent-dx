@@ -243,6 +243,52 @@ describe("run-base fill instruction ships in the skill", () => {
 });
 
 /**
+ * Guards the subagent misfire rule added after a live incident: a reviewer
+ * spawn returned in 5s with 0 tool uses, handing back harness boilerplate
+ * instead of the reviewer output contract. Each assertion pins one
+ * load-bearing element of the rule (detection signals, the resume/respawn
+ * response, the 03-decisions.md record, and the review-gate consequence) so
+ * deleting or hollowing out the rule paragraph fails at least one check.
+ */
+describe("subagent misfire rule ships in the skill", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("carries the section heading", () => {
+    expect(skillMd).toContain("## Subagent misfire rule");
+  });
+
+  it("names both detection signals", () => {
+    expect(skillMd).toContain(
+      "does not parse against its role's output contract",
+    );
+    expect(skillMd).toContain("returns near-instantly with no tool activity");
+  });
+
+  it("scopes the no-tool-activity signal so valid tool-free returns are not misfires", () => {
+    expect(skillMd).toContain("a misfire signal rather than proof");
+    expect(skillMd).toContain(
+      "only if it is contract-valid and the assignment was answerable from the context supplied with it",
+    );
+  });
+
+  it("states the resume-or-respawn response and never treats the output as evidence", () => {
+    expect(skillMd).toContain("resume or respawn the subagent");
+    expect(skillMd).toContain(
+      "never fold the non-contract output into run state or count it as a completed step",
+    );
+  });
+
+  it("requires recording the misfire in 03-decisions.md", () => {
+    expect(skillMd).toContain("Record every misfire in `03-decisions.md`");
+  });
+
+  it("states the review-gate consequence", () => {
+    expect(skillMd).toContain("a misfired review is not a review");
+    expect(skillMd).toContain("never satisfies the review gate");
+  });
+});
+
+/**
  * The read-only posture is tool-level only for Edit/Write/NotebookEdit; Bash
  * mutation is guarded by instruction alone. README must say so honestly
  * instead of implying full closure (the residual bit in practice: a reviewer

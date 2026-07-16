@@ -5,6 +5,29 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-16
+
+### Added
+
+- `SKILL.md` gains a Subagent misfire rule: a subagent return that does not
+  parse against its role's output contract is a misfire, not evidence. A
+  near-instant return with no tool activity is a misfire signal rather than
+  proof: the orchestrator accepts it only when the output is contract-valid
+  and the assignment was answerable from the context supplied with it, so
+  legitimately tool-free returns (a slicer answering from provided context)
+  are not discarded. On a misfire the
+  orchestrator resumes or respawns the subagent, never folds the
+  non-contract output into run state, and records the misfire in
+  `03-decisions.md`. The rule calls out the review case explicitly, since a
+  misfired review is not a review and never satisfies the review gate.
+  Motivated by a live incident: a reviewer subagent spawn returned in 5
+  seconds with 0 tool uses, handing back harness hook-boilerplate instead of
+  the reviewer output contract; a resume produced a correct full review. The
+  kit previously said nothing about malformed subagent returns, leaving the
+  door open to silently accepting a non-review as a passed review gate.
+  Docs-consistency tests pin the rule's detection signals, response, record
+  location, and review-gate consequence.
+
 ## [0.10.0] - 2026-07-16
 
 ### Changed
