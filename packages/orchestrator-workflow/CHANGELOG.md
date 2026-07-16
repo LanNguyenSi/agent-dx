@@ -5,6 +5,35 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-16
+
+### Changed
+
+- The task-slicer output schema is now a lossless superset of the subagent
+  input contract: each task carries `constraints`, `suggested_tests`,
+  `allowed_changes`, `forbidden_changes`, and `relevant_docs` in addition
+  to the existing `id`, `title`, `goal`, `relevant_files`,
+  `acceptance_criteria`, `dependencies`, and `risk` — every field the
+  subagent input contract requires now has a same-named slicer-output
+  counterpart. Previously the slicer output contract in `SKILL.md` and the
+  installed `task-slicer.md` prompt omitted
+  `constraints`/`allowed_changes`/`forbidden_changes` even though the
+  implementer input contract and `implementer.md` treat them as
+  load-bearing, forcing the orchestrator to invent them when delegating
+  implementation instead of copying them from the slice. `SKILL.md` now
+  states this 1:1 mapping explicitly next to the contract. `02-tasks.md`
+  gained matching **Relevant Docs** / **Allowed Changes** /
+  **Forbidden Changes** sections so its sections map 1:1 to the slicer
+  output fields. `task-slicer.md`'s rules frame allowed/forbidden changes
+  as scope boundaries for the implementer (which files or areas it may and
+  must not touch), not as implementation instructions, keeping the slicer
+  a planner. Docs-consistency tests pin both output-contract locations
+  (including their field-for-field equivalence), the template sections,
+  the prose enumerations, and the mapping sentence; the superset check
+  derives the required field set from the subagent input contract itself,
+  so a field added there cannot silently go missing from the slicer
+  output.
+
 ## [0.9.0] - 2026-07-16
 
 ### Added
