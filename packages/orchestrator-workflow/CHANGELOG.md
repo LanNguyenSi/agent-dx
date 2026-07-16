@@ -5,6 +5,30 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-07-16
+
+### Added
+
+- `SKILL.md`'s Hand off step (9) gains an optional bundle-upkeep hook,
+  symmetric to the 0.8.0 discovery-side rule: when the repo carries a
+  curated knowledge bundle (for example a `docs/okf/` directory with an
+  index), the orchestrator checks before handoff whether the change touches
+  paths any bundle doc claims as sources, and if so either updates the
+  affected docs (re-verify and re-stamp) or records a follow-up task, and
+  runs the bundle validator when one is available (for example `okf-kit
+  check`). The hook is optional guidance, never a gate: repos without a
+  bundle are unaffected. `06-handoff.md` gained a matching optional
+  "Knowledge Bundle" section so the outcome (updated / not affected /
+  follow-up filed) is recorded alongside the rest of the handoff. Motivated
+  by the OKF initiative's Phase 3 evidence: four upkeep sweeps on 2026-07-16
+  found 48/24/11/8 stale claims accumulated in the four oldest bundles, with
+  warn-only drift CI already live in 8 repos — discovery-side consumption
+  shipped in 0.8.0 and named this hook as its symmetric, still-missing,
+  loop-closer. Docs-consistency tests pin the hook's source-overlap check,
+  its two responses, the validator run, and its explicit non-gate
+  optionality, plus the handoff template's new section and outcome
+  vocabulary.
+
 ## [0.11.0] - 2026-07-16
 
 ### Added

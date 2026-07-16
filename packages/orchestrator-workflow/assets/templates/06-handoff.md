@@ -24,6 +24,14 @@
 |---|---|---|---|
 | <!-- finding --> | high/critical | <!-- rationale --> | operator/orchestrator |
 
+## Knowledge Bundle
+
+<!-- Optional: only applies when the repo carries a curated knowledge bundle
+     (for example a docs/okf/ directory). Outcome: updated | not affected |
+     follow-up filed. -->
+
+- <!-- outcome and brief note, or omit this section when the repo carries no bundle -->
+
 ## Follow-Ups
 
 - <!-- next steps or none -->
