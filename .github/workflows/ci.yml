@@ -34,13 +34,11 @@ jobs:
       matrix:
         package:
           - agent-dev-kit
-          - agent-entrypoint
           - friction-log
           - git-batch-cli
           - github-api-tool
           - okf-kit
           - orchestrator-workflow
-          - release-prep
           - slop-detector
     defaults:
       run:

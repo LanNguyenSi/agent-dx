@@ -8,11 +8,11 @@ body:
       label: Package
       options:
         - slop-detector
-        - scaffoldkit
-        - release-prep
+        - okf-kit
+        - orchestrator-workflow
+        - friction-log
         - github-api-tool
         - git-batch-cli
-        - agent-entrypoint
         - agent-dev-kit
         - agentic-coding-playbook
         - agent-engineering-playbook

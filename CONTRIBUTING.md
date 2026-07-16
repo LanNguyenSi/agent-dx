@@ -9,7 +9,7 @@ Thanks for your interest. This is a TypeScript monorepo of small, independent to
 
 ## Pull Requests
 
-1. Fork, branch off `master` (e.g. `feat/slop-detector-rule-x`, `fix/release-prep-bug`).
+1. Fork, branch off `master` (e.g. `feat/slop-detector-rule-x`, `fix/okf-kit-bug`).
 2. Keep changes scoped to one package where possible. Cross-package refactors should be split.
 3. Run whatever checks the changed package defines (commonly `npm run build`, `npm test`, plus `npm run format:check` / `npm run typecheck` where present). CI uses `--if-present` so missing scripts are not a blocker.
 4. Open the PR with a clear summary, motivation, and test plan.
@@ -18,7 +18,7 @@ Thanks for your interest. This is a TypeScript monorepo of small, independent to
 
 The monorepo is mixed:
 
-- **npm packages** (`slop-detector`, `release-prep`, `github-api-tool`, `git-batch-cli`, `agent-entrypoint`, `agent-dev-kit`, `friction-log`, `orchestrator-workflow`, `okf-kit`):
+- **npm packages** (`slop-detector`, `github-api-tool`, `git-batch-cli`, `agent-dev-kit`, `friction-log`, `orchestrator-workflow`, `okf-kit`):
 
   ```bash
   git clone https://github.com/LanNguyenSi/agent-dx
