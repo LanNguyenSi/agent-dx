@@ -1,0 +1,129 @@
+name: OKF staleness
+
+# Warn-only drift watch for the packages/orchestrator-workflow/docs/okf
+# knowledge bundle: surfaces STALE curated docs (source files that changed
+# after the doc's verification timestamp) on every PR without ever blocking
+# a merge. Deliberately a separate workflow: ci.yml must stay a blocking
+# gate, this one never is. Never mark this check as required in branch
+# protection: a PR that removes or renames the bundle goes red here by
+# design (tool-error posture, exit 2), and warn-only must stay
+# non-blocking. Canonical pattern shared with the OKF bundle repos
+# (agent-tasks, harness, triologue, agent-grounding, codebase-oracle);
+# keep them in sync. agent-dx specifics: per-package bundle granularity
+# (see the 2026-07-16 pilot decision), so the path below targets the
+# orchestrator-workflow package bundle; additional per-package bundles
+# each get their own path here.
+
+on:
+  pull_request:
+    # The one repo-specific line in the canonical pattern: set this to the
+    # target repo's default branch when porting; a wrong name here means
+    # the watch silently never runs.
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  okf-staleness:
+    name: OKF bundle staleness (warn-only)
+    runs-on: ubuntu-latest
+
+    env:
+      BUNDLE_PATH: packages/orchestrator-workflow/docs/okf
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # sources-fresh derives per-path change times from `git log %ct`;
+          # a shallow clone silently reports wrong staleness verdicts.
+          # Note: on pull_request this checks out the ephemeral merge ref
+          # (PR merged into base), so verdicts can differ from a local run
+          # on the branch tip when the base has advanced. Deterministic,
+          # just a different commit than a naive local run.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22 = active LTS, matching ci.yml.
+          node-version: 22
+
+      - name: Install okf-kit (exact pin)
+        # Exact pin: okf-kit@0.3.0 on npm is a deprecated silent no-op
+        # (exit 0, no output). The output assertion below exists to catch
+        # any regression of that failure mode: never assert on exit code
+        # alone here.
+        run: npm install -g okf-kit@0.3.1
+
+      - name: Assert CLI is alive (output, not exit code)
+        shell: bash
+        run: |
+          v="$(okf-kit --version)"
+          test -n "$v"
+          echo "okf-kit ${v}"
+
+      - name: Check bundle (warn-only)
+        shell: bash
+        run: |
+          # Exit contract of `okf-kit check` (no --strict): 0 = clean or
+          # warnings/notices only (STALE is a warning), 1 = structural
+          # errors present, 2 = usage/tool error. 0 and 1 are bundle
+          # findings: report them and stay green. Anything else means the
+          # check itself broke and must fail red, a broken check never
+          # looks green.
+          set +e
+          okf-kit check --json "${BUNDLE_PATH}" > okf-report.json
+          code=$?
+          set -e
+
+          if [ "${code}" -ne 0 ] && [ "${code}" -ne 1 ]; then
+            echo "::error title=OKF staleness::okf-kit check exited ${code} (tool/usage error, not bundle findings)"
+            cat okf-report.json || true
+            exit "${code}"
+          fi
+
+          # Truncated or non-JSON output is a tool failure, not findings.
+          jq -e . okf-report.json > /dev/null
+
+          errors=$(jq '.summary.errors' okf-report.json)
+          warnings=$(jq '.summary.warnings' okf-report.json)
+          notices=$(jq '.summary.notices' okf-report.json)
+
+          {
+            echo "## OKF bundle check (\`${BUNDLE_PATH}\`), warn-only"
+            echo ""
+            echo "errors: ${errors} · warnings: ${warnings} · notices: ${notices}"
+            echo ""
+            if [ "$(jq '.findings | length' okf-report.json)" -gt 0 ]; then
+              echo '```'
+              jq -r '.findings[] | "\(.severity | ascii_upcase) \(.ruleId) \(.file): \(.message)"' okf-report.json
+              echo '```'
+              echo ""
+              echo "A STALE warning means a \`sources:\` path changed after the"
+              echo "doc's verification timestamp: re-verify the doc against the"
+              echo "source, then update its timestamp. This job never blocks."
+            else
+              echo "Clean, no findings."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          # GitHub caps workflow-command annotations at 10 per type per
+          # step, so aggregate per doc (not per finding); the complete list
+          # is in the step summary either way.
+          jq -r '
+            [.findings[] | select(.severity == "warning")]
+            | group_by(.file)[]
+            | "\(.[0].file): \(length) warning(s), stale sources, full list in the job summary"
+          ' okf-report.json | while IFS= read -r line; do
+            echo "::warning title=OKF bundle drift::${line}"
+          done
+
+          jq -r '
+            [.findings[] | select(.severity == "error")]
+            | group_by(.file)[]
+            | "\(.[0].file): \(length) structural error(s), full list in the job summary"
+          ' okf-report.json | while IFS= read -r line; do
+            echo "::error title=OKF bundle broken::${line}"
+          done
+
+          exit 0
