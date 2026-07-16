@@ -109,7 +109,7 @@ github standup -o LanNguyenSi
 github standup -o LanNguyenSi -d 7
 
 # Specific repos only
-github standup -o LanNguyenSi -r agent-entrypoint github-api-tool
+github standup -o LanNguyenSi -r agent-dx codebase-oracle
 
 # Filter by author
 github standup -o LanNguyenSi --author octocat

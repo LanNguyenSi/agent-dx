@@ -9,10 +9,8 @@ body:
       options:
         - slop-detector
         - scaffoldkit
-        - release-prep
         - github-api-tool
         - git-batch-cli
-        - agent-entrypoint
         - agent-dev-kit
         - agentic-coding-playbook
         - agent-engineering-playbook
