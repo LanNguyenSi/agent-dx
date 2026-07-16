@@ -264,6 +264,13 @@ describe("subagent misfire rule ships in the skill", () => {
     expect(skillMd).toContain("returns near-instantly with no tool activity");
   });
 
+  it("scopes the no-tool-activity signal so valid tool-free returns are not misfires", () => {
+    expect(skillMd).toContain("a misfire signal rather than proof");
+    expect(skillMd).toContain(
+      "only if it is contract-valid and the assignment was answerable from the context supplied with it",
+    );
+  });
+
   it("states the resume-or-respawn response and never treats the output as evidence", () => {
     expect(skillMd).toContain("resume or respawn the subagent");
     expect(skillMd).toContain(

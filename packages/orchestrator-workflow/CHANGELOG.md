@@ -10,8 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `SKILL.md` gains a Subagent misfire rule: a subagent return that does not
-  parse against its role's output contract, or that comes back
-  near-instantly with no tool activity, is a misfire, not evidence. The
+  parse against its role's output contract is a misfire, not evidence. A
+  near-instant return with no tool activity is a misfire signal rather than
+  proof: the orchestrator accepts it only when the output is contract-valid
+  and the assignment was answerable from the context supplied with it, so
+  legitimately tool-free returns (a slicer answering from provided context)
+  are not discarded. On a misfire the
   orchestrator resumes or respawns the subagent, never folds the
   non-contract output into run state, and records the misfire in
   `03-decisions.md`. The rule calls out the review case explicitly, since a
