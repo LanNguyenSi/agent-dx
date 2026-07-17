@@ -62,7 +62,10 @@ jobs:
           PACKAGE: ${{ inputs.package }}
           VERSION: ${{ inputs.version }}
           TAG: ${{ inputs.tag }}
-          # Keep in step with publish-npm.yml's PUBLISHABLE list.
+          # NPM PACKAGE NAMES. publish-npm.yml's PUBLISHABLE list holds package
+          # DIRECTORY names; today the two coincide, but a future package whose
+          # npm name diverges from its directory name must be added here under
+          # its npm name, not copied verbatim.
           ALLOWLIST: "orchestrator-workflow okf-kit"
         run: |
           set -euo pipefail
@@ -147,11 +150,17 @@ jobs:
         run: |
           set -euo pipefail
           echo "npm dist-tag step outcome: ${{ steps.move.outcome }} (not the verdict; the registry is)"
+          # jq is preinstalled on GitHub-hosted ubuntu-latest; fail with a
+          # clear message rather than a pipeline abort if a future runner
+          # lacks it.
+          command -v jq >/dev/null || { echo "::error::jq not available on this runner" >&2; exit 1; }
           # Backoff polling against registry/CDN lag; the read-back is the
-          # sole verdict.
+          # sole verdict. The || true guard keeps a transient view failure
+          # inside the retry loop (pipefail would otherwise abort the step,
+          # defeating the loop's purpose).
           for delay in 0 5 10 20 40; do
             sleep "$delay"
-            actual=$(npm view "$PACKAGE" dist-tags --json | jq -r --arg t "$TAG" '.[$t] // empty')
+            actual=$(npm view "$PACKAGE" dist-tags --json 2>/dev/null | jq -r --arg t "$TAG" '.[$t] // empty' || true)
             if [ "$actual" = "$VERSION" ]; then
               echo "Registry confirms ${PACKAGE}@${TAG} -> ${VERSION}"
               npm view "$PACKAGE" dist-tags --json
