@@ -1,0 +1,164 @@
+name: Move an npm dist-tag
+
+# Operator tool. Points ONE dist-tag of ONE allowlisted package at ONE
+# already-published version. Runs here rather than on a workstation because
+# the write-capable NPM_TOKEN lives only as a repository secret.
+#
+# Why this exists: publish-npm.yml runs `npm publish` without a --tag pin, so
+# `latest` always follows the most recently FINISHED publish run. Two tags
+# pushed back-to-back can complete out of order (observed 2026-07-17:
+# orchestrator-workflow v0.12.0 finished before v0.11.0, leaving
+# latest=0.11.0), and re-running the publish workflow cannot repair it, since
+# its idempotency check exits before touching the registry.
+#
+# Why the inputs are validated rather than trusted:
+#
+#   npm dist-tag add <pkg>@<version> <tag>
+#
+# `version` must be an exact semver of an ALREADY PUBLISHED version (npm
+# rejects unknown versions, but the precondition here fails fast with a clear
+# message instead of a registry error), `package` must match the same
+# allowlist publish-npm.yml uses, and `tag` must be a plain lowercase word:
+# npm forbids tag names that parse as semver, and anything exotic is more
+# likely a typo than an intent.
+#
+# Evidence comes from the registry, never from npm's exit code (same posture
+# as npm-deprecate.yml): the dist-tag step does not gate the job
+# (continue-on-error) and the AFTER assertion, `npm view <pkg> dist-tags`
+# showing the tag at the requested version, is the sole verdict, with backoff
+# polling against registry/CDN lag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package name (must be on the publishable allowlist)"
+        required: true
+        type: string
+      version:
+        description: "Exact, already-published version the tag should point at, e.g. 0.12.0"
+        required: true
+        type: string
+      tag:
+        description: "Dist-tag to move (default: latest)"
+        required: true
+        default: "latest"
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dist-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate inputs
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          TAG: ${{ inputs.tag }}
+          # Keep in step with publish-npm.yml's PUBLISHABLE list.
+          ALLOWLIST: "orchestrator-workflow okf-kit"
+        run: |
+          set -euo pipefail
+
+          # Exact-match over tokens, not a substring test: a PACKAGE containing
+          # whitespace must never satisfy the allowlist.
+          allowed=""
+          for entry in $ALLOWLIST; do
+            if [ "$entry" = "$PACKAGE" ]; then allowed=yes; fi
+          done
+          if [ -z "$allowed" ]; then
+            echo "::error::Package '${PACKAGE}' is not in the allowlist (${ALLOWLIST})" >&2
+            exit 1
+          fi
+
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Version '${VERSION}' is not an exact semver." >&2
+            exit 1
+          fi
+
+          # Plain lowercase word: npm forbids semver-shaped tag names, and
+          # anything beyond [a-z0-9-] is more likely a typo than an intent.
+          if ! printf '%s' "$TAG" | grep -Eq '^[a-z][a-z0-9-]{0,63}$'; then
+            echo "::error::Tag '${TAG}' is not a plain lowercase dist-tag name." >&2
+            exit 1
+          fi
+
+          echo "Will point ${PACKAGE}@${TAG} at ${VERSION}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Preflight, verify NPM_TOKEN secret is set
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN secret is not configured." >&2
+            exit 1
+          fi
+
+      - name: Precondition, the target version is on the registry
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # Output is the verdict, not the exit code: `npm view` of a missing
+          # version can exit 0 with empty output on some registry states.
+          found=$(npm view "${PACKAGE}@${VERSION}" version 2>/dev/null || true)
+          if [ "$found" != "$VERSION" ]; then
+            echo "::error::${PACKAGE}@${VERSION} is not on the registry (view returned '${found}'). Publish it first; this workflow only moves tags." >&2
+            exit 1
+          fi
+
+      - name: Dist-tags BEFORE
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: npm view "$PACKAGE" dist-tags --json
+
+      - name: Move the dist-tag
+        id: move
+        # Deliberately non-gating: a non-zero exit here is not evidence of
+        # failure (npm can fail after the write lands). The AFTER step decides.
+        continue-on-error: true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          # Quoted spec: the @ must reach npm as part of one argv element.
+          npm dist-tag add "${PACKAGE}@${VERSION}" "${TAG}"
+
+      - name: Dist-tags AFTER, and assert the tag landed
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "npm dist-tag step outcome: ${{ steps.move.outcome }} (not the verdict; the registry is)"
+          # Backoff polling against registry/CDN lag; the read-back is the
+          # sole verdict.
+          for delay in 0 5 10 20 40; do
+            sleep "$delay"
+            actual=$(npm view "$PACKAGE" dist-tags --json | jq -r --arg t "$TAG" '.[$t] // empty')
+            if [ "$actual" = "$VERSION" ]; then
+              echo "Registry confirms ${PACKAGE}@${TAG} -> ${VERSION}"
+              npm view "$PACKAGE" dist-tags --json
+              exit 0
+            fi
+            echo "not yet visible: ${TAG} -> '${actual:-<absent>}' (want ${VERSION}); retrying"
+          done
+          echo "::error::${PACKAGE}@${TAG} still does not point at ${VERSION} after polling; the write did not land." >&2
+          npm view "$PACKAGE" dist-tags --json || true
+          exit 1
