@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The four subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-07-18T00:00:00Z
+timestamp: 2026-07-18T12:00:00Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -54,20 +54,22 @@ fenced yaml block (the orchestrator's reference copy), once in the role's
 installed prompt, in its trailing "Return exactly this structure as your
 final output, nothing else" block:
 
-- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:150-173`
+- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:158-181`
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:47-70`.
-- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:198-219`
+- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:206-227`
   vs. `packages/orchestrator-workflow/assets/agents/implementer.md:27-48`.
-- Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:223-239`
-  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:42-58`.
+- Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:231-252`
+  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:48-69`. Both
+  copies gained a `reproduction` field in 0.14.0; see
+  [Reproduction requirement](#reproduction-requirement-0140) below.
 - Task-slicer:
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:243-273`
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:256-286`
   (`## Task slicer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/task-slicer.md:30-60`.
 - Subagent input contract (the shape the orchestrator sends when delegating,
   not a role's own output) lives only in
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:177-194`; there is no
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:185-202`; there is no
   installed-prompt counterpart because it is what the orchestrator constructs,
   not what a subagent returns.
 
@@ -82,25 +84,25 @@ Every field the subagent input contract requires must have a same-named
 counterpart in the task-slicer's per-task output, so the orchestrator copies
 task fields 1:1 into the implementer contract at delegation time instead of
 inventing values. This was not always true:
-`packages/orchestrator-workflow/CHANGELOG.md:55-82` (0.10.0) records that the
+`packages/orchestrator-workflow/CHANGELOG.md:117-144` (0.10.0) records that the
 slicer contract previously omitted `constraints`, `allowed_changes`,
 `forbidden_changes` even though the implementer input contract already
 required them, forcing the orchestrator to fabricate that content when
 delegating.
 
 Current per-task slicer shape
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:243-273`): `id, title,
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:256-286`): `id, title,
 goal, relevant_files, relevant_docs, acceptance_criteria, constraints,
 suggested_tests, allowed_changes, forbidden_changes, dependencies, risk`, in
 that order. The subagent input contract
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:177-194`) requires:
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:185-202`) requires:
 `role, task_id, goal, context.relevant_files, context.relevant_docs,
 constraints, acceptance_criteria, allowed_changes, forbidden_changes,
 expected_output.format`. `suggested_tests` is the one slicer field with no
 subagent-input counterpart (tests are not part of that contract); it exists
 for the `02-tasks.md` template and the step-4 workflow narrative instead. The
 copy rule is stated verbatim at
-`packages/orchestrator-workflow/assets/skill/SKILL.md:275-278`: "The
+`packages/orchestrator-workflow/assets/skill/SKILL.md:288-291`: "The
 orchestrator copies each task's goal, relevant_files, relevant_docs,
 acceptance_criteria, constraints, allowed_changes, and forbidden_changes 1:1
 into the subagent input contract when delegating implementation, rather than
@@ -128,28 +130,28 @@ implementer, not implementation instructions
 
 ## Subagent misfire rule (0.11.0)
 
-`packages/orchestrator-workflow/assets/skill/SKILL.md:308-319` (`## Subagent
+`packages/orchestrator-workflow/assets/skill/SKILL.md:321-332` (`## Subagent
 misfire rule`): a subagent return is a misfire, not evidence, when it fails
 to parse against its role's output contract. Two detection signals:
 
 1. Contract-parse failure: the output does not parse against the role's
-   contract (`SKILL.md:310-311`).
-2. Near-instant return with no tool activity (`SKILL.md:311-312`). This is a
+   contract (`SKILL.md:323-324`).
+2. Near-instant return with no tool activity (`SKILL.md:324-325`). This is a
    signal, not proof: a legitimately tool-free return (e.g. a slicer
    answering entirely from context already supplied) is not automatically a
    misfire. It is accepted only if it is contract-valid *and* the assignment
-   was answerable from the context supplied with it (`SKILL.md:312-315`).
+   was answerable from the context supplied with it (`SKILL.md:325-328`).
 
 Response: treat a misfire as a failed spawn: resume or respawn the
 subagent; never fold the non-contract output into run state or count it as a
-completed step (`SKILL.md:315-317`). Record every misfire in
-`03-decisions.md` (`SKILL.md:317`). Review-gate consequence, stated
+completed step (`SKILL.md:328-330`). Record every misfire in
+`03-decisions.md` (`SKILL.md:330`). Review-gate consequence, stated
 explicitly: a misfired review is not a review and never satisfies the review
-gate, since review is never skipped (`SKILL.md:317-319`). Review-gate
+gate, since review is never skipped (`SKILL.md:330-332`). Review-gate
 severities and waiver mechanics themselves are out of this doc's lane; see
 [review-gate-and-waivers.md](review-gate-and-waivers.md).
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:32-53` (0.11.0): a
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:94-115` (0.11.0): a
 live incident where a reviewer subagent spawn returned in 5 seconds with 0
 tool uses, handing back harness hook-boilerplate instead of the reviewer
 output contract; a resume of the same spawn produced a correct full review.
@@ -162,6 +164,35 @@ signals named verbatim (322-327), the scoping language that prevents
 false-positive misfires (329-334), the resume-or-respawn response plus the
 non-evidence rule (336-341), the `03-decisions.md` record requirement
 (343-345), and the review-gate consequence sentence (347-350).
+
+## Reproduction requirement (0.14.0)
+
+`packages/orchestrator-workflow/assets/skill/SKILL.md:125-132` (step 7,
+immediately after the placeholder-row rule): when acceptance rests on
+empirical or probabilistic evidence (flake rates, benchmarks, "n runs
+green", performance/timing numbers), the reviewer must independently
+reproduce it — its own runs or measurements, not a re-read of the
+implementer's log — and record method, sample size, and result against the
+implementer's claim. The trigger is deliberately narrow: a single
+deterministic check (one test run, `tsc`, lint) does not qualify. The
+installed `packages/orchestrator-workflow/assets/agents/reviewer.md:39-44`
+prompt carries the same rule verbatim (second-person voice). Both output
+contracts gained a matching `reproduction` field
+(`method, sample_size, result, matches_implementer_claim`,
+`SKILL.md:247-251` and `reviewer.md:64-68`); `matches_implementer_claim`
+accepts `not_applicable` for reviews where the narrow trigger never fires, so
+a reviewer is not forced to fabricate a reproduction record for a
+deterministic-only change.
+
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:8-37` (0.14.0): the
+agent-dx run `2026-07-18-harness-subprocess-test-deflake` accepted an
+implementer's "8/8 green" flake-rate claim on a `maxWorkers` cap fix, then
+the reviewer independently reran the full suite and found 2/6 red on an
+independent 6-run sample (flake rate ~1/3, matching the pre-fix baseline) —
+nothing in the prior contract had required that rerun, so the first pass
+would have accepted the implementer's number as reported. This clause is a
+docs/prompt-only change: no runtime code in this package depends on the new
+field.
 
 ## Cross-links
 

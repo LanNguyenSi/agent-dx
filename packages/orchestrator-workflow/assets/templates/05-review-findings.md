@@ -26,3 +26,5 @@
 accept | accept_with_notes | fix_required | reject
 
 <!-- solution-acceptance: acceptance-recommendation = TODO -->
+
+<!-- Reproduction note: when a finding rests on empirical or probabilistic evidence (flake rates, benchmarks, "n runs green", performance/timing numbers), record the reviewer's independent reproduction (method, sample size, result vs. the implementer's claim) in the reviewer output contract's `reproduction` field (SKILL.md step 7). Deterministic checks (a single test run, tsc, lint) do not require it. -->

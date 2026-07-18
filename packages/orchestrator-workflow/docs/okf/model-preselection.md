@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-07-16T12:01:30Z
+timestamp: 2026-07-18T12:00:00Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
