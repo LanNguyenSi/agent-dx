@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The four subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-07-16T12:02:30Z
+timestamp: 2026-07-18T00:00:00Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -54,20 +54,20 @@ fenced yaml block (the orchestrator's reference copy), once in the role's
 installed prompt, in its trailing "Return exactly this structure as your
 final output, nothing else" block:
 
-- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:146-169`
+- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:150-173`
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:47-70`.
-- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:194-215`
+- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:198-219`
   vs. `packages/orchestrator-workflow/assets/agents/implementer.md:27-48`.
-- Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:219-235`
+- Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:223-239`
   vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:42-58`.
 - Task-slicer:
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:239-269`
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:243-273`
   (`## Task slicer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/task-slicer.md:30-60`.
 - Subagent input contract (the shape the orchestrator sends when delegating,
   not a role's own output) lives only in
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:173-190`; there is no
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:177-194`; there is no
   installed-prompt counterpart because it is what the orchestrator constructs,
   not what a subagent returns.
 
@@ -89,18 +89,18 @@ required them, forcing the orchestrator to fabricate that content when
 delegating.
 
 Current per-task slicer shape
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:239-269`): `id, title,
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:243-273`): `id, title,
 goal, relevant_files, relevant_docs, acceptance_criteria, constraints,
 suggested_tests, allowed_changes, forbidden_changes, dependencies, risk`, in
 that order. The subagent input contract
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:173-190`) requires:
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:177-194`) requires:
 `role, task_id, goal, context.relevant_files, context.relevant_docs,
 constraints, acceptance_criteria, allowed_changes, forbidden_changes,
 expected_output.format`. `suggested_tests` is the one slicer field with no
 subagent-input counterpart (tests are not part of that contract); it exists
 for the `02-tasks.md` template and the step-4 workflow narrative instead. The
 copy rule is stated verbatim at
-`packages/orchestrator-workflow/assets/skill/SKILL.md:271-274`: "The
+`packages/orchestrator-workflow/assets/skill/SKILL.md:275-278`: "The
 orchestrator copies each task's goal, relevant_files, relevant_docs,
 acceptance_criteria, constraints, allowed_changes, and forbidden_changes 1:1
 into the subagent input contract when delegating implementation, rather than
@@ -128,24 +128,24 @@ implementer, not implementation instructions
 
 ## Subagent misfire rule (0.11.0)
 
-`packages/orchestrator-workflow/assets/skill/SKILL.md:304-315` (`## Subagent
+`packages/orchestrator-workflow/assets/skill/SKILL.md:308-319` (`## Subagent
 misfire rule`): a subagent return is a misfire, not evidence, when it fails
 to parse against its role's output contract. Two detection signals:
 
 1. Contract-parse failure: the output does not parse against the role's
-   contract (`SKILL.md:306-307`).
-2. Near-instant return with no tool activity (`SKILL.md:307-308`). This is a
+   contract (`SKILL.md:310-311`).
+2. Near-instant return with no tool activity (`SKILL.md:311-312`). This is a
    signal, not proof: a legitimately tool-free return (e.g. a slicer
    answering entirely from context already supplied) is not automatically a
    misfire. It is accepted only if it is contract-valid *and* the assignment
-   was answerable from the context supplied with it (`SKILL.md:308-311`).
+   was answerable from the context supplied with it (`SKILL.md:312-315`).
 
 Response: treat a misfire as a failed spawn: resume or respawn the
 subagent; never fold the non-contract output into run state or count it as a
-completed step (`SKILL.md:311-313`). Record every misfire in
-`03-decisions.md` (`SKILL.md:313`). Review-gate consequence, stated
+completed step (`SKILL.md:315-317`). Record every misfire in
+`03-decisions.md` (`SKILL.md:317`). Review-gate consequence, stated
 explicitly: a misfired review is not a review and never satisfies the review
-gate, since review is never skipped (`SKILL.md:313-315`). Review-gate
+gate, since review is never skipped (`SKILL.md:317-319`). Review-gate
 severities and waiver mechanics themselves are out of this doc's lane; see
 [review-gate-and-waivers.md](review-gate-and-waivers.md).
 

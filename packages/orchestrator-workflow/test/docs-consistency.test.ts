@@ -107,6 +107,26 @@ describe("review gate ships in the policy, skill, and handoff template", () => {
   });
 });
 
+/**
+ * 0.13.0 added a placeholder/legend-row rule to SKILL.md's step 7, mirroring
+ * the fail-closed comment pinned next to the row itself in
+ * 05-review-findings.md (see template-markers.test.ts's "placeholder-row
+ * fail-closed convention" describe block). This pins the SKILL.md side of
+ * that same rule so a revert of the step-7 sentence fails a test here, not
+ * just in the template.
+ */
+describe("findings-table placeholder-row rule ships in the skill", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("step 7 instructs replacing the placeholder row on findings transfer and deleting it for a zero-findings review", () => {
+    expect(skillMd).toContain(
+      "Replace the shipped placeholder/legend row with the transferred findings",
+    );
+    expect(skillMd).toContain("for a genuine zero-findings review");
+    expect(skillMd).toContain("delete that row instead of leaving it in place");
+  });
+});
+
 describe("instruction trust boundary ships in policy, skill, and agent prompts", () => {
   const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
   const skillMd = unwrap(readAsset("skill/SKILL.md"));

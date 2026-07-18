@@ -5,6 +5,37 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-07-18
+
+### Changed
+
+- `05-review-findings.md`'s findings-table placeholder/legend row
+  (`| low/medium/high/critical | ... | accepted/defer |`) now carries a
+  comment stating its fail-closed semantics: replace this row when
+  transferring reviewer findings (step 7), or delete it outright for a
+  genuine zero-findings review (a header row with no data rows is valid; a
+  leftover legend row next to real finding rows is also fine). `SKILL.md`'s
+  step 7 gains a matching one-sentence rule. This is the contract half of a
+  fix for a mixed-state bypass in grounding-mcp's orchestrator-workflow
+  completeness reader: the reader identifies a real finding row by its
+  Severity cell carrying a single concrete value, so the shipped slash-list
+  legend row was never counted as a finding — a run that filled the
+  `acceptance-recommendation` marker with `accept` but left this row
+  byte-for-byte as shipped read as `complete: true` with zero findings,
+  indistinguishable from a genuine zero-findings review. The runtime half
+  (the reader treating a survived, unaccompanied placeholder row as an
+  explicit format blocker instead of silently reporting zero findings) is a
+  lockstep sibling change in grounding-mcp's own release, outside this
+  package. In this package the change is docs/template/test-only: no
+  runtime behavior changes here, the completeness reader itself is not part
+  of this package, and the fail-closed enforcement only takes effect once
+  grounding-mcp ships its lockstep sibling change (agent-tasks task
+  8f173547); do not tag/publish this 0.13.0 release before that change ships
+  (release ordering). A template-markers test pins the placeholder row's
+  literal wording (mutation-checked, matching the reader's literal match) and
+  that the replace/delete rule is documented next to it. Motivated by
+  agent-tasks task fa0eca65.
+
 ## [0.12.0] - 2026-07-16
 
 ### Added

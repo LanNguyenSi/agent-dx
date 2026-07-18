@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-07-16T12:18:30Z
+timestamp: 2026-07-18T00:00:00Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -31,7 +31,7 @@ every change; only the size of the apparatus changes."
 ## Severity ladder and what blocks
 
 Reviewer findings carry `severity: low | medium | high | critical`
-(`SKILL.md:226`, reviewer output contract). Only high and critical block
+(`SKILL.md:230`, reviewer output contract). Only high and critical block
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
@@ -42,9 +42,9 @@ waiver bookkeeping applies to them.
 Do not conflate two distinct vocabularies attached to the same review: the
 per-finding `Decision` column (below) and the whole-review
 `acceptance_recommendation: accept | accept_with_notes | fix_required |
-reject` (`SKILL.md:230`; mirrored in the findings template's Acceptance
+reject` (`SKILL.md:234`; mirrored in the findings template's Acceptance
 Recommendation section,
-`packages/orchestrator-workflow/assets/templates/05-review-findings.md:25`).
+`packages/orchestrator-workflow/assets/templates/05-review-findings.md:26`).
 A review can recommend `fix_required` overall while individual low findings
 carry Decision `accepted`; the gate only inspects Decision on high/critical
 rows.
@@ -54,13 +54,13 @@ rows.
 - Critical: "waived by the operator. The orchestrator never waives a
   critical finding on its own" (`agents-md-section.md:53-54`); SKILL.md
   step 8 echoes "critical findings require operator sign-off"
-  (`SKILL.md:121-123`).
+  (`SKILL.md:125-127`).
 - High: "waived by the orchestrator with a recorded rationale"
-  (`agents-md-section.md:55-56`; `SKILL.md:123-124`).
+  (`agents-md-section.md:55-56`; `SKILL.md:127-128`).
 - Deferring counts as waiving, for both severities: "Deferring such a
   finding counts as a waiver" (`agents-md-section.md:48-49`). SKILL.md makes
   the symmetry explicit: "Deferring a high or critical finding counts as a
-  waiver and follows the same rules" (`SKILL.md:124-125`). A deferred
+  waiver and follows the same rules" (`SKILL.md:128-129`). A deferred
   critical still needs operator sign-off; a deferred high still needs an
   orchestrator-recorded rationale.
 - Recorded in
@@ -69,7 +69,7 @@ rows.
   (`03-decisions.md:3`); the Reason cell is where the sign-off or rationale
   text lives, there is no separate waiver schema.
 - Summarized in `06-handoff.md`'s Accepted Waivers section
-  (`agents-md-section.md:57-58`; `SKILL.md:126-127`), instructed to "Mirror
+  (`agents-md-section.md:57-58`; `SKILL.md:130-131`), instructed to "Mirror
   03-decisions.md"
   (`packages/orchestrator-workflow/assets/templates/06-handoff.md:21`) via a
   `Finding | Severity | Rationale | Approved By` table
@@ -80,7 +80,13 @@ rows.
 SKILL.md step 7 is the transfer instruction: "transfer each finding from the
 reviewer output contract into the table's columns as-is, keeping the
 Severity and Decision headers unchanged, since those two are what the
-orchestrator-workflow completeness reader verifies" (`SKILL.md:117-120`). The
+orchestrator-workflow completeness reader verifies" (`SKILL.md:117-120`).
+Immediately after that quote, SKILL.md step 7 also carries a 0.13.0 addition
+on the same table's placeholder/legend row (`SKILL.md:121-124`): replace it
+when transferring findings, delete it outright for a genuine zero-findings
+review; full treatment (the mixed-state bypass it closes, the mirrored
+template comment, the reader's literal match) is out of scope here, see
+[run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md). The
 table header is `Severity | Category | Description | Suggested Fix |
 Decision` (`05-review-findings.md:11`). Its Decision legend comment
 (`05-review-findings.md:10`) states `RESOLVED_DECISIONS = {accepted,
@@ -107,9 +113,9 @@ already-correct-header statement at 145-146).
 
 Two machine-readable markers sit next to the prose gate: `<!--
 solution-acceptance: acceptance-recommendation = TODO -->`
-(`05-review-findings.md:27`) and `<!-- solution-acceptance: final-status =
+(`05-review-findings.md:28`) and `<!-- solution-acceptance: final-status =
 TODO -->` (`06-handoff.md:43`). SKILL.md instructs replacing `TODO` with the
-chosen enum value when finalizing each file (`SKILL.md:138-142`). Left as
+chosen enum value when finalizing each file (`SKILL.md:142-146`). Left as
 `TODO`, the harness solution-acceptance gate reads the run as non-accepting.
 `packages/orchestrator-workflow/test/template-markers.test.ts:11-44` pins
 exactly one marker per template, each defaulting to `TODO`. This is a
@@ -139,7 +145,7 @@ Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 reviewer output contract (`CHANGELOG.md:32-53`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
-(`SKILL.md:313-315`), pinned by
+(`SKILL.md:317-319`), pinned by
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:347-350`. Full
 misfire mechanics (detection signals, resume-vs-respawn, the
 `03-decisions.md` record) are out of scope here; see

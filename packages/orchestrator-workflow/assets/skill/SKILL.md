@@ -118,6 +118,10 @@ directory and the subagents.
    transfer each finding from the reviewer output contract into the table's
    columns as-is, keeping the Severity and Decision headers unchanged, since
    those two are what the orchestrator-workflow completeness reader verifies.
+   Replace the shipped placeholder/legend row with the transferred findings;
+   for a genuine zero-findings review, delete that row instead of leaving it
+   in place, since the completeness reader treats an untouched placeholder
+   row with no finding rows as the template never having been filled in.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high
