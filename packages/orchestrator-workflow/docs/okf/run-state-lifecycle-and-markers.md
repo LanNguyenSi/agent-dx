@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff]
-timestamp: 2026-07-18T00:00:00Z
+timestamp: 2026-07-18T12:00:00Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -52,11 +52,11 @@ lie behind the fork point of the change (the merge-base with the remote
 default branch) (SKILL.md:76-78). The in-repo changelog entry adds the
 consumer's malformed-value behavior: a valid sha gets an exact binding, a
 malformed value blocks explicitly via a 7-40 hex guard, and only a bare
-`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:88-96,
+`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:150-158,
 "grounding-mcp 0.6.0 reads this marker"; SKILL.md:79 points to "the
 grounding-mcp 0.6.0 docs for the full consumer semantics", so external
 reader internals are not verified from this repo). Introduced in 0.9.0
-(CHANGELOG.md:84-101). Pinned by template-markers.test.ts:19,33-37 (exactly
+(CHANGELOG.md:146-163). Pinned by template-markers.test.ts:19,33-37 (exactly
 one `run-base` marker, defaulting to `TODO`) and :39-43 (the literal line,
 wrapper included).
 
@@ -76,10 +76,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (SKILL.md:142-146). A freshly-copied run is
+non-accepting (fail-closed)" (SKILL.md:150-154). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
-(CHANGELOG.md:186-198). Consumer is "the harness solution-acceptance
-run-gate" per SKILL.md:145; this doc cites that in-repo statement only, it
+(CHANGELOG.md:248-260). Consumer is "the harness solution-acceptance
+run-gate" per SKILL.md:153; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18 (regexes) and :21-31 (one marker per
 template, default `TODO`).
@@ -94,7 +94,7 @@ locates this table by its header row and verifies unresolved findings from
 those two columns. Do not rename or drop them."
 (05-review-findings.md:9; line 10 and the 0.7.3 changelog entry attribute
 that reader to grounding-mcp). This was a reactive fix (0.7.3,
-CHANGELOG.md:134-151): a live run had drifted onto
+CHANGELOG.md:196-213): a live run had drifted onto
 `| Severity | Finding | Resolution |` (no Decision column), and the reader
 failed closed with an explicit "not in the expected table format" blocker
 rather than silently passing. The Decision legend defines
@@ -103,7 +103,7 @@ resolved only when its Decision is `accepted` or `defer`; every other value
 (`fix`, `reject`, blank, `open`, `TODO`) leaves it unresolved and **arms**
 the completeness gate (05-review-findings.md:10). The template's example row
 was deliberately narrowed to `accepted/defer` only (0.7.4,
-CHANGELOG.md:118-133) so the template itself never invites `fix`/`reject`
+CHANGELOG.md:180-195) so the template itself never invites `fix`/`reject`
 as if they were resolutions. Pinned by template-markers.test.ts:59-70
 (header row carries both `severity` and `decision` cells), :72-74 (the
 load-bearing comment exists), :76-90 (example row's Decision cell is
@@ -167,14 +167,14 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (SKILL.md:132-138). It is explicitly non-gating: "apply
+`okf-kit check`) (SKILL.md:140-146). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:132,138). This is the symmetric counterpart to the 0.8.0
+(SKILL.md:140,146). This is the symmetric counterpart to the 0.8.0
 discovery-side rule (the Discover step already checks `docs/okf/` before
 hand-mapping terrain, SKILL.md:91-96); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
-(CHANGELOG.md:8-30). Pinned by
+(CHANGELOG.md:70-92). Pinned by
 docs-consistency.test.ts:248-255 (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
 "docs/okf/" also occur in the Discover-step test), :257-261 (source-overlap
@@ -221,3 +221,14 @@ leaving `run-base` as `TODO` is harmless (day-granular fallback), leaving
 either verdict marker as `TODO` keeps the run non-accepting. The three are
 distinguished only by the `<key>` token and by which of `00-goal.md`,
 `05-review-findings.md`, `06-handoff.md` they live in.
+
+## Note: 05-review-findings.md's 0.14.0 trailing comment is not a marker
+
+`05-review-findings.md` gained a trailing HTML comment in 0.14.0 pointing
+reviewers at the new reviewer-contract reproduction requirement, appended
+after the acceptance-recommendation marker so no marker, header, or
+placeholder-row line shifted. It carries no `solution-acceptance:` prefix
+and no enum, so none of the marker/table mechanics in this doc changed; the
+requirement itself is out of scope here — see
+[review-gate-and-waivers.md](review-gate-and-waivers.md) and
+[subagent-contracts-superset.md](subagent-contracts-superset.md).

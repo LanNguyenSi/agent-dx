@@ -122,6 +122,14 @@ directory and the subagents.
    for a genuine zero-findings review, delete that row instead of leaving it
    in place, since the completeness reader treats an untouched placeholder
    row with no finding rows as the template never having been filled in.
+   When acceptance rests on empirical or probabilistic evidence (flake rates,
+   benchmarks, "n runs green", performance/timing numbers), the reviewer must
+   independently reproduce it — its own runs or measurements, not a re-read of
+   the implementer's log — and record the method, sample size, and result
+   against the implementer's claim in the reviewer output contract's
+   `reproduction` field. This does not apply to deterministic checks (a
+   single test run, `tsc`, lint): only claims that could vary run to run
+   trigger it.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high
@@ -236,6 +244,11 @@ missing_tests:
   - ""
 residual_risks:
   - ""
+reproduction:
+  method: ""
+  sample_size: ""
+  result: ""
+  matches_implementer_claim: matched | mismatched | not_applicable
 ```
 
 ## Task slicer output contract

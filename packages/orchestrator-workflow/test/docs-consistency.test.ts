@@ -583,3 +583,72 @@ describe("task slicer output schema is a superset of the implementer input contr
     expect(unwrapped).toContain("not implementation instructions");
   });
 });
+
+/**
+ * 0.14.0 added a reproduction requirement to the reviewer contract: when
+ * acceptance rests on empirical or probabilistic evidence, the reviewer must
+ * independently reproduce it rather than transcribe the implementer's
+ * reported numbers as-is. Motivated by a live incident (agent-dx run
+ * 2026-07-18-harness-subprocess-test-deflake): an implementer's "8/8 green"
+ * flake-rate claim on a maxWorkers-cap fix was overturned only because the
+ * reviewer independently reran the suite and found 2/6 red on an independent
+ * sample. Each check pins one load-bearing element (the narrow trigger
+ * wording, the deterministic-check exclusion, the reviewer prompt's
+ * second-person mirror, and the `reproduction` field shared byte-for-byte by
+ * both output-contract copies) so hollowing out the clause or letting the
+ * two copies drift apart fails at least one assertion here, the same way
+ * the 0.13.0 placeholder-row rule is pinned above.
+ */
+describe("reproduction requirement ships in the skill and the reviewer prompt", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("step 7 states the narrow empirical-evidence trigger and the independent-reproduction rule", () => {
+    expect(skillMd).toContain(
+      'When acceptance rests on empirical or probabilistic evidence (flake rates, benchmarks, "n runs green", performance/timing numbers), the reviewer must',
+    );
+    expect(skillMd).toContain("independently reproduce it");
+    expect(skillMd).toContain(
+      "not a re-read of the implementer's log",
+    );
+  });
+
+  it("step 7 excludes one-shot deterministic checks from the trigger", () => {
+    expect(skillMd).toContain(
+      "This does not apply to deterministic checks (a single test run, `tsc`, lint): only claims that could vary run to run trigger it.",
+    );
+  });
+
+  it("the installed reviewer.md prompt carries the same rule in second-person voice", () => {
+    expect(reviewerMd).toContain("reproduce it yourself");
+    expect(reviewerMd).toContain(
+      "Deterministic checks (a single test run, `tsc`, lint) do not trigger this.",
+    );
+  });
+
+  it("both reviewer output contracts carry an identical reproduction field with all four sub-fields", () => {
+    const field =
+      'reproduction: method: "" sample_size: "" result: "" matches_implementer_claim: matched | mismatched | not_applicable';
+    expect(skillMd).toContain(field);
+    expect(reviewerMd).toContain(field);
+  });
+
+  it("matches_implementer_claim avoids bare yes/no (YAML 1.1 boolean synonyms)", () => {
+    expect(skillMd).not.toMatch(/matches_implementer_claim:\s*yes\s*\|/);
+    expect(reviewerMd).not.toMatch(/matches_implementer_claim:\s*yes\s*\|/);
+  });
+
+  it("the reproduction field is byte-for-byte identical between SKILL.md and reviewer.md (raw, not line-unwrapped)", () => {
+    const extractReproductionBlock = (raw: string): string => {
+      const match = raw.match(/^reproduction:\n(?:.+\n)*?```/m);
+      expect(match, "reproduction block not found").toBeTruthy();
+      return (match as RegExpMatchArray)[0].replace(/\n```$/, "");
+    };
+    const skillBlock = extractReproductionBlock(readAsset("skill/SKILL.md"));
+    const reviewerBlock = extractReproductionBlock(readAsset("agents/reviewer.md"));
+    // Guard the extraction itself: a regex that silently matched nothing or
+    // an empty span would make the equality check below vacuous.
+    expect(skillBlock.length).toBeGreaterThan(20);
+    expect(skillBlock).toBe(reviewerBlock);
+  });
+});

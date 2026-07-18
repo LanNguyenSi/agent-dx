@@ -5,6 +5,37 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-07-18
+
+### Changed
+
+- Reviewer contract now requires independent reproduction when acceptance
+  rests on empirical or probabilistic evidence: flake rates, benchmarks, "n
+  runs green", or performance/timing numbers. The reviewer must rerun the
+  measurement itself, not re-read the implementer's log, and record method,
+  sample size, and result against the implementer's claim in a new
+  `reproduction` field (`method, sample_size, result,
+  matches_implementer_claim`) added to the Reviewer output contract in
+  `SKILL.md` step 7 and to the installed `assets/agents/reviewer.md` prompt
+  body (shared, byte-identical, by the Claude Code and opencode reviewer
+  subagents). `matches_implementer_claim` uses `matched | mismatched |
+  not_applicable` rather than `yes | no | not_applicable`: bare `yes`/`no`
+  are YAML 1.1 boolean synonyms, and picking unambiguous tokens up front
+  costs nothing even though this field is prose a human reads, not a
+  machine-parsed value. The trigger is deliberately narrow: a single deterministic
+  check (one test run, `tsc`, lint) does not qualify, only claims that could
+  vary run to run. `05-review-findings.md` gains a short trailing comment
+  pointing reviewers at the rule; the findings-table placeholder row itself
+  is untouched. Motivated by a live incident (agent-dx run
+  2026-07-18-harness-subprocess-test-deflake): an implementer's "8/8 green"
+  flake-rate claim on a maxWorkers-cap fix was overturned only because the
+  reviewer independently reran the suite and found 2/6 red on an independent
+  6-run sample (flake rate ~1/3, matching the pre-fix baseline) — nothing in
+  the prior contract required that rerun. Docs-only change: no runtime
+  behavior in this package depends on the new field, it is a reporting
+  contract the orchestrator and operator read. Motivated by agent-tasks task
+  0018d61c.
+
 ## [0.13.0] - 2026-07-18
 
 ### Changed
