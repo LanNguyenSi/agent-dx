@@ -96,3 +96,34 @@ describe("05-review-findings.md findings-table header convention", () => {
     expect(reviewTemplate).toMatch(/arms? the (?:completeness )?gate/i);
   });
 });
+
+/**
+ * grounding-mcp's ow-run-completeness reader (packages/grounding-mcp/src/
+ * ow-run-completeness.ts, own release cycle in the agent-grounding repo)
+ * matches this exact example row literally to decide a row is the shipped
+ * legend, not a real finding (its SEVERITY cell is the slash-list
+ * `low/medium/high/critical` rather than a single concrete value). A lockstep
+ * sibling change there makes an untouched copy of this row, with no concrete
+ * finding row alongside it, fail the completeness gate closed instead of
+ * silently passing (the "Mixed-State-Bypass": marker set to `accepted`,
+ * table left as the pristine template). This test pins the row's literal
+ * wording on the agent-dx side so the two repos cannot drift apart silently.
+ */
+describe("05-review-findings.md placeholder-row fail-closed convention", () => {
+  const reviewTemplate = readAsset("templates/05-review-findings.md");
+
+  it("carries the exact placeholder row grounding-mcp's completeness reader matches literally", () => {
+    // Mutation-check: editing any cell of this row (including the HTML-comment
+    // placeholders) fails this assertion.
+    expect(reviewTemplate).toContain(
+      "| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |",
+    );
+  });
+
+  it("documents the placeholder row's fail-closed semantics next to the row", () => {
+    // The rule must be spelled out where an operator edits the row: replace it
+    // when transferring findings, delete it for a genuine zero-findings review.
+    expect(reviewTemplate).toMatch(/replace this row/i);
+    expect(reviewTemplate).toMatch(/zero-findings review, delete this row/i);
+  });
+});

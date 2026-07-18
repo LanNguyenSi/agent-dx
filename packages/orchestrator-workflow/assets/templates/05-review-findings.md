@@ -11,6 +11,7 @@
 | Severity | Category | Description | Suggested Fix | Decision |
 |---|---|---|---|---|
 | low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |
+<!-- This row is the shipped template placeholder, not a finding: the orchestrator-workflow completeness reader fails the completeness gate closed when this exact row survives untouched and no concrete finding row has been added, the same way a `TODO` marker does. During findings transfer (step 7), replace this row with each reviewer finding. For a genuine zero-findings review, delete this row instead — a header row with no data rows is a valid, complete table; leaving this row next to real finding rows is also fine. This mirrors grounding-mcp's placeholder-row detection; keep the two in sync. -->
 
 ## Missing Tests
 
