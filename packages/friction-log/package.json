@@ -44,7 +44,7 @@
     "directory": "packages/friction-log"
   },
   "dependencies": {
-    "better-sqlite3": "^11.3.0",
+    "better-sqlite3": "^13.0.0",
     "commander": "^12.0.0",
     "yaml": "^2.5.0"
   },
