@@ -10,20 +10,40 @@ export interface FileTarget {
 
 export type FileKind = "prose" | "code" | "style" | "markup" | "binary";
 
+/** A single exported symbol, pre-resolved to a report-ready location. */
+export interface CorpusExportEntry {
+  file: string;
+  symbol: string;
+  loc: { line: number; column: number; endLine: number; endColumn: number };
+  /** Short source snippet for the violation's `matched` field. */
+  snippet: string;
+}
+
 export interface Corpus {
   /**
    * Every exported symbol in the scan root, keyed as "file::symbol".
    * Built by `buildCorpus` when the corpus feature flag is active.
+   * Consumed directly by `code-slop/unused-export` — rules do not need to
+   * re-parse a file to recompute its own exports.
    */
-  exports: Map<string, { file: string; symbol: string }>;
+  exports: Map<string, CorpusExportEntry>;
   /**
-   * Identifiers referenced (imported or called) per file.
-   * Key = absolute file path; value = Set of identifier names.
+   * The same entries as `exports`, grouped by file for O(1) "give me this
+   * file's exports" access instead of a full scan of `exports`.
    */
-  referencesByFile: Map<string, Set<string>>;
+  exportsByFile: Map<string, CorpusExportEntry[]>;
+  /**
+   * Inverted index: identifier name -> set of files whose reference set
+   * contains that name (imported, called, or re-exported from). Lets
+   * corpus-aware rules answer "is this name used by any file other than
+   * mine?" in O(1) instead of scanning every file's reference set per
+   * export.
+   */
+  referencingFilesByName: Map<string, Set<string>>;
   /**
    * Source files reachable from the nearest package.json
-   * via `main`, `bin`, or `exports` fields.
+   * via `main`, `bin`, or `exports` fields, plus any file matched by
+   * `config.entrypointGlobs`.
    */
   entrypoints: Set<string>;
   /**
@@ -84,6 +104,14 @@ export interface ResolvedConfig {
   treatAsCode: string[];
   /** When true, `checkFiles`/`checkPath` will build a corpus for cross-file rules. */
   corpus?: boolean;
+  /**
+   * Glob patterns (matched relative to the scan root) marking additional
+   * files as public-API entrypoints for the corpus pre-pass, on top of
+   * whatever `package.json` main/bin/exports resolve to. Use this to mark
+   * a `src/` barrel whose package.json entrypoints point at compiled
+   * `dist/` output, so the corpus-aware rules don't flag its re-exports.
+   */
+  entrypointGlobs: string[];
 }
 
 export interface CheckSummary {

@@ -12,6 +12,7 @@ const config: ResolvedConfig = {
   ignorePaths: [],
   treatAsProse: [],
   treatAsCode: [],
+  entrypointGlobs: [],
 };
 
 function findRule(id: string): Rule {

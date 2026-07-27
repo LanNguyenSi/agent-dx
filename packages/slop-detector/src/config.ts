@@ -19,6 +19,7 @@ const ConfigFileSchema = z.object({
   treatAsProse: z.array(z.string()).optional(),
   treatAsCode: z.array(z.string()).optional(),
   corpus: z.boolean().optional(),
+  entrypointGlobs: z.array(z.string()).optional(),
 });
 
 export type ConfigFile = z.infer<typeof ConfigFileSchema>;
@@ -66,6 +67,7 @@ export function defaultConfig(): ResolvedConfig {
     ignorePaths: [...DEFAULT_IGNORES],
     treatAsProse: [],
     treatAsCode: [],
+    entrypointGlobs: [],
   };
 }
 
@@ -80,6 +82,7 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
     treatAsProse: file.treatAsProse ?? [],
     treatAsCode: file.treatAsCode ?? [],
     corpus: file.corpus,
+    entrypointGlobs: file.entrypointGlobs ?? [],
   };
 }
 

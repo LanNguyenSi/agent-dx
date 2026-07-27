@@ -4,6 +4,7 @@ import type { TSESTree } from "@typescript-eslint/types";
 import type {
   CheckSummary,
   Corpus,
+  CorpusExportEntry,
   FileTarget,
   PackDefinition,
   ResolvedConfig,
@@ -14,7 +15,15 @@ import type {
 import { effectiveSeverity, isRuleEnabled } from "./config.js";
 import { detectFileKind, globToRegex } from "./util/file-kind.js";
 import { buildDisableMap } from "./util/disable-comments.js";
-import { extractDeclaredNames, isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode } from "./util/ts-ast.js";
+import {
+  extractDeclaredNames,
+  isTypeScriptOrJavaScript,
+  nodeLoc,
+  parseTsFile,
+  snippet,
+  walk,
+  type AnyNode,
+} from "./util/ts-ast.js";
 
 export interface CheckOptions {
   packs: PackDefinition[];
@@ -133,17 +142,39 @@ export function checkPath(
  *   - every identifier reference (imported names + CallExpression callee names)
  *
  * Entrypoints are resolved from the nearest `package.json` relative to
- * `scanRoot` (or the first file's directory when `scanRoot` is omitted).
+ * `scanRoot` (or the first file's directory when `scanRoot` is omitted),
+ * plus any file matched by `config.entrypointGlobs`.
  */
 export function buildCorpus(
   files: string[],
   config: ResolvedConfig,
   scanRoot?: string,
 ): Corpus {
-  const exports = new Map<string, { file: string; symbol: string }>();
-  const referencesByFile = new Map<string, Set<string>>();
+  const exports = new Map<string, CorpusExportEntry>();
+  const exportsByFile = new Map<string, CorpusExportEntry[]>();
+  const referencingFilesByName = new Map<string, Set<string>>();
   const entrypoints = new Set<string>();
   const callCountBySymbol = new Map<string, number>();
+
+  const addExport = (filePath: string, symbol: string, node: TSESTree.Node, file: FileTarget): void => {
+    const entry: CorpusExportEntry = { file: filePath, symbol, loc: nodeLoc(node), snippet: snippet(file, node) };
+    exports.set(`${filePath}::${symbol}`, entry);
+    let list = exportsByFile.get(filePath);
+    if (!list) {
+      list = [];
+      exportsByFile.set(filePath, list);
+    }
+    list.push(entry);
+  };
+
+  const addReference = (filePath: string, name: string): void => {
+    let referencingFiles = referencingFilesByName.get(name);
+    if (!referencingFiles) {
+      referencingFiles = new Set<string>();
+      referencingFilesByName.set(name, referencingFiles);
+    }
+    referencingFiles.add(filePath);
+  };
 
   for (const filePath of files) {
     let text: string;
@@ -158,26 +189,33 @@ export function buildCorpus(
     const result = parseTsFile(file);
     if (!result.ok) continue;
 
-    const refs = new Set<string>();
-
     walk(result.ast as unknown as AnyNode, (node) => {
       // ── Collect exports ─────────────────────────────────────────────────
       if (node.type === "ExportNamedDeclaration") {
         const exportNode = node as TSESTree.ExportNamedDeclaration;
         if (exportNode.declaration) {
           for (const name of extractDeclaredNames(exportNode.declaration as AnyNode)) {
-            exports.set(`${filePath}::${name}`, { file: filePath, symbol: name });
+            addExport(filePath, name, exportNode, file);
           }
         }
         for (const spec of exportNode.specifiers) {
           const exported = spec.exported;
           const name = exported.type === "Identifier" ? exported.name : null;
-          if (name) exports.set(`${filePath}::${name}`, { file: filePath, symbol: name });
+          if (name) addExport(filePath, name, spec, file);
+
+          // A re-export (`export { x } from "./other.js"`) is a real
+          // consumer of `x` in the *other* module — without this, every
+          // barrel re-export makes its underlying symbol look unused.
+          // `local` is the name as it exists in the source module (the
+          // pre-rename name); that's what needs to count as referenced.
+          if (exportNode.source && spec.local.type === "Identifier") {
+            addReference(filePath, spec.local.name);
+          }
         }
         return;
       }
       if (node.type === "ExportDefaultDeclaration") {
-        exports.set(`${filePath}::default`, { file: filePath, symbol: "default" });
+        addExport(filePath, "default", node, file);
         return;
       }
 
@@ -186,9 +224,9 @@ export function buildCorpus(
         for (const spec of (node as TSESTree.ImportDeclaration).specifiers) {
           if (spec.type === "ImportSpecifier") {
             const imported = (spec as TSESTree.ImportSpecifier).imported;
-            refs.add(imported.type === "Identifier" ? imported.name : "default");
+            addReference(filePath, imported.type === "Identifier" ? imported.name : "default");
           } else if (spec.type === "ImportDefaultSpecifier") {
-            refs.add("default");
+            addReference(filePath, "default");
           }
           // ImportNamespaceSpecifier (import * as ns) — no specific symbol to track
         }
@@ -199,21 +237,24 @@ export function buildCorpus(
       if (node.type === "CallExpression") {
         const callee = (node as TSESTree.CallExpression).callee;
         if (callee.type === "Identifier") {
-          refs.add(callee.name);
+          addReference(filePath, callee.name);
           callCountBySymbol.set(callee.name, (callCountBySymbol.get(callee.name) ?? 0) + 1);
         }
         return;
       }
     });
-
-    referencesByFile.set(filePath, refs);
   }
 
   // ── Resolve package.json entrypoints ──────────────────────────────────────
   const pkgRoot = scanRoot ?? _findNearestPackageRoot(files);
-  if (pkgRoot) _resolveEntrypoints(pkgRoot, entrypoints);
+  if (pkgRoot) {
+    _resolveEntrypoints(pkgRoot, entrypoints);
+    if (config.entrypointGlobs.length > 0) {
+      _resolveEntrypointGlobs(pkgRoot, files, config.entrypointGlobs, entrypoints);
+    }
+  }
 
-  return { exports, referencesByFile, entrypoints, callCountBySymbol };
+  return { exports, exportsByFile, referencingFilesByName, entrypoints, callCountBySymbol };
 }
 
 /** Walk up from the first file looking for a package.json directory. */
@@ -285,6 +326,26 @@ function _resolveEntrypoints(root: string, into: Set<string>): void {
   }
 
   if (pkg.exports) walkExportsField(pkg.exports);
+}
+
+/**
+ * Populate `into` with every scanned file whose path (relative to `root`,
+ * forward-slash normalized) matches one of `globs`.
+ *
+ * This is the escape hatch for the case `_resolveEntrypoints` cannot handle:
+ * `package.json` `main`/`bin`/`exports` typically point at compiled `dist/`
+ * output, so when the scan targets `src/` the real public-API barrel is
+ * never recognised as an entrypoint and its re-exports get flagged as dead.
+ * `config.entrypointGlobs` lets a project mark that barrel explicitly, e.g.
+ * `entrypointGlobs: ["src/index.ts"]`.
+ */
+function _resolveEntrypointGlobs(root: string, files: string[], globs: string[], into: Set<string>): void {
+  const regexes = globs.map((g) => globToRegex(g));
+  for (const filePath of files) {
+    const abs = path.resolve(filePath);
+    const rel = path.relative(root, abs).split(path.sep).join("/");
+    if (regexes.some((re) => re.test(rel))) into.add(abs);
+  }
 }
 
 export function summarize(violations: Violation[], filesScanned: number): CheckSummary {

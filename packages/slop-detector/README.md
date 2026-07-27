@@ -223,12 +223,12 @@ Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; 
 
 ## Cross-file rules (experimental)
 
-Two `code-slop` rules analyse symbols across all files in the scan root rather than per file.  They are **off by default** and require a corpus pre-pass that parses every TypeScript/JavaScript file once before the rule loop runs.
+Two `code-slop` rules analyse symbols across all files in the scan root rather than per file.  They are **off by default** and require a corpus pre-pass that parses every TypeScript/JavaScript file once before the rule loop runs. The pre-pass also builds an inverted name → referencing-files index, so `unused-export`'s "does any other file use this?" check is an O(1) map lookup per export rather than an O(files) scan repeated for every export in the scan root.
 
 | Rule | Default severity | What it finds |
 |------|-----------------|---------------|
-| `code-slop/unused-export` | warn | Exported symbols not imported by any other file and not reachable via `package.json` entrypoints (`main`, `bin`, `exports`). |
-| `code-slop/single-callsite-helper` | warn | Named functions/`const`s with a body of at most 3 statements that are called from at most one place in the package (candidates for inlining). |
+| `code-slop/unused-export` | warn | Exported symbols not imported by any other file and not reachable via `package.json` entrypoints (`main`, `bin`, `exports`, or `entrypointGlobs`). |
+| `code-slop/single-callsite-helper` | warn | Named functions/`const`s with a body of at most 3 statements that are called from at most one place in the package (candidates for inlining). Exempts files reachable via an entrypoint, same as `unused-export` — a helper whose only real callers are external to the scan is expected to show a low in-package call count. |
 
 ### Enabling the corpus pre-pass
 
@@ -265,11 +265,21 @@ rules:
     enabled: true
 ```
 
+### Marking a src barrel as an entrypoint
+
+`package.json` `main`/`bin`/`exports` fields typically point at compiled output (`dist/index.js`). When the scan targets `src/`, those paths don't resolve to any file in the scan root, so the real `src/` public-API barrel is never recognised as an entrypoint and its re-exports get flagged as unused. Use `entrypointGlobs` to mark it explicitly (matched relative to the scan root):
+
+```yaml
+# slop.config.yml
+corpus: true
+entrypointGlobs:
+  - "src/index.ts"
+```
+
 ### Known limitations (v1)
 
-- **Entrypoint resolution uses dist paths.** `package.json` `main`/`exports` fields typically point at compiled output (`dist/index.js`).  When you scan `src/`, the entrypoint files are not matched and every symbol in the public API entry file will appear as an unused export.  Workaround: add the entry file to `ignorePaths`, or scope the scan to a sub-directory that does not contain the public API boundary.  A symbol-level entrypoint glob is tracked as a follow-up.
-- **Name-only symbol matching.** The corpus matches symbols by identifier name across files, not by import binding.  Two unrelated exports with the same name in different files will be counted as references to each other (false negative on `unused-export`).  Likewise, a local variable shadowing an imported name may suppress a violation (false positive suppression).
-- **Each file is parsed twice** when both the corpus pre-pass and the per-file rule loop run: once in `buildCorpus` and once inside the rule `check()` call (the second parse is cache-hit via `parseTsFile`'s `WeakMap`, so no disk I/O, but the AST walk repeats).
+- **Name-only, scope-blind symbol matching.** The corpus matches symbols by identifier name across files, not by import binding or lexical scope. Two unrelated exports with the same name in different files are counted as references to each other (false negative on `unused-export`). A local variable or parameter that shadows an imported/exported name may likewise suppress a violation (false positive suppression). Re-export specifiers (`export { x } from "./mod.js"`) are tracked as a reference to `x`, so barrel re-exports no longer make their underlying symbol look unused — but a **non-call** use of an identifier (passing a function by reference, e.g. `arr.map(helperA)`, `setTimeout(helperA)`, `export const onClick = helperA`) is still not tracked, so a helper consumed only that way can still be misflagged as unused or single-callsite. Treat both rules as directional signals to double-check, not ground truth, until this is closed.
+- **`buildCorpus` still makes a separate initial pass** over every file before the per-file rule loop runs — that's the nature of a two-pass "see everything, then judge each file" design and isn't avoidable without restructuring the engine. What *is* fixed: `code-slop/unused-export` no longer re-parses a file and re-walks its AST to rediscover its own export list — it reads the already-computed export locations straight out of the corpus (`corpus.exportsByFile`), so the corpus's parse is the only parse attributable to that rule.
 
 ## Per-line opt-out
 

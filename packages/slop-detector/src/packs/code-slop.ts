@@ -3,7 +3,15 @@ import path from "node:path";
 import YAML from "yaml";
 import type { TSESTree } from "@typescript-eslint/types";
 import type { FileTarget, PackDefinition, Rule, RuleContext, Violation } from "../types.js";
-import { extractDeclaredNames, isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode, type ParsedTsFile } from "../util/ts-ast.js";
+import {
+  isTypeScriptOrJavaScript,
+  nodeLoc,
+  parseTsFile,
+  snippet,
+  walk,
+  type AnyNode,
+  type ParsedTsFile,
+} from "../util/ts-ast.js";
 
 function appliesToCode(file: FileTarget): boolean {
   return isTypeScriptOrJavaScript(file);
@@ -29,21 +37,6 @@ function makeViolation(
     rationale: rule.rationale,
     matched,
   };
-}
-
-function nodeLoc(node: TSESTree.Node): { line: number; column: number; endLine: number; endColumn: number } {
-  return {
-    line: node.loc.start.line,
-    column: node.loc.start.column + 1,
-    endLine: node.loc.end.line,
-    endColumn: node.loc.end.column + 1,
-  };
-}
-
-function snippet(file: FileTarget, node: TSESTree.Node, max = 80): string {
-  if (!node.range) return "";
-  const raw = file.text.slice(node.range[0], Math.min(node.range[1], node.range[0] + max));
-  return raw.replace(/\s+/g, " ");
 }
 
 // ─────────────────────────── Rule 1: try/catch around non-throwing code ───
@@ -969,7 +962,7 @@ const unusedExport: Rule = {
     // rule.check() calls in unit tests that do not build a corpus.
     if (!ctx.corpus) return [];
 
-    const { referencesByFile, entrypoints } = ctx.corpus;
+    const { exportsByFile, referencingFilesByName, entrypoints } = ctx.corpus;
 
     // Skip every symbol in files that are package.json entrypoints — those
     // symbols ARE the public API regardless of whether they're imported
@@ -977,45 +970,28 @@ const unusedExport: Rule = {
     const absPath = path.resolve(ctx.file.path);
     if (entrypoints.has(absPath) || entrypoints.has(ctx.file.path)) return [];
 
-    const result = parseTsFile(ctx.file);
-    if (!result.ok) return [];
-
-    // Collect (symbol-name, AST-node) pairs for all exports in this file.
-    const fileExports: Array<{ name: string; node: TSESTree.Node }> = [];
-    walk(result.ast as unknown as AnyNode, (node) => {
-      if (node.type === "ExportNamedDeclaration") {
-        const exportNode = node as TSESTree.ExportNamedDeclaration;
-        if (exportNode.declaration) {
-          for (const name of extractDeclaredNames(exportNode.declaration as AnyNode)) {
-            fileExports.push({ name, node: exportNode });
-          }
-        }
-        for (const spec of exportNode.specifiers) {
-          const exported = spec.exported;
-          const name = exported.type === "Identifier" ? exported.name : null;
-          if (name) fileExports.push({ name, node: spec });
-        }
-        return;
-      }
-      if (node.type === "ExportDefaultDeclaration") {
-        fileExports.push({ name: "default", node });
-      }
-    });
+    // This file's exports were already resolved (name, location, snippet)
+    // while `buildCorpus` made its single pass over every file — no need to
+    // re-parse `ctx.file` and re-walk its AST just to rediscover the same
+    // export list.
+    const fileExports = exportsByFile.get(ctx.file.path) ?? [];
 
     const violations: Violation[] = [];
-    for (const { name, node } of fileExports) {
-      // Does any OTHER file reference this symbol?
-      const hasConsumer = Array.from(referencesByFile.entries()).some(
-        ([file, refs]) => file !== ctx.file.path && refs.has(name),
-      );
+    for (const entry of fileExports) {
+      // Does any OTHER file reference this symbol? O(1) via the
+      // precomputed name -> referencing-files index instead of scanning
+      // every file's reference set for every export in the scan.
+      const referencingFiles = referencingFilesByName.get(entry.symbol);
+      const hasConsumer =
+        !!referencingFiles && (referencingFiles.size > 1 || !referencingFiles.has(ctx.file.path));
       if (!hasConsumer) {
         violations.push(
           makeViolation(
             unusedExport,
             ctx.file,
-            nodeLoc(node),
-            `\`${name}\` is exported but not imported by any other file in the package`,
-            snippet(ctx.file, node),
+            entry.loc,
+            `\`${entry.symbol}\` is exported but not imported by any other file in the package`,
+            entry.snippet,
           ),
         );
       }
@@ -1037,7 +1013,15 @@ const singleCallsiteHelper: Rule = {
   check(ctx: RuleContext): Violation[] {
     if (!ctx.corpus) return [];
 
-    const { callCountBySymbol } = ctx.corpus;
+    const { callCountBySymbol, entrypoints } = ctx.corpus;
+
+    // A helper that lives in a package.json entrypoint (or a file matched
+    // by `config.entrypointGlobs`) is public API by definition — its real
+    // callers are outside the scanned corpus, so a low in-package call
+    // count is expected and not a sign of dead indirection. Same exemption
+    // `unused-export` applies.
+    const absPath = path.resolve(ctx.file.path);
+    if (entrypoints.has(absPath) || entrypoints.has(ctx.file.path)) return [];
 
     const result = parseTsFile(ctx.file);
     if (!result.ok) return [];

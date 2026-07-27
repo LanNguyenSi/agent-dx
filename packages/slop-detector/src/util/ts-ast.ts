@@ -56,6 +56,23 @@ export function parseTsFile(file: FileTarget): ParseResult | ParseFailure {
 
 export type AnyNode = TSESTree.Node;
 
+/** Violation location (1-indexed line/column) derived from an AST node's `loc`. */
+export function nodeLoc(node: TSESTree.Node): { line: number; column: number; endLine: number; endColumn: number } {
+  return {
+    line: node.loc.start.line,
+    column: node.loc.start.column + 1,
+    endLine: node.loc.end.line,
+    endColumn: node.loc.end.column + 1,
+  };
+}
+
+/** Short, whitespace-collapsed source snippet for a node's `matched` field. */
+export function snippet(file: FileTarget, node: TSESTree.Node, max = 80): string {
+  if (!node.range) return "";
+  const raw = file.text.slice(node.range[0], Math.min(node.range[1], node.range[0] + max));
+  return raw.replace(/\s+/g, " ");
+}
+
 /**
  * Extract declared identifier names from an export declaration subtree.
  *

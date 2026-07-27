@@ -16,6 +16,7 @@ const config: ResolvedConfig = {
   ignorePaths: [],
   treatAsProse: [],
   treatAsCode: [],
+  entrypointGlobs: [],
 };
 
 function findRule(id: string): Rule {
@@ -681,6 +682,7 @@ function runCorpusRule(
   files: Record<string, string>,
   tmpDir: string,
   pkgJson?: object,
+  configOverrides?: Partial<ResolvedConfig>,
 ): ReturnType<typeof checkFiles>["violations"] {
   if (pkgJson) {
     writeFileSync(join(tmpDir, "package.json"), JSON.stringify(pkgJson));
@@ -698,6 +700,8 @@ function runCorpusRule(
     ignorePaths: [],
     treatAsProse: [],
     treatAsCode: [],
+    entrypointGlobs: [],
+    ...configOverrides,
   };
   const summary = checkFiles(paths, {
     packs: [codeSlopPack],
@@ -776,6 +780,82 @@ describe("code-slop/unused-export", () => {
     // No corpus in context — must return []
     expect(rule.check({ file, config })).toEqual([]);
   });
+
+  it("reports the export's own source location (consumed from the corpus, not re-derived by a second parse)", () => {
+    // `helperA` is declared on line 2; the violation must point at it, even
+    // though the rule itself never re-parses a.ts to find that location.
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "a.ts": `\nexport function helperA() { return 1; }\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    const v = violations.find((x) => x.message.includes("`helperA`"));
+    expect(v).toBeDefined();
+    expect(v?.line).toBe(2);
+    expect(v?.matched).toContain("helperA");
+  });
+
+  it("flags an unused `export default`", () => {
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "a.ts": `export default function helperA() { return 1; }\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.message.includes("`default`"))).toBe(true);
+  });
+
+  it("does not flag a symbol re-exported by a barrel (`export { x } from \"./a.js\"`)", () => {
+    // b.ts re-exports helperA without ever importing/calling it directly.
+    // Before tracking re-export specifiers as references, this made a.ts's
+    // *own declaration* look unused even though the barrel makes it public.
+    // (b.ts's own re-export is separately and correctly flagged as unused
+    // here, since nothing in this fixture imports `helperA` from b.ts —
+    // that's not what this test is about; see the `path.endsWith` filter.)
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "a.ts": `export function helperA() { return 1; }\n`,
+        "b.ts": `export { helperA } from "./a.js";\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.path.endsWith("a.ts") && v.message.includes("`helperA`"))).toBe(false);
+  });
+
+  it("BUG REPRO: flags a src barrel's re-exports when package.json main points at a dist path with no source counterpart", () => {
+    // main resolves to dist/index.js, which does not exist anywhere under
+    // the scanned src/ tree (nor does dist/index.ts) — so `_resolveEntrypoints`
+    // can't match it, and src/index.ts's re-exports look unused.
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "src/index.ts": `export function helperA() { return 1; }\n`,
+      },
+      tmpDir,
+      { name: "fixture", main: "./dist/index.js" },
+    );
+    expect(violations.some((v) => v.message.includes("`helperA`"))).toBe(true);
+  });
+
+  it("entrypointGlobs marks a src barrel as an entrypoint even when package.json main points at dist", () => {
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "src/index.ts": `export function helperA() { return 1; }\n`,
+      },
+      tmpDir,
+      { name: "fixture", main: "./dist/index.js" },
+      { entrypointGlobs: ["src/index.ts"] },
+    );
+    expect(violations.some((v) => v.message.includes("`helperA`"))).toBe(false);
+  });
 });
 
 describe("code-slop/single-callsite-helper", () => {
@@ -819,9 +899,10 @@ describe("code-slop/single-callsite-helper", () => {
     expect(violations.some((v) => v.message.includes("`add`"))).toBe(false);
   });
 
-  it("does not flag a function reached via a package.json entrypoint (entrypoint file exempt from unused-export, callsite rule still applies)", () => {
-    // The single-callsite rule does NOT use entrypoints — it purely counts callsites.
-    // A function with >1 callsite should still be safe.
+  it("does not flag a function called from two files regardless of entrypoint status", () => {
+    // A function with >1 callsite should be safe whether or not any file
+    // involved is a package.json entrypoint — the callsite count alone
+    // already clears it.
     const violations = runCorpusRule(
       "code-slop/single-callsite-helper",
       {
@@ -832,6 +913,22 @@ describe("code-slop/single-callsite-helper", () => {
       { name: "fixture" },
     );
     // b.ts calls helper() twice — corpus counts 2 → not flagged
+    expect(violations.some((v) => v.message.includes("`helper`"))).toBe(false);
+  });
+
+  it("does not flag a ≤3-statement helper defined in a package.json entrypoint file", () => {
+    // a.ts is `main`. Its helper has zero in-package callers — real callers
+    // are external consumers of the package, invisible to the scan. Without
+    // the entrypoint exemption this would read "called from nowhere in the
+    // package" and get flagged, even though it's the public API surface.
+    const violations = runCorpusRule(
+      "code-slop/single-callsite-helper",
+      {
+        "a.ts": `export function helper(x: number) { return x * 2; }\n`,
+      },
+      tmpDir,
+      { name: "fixture", main: "./a.ts" },
+    );
     expect(violations.some((v) => v.message.includes("`helper`"))).toBe(false);
   });
 
