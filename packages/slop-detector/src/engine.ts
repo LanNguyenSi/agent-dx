@@ -236,12 +236,20 @@ export function buildCorpus(
       // symbol in a file that's only ever consumed through a `export *`
       // barrel was flagged as unused.
       if (node.type === "ExportAllDeclaration") {
-        const src = (node as TSESTree.ExportAllDeclaration).source;
+        const exportAll = node as TSESTree.ExportAllDeclaration;
+        const src = exportAll.source;
         const specifier = src && typeof src.value === "string" ? src.value : null;
         if (specifier && specifier.startsWith(".")) {
           const abs = path.resolve(path.dirname(filePath), specifier);
           const resolved = _resolveSourceFile(abs);
           if (resolved) starReexportTargets.add(resolved);
+        }
+        // `export * as ns from "./mod.js"` — unlike a bare `export *`,
+        // this form declares a real, trackable name (`ns`) on *this* file.
+        // Track it like any other named export so it can still be flagged
+        // as unused if nothing ever consumes `ns` from the barrel.
+        if (exportAll.exported && exportAll.exported.type === "Identifier") {
+          addExport(filePath, exportAll.exported.name, exportAll, file);
         }
         return;
       }
@@ -312,20 +320,37 @@ function _findNearestPackageRoot(files: string[]): string | null {
 const TS_SOURCE_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 
 /**
- * Resolve an absolute path to an existing file on disk: try it verbatim,
- * then swap its (real or apparent) extension across `TS_SOURCE_EXTS`.
- * Returns null when nothing on disk matches — e.g. a dist-only path with
- * no source counterpart in the scan root, or an unresolvable specifier.
+ * Resolve an absolute path to an existing *file* on disk: try it verbatim,
+ * then swap its (real or apparent) extension across `TS_SOURCE_EXTS`, then
+ * — if it's a directory (e.g. `main: "./src"`, or `export * from "./util"`
+ * with the real file at `util/index.ts`) — try `index.<ext>` inside it,
+ * matching Node's own directory-import resolution. Returns null when
+ * nothing on disk matches — e.g. a dist-only path with no source
+ * counterpart in the scan root, or an unresolvable specifier.
+ *
+ * `fs.existsSync` alone is not enough to accept the verbatim path: it's
+ * also true for directories, and a bare directory can never be the actual
+ * source file that ends up in `entrypoints` / a scanned file's path.
  * Shared by package.json entrypoint resolution and `export * from`
  * resolution, which both need the same "given a path, find the real
  * source file" logic.
  */
 function _resolveSourceFile(abs: string): string | null {
-  if (fs.existsSync(abs)) return abs;
+  if (fs.existsSync(abs)) {
+    const stat = fs.statSync(abs);
+    if (stat.isFile()) return abs;
+    if (stat.isDirectory()) {
+      for (const ext of TS_SOURCE_EXTS) {
+        const candidate = path.join(abs, "index" + ext);
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+      }
+      return null;
+    }
+  }
   const base = abs.replace(/\.[cm]?[jt]s[x]?$/, "");
   for (const ext of TS_SOURCE_EXTS) {
     const candidate = base + ext;
-    if (fs.existsSync(candidate)) return candidate;
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
   }
   return null;
 }

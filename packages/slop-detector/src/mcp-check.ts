@@ -67,8 +67,10 @@ const SEVERITY_LABEL: Record<Severity, string> = {
  * the shape of the CLI's text output.
  */
 export function renderSummary(summary: CheckSummary): string {
+  const lead: string[] = (summary.warnings ?? []).map((w) => `slop-detector: warning: ${w}`);
   if (summary.violations.length === 0) {
-    return `slop-detector: clean (${summary.filesScanned} file(s) scanned)`;
+    lead.push(`slop-detector: clean (${summary.filesScanned} file(s) scanned)`);
+    return lead.join("\n");
   }
   const byFile = new Map<string, Violation[]>();
   for (const v of summary.violations) {
@@ -76,7 +78,7 @@ export function renderSummary(summary: CheckSummary): string {
     if (arr) arr.push(v);
     else byFile.set(v.path, [v]);
   }
-  const lines: string[] = [];
+  const lines: string[] = [...lead];
   for (const [filePath, vs] of byFile) {
     lines.push(filePath);
     for (const v of vs) {

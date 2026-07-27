@@ -985,6 +985,7 @@ const unusedExport: Rule = {
     const seenSymbols = new Set<string>();
     for (const entry of fileExports) {
       if (seenSymbols.has(entry.symbol)) continue;
+      seenSymbols.add(entry.symbol);
 
       // Does any OTHER file reference this symbol? O(1) via the
       // precomputed name -> referencing-files index instead of scanning
@@ -993,7 +994,6 @@ const unusedExport: Rule = {
       const hasConsumer =
         !!referencingFiles && (referencingFiles.size > 1 || !referencingFiles.has(ctx.file.path));
       if (!hasConsumer) {
-        seenSymbols.add(entry.symbol);
         violations.push(
           makeViolation(
             unusedExport,

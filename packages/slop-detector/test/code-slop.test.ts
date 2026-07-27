@@ -891,6 +891,56 @@ describe("code-slop/unused-export", () => {
     expect(violations.some((v) => v.path.endsWith("a.ts") && v.message.includes("`helperA`"))).toBe(false);
   });
 
+  it("tracks `export * as ns from \"./a.js\"` as a real, trackable export of the barrel (unlike a bare `export *`)", () => {
+    // `ns` is a name genuinely introduced by this declaration on b.ts, not
+    // just an opaque re-export passthrough — so it must show up in
+    // exportsByFile and be flaggable like any other export, not silently
+    // invisible to the corpus the way a bare `export * from` is.
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "a.ts": `export function helperA() { return 1; }\n`,
+        "b.ts": `export * as ns from "./a.js";\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.path.endsWith("b.ts") && v.message.includes("`ns`"))).toBe(true);
+  });
+
+  it("resolves a directory specifier in `export * from \"./util\"` to util/index.ts, not the directory itself", () => {
+    // `existsSync` is true for directories too — without a stat().isFile()
+    // guard, `_resolveSourceFile` would "resolve" the bare directory path
+    // and add *that* to entrypoints, which matches no scanned file, so
+    // util/index.ts's export would still be (wrongly) flagged.
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "util/index.ts": `export function helperA() { return 1; }\n`,
+        "b.ts": `export * from "./util";\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.path.endsWith("util/index.ts") && v.message.includes("`helperA`"))).toBe(
+      false,
+    );
+  });
+
+  it("resolves package.json main: \"./src\" (a directory) to src/index.ts via the same directory-specifier fix", () => {
+    // _resolveEntrypoints shares _resolveSourceFile with the export * fix,
+    // so a directory `main` has the identical hole and the identical fix.
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "src/index.ts": `export function helperA() { return 1; }\n`,
+      },
+      tmpDir,
+      { name: "fixture", main: "./src" },
+    );
+    expect(violations.some((v) => v.message.includes("`helperA`"))).toBe(false);
+  });
+
   it("does not emit duplicate violations for an exported name declared more than once (e.g. overload signatures)", () => {
     // Two overload signatures + the implementation all declare `helperA` as
     // an export in the same file; exportsByFile has one entry per
@@ -996,6 +1046,24 @@ describe("code-slop/single-callsite-helper", () => {
       { name: "fixture", main: "./a.ts" },
     );
     expect(violations.some((v) => v.message.includes("`helper`"))).toBe(false);
+  });
+
+  it("does not flag a genuinely inlinable one-callsite helper inside a bare `export *` barrel target (blast-radius of the star exemption)", () => {
+    // util.ts is the target of `export * from "./util.js"` in b.ts. It's
+    // fully exempted (like an entrypoint), so a helper with a single
+    // in-package callsite that would normally be flagged is invisible to
+    // this rule too — not just to unused-export. This pins the documented
+    // blast-radius trade-off, not just the unused-export half of it.
+    const violations = runCorpusRule(
+      "code-slop/single-callsite-helper",
+      {
+        "util.ts": `export function trulyDeadInternal(x: number) { return x + 1; }\nconsole.log(trulyDeadInternal(1));\n`,
+        "b.ts": `export * from "./util.js";\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.message.includes("`trulyDeadInternal`"))).toBe(false);
   });
 
   it("returns empty results when corpus is absent (backward compat)", () => {
