@@ -321,6 +321,10 @@ program
         for (const peer of out.peers) {
           if (peer.error) {
             process.stderr.write(`friction-log: warning: peer digest source ${peer.sourcePath} (origin=${peer.origin}) skipped: ${peer.error}\n`);
+          } else if (peer.skipped > 0) {
+            process.stderr.write(
+              `friction-log: warning: peer digest source ${peer.sourcePath} (origin=${peer.origin}) skipped ${peer.skipped} malformed record(s)\n`
+            );
           }
         }
       }

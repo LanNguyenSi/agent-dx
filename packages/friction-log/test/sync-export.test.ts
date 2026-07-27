@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { formatDigest, runDigest } from '../src/commands/digest.js';
 import { runFile } from '../src/commands/file.js';
@@ -12,6 +12,27 @@ import { runScan } from '../src/commands/scan.js';
 import { runSyncExport } from '../src/commands/sync-export.js';
 import { runUpdate } from '../src/commands/update.js';
 import { FrictionDb } from '../src/db.js';
+
+function writeScanTranscript(path: string): void {
+  writeFileSync(
+    path,
+    [
+      {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: {} }] },
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'Exit code 1', is_error: true }],
+        },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join('\n') + '\n'
+  );
+}
 
 let tmp: string;
 let dbPath: string;
@@ -212,6 +233,83 @@ describe('write-through: maybeSyncExport wired into all 6 mutating commands', ()
   });
 });
 
+describe('write-through hardening', () => {
+  it('(HIGH regression) a config.yml with no sync_export block but otherwise malformed does not fail any mutating command', async () => {
+    // Non-mapping `sinks` value: loadConfig(configPath) throws when this is
+    // loaded, with a message that has nothing to do with sync_export at
+    // all. Before the fix, log/scan/import/update/rm called loadConfig
+    // directly at the call site (outside maybeSyncExport's try/catch),
+    // AFTER their own mutation had already committed, so this would crash
+    // the command with the row already written (a retry would duplicate).
+    writeFileSync(configPath, 'sinks: hello\n');
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      expect(() => runLog({ title: 'a', dbPath, configPath })).not.toThrow();
+      const logged = runLog({ title: 'b', dbPath, configPath });
+      expect(() => runUpdate({ frictionId: logged.id, status: 'wontfix', dbPath, configPath })).not.toThrow();
+
+      const importDir = join(tmp, 'memory-regression');
+      mkdirSync(importDir, { recursive: true });
+      writeFileSync(join(importDir, 'a.md'), '---\ntitle: imported under broken config\n---\nbody\n');
+      expect(() => runImport({ format: 'markdown-frontmatter', path: importDir, dbPath, configPath })).not.toThrow();
+
+      const transcript = join(tmp, 'regression.jsonl');
+      writeScanTranscript(transcript);
+      await expect(
+        runScan({ transcriptPath: transcript, sessionId: 'regression', dbPath, configPath })
+      ).resolves.toMatchObject({ inserted: 1 });
+
+      const toRemove = runLog({ title: 'c', dbPath, configPath });
+      expect(() => runRm({ frictionId: toRemove.id, dbPath, configPath })).not.toThrow();
+
+      // All the mutations actually landed: a broken config degraded the
+      // write-through, it did not degrade the primary command.
+      const db = new FrictionDb(dbPath);
+      try {
+        expect(db.listFrictions({ limit: 100 }).length).toBeGreaterThanOrEqual(4);
+      } finally {
+        db.close();
+      }
+      expect(stderrSpy.mock.calls.some((c) => String(c[0]).includes('sync-export write-through failed'))).toBe(true);
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('a write failure (unwritable target directory) warns but does not throw, and the mutation is not rolled back', () => {
+    const readonlyDir = join(tmp, 'readonly-target');
+    mkdirSync(readonlyDir, { recursive: true });
+    writeFileSync(
+      configPath,
+      `sync_export:\n  path: ${JSON.stringify(join(readonlyDir, 'export.json'))}\n  origin: test-machine\n`
+    );
+    chmodSync(readonlyDir, 0o500); // r-x: cannot create the .tmp file inside it
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const out = runLog({ title: 'survives write failure', dbPath, configPath });
+      expect(out.id).toBeGreaterThan(0);
+      const db = new FrictionDb(dbPath);
+      try {
+        expect(db.getFriction(out.id)?.title).toBe('survives write failure');
+      } finally {
+        db.close();
+      }
+      expect(stderrSpy.mock.calls.some((c) => String(c[0]).includes('sync-export write-through failed'))).toBe(true);
+      expect(existsSync(join(readonlyDir, 'export.json.tmp'))).toBe(false);
+    } finally {
+      stderrSpy.mockRestore();
+      chmodSync(readonlyDir, 0o700); // restore so afterEach's rmSync can clean up
+    }
+  });
+
+  it('does not leave a .tmp file behind after a successful write', () => {
+    writeSyncExportConfig();
+    runLog({ title: 'atomic', dbPath, configPath });
+    expect(existsSync(syncExportPath)).toBe(true);
+    expect(existsSync(`${syncExportPath}.tmp`)).toBe(false);
+  });
+});
+
 describe('digest --include-peers', () => {
   it('local rows are identical with and without the flag when peer_paths is empty', () => {
     writeSyncExportConfig();
@@ -290,5 +388,118 @@ describe('digest --include-peers', () => {
     expect(out.peers?.every((p) => p.rows.length === 0)).toBe(true);
     expect(() => formatDigest(out)).not.toThrow();
     expect(formatDigest(out)).toContain('WARNING');
+  });
+
+  it('hostile peer file: malformed records are skipped and counted, valid-but-odd fields degrade gracefully', () => {
+    const peerPath = join(tmp, 'hostile-peer.json');
+    writeFileSync(
+      peerPath,
+      JSON.stringify({
+        origin: 'hostile-machine',
+        records: [
+          {
+            title: 'valid one',
+            toolSurface: 'demo-tool',
+            capturedAt: '2026-01-01T00:00:00.000Z',
+            status: 'open',
+            severity: 'high',
+            source: 'manual',
+            recurrenceOfId: null,
+          },
+          // unknown status: must be skipped, not silently coerced to 'open'.
+          {
+            title: 'bad status',
+            toolSurface: 'demo-tool',
+            capturedAt: '2026-01-01T00:00:00.000Z',
+            status: 'archived',
+            severity: 'high',
+            source: 'manual',
+          },
+          // non-string title: must be skipped.
+          {
+            title: 12345,
+            toolSurface: 'demo-tool',
+            capturedAt: '2026-01-01T00:00:00.000Z',
+            status: 'open',
+            severity: 'high',
+            source: 'manual',
+          },
+          // non-ISO capturedAt: must be skipped (not silently included in
+          // every --last window via string comparison).
+          {
+            title: 'bad date',
+            toolSurface: 'demo-tool',
+            capturedAt: 'not-a-date',
+            status: 'open',
+            severity: 'high',
+            source: 'manual',
+          },
+          // invalid severity/source: NOT skipped, degrades to null/'import'.
+          {
+            title: 'coerced fields',
+            toolSurface: 'demo-tool',
+            capturedAt: '2026-01-02T00:00:00.000Z',
+            status: 'open',
+            severity: 'nonsense',
+            source: 'bogus',
+          },
+        ],
+      })
+    );
+    writeSyncExportConfig(`  peer_paths:\n    - ${JSON.stringify(peerPath)}\n`);
+    const out = runDigest({ groupBy: 'tool', dbPath, configPath, includePeers: true });
+    expect(out.peers).toHaveLength(1);
+    const peer = out.peers![0];
+    expect(peer.error).toBeUndefined();
+    expect(peer.skipped).toBe(3);
+    expect(peer.rows).toHaveLength(1);
+    expect(peer.rows[0].group).toBe('demo-tool');
+    expect(peer.rows[0].total).toBe(2);
+    expect(peer.rows[0].open).toBe(2);
+
+    const rendered = formatDigest(out);
+    expect(rendered).toContain('3 record(s) skipped as malformed');
+  });
+
+  it('peer recurrence fidelity: an explicit recurrenceOfId in the export data is counted even when replay-order heuristics would miss it', () => {
+    // Reproduces the reviewer's proof: record 2 is exported with
+    // recurrenceOfId=1 (the origin's own bookkeeping), but by the time it
+    // replays into the scratch db, record 1's status has already been
+    // flipped to 'resolved', so insertFriction's own open-root heuristic
+    // (which requires the root to still be 'open') would fail to re-derive
+    // the link and report 0 recurrences instead of 1.
+    const peerPath = join(tmp, 'recurrence-peer.json');
+    writeFileSync(
+      peerPath,
+      JSON.stringify({
+        origin: 'peer-machine',
+        records: [
+          {
+            title: 'flaky test fails',
+            toolSurface: 'ci',
+            capturedAt: '2026-01-01T00:00:00.000Z',
+            status: 'resolved',
+            recurrenceOfId: null,
+            source: 'manual',
+          },
+          {
+            title: 'flaky test fails',
+            toolSurface: 'ci',
+            capturedAt: '2026-01-05T00:00:00.000Z',
+            status: 'open',
+            recurrenceOfId: 1,
+            source: 'manual',
+          },
+        ],
+      })
+    );
+    writeSyncExportConfig(`  peer_paths:\n    - ${JSON.stringify(peerPath)}\n`);
+    const out = runDigest({ groupBy: 'tool', dbPath, configPath, includePeers: true });
+    const peer = out.peers![0];
+    expect(peer.skipped).toBe(0);
+    expect(peer.rows).toHaveLength(1);
+    expect(peer.rows[0].group).toBe('ci');
+    expect(peer.rows[0].total).toBe(2);
+    expect(peer.rows[0].recurrences).toBe(1);
   });
 });

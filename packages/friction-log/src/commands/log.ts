@@ -1,4 +1,3 @@
-import { loadConfig } from '../config.js';
 import { FrictionDb, type InsertFrictionInput } from '../db.js';
 import { defaultDbPath } from '../paths.js';
 import type { Severity } from '../types.js';
@@ -60,8 +59,7 @@ export function runLog(input: LogCommandInput): LogCommandOutput {
       source: 'manual',
     };
     const f = db.insertFriction(insert);
-    const config = loadConfig(input.configPath);
-    maybeSyncExport({ dbPath, config });
+    maybeSyncExport({ dbPath, configPath: input.configPath });
     return { id: f.id, capturedAt: f.capturedAt, recurrenceOfId: f.recurrenceOfId };
   } finally {
     db.close();

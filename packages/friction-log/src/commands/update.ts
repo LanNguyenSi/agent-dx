@@ -1,4 +1,3 @@
-import { loadConfig } from '../config.js';
 import { FrictionDb } from '../db.js';
 import { defaultDbPath } from '../paths.js';
 import { maybeSyncExport } from './sync-export.js';
@@ -25,8 +24,11 @@ export function runUpdate(input: UpdateCommandInput): UpdateCommandOutput {
       throw new Error(`friction-log: friction id=${input.frictionId} not found`);
     }
     db.updateFrictionStatus(input.frictionId, input.status);
-    const config = loadConfig(input.configPath);
-    maybeSyncExport({ dbPath, config });
+    // Skip write-through when the status did not actually change (the
+    // export payload's status field would be identical either way).
+    if (friction.status !== input.status) {
+      maybeSyncExport({ dbPath, configPath: input.configPath });
+    }
     return { id: input.frictionId, status: input.status };
   } finally {
     db.close();

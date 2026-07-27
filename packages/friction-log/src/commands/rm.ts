@@ -1,4 +1,3 @@
-import { loadConfig } from '../config.js';
 import { FrictionDb } from '../db.js';
 import { defaultDbPath } from '../paths.js';
 import { maybeSyncExport } from './sync-export.js';
@@ -23,8 +22,7 @@ export function runRm(input: RmCommandInput): RmCommandOutput {
     }
     const removed = db.deleteFriction(input.frictionId);
     if (removed) {
-      const config = loadConfig(input.configPath);
-      maybeSyncExport({ dbPath, config });
+      maybeSyncExport({ dbPath, configPath: input.configPath });
     }
     return { removed };
   } finally {

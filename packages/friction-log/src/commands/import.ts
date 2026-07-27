@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { loadConfig } from '../config.js';
 import { FrictionDb, type InsertFrictionInput } from '../db.js';
 import { defaultDbPath } from '../paths.js';
 import { maybeSyncExport } from './sync-export.js';
@@ -79,8 +78,11 @@ export function runImport(input: ImportCommandInput): ImportCommandOutput {
         errors.push({ file, reason: (err as Error).message });
       }
     }
-    const config = loadConfig(input.configPath);
-    maybeSyncExport({ dbPath, config });
+    // Skip write-through when nothing was actually imported (e.g. a full
+    // re-run of an already-imported directory, all deduped).
+    if (imported > 0) {
+      maybeSyncExport({ dbPath, configPath: input.configPath });
+    }
   } finally {
     db.close();
   }
