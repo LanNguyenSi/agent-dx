@@ -19,6 +19,7 @@ import {
   type StopHookPayload,
 } from './commands/scan.js';
 import { runSearch } from './commands/search.js';
+import { runSyncExport } from './commands/sync-export.js';
 import { runUpdate } from './commands/update.js';
 import { parseSinkOpts } from './config.js';
 import type { DigestGroupBy } from './db.js';
@@ -298,7 +299,9 @@ program
       .makeOptionMandatory(true)
   )
   .option('--last <span>', 'Restrict to frictions newer than e.g. 30d, 4w, 12h')
+  .option('--include-peers', 'Also render read-only digest sections for each configured sync_export.peer_paths file')
   .option('--json', 'Emit JSON instead of a table')
+  .option('--config <path>', 'Override config file path (only used by --include-peers)')
   .option('--db <path>', 'Override database path')
   .action((opts: Record<string, unknown>) => {
     try {
@@ -306,11 +309,20 @@ program
         groupBy: opts.groupBy as DigestGroupBy,
         last: opts.last as string | undefined,
         dbPath: opts.db as string | undefined,
+        configPath: opts.config as string | undefined,
+        includePeers: Boolean(opts.includePeers),
       });
       if (opts.json) {
         process.stdout.write(JSON.stringify(out, null, 2) + '\n');
       } else {
         process.stdout.write(formatDigest(out) + '\n');
+      }
+      if (out.peers) {
+        for (const peer of out.peers) {
+          if (peer.error) {
+            process.stderr.write(`friction-log: warning: peer digest source ${peer.sourcePath} (origin=${peer.origin}) skipped: ${peer.error}\n`);
+          }
+        }
       }
     } catch (err) {
       process.stderr.write(`${(err as Error).message}\n`);
@@ -361,19 +373,61 @@ program
   });
 
 program
+  .command('sync-export')
+  .description(
+    'Write every friction as deterministic, origin-tagged JSON to the configured sync_export.path. ' +
+      'No-op error unless "sync_export" (path + origin) is set in config.yml or via FRICTION_LOG_SYNC_EXPORT_PATH/_ORIGIN.'
+  )
+  .option('--config <path>', 'Override config file path')
+  .option('--db <path>', 'Override database path')
+  .action((opts: Record<string, unknown>) => {
+    try {
+      const out = runSyncExport({
+        configPath: opts.config as string | undefined,
+        dbPath: opts.db as string | undefined,
+      });
+      process.stderr.write(`sync-export: wrote ${out.count} frictions (origin=${out.origin}) to ${out.path}\n`);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
   .command('init')
   .description('Interactive setup: write config.yml, optionally install Stop-hook.')
   .addOption(new Option('--sink <name>', 'Default sink (skips the interactive prompt)').choices([...availableSinks]))
   .option('-y, --yes', 'Non-interactive; use --sink (or markdown-file fallback) and skip Stop-hook offer')
   .option('--install-stop-hook', 'Force-install the Claude Code Stop-hook (skip the interactive y/N)')
   .option('--config <path>', 'Override config file path')
+  .option('--sync-export-path <path>', 'Opt in to sync-export: write this config\'s sync_export.path')
+  .option('--sync-export-origin <name>', 'Opt in to sync-export: this machine\'s sync_export.origin label')
+  .option(
+    '--sync-export-peer <path>',
+    'Peer sync-export file to read for `digest --include-peers`, repeatable',
+    (value: string, previous: string[] = []) => [...previous, value],
+    [] as string[]
+  )
   .action(async (opts: Record<string, unknown>) => {
     try {
+      const syncExportPath = opts.syncExportPath as string | undefined;
+      const syncExportOrigin = opts.syncExportOrigin as string | undefined;
+      if (Boolean(syncExportPath) !== Boolean(syncExportOrigin)) {
+        process.stderr.write(
+          'friction-log: --sync-export-path and --sync-export-origin must be given together\n'
+        );
+        process.exit(2);
+      }
+      const syncExportPeers = Array.isArray(opts.syncExportPeer) ? (opts.syncExportPeer as string[]) : [];
       const out = await runInit({
         configPath: opts.config as string | undefined,
         sink: opts.sink as NonNullable<Parameters<typeof runInit>[0]>['sink'],
         yes: Boolean(opts.yes),
         installStopHook: opts.installStopHook === true ? true : undefined,
+        syncExport:
+          syncExportPath && syncExportOrigin
+            ? { path: syncExportPath, origin: syncExportOrigin, peerPaths: syncExportPeers }
+            : undefined,
       });
       process.stdout.write(
         `init: ${out.configWritten ? 'wrote' : 'no change to'} ${out.configPath}\n` +

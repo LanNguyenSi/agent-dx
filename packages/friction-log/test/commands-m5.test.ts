@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { loadConfig } from '../src/config.js';
 import { runImport, parseMarkdownContent } from '../src/commands/import.js';
 import { mergeConfigYaml, mergeStopHook, runInit } from '../src/commands/init.js';
 import { FrictionDb } from '../src/db.js';
@@ -11,13 +12,28 @@ import { listTemplates, loadTemplate, pickTemplateForCategory } from '../src/tem
 let workDir: string;
 let dbPath: string;
 
+// Guard against ambient FRICTION_LOG_SYNC_EXPORT_* env vars (which
+// loadConfig honors as overrides) leaking into the sync_export roundtrip
+// tests below and making them depend on the host environment.
+const SYNC_EXPORT_ENV_KEYS = ['FRICTION_LOG_SYNC_EXPORT_PATH', 'FRICTION_LOG_SYNC_EXPORT_ORIGIN'] as const;
+let savedSyncExportEnv: Record<string, string | undefined>;
+
 beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), 'friction-log-m5-'));
   dbPath = join(workDir, 'db.sqlite');
+  savedSyncExportEnv = {};
+  for (const k of SYNC_EXPORT_ENV_KEYS) {
+    savedSyncExportEnv[k] = process.env[k];
+    delete process.env[k];
+  }
 });
 
 afterEach(() => {
   rmSync(workDir, { recursive: true, force: true });
+  for (const k of SYNC_EXPORT_ENV_KEYS) {
+    if (savedSyncExportEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedSyncExportEnv[k];
+  }
 });
 
 describe('m5 templates', () => {
@@ -196,5 +212,61 @@ describe('init', () => {
     expect(merged).toContain('repo: x/y');
     expect(merged).toContain('some_user_key: kept');
     expect(merged).toContain('default_sink: markdown-file');
+  });
+
+  it('mergeConfigYaml leaves sync_export untouched when init is not asked to write one (no drift-bug repeat)', () => {
+    // The pre-existing drift bug: init.ts wrote `default_sink` but loadConfig
+    // never read it back. Guard the opposite failure mode for sync_export: a
+    // plain `init` run (no --sync-export-* flags) must not silently drop or
+    // rewrite an already-configured sync_export block.
+    const existing = 'sync_export:\n  path: /tmp/export.json\n  origin: macbook\n';
+    const merged = mergeConfigYaml(existing, 'markdown-file');
+    expect(merged).toContain('path: /tmp/export.json');
+    expect(merged).toContain('origin: macbook');
+  });
+
+  it('roundtrip: init writes the sync_export block and loadConfig reads it back (AC4)', async () => {
+    const configPath = join(workDir, 'config.yml');
+    const out = await runInit({
+      configPath,
+      sink: 'markdown-file',
+      yes: true,
+      installStopHook: false,
+      syncExport: { path: '/tmp/friction-log-sync.json', origin: 'macbook', peerPaths: ['/tmp/peer.json'] },
+      detect: () => ({
+        claudeCodeSettingsPath: null,
+        ghAvailable: false,
+        linearKeyPresent: false,
+        agentTasksTokenPresent: false,
+      }),
+    });
+    expect(out.configWritten).toBe(true);
+    const cfg = loadConfig(configPath);
+    expect(cfg.syncExport).toEqual({
+      path: '/tmp/friction-log-sync.json',
+      origin: 'macbook',
+      peerPaths: ['/tmp/peer.json'],
+    });
+    expect(out.nextSteps.join('\n')).toContain('sync-export configured');
+  });
+
+  it('re-running init without --sync-export-* preserves a previously-written block', async () => {
+    const configPath = join(workDir, 'config.yml');
+    const noopDetect = () => ({
+      claudeCodeSettingsPath: null,
+      ghAvailable: false,
+      linearKeyPresent: false,
+      agentTasksTokenPresent: false,
+    });
+    await runInit({
+      configPath,
+      sink: 'markdown-file',
+      yes: true,
+      syncExport: { path: '/tmp/friction-log-sync.json', origin: 'macbook' },
+      detect: noopDetect,
+    });
+    await runInit({ configPath, sink: 'markdown-file', yes: true, detect: noopDetect });
+    const cfg = loadConfig(configPath);
+    expect(cfg.syncExport).toEqual({ path: '/tmp/friction-log-sync.json', origin: 'macbook', peerPaths: [] });
   });
 });

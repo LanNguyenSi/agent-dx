@@ -1,6 +1,8 @@
+import { loadConfig } from '../config.js';
 import { FrictionDb, type InsertFrictionInput } from '../db.js';
 import { defaultDbPath } from '../paths.js';
 import { loadScanner } from '../scanners/index.js';
+import { maybeSyncExport } from './sync-export.js';
 import type { Friction } from '../types.js';
 
 export interface ScanCommandInput {
@@ -8,6 +10,7 @@ export interface ScanCommandInput {
   transcriptPath?: string;
   adapter?: string;
   dbPath?: string;
+  configPath?: string;
 }
 
 export interface ScanCommandOutput {
@@ -26,7 +29,8 @@ export async function runScan(input: ScanCommandInput): Promise<ScanCommandOutpu
     transcriptPath: input.transcriptPath,
   });
 
-  const db = new FrictionDb(input.dbPath ?? defaultDbPath());
+  const dbPath = input.dbPath ?? defaultDbPath();
+  const db = new FrictionDb(dbPath);
   try {
     db.upsertSession({
       id: result.session.id,
@@ -57,6 +61,9 @@ export async function runScan(input: ScanCommandInput): Promise<ScanCommandOutpu
       db.insertFriction(insert);
       inserted++;
     }
+
+    const config = loadConfig(input.configPath);
+    maybeSyncExport({ dbPath, config });
 
     return {
       sessionId: result.session.id,

@@ -2,6 +2,7 @@ import { loadConfig, mergeSinkOpts, type SinkConfig } from '../config.js';
 import { FrictionDb } from '../db.js';
 import { defaultDbPath } from '../paths.js';
 import { loadSink } from '../sinks/index.js';
+import { maybeSyncExport } from './sync-export.js';
 import { loadTemplate, pickTemplateForCategory, render } from '../templates.js';
 
 export interface FileCommandInput {
@@ -23,7 +24,8 @@ export interface FileCommandOutput {
 }
 
 export async function runFile(input: FileCommandInput): Promise<FileCommandOutput> {
-  const db = new FrictionDb(input.dbPath ?? defaultDbPath());
+  const dbPath = input.dbPath ?? defaultDbPath();
+  const db = new FrictionDb(dbPath);
   try {
     const friction = db.getFriction(input.frictionId);
     if (!friction) {
@@ -52,6 +54,7 @@ export async function runFile(input: FileCommandInput): Promise<FileCommandOutpu
       prUrl: result.prUrl ?? null,
     });
     db.updateFrictionStatus(friction.id, 'filed');
+    maybeSyncExport({ dbPath, config });
     return {
       taskId: task.id,
       sinkName,

@@ -73,6 +73,91 @@ describe('config loader', () => {
   });
 });
 
+describe('config loader: sync_export block', () => {
+  const ENV_KEYS = ['FRICTION_LOG_SYNC_EXPORT_PATH', 'FRICTION_LOG_SYNC_EXPORT_ORIGIN'] as const;
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    savedEnv = {};
+    for (const k of ENV_KEYS) {
+      savedEnv[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+  });
+
+  it('is undefined when absent, and does not affect the sinks-only shape', () => {
+    writeFileSync(configPath, 'sinks:\n  markdown-file: {}\n');
+    expect(loadConfig(configPath).syncExport).toBeUndefined();
+  });
+
+  it('reads path, origin, and peer_paths', () => {
+    writeFileSync(
+      configPath,
+      'sync_export:\n  path: /tmp/export.json\n  origin: macbook\n  peer_paths:\n    - /tmp/peer-a.json\n    - /tmp/peer-b.json\n'
+    );
+    expect(loadConfig(configPath).syncExport).toEqual({
+      path: '/tmp/export.json',
+      origin: 'macbook',
+      peerPaths: ['/tmp/peer-a.json', '/tmp/peer-b.json'],
+    });
+  });
+
+  it('defaults peerPaths to [] when omitted, and is readable with no sinks key at all', () => {
+    writeFileSync(configPath, 'sync_export:\n  path: /tmp/export.json\n  origin: macbook\n');
+    const cfg = loadConfig(configPath);
+    expect(cfg.sinks).toEqual({});
+    expect(cfg.syncExport).toEqual({ path: '/tmp/export.json', origin: 'macbook', peerPaths: [] });
+  });
+
+  it('throws when path or origin is missing from an otherwise-present block', () => {
+    writeFileSync(configPath, 'sync_export:\n  origin: macbook\n');
+    expect(() => loadConfig(configPath)).toThrow(/sync_export\.path/);
+    writeFileSync(configPath, 'sync_export:\n  path: /tmp/export.json\n');
+    expect(() => loadConfig(configPath)).toThrow(/sync_export\.origin/);
+  });
+
+  it('throws on a non-mapping sync_export value', () => {
+    writeFileSync(configPath, 'sync_export: hello\n');
+    expect(() => loadConfig(configPath)).toThrow(/non-mapping "sync_export"/);
+  });
+
+  it('env vars activate sync-export even with no config file at all', () => {
+    process.env.FRICTION_LOG_SYNC_EXPORT_PATH = '/tmp/env-export.json';
+    process.env.FRICTION_LOG_SYNC_EXPORT_ORIGIN = 'env-origin';
+    expect(loadConfig(configPath).syncExport).toEqual({
+      path: '/tmp/env-export.json',
+      origin: 'env-origin',
+      peerPaths: [],
+    });
+  });
+
+  it('env vars override individual fields of an existing config block, preserving peer_paths', () => {
+    writeFileSync(
+      configPath,
+      'sync_export:\n  path: /tmp/config-export.json\n  origin: config-origin\n  peer_paths:\n    - /tmp/peer.json\n'
+    );
+    process.env.FRICTION_LOG_SYNC_EXPORT_ORIGIN = 'env-origin';
+    expect(loadConfig(configPath).syncExport).toEqual({
+      path: '/tmp/config-export.json',
+      origin: 'env-origin',
+      peerPaths: ['/tmp/peer.json'],
+    });
+  });
+
+  it('throws when only one env var is set and the config has no counterpart', () => {
+    writeFileSync(configPath, 'sinks: {}\n');
+    process.env.FRICTION_LOG_SYNC_EXPORT_PATH = '/tmp/env-export.json';
+    expect(() => loadConfig(configPath)).toThrow(/FRICTION_LOG_SYNC_EXPORT_PATH/);
+  });
+});
+
 describe('mergeSinkOpts + parseSinkOpts', () => {
   it('CLI overrides win over config defaults', () => {
     const merged = mergeSinkOpts({ repo: 'a/b', extra: 1 }, { repo: 'c/d' });

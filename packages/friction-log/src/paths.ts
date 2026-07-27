@@ -20,3 +20,18 @@ export function defaultConfigPath(): string {
 export function defaultMarkdownSinkDir(): string {
   return process.env.FRICTION_LOG_MARKDOWN_DIR ?? join(xdgDataHome(), 'friction-log', 'frictions');
 }
+
+/**
+ * sync_export has no XDG-style fallback location (it is opt-in only), so
+ * unlike the `default*Path` helpers above these return `undefined` when the
+ * env var is unset rather than falling back to a computed default. Callers
+ * (config.ts) treat `undefined` as "no override" and fall through to the
+ * config-file value, if any.
+ */
+export function syncExportPathOverride(): string | undefined {
+  return process.env.FRICTION_LOG_SYNC_EXPORT_PATH || undefined;
+}
+
+export function syncExportOriginOverride(): string | undefined {
+  return process.env.FRICTION_LOG_SYNC_EXPORT_ORIGIN || undefined;
+}

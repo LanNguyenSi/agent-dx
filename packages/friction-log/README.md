@@ -50,8 +50,9 @@ The data isn't the goal. The goal is the inferences that the data enables once a
 | `log` | Manually record a friction with title, tool, category, severity. Returns the new id. Optional `--recurrence-of <id>` to explicitly mark a duplicate; otherwise auto-links on matching (tool, title) against an open root, see [recurrence semantics](#recurrence_of_id-semantics). |
 | `list` | List frictions with filters: `--status`, `--tool`, `--category`, `--source`, `--age 14d`, `--limit`. Use `--json` for piping. |
 | `search <query>` | FTS5 MATCH over title and description, plus the same structured filters as `list`. Use `--json` for piping. Accepts the full [FTS5 query syntax](https://sqlite.org/fts5.html#full_text_query_syntax). |
-| `digest --group-by <field>` | Aggregations over frictions: total, open / filed / resolved / wontfix counts, open percentage, recurrence count, and average hours from `captured_at` to the first `tasks.created_at` (time-to-triage proxy). `--group-by tool|category|severity|source`. Optional `--last <span>` window. |
+| `digest --group-by <field>` | Aggregations over frictions: total, open / filed / resolved / wontfix counts, open percentage, recurrence count, and average hours from `captured_at` to the first `tasks.created_at` (time-to-triage proxy). `--group-by tool|category|severity|source`. Optional `--last <span>` window. `--include-peers` additionally renders one read-only section per `sync_export.peer_paths` entry; see [Sync-export](#sync-export-optional-multi-machine-file-merge). |
 | `export --format <json\|csv\|md>` | Render frictions for offline analysis or hand-off. Same filter combinators as `list`, plus `--query <text>` for an FTS pre-filter. `--out <path>` writes to a file, otherwise stdout. |
+| `sync-export` | Write every friction as deterministic, origin-tagged JSON to the configured `sync_export.path`. No-op error unless `sync_export` is configured; see [Sync-export](#sync-export-optional-multi-machine-file-merge). |
 | `file <id>` | Push a friction through a sink. Default sink is `markdown-file`, default template matches the friction's category and falls back to `workflow-friction`. |
 | `scan` | Parse a transcript and extract candidate frictions (tool-call errors, non-zero Bash exits, friction phrases). Flags: `--transcript <path>`, `--session <id>`, `--adapter claude-code`, `--silent`, `--stdin-payload`. Idempotent on re-run. |
 | `bilanz` | Print a session-boundary summary: tools exercised, frictions noticed, tasks filed, plus a highlighted list of open frictions that have not been filed yet. `--session <id>` defaults to the most recent session. |
@@ -117,6 +118,29 @@ When `log` (or `scan`) inserts a new friction without an explicit `--recurrence-
 The oldest such match becomes the new friction's `recurrence_of_id`. The chain therefore always points one level deep, at the root; downstream queries can `GROUP BY coalesce(recurrence_of_id, id)` to fold recurrences into their root for free.
 
 This is the cheap, deterministic rule, deliberately small enough to predict by eye. A future milestone may add fuzzier matching (template-aware, vector-based) behind an opt-in flag, but the cheap rule is the default so the database remains explainable from a glance at the source.
+
+## Sync-export (optional, multi-machine file merge)
+
+`friction-log` is still local SQLite, single-machine, no server (see [Design notes](#design-notes)). Sync-export is an opt-in, config-gated file export that makes it possible to *look at* frictions from more than one machine without turning the tool into a client-server system: each machine writes its own deterministic JSON dump to a path of your choosing, and any machine can read the others' dumps read-only. Moving that file between machines (Dropbox, iCloud, a git-tracked dotfiles repo, `agent-memory-sync`, `rsync`, ...) is entirely up to you; this package only produces and consumes the file.
+
+**Without a `sync_export` block, every piece of this is an exact no-op.** No new file is ever written, and `list`/`search`/`export`/`digest` render exactly as before.
+
+```yaml
+# config.yml
+sync_export:
+  path: /Users/you/Sync/friction-log/macbook.json   # where THIS machine writes
+  origin: macbook                                    # this machine's label
+  peer_paths:                                        # OTHER machines' files, read-only
+    - /Users/you/Sync/friction-log/mac-mini.json
+```
+
+`path` and `origin` can also come from `FRICTION_LOG_SYNC_EXPORT_PATH` / `FRICTION_LOG_SYNC_EXPORT_ORIGIN` (env wins over the YAML value when both are set), so the same `config.yml` can be checked into dotfiles and shared across machines while each machine supplies its own path/origin via its shell profile or `.env`. `friction-log init --sync-export-path <path> --sync-export-origin <name> [--sync-export-peer <path> ...]` scaffolds the block non-interactively.
+
+- **Write-through.** Once configured, every mutating command (`log`, `scan`, `import`, `update`, `rm`, `file`) rewrites the full export file after it commits its own change, so the file always reflects the current local state. Write failures (e.g. an unmounted sync folder) log a warning to stderr; they never fail the command whose data is already safely in the local db.
+- **`friction-log sync-export`** does the same write on demand, useful for a cron job or a manual "sync now", and, unlike the write-through above, errors loudly if `sync_export` is not configured, since the whole point of calling it is to produce the file.
+- **Determinism.** The file has no timestamp field and lists every friction (no 100-row cap) sorted by `captured_at` ascending with an `id` tiebreaker, so two exports with no mutation in between are byte-identical: safe to diff or to feed into a dumb "did anything change" check.
+- **Shape:** `{ "origin": "<label>", "records": [ ...same fields as `export --format json`, plus `origin` at the top level... ] }`. One file = one machine; no secrets are included (frictions are personal observation data, same as everywhere else in this tool).
+- **`digest --group-by <field> --include-peers`** reads every `sync_export.peer_paths` file read-only (never writes to them) and renders one additional section per peer, labeled by that file's own `origin` field (falling back to the filename if it's missing or blank). Peer numbers are computed with the exact same aggregation as the local digest, replayed against a throwaway in-memory database, but a peer's friction ids are never dereferenced against local ids (they're a different machine's AUTOINCREMENT sequence, so a raw id/`recurrence_of_id` from one machine means nothing on another); local digest numbers are completely unaffected by `--include-peers`. A missing or corrupt peer file degrades to a warning section (and a stderr warning) instead of failing the command.
 
 ## Sinks
 
@@ -234,7 +258,7 @@ The v1 surface is complete. Future ideas (no scheduled milestone): web dashboard
 
 Public-tool framing: zero LanNguyenSi-stack assumptions in the core. The default sink is plain markdown files so the tool works without any external infrastructure, and integrations are configurable adapters that load only when used.
 
-Local SQLite, single-user, single-machine. No sync, no server, no cloud. Friction records are personal observation data, the smallest store that lets queries answer questions is the right one.
+Local SQLite, single-user, single-machine at the core. Still no live sync, no server, no cloud: the database itself is never shared or written to remotely. The one opt-in exception is [sync-export](#sync-export-optional-multi-machine-file-merge): a deterministic, config-gated file dump of the local db, plus a read-only merge of other machines' dumps into `digest`. Both are exact no-ops until configured, and transport between machines is left to something else (Dropbox, iCloud, `agent-memory-sync`, ...); this package produces and consumes a file, it does not move it. Friction records are personal observation data, the smallest store that lets queries answer questions is the right one.
 
 Deterministic detection only: regex on tool-call errors, non-zero exits, friction phrases. No LLM API calls in the default Stop-hook so it stays free and fast. An opt-in `--with-llm` flag for deeper end-of-week reviews is on the M5+ roadmap.
 

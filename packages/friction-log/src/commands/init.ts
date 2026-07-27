@@ -15,6 +15,15 @@ export interface InitDetected {
   agentTasksTokenPresent: boolean;
 }
 
+/** Mirrors config.ts's SyncExportConfig; kept as a separate, minimal shape
+ * here so init.ts does not need to import the config-loading module just
+ * for a type. */
+export interface InitSyncExportInput {
+  path: string;
+  origin: string;
+  peerPaths?: string[];
+}
+
 export interface InitCommandInput {
   configPath?: string;
   sink?: InitDefaultSink;
@@ -22,6 +31,10 @@ export interface InitCommandInput {
   installStopHook?: boolean;
   prompt?: Prompter;
   detect?: () => InitDetected;
+  /** Opt-in only: when omitted, init never touches (or scaffolds) the
+   * sync_export block, so a plain `init` re-run stays a no-op for existing
+   * users who never asked for sync-export. */
+  syncExport?: InitSyncExportInput;
 }
 
 export interface InitCommandOutput {
@@ -56,7 +69,7 @@ export async function runInit(input: InitCommandInput = {}): Promise<InitCommand
 
   const configExistedBefore = existsSync(configPath);
   const existing = configExistedBefore ? readFileSync(configPath, 'utf8') : '';
-  const newConfig = mergeConfigYaml(existing, defaultSink);
+  const newConfig = mergeConfigYaml(existing, defaultSink, input.syncExport);
 
   // Only write when the content actually changes; idempotency matters when
   // init is run multiple times during onboarding.
@@ -92,7 +105,7 @@ export async function runInit(input: InitCommandInput = {}): Promise<InitCommand
     defaultSink,
     stopHookWrittenTo,
     detected,
-    nextSteps: buildNextSteps(defaultSink, configPath, stopHookWrittenTo),
+    nextSteps: buildNextSteps(defaultSink, configPath, stopHookWrittenTo, input.syncExport),
   };
 }
 
@@ -117,7 +130,11 @@ function defaultDetect(): InitDetected {
   };
 }
 
-export function mergeConfigYaml(existingYaml: string, defaultSink: InitDefaultSink): string {
+export function mergeConfigYaml(
+  existingYaml: string,
+  defaultSink: InitDefaultSink,
+  syncExport?: InitSyncExportInput
+): string {
   // Parse as best-effort; if existing config is corrupt we still want init
   // to land a clean default scaffolding rather than wedging the user.
   let parsed: Record<string, unknown> = {};
@@ -139,6 +156,20 @@ export function mergeConfigYaml(existingYaml: string, defaultSink: InitDefaultSi
   }
   parsed.sinks = sinks;
   parsed.default_sink = defaultSink;
+  // Opt-in only, and this is the ONLY place that writes sync_export: when
+  // `syncExport` is omitted (the default `init` path), any existing
+  // sync_export block in `parsed` is passed through untouched below since we
+  // never delete or overwrite the key. This is the fix for the drift bug
+  // where init.ts wrote `default_sink` but loadConfig never read it back:
+  // config.ts's loadConfig reads this exact `sync_export` shape (see
+  // parseSyncExportBlock).
+  if (syncExport) {
+    parsed.sync_export = {
+      path: syncExport.path,
+      origin: syncExport.origin,
+      ...(syncExport.peerPaths && syncExport.peerPaths.length ? { peer_paths: syncExport.peerPaths } : {}),
+    };
+  }
   return stringifyYaml(parsed);
 }
 
@@ -193,7 +224,12 @@ export function mergeStopHook(existingJson: string): string {
   return JSON.stringify(parsed, null, 2) + '\n';
 }
 
-function buildNextSteps(sink: InitDefaultSink, configPath: string, stopHook: string | null): string[] {
+function buildNextSteps(
+  sink: InitDefaultSink,
+  configPath: string,
+  stopHook: string | null,
+  syncExport?: InitSyncExportInput
+): string[] {
   const out: string[] = [];
   out.push(`Configuration written to ${configPath}.`);
   out.push(`Default sink: ${sink}.`);
@@ -201,6 +237,11 @@ function buildNextSteps(sink: InitDefaultSink, configPath: string, stopHook: str
     out.push(`Stop-hook installed at ${stopHook}; new sessions auto-scan on close.`);
   } else {
     out.push(`Stop-hook not installed. Run "friction-log scan" manually at end of session, or re-run "init" later.`);
+  }
+  if (syncExport) {
+    out.push(
+      `sync-export configured: origin=${syncExport.origin}, writes to ${syncExport.path} after every mutation.`
+    );
   }
   out.push('Quick smoke:');
   out.push(`  friction-log log --title "first friction" --tool "demo" --category tool-error`);

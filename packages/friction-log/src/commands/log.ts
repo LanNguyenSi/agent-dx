@@ -1,6 +1,8 @@
+import { loadConfig } from '../config.js';
 import { FrictionDb, type InsertFrictionInput } from '../db.js';
 import { defaultDbPath } from '../paths.js';
 import type { Severity } from '../types.js';
+import { maybeSyncExport } from './sync-export.js';
 
 export interface LogCommandInput {
   title: string;
@@ -11,6 +13,7 @@ export interface LogCommandInput {
   sessionId?: string;
   recurrenceOfId?: number;
   dbPath?: string;
+  configPath?: string;
 }
 
 export interface LogCommandOutput {
@@ -20,7 +23,8 @@ export interface LogCommandOutput {
 }
 
 export function runLog(input: LogCommandInput): LogCommandOutput {
-  const db = new FrictionDb(input.dbPath ?? defaultDbPath());
+  const dbPath = input.dbPath ?? defaultDbPath();
+  const db = new FrictionDb(dbPath);
   try {
     if (input.recurrenceOfId !== undefined) {
       const parent = db.getFriction(input.recurrenceOfId);
@@ -56,6 +60,8 @@ export function runLog(input: LogCommandInput): LogCommandOutput {
       source: 'manual',
     };
     const f = db.insertFriction(insert);
+    const config = loadConfig(input.configPath);
+    maybeSyncExport({ dbPath, config });
     return { id: f.id, capturedAt: f.capturedAt, recurrenceOfId: f.recurrenceOfId };
   } finally {
     db.close();
