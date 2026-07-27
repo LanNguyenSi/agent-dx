@@ -1,6 +1,7 @@
 import { FrictionDb, type InsertFrictionInput } from '../db.js';
 import { defaultDbPath } from '../paths.js';
 import { loadScanner } from '../scanners/index.js';
+import { maybeSyncExport } from './sync-export.js';
 import type { Friction } from '../types.js';
 
 export interface ScanCommandInput {
@@ -8,6 +9,7 @@ export interface ScanCommandInput {
   transcriptPath?: string;
   adapter?: string;
   dbPath?: string;
+  configPath?: string;
 }
 
 export interface ScanCommandOutput {
@@ -26,7 +28,8 @@ export async function runScan(input: ScanCommandInput): Promise<ScanCommandOutpu
     transcriptPath: input.transcriptPath,
   });
 
-  const db = new FrictionDb(input.dbPath ?? defaultDbPath());
+  const dbPath = input.dbPath ?? defaultDbPath();
+  const db = new FrictionDb(dbPath);
   try {
     db.upsertSession({
       id: result.session.id,
@@ -56,6 +59,14 @@ export async function runScan(input: ScanCommandInput): Promise<ScanCommandOutpu
       };
       db.insertFriction(insert);
       inserted++;
+    }
+
+    // Skip write-through entirely when nothing was actually inserted (all
+    // candidates were duplicates, or there were none): the export payload
+    // only carries frictions, so a session-only upsert with zero new
+    // frictions can never change its content anyway.
+    if (inserted > 0) {
+      maybeSyncExport({ dbPath, configPath: input.configPath });
     }
 
     return {

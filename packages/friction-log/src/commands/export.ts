@@ -69,7 +69,7 @@ export function runExport(input: ExportCommandInput): ExportCommandOutput {
   }
 }
 
-function frictionToExport(f: Friction): Omit<ExportRecord, 'tags'> {
+export function frictionToExport(f: Friction): Omit<ExportRecord, 'tags'> {
   return {
     id: f.id,
     sessionId: f.sessionId,

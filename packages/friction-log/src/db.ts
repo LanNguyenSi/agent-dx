@@ -499,9 +499,27 @@ export class FrictionDb {
     const rawLimit = filter.limit ?? 100;
     const limit = Math.max(1, Math.min(10_000, Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : 100));
     params.limit = limit;
+    // Tiebreaker on `id` makes ordering deterministic when two frictions
+    // share a captured_at timestamp (e.g. a bulk import landing in the same
+    // millisecond). Backward-compatible: for the overwhelmingly common case
+    // of distinct timestamps this changes nothing, and SQLite gave no
+    // ordering guarantee on ties before this either.
     const rows = this.db
-      .prepare(`SELECT * FROM frictions ${whereSql} ORDER BY captured_at DESC LIMIT @limit`)
+      .prepare(`SELECT * FROM frictions ${whereSql} ORDER BY captured_at DESC, id DESC LIMIT @limit`)
       .all(params) as FrictionRow[];
+    return rows.map(rowToFriction);
+  }
+
+  /**
+   * Every friction, no limit, sorted oldest-first with an `id` tiebreaker.
+   * Dedicated to sync-export: `listFrictions` caps at 10_000 and sorts
+   * newest-first for interactive use, neither of which is right for a full,
+   * deterministic machine-readable dump.
+   */
+  listAllFrictionsForSyncExport(): Friction[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM frictions ORDER BY captured_at ASC, id ASC`)
+      .all() as FrictionRow[];
     return rows.map(rowToFriction);
   }
 
