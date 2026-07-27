@@ -223,12 +223,12 @@ Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; 
 
 ## Cross-file rules (experimental)
 
-Two `code-slop` rules analyse symbols across all files in the scan root rather than per file.  They are **off by default** and require a corpus pre-pass that parses every TypeScript/JavaScript file once before the rule loop runs.
+Two `code-slop` rules analyse symbols across all files in the scan root rather than per file.  They are **off by default** and require a corpus pre-pass that parses every TypeScript/JavaScript file once before the rule loop runs. The pre-pass also builds an inverted name → referencing-files index, so `unused-export`'s "does any other file use this?" check is an O(1) map lookup per export rather than an O(files) scan repeated for every export in the scan root.
 
 | Rule | Default severity | What it finds |
 |------|-----------------|---------------|
-| `code-slop/unused-export` | warn | Exported symbols not imported by any other file and not reachable via `package.json` entrypoints (`main`, `bin`, `exports`). |
-| `code-slop/single-callsite-helper` | warn | Named functions/`const`s with a body of at most 3 statements that are called from at most one place in the package (candidates for inlining). |
+| `code-slop/unused-export` | warn | Exported symbols not imported by any other file and not reachable via `package.json` entrypoints (`main`, `bin`, `exports`, or `entrypointGlobs`). |
+| `code-slop/single-callsite-helper` | warn | Named functions/`const`s with a body of at most 3 statements that are called from at most one place in the package (candidates for inlining). Exempts files reachable via an entrypoint, same as `unused-export` — a helper whose only real callers are external to the scan is expected to show a low in-package call count. Precision cost of that exemption: it's file-wide, so a genuinely inlinable one-callsite helper that happens to live in the entrypoint/barrel file is now permanently invisible to this rule, not just the helpers that are actually part of the public API. This also applies to a bare `export *` barrel target, not just `package.json`/`entrypointGlobs` entrypoints — see the blast-radius note in Known limitations below. |
 
 ### Enabling the corpus pre-pass
 
@@ -265,11 +265,23 @@ rules:
     enabled: true
 ```
 
+### Marking a src barrel as an entrypoint
+
+`package.json` `main`/`bin`/`exports` fields typically point at compiled output (`dist/index.js`). When the scan targets `src/`, those paths don't resolve to any file in the scan root, so the real `src/` public-API barrel is never recognised as an entrypoint and its re-exports get flagged as unused. Use `entrypointGlobs` to mark it explicitly:
+
+```yaml
+# slop.config.yml
+corpus: true
+entrypointGlobs:
+  - "src/index.ts"
+```
+
+Patterns are matched against each scanned file's path relative to `scanRoot` (the CLI passes the path/directory you told it to `check`); when no `scanRoot` is available (e.g. a bare `checkFiles([...])` call with no option), the nearest directory containing a `package.json` is used, and failing that, `process.cwd()`. A pattern must not start with `/` — that can never match a relative path and is rejected at config-load time. A pattern that matches zero scanned files (a typo, or the wrong root assumption) doesn't fail silently: `checkFiles`'s returned `CheckSummary.warnings` names it. There's no equivalent guard against an *overly broad* pattern, though — `entrypointGlobs: ["**"]` is valid config that silently exempts every file and reduces both rules to zero output; treat a broad barrel pattern as suspicious paired with the two rules producing nothing.
+
 ### Known limitations (v1)
 
-- **Entrypoint resolution uses dist paths.** `package.json` `main`/`exports` fields typically point at compiled output (`dist/index.js`).  When you scan `src/`, the entrypoint files are not matched and every symbol in the public API entry file will appear as an unused export.  Workaround: add the entry file to `ignorePaths`, or scope the scan to a sub-directory that does not contain the public API boundary.  A symbol-level entrypoint glob is tracked as a follow-up.
-- **Name-only symbol matching.** The corpus matches symbols by identifier name across files, not by import binding.  Two unrelated exports with the same name in different files will be counted as references to each other (false negative on `unused-export`).  Likewise, a local variable shadowing an imported name may suppress a violation (false positive suppression).
-- **Each file is parsed twice** when both the corpus pre-pass and the per-file rule loop run: once in `buildCorpus` and once inside the rule `check()` call (the second parse is cache-hit via `parseTsFile`'s `WeakMap`, so no disk I/O, but the AST walk repeats).
+- **Name-only, scope-blind symbol matching.** The corpus matches symbols by identifier name across files, not by import binding or lexical scope. Two unrelated exports with the same name in different files are counted as references to each other (false negative on `unused-export`). A local variable or parameter that shadows an imported/exported name may likewise suppress a violation (false positive suppression). Both re-export forms are handled: a named re-export (`export { x } from "./mod.js"`) counts as a reference to `x`, so the original declaration is no longer flagged — but the re-export statement itself is also tracked as an export *of the barrel file*, so if nothing consumes `x` from the barrel either (and the barrel isn't an entrypoint), the "unused" violation simply moves from the declaration to the barrel rather than disappearing; that's a defensible outcome (the barrel re-export genuinely is the dead surface in that case) but worth knowing when triaging a violation's location. `export * as ns from "./mod.js"` declares a real name (`ns`) on the barrel file and is tracked exactly like a named re-export — same "moves to the barrel" behavior applies to it. A *bare* `export * from "./mod.js"` (no `as ns`) is different: it declares no trackable name of its own, so instead the whole resolved target file is treated as reachable public API (like a `main`/`entrypointGlobs` entrypoint) rather than tracking which individual symbols the barrel actually forwards — resolving that precisely would mean walking the full re-export graph. **Blast radius of that exemption: it applies to both corpus rules, not just `unused-export`.** A file that's the target of a bare `export *` is fully invisible to `single-callsite-helper` too — a genuinely dead or genuinely inlinable symbol inside it won't be flagged by either rule, not only the ones actually re-exported through the barrel. TypeScript's `export = foo` (CommonJS-style export assignment) is recognised as neither an export nor a reference at all; a file using it will misbehave under both corpus rules. A **non-call** use of an identifier (passing a function by reference, e.g. `arr.map(helperA)`, `setTimeout(helperA)`, `export const onClick = helperA`) is also still not tracked, so a helper consumed only that way can be misflagged as unused or single-callsite. Treat both rules as directional signals to double-check, not ground truth, until these are closed.
+- **`buildCorpus` still makes a separate initial pass** over every file before the per-file rule loop runs. Measured on a synthetic 500-file project (median of 7 warmed runs, `code-slop` pack with both corpus rules enabled): `checkFiles` took ~172ms with the corpus pre-pass off and ~343ms with it on — the extra pass costs roughly as much as the rest of the scan combined (about half of corpus-on runtime), several times more than the O(files²)→O(1) lookup this change removed. It exists because `buildCorpus` and the per-file rule loop each construct their own `FileTarget` for the same file, and `parseTsFile`'s cache is a `WeakMap` keyed by that object — so the second pass's parse is always a cache miss, never reused. Unlike the double-parse `code-slop/unused-export` used to do (fixed in this change: it now reads `corpus.exportsByFile` directly instead of re-parsing), this one is structural: threading the corpus's own `FileTarget`s through into the main loop, or keying the parse cache by path+text instead of by object identity, would close it, but that's a `checkFiles`-level change and is an open follow-up, not something fixed here.
 
 ## Per-line opt-out
 

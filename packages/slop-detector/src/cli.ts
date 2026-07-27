@@ -5,7 +5,8 @@ import { Command } from "commander";
 import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
-import type { CheckSummary, Severity } from "./types.js";
+import { renderText } from "./cli-render.js";
+import type { CheckSummary } from "./types.js";
 
 const program = new Command();
 
@@ -90,7 +91,7 @@ async function runCheck(rawPath: string | undefined, rawOpts: unknown): Promise<
   if (opts.format === "json") {
     process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
   } else {
-    renderText(summary, opts.explain ?? false);
+    process.stdout.write(renderText(summary, opts.explain ?? false));
   }
   process.exit(summary.blockCount > 0 ? 1 : 0);
 }
@@ -119,50 +120,6 @@ async function readStdin(): Promise<string> {
     process.stdin.on("end", () => resolve(data));
     process.stdin.on("error", reject);
   });
-}
-
-function renderText(summary: CheckSummary, explain: boolean): void {
-  const out = process.stdout;
-  if (summary.violations.length === 0) {
-    out.write(`slop-detector: clean (${summary.filesScanned} files scanned)\n`);
-    return;
-  }
-  const byFile = groupBy(summary.violations, (v) => v.path);
-  for (const [filePath, vs] of byFile) {
-    out.write(`\n${filePath}\n`);
-    for (const v of vs) {
-      const sev = severityLabel(v.severity);
-      out.write(`  ${sev} ${v.line}:${v.column}  ${v.ruleId}  ${v.message}\n`);
-      if (explain) {
-        out.write(`    ↪ ${v.rationale}\n`);
-      }
-    }
-  }
-  out.write(
-    `\n${summary.filesScanned} files scanned, ${summary.violations.length} violations (block ${summary.blockCount}, warn ${summary.warnCount}, info ${summary.infoCount})\n`,
-  );
-}
-
-function severityLabel(s: Severity): string {
-  switch (s) {
-    case "block":
-      return "BLOCK";
-    case "warn":
-      return "WARN ";
-    case "info":
-      return "INFO ";
-  }
-}
-
-function groupBy<T, K>(items: T[], key: (t: T) => K): Map<K, T[]> {
-  const map = new Map<K, T[]>();
-  for (const item of items) {
-    const k = key(item);
-    const arr = map.get(k);
-    if (arr) arr.push(item);
-    else map.set(k, [item]);
-  }
-  return map;
 }
 
 function readVersion(): string {

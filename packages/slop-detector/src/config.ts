@@ -12,6 +12,16 @@ const RuleOverrideSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+// `entrypointGlobs` is matched against a path already made relative to the
+// scan root (see `_resolveEntrypointGlobs` in engine.ts) — a leading "/"
+// can never match that relative path, so it's always a misconfiguration
+// (someone assuming absolute-path matching) rather than a valid pattern.
+// Reject it at parse time instead of letting it silently match nothing.
+const EntrypointGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
+  message:
+    'entrypointGlobs patterns are matched relative to the scan root (or the nearest package.json directory), not as absolute paths — remove the leading "/"',
+});
+
 const ConfigFileSchema = z.object({
   packs: z.record(PackIdSchema, z.boolean()).optional(),
   rules: z.record(z.string(), RuleOverrideSchema).optional(),
@@ -19,6 +29,7 @@ const ConfigFileSchema = z.object({
   treatAsProse: z.array(z.string()).optional(),
   treatAsCode: z.array(z.string()).optional(),
   corpus: z.boolean().optional(),
+  entrypointGlobs: z.array(EntrypointGlobSchema).optional(),
 });
 
 export type ConfigFile = z.infer<typeof ConfigFileSchema>;
@@ -66,6 +77,7 @@ export function defaultConfig(): ResolvedConfig {
     ignorePaths: [...DEFAULT_IGNORES],
     treatAsProse: [],
     treatAsCode: [],
+    entrypointGlobs: [],
   };
 }
 
@@ -80,6 +92,7 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
     treatAsProse: file.treatAsProse ?? [],
     treatAsCode: file.treatAsCode ?? [],
     corpus: file.corpus,
+    entrypointGlobs: file.entrypointGlobs ?? [],
   };
 }
 

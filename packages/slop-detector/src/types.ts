@@ -10,20 +10,41 @@ export interface FileTarget {
 
 export type FileKind = "prose" | "code" | "style" | "markup" | "binary";
 
+/** A single exported symbol, pre-resolved to a report-ready location. */
+export interface CorpusExportEntry {
+  file: string;
+  symbol: string;
+  loc: { line: number; column: number; endLine: number; endColumn: number };
+  /** Short source snippet for the violation's `matched` field. */
+  snippet: string;
+}
+
 export interface Corpus {
   /**
-   * Every exported symbol in the scan root, keyed as "file::symbol".
-   * Built by `buildCorpus` when the corpus feature flag is active.
+   * Every exported symbol in the scan root, grouped by file. Built by
+   * `buildCorpus` when the corpus feature flag is active and consumed
+   * directly by `code-slop/unused-export` — the rule does not re-parse a
+   * file or re-walk its AST to rediscover its own export list.
+   *
+   * Note: a file with multiple declarations for the same exported name
+   * (e.g. overloaded `function` signatures, each satisfying
+   * `extractDeclaredNames`) produces one entry per declaration here, not
+   * one per unique symbol name — callers that care about uniqueness must
+   * de-duplicate by `symbol`.
    */
-  exports: Map<string, { file: string; symbol: string }>;
+  exportsByFile: Map<string, CorpusExportEntry[]>;
   /**
-   * Identifiers referenced (imported or called) per file.
-   * Key = absolute file path; value = Set of identifier names.
+   * Inverted index: identifier name -> set of files whose reference set
+   * contains that name (imported, called, or re-exported from). Lets
+   * corpus-aware rules answer "is this name used by any file other than
+   * mine?" in O(1) instead of scanning every file's reference set per
+   * export.
    */
-  referencesByFile: Map<string, Set<string>>;
+  referencingFilesByName: Map<string, Set<string>>;
   /**
    * Source files reachable from the nearest package.json
-   * via `main`, `bin`, or `exports` fields.
+   * via `main`, `bin`, or `exports` fields, plus any file matched by
+   * `config.entrypointGlobs`.
    */
   entrypoints: Set<string>;
   /**
@@ -32,6 +53,13 @@ export interface Corpus {
    * detect single-call-site helpers.
    */
   callCountBySymbol: Map<string, number>;
+  /**
+   * `config.entrypointGlobs` patterns that matched zero scanned files.
+   * `checkFiles` turns these into `CheckSummary.warnings` — a typo'd or
+   * wrongly-rooted glob otherwise fails silently and the corpus rules
+   * behave exactly as if `entrypointGlobs` had never been set.
+   */
+  unmatchedEntrypointGlobs: string[];
 }
 
 export interface RuleContext {
@@ -84,6 +112,21 @@ export interface ResolvedConfig {
   treatAsCode: string[];
   /** When true, `checkFiles`/`checkPath` will build a corpus for cross-file rules. */
   corpus?: boolean;
+  /**
+   * Glob patterns marking additional files as public-API entrypoints for
+   * the corpus pre-pass, on top of whatever `package.json` main/bin/exports
+   * resolve to. Use this to mark a `src/` barrel whose package.json
+   * entrypoints point at compiled `dist/` output, so the corpus-aware
+   * rules don't flag its re-exports.
+   *
+   * Matched relative to `CheckOptions.scanRoot` when given, else the
+   * nearest directory containing a `package.json`, else `process.cwd()`
+   * (see `buildCorpus` in engine.ts). Optional and defaulting to `[]` so
+   * that omitting it — including from a hand-built `ResolvedConfig`
+   * object, as opposed to one produced by `defaultConfig`/`mergeConfig` —
+   * is not a breaking change.
+   */
+  entrypointGlobs?: string[];
 }
 
 export interface CheckSummary {
@@ -92,4 +135,12 @@ export interface CheckSummary {
   blockCount: number;
   warnCount: number;
   infoCount: number;
+  /**
+   * Engine-level configuration warnings, distinct from lint violations —
+   * currently only populated with one entry per `entrypointGlobs` pattern
+   * that matched zero scanned files. Absent (not just empty) when there is
+   * nothing to report, so existing consumers that don't check for it are
+   * unaffected.
+   */
+  warnings?: string[];
 }

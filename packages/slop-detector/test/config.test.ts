@@ -51,4 +51,24 @@ describe("config", () => {
     expect(cfg.packs["prose-slop"]).toBe(false);
     expect(cfg.ruleOverrides["agent-tics/stray-result-tag"].severity).toBe("warn");
   });
+
+  it("loadConfig accepts a scan-root-relative entrypointGlobs pattern", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `entrypointGlobs:\n  - "src/index.ts"\n`);
+    const cfg = loadConfig(file);
+    expect(cfg.entrypointGlobs).toEqual(["src/index.ts"]);
+  });
+
+  it("loadConfig rejects an entrypointGlobs pattern with a leading slash", () => {
+    // entrypointGlobs is matched against a path already made relative to
+    // the scan root — a leading "/" can never match, so it's always a
+    // misconfiguration (someone assuming absolute-path matching), not a
+    // valid pattern. Reject it at parse time instead of silently matching
+    // nothing.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `entrypointGlobs:\n  - "/src/index.ts"\n`);
+    expect(() => loadConfig(file)).toThrow(/entrypointGlobs/);
+  });
 });

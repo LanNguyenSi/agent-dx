@@ -105,4 +105,28 @@ describe("renderSummary", () => {
       /violation\(s\) \(block \d+, warn \d+, info \d+\)/,
     );
   });
+
+  it("prints a warning before the clean line when the summary carries one", () => {
+    // Mirrors the CLI bug this guards against: CheckSummary.warnings can be
+    // populated (e.g. a typo'd entrypointGlobs pattern) even when there are
+    // zero violations, and the MCP renderer must not silently drop it.
+    const summary = runSlopCheck({
+      text: "Shipped the fix and ran the tests.",
+      filename: "msg.md",
+    });
+    summary.warnings = ['entrypointGlobs pattern "src/typo-index.ts" matched no scanned files'];
+    const rendered = renderSummary(summary);
+    expect(rendered.split("\n")[0]).toContain("src/typo-index.ts");
+    expect(rendered).toMatch(/clean \(1 file\(s\) scanned\)/);
+  });
+
+  it("prints a warning before the violation list", () => {
+    const summary = runSlopCheck({
+      text: "done\n</result>\n",
+      filename: "msg.md",
+    });
+    summary.warnings = ["some warning"];
+    const rendered = renderSummary(summary);
+    expect(rendered.indexOf("some warning")).toBeLessThan(rendered.indexOf("msg.md"));
+  });
 });
