@@ -121,7 +121,14 @@ export function checkFiles(
     violations.push(..._checkTextWithCorpus(text, filePath, options, corpus));
     scanned++;
   }
-  return summarize(violations, scanned);
+  const summary = summarize(violations, scanned);
+  if (corpus && corpus.unmatchedEntrypointGlobs.length > 0) {
+    summary.warnings = corpus.unmatchedEntrypointGlobs.map(
+      (glob) =>
+        `entrypointGlobs pattern "${glob}" matched no scanned files — check for a typo, or that it's relative to the scan root (or nearest package.json) rather than to something else`,
+    );
+  }
+  return summary;
 }
 
 export function checkPath(
@@ -150,15 +157,16 @@ export function buildCorpus(
   config: ResolvedConfig,
   scanRoot?: string,
 ): Corpus {
-  const exports = new Map<string, CorpusExportEntry>();
   const exportsByFile = new Map<string, CorpusExportEntry[]>();
   const referencingFilesByName = new Map<string, Set<string>>();
   const entrypoints = new Set<string>();
   const callCountBySymbol = new Map<string, number>();
+  // Files reached via `export * from "./mod.js"` somewhere in the scan.
+  // Merged into `entrypoints` after the main loop (see rationale below).
+  const starReexportTargets = new Set<string>();
 
   const addExport = (filePath: string, symbol: string, node: TSESTree.Node, file: FileTarget): void => {
     const entry: CorpusExportEntry = { file: filePath, symbol, loc: nodeLoc(node), snippet: snippet(file, node) };
-    exports.set(`${filePath}::${symbol}`, entry);
     let list = exportsByFile.get(filePath);
     if (!list) {
       list = [];
@@ -218,6 +226,25 @@ export function buildCorpus(
         addExport(filePath, "default", node, file);
         return;
       }
+      // `export * from "./mod.js"` (and `export * as ns from "./mod.js"`).
+      // We don't know which of `mod`'s exports are actually consumed
+      // downstream of the barrel without resolving the whole re-export
+      // chain, so — same trade-off as the package.json entrypoint
+      // exemption — treat the *entire* resolved file as reachable public
+      // API rather than tracking individual symbols. Cheaper than full
+      // resolution, and it closes the false positive: without this, every
+      // symbol in a file that's only ever consumed through a `export *`
+      // barrel was flagged as unused.
+      if (node.type === "ExportAllDeclaration") {
+        const src = (node as TSESTree.ExportAllDeclaration).source;
+        const specifier = src && typeof src.value === "string" ? src.value : null;
+        if (specifier && specifier.startsWith(".")) {
+          const abs = path.resolve(path.dirname(filePath), specifier);
+          const resolved = _resolveSourceFile(abs);
+          if (resolved) starReexportTargets.add(resolved);
+        }
+        return;
+      }
 
       // ── Collect references: imports ──────────────────────────────────────
       if (node.type === "ImportDeclaration") {
@@ -247,14 +274,26 @@ export function buildCorpus(
 
   // ── Resolve package.json entrypoints ──────────────────────────────────────
   const pkgRoot = scanRoot ?? _findNearestPackageRoot(files);
-  if (pkgRoot) {
-    _resolveEntrypoints(pkgRoot, entrypoints);
-    if (config.entrypointGlobs.length > 0) {
-      _resolveEntrypointGlobs(pkgRoot, files, config.entrypointGlobs, entrypoints);
-    }
+  if (pkgRoot) _resolveEntrypoints(pkgRoot, entrypoints);
+
+  // `entrypointGlobs` doesn't require a package.json — resolve it whenever
+  // globs are configured, independent of the `if (pkgRoot)` branch above,
+  // so programmatic `checkFiles` callers without a package.json in scope
+  // still get it. Root is `scanRoot` when given, else the nearest
+  // package.json directory, else `process.cwd()` (see the JSDoc on
+  // `ResolvedConfig.entrypointGlobs` in types.ts for the same contract).
+  const entrypointGlobs = config.entrypointGlobs ?? [];
+  let unmatchedEntrypointGlobs: string[] = [];
+  if (entrypointGlobs.length > 0) {
+    const globRoot = scanRoot ?? pkgRoot ?? process.cwd();
+    unmatchedEntrypointGlobs = _resolveEntrypointGlobs(globRoot, files, entrypointGlobs, entrypoints);
   }
 
-  return { exports, exportsByFile, referencingFilesByName, entrypoints, callCountBySymbol };
+  // `export * from` targets are exempted the same way package.json
+  // entrypoints are (see the ExportAllDeclaration branch above).
+  for (const target of starReexportTargets) entrypoints.add(target);
+
+  return { exportsByFile, referencingFilesByName, entrypoints, callCountBySymbol, unmatchedEntrypointGlobs };
 }
 
 /** Walk up from the first file looking for a package.json directory. */
@@ -266,6 +305,27 @@ function _findNearestPackageRoot(files: string[]): string | null {
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
+  }
+  return null;
+}
+
+const TS_SOURCE_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+
+/**
+ * Resolve an absolute path to an existing file on disk: try it verbatim,
+ * then swap its (real or apparent) extension across `TS_SOURCE_EXTS`.
+ * Returns null when nothing on disk matches — e.g. a dist-only path with
+ * no source counterpart in the scan root, or an unresolvable specifier.
+ * Shared by package.json entrypoint resolution and `export * from`
+ * resolution, which both need the same "given a path, find the real
+ * source file" logic.
+ */
+function _resolveSourceFile(abs: string): string | null {
+  if (fs.existsSync(abs)) return abs;
+  const base = abs.replace(/\.[cm]?[jt]s[x]?$/, "");
+  for (const ext of TS_SOURCE_EXTS) {
+    const candidate = base + ext;
+    if (fs.existsSync(candidate)) return candidate;
   }
   return null;
 }
@@ -293,22 +353,12 @@ function _resolveEntrypoints(root: string, into: Set<string>): void {
     return;
   }
 
-  const TS_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
-
   function tryAdd(raw: unknown): void {
     if (typeof raw !== "string") return;
     // Condition keys (e.g. "import", "require", "default") start without ".".
     if (!raw.startsWith(".")) return;
-    const abs = path.resolve(root, raw);
-    // First try the path as-is.
-    if (fs.existsSync(abs)) { into.add(abs); return; }
-    // Strip existing extension and retry with source extensions.
-    const base = abs.replace(/\.[cm]?[jt]s[x]?$/, "");
-    for (const ext of TS_EXTS) {
-      const candidate = base + ext;
-      if (fs.existsSync(candidate)) { into.add(candidate); return; }
-    }
-    // Give up — may be a dist-only path with no source counterpart.
+    const resolved = _resolveSourceFile(path.resolve(root, raw));
+    if (resolved) into.add(resolved);
   }
 
   function walkExportsField(val: unknown): void {
@@ -338,14 +388,26 @@ function _resolveEntrypoints(root: string, into: Set<string>): void {
  * never recognised as an entrypoint and its re-exports get flagged as dead.
  * `config.entrypointGlobs` lets a project mark that barrel explicitly, e.g.
  * `entrypointGlobs: ["src/index.ts"]`.
+ *
+ * Returns the subset of `globs` that matched zero scanned files, so the
+ * caller can surface a warning — a typo'd or wrongly-rooted pattern would
+ * otherwise fail silently and leave the corpus rules behaving as if
+ * `entrypointGlobs` had never been set.
  */
-function _resolveEntrypointGlobs(root: string, files: string[], globs: string[], into: Set<string>): void {
+function _resolveEntrypointGlobs(root: string, files: string[], globs: string[], into: Set<string>): string[] {
   const regexes = globs.map((g) => globToRegex(g));
+  const matchCounts = new Array<number>(globs.length).fill(0);
   for (const filePath of files) {
     const abs = path.resolve(filePath);
     const rel = path.relative(root, abs).split(path.sep).join("/");
-    if (regexes.some((re) => re.test(rel))) into.add(abs);
+    for (let i = 0; i < regexes.length; i++) {
+      if (regexes[i].test(rel)) {
+        into.add(abs);
+        matchCounts[i]++;
+      }
+    }
   }
+  return globs.filter((_, i) => matchCounts[i] === 0);
 }
 
 export function summarize(violations: Violation[], filesScanned: number): CheckSummary {

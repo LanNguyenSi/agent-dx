@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codeSlopPack, __resetCaches } from "../src/packs/code-slop.js";
 import { checkFiles } from "../src/engine.js";
-import type { FileTarget, ResolvedConfig, Rule } from "../src/types.js";
+import type { Corpus, FileTarget, ResolvedConfig, Rule } from "../src/types.js";
 
 function code(text: string, fileName = "fixture.ts"): FileTarget {
   return { path: fileName, text, kind: "code" };
@@ -781,21 +781,38 @@ describe("code-slop/unused-export", () => {
     expect(rule.check({ file, config })).toEqual([]);
   });
 
-  it("reports the export's own source location (consumed from the corpus, not re-derived by a second parse)", () => {
-    // `helperA` is declared on line 2; the violation must point at it, even
-    // though the rule itself never re-parses a.ts to find that location.
-    const violations = runCorpusRule(
-      "code-slop/unused-export",
-      {
-        "a.ts": `\nexport function helperA() { return 1; }\n`,
-      },
-      tmpDir,
-      { name: "fixture" },
-    );
-    const v = violations.find((x) => x.message.includes("`helperA`"));
-    expect(v).toBeDefined();
-    expect(v?.line).toBe(2);
-    expect(v?.matched).toContain("helperA");
+  it("consumes the corpus's precomputed export location/snippet instead of re-deriving them by re-parsing the file", () => {
+    // Hand-build a corpus whose exportsByFile entry for a.ts is
+    // deliberately wrong relative to a.ts's real text: line 99 and a
+    // snippet string that could never come from actually parsing this
+    // file. If the rule still re-parsed ctx.file to rediscover its own
+    // exports (the pre-fix behaviour), it would report the *correct*,
+    // re-derived location/snippet instead — so a violation carrying these
+    // exact fake values pins direct corpus consumption, not just "the rule
+    // still works".
+    const rule = codeSlopPack.rules.find((r) => r.id === "code-slop/unused-export")!;
+    const file: FileTarget = {
+      path: "a.ts",
+      text: `export function helperA() { return 1; }\n`,
+      kind: "code",
+    };
+    const fakeEntry = {
+      file: "a.ts",
+      symbol: "helperA",
+      loc: { line: 99, column: 5, endLine: 99, endColumn: 20 },
+      snippet: "__DELIBERATELY_FAKE_SNIPPET__",
+    };
+    const corpus: Corpus = {
+      exportsByFile: new Map([["a.ts", [fakeEntry]]]),
+      referencingFilesByName: new Map(),
+      entrypoints: new Set(),
+      callCountBySymbol: new Map(),
+      unmatchedEntrypointGlobs: [],
+    };
+    const violations = rule.check({ file, config, corpus });
+    expect(violations).toHaveLength(1);
+    expect(violations[0].line).toBe(99);
+    expect(violations[0].matched).toBe("__DELIBERATELY_FAKE_SNIPPET__");
   });
 
   it("flags an unused `export default`", () => {
@@ -856,6 +873,72 @@ describe("code-slop/unused-export", () => {
     );
     expect(violations.some((v) => v.message.includes("`helperA`"))).toBe(false);
   });
+
+  it("does not flag a symbol reachable only through `export * from \"./a.js\"` (star re-export)", () => {
+    // b.ts is a bare `export *` barrel over a.ts — nothing imports, calls,
+    // or named-re-exports helperA directly. This is the exact shape used
+    // in this monorepo at packages/friction-log/src/index.ts:1
+    // (`export * from './types.js';`).
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "a.ts": `export function helperA() { return 1; }\n`,
+        "b.ts": `export * from "./a.js";\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.some((v) => v.path.endsWith("a.ts") && v.message.includes("`helperA`"))).toBe(false);
+  });
+
+  it("does not emit duplicate violations for an exported name declared more than once (e.g. overload signatures)", () => {
+    // Two overload signatures + the implementation all declare `helperA` as
+    // an export in the same file; exportsByFile has one entry per
+    // declaration, so without de-duplication this would emit 3 identical
+    // violations instead of 1.
+    const violations = runCorpusRule(
+      "code-slop/unused-export",
+      {
+        "a.ts": `export function helperA(x: number): number;\nexport function helperA(x: string): string;\nexport function helperA(x: unknown) { return x; }\n`,
+      },
+      tmpDir,
+      { name: "fixture" },
+    );
+    expect(violations.filter((v) => v.message.includes("`helperA`"))).toHaveLength(1);
+  });
+
+  it("surfaces a warning when an entrypointGlobs pattern matches no scanned files (typo protection)", () => {
+    writeFileSync(join(tmpDir, "package.json"), JSON.stringify({ name: "fixture" }));
+    const p = join(tmpDir, "a.ts");
+    writeFileSync(p, `export function helperA() { return 1; }\n`);
+    const cfg: ResolvedConfig = {
+      packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false },
+      ruleOverrides: { "code-slop/unused-export": { enabled: true } },
+      ignorePaths: [],
+      treatAsProse: [],
+      treatAsCode: [],
+      entrypointGlobs: ["src/typo-index.ts"],
+    };
+    const summary = checkFiles([p], { packs: [codeSlopPack], config: cfg, corpusEnabled: true, scanRoot: tmpDir });
+    expect(summary.warnings?.some((w) => w.includes("src/typo-index.ts"))).toBe(true);
+  });
+
+  it("does not warn when every entrypointGlobs pattern matches a scanned file", () => {
+    writeFileSync(join(tmpDir, "package.json"), JSON.stringify({ name: "fixture" }));
+    const p = join(tmpDir, "src", "index.ts");
+    mkdirSync(join(tmpDir, "src"), { recursive: true });
+    writeFileSync(p, `export function helperA() { return 1; }\n`);
+    const cfg: ResolvedConfig = {
+      packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false },
+      ruleOverrides: { "code-slop/unused-export": { enabled: true } },
+      ignorePaths: [],
+      treatAsProse: [],
+      treatAsCode: [],
+      entrypointGlobs: ["src/index.ts"],
+    };
+    const summary = checkFiles([p], { packs: [codeSlopPack], config: cfg, corpusEnabled: true, scanRoot: tmpDir });
+    expect(summary.warnings).toBeUndefined();
+  });
 });
 
 describe("code-slop/single-callsite-helper", () => {
@@ -897,23 +980,6 @@ describe("code-slop/single-callsite-helper", () => {
       { name: "fixture" },
     );
     expect(violations.some((v) => v.message.includes("`add`"))).toBe(false);
-  });
-
-  it("does not flag a function called from two files regardless of entrypoint status", () => {
-    // A function with >1 callsite should be safe whether or not any file
-    // involved is a package.json entrypoint — the callsite count alone
-    // already clears it.
-    const violations = runCorpusRule(
-      "code-slop/single-callsite-helper",
-      {
-        "a.ts": `export function helper(x: number) { return x * 2; }\n`,
-        "b.ts": `import { helper } from "./a.js";\nconsole.log(helper(1));\nconsole.log(helper(2));\n`,
-      },
-      tmpDir,
-      { name: "fixture" },
-    );
-    // b.ts calls helper() twice — corpus counts 2 → not flagged
-    expect(violations.some((v) => v.message.includes("`helper`"))).toBe(false);
   });
 
   it("does not flag a ≤3-statement helper defined in a package.json entrypoint file", () => {

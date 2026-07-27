@@ -977,7 +977,15 @@ const unusedExport: Rule = {
     const fileExports = exportsByFile.get(ctx.file.path) ?? [];
 
     const violations: Violation[] = [];
+    // A file with several declarations for the same exported name (e.g.
+    // overloaded `function` signatures) has one `exportsByFile` entry per
+    // declaration, not per unique name — de-duplicate here so an
+    // unconsumed overloaded export gets one violation, not one per
+    // overload signature.
+    const seenSymbols = new Set<string>();
     for (const entry of fileExports) {
+      if (seenSymbols.has(entry.symbol)) continue;
+
       // Does any OTHER file reference this symbol? O(1) via the
       // precomputed name -> referencing-files index instead of scanning
       // every file's reference set for every export in the scan.
@@ -985,6 +993,7 @@ const unusedExport: Rule = {
       const hasConsumer =
         !!referencingFiles && (referencingFiles.size > 1 || !referencingFiles.has(ctx.file.path));
       if (!hasConsumer) {
+        seenSymbols.add(entry.symbol);
         violations.push(
           makeViolation(
             unusedExport,
