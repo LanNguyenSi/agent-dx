@@ -97,7 +97,10 @@ function writeSyncExportFile(dbPath: string, cfg: SyncExportConfig): number {
       // Atomic write: write to a same-directory tmp file, then rename over
       // the real path, so a reader (or a sync tool) never observes a
       // partially-written file.
-      const tmpPath = `${cfg.path}.tmp`;
+      // PID suffix: two concurrent writers sharing one config (Stop-hook
+      // scan racing an operator-run command) must not share a temp file,
+      // or the rename can publish a mix of two snapshots.
+      const tmpPath = `${cfg.path}.${process.pid}.tmp`;
       writeFileSync(tmpPath, json, 'utf8');
       renameSync(tmpPath, cfg.path);
     }

@@ -88,12 +88,19 @@ function normalizePeerRecord(raw: unknown): NormalizedPeerRecord | null {
   const rec = raw as Partial<ExportRecord>;
   if (typeof rec.title !== 'string' || rec.title.trim() === '') return null;
   if (!isFrictionStatus(rec.status)) return null;
-  if (typeof rec.capturedAt !== 'string' || Number.isNaN(Date.parse(rec.capturedAt))) return null;
+  if (typeof rec.capturedAt !== 'string') return null;
+  // Lenient on input, canonical in storage: Date.parse accepts many
+  // non-ISO spellings ('Jan 1 1999'), and every downstream comparison
+  // (--last windows, recurrence cutoffs) is a plain string compare
+  // against ISO timestamps — so a parseable-but-non-ISO value must be
+  // re-rendered as ISO or it sorts above every real date.
+  const capturedAtDate = new Date(rec.capturedAt);
+  if (Number.isNaN(capturedAtDate.getTime())) return null;
   return {
     toolSurface: typeof rec.toolSurface === 'string' ? rec.toolSurface : null,
     title: rec.title,
     description: typeof rec.description === 'string' ? rec.description : null,
-    capturedAt: rec.capturedAt,
+    capturedAt: capturedAtDate.toISOString(),
     severity: isSeverity(rec.severity) ? rec.severity : null,
     category: typeof rec.category === 'string' ? rec.category : null,
     status: rec.status,

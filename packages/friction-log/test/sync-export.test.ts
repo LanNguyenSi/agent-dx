@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -459,6 +459,59 @@ describe('digest --include-peers', () => {
 
     const rendered = formatDigest(out);
     expect(rendered).toContain('3 record(s) skipped as malformed');
+  });
+
+  it('non-ISO but Date.parse-able capturedAt is normalized to ISO, not string-compared into every --last window', () => {
+    // Date.parse accepts 'Jan 1 1999'; stored verbatim it would sort
+    // ABOVE every ISO timestamp in the plain string compare and land a
+    // 27-year-old record inside every --last window.
+    const peerPath = join(tmp, 'lenient-date-peer.json');
+    writeFileSync(
+      peerPath,
+      JSON.stringify({
+        origin: 'lenient-machine',
+        records: [
+          {
+            title: 'ancient non-iso',
+            toolSurface: 'ancient-tool',
+            capturedAt: 'Jan 1 1999 00:00:00 GMT',
+            status: 'open',
+            severity: 'high',
+            source: 'manual',
+            recurrenceOfId: null,
+          },
+          {
+            title: 'recent iso',
+            toolSurface: 'recent-tool',
+            capturedAt: new Date().toISOString(),
+            status: 'open',
+            severity: 'high',
+            source: 'manual',
+            recurrenceOfId: null,
+          },
+        ],
+      })
+    );
+    writeSyncExportConfig(`  peer_paths:\n    - ${JSON.stringify(peerPath)}\n`);
+    const out = runDigest({ groupBy: 'tool', dbPath, configPath, includePeers: true, last: '7d' });
+    const peer = out.peers![0];
+    expect(peer.error).toBeUndefined();
+    // The ancient record is valid (skipped=0) but must fall OUTSIDE the
+    // 7-day window once normalized to ISO; only the recent one remains.
+    expect(peer.skipped).toBe(0);
+    expect(peer.rows.map((r) => r.group)).toEqual(['recent-tool']);
+  });
+
+  it('no-op runs leave the export file mtime untouched (content-compare skip)', () => {
+    writeSyncExportConfig();
+    const logged = runLog({ title: 'mtime probe', dbPath, configPath });
+    const before = statSync(syncExportPath).mtimeMs;
+    // A mutation-free re-export must compare-and-skip, not rewrite.
+    runSyncExport({ dbPath, configPath });
+    expect(statSync(syncExportPath).mtimeMs).toBe(before);
+    // An update to the same status is a no-op mutation: no write-through.
+    runUpdate({ frictionId: logged.id, status: 'open', dbPath, configPath });
+    expect(statSync(syncExportPath).mtimeMs).toBe(before);
   });
 
   it('peer recurrence fidelity: an explicit recurrenceOfId in the export data is counted even when replay-order heuristics would miss it', () => {
