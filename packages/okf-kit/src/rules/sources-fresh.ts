@@ -9,7 +9,7 @@ const RULE_ID = "sources-fresh";
 export const sourcesFreshRule: Rule = {
   id: RULE_ID,
   description:
-    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`.",
+    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp` and the doc file's own last commit.",
   run(ctx) {
     const findings: Finding[] = [];
 
@@ -62,15 +62,21 @@ export const sourcesFreshRule: Rule = {
         continue;
       }
 
-      // A doc with a newer commit (e.g. via squash-merge) should not be considered stale
-      // if its last commit is at or after the source's last commit,
-      // even if its frontmatter timestamp is old.
-      const fullDocPath = path.join(ctx.bundleDir, doc.relPath);
+      // A doc whose own last commit is at or after the source's last commit
+      // (typically: both landed in one squash-merge) is not stale, even if
+      // its frontmatter timestamp is old. Lazy + memoized: the lookup costs a
+      // git process per doc but is only ever consulted on the stale path.
       const repoRelDocPath = path
-        .relative(repoRoot, fullDocPath)
+        .relative(repoRoot, path.join(ctx.bundleDir, doc.relPath))
         .split(path.sep)
         .join("/");
-      const docCommitEpoch = getLastCommitEpoch(git, repoRoot, repoRelDocPath);
+      let docCommitEpochMemo: number | null | undefined;
+      const docCommitEpochFor = (): number | null =>
+        (docCommitEpochMemo ??= getLastCommitEpoch(
+          git,
+          repoRoot,
+          repoRelDocPath,
+        ));
 
       for (const source of sources) {
         // A missing path on disk is sources-shape's job to report; avoid a
@@ -90,15 +96,14 @@ export const sourcesFreshRule: Rule = {
 
         let isStale = commitEpoch > timestampEpoch;
 
-        // If the doc file has a git history and its last commit is at or after
-        // the source's last commit (e.g. they were part of the same squash-merge),
-        // we don't consider it stale based on frontmatter alone.
-        if (
-          isStale &&
-          docCommitEpoch !== null &&
-          docCommitEpoch >= commitEpoch
-        ) {
-          isStale = false;
+        // Doc committed at/after the source: not stale (see comment above).
+        // A doc without git history (null epoch, e.g. uncommitted) keeps the
+        // frontmatter-only comparison.
+        if (isStale) {
+          const docCommitEpoch = docCommitEpochFor();
+          if (docCommitEpoch !== null && docCommitEpoch >= commitEpoch) {
+            isStale = false;
+          }
         }
 
         if (isStale) {
@@ -111,6 +116,7 @@ export const sourcesFreshRule: Rule = {
         }
       }
     }
+
     return findings;
   },
 };

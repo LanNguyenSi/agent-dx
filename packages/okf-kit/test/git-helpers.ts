@@ -15,8 +15,9 @@ export interface TmpGitRepo {
    */
   commitFile(relPath: string, content: string, isoDate: string): void;
   /**
-   * Writes multiple files and commits them in a SINGLE commit
-   * with both author and committer date pinned to `isoDate`.
+   * Writes multiple files and commits them in a SINGLE commit with both
+   * author and committer date pinned to `isoDate`. Stages exactly the given
+   * paths, so files deliberately left untracked by a test stay untracked.
    */
   commitFiles(
     files: Array<{ relPath: string; content: string }>,
@@ -58,7 +59,7 @@ export function createTmpGitRepo(): TmpGitRepo {
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, content);
       }
-      git(["add", "."]);
+      git(["add", ...files.map((f) => f.relPath)]);
       execFileSync("git", ["commit", "--quiet", "-m", "bulk commit"], {
         cwd: dir,
         encoding: "utf8",
@@ -75,6 +76,11 @@ export function createTmpGitRepo(): TmpGitRepo {
   };
 }
 
+/** Renders an OKF doc (frontmatter + a throwaway body) as file content. */
+export function docContent(frontmatter: Record<string, unknown>): string {
+  return `---\n${YAML.stringify(frontmatter)}---\n\n# Doc\n`;
+}
+
 /** Writes an OKF doc (frontmatter + a throwaway body) at `baseDir/relPath`. */
 export function writeDoc(
   baseDir: string,
@@ -83,6 +89,5 @@ export function writeDoc(
 ): void {
   const abs = path.join(baseDir, relPath);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
-  const content = `---\n${YAML.stringify(frontmatter)}---\n\n# Doc\n`;
-  fs.writeFileSync(abs, content);
+  fs.writeFileSync(abs, docContent(frontmatter));
 }
