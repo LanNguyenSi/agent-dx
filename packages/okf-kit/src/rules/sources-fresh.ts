@@ -9,7 +9,7 @@ const RULE_ID = "sources-fresh";
 export const sourcesFreshRule: Rule = {
   id: RULE_ID,
   description:
-    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`.",
+    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp` and the doc file's own last commit.",
   run(ctx) {
     const findings: Finding[] = [];
 
@@ -62,6 +62,22 @@ export const sourcesFreshRule: Rule = {
         continue;
       }
 
+      // A doc whose own last commit is at or after the source's last commit
+      // (typically: both landed in one squash-merge) is not stale, even if
+      // its frontmatter timestamp is old. Lazy + memoized: the lookup costs a
+      // git process per doc but is only ever consulted on the stale path.
+      const repoRelDocPath = path
+        .relative(repoRoot, path.join(ctx.bundleDir, doc.relPath))
+        .split(path.sep)
+        .join("/");
+      let docCommitEpochMemo: number | null | undefined;
+      const docCommitEpochFor = (): number | null =>
+        (docCommitEpochMemo ??= getLastCommitEpoch(
+          git,
+          repoRoot,
+          repoRelDocPath,
+        ));
+
       for (const source of sources) {
         // A missing path on disk is sources-shape's job to report; avoid a
         // duplicate/confusing finding here.
@@ -78,7 +94,19 @@ export const sourcesFreshRule: Rule = {
           continue;
         }
 
-        if (commitEpoch > timestampEpoch) {
+        let isStale = commitEpoch > timestampEpoch;
+
+        // Doc committed at/after the source: not stale (see comment above).
+        // A doc without git history (null epoch, e.g. uncommitted) keeps the
+        // frontmatter-only comparison.
+        if (isStale) {
+          const docCommitEpoch = docCommitEpochFor();
+          if (docCommitEpoch !== null && docCommitEpoch >= commitEpoch) {
+            isStale = false;
+          }
+        }
+
+        if (isStale) {
           findings.push({
             ruleId: RULE_ID,
             severity: "warning",

@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadBundle } from "../src/bundle.js";
 import { sourcesFreshRule } from "../src/rules/sources-fresh.js";
 import type { RunGit } from "../src/types.js";
-import { createTmpGitRepo, writeDoc, type TmpGitRepo } from "./git-helpers.js";
+import {
+  createTmpGitRepo,
+  docContent,
+  writeDoc,
+  type TmpGitRepo,
+} from "./git-helpers.js";
 
 describe("sources-fresh", () => {
   let repo: TmpGitRepo;
@@ -176,10 +181,160 @@ describe("sources-fresh", () => {
     expect(sourcesFreshRule.run(ctx)).toEqual([]);
   });
 
+  it("does not flag a source that landed in the same commit as the doc (squash-merge case)", () => {
+    // Frontmatter timestamp predates the commit: before the doc-commit
+    // comparison existed, this was exactly the stale-on-arrival squash-merge
+    // false positive.
+    repo.commitFiles(
+      [
+        {
+          relPath: "bundle/doc.md",
+          content: docContent({
+            type: "concept",
+            timestamp: "2026-01-01T00:00:00Z",
+            sources: ["source.ts"],
+          }),
+        },
+        { relPath: "source.ts", content: "export const a = 2;\n" },
+      ],
+      "2026-02-01T00:00:00Z",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    expect(sourcesFreshRule.run(ctx)).toEqual([]);
+  });
+
+  it("does not flag a source when the doc was committed strictly after it (stamp older than both)", () => {
+    repo.commitFile(
+      "source.ts",
+      "export const a = 2;\n",
+      "2026-02-01T00:00:00Z",
+    );
+    repo.commitFile(
+      "bundle/doc.md",
+      docContent({
+        type: "concept",
+        timestamp: "2026-01-01T00:00:00Z",
+        sources: ["source.ts"],
+      }),
+      "2026-03-01T00:00:00Z",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    expect(sourcesFreshRule.run(ctx)).toEqual([]);
+  });
+
+  it("applies the doc-commit comparison to docs in bundle subdirectories", () => {
+    repo.commitFiles(
+      [
+        {
+          relPath: "bundle/sub/doc.md",
+          content: docContent({
+            type: "concept",
+            timestamp: "2026-01-01T00:00:00Z",
+            sources: ["source.ts"],
+          }),
+        },
+        { relPath: "source.ts", content: "export const a = 2;\n" },
+      ],
+      "2026-02-01T00:00:00Z",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    expect(sourcesFreshRule.run(ctx)).toEqual([]);
+  });
+
+  it("suppresses only sources at/before the doc's last commit, newer ones stay STALE", () => {
+    // Pins the accepted >= semantics for multi-source docs: committing the
+    // doc silences drift for every source older than that commit (documented
+    // limitation), while a source changed afterwards still warns.
+    repo.commitFiles(
+      [
+        {
+          relPath: "bundle/doc.md",
+          content: docContent({
+            type: "concept",
+            timestamp: "2026-01-01T00:00:00Z",
+            sources: ["a.ts", "b.ts"],
+          }),
+        },
+        { relPath: "a.ts", content: "export const a = 1;\n" },
+        { relPath: "b.ts", content: "export const b = 1;\n" },
+      ],
+      "2026-02-01T00:00:00Z",
+    );
+    repo.commitFile("b.ts", "export const b = 2;\n", "2026-03-01T00:00:00Z");
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain("STALE");
+    expect(findings[0].message).toContain("b.ts");
+    expect(findings[0].message).not.toContain("a.ts");
+  });
+
+  it("keeps the frontmatter-only comparison for a doc without git history", () => {
+    repo.commitFile(
+      "source.ts",
+      "export const a = 2;\n",
+      "2026-02-01T00:00:00Z",
+    );
+    // writeDoc does not commit: the doc has no git history, so the doc-commit
+    // comparison must stay out of the way and the stamp alone decides.
+    writeDoc(repo.dir, "bundle/doc.md", {
+      type: "concept",
+      timestamp: "2026-01-01T00:00:00Z",
+      sources: ["source.ts"],
+    });
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain("STALE");
+  });
+
+  it("still flags STALE when the source changed after the doc's last commit", () => {
+    repo.commitFile(
+      "bundle/doc.md",
+      docContent({
+        type: "concept",
+        timestamp: "2026-01-01T00:00:00Z",
+        sources: ["source.ts"],
+      }),
+      "2026-02-01T00:00:00Z",
+    );
+    repo.commitFile(
+      "source.ts",
+      "export const a = 3;\n",
+      "2026-03-01T00:00:00Z",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "sources-fresh",
+      severity: "warning",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("STALE");
+  });
+
   it("uses an injected runGit stub instead of a real git process when supplied", () => {
     const stubEpoch = Math.floor(Date.parse("2025-06-01T00:00:00Z") / 1000);
-    const stubRunGit: RunGit = (args) =>
-      args[0] === "log" ? String(stubEpoch) : null;
+    const docEpoch = Math.floor(Date.parse("2025-01-01T00:00:00Z") / 1000);
+    // The doc's own last-commit epoch must be OLDER than the source's, or the
+    // doc-commit freshness comparison would legitimately suppress the STALE
+    // finding this test asserts.
+    const stubRunGit: RunGit = (args) => {
+      if (args[0] !== "log") return null;
+      return args[args.length - 1] === "doc.md"
+        ? String(docEpoch)
+        : String(stubEpoch);
+    };
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-stub-"));
     try {

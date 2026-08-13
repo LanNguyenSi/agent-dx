@@ -68,7 +68,7 @@ Every template doc except `benchmark-template.md` ships with `sources: [path/to/
 | `links-resolve` | error | Markdown links to other `.md` files in the bundle must resolve to a real file. Relative targets resolve against the containing file's directory; targets starting with `/` resolve against the bundle root. A relative target that climbs out of the bundle directory (`../outside.md`) and still resolves on disk is accepted; the rule checks resolution, not containment. |
 | `no-absolute-links` | warning | Link targets should not start with `/`. GitHub resolves a leading slash against the repository root, not the bundle root, so an absolute link 404s once the bundle is viewed outside its own repository. Use a same-directory relative link instead. |
 | `sources-shape` | error | Frontmatter `sources`, when present, must be a non-empty array of non-empty strings. With a repo root (explicit or auto-detected), each listed path (file or directory) must also exist under it. |
-| `sources-fresh` | warning / notice | For docs with a `sources` list and a repo root, flags a source path whose last git commit is newer than the doc's `timestamp`. See "Staleness (sources-fresh)" below. |
+| `sources-fresh` | warning / notice | For docs with a `sources` list and a repo root, flags a source path whose last git commit is newer than both the doc's `timestamp` and the doc file's own last commit. See "Staleness (sources-fresh)" below. |
 
 ## repo-root auto-detection
 
@@ -80,11 +80,12 @@ Pass `--repo-root` explicitly to pin a specific root (useful in CI when the bund
 
 ## Staleness (sources-fresh)
 
-`sources-fresh` compares each frontmatter `sources` entry's last git commit time against the doc's `timestamp`. It never blocks a doc that has no `sources`, and it never invents an error where git can't give a real answer:
+`sources-fresh` compares each frontmatter `sources` entry's last git commit time against the doc's `timestamp`, and additionally against the doc file's own last commit time: a source committed at or before the doc file's last commit is treated as fresh even when the frontmatter `timestamp` is older. That keeps squash-merge PRs honest: when a doc re-stamp lands in the same commit as its changed sources, the merge gives every source a commit time later than any pre-merge `timestamp`, which used to make such docs stale-on-arrival. The rule never blocks a doc that has no `sources`, and it never invents an error where git can't give a real answer:
 
 | Situation | Severity | Message |
 |-----------|----------|---------|
-| A source path's last commit is newer than the doc's `timestamp` | warning | `STALE: <path> changed <iso> after doc timestamp <iso>` |
+| A source path's last commit is newer than the doc's `timestamp` and the doc file's last commit | warning | `STALE: <path> changed <iso> after doc timestamp <iso>` |
+| A source path's last commit is newer than the doc's `timestamp` but at/before the doc file's last commit | (nothing) | fresh: doc and source landed together (or the doc was committed later) |
 | A source path exists but has no git history (untracked) | notice | `untracked by git, staleness unknown: <path>` |
 | The doc's `timestamp` is missing or not a parseable date, while `sources` is present | notice | `staleness not assessable: no valid timestamp` |
 | No repo root available (see auto-detection above) | notice | `staleness skipped: not inside a git work tree` |
@@ -93,6 +94,8 @@ Pass `--repo-root` explicitly to pin a specific root (useful in CI when the bund
 STALE findings are warnings, so they are advisory by default; run with `--strict` to fail the build on them.
 
 Known limitation: a `git log` call that fails for a reason other than "no history for this path" (for example a corrupt object or a transient git error) is reported the same way as a genuinely untracked path, the `untracked by git, staleness unknown` notice; okf-kit does not currently distinguish a real git failure from "no commits touch this path".
+
+Known limitation: the doc-commit comparison suppresses staleness for every source older than the doc file's last commit, not only for sources from the same commit. For a multi-source doc that means any commit touching the doc (a typo fix, a repo-wide formatter run, a rename, which resets the doc's last-commit time because `git log` runs without `--follow`) silences drift on all sources changed before it, even ones nobody re-verified. The frontmatter `timestamp` still governs sources changed after the doc's last commit.
 
 **Authoring guidance:** when you re-verify a doc against its sources, bump its frontmatter `timestamp` (and add a line to the bundle's `log.md`) so `sources-fresh` reflects that the doc is current again.
 
@@ -110,7 +113,7 @@ This is advisory: don't fail the build on warnings unless you pass `--strict`. U
 
 ```yaml
 - name: OKF bundle check
-  run: npx okf-kit@0.3.1 check path/to/bundle
+  run: npx okf-kit@0.4.0 check path/to/bundle
 ```
 
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
