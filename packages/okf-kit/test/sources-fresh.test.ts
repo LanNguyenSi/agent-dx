@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import YAML from "yaml";
 import { loadBundle } from "../src/bundle.js";
 import { sourcesFreshRule } from "../src/rules/sources-fresh.js";
 import type { RunGit } from "../src/types.js";
@@ -176,10 +177,69 @@ describe("sources-fresh", () => {
     expect(sourcesFreshRule.run(ctx)).toEqual([]);
   });
 
+  it("does not flag a source that landed in the same commit as the doc (squash-merge case)", () => {
+    // Frontmatter timestamp predates the commit: before the doc-commit
+    // comparison existed, this was exactly the stale-on-arrival squash-merge
+    // false positive.
+    repo.commitFiles(
+      [
+        {
+          relPath: "bundle/doc.md",
+          content: `---\n${YAML.stringify({
+            type: "concept",
+            timestamp: "2026-01-01T00:00:00Z",
+            sources: ["source.ts"],
+          })}---\n\n# Doc\n`,
+        },
+        { relPath: "source.ts", content: "export const a = 2;\n" },
+      ],
+      "2026-02-01T00:00:00Z",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    expect(sourcesFreshRule.run(ctx)).toEqual([]);
+  });
+
+  it("still flags STALE when the source changed after the doc's last commit", () => {
+    repo.commitFile(
+      "bundle/doc.md",
+      `---\n${YAML.stringify({
+        type: "concept",
+        timestamp: "2026-01-01T00:00:00Z",
+        sources: ["source.ts"],
+      })}---\n\n# Doc\n`,
+      "2026-02-01T00:00:00Z",
+    );
+    repo.commitFile(
+      "source.ts",
+      "export const a = 3;\n",
+      "2026-03-01T00:00:00Z",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "sources-fresh",
+      severity: "warning",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("STALE");
+  });
+
   it("uses an injected runGit stub instead of a real git process when supplied", () => {
     const stubEpoch = Math.floor(Date.parse("2025-06-01T00:00:00Z") / 1000);
-    const stubRunGit: RunGit = (args) =>
-      args[0] === "log" ? String(stubEpoch) : null;
+    const docEpoch = Math.floor(Date.parse("2025-01-01T00:00:00Z") / 1000);
+    // The doc's own last-commit epoch must be OLDER than the source's, or the
+    // doc-commit freshness comparison would legitimately suppress the STALE
+    // finding this test asserts.
+    const stubRunGit: RunGit = (args) => {
+      if (args[0] !== "log") return null;
+      return args[args.length - 1] === "doc.md"
+        ? String(docEpoch)
+        : String(stubEpoch);
+    };
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-stub-"));
     try {

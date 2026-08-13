@@ -62,6 +62,16 @@ export const sourcesFreshRule: Rule = {
         continue;
       }
 
+      // A doc with a newer commit (e.g. via squash-merge) should not be considered stale
+      // if its last commit is at or after the source's last commit,
+      // even if its frontmatter timestamp is old.
+      const fullDocPath = path.join(ctx.bundleDir, doc.relPath);
+      const repoRelDocPath = path
+        .relative(repoRoot, fullDocPath)
+        .split(path.sep)
+        .join("/");
+      const docCommitEpoch = getLastCommitEpoch(git, repoRoot, repoRelDocPath);
+
       for (const source of sources) {
         // A missing path on disk is sources-shape's job to report; avoid a
         // duplicate/confusing finding here.
@@ -78,7 +88,20 @@ export const sourcesFreshRule: Rule = {
           continue;
         }
 
-        if (commitEpoch > timestampEpoch) {
+        let isStale = commitEpoch > timestampEpoch;
+
+        // If the doc file has a git history and its last commit is at or after
+        // the source's last commit (e.g. they were part of the same squash-merge),
+        // we don't consider it stale based on frontmatter alone.
+        if (
+          isStale &&
+          docCommitEpoch !== null &&
+          docCommitEpoch >= commitEpoch
+        ) {
+          isStale = false;
+        }
+
+        if (isStale) {
           findings.push({
             ruleId: RULE_ID,
             severity: "warning",
@@ -88,7 +111,6 @@ export const sourcesFreshRule: Rule = {
         }
       }
     }
-
     return findings;
   },
 };

@@ -14,6 +14,14 @@ export interface TmpGitRepo {
    * when the test actually runs.
    */
   commitFile(relPath: string, content: string, isoDate: string): void;
+  /**
+   * Writes multiple files and commits them in a SINGLE commit
+   * with both author and committer date pinned to `isoDate`.
+   */
+  commitFiles(
+    files: Array<{ relPath: string; content: string }>,
+    isoDate: string,
+  ): void;
   cleanup(): void;
 }
 
@@ -35,6 +43,23 @@ export function createTmpGitRepo(): TmpGitRepo {
       fs.writeFileSync(abs, content);
       git(["add", relPath]);
       execFileSync("git", ["commit", "--quiet", "-m", `commit ${relPath}`], {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_DATE: isoDate,
+          GIT_COMMITTER_DATE: isoDate,
+        },
+      });
+    },
+    commitFiles(files, isoDate) {
+      for (const { relPath, content } of files) {
+        const abs = path.join(dir, relPath);
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, content);
+      }
+      git(["add", "."]);
+      execFileSync("git", ["commit", "--quiet", "-m", "bulk commit"], {
         cwd: dir,
         encoding: "utf8",
         env: {
