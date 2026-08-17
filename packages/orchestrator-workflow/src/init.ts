@@ -210,6 +210,30 @@ export function runInit(options: InitOptions): Report {
   const previous = readInstalledManifest(targetDir);
   const installedFiles: Record<string, string> = {};
 
+  // A full -> minimal downgrade drops explorer/task-slicer from the roles
+  // installed, but (like dropping a harness from --harness) existing role
+  // files are never deleted: they simply fall out of the manifest's file
+  // ledger. Surface that as a note so it is reported instead of silently
+  // left as an unexplained, untracked leftover on disk.
+  if (previous && previous.profile === "full" && profile !== previous.profile) {
+    const droppedRoles = rolesForProfile(previous.profile).filter(
+      (role) => !rolesForProfile(profile).includes(role),
+    );
+    const harnessDirs = options.harnesses.filter(
+      (harness): harness is "claude" | "opencode" =>
+        harness === "claude" || harness === "opencode",
+    );
+    for (const harness of harnessDirs) {
+      const harnessDir = harness === "claude" ? ".claude" : ".opencode";
+      for (const role of droppedRoles) {
+        const relativePath = join(harnessDir, "agents", `${role}.md`);
+        report.notes.push(
+          `${relativePath}: now untracked after the full -> ${profile} profile downgrade; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+        );
+      }
+    }
+  }
+
   /**
    * Installs a kit-owned file. An unedited file (it still matches the hash
    * recorded at install time) is updated in place when the kit content

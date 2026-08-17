@@ -652,3 +652,22 @@ describe("reproduction requirement ships in the skill and the reviewer prompt", 
     expect(skillBlock).toBe(reviewerBlock);
   });
 });
+
+/**
+ * 0.15.0 added `--profile minimal|full`: under `minimal` only the
+ * implementer and reviewer roles are installed as named subagents, so the
+ * Roles section's prior unconditional claim ("the explorer, slicer,
+ * implementer, and reviewer roles are installed as named subagents") was
+ * false for a minimal install. This pins the profile-aware caveat sentence
+ * (the fix, reusing the pre-existing Codex "run inline" idiom) so it cannot
+ * silently disappear again.
+ */
+describe("Roles section states which roles a minimal profile omits", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("carries the profile-aware caveat sentence", () => {
+    expect(skillMd).toContain(
+      "Only the roles this install's profile carries exist as named subagents (see `profile` in `.ai/workflow/manifest.json`); run any missing role inline with the same contract.",
+    );
+  });
+});

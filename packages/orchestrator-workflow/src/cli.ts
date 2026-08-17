@@ -14,7 +14,6 @@ import {
   DEFAULT_PROFILE,
   MODEL_ALIASES,
   PROFILES,
-  ROLES,
   assertValidModelId,
   parseModelsSpec,
   parseProfile,
@@ -276,6 +275,7 @@ program
         "Conflicts (local edits kept, re-run with --force to overwrite)",
         report.conflicted,
       );
+      for (const note of report.notes) console.log(note);
       console.log(
         `\norchestrator-workflow v${PACKAGE_VERSION} installed for: ${harnesses.join(", ")} (profile: ${profile})`,
       );

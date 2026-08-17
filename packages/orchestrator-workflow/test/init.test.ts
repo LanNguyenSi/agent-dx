@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -24,6 +25,7 @@ import {
   rolesForProfile,
 } from "../src/models.js";
 import { detectHarnesses } from "../src/detect.js";
+import { runUninstall } from "../src/uninstall.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
 
@@ -699,6 +701,143 @@ describe("profile selection", () => {
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain('Unknown --profile "bogus"');
     });
+  });
+});
+
+/**
+ * A manifest written before profiles existed (or hand-corrupted to drop the
+ * field) must fall back to `full`, not `minimal` — a pre-profile install
+ * always put down every role, so silently narrowing it on the next re-run
+ * would delete-by-omission roles the operator never asked to drop. This is
+ * the CLI-path counterpart to the "survives a malformed hand-written
+ * manifest" test above: that test never checks which profile got installed
+ * (its pre-fix baseline already has all four agent files on disk from an
+ * earlier good run, so a wrong `minimal` fallback would go undetected — the
+ * loop over `rolesForProfile` only adds files, it never deletes one for a
+ * role that fell out of profile). This test starts from a target that has
+ * never been through a real `full` install, so the fallback's chosen
+ * profile is the only thing that can explain which agent files appear.
+ */
+describe("manifest missing the profile field (pre-profile-era manifest)", () => {
+  it("falls back to full, not minimal, installing all four agent files on re-run without --profile", () => {
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    mkdirSync(join(target, ".ai", "workflow"), { recursive: true });
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          kit: "orchestrator-workflow",
+          version: "0.14.0",
+          harnesses: ["claude"],
+          models: DEFAULT_MODELS,
+          files: {},
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "src/cli.ts", "init", target, "--yes"],
+      { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("profile: full");
+
+    for (const role of ROLES) {
+      expect(
+        existsSync(join(target, ".claude", "agents", `${role}.md`)),
+        `${role}.md should exist under the full-profile fallback`,
+      ).toBe(true);
+    }
+
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.profile).toBe("full");
+  });
+});
+
+describe("profile downgrade (full -> minimal) leaves a note about untracked role files", () => {
+  it("reports a note naming the now-untracked task-slicer/explorer files and how to remove them", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+    });
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+
+    const claudeTaskSlicer = join(".claude", "agents", "task-slicer.md");
+    const claudeExplorer = join(".claude", "agents", "explorer.md");
+    expect(report.notes.some((note) => note.includes(claudeTaskSlicer))).toBe(
+      true,
+    );
+    expect(report.notes.some((note) => note.includes(claudeExplorer))).toBe(
+      true,
+    );
+    expect(
+      report.notes.some((note) =>
+        note.includes("orchestrator-workflow uninstall"),
+      ),
+    ).toBe(true);
+
+    // The files themselves are untouched (not deleted), only untracked.
+    expect(existsSync(join(target, claudeTaskSlicer))).toBe(true);
+    expect(existsSync(join(target, claudeExplorer))).toBe(true);
+  });
+
+  it("does not repeat the note on a later no-op re-run at the same (minimal) profile", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+    });
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+    const again = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+    expect(again.notes).toEqual([]);
+  });
+
+  it("uninstall after a downgrade completes without error; the untracked leftovers survive it", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+    });
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+
+    expect(() => runUninstall({ targetDir: target })).not.toThrow();
+    // task-slicer.md/explorer.md are no longer in the manifest's file
+    // ledger, so uninstall (which only removes what it can still find
+    // there) leaves them in place.
+    expect(
+      existsSync(join(target, ".claude", "agents", "task-slicer.md")),
+    ).toBe(true);
+    expect(existsSync(join(target, ".claude", "agents", "explorer.md"))).toBe(
+      true,
+    );
   });
 });
 

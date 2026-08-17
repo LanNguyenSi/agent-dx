@@ -151,12 +151,17 @@ updating the manifest to match. Switching profiles follows the same
 precedent already in place for dropping a harness from `--harness` on a
 re-run: files for roles no longer in the profile are simply no longer
 installed or tracked in the manifest; they are not automatically deleted
-from disk. For a fully clean switch (e.g. `full` → `minimal`), run
-`orchestrator-workflow uninstall` first, or remove the stale
-`task-slicer.md` / `explorer.md` agent files by hand. Uninstalling a
-`minimal` install is always clean on its own: it only ever removes what it
-actually installed, so there is nothing to report as missing for the roles
-that were never written.
+from disk. `init` detects a `full` → `minimal` downgrade and prints a note
+naming the now-untracked `task-slicer.md` / `explorer.md` agent files and how
+to remove them. For a fully clean switch, run `orchestrator-workflow
+uninstall` first, or remove those files by hand. Uninstalling a `minimal`
+install that has never been downgraded from `full` is always clean on its
+own: it only ever removes what it actually installed, so there is nothing to
+report as missing for the roles that were never written. A `minimal` install
+reached via a `full` → `minimal` downgrade is not clean in that sense: the
+downgrade's now-untracked `task-slicer.md` / `explorer.md` files are not in
+the manifest's file ledger, so uninstall leaves them on disk without
+reporting them at all.
 
 ## Model preselection
 

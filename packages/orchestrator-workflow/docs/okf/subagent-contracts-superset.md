@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The four subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-07-18T12:00:00Z
+timestamp: 2026-08-17T19:05:00Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -22,13 +22,13 @@ All `path:line` pointers below are repo-root-relative from the agent-dx root.
 The canonical role list is code, not just prose: `ROLES` at
 `packages/orchestrator-workflow/src/models.ts:3-8` = `explorer, task-slicer,
 implementer, reviewer`, narratively mirrored at
-`packages/orchestrator-workflow/assets/skill/SKILL.md:24-42` (`## Roles`).
+`packages/orchestrator-workflow/assets/skill/SKILL.md:24-52` (`## Roles`).
 
 Read-only vs. writable is also a code-level set:
 `READ_ONLY_ROLES = new Set(["explorer", "reviewer"])` at
 `packages/orchestrator-workflow/src/models.ts:14-17`. There is no matching
 `WRITABLE_ROLES` constant; the writable set is derived as the complement,
-exactly as `packages/orchestrator-workflow/test/docs-consistency.test.ts:153`
+exactly as `packages/orchestrator-workflow/test/docs-consistency.test.ts:173`
 computes it: `ROLES.filter((role) => !READ_ONLY_ROLES.has(role))` →
 `task-slicer, implementer`. That posture is tool-level only for
 Edit/Write/NotebookEdit; Bash mutation is guarded by prompt instruction alone,
@@ -42,9 +42,9 @@ Where the harness supports subagent definitions, `SKILL.md` tells the
 orchestrator to spawn the installed prompts under
 `packages/orchestrator-workflow/assets/agents/{explorer,task-slicer,implementer,reviewer}.md`
 instead of improvising role text
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:44-48`). Per-role
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:44-50`). Per-role
 default models (`DEFAULT_MODELS`,
-`packages/orchestrator-workflow/src/models.ts:27-32`) are out of this doc's
+`packages/orchestrator-workflow/src/models.ts:70-75`) are out of this doc's
 lane; see [model-preselection.md](model-preselection.md).
 
 ## Where each contract lives, and what keeps the copies equal
