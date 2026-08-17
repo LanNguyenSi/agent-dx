@@ -9,10 +9,12 @@
   },
   "scripts": {
     "build": "tsc",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "dev": "node --import tsx src/cli.ts",
     "test": "vitest run",
     "format": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\""
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "ai",

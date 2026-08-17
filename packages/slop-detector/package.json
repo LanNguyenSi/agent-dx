@@ -22,6 +22,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "dev": "node --import tsx src/cli.ts",
     "test": "vitest run",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

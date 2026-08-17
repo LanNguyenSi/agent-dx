@@ -11,11 +11,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── hoisted box so the vi.mock factory (which is hoisted too) can reference it
+type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
+
 const box = vi.hoisted(() => {
   const connectSpy = vi.fn().mockResolvedValue(undefined);
-  let handler: ((args: Record<string, unknown>) => Promise<unknown>) | null =
-    null;
-  return { connectSpy, handler };
+  const handler: ToolHandler | null = null;
+  // Cast at the return site: without it, TS narrows `handler`'s type in the
+  // returned object literal to the literal `null` (control-flow analysis on
+  // the just-initialized `let`), so the later `box.handler = handler`
+  // assignment in the McpServer mock below would not typecheck.
+  return { connectSpy, handler: handler as ToolHandler | null };
 });
 
 // ── mock the MCP SDK: use a class so `new McpServer(...)` works ──────────────

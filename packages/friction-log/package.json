@@ -21,6 +21,7 @@
   "scripts": {
     "build": "tsc && node scripts/copy-templates.mjs && chmod +x dist/cli.js",
     "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "dev": "node --import tsx src/cli.ts",
     "test": "vitest run",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
