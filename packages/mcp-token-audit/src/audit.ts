@@ -1,0 +1,66 @@
+// Orchestration: read transcript files, parse + aggregate each, merge into
+// one per-tool ranking, and split out the mcp__* subtotal. The only
+// filesystem access here is the read itself (via discover.ts); everything
+// else delegates to the pure functions in aggregate.ts.
+
+import { readTranscriptFile } from "./discover.js";
+import {
+  aggregateEntries,
+  mergeToolStats,
+  parseTranscript,
+} from "./aggregate.js";
+import type { AuditResult, AuditTotals, ToolStats } from "./types.js";
+
+const MCP_PREFIX = "mcp__";
+
+/**
+ * Audit a list of transcript file paths: parse each (tolerating malformed
+ * lines and unreadable files), merge per-tool stats across all of them,
+ * and rank by total (in+out) characters descending.
+ */
+export function auditFiles(paths: string[]): AuditResult {
+  const merged = new Map<string, ToolStats>();
+  let skippedLines = 0;
+  let filesScanned = 0;
+
+  for (const path of paths) {
+    let raw: string;
+    try {
+      raw = readTranscriptFile(path);
+    } catch {
+      // Unreadable file (permissions, race with rotation, ...): skip the
+      // whole file. Not counted in skippedLines, which tracks malformed
+      // *lines* within files we could read.
+      continue;
+    }
+    filesScanned += 1;
+    const { entries, skipped } = parseTranscript(raw);
+    skippedLines += skipped;
+    mergeToolStats(merged, aggregateEntries(entries));
+  }
+
+  const perTool = [...merged.values()].sort(
+    (a, b) => totalChars(b) - totalChars(a),
+  );
+  const totals = sumTotals(perTool);
+  const mcpTotals = sumTotals(
+    perTool.filter((t) => t.tool.startsWith(MCP_PREFIX)),
+  );
+
+  return { perTool, totals, mcpTotals, skippedLines, filesScanned };
+}
+
+function totalChars(stats: ToolStats): number {
+  return stats.charsIn + stats.charsOut;
+}
+
+function sumTotals(list: ToolStats[]): AuditTotals {
+  return list.reduce(
+    (acc, t) => ({
+      calls: acc.calls + t.calls,
+      charsIn: acc.charsIn + t.charsIn,
+      charsOut: acc.charsOut + t.charsOut,
+    }),
+    { calls: 0, charsIn: 0, charsOut: 0 },
+  );
+}

@@ -1,0 +1,9 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me check that."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ls -la"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"file1\nfile2\nfile3"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu2","name":"mcp__agent-tasks__tasks_list","input":{"status":"open","limit":50}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu2","content":[{"type":"text","text":"5 tasks found"}]}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu3","name":"Bash","input":{"command":"pwd"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu3","content":"/home/user"}]}}
+{not valid json, should be skipped}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu4","name":"mcp__agent-tasks__tasks_get","input":{}}]}}
