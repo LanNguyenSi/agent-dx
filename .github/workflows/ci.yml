@@ -60,7 +60,16 @@ jobs:
         run: npm run typecheck --if-present
 
       - name: Typecheck (test files)
-        run: npm run typecheck:test --if-present
+        shell: bash
+        run: |
+          if node -e "process.exit((require('./package.json').scripts || {})['typecheck:test'] ? 0 : 1)"; then
+            npm run typecheck:test
+          elif [ -f tsconfig.json ]; then
+            echo "::error::package has a tsconfig.json but no typecheck:test script - test files would go untypechecked"
+            exit 1
+          else
+            echo "No tsconfig.json (plain JS package), skipping test typecheck"
+          fi
 
       - name: Build
         run: npm run build --if-present
