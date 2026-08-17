@@ -37,6 +37,7 @@ jobs:
           - friction-log
           - git-batch-cli
           - github-api-tool
+          - mcp-token-audit
           - okf-kit
           - orchestrator-workflow
           - slop-detector
