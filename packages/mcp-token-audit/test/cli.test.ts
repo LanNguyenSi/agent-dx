@@ -13,6 +13,12 @@ import { describe, expect, it } from "vitest";
 
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = join(PKG_ROOT, "dist", "cli.js");
+// Discovery (findTranscriptFiles) is non-recursive: it only lists *.jsonl
+// files directly under a given project dir, not in subdirectories. New
+// fixtures therefore belong in their own subdirectory under FIXTURES_DIR
+// (see FAULT_TOLERANT_DIR below), never dropped directly into FIXTURES_DIR
+// itself, or the "known fixture totals" test below picks them up too and
+// its hand-verified counts silently shift.
 const FIXTURES_DIR = join(PKG_ROOT, "test", "fixtures");
 const FAULT_TOLERANT_DIR = join(FIXTURES_DIR, "fault-tolerant");
 
@@ -80,5 +86,25 @@ describe("mcp-token-audit cli", () => {
       { tool: "Bash", calls: 1, tokIn: 4, tokOut: 3, tokPerCall: 7 },
     ]);
     expect(parsed.totals).toEqual({ calls: 1, tokIn: 4, tokOut: 3, tok: 7 });
+  });
+
+  it("exits 0 but reports a skipped project dir, instead of silently looking like an empty project, when the given dir does not exist", () => {
+    // Regression coverage for the discover.ts fault-tolerance fix: a
+    // mistyped or unreadable --projectDir argument used to disappear into
+    // a bare `catch { continue; }`, so the run exited 0 with all-zero
+    // totals and no indication anything was skipped.
+    const missingDir = join(FIXTURES_DIR, "does-not-exist");
+
+    const textResult = runCli([missingDir]);
+    expect(textResult.status, textResult.stderr).toBe(0);
+    expect(textResult.stdout).toContain(
+      "skipped 1 unreadable/missing project dir(s)",
+    );
+
+    const jsonResult = runCli([missingDir, "--json"]);
+    expect(jsonResult.status, jsonResult.stderr).toBe(0);
+    const parsed = JSON.parse(jsonResult.stdout);
+    expect(parsed.skippedDirs).toBe(1);
+    expect(parsed.filesScanned).toBe(0);
   });
 });

@@ -53,13 +53,15 @@ mcp__agent-tasks__task_create      40    23377      2038       635
 total: 1234 calls, ~412490 tok in, ~512873 tok out, ~925363 tok
 mcp__*: 71 calls, ~97046 tok (10.5% of total)
 skipped 2 malformed line(s)
+skipped 1 unreadable file(s)
+skipped 1 unreadable/missing project dir(s)
 5 transcript file(s) scanned
 ```
 
 ## How it works
 
 - **Discovery.** With no `<projectDir...>` arguments, every directory directly under `~/.claude/projects/` is scanned (each one holds one Claude Code project's transcripts). Pass one or more directories to scan a subset instead. `--days N` restricts this to `*.jsonl` files whose mtime is within the last `N` days.
-- **Parsing.** Each transcript is JSONL, one entry per line. Lines that fail to `JSON.parse` are skipped and counted, not fatal, so a mid-session crash or a truncated write doesn't make the rest of the file unusable.
+- **Parsing.** Each transcript is JSONL, one entry per line. Lines that fail to `JSON.parse` are skipped and counted, not fatal, so a mid-session crash or a truncated write doesn't make the rest of the file unusable. A transcript file that cannot be read at all (permissions, a race with log rotation, ...) is skipped in its entirety and counted separately, as `skippedFiles`, from the per-line `skippedLines` count.
 - **Pairing.** Within each entry's `message.content[]` array, a `tool_use` block (`{ id, name, input }`) is matched to its `tool_result` block (`{ tool_use_id, content }`) by id. A `tool_use` with no matching `tool_result` still counts as a call, with zero output.
 - **Token approximation.** `~tok_in` is `JSON.stringify(tool_use.input).length / 4`, `~tok_out` is the stringified `tool_result.content` length / 4, both rounded to the nearest integer. This is a rough heuristic (~4 characters per token for English text), not a real tokenizer call: good for relative before/after comparisons of payload size, not for billing or exact context accounting.
 - **MCP share.** A tool counts toward the `mcp__*` subtotal when its name starts with the `mcp__` prefix Claude Code uses for MCP-server tools (e.g. `mcp__agent-tasks__task_create`). Built-in tools (`Bash`, `Read`, `Edit`, `Agent`, ...) do not.
@@ -75,12 +77,12 @@ skipped 2 malformed line(s)
 | `~tok_out` | Approximate tokens returned by the tool (its `tool_result.content`, summed) |
 | `~tok/call` | `(~tok_in + ~tok_out) / calls`, rounded |
 
-`--json` emits the same numbers as a `{ filesScanned, skippedLines, tools[], totals, mcp }` object instead of a text table.
+`--json` emits the same numbers as a `{ filesScanned, skippedLines, skippedFiles, skippedDirs, tools[], totals, mcp }` object instead of a text table.
 
 ## Limitations
 
 - No live API calls (this reads local transcript files only), no dollar-cost conversion, no dashboard. The `chars/4` approximation will drift from a real tokenizer, especially for code, JSON payloads, and non-English text; treat the numbers as directionally useful, not exact.
-- **Privacy.** Output contains only tool names and aggregate call/character counts, never prompt or result content, so it's safe to paste into an issue, a chat, or a report without redaction.
+- **Privacy.** Output never contains prompt or result content, only tool names and aggregate call/character counts. That still exposes something: which tools and MCP servers were used, and how heavily (call counts, token volumes), are themselves visible in the output. If a tool or MCP-server name is itself sensitive (an internal codename, a client or project identifier baked into the name), review before sharing rather than assuming the output is safe to paste anywhere without redaction.
 - **Per-file pairing.** A `tool_use` is only matched to its `tool_result` within the same transcript file. If a session's log got split or rotated so the two land in different files, the call is still counted but with zero output. A duplicate `tool_use` id within one file is deduplicated (the last occurrence wins); the same id appearing across two different files is not deduplicated and is double-counted, since each file is aggregated independently before totals are summed.
 - **Non-text result blocks.** A `tool_result.content` block without a `text` field (e.g. an image block) is approximated by `JSON.stringify`-ing it rather than by its true payload size, so its `~tok_out` contribution is a rough stand-in, not a faithful size estimate.
 

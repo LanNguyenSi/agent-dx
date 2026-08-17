@@ -54,4 +54,12 @@ export interface AuditResult {
    * were readable.
    */
   skippedFiles: number;
+  /**
+   * Project directories that could not be listed (missing, permissions,
+   * ...) and were skipped in their entirety, threaded in from
+   * discover.ts's findTranscriptFiles via audit.ts's auditFiles. Distinct
+   * from skippedFiles, which counts individual transcript files within
+   * directories that were listable.
+   */
+  skippedDirs: number;
 }

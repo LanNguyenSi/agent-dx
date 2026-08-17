@@ -16,9 +16,13 @@ const MCP_PREFIX = "mcp__";
 /**
  * Audit a list of transcript file paths: parse each (tolerating malformed
  * lines and unreadable files), merge per-tool stats across all of them,
- * and rank by total (in+out) characters descending.
+ * and rank by total (in+out) characters descending. `skippedDirs` is
+ * threaded straight through from discover.ts's findTranscriptFiles (the
+ * caller resolved `paths` from a set of project directories, some of
+ * which may have been unreadable) so it ends up on the same AuditResult
+ * as the other skip counters, for the CLI to report in one place.
  */
-export function auditFiles(paths: string[]): AuditResult {
+export function auditFiles(paths: string[], skippedDirs = 0): AuditResult {
   const merged = new Map<string, ToolStats>();
   let skippedLines = 0;
   let filesScanned = 0;
@@ -56,6 +60,7 @@ export function auditFiles(paths: string[]): AuditResult {
     skippedLines,
     filesScanned,
     skippedFiles,
+    skippedDirs,
   };
 }
 

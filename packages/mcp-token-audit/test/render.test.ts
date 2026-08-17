@@ -52,6 +52,7 @@ describe("toJsonOutput", () => {
     expect(out.filesScanned).toBe(1);
     expect(out.skippedLines).toBe(1);
     expect(out.skippedFiles).toBe(0);
+    expect(out.skippedDirs).toBe(0);
   });
 
   it("reports 0% mcp share when there are no tool calls at all", () => {
@@ -62,6 +63,7 @@ describe("toJsonOutput", () => {
       skippedLines: 0,
       filesScanned: 0,
       skippedFiles: 0,
+      skippedDirs: 0,
     });
     expect(out.mcp.pctOfTotal).toBe(0);
   });
@@ -85,6 +87,17 @@ describe("toRows", () => {
       { tool: "four-calls", calls: 4, tokIn: 10, tokOut: 0, tokPerCall: 3 },
     ]);
   });
+
+  it("strips control/format characters (e.g. an embedded ANSI escape) from tool names", () => {
+    // Built with String.fromCharCode rather than a literal control byte in
+    // the source, so the ESC (U+001B) character is visible/reviewable in a
+    // diff instead of being an invisible byte in the .ts file.
+    const ESC = String.fromCharCode(0x1b);
+    const dirty = `tool${ESC}[31mRED${ESC}[0m`;
+    const rows = toRows([{ tool: dirty, calls: 1, charsIn: 0, charsOut: 0 }]);
+    expect(rows[0].tool).toBe("tool[31mRED[0m");
+    expect(rows[0].tool).not.toContain(ESC);
+  });
 });
 
 describe("renderText", () => {
@@ -105,6 +118,7 @@ describe("renderText", () => {
     expect(text).toContain("mcp__*: 2 calls, ~11 tok (40.7% of total)");
     expect(text).toContain("skipped 1 malformed line(s)");
     expect(text).not.toContain("unreadable file(s)");
+    expect(text).not.toContain("project dir(s)");
     expect(text).toContain("1 transcript file(s) scanned");
   });
 
@@ -116,6 +130,7 @@ describe("renderText", () => {
       skippedLines: 0,
       filesScanned: 0,
       skippedFiles: 0,
+      skippedDirs: 0,
     });
     expect(text).toContain("mcp-token-audit: no tool calls found");
   });
@@ -128,8 +143,25 @@ describe("renderText", () => {
       skippedLines: 0,
       filesScanned: 2,
       skippedFiles: 3,
+      skippedDirs: 0,
     });
     expect(text).toContain("skipped 3 unreadable file(s)");
     expect(text).not.toContain("malformed line(s)");
+    expect(text).not.toContain("project dir(s)");
+  });
+
+  it("reports skipped unreadable/missing project dirs, distinct from skipped files/lines", () => {
+    const text = renderText({
+      perTool: [],
+      totals: { calls: 0, charsIn: 0, charsOut: 0 },
+      mcpTotals: { calls: 0, charsIn: 0, charsOut: 0 },
+      skippedLines: 0,
+      filesScanned: 0,
+      skippedFiles: 0,
+      skippedDirs: 2,
+    });
+    expect(text).toContain("skipped 2 unreadable/missing project dir(s)");
+    expect(text).not.toContain("malformed line(s)");
+    expect(text).not.toContain("unreadable file(s)");
   });
 });

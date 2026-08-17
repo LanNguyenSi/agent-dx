@@ -30,8 +30,8 @@ program
         const projectDirs =
           projectDirsArg.length > 0 ? projectDirsArg : defaultProjectDirs();
         const days = opts.days === undefined ? undefined : parseDays(opts.days);
-        const files = findTranscriptFiles(projectDirs, days);
-        const result = auditFiles(files);
+        const { files, skippedDirs } = findTranscriptFiles(projectDirs, days);
+        const result = auditFiles(files, skippedDirs);
         process.stdout.write(
           opts.json ? renderJson(result) : renderText(result),
         );

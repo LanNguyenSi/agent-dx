@@ -19,25 +19,41 @@ export function defaultProjectDirs(): string[] {
     .sort();
 }
 
+export interface FindTranscriptFilesResult {
+  files: string[];
+  /**
+   * Number of `projectDirs` entries that could not be listed (missing
+   * directory, permission denied, ...) and were skipped rather than
+   * aborting the whole run. Surfaced to the caller instead of swallowed:
+   * a mistyped or unreadable --projectDir argument would otherwise look
+   * indistinguishable from a project with zero transcripts (exit 0, all
+   * zeros).
+   */
+  skippedDirs: number;
+}
+
 /**
  * List `*.jsonl` transcript files directly under each of `projectDirs`.
  * When `days` is given, only files whose mtime falls within the last
  * `days` days are included. A project directory that does not exist or
  * cannot be read is skipped, not fatal, so a stale --projectDir argument
- * does not abort the whole run.
+ * does not abort the whole run; it is counted in the returned
+ * `skippedDirs` instead.
  */
 export function findTranscriptFiles(
   projectDirs: string[],
   days?: number,
-): string[] {
+): FindTranscriptFilesResult {
   const cutoffMs =
     days === undefined ? undefined : Date.now() - days * MS_PER_DAY;
   const files: string[] = [];
+  let skippedDirs = 0;
   for (const dir of projectDirs) {
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
+      skippedDirs += 1;
       continue;
     }
     for (const entry of entries) {
@@ -53,7 +69,7 @@ export function findTranscriptFiles(
       files.push(full);
     }
   }
-  return files.sort();
+  return { files: files.sort(), skippedDirs };
 }
 
 export function readTranscriptFile(path: string): string {

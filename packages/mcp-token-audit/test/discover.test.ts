@@ -26,15 +26,31 @@ describe("findTranscriptFiles", () => {
     writeFileSync(join(projDir, "s2.jsonl"), "{}\n");
     writeFileSync(join(projDir, "notes.txt"), "not a transcript");
 
-    const files = findTranscriptFiles([projDir]);
+    const { files, skippedDirs } = findTranscriptFiles([projDir]);
     expect(files.sort()).toEqual(
       [join(projDir, "s1.jsonl"), join(projDir, "s2.jsonl")].sort(),
     );
+    expect(skippedDirs).toBe(0);
   });
 
-  it("silently skips a project dir that does not exist", () => {
-    const files = findTranscriptFiles([join(tmp, "nope")]);
+  it("skips a project dir that does not exist and counts it in skippedDirs, instead of failing the whole run", () => {
+    const { files, skippedDirs } = findTranscriptFiles([join(tmp, "nope")]);
     expect(files).toEqual([]);
+    expect(skippedDirs).toBe(1);
+  });
+
+  it("still returns files from readable dirs when another dir is unreadable", () => {
+    const projDir = join(tmp, "proj-good");
+    mkdirSync(projDir, { recursive: true });
+    writeFileSync(join(projDir, "s1.jsonl"), "{}\n");
+
+    const { files, skippedDirs } = findTranscriptFiles([
+      join(tmp, "nope-1"),
+      projDir,
+      join(tmp, "nope-2"),
+    ]);
+    expect(files).toEqual([join(projDir, "s1.jsonl")]);
+    expect(skippedDirs).toBe(2);
   });
 
   it("filters by mtime when --days is given", () => {
@@ -49,7 +65,7 @@ describe("findTranscriptFiles", () => {
     const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
     utimesSync(stale, tenDaysAgo, tenDaysAgo);
 
-    const files = findTranscriptFiles([projDir], 1);
+    const { files } = findTranscriptFiles([projDir], 1);
     expect(files).toEqual([fresh]);
   });
 });

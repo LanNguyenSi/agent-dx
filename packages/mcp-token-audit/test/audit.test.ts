@@ -67,6 +67,21 @@ describe("auditFiles", () => {
     expect(result.filesScanned).toBe(0);
     expect(result.skippedLines).toBe(0);
     expect(result.skippedFiles).toBe(0);
+    expect(result.skippedDirs).toBe(0);
+  });
+
+  it("threads the caller-supplied skippedDirs count straight through to the result", () => {
+    // skippedDirs is resolved by discover.ts's findTranscriptFiles from a
+    // set of project directories, not by auditFiles itself (it only ever
+    // sees the resulting file paths), so auditFiles just has to carry the
+    // number the caller passed in through to the result unchanged.
+    const result = auditFiles([FIXTURE_PATH], 3);
+    expect(result.skippedDirs).toBe(3);
+  });
+
+  it("defaults skippedDirs to 0 when the caller omits it", () => {
+    const result = auditFiles([FIXTURE_PATH]);
+    expect(result.skippedDirs).toBe(0);
   });
 
   it("tolerates a file that is entirely malformed JSONL", () => {
