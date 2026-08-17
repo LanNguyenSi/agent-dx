@@ -4,8 +4,6 @@ export type {
   ContentBlock,
   MessageEntry,
   ToolStats,
-  ToolUseBlock,
-  ToolResultBlock,
   TranscriptEntry,
 } from "./types.js";
 

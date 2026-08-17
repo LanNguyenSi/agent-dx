@@ -79,7 +79,10 @@ skipped 2 malformed line(s)
 
 ## Limitations
 
-No live API calls (this reads local transcript files only), no dollar-cost conversion, no dashboard. The `chars/4` approximation will drift from a real tokenizer, especially for code, JSON payloads, and non-English text; treat the numbers as directionally useful, not exact.
+- No live API calls (this reads local transcript files only), no dollar-cost conversion, no dashboard. The `chars/4` approximation will drift from a real tokenizer, especially for code, JSON payloads, and non-English text; treat the numbers as directionally useful, not exact.
+- **Privacy.** Output contains only tool names and aggregate call/character counts, never prompt or result content, so it's safe to paste into an issue, a chat, or a report without redaction.
+- **Per-file pairing.** A `tool_use` is only matched to its `tool_result` within the same transcript file. If a session's log got split or rotated so the two land in different files, the call is still counted but with zero output. A duplicate `tool_use` id within one file is deduplicated (the last occurrence wins); the same id appearing across two different files is not deduplicated and is double-counted, since each file is aggregated independently before totals are summed.
+- **Non-text result blocks.** A `tool_result.content` block without a `text` field (e.g. an image block) is approximated by `JSON.stringify`-ing it rather than by its true payload size, so its `~tok_out` contribution is a rough stand-in, not a faithful size estimate.
 
 ## CI
 

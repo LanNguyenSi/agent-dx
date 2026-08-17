@@ -22,6 +22,7 @@ export function auditFiles(paths: string[]): AuditResult {
   const merged = new Map<string, ToolStats>();
   let skippedLines = 0;
   let filesScanned = 0;
+  let skippedFiles = 0;
 
   for (const path of paths) {
     let raw: string;
@@ -29,8 +30,9 @@ export function auditFiles(paths: string[]): AuditResult {
       raw = readTranscriptFile(path);
     } catch {
       // Unreadable file (permissions, race with rotation, ...): skip the
-      // whole file. Not counted in skippedLines, which tracks malformed
-      // *lines* within files we could read.
+      // whole file, counted in skippedFiles. Not counted in skippedLines,
+      // which tracks malformed *lines* within files we could read.
+      skippedFiles += 1;
       continue;
     }
     filesScanned += 1;
@@ -47,7 +49,14 @@ export function auditFiles(paths: string[]): AuditResult {
     perTool.filter((t) => t.tool.startsWith(MCP_PREFIX)),
   );
 
-  return { perTool, totals, mcpTotals, skippedLines, filesScanned };
+  return {
+    perTool,
+    totals,
+    mcpTotals,
+    skippedLines,
+    filesScanned,
+    skippedFiles,
+  };
 }
 
 function totalChars(stats: ToolStats): number {

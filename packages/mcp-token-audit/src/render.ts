@@ -26,6 +26,7 @@ export function toRows(perTool: ToolStats[]): ToolRow[] {
 export interface JsonOutput {
   filesScanned: number;
   skippedLines: number;
+  skippedFiles: number;
   tools: ToolRow[];
   totals: { calls: number; tokIn: number; tokOut: number; tok: number };
   mcp: {
@@ -48,6 +49,7 @@ export function toJsonOutput(result: AuditResult): JsonOutput {
   return {
     filesScanned: result.filesScanned,
     skippedLines: result.skippedLines,
+    skippedFiles: result.skippedFiles,
     tools,
     totals: {
       calls: result.totals.calls,
@@ -102,6 +104,9 @@ export function renderText(result: AuditResult): string {
   text += `mcp__*: ${out.mcp.calls} calls, ~${out.mcp.tok} tok (${out.mcp.pctOfTotal.toFixed(1)}% of total)\n`;
   if (result.skippedLines > 0) {
     text += `skipped ${result.skippedLines} malformed line(s)\n`;
+  }
+  if (result.skippedFiles > 0) {
+    text += `skipped ${result.skippedFiles} unreadable file(s)\n`;
   }
   text += `${result.filesScanned} transcript file(s) scanned\n`;
   return text;

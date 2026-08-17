@@ -1,25 +1,15 @@
-// Shapes we actually read from Claude Code transcript JSONL. Both are
-// intentionally loose (index signatures, unknown fields) because a
+// Shapes we actually read from Claude Code transcript JSONL. ContentBlock
+// is intentionally loose (index signature, unknown fields) because a
 // transcript line carries far more than this, and we only care about the
-// message.content tool_use / tool_result blocks.
+// message.content tool_use / tool_result blocks. There is no separate
+// ToolUseBlock/ToolResultBlock interface: aggregate.ts pulls individual
+// fields (id, name, input, tool_use_id, content) out with its own
+// defensive casts and typeof checks at the point of use, since transcript
+// content is untrusted input. A narrower discriminated type would not
+// remove that need, because the shape isn't guaranteed to match at
+// runtime regardless of what TypeScript infers from `block.type`.
 
-export interface ToolUseBlock {
-  type: "tool_use";
-  id?: unknown;
-  name?: unknown;
-  input?: unknown;
-  [key: string]: unknown;
-}
-
-export interface ToolResultBlock {
-  type: "tool_result";
-  tool_use_id?: unknown;
-  content?: unknown;
-  [key: string]: unknown;
-}
-
-export type ContentBlock =
-  ToolUseBlock | ToolResultBlock | { type: string; [key: string]: unknown };
+export type ContentBlock = { type: string; [key: string]: unknown };
 
 export interface MessageEntry {
   type: "user" | "assistant";
@@ -57,4 +47,11 @@ export interface AuditResult {
   mcpTotals: AuditTotals;
   skippedLines: number;
   filesScanned: number;
+  /**
+   * Transcript files that could not be read at all (permissions, a race
+   * with log rotation, ...) and were skipped in their entirety. Distinct
+   * from skippedLines, which counts malformed lines within files that
+   * were readable.
+   */
+  skippedFiles: number;
 }

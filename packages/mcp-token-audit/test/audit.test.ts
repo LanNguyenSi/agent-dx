@@ -52,10 +52,11 @@ describe("auditFiles", () => {
     expect(bash).toEqual({ tool: "Bash", calls: 4, charsIn: 74, charsOut: 54 });
   });
 
-  it("skips an unreadable file without throwing and without counting it as scanned", () => {
+  it("skips an unreadable file without throwing, counts it in skippedFiles, and does not count it as scanned", () => {
     const missing = join(tmp, "does-not-exist.jsonl");
     const result = auditFiles([missing, FIXTURE_PATH]);
     expect(result.filesScanned).toBe(1);
+    expect(result.skippedFiles).toBe(1);
     expect(result.perTool.length).toBeGreaterThan(0);
   });
 
@@ -65,6 +66,7 @@ describe("auditFiles", () => {
     expect(result.totals).toEqual({ calls: 0, charsIn: 0, charsOut: 0 });
     expect(result.filesScanned).toBe(0);
     expect(result.skippedLines).toBe(0);
+    expect(result.skippedFiles).toBe(0);
   });
 
   it("tolerates a file that is entirely malformed JSONL", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { auditFiles } from "../src/audit.js";
-import { renderText, toJsonOutput } from "../src/render.js";
+import { renderText, toJsonOutput, toRows } from "../src/render.js";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,6 +51,7 @@ describe("toJsonOutput", () => {
     });
     expect(out.filesScanned).toBe(1);
     expect(out.skippedLines).toBe(1);
+    expect(out.skippedFiles).toBe(0);
   });
 
   it("reports 0% mcp share when there are no tool calls at all", () => {
@@ -60,8 +61,29 @@ describe("toJsonOutput", () => {
       mcpTotals: { calls: 0, charsIn: 0, charsOut: 0 },
       skippedLines: 0,
       filesScanned: 0,
+      skippedFiles: 0,
     });
     expect(out.mcp.pctOfTotal).toBe(0);
+  });
+});
+
+describe("toRows", () => {
+  it("rounds ~tok/call with Math.round, including the .5 half-up case", () => {
+    // charsIn 40 -> tokIn 10 exactly (no rounding noise from charsToTokens
+    // itself), charsOut 0 -> tokOut 0, so tok totals 10 for both rows.
+    // calls 3 -> 10/3 = 3.33.. -> rounds down to 3 (would round UP to 4
+    // under Math.ceil, so this kills a round->ceil mutant).
+    // calls 4 -> 10/4 = 2.5 -> rounds UP to 3 under Math.round's
+    // round-half-up (would round DOWN to 2 under Math.floor, so this kills
+    // a round->floor mutant).
+    const rows = toRows([
+      { tool: "three-calls", calls: 3, charsIn: 40, charsOut: 0 },
+      { tool: "four-calls", calls: 4, charsIn: 40, charsOut: 0 },
+    ]);
+    expect(rows).toEqual([
+      { tool: "three-calls", calls: 3, tokIn: 10, tokOut: 0, tokPerCall: 3 },
+      { tool: "four-calls", calls: 4, tokIn: 10, tokOut: 0, tokPerCall: 3 },
+    ]);
   });
 });
 
@@ -82,6 +104,7 @@ describe("renderText", () => {
     expect(text).toContain("total: 4 calls, ~17 tok in, ~10 tok out, ~27 tok");
     expect(text).toContain("mcp__*: 2 calls, ~11 tok (40.7% of total)");
     expect(text).toContain("skipped 1 malformed line(s)");
+    expect(text).not.toContain("unreadable file(s)");
     expect(text).toContain("1 transcript file(s) scanned");
   });
 
@@ -92,7 +115,21 @@ describe("renderText", () => {
       mcpTotals: { calls: 0, charsIn: 0, charsOut: 0 },
       skippedLines: 0,
       filesScanned: 0,
+      skippedFiles: 0,
     });
     expect(text).toContain("mcp-token-audit: no tool calls found");
+  });
+
+  it("reports skipped unreadable files, distinct from skipped malformed lines", () => {
+    const text = renderText({
+      perTool: [],
+      totals: { calls: 0, charsIn: 0, charsOut: 0 },
+      mcpTotals: { calls: 0, charsIn: 0, charsOut: 0 },
+      skippedLines: 0,
+      filesScanned: 2,
+      skippedFiles: 3,
+    });
+    expect(text).toContain("skipped 3 unreadable file(s)");
+    expect(text).not.toContain("malformed line(s)");
   });
 });

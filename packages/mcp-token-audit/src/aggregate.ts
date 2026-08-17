@@ -34,14 +34,29 @@ export function parseTranscript(raw: string): {
   return { entries, skipped };
 }
 
+/**
+ * A parsed JSONL line can be any valid JSON value (`null`, a number, an
+ * array, ...), not just the MessageEntry shape TranscriptEntry declares:
+ * the cast in parseTranscript doesn't check this at runtime. Guard against
+ * that before reading `.type`, or a `null` line throws and kills the whole
+ * audit run.
+ */
 function isMessageEntry(entry: TranscriptEntry): entry is MessageEntry {
-  return entry.type === "user" || entry.type === "assistant";
+  return (
+    entry !== null &&
+    typeof entry === "object" &&
+    (entry.type === "user" || entry.type === "assistant")
+  );
 }
 
 function contentBlocks(entry: TranscriptEntry): ContentBlock[] {
   if (!isMessageEntry(entry)) return [];
   const content = entry.message?.content;
-  if (!content || typeof content === "string") return [];
+  // `content` can be a well-formed-JSON-but-wrong-shape value (an object
+  // instead of an array, a number, ...): only an actual array is safe to
+  // iterate over downstream, anything else is treated as no blocks rather
+  // than thrown on.
+  if (!Array.isArray(content)) return [];
   return content;
 }
 

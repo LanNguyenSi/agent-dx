@@ -92,3 +92,46 @@ describe("aggregateEntries against test/fixtures/sample.jsonl", () => {
     });
   });
 });
+
+describe("aggregateEntries tolerates well-formed-JSON-but-wrong-shape lines", () => {
+  // Both lines below are valid JSON (parseTranscript does not count them as
+  // malformed / skipped), but neither is a usable MessageEntry: a bare
+  // `null` line, and a `message.content` that is an object instead of an
+  // array. Before the fix, isMessageEntry read `.type` off `null` (a
+  // TypeError) and contentBlocks iterated over a non-array `content` (a
+  // "not iterable" TypeError), either of which killed the whole audit run
+  // instead of just being ignored.
+
+  it("does not throw on a bare null line or a non-array message.content, and contributes no tool stats", () => {
+    const raw = [
+      "null",
+      '{"type":"user","message":{"content":{"type":"text"}}}',
+    ].join("\n");
+    const { entries, skipped } = parseTranscript(raw);
+    expect(skipped).toBe(0); // both lines parse as valid JSON
+
+    expect(() => aggregateEntries(entries)).not.toThrow();
+    const perTool = aggregateEntries(entries);
+    expect(perTool.size).toBe(0);
+  });
+
+  it("keeps aggregating a valid tool_use/tool_result pair surrounding the malformed-shape lines", () => {
+    const raw = [
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"pwd"}}]}}',
+      "null",
+      '{"type":"user","message":{"content":{"type":"text"}}}',
+      '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"/home/user"}]}}',
+    ].join("\n");
+    const { entries } = parseTranscript(raw);
+    const perTool = aggregateEntries(entries);
+    // Same char counts as tu3/its result in the sample.jsonl fixture math
+    // above: input {"command":"pwd"} -> 17 chars, result "/home/user" -> 10
+    // chars.
+    expect(perTool.get("Bash")).toEqual({
+      tool: "Bash",
+      calls: 1,
+      charsIn: 17,
+      charsOut: 10,
+    });
+  });
+});
