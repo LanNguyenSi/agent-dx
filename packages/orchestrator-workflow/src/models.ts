@@ -16,6 +16,49 @@ export const READ_ONLY_ROLES: ReadonlySet<Role> = new Set<Role>([
   "reviewer",
 ]);
 
+/**
+ * A profile selects which subagent roles init installs. `full` is every
+ * role (today's unconditional behavior); `minimal` drops the planning
+ * (task-slicer) and discovery (explorer) roles and keeps only the
+ * write+check pair. The reviewer is never omitted from either profile
+ * (Standing Rule: always review), so `minimal` is not "just implementer".
+ */
+export type Profile = "minimal" | "full";
+
+export const PROFILES: Profile[] = ["minimal", "full"];
+
+export const DEFAULT_PROFILE: Profile = "full";
+
+const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new Set<Role>([
+  "implementer",
+  "reviewer",
+]);
+
+/** Roles installed for a given profile, in the same order as `ROLES`. */
+export function rolesForProfile(profile: Profile): Role[] {
+  return profile === "minimal"
+    ? ROLES.filter((role) => MINIMAL_PROFILE_ROLES.has(role))
+    : ROLES;
+}
+
+export function isProfile(value: string): value is Profile {
+  return (PROFILES as string[]).includes(value);
+}
+
+/**
+ * Parses a `--profile` value. Unknown values throw rather than silently
+ * falling back to a default, matching `parseHarnessList`'s validation style.
+ */
+export function parseProfile(value: string): Profile {
+  const trimmed = value.trim();
+  if (!isProfile(trimmed)) {
+    throw new Error(
+      `Unknown --profile "${value}"; valid values: ${PROFILES.join(", ")}`,
+    );
+  }
+  return trimmed;
+}
+
 export type ModelAlias = "sonnet" | "opus" | "haiku";
 
 export const MODEL_ALIASES: ModelAlias[] = ["sonnet", "opus", "haiku"];

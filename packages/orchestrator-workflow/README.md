@@ -70,6 +70,7 @@ Non-interactive:
 ```bash
 npx orchestrator-workflow init --yes
 npx orchestrator-workflow init --harness claude,codex,opencode --models "implementer=sonnet,reviewer=opus" --yes
+npx orchestrator-workflow init --profile minimal --yes
 ```
 
 To let a coding agent do the install, give it this single line:
@@ -91,7 +92,7 @@ to a commit SHA for a stable audit.
 .ai/
   workflow/
     templates/        00-goal.md ... 06-handoff.md (canonical run templates)
-    manifest.json     kit version, chosen harnesses, per-role models
+    manifest.json     kit version, chosen harnesses, role profile, per-role models
   runs/               one directory per unit of work, newest = active
 AGENTS.md             marker-fenced "Agentic Coding Workflow" policy section
 ```
@@ -116,6 +117,46 @@ reviewer ran `git checkout` and discarded uncommitted work), which is why the
 prompts now name the forbidden commands instead of just saying "read-only".
 Marker- or verdict-style enforcement of the Bash residual (sandboxing,
 PreToolUse hooks) is harness territory and out of this kit's scope.
+
+## Role profile
+
+`--profile` selects which subagent roles get installed (Claude Code and
+opencode only; Codex has no per-role files to select from):
+
+| Profile | Roles installed | When to use it |
+|---|---|---|
+| `full` (default) | explorer, task-slicer, implementer, reviewer | the full workflow: read-only discovery, task slicing, implementation, review |
+| `minimal` | implementer, reviewer | a small or well-understood repo where discovery and slicing add ceremony without payoff |
+
+The reviewer is never omitted from either profile: the Standing Rule "always
+review" applies regardless of profile, so `minimal` is the write+check pair,
+not "just implementer". There is no per-role checklist; the two profiles are
+the only supported shapes.
+
+```bash
+npx orchestrator-workflow init --profile minimal --yes
+```
+
+Interactively (no `--yes`), the installer asks one additional question —
+which profile to install — defaulting to `full`. `--profile` rejects any
+value other than `minimal` or `full` with a clear error instead of silently
+falling back to a default.
+
+**Re-runs and profile changes.** A plain re-run (no `--profile` flag) keeps
+the profile recorded in `.ai/workflow/manifest.json` from the previous
+install, the same override-vs-persist rule already used for `--harness` and
+`--models`. Passing `--profile` explicitly always overrides the recorded
+value, immediately switching which per-role files the next run installs and
+updating the manifest to match. Switching profiles follows the same
+precedent already in place for dropping a harness from `--harness` on a
+re-run: files for roles no longer in the profile are simply no longer
+installed or tracked in the manifest; they are not automatically deleted
+from disk. For a fully clean switch (e.g. `full` → `minimal`), run
+`orchestrator-workflow uninstall` first, or remove the stale
+`task-slicer.md` / `explorer.md` agent files by hand. Uninstalling a
+`minimal` install is always clean on its own: it only ever removes what it
+actually installed, so there is nothing to report as missing for the roles
+that were never written.
 
 ## Model preselection
 
@@ -162,8 +203,8 @@ be supplied as a fully-qualified `--models` entry, e.g.
   updates files you never touched and reports files you edited as conflicts
   instead of overwriting them; `--force` overwrites those too.
 - `.ai/workflow/manifest.json` is the kit's state file. It records the applied
-  version, harnesses, models, and file hashes, and is rewritten whenever that
-  state changes; do not edit it by hand.
+  version, harnesses, role profile, models, and file hashes, and is rewritten
+  whenever that state changes; do not edit it by hand.
 
 ## Uninstall
 

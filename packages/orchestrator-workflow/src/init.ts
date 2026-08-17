@@ -10,13 +10,16 @@ import {
 } from "./assets.js";
 import type { Harness } from "./detect.js";
 import { HARNESSES } from "./detect.js";
-import type { Role } from "./models.js";
+import type { Profile, Role } from "./models.js";
 import {
+  DEFAULT_PROFILE,
   READ_ONLY_ROLES,
   ROLES,
   assertValidModelId,
   claudeModelValue,
+  isProfile,
   opencodeModelValue,
+  rolesForProfile,
 } from "./models.js";
 import type { Report } from "./writers.js";
 import {
@@ -30,6 +33,12 @@ export interface InitOptions {
   targetDir: string;
   harnesses: Harness[];
   models: Record<Role, string>;
+  /**
+   * Which subagent roles to install. Defaults to `"full"` (every role,
+   * today's unconditional behavior) when omitted, so existing callers that
+   * do not pass this field see no change.
+   */
+  profile?: Profile;
   force?: boolean;
   /**
    * Resolved fully-qualified opencode model ids per role, or `undefined` to
@@ -49,6 +58,8 @@ export interface Manifest {
   version: string;
   harnesses: Harness[];
   models: Record<Role, string>;
+  /** Which subagent roles were installed: `"minimal"` or `"full"`. */
+  profile: Profile;
   /**
    * sha256 of every kit-owned file as installed. This is how a re-run tells
    * "upstream changed, safe to update" apart from "user edited, conflict".
@@ -122,11 +133,20 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
       }
     }
   }
+  // A manifest written before profiles existed carries no `profile` field;
+  // that install always put down every role, so it degrades to "full" here
+  // rather than to some notional "no roles" state.
+  const profile: Profile =
+    typeof candidate.profile === "string" && isProfile(candidate.profile)
+      ? candidate.profile
+      : DEFAULT_PROFILE;
+
   return {
     kit: SKILL_NAME,
     version: typeof candidate.version === "string" ? candidate.version : "",
     harnesses,
     models: models as Record<Role, string>,
+    profile,
     files,
     installedAt:
       typeof candidate.installedAt === "string" ? candidate.installedAt : "",
@@ -184,6 +204,7 @@ export function runInit(options: InitOptions): Report {
     throw new Error(`Target is not a directory: ${targetDir}`);
   }
   const force = options.force ?? false;
+  const profile: Profile = options.profile ?? DEFAULT_PROFILE;
   const report = emptyReport();
 
   const previous = readInstalledManifest(targetDir);
@@ -235,7 +256,7 @@ export function runInit(options: InitOptions): Report {
 
   if (options.harnesses.includes("claude")) {
     installKitFile(join(".claude", "skills", SKILL_NAME, "SKILL.md"), skill);
-    for (const role of ROLES) {
+    for (const role of rolesForProfile(profile)) {
       installKitFile(
         join(".claude", "agents", `${role}.md`),
         composeClaudeAgent(role, options.models[role]),
@@ -250,7 +271,7 @@ export function runInit(options: InitOptions): Report {
 
   if (options.harnesses.includes("opencode")) {
     installKitFile(join(".opencode", "skills", SKILL_NAME, "SKILL.md"), skill);
-    for (const role of ROLES) {
+    for (const role of rolesForProfile(profile)) {
       const modelValue =
         options.opencodeModels !== undefined
           ? options.opencodeModels[role]
@@ -269,6 +290,7 @@ export function runInit(options: InitOptions): Report {
     version: PACKAGE_VERSION,
     harnesses: [...options.harnesses].sort(),
     models: options.models,
+    profile,
     files: installedFiles,
   };
   const manifestPath = join(targetDir, MANIFEST_PATH);
@@ -279,6 +301,7 @@ export function runInit(options: InitOptions): Report {
       version: previous.version,
       harnesses: previous.harnesses,
       models: previous.models,
+      profile: previous.profile,
       files: previous.files,
     }) === JSON.stringify(desired)
   ) {

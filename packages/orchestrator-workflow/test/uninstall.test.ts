@@ -79,6 +79,40 @@ describe("init-uninstall roundtrip", () => {
   });
 });
 
+describe("minimal profile", () => {
+  it("uninstalls a minimal install cleanly: no kept/missing noise for the omitted roles", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "codex", "opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+    // The minimal surface: no task-slicer/explorer agent files were ever
+    // written, for either harness that carries per-role files.
+    expect(
+      existsSync(join(target, ".claude", "agents", "task-slicer.md")),
+    ).toBe(false);
+    expect(existsSync(join(target, ".opencode", "agents", "explorer.md"))).toBe(
+      false,
+    );
+
+    const report = runUninstall({ targetDir: target });
+
+    expect(readdirSync(target)).toEqual([]);
+    expect(report.kept).toEqual([]);
+    expect(report.missing).toEqual([]);
+    expect(report.removed.length).toBeGreaterThan(0);
+    // No manifest entry ever existed for the omitted roles, so uninstall
+    // never has to reason about a missing file for them either.
+    expect(report.removed.some((path) => path.includes("task-slicer.md"))).toBe(
+      false,
+    );
+    expect(report.removed.some((path) => path.includes("explorer.md"))).toBe(
+      false,
+    );
+  });
+});
+
 describe("edited kit files", () => {
   it("keeps a locally edited file without --force and reports it", () => {
     initAll();
