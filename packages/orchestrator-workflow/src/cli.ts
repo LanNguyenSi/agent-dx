@@ -8,13 +8,16 @@ import inquirer from "inquirer";
 import { PACKAGE_VERSION } from "./assets.js";
 import type { Harness } from "./detect.js";
 import { HARNESSES, detectHarnesses, parseHarnessList } from "./detect.js";
-import type { Role } from "./models.js";
+import type { Profile, Role } from "./models.js";
 import {
   DEFAULT_MODELS,
+  DEFAULT_PROFILE,
   MODEL_ALIASES,
-  ROLES,
+  PROFILES,
   assertValidModelId,
   parseModelsSpec,
+  parseProfile,
+  rolesForProfile,
 } from "./models.js";
 import { loadOpencodeCatalog, resolveOpencodeModels } from "./opencode.js";
 import { readInstalledManifest, runInit } from "./init.js";
@@ -64,11 +67,34 @@ async function promptHarnesses(
   return harnesses;
 }
 
+async function promptProfile(base: Profile): Promise<Profile> {
+  const { profile } = await inquirer.prompt<{ profile: Profile }>([
+    {
+      type: "list",
+      name: "profile",
+      message: "Which subagent roles should be installed?",
+      default: base,
+      choices: [
+        {
+          name: "full — explorer, task-slicer, implementer, reviewer (default)",
+          value: "full",
+        },
+        {
+          name: "minimal — implementer, reviewer only (reviewer is never optional)",
+          value: "minimal",
+        },
+      ],
+    },
+  ]);
+  return profile;
+}
+
 async function promptModels(
   base: Record<Role, string>,
+  roles: Role[],
 ): Promise<Record<Role, string>> {
   const models = { ...base };
-  for (const role of ROLES) {
+  for (const role of roles) {
     const { choice } = await inquirer.prompt<{ choice: string }>([
       {
         type: "list",
@@ -132,6 +158,10 @@ program
     'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
   )
   .option(
+    "--profile <profile>",
+    `subagent role profile (${PROFILES.join(", ")}); default: full, or the previously installed profile on a re-run`,
+  )
+  .option(
     "--opencode-provider <id>",
     "opencode provider id for alias resolution (e.g. github-copilot); auto-detected when omitted",
   )
@@ -143,6 +173,7 @@ program
         force?: boolean;
         harness?: string;
         models?: string;
+        profile?: string;
         opencodeProvider?: string;
       },
     ) => {
@@ -175,7 +206,7 @@ program
             ? previous.harnesses.join(", ")
             : "none recorded";
         console.log(
-          `Found existing install (${version.startsWith("unknown") ? version : `v${version}`}, harnesses: ${installedFor})`,
+          `Found existing install (${version.startsWith("unknown") ? version : `v${version}`}, harnesses: ${installedFor}, profile: ${previous.profile})`,
         );
       }
 
@@ -192,12 +223,25 @@ program
             : ["claude"];
       }
 
+      // Explicit --profile always overrides; a plain re-run keeps the
+      // profile from the previous install (same override-vs-persist rule as
+      // --harness/--models above); a fresh install with no prior manifest
+      // defaults to full.
+      let profile: Profile;
+      if (opts.profile) {
+        profile = parseProfile(opts.profile);
+      } else {
+        profile = previous?.profile ?? DEFAULT_PROFILE;
+        if (interactive) profile = await promptProfile(profile);
+      }
+
       let models: Record<Role, string> = {
         ...DEFAULT_MODELS,
         ...(previous?.models ?? {}),
       };
       if (opts.models) models = parseModelsSpec(opts.models, models);
-      if (interactive && !opts.models) models = await promptModels(models);
+      if (interactive && !opts.models)
+        models = await promptModels(models, rolesForProfile(profile));
 
       // Resolve opencode model aliases against the live catalog when the opencode
       // harness is selected. The shell-out stays here in the CLI so runInit
@@ -219,6 +263,7 @@ program
         targetDir,
         harnesses,
         models,
+        profile,
         force: opts.force,
         opencodeModels,
       });
@@ -230,8 +275,9 @@ program
         "Conflicts (local edits kept, re-run with --force to overwrite)",
         report.conflicted,
       );
+      for (const note of report.notes) console.log(note);
       console.log(
-        `\norchestrator-workflow v${PACKAGE_VERSION} installed for: ${harnesses.join(", ")}`,
+        `\norchestrator-workflow v${PACKAGE_VERSION} installed for: ${harnesses.join(", ")} (profile: ${profile})`,
       );
     },
   );

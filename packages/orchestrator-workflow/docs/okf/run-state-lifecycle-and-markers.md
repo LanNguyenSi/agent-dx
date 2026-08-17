@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff]
-timestamp: 2026-07-18T12:00:00Z
+timestamp: 2026-08-17T19:05:00Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -22,8 +22,8 @@ sources:
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:52-63).
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(SKILL.md:65-66; packages/orchestrator-workflow/README.md:91-95;
-packages/orchestrator-workflow/INSTALL-AGENT.md:41-42,98-100). The newest run
+(SKILL.md:65-66; packages/orchestrator-workflow/README.md:91-96;
+packages/orchestrator-workflow/INSTALL-AGENT.md:44-45,110-113). The newest run
 directory is the active one; older directories are the auditable history and
 must not be edited (SKILL.md:66-67, "Do not edit past runs"). Three of the
 seven files carry a `<!-- solution-acceptance: <key> = <value> -->`

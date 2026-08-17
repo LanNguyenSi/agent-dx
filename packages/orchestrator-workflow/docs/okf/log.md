@@ -122,3 +122,52 @@
   invariant, not just an assertion via the line-unwrapped `toContain` checks
   already in place. Full suite 137/137 (135 + 2 new), `tsc --noEmit` clean,
   `okf-kit check --strict` clean.
+
+- 2026-08-17: re-verified and re-stamped install-fence-mechanics.md and
+  model-preselection.md against package version 0.15.0 (`--profile
+  minimal|full` on `init`, review fix-round for agent-dx task 9f6a77e1):
+  `models.ts` gained a ~44-line Profile block between `READ_ONLY_ROLES` and
+  `ModelAlias` (shifting every `models.ts:` citation after line 17 in
+  model-preselection.md), `cli.ts` gained `promptProfile` plus profile
+  plumbing through the `init` action (shifting most `cli.ts:` citations),
+  and `init.ts` gained a `profile` manifest field, a `profile`-aware
+  `readInstalledManifest` fallback, `rolesForProfile`-scoped per-role
+  installs, and (this fix-round) a full -> minimal downgrade-note block
+  inserted before `installKitFile` — `runInit` moved from its old
+  src/init.ts:178 to :198, and every citation at or after the old
+  init.ts:216 templates-loop shifted by +21 (not a uniform offset applied
+  blindly: every citation in both docs was checked against a direct read of
+  the current file, the same discipline as the 2026-07-18 entries above).
+  `test/init.test.ts` citations needed the same treatment for a second,
+  independent reason: several were already stale at HEAD, predating even
+  the profile feature commit (`631-651`, `705-717`, `719-726` did not
+  correspond to any test in the file as committed) — these are corrected to
+  the tests' actual current locations rather than shifted from a wrong
+  baseline. This fix-round's own additions to `test/init.test.ts` (a
+  CLI-path test pinning the pre-0.15.0-manifest full-not-minimal fallback,
+  and three tests for the full -> minimal downgrade note and its uninstall
+  interaction) are cited by their real line ranges. Both docs' `sources:`
+  lists already covered every file touched, so no source entries were
+  added. install-fence-mechanics.md also picked up two `test/uninstall.test.ts`
+  citations that were already wrong at HEAD (`105-153`/`155-180` predated
+  that file's own +34-line growth in the profile commit); corrected to
+  `139-187`/`189-214` by direct read, `uninstall.ts` itself is untouched by
+  the profile feature so its own citations were left as-is.
+
+  Known gap, explicitly out of this pass's scope (the task named only these
+  two docs): `okf-kit check docs/okf --strict` still exits 1 with 3
+  pre-existing warnings unrelated to this fix-round —
+  run-state-lifecycle-and-markers.md's `README.md`/`INSTALL-AGENT.md`
+  staleness and subagent-contracts-superset.md's `src/models.ts` staleness
+  (its `models.ts:27-32` `DEFAULT_MODELS` citation, at minimum, is now
+  stale too, having moved to `:70-75` by the same Profile-block insertion
+  documented above). Neither install-fence-mechanics.md nor
+  model-preselection.md contributes any finding to that run. Full suite
+  152/152 (147 + 5 new: the fallback test above, three downgrade-note
+  tests, and a docs-consistency pin for the new profile-aware "run any
+  missing role inline" sentence in `SKILL.md`/`agents-md-section.md`),
+  `tsc --noEmit` clean, `npm run build` clean, `prettier --check` clean for
+  every file this fix-round touched (the two pre-existing warnings in
+  `test/docs-consistency.test.ts` and `test/template-markers.test.ts` are
+  both in code this pass never edited, confirmed by diffing prettier's
+  reformatted output against the current file).

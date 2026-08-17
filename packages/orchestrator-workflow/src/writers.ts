@@ -10,10 +10,12 @@ export interface Report {
   skipped: string[];
   /** Existed with diverging content and was left untouched (no --force). */
   conflicted: string[];
+  /** Human-readable notes (profile-downgrade leftovers, ...). */
+  notes: string[];
 }
 
 export function emptyReport(): Report {
-  return { written: [], updated: [], skipped: [], conflicted: [] };
+  return { written: [], updated: [], skipped: [], conflicted: [], notes: [] };
 }
 
 function write(path: string, content: string): void {

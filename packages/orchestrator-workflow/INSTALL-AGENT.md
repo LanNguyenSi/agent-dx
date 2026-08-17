@@ -20,19 +20,21 @@ which is mutable. For a stable audit, pin the URL to a commit SHA instead
 1. **Locate existing harness configs** in the repo root and report them to
    you (Claude Code, opencode, Codex marker files; full list in step 1
    below).
-2. **Ask you, not guess**: which harnesses should get adapters, and which
-   model each subagent role (explorer, task-slicer, implementer, reviewer)
-   should use. Suggested defaults: explorer `sonnet`, task-slicer `sonnet`,
-   implementer `sonnet`, reviewer `opus`.
+2. **Ask you, not guess**: which harnesses should get adapters, which role
+   profile to install (`full` — every role, or `minimal` — implementer and
+   reviewer only; the reviewer is never optional), and which model each
+   installed subagent role should use. Suggested defaults: profile `full`;
+   explorer `sonnet`, task-slicer `sonnet`, implementer `sonnet`, reviewer
+   `opus`.
 3. **Run the non-interactive installer** with your answers:
-   `npx orchestrator-workflow init --yes --harness ... --models ...`.
+   `npx orchestrator-workflow init --yes --harness ... --profile ... --models ...`.
    If the installer reports conflicts with locally edited files, the agent
    shows them to you and asks before any `--force` re-run.
 4. **Manual fallback only when npx or the registry is unavailable**: create
    the same files by hand from this repository's `assets/` directory,
    following the byte-precise rules in step 4 below.
-5. **Report back**: which harnesses were installed, which model each role
-   uses, and any conflicts left in place.
+5. **Report back**: which harnesses were installed, which profile and model
+   each role uses, and any conflicts left in place.
 
 ### Write surface
 
@@ -52,7 +54,11 @@ The install creates or touches only these paths:
 - `.opencode/skills/orchestrator-workflow/SKILL.md` and
   `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` (opencode)
 
-Nothing else in the repository is modified. Locally edited files are
+The per-role agent files above are the `full` profile (the default); the
+`minimal` profile writes only the `implementer` and `reviewer` files for
+Claude Code and opencode and skips `task-slicer` and `explorer` entirely.
+Codex has no per-role files, so the profile choice does not change what it
+gets. Nothing else in the repository is modified. Locally edited files are
 reported as conflicts and left alone, never overwritten silently; the
 exceptions are the kit-owned surfaces: `.ai/workflow/manifest.json` (the
 kit's state file, rewritten whenever the applied state changes) and the
@@ -76,21 +82,28 @@ steps in the repository you were asked to install into.
 2. Ask the operator, do not guess:
    - Which harnesses should get adapters: claude, codex, opencode?
      Suggest the detected ones.
-   - Which model for each subagent role? Suggest the defaults:
-     explorer `sonnet`, task-slicer `sonnet`, implementer `sonnet`,
-     reviewer `opus`. Accept the aliases `sonnet`, `opus`, `haiku` or a
-     full model id.
+   - Which role profile: `full` (explorer, task-slicer, implementer,
+     reviewer — the default) or `minimal` (implementer and reviewer only;
+     the reviewer is never optional under either profile)?
+   - Which model for each role the chosen profile installs? Suggest the
+     defaults: explorer `sonnet`, task-slicer `sonnet`, implementer
+     `sonnet`, reviewer `opus`. Accept the aliases `sonnet`, `opus`,
+     `haiku` or a full model id. Skip asking about a role's model when the
+     chosen profile does not install that role.
 
 3. Run the non-interactive installer with the operator's answers:
 
    ```bash
    npx orchestrator-workflow init --yes \
      --harness <claude,codex,opencode> \
+     --profile <minimal|full> \
      --models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>"
    ```
 
-   If the command reports conflicts, show them to the operator and ask
-   before re-running with --force.
+   Omit `--profile` to keep `full` (or, on a re-run, whatever profile was
+   installed previously); omit the models for roles the chosen profile does
+   not install. If the command reports conflicts, show them to the operator
+   and ask before re-running with --force.
 
 4. Only if npx or the registry is unavailable, scaffold manually from
    https://github.com/LanNguyenSi/agent-dx/tree/master/packages/orchestrator-workflow/assets
@@ -104,7 +117,9 @@ steps in the repository you were asked to install into.
      `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:end -->`
      markers.
    - Claude Code: `.claude/skills/orchestrator-workflow/SKILL.md` from
-     `assets/skill/SKILL.md`. For each role, `.claude/agents/<role>.md` from
+     `assets/skill/SKILL.md`. For each role in the chosen profile (all four
+     for `full`; only `implementer` and `reviewer` for `minimal`),
+     `.claude/agents/<role>.md` from
      `assets/agents/<role>.md` with `model: <operator's choice>` added as a
      new line directly after the `description:` line (that placement matches
      the installer's output byte for byte). For the explorer and reviewer
@@ -114,6 +129,7 @@ steps in the repository you were asked to install into.
    - Codex: `.agents/skills/orchestrator-workflow/SKILL.md`, same skill file.
    - opencode: `.opencode/skills/orchestrator-workflow/SKILL.md` from
      `assets/skill/SKILL.md`, unchanged.
+     For each role in the chosen profile (same set as Claude Code above),
      `.opencode/agents/<role>.md` from `assets/agents/<role>.md`, with the
      frontmatter rewritten to this order: `description:` (unchanged), then
      `mode: subagent`; the `name:` line is dropped. Only emit a
@@ -139,13 +155,15 @@ steps in the repository you were asked to install into.
      ---
      ```
    - `.ai/workflow/manifest.json`, exactly this shape (harnesses MUST be an
-     array, models keyed by role, version = the kit version you installed):
+     array, `profile` is `"minimal"` or `"full"`, models keyed by role,
+     version = the kit version you installed):
 
      ```json
      {
        "kit": "orchestrator-workflow",
        "version": "0.5.0",
        "harnesses": ["claude", "opencode"],
+       "profile": "full",
        "models": {
          "explorer": "sonnet",
          "task-slicer": "sonnet",
@@ -156,6 +174,10 @@ steps in the repository you were asked to install into.
        "installedAt": "2026-06-12T00:00:00.000Z"
      }
      ```
+
+     Under `minimal`, `models` only needs the `implementer` and `reviewer`
+     keys (the roles actually installed); the missing keys fall back to the
+     kit's defaults if the profile is later switched back to `full`.
 
      A manual install may leave the `files` hash map empty; a later `init`
      run then treats existing kit files conservatively and reports conflicts

@@ -5,6 +5,49 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-17
+
+### Added
+
+- `init` gains `--profile minimal|full`: `full` (the default) installs every
+  subagent role, byte-identical to pre-0.15.0 behavior when the flag is
+  omitted or passed explicitly as `full`; `minimal` installs only
+  `implementer` and `reviewer` (`task-slicer` and `explorer` are omitted).
+  The reviewer is never omittable under either profile (Standing Rule:
+  always review), so `minimal` is the write+check pair, not "just
+  implementer". `rolesForProfile` selects the installed role set for both
+  the Claude Code and opencode per-role agent files; Codex has no per-role
+  files, so the profile choice does not change what it gets. The chosen
+  profile is recorded in a new `profile` field on
+  `.ai/workflow/manifest.json`. A plain re-run with no `--profile` flag
+  keeps the previously installed profile, the same override-vs-persist rule
+  already used for `--harness`/`--models`; an explicit `--profile` always
+  overrides. A manifest written before profiles existed (no `profile` key)
+  degrades to `full`, not `minimal`, since that install always put down
+  every role; a CLI-path test spawns `init` against a hand-written
+  pre-profile manifest and asserts all four agent files are (re)installed,
+  closing a gap where a naive fallback could silently narrow an existing
+  install. A `full` -> `minimal` downgrade prints a note naming the
+  now-untracked `task-slicer.md`/`explorer.md` agent files and how to
+  remove them (`orchestrator-workflow uninstall` first, or by hand);
+  `uninstall` needs no other change since it only ever iterates
+  `manifest.files`, so the leftover files are simply absent from its
+  removal loop and it still completes without error afterward. `SKILL.md`
+  and the installed `AGENTS.md` policy section now state, at every role
+  paragraph that names the explorer/task-slicer subagents, that only the
+  roles the profile carries exist as named subagents and any missing role
+  is run inline with the same contract, reusing the existing Codex
+  "run roles inline" idiom; a docs-consistency test pins the sentence.
+  README documents the flag, the single interactive profile question, and
+  scopes its "uninstalling a minimal install is always clean on its own"
+  claim to installs that were never downgraded from `full`, since a
+  downgrade's untracked leftover files are exactly the case that claim
+  doesn't cover. Both OKF bundle docs touching the installer
+  (`install-fence-mechanics.md`, `model-preselection.md`) are re-verified
+  and re-stamped against the file:line locations this feature shifted.
+  Also drops an unused `ROLES` import left over in `cli.ts` after
+  `promptModels` switched to an explicit `roles` parameter.
+
 ## [0.14.0] - 2026-07-18
 
 ### Changed

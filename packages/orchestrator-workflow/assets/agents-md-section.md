@@ -15,7 +15,10 @@ and the subagent I/O contracts live in the `orchestrator-workflow` skill.
   further subagents.
 - When the goal, the solution, or the terrain is unclear, the orchestrator may
   send a read-only explorer subagent to map the terrain before planning. The
-  explorer reads and reports; it never changes files.
+  explorer reads and reports; it never changes files. Only the roles this
+  install's profile carries exist as named subagents; under a `minimal`
+  profile there is no explorer subagent, so the orchestrator runs this step
+  inline with the same read-only discipline instead.
 - The orchestrator plans features itself. It may delegate task slicing, but it
   validates the sliced tasks before implementation starts.
 - Non-trivial implementation goes to narrow implementer subagents, one task
@@ -35,9 +38,13 @@ default, not a ritual.
   the orchestrator directly, without discovery, slicing, or an implementer
   subagent.
 - Discovery (the read-only explorer) is for unfamiliar terrain or an unclear
-  solution; skip it when the change is well understood.
+  solution; skip it when the change is well understood. Under a `minimal`
+  profile there is no explorer subagent to spawn; run this step inline
+  instead.
 - Slicing and implementer subagents are for non-trivial work: multiple files,
   real logic, or anything that benefits from decomposition or a fresh context.
+  Under a `minimal` profile there is no task-slicer subagent; the orchestrator
+  slices inline with the same contract.
 - Review judgment applies to every change. For a trivial change the
   orchestrator may review it itself; reserve the reviewer subagent for
   changes whose risk or size warrants an independent skeptical pass. Either

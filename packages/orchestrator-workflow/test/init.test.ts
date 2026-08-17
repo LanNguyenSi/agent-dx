@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -16,8 +17,15 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runInit } from "../src/init.js";
-import { DEFAULT_MODELS, ROLES, parseModelsSpec } from "../src/models.js";
+import {
+  DEFAULT_MODELS,
+  ROLES,
+  parseModelsSpec,
+  parseProfile,
+  rolesForProfile,
+} from "../src/models.js";
 import { detectHarnesses } from "../src/detect.js";
+import { runUninstall } from "../src/uninstall.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
 
@@ -548,6 +556,288 @@ describe("harness selection and model mapping", () => {
       "utf8",
     );
     expect(reviewer).toContain("model: github-copilot/claude-opus-4.8");
+  });
+});
+
+describe("profile selection", () => {
+  it("minimal installs only implementer and reviewer agent files, for both claude and opencode", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+
+    for (const harnessDir of [".claude", ".opencode"]) {
+      expect(
+        existsSync(join(target, harnessDir, "agents", "implementer.md")),
+        `${harnessDir}/agents/implementer.md`,
+      ).toBe(true);
+      expect(
+        existsSync(join(target, harnessDir, "agents", "reviewer.md")),
+        `${harnessDir}/agents/reviewer.md`,
+      ).toBe(true);
+      expect(
+        existsSync(join(target, harnessDir, "agents", "task-slicer.md")),
+        `${harnessDir}/agents/task-slicer.md`,
+      ).toBe(false);
+      expect(
+        existsSync(join(target, harnessDir, "agents", "explorer.md")),
+        `${harnessDir}/agents/explorer.md`,
+      ).toBe(false);
+    }
+    // The skill itself is not role-scoped and still installs under minimal.
+    expect(
+      existsSync(
+        join(target, ".claude", "skills", "orchestrator-workflow", "SKILL.md"),
+      ),
+    ).toBe(true);
+  });
+
+  it("full installs the exact same agent file set whether the profile is explicit or omitted (today's unconditional behavior)", () => {
+    const explicitTarget = mkdtempSync(
+      join(tmpdir(), "orchestrator-workflow-profile-"),
+    );
+    try {
+      runInit({
+        targetDir: target,
+        harnesses: ["claude"],
+        models: { ...DEFAULT_MODELS },
+      }); // profile omitted
+      runInit({
+        targetDir: explicitTarget,
+        harnesses: ["claude"],
+        models: { ...DEFAULT_MODELS },
+        profile: "full",
+      });
+
+      const listAgents = (dir: string) =>
+        readdirSync(join(dir, ".claude", "agents")).sort();
+      expect(listAgents(target)).toEqual(listAgents(explicitTarget));
+      expect(listAgents(target)).toEqual([
+        "explorer.md",
+        "implementer.md",
+        "reviewer.md",
+        "task-slicer.md",
+      ]);
+    } finally {
+      rmSync(explicitTarget, { recursive: true, force: true });
+    }
+  });
+
+  it("records the chosen profile in the manifest", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(manifest.profile).toBe("minimal");
+  });
+
+  it("defaults the manifest profile to full when the option is omitted", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(manifest.profile).toBe("full");
+  });
+
+  it("rolesForProfile: minimal is implementer+reviewer, full is every role, in ROLES order", () => {
+    expect(rolesForProfile("minimal")).toEqual(["implementer", "reviewer"]);
+    expect(rolesForProfile("full")).toEqual(ROLES);
+  });
+
+  it("parseProfile rejects an unknown value", () => {
+    expect(() => parseProfile("bogus")).toThrow(/Unknown --profile "bogus"/);
+    expect(parseProfile("minimal")).toBe("minimal");
+    expect(parseProfile("full")).toBe("full");
+  });
+
+  describe("CLI re-run semantics", () => {
+    const run = (...extra: string[]) =>
+      spawnSync(
+        process.execPath,
+        ["--import", "tsx", "src/cli.ts", "init", target, "--yes", ...extra],
+        { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+      );
+
+    it("a plain re-run without --profile keeps the previously installed profile", () => {
+      expect(run("--profile", "minimal").status).toBe(0);
+      const second = run();
+      expect(second.status, second.stderr).toBe(0);
+      expect(second.stdout).toContain("profile: minimal");
+      expect(
+        existsSync(join(target, ".claude", "agents", "task-slicer.md")),
+      ).toBe(false);
+      const manifest = JSON.parse(
+        readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+      );
+      expect(manifest.profile).toBe("minimal");
+    });
+
+    it("an explicit --profile overrides the previously installed profile", () => {
+      expect(run("--profile", "minimal").status).toBe(0);
+      const second = run("--profile", "full");
+      expect(second.status, second.stderr).toBe(0);
+      expect(
+        existsSync(join(target, ".claude", "agents", "task-slicer.md")),
+      ).toBe(true);
+      const manifest = JSON.parse(
+        readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+      );
+      expect(manifest.profile).toBe("full");
+    });
+
+    it("rejects an unknown --profile value non-zero, with a clear message on stderr", () => {
+      const result = run("--profile", "bogus");
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('Unknown --profile "bogus"');
+    });
+  });
+});
+
+/**
+ * A manifest written before profiles existed (or hand-corrupted to drop the
+ * field) must fall back to `full`, not `minimal` — a pre-profile install
+ * always put down every role, so silently narrowing it on the next re-run
+ * would delete-by-omission roles the operator never asked to drop. This is
+ * the CLI-path counterpart to the "survives a malformed hand-written
+ * manifest" test above: that test never checks which profile got installed
+ * (its pre-fix baseline already has all four agent files on disk from an
+ * earlier good run, so a wrong `minimal` fallback would go undetected — the
+ * loop over `rolesForProfile` only adds files, it never deletes one for a
+ * role that fell out of profile). This test starts from a target that has
+ * never been through a real `full` install, so the fallback's chosen
+ * profile is the only thing that can explain which agent files appear.
+ */
+describe("manifest missing the profile field (pre-profile-era manifest)", () => {
+  it("falls back to full, not minimal, installing all four agent files on re-run without --profile", () => {
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    mkdirSync(join(target, ".ai", "workflow"), { recursive: true });
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          kit: "orchestrator-workflow",
+          version: "0.14.0",
+          harnesses: ["claude"],
+          models: DEFAULT_MODELS,
+          files: {},
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "src/cli.ts", "init", target, "--yes"],
+      { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("profile: full");
+
+    for (const role of ROLES) {
+      expect(
+        existsSync(join(target, ".claude", "agents", `${role}.md`)),
+        `${role}.md should exist under the full-profile fallback`,
+      ).toBe(true);
+    }
+
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.profile).toBe("full");
+  });
+});
+
+describe("profile downgrade (full -> minimal) leaves a note about untracked role files", () => {
+  it("reports a note naming the now-untracked task-slicer/explorer files and how to remove them", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+    });
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+
+    const claudeTaskSlicer = join(".claude", "agents", "task-slicer.md");
+    const claudeExplorer = join(".claude", "agents", "explorer.md");
+    expect(report.notes.some((note) => note.includes(claudeTaskSlicer))).toBe(
+      true,
+    );
+    expect(report.notes.some((note) => note.includes(claudeExplorer))).toBe(
+      true,
+    );
+    expect(
+      report.notes.some((note) =>
+        note.includes("orchestrator-workflow uninstall"),
+      ),
+    ).toBe(true);
+
+    // The files themselves are untouched (not deleted), only untracked.
+    expect(existsSync(join(target, claudeTaskSlicer))).toBe(true);
+    expect(existsSync(join(target, claudeExplorer))).toBe(true);
+  });
+
+  it("does not repeat the note on a later no-op re-run at the same (minimal) profile", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+    });
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+    const again = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+    expect(again.notes).toEqual([]);
+  });
+
+  it("uninstall after a downgrade completes without error; the untracked leftovers survive it", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+    });
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+    });
+
+    expect(() => runUninstall({ targetDir: target })).not.toThrow();
+    // task-slicer.md/explorer.md are no longer in the manifest's file
+    // ledger, so uninstall (which only removes what it can still find
+    // there) leaves them in place.
+    expect(
+      existsSync(join(target, ".claude", "agents", "task-slicer.md")),
+    ).toBe(true);
+    expect(existsSync(join(target, ".claude", "agents", "explorer.md"))).toBe(
+      true,
+    );
   });
 });
 
