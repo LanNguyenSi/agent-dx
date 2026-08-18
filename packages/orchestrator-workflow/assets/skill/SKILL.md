@@ -374,9 +374,21 @@ against the contract with extra suspicion, and accept it only if it is
 contract-valid and the assignment was answerable from the context supplied
 with it. Treat a misfire as a failed spawn: resume or respawn the subagent,
 and never fold the non-contract output into run state or count it as a
-completed step. Record every misfire in `03-decisions.md`. This matters most
-for review: a misfired review is not a review and never satisfies the review
-gate, since review is never skipped.
+completed step. For the near-instant, no-tool-activity signal specifically,
+prefer resume over a fresh respawn: send the same subagent a message that
+explicitly repeats the original assignment rather than a generic retry,
+since resume keeps the subagent's prior turn in context while a fresh spawn
+starts cold and risks the same misfire again. Every incident of this exact
+signal (a return within seconds, zero tool calls, harness or system
+boilerplate instead of the output contract) has resolved on the first
+resume attempt so far; fall back to a fresh respawn only if the resume
+attempt itself misfires the same way. So far this signal has only been
+observed for the reviewer role, the one role whose default model differs
+from the other roles' (see the per-role model preferences); treat that
+correlation as an open lead worth watching as more incidents accumulate,
+not as a confirmed cause. Record every misfire in `03-decisions.md`. This
+matters most for review: a misfired review is not a review and never
+satisfies the review gate, since review is never skipped.
 
 ## Round-2 halt rule
 

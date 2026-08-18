@@ -5,6 +5,52 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-08-18
+
+### Changed
+
+- Extends the Subagent misfire rule (`SKILL.md`) and hardens the installed
+  reviewer prompt, both docs/prompt-only, after two further sessions
+  (2026-07-19, 2026-07-20) reproduced the same near-instant, no-tool-activity
+  reviewer misfire the rule was originally written for in 0.11.0: a
+  first-spawn reviewer returned within seconds, zero tool calls, harness or
+  system boilerplate instead of the output contract, while a resume on the
+  same subagent with the assignment explicitly repeated produced a full,
+  contract-valid review. Explorer and implementer first spawns never
+  misfired in either session.
+  - **Concrete resume-over-respawn workaround.** The rule previously said
+    only "resume or respawn," leaving the choice and the resume mechanics
+    unstated. It now names, for this specific signal, resume over a fresh
+    respawn as the preferred response, states the mechanic (repeat the
+    original assignment explicitly, not a generic retry, since resume keeps
+    the subagent's prior context while a fresh spawn starts cold), and
+    scopes the fallback to a fresh respawn to the case where the resume
+    attempt itself misfires the same way.
+  - **Model correlation flagged as an open lead.** A structural comparison
+    of the four installed agent prompts (`explorer.md`, `implementer.md`,
+    `reviewer.md`, `task-slicer.md`) found this signal has so far only been
+    observed for the reviewer role. Tool posture does not explain it: the
+    explorer role carries the identical read-only restriction and has not
+    shown the signal. The reviewer role is the only one of the four whose
+    default model (`opus`) differs from the other three's default
+    (`sonnet`); `SKILL.md` now names that correlation explicitly as an open
+    lead to keep watching as more incidents accumulate, not as a confirmed
+    root cause: a deterministic repro of a harness-level subagent-spawn race
+    is not achievable in a docs/prompt-only package, so this remains an
+    observation, not a fix at the harness layer.
+  - **Reviewer prompt hardening.** `reviewer.md` now instructs the reviewer
+    to begin its very first turn with a tool call before writing any
+    analysis, and forbids a text-only opening turn (harness boilerplate, a
+    restated-instructions preamble). This does not address a harness-level
+    spawn race directly, but removes one plausible contributing factor (the
+    prompt not forcing an immediate tool call) at no cost.
+  - **Observation task, not closed.** Whether the hardened prompt plus the
+    documented workaround measurably reduces the recurrence rate can only be
+    judged by watching subsequent sessions for the same signal; this is
+    recorded as an open observation, not claimed as verified here.
+
+  Motivated by agent-tasks task a932b12a.
+
 ## [0.17.0] - 2026-08-18
 
 ### Changed
