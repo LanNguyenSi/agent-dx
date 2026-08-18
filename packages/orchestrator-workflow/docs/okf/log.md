@@ -320,3 +320,119 @@
   `npm run build` clean, `okf-kit check docs/okf --strict` clean (9
   `sources-fresh` staleness warnings before the timestamp bump in this pass,
   0 findings after).
+
+- 2026-08-18: re-verified and re-stamped subagent-contracts-superset.md,
+  review-gate-and-waivers.md, and run-state-lifecycle-and-markers.md against
+  package version 0.18.0 plus a same-day review-fix round on it (agent-tasks
+  task a932b12a, Refs a932b12a-cda0-4f5f-b3f9-2d6733837368): the 0.18.0
+  feature commit (resume-over-respawn workaround for the near-instant
+  reviewer misfire signal, model-correlation open lead, reviewer.md
+  first-turn hardening) landed without any docs/okf update, repeating the
+  0.16.0/0.17.0 gap the two log entries above already flagged as a
+  precedent; the fix-round closed it. The fix-round also hardened the
+  0.18.0 feature itself on four review findings, each requiring a real
+  content change (not just a citation fix): (1) `SKILL.md`'s "every
+  incident of this exact signal has resolved on the first resume attempt"
+  overstated the record — only four resume outcomes for this signal are
+  actually recorded (three on 2026-07-16, one on 2026-07-20); the
+  2026-07-19 session named in the 0.18.0 CHANGELOG entry never had a resume
+  outcome recorded at all. `SKILL.md` and the CHANGELOG entry now bind the
+  claim to "whose outcome was recorded (four so far)" instead of a
+  universal resolve rate, and the CHANGELOG entry no longer attributes a
+  resume success to the 2026-07-19 session specifically. (2) `SKILL.md`
+  gained a scope carve-out: the resume-over-respawn preference does not
+  cover a structurally different misfire class, a mid-run watchdog stall,
+  where the one measured incident did NOT resolve on resume (it stalled a
+  second time) and only a fresh, explicitly constrained respawn produced a
+  valid review; both docs' misfire-rule sections and the CHANGELOG entry's
+  workaround bullet now name this carve-out explicitly. (3) The
+  CHANGELOG's "model correlation flagged as an open lead" bullet named only
+  "a structural comparison of the four installed agent prompts" without
+  saying what was actually compared; it now names the three axes checked
+  (frontmatter, line count, each role's `models.ts` default-model entry)
+  and states explicitly why a deterministic repro is not achievable from a
+  docs/prompt-only package (no runtime code here spawns subagents), making
+  the open-lead claim checkable in-repo instead of a bare assertion. (4)
+  The CHANGELOG's "Observation task, not closed" bullet named no observable
+  or recording location for the open AC3 question; it now names the metric
+  (first-spawn reviewer misfires of this exact signal, counted per session),
+  the recording location (the friction-log and run notes), and a review
+  cadence (after roughly five more sessions).
+
+  `test/docs-consistency.test.ts` gained five new `it`s inside the existing
+  0.18.0 `describe` block (`the misfire rule prefers resume with a repeated
+  assignment for the no-tool-activity signal`, now 387-457): the
+  parenthetical signal definition pin (408-412), the claim-binding pin
+  (414-418), a derived assertion importing `DEFAULT_MODELS` alongside the
+  already-imported `ROLES`/`READ_ONLY_ROLES` and asserting the reviewer
+  default differs from all three other roles' defaults rather than trusting
+  the prose alone (435-441), and the watchdog-stall scope-carve-out pin plus
+  its own resolution-detail pin (443-456). Mutation-tested for real, one
+  change at a time, each reverted and restored to the byte-identical
+  pre-mutant state before moving to the next: reverting the claim-binding
+  phrase to its pre-fix-round wording turned exactly 1 test red (the
+  claim-binding pin); reverting the watchdog-stall clause (deleting both new
+  sentences) turned exactly 2 tests red (the scope-carve-out pin and its
+  resolution-detail pin); rewording the parenthetical signal definition
+  turned exactly 1 test red (the parenthetical pin); setting
+  `DEFAULT_MODELS.reviewer` to `"sonnet"` (matching the other three roles)
+  turned the new derived-assertion test red plus 4 pre-existing runtime
+  tests in `opencode.test.ts`/`init.test.ts` that exercise the reviewer's
+  actual default model end to end — expected collateral, since
+  `DEFAULT_MODELS` backs runtime behavior beyond this one prose claim, not a
+  sign the new test is redundant with those. Full suite 187/187 (182 + 5
+  new), `tsc --noEmit` clean, `tsc --noEmit -p tsconfig.test.json` clean,
+  `npm run build` clean, `prettier --check` clean for every file this pass
+  touched.
+
+  Every `SKILL.md:`, `CHANGELOG.md:`, `reviewer.md:`, and
+  `test/docs-consistency.test.ts:` citation in all three docs was checked
+  directly against the current file content (not shifted by a computed
+  offset, though the deltas turned out uniform almost everywhere checked)
+  and corrected where stale, continuing the discipline from every entry
+  above. Known shifts: `SKILL.md`'s misfire-rule section grew from
+  `366-379` (its shape right after the original 0.18.0 commit, before this
+  fix-round's own two additions) to `366-397`; `reviewer.md` gained 4 lines
+  near its top (the first-turn-tool-call hardening), shifting every
+  citation into it below that point by +4 (`56-77` -> `60-81`, `47-52` ->
+  `51-56`, `72-76` -> `76-80`, `26-27` -> `30-31`); `CHANGELOG.md` grew by a
+  net +28 lines below the 0.18.0 entry from the original 0.18.0 commit
+  alone (0.17.0's heading moved `54` -> `82`, and every entry below it by
+  the same +28), then by a further amount from this fix-round's own edits
+  to the 0.18.0 entry, landing every older entry's citation at its current
+  position (0.16.0 entry `8-54` -> `121-167`, 0.14.0 `99-128` -> `212-241`,
+  0.11.0 `185-206` -> `298-319`, 0.10.0 `208-235` -> `321-348`, 0.9.0
+  `146-163`/`150-158` -> `350-367`/`356-360`, 0.7.4 `271-285` -> `384-398`,
+  0.7.3 `196-213`/`287-303` -> both `400-416`, 0.7.0 `248-260` -> `452-463`,
+  0.12.0 `70-92` -> `274-296`); `test/docs-consistency.test.ts` grew from
+  this fix-round's own five new `it`s plus the 112 lines the original
+  0.18.0 commit had already added, shifting every citation below its
+  insertion point (335-371's "subagent misfire rule ships in the skill"
+  block itself did not move, since the 0.18.0 commit inserted after it, but
+  everything after that block did: the Bash-residual pin `379-386` ->
+  `486-493`, the task-slicer-superset block `401-585` -> `508-714` with its
+  five internal sub-citations re-derived the same way, the reproduction
+  byte-for-byte pin `641-653` -> `769-783`, the mutation-probes block
+  `688-728`/`746-782` -> `818-858`/`876-912` with their sub-citations, and
+  the acceptance_recommendation block `792-810` -> `922-940`).
+  `run-state-lifecycle-and-markers.md`'s Knowledge Bundle section carried a
+  second, independent kind of staleness found during this pass and fixed
+  the same way: its `docs-consistency.test.ts` sub-citations for the
+  "hand off keeps a curated knowledge bundle current" hook (`248-255` etc.)
+  and its `run-base fill instruction`/`hand off` `describe`-block citations
+  (`297-305`, `244-295`) were already wrong at the 0.17.0-pass baseline
+  (verified by reading the same line ranges in that commit directly, which
+  showed unrelated 0.16.0-entry content, not this hook) — a latent bug this
+  pass's "re-verify every citation, not just the ones this diff broke"
+  scope caught and corrected to `268-275`/`277-281`/`283-287`/`289-292`/
+  `294-297`/`299-314` and `317-325`/`264-315` respectively.
+
+  `okf-kit check docs/okf --strict` before this pass: 1 `sources-fresh`
+  warning (model-preselection.md flagged stale purely on `test/
+  docs-consistency.test.ts` mtime, its actual cited ranges `28-70`
+  confirmed unaffected by any change in this pass or the 0.18.0 commit, so
+  left un-re-stamped per the 0.14.0/0.17.0 precedent above of not
+  re-stamping a doc whose own citations did not move). After this pass:
+  identical single warning, 0 new findings — the model-preselection.md
+  warning is expected to persist until a pass that actually touches its
+  cited ranges re-stamps it; not fixed here, per the task's own boundary.
