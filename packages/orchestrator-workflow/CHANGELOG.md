@@ -5,6 +5,36 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-08-18
+
+### Changed
+
+- Hardens three subagent output-contract gaps measured across a 16-round
+  dogfood run: two separate implementer rounds omitted briefed-as-mandatory
+  mutation probes from their return entirely (a human had to rerun them);
+  one implementer committed a false "Verified by ..." claim into a source
+  comment for a probe it never measurably ran; one reviewer omitted the
+  mandatory `acceptance_recommendation` field. Three changes, each docs/
+  prompt-only:
+  - Implementer output contract gains a `mutation_probes` field (`mutant,
+    verified_applied_via, result, restored_verified`), mirrored
+    byte-identically in `SKILL.md`'s reference copy and the installed
+    `assets/agents/implementer.md` prompt. The Subagent misfire rule now
+    states explicitly that an implementer return omitting this field, when
+    the task assignment named mutation probes to run, is a misfire like any
+    other: resume or respawn, never fold into run state.
+  - The installed implementer prompt gains a claim-only-what-was-measured
+    rule: a verification claim (for example "Verified by ...") in a code
+    comment, commit message, or the implementer's own report is only for a
+    check the implementer actually ran and measured itself.
+  - Reviewer contract marks `acceptance_recommendation` as a hard-mandatory
+    field in both the installed `assets/agents/reviewer.md` prompt and
+    `SKILL.md`'s reference copy; `SKILL.md` adds that when the field is
+    missing, the orchestrator asks the reviewer to resupply it rather than
+    inferring a recommendation from the findings list.
+
+  Motivated by agent-tasks task 16637a96.
+
 ## [0.15.0] - 2026-08-17
 
 ### Added

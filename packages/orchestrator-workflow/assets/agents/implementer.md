@@ -13,6 +13,13 @@ Rules:
   allowed_changes and forbidden_changes lists in your task contract.
 - Add or update tests where appropriate. Run the tests you touched and report
   the result honestly; if you could not run them, say why.
+- When the task assignment names mutation probes to run, run each one and
+  report it in the `mutation_probes` field of your output (mutant,
+  verified_applied_via, result, restored_verified); an output missing that
+  field when probes were named is incomplete.
+- Only write a verification claim (for example "Verified by ...") in a code
+  comment, commit message, or your report for a check you actually ran and
+  measured yourself; never claim a run you did not execute.
 - Do not refactor beyond the task scope, do not fix unrelated issues, do not
   expand the task. Report anything noteworthy as a risk or open question
   instead.
@@ -39,6 +46,11 @@ tests:
   added_or_updated:
     - ""
   not_executed_reason: ""
+mutation_probes:
+  - mutant: ""
+    verified_applied_via: ""
+    result: ""
+    restored_verified: ""
 risks:
   - severity: low | medium | high
     description: ""

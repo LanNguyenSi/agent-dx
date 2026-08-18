@@ -671,3 +671,86 @@ describe("Roles section states which roles a minimal profile omits", () => {
     );
   });
 });
+
+/**
+ * 0.16.0 hardened three contract-compliance gaps measured across a 16-round
+ * dogfood: two implementer rounds omitted briefed-as-mandatory mutation
+ * probes from their return entirely, one implementer wrote a false
+ * "Verified by ..." claim into a source comment for a probe it never
+ * measurably ran, and one reviewer omitted the mandatory
+ * `acceptance_recommendation` field. This pins the implementer-side fixes:
+ * the `mutation_probes` field (byte-identical between SKILL.md's reference
+ * copy and the installed implementer.md prompt, the same rigor applied to
+ * the 0.14.0 `reproduction` field above), the misfire-rule sentence that
+ * treats an omission as a misfire when the assignment named probes, and the
+ * claim-only-what-was-measured rule in the installed prompt.
+ */
+describe("mutation probes requirement ships in the skill and the implementer prompt", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+
+  it("the installed implementer prompt instructs running and reporting named mutation probes", () => {
+    expect(implementerMd).toContain("mutation probes to run");
+    expect(implementerMd).toContain("mutation_probes");
+    expect(implementerMd).toContain(
+      "an output missing that field when probes were named is incomplete",
+    );
+  });
+
+  it("the installed implementer prompt carries the claim-only-what-was-measured rule", () => {
+    expect(implementerMd).toContain(
+      "for a check you actually ran and measured yourself",
+    );
+    expect(implementerMd).toContain("never claim a run you did not execute");
+  });
+
+  it("the subagent misfire rule treats a missing mutation_probes field, when probes were named, as a misfire", () => {
+    expect(skillMd).toContain(
+      "does not parse against its role's output contract, including an implementer return that omits the `mutation_probes` field",
+    );
+    expect(skillMd).toContain("mutation probes to run");
+  });
+
+  it("both implementer output contracts carry an identical mutation_probes field (raw, not line-unwrapped)", () => {
+    const extractMutationProbesBlock = (raw: string): string => {
+      const match = raw.match(/^mutation_probes:\n(?: {2}.+\n)*/m);
+      expect(match, "mutation_probes block not found").toBeTruthy();
+      return (match as RegExpMatchArray)[0];
+    };
+    const skillBlock = extractMutationProbesBlock(readAsset("skill/SKILL.md"));
+    const implementerBlock = extractMutationProbesBlock(
+      readAsset("agents/implementer.md"),
+    );
+    // Guard the extraction itself, same as the reproduction-field test above.
+    expect(skillBlock.length).toBeGreaterThan(20);
+    expect(skillBlock).toBe(implementerBlock);
+  });
+});
+
+/**
+ * 0.16.0's third contract-compliance fix from the same dogfood: a reviewer
+ * return omitted the mandatory `acceptance_recommendation` field, so the
+ * orchestrator had to guess a verdict instead of asking the reviewer to
+ * resupply it. Pins the mandatory rule in both the installed reviewer.md
+ * prompt and SKILL.md's reference copy, plus SKILL.md's orchestrator-facing
+ * ask-back response.
+ */
+describe("acceptance_recommendation mandatory rule ships in the skill and the reviewer prompt", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("the installed reviewer prompt marks acceptance_recommendation mandatory", () => {
+    expect(reviewerMd).toContain(
+      "`acceptance_recommendation` is mandatory: always set it in your output",
+    );
+  });
+
+  it("SKILL.md marks the field mandatory and states the orchestrator's ask-back response", () => {
+    expect(skillMd).toContain(
+      "`acceptance_recommendation` is mandatory: every reviewer return must set it.",
+    );
+    expect(skillMd).toContain(
+      "the orchestrator asks the reviewer to resupply it instead of inferring one from the findings list",
+    );
+  });
+});
