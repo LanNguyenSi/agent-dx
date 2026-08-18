@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff]
-timestamp: 2026-08-17T19:05:00Z
+timestamp: 2026-08-18T17:00:00Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -20,12 +20,12 @@ sources:
 # Run-state lifecycle and machine-readable markers
 
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
-`00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:52-63).
+`00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:57-66).
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(SKILL.md:65-66; packages/orchestrator-workflow/README.md:91-96;
+(SKILL.md:68-69; packages/orchestrator-workflow/README.md:91-96;
 packages/orchestrator-workflow/INSTALL-AGENT.md:44-45,110-113). The newest run
 directory is the active one; older directories are the auditable history and
-must not be edited (SKILL.md:66-67, "Do not edit past runs"). Three of the
+must not be edited (SKILL.md:70, "Do not edit past runs"). Three of the
 seven files carry a `<!-- solution-acceptance: <key> = <value> -->`
 HTML-comment marker, all sharing one comment prefix but split across two
 opposite fail postures. This doc covers those markers and the
@@ -42,18 +42,18 @@ YAML contracts referenced below live in
 byte-exact by packages/orchestrator-workflow/test/template-markers.test.ts:39-43).
 At run creation the orchestrator replaces `TODO` with the pre-change repo
 HEAD (`git rev-parse HEAD`), recorded before the run's first implementation
-commit (SKILL.md:69-71). Despite sharing the `solution-acceptance:` prefix
+commit (SKILL.md:73-75). Despite sharing the `solution-acceptance:` prefix
 with the two verdict markers below, run-base is not a verdict: it is a
 change-binding signal for run-completeness readers, and it fails **open**
-(SKILL.md:73-76). Left as `TODO` it does not block anything, the reader
+(SKILL.md:76-77). Left as `TODO` it does not block anything, the reader
 just falls back to a tolerant day-granular date heuristic. When filled, the
 recorded sha must resolve in the repo, be an ancestor of HEAD, and must not
 lie behind the fork point of the change (the merge-base with the remote
-default branch) (SKILL.md:76-78). The in-repo changelog entry adds the
+default branch) (SKILL.md:80-81). The in-repo changelog entry adds the
 consumer's malformed-value behavior: a valid sha gets an exact binding, a
 malformed value blocks explicitly via a 7-40 hex guard, and only a bare
 `TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:150-158,
-"grounding-mcp 0.6.0 reads this marker"; SKILL.md:79 points to "the
+"grounding-mcp 0.6.0 reads this marker"; SKILL.md:82 points to "the
 grounding-mcp 0.6.0 docs for the full consumer semantics", so external
 reader internals are not verified from this repo). Introduced in 0.9.0
 (CHANGELOG.md:146-163). Pinned by template-markers.test.ts:19,33-37 (exactly
@@ -76,10 +76,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (SKILL.md:150-154). A freshly-copied run is
+non-accepting (fail-closed)" (SKILL.md:177-181). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (CHANGELOG.md:248-260). Consumer is "the harness solution-acceptance
-run-gate" per SKILL.md:153; this doc cites that in-repo statement only, it
+run-gate" per SKILL.md:179-180; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18 (regexes) and :21-31 (one marker per
 template, default `TODO`).
@@ -129,7 +129,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and
 SKILL.md's step 7 carries the same one-sentence rule
-(SKILL.md:121-124). The runtime half (grounding-mcp's reader treating a
+(SKILL.md:147-150). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -167,11 +167,11 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (SKILL.md:140-146). It is explicitly non-gating: "apply
+`okf-kit check`) (SKILL.md:167-175). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:140,146). This is the symmetric counterpart to the 0.8.0
+(SKILL.md:167-168,172-173). This is the symmetric counterpart to the 0.8.0
 discovery-side rule (the Discover step already checks `docs/okf/` before
-hand-mapping terrain, SKILL.md:91-96); the 0.12.0 changelog entry names it
+hand-mapping terrain, SKILL.md:96-97); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
 (CHANGELOG.md:70-92). Pinned by

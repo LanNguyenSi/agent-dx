@@ -109,7 +109,13 @@ directory and the subagents.
    the task-slicer subagent when the change is large enough to benefit. Each
    task carries: id, title, goal, relevant files, relevant docs, acceptance
    criteria, constraints, suggested tests, allowed changes, forbidden
-   changes, dependencies, risk. Under a `minimal` profile there is no
+   changes, dependencies, risk. A high-risk task whose acceptance criteria
+   allow recording the divergence instead of changing behavior, so its
+   outcome is undetermined at slice time (for example, phrased along the
+   lines of "... or record the divergence as a deliberate, documented
+   boundary"), is planned as its own PR (its own independently shippable
+   unit) by default, not bundled with a lower-risk sibling task whose
+   shipping should not wait on it. Under a `minimal` profile there is no
    task-slicer subagent to delegate to; slice the tasks inline yourself with
    the same contract.
 5. **Validate tasks.** Check the slices are independently understandable, small
@@ -125,32 +131,39 @@ directory and the subagents.
    claim there that is not backed by a check it actually ran as unverified.
    Record meaningful decisions in `03-decisions.md` and consolidate
    evidence in `04-implementation-summary.md`.
-7. **Delegate review.** Send the diff to the reviewer subagent. The reviewer
-   checks spec compliance, architecture consistency, edge cases, security,
-   test adequacy (including whether new tests would fail if the change were
+7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
+   briefing the base and head revision the diff was generated from. When the
+   reviewer's environment cannot use version control to see the diff (for
+   example a policy-gated repository), supply the diff as a pre-generated file
+   in the briefing instead of expecting the reviewer to derive it, and have the
+   reviewer report explicitly if it could only reconstruct the delta some other
+   way, rather than silently reviewing less than the full change. The reviewer
+   checks spec compliance, architecture consistency, edge cases, security, test
+   adequacy (including whether new tests would fail if the change were
    reverted), and maintainability. Findings go to `05-review-findings.md`;
    transfer each finding from the reviewer output contract into the table's
    columns as-is, keeping the Severity and Decision headers unchanged, since
    those two are what the orchestrator-workflow completeness reader verifies.
    Replace the shipped placeholder/legend row with the transferred findings;
-   for a genuine zero-findings review, delete that row instead of leaving it
-   in place, since the completeness reader treats an untouched placeholder
-   row with no finding rows as the template never having been filled in.
-   When acceptance rests on empirical or probabilistic evidence (flake rates,
+   for a genuine zero-findings review, delete that row instead of leaving it in
+   place, since the completeness reader treats an untouched placeholder row
+   with no finding rows as the template never having been filled in. When
+   acceptance rests on empirical or probabilistic evidence (flake rates,
    benchmarks, "n runs green", performance/timing numbers), the reviewer must
    independently reproduce it — its own runs or measurements, not a re-read of
    the implementer's log — and record the method, sample size, and result
    against the implementer's claim in the reviewer output contract's
-   `reproduction` field. This does not apply to deterministic checks (a
-   single test run, `tsc`, lint): only claims that could vary run to run
-   trigger it.
+   `reproduction` field. This does not apply to deterministic checks (a single
+   test run, `tsc`, lint): only claims that could vary run to run trigger it.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high
    findings require the orchestrator to record a rationale. Deferring a high
    or critical finding counts as a waiver and follows the same rules. Record
    all decisions and waivers in `03-decisions.md` and summarize waivers in
-   the Accepted Waivers section of `06-handoff.md`.
+   the Accepted Waivers section of `06-handoff.md`. Watch for the round-2
+   halt signal across repeated review-fix cycles (see Round-2 halt rule
+   below).
 9. **Hand off.** Before filling `06-handoff.md`, apply this optional
    guidance: when the repo carries a curated knowledge bundle (for example a
    `docs/okf/` directory with an index), check whether the change touches
@@ -364,6 +377,21 @@ and never fold the non-contract output into run state or count it as a
 completed step. Record every misfire in `03-decisions.md`. This matters most
 for review: a misfired review is not a review and never satisfies the review
 gate, since review is never skipped.
+
+## Round-2 halt rule
+
+The signal: a review round finds a new defect of the same class a previous
+round's fix already addressed, so the class has recurred once after being
+fixed, and the next fix would again be case-by-case enumeration (boundary
+tokens, spellings, and similar one-off patches). Stop the first time this
+signal fires: the recurrence is already the class's second occurrence, so
+do not wait for a third one before stopping. Name the structural cause in
+one sentence, and decide to split or redesign rather than keep accreting
+cases. Ship the healthy half on its own verification, and refile the
+removed half as its own task carrying the measurement history that led to
+the split. Acceptance criteria that cannot be satisfied this way go to the
+operator as a merge-hold (hold the change unmerged and hand the decision to
+the operator).
 
 ## Final acceptance rule
 
