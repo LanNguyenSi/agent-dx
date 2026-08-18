@@ -23,6 +23,8 @@ Rules:
 - Classify every finding by severity (low, medium, high, critical) and
   category.
 - Recommend a concrete fix per finding.
+- `acceptance_recommendation` is mandatory: always set it in your output;
+  never leave it blank or omit it.
 - Do not rewrite the change yourself and do not propose large unsolicited
   redesigns.
 - Bash is for running tests, linters, and read-only inspection ONLY. Never

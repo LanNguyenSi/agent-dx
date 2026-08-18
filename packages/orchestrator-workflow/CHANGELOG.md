@@ -5,6 +5,54 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-08-18
+
+### Changed
+
+- Hardens three subagent output-contract gaps measured across a 16-round
+  dogfood run: two separate implementer rounds omitted briefed-as-mandatory
+  mutation probes from their return entirely (a human had to rerun them);
+  one implementer committed a false "Verified by ..." claim into a source
+  comment for a probe it never measurably ran; one reviewer omitted the
+  mandatory `acceptance_recommendation` field. Three changes, each docs/
+  prompt-only:
+  - Implementer output contract gains a `mutation_probes` field (`mutant,
+    verified_applied_via, result, restored_verified`), mirrored
+    byte-identically in `SKILL.md`'s reference copy and the installed
+    `assets/agents/implementer.md` prompt. The Subagent misfire rule now
+    states explicitly that an implementer return omitting this field, when
+    the task assignment named mutation probes to run, is a misfire like any
+    other: resume or respawn, never fold into run state.
+  - The installed implementer prompt gains a claim-only-what-was-measured
+    rule: a verification claim (for example "Verified by ...") in a code
+    comment, commit message, or the implementer's own report is only for a
+    check the implementer actually ran and measured itself.
+  - Reviewer contract marks `acceptance_recommendation` as a hard-mandatory
+    field in both the installed `assets/agents/reviewer.md` prompt and
+    `SKILL.md`'s reference copy; `SKILL.md` adds that when the field is
+    missing, the orchestrator asks the reviewer to resupply it rather than
+    inferring a recommendation from the findings list.
+
+  Motivated by agent-tasks task 16637a96.
+
+  Review-fix follow-up (same task): `mutation_probes` shipped with no
+  trigger the kit itself ever produced (SKILL.md step 6 said nothing about
+  naming probes) and no not-applicable signal (an implementer never given
+  probes returned the same placeholder block as one that silently dropped
+  them). Step 6 now instructs the orchestrator to name the mutation probes
+  to run in the task assignment whenever acceptance rests on a test that
+  must fail without the change, and carries a short reference to the
+  claim-only-what-was-measured rule. Both `mutation_probes` rule-text
+  copies (`SKILL.md`'s reference paragraph and the installed
+  `implementer.md` prompt) gained a not-applicable clause: when the
+  assignment names no probes, the implementer returns `mutation_probes: []`
+  rather than omitting the field, so "none asked for" is distinguishable
+  from "asked for and not reported". The installed prompt's wording for a
+  missing field changed from "incomplete" to "treated as a misfire, not
+  evidence", matching the Subagent misfire rule's own language; that rule's
+  paragraph also had an uneven line-wrap seam (left by the original 0.16.0
+  edit) rewrapped.
+
 ## [0.15.0] - 2026-08-17
 
 ### Added

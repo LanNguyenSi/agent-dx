@@ -671,3 +671,140 @@ describe("Roles section states which roles a minimal profile omits", () => {
     );
   });
 });
+
+/**
+ * 0.16.0 hardened three contract-compliance gaps measured across a 16-round
+ * dogfood: two implementer rounds omitted briefed-as-mandatory mutation
+ * probes from their return entirely, one implementer wrote a false
+ * "Verified by ..." claim into a source comment for a probe it never
+ * measurably ran, and one reviewer omitted the mandatory
+ * `acceptance_recommendation` field. This pins the implementer-side fixes:
+ * the `mutation_probes` field (byte-identical between SKILL.md's reference
+ * copy and the installed implementer.md prompt, the same rigor applied to
+ * the 0.14.0 `reproduction` field above), the misfire-rule sentence that
+ * treats an omission as a misfire when the assignment named probes, and the
+ * claim-only-what-was-measured rule in the installed prompt.
+ */
+describe("mutation probes requirement ships in the skill and the implementer prompt", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+
+  it("the installed implementer prompt instructs running and reporting named mutation probes", () => {
+    expect(implementerMd).toContain("mutation probes to run");
+    expect(implementerMd).toContain("mutation_probes");
+    expect(implementerMd).toContain(
+      "an output missing that field when probes were named is treated as a misfire, not evidence",
+    );
+  });
+
+  it("the installed implementer prompt carries the claim-only-what-was-measured rule", () => {
+    expect(implementerMd).toContain(
+      "for a check you actually ran and measured yourself",
+    );
+    expect(implementerMd).toContain("never claim a run you did not execute");
+  });
+
+  it("the subagent misfire rule treats a missing mutation_probes field, when probes were named, as a misfire", () => {
+    expect(skillMd).toContain(
+      "does not parse against its role's output contract, including an implementer return that omits the `mutation_probes` field",
+    );
+    expect(skillMd).toContain("mutation probes to run");
+  });
+
+  it("both implementer output contracts carry an identical mutation_probes field (raw, not line-unwrapped)", () => {
+    const extractMutationProbesBlock = (raw: string): string => {
+      const match = raw.match(/^mutation_probes:\n(?: {2}.+\n)*/m);
+      expect(match, "mutation_probes block not found").toBeTruthy();
+      return (match as RegExpMatchArray)[0];
+    };
+    const skillBlock = extractMutationProbesBlock(readAsset("skill/SKILL.md"));
+    const implementerBlock = extractMutationProbesBlock(
+      readAsset("agents/implementer.md"),
+    );
+    // Guard the extraction itself, same as the reproduction-field test above.
+    expect(skillBlock.length).toBeGreaterThan(20);
+    expect(skillBlock).toBe(implementerBlock);
+  });
+});
+
+/**
+ * R2 fix-round on the same 0.16.0 mutation-probes contract (agent-tasks
+ * 16637a96): the field shipped with no trigger the kit itself ever
+ * produces (SKILL.md step 6 said nothing about naming probes, unlike the
+ * reviewer-facing reproduction trigger step 7 gained in 0.14.0) and no
+ * not-applicable signal (an implementer never given probes returned the
+ * same placeholder block as one that silently dropped them). This pins
+ * step 6's assignment-time instruction, its orchestrator-checkable
+ * reference to the claim-only-what-was-measured rule, the `mutation_probes:
+ * []` not-applicable clause added to both the SKILL.md reference paragraph
+ * and the installed implementer.md prompt, and exact-name pins on the
+ * shared field block and its prose enumeration. The exact-name pins matter
+ * because the cross-copy equality check above only proves the two copies
+ * match each other: renaming a sub-field identically in both copies passes
+ * that check but must fail here.
+ */
+describe("mutation probe naming and not-applicable signal ship in step 6 and both contract copies", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+
+  it("step 6 instructs naming mutation probes in the task assignment when acceptance rests on a must-fail-without-the-change test", () => {
+    expect(skillMd).toContain(
+      "When a task's acceptance rests on a test that must fail without the change, name the mutation probes to run in the task assignment",
+    );
+    expect(skillMd).toContain(
+      "apply the mutant for real, observe the named test fail, restore, re-verify",
+    );
+  });
+
+  it("step 6 carries an orchestrator-checkable reference to the claim-only-what-was-measured rule", () => {
+    expect(skillMd).toContain("claim-only-what-was-measured");
+  });
+
+  it("both copies carry the not-applicable mutation_probes: [] clause", () => {
+    const clause = "`mutation_probes: []` rather than omitting the field";
+    expect(skillMd).toContain(clause);
+    expect(implementerMd).toContain(clause);
+  });
+
+  it("both copies pin the mutation_probes field block by its exact sub-field names, not just cross-copy equality", () => {
+    const field =
+      'mutation_probes: - mutant: "" verified_applied_via: "" result: "" restored_verified: ""';
+    expect(skillMd).toContain(field);
+    expect(implementerMd).toContain(field);
+  });
+
+  it("both copies pin the field enumeration in prose", () => {
+    const enumeration =
+      "(mutant, verified_applied_via, result, restored_verified)";
+    expect(skillMd).toContain(enumeration);
+    expect(implementerMd).toContain(enumeration);
+  });
+});
+
+/**
+ * 0.16.0's third contract-compliance fix from the same dogfood: a reviewer
+ * return omitted the mandatory `acceptance_recommendation` field, so the
+ * orchestrator had to guess a verdict instead of asking the reviewer to
+ * resupply it. Pins the mandatory rule in both the installed reviewer.md
+ * prompt and SKILL.md's reference copy, plus SKILL.md's orchestrator-facing
+ * ask-back response.
+ */
+describe("acceptance_recommendation mandatory rule ships in the skill and the reviewer prompt", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("the installed reviewer prompt marks acceptance_recommendation mandatory", () => {
+    expect(reviewerMd).toContain(
+      "`acceptance_recommendation` is mandatory: always set it in your output",
+    );
+  });
+
+  it("SKILL.md marks the field mandatory and states the orchestrator's ask-back response", () => {
+    expect(skillMd).toContain(
+      "`acceptance_recommendation` is mandatory: every reviewer return must set it.",
+    );
+    expect(skillMd).toContain(
+      "the orchestrator asks the reviewer to resupply it instead of inferring one from the findings list",
+    );
+  });
+});
