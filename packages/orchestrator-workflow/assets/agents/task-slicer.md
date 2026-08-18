@@ -14,10 +14,12 @@ Rules:
 - Separate discovery work from implementation work.
 - Make dependencies between tasks explicit.
 - Mark risky or ambiguous tasks and add stop conditions for them.
-- A high-risk task whose goal offers a documented-divergence alternative
-  (acceptance criteria phrased along the lines of "... or record the
-  divergence as a deliberate, documented boundary") is planned as its own PR
-  by default, not bundled with a lower-risk sibling task.
+- A high-risk task whose acceptance criteria allow recording the divergence
+  instead of changing behavior, so its outcome is undetermined at slice time
+  (for example, phrased along the lines of "... or record the divergence as
+  a deliberate, documented boundary"), is planned as its own PR (its own
+  independently shippable unit) by default, not bundled with a lower-risk
+  sibling task.
 - Propose an implementation order.
 - Each task must be completable by an implementer subagent with limited
   context: include id, title, goal, relevant files, relevant docs,

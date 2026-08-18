@@ -257,3 +257,66 @@
   gained a "Review-fix follow-up" paragraph inside the existing
   (unreleased) 0.16.0 entry rather than a new version heading, per the
   task's instruction to keep the version at 0.16.0.
+
+- 2026-08-18: re-verified and re-stamped review-gate-and-waivers.md,
+  run-state-lifecycle-and-markers.md, and subagent-contracts-superset.md
+  against package version 0.17.0 plus a same-day fix-round on it (agent-tasks
+  task 66c548ad-9e99-4da7-8c49-7073b79ed072): the 0.17.0 feature commit
+  (round-2 halt criterion in step 8, split-by-default rule in step 4 and
+  `task-slicer.md`, diff-as-file reviewer briefing in step 7 and
+  `reviewer.md`) landed without any docs/okf update, again breaking the
+  0.13.0/0.14.0/0.15.0/0.16.0 precedent of updating the bundle in the same
+  commit as the feature; the fix-round closed that gap. The fix-round also
+  restructured `SKILL.md` beyond the original commit's shape: step 4's new
+  sentence moved before the `minimal`-profile caveat (matching step 2's
+  pattern), step 7 was rewrapped and gained a base/head provenance clause,
+  and step 8's halt criterion was extracted into a new named `## Round-2 halt
+  rule` section (mirroring the existing `## Subagent misfire rule` / `##
+  Final acceptance rule` pattern) with only a one-sentence pointer left in
+  step 8 itself, so every citation into those spans needed re-deriving from
+  the final shape rather than from the original commit's line numbers.
+
+  Every `SKILL.md:`, `reviewer.md:`, and `task-slicer.md:` citation in all
+  three docs was checked directly against the current file content (not
+  shifted by a computed offset) and corrected where stale, continuing the
+  discipline from the 2026-07-18 and 2026-08-18 (0.16.0) entries above.
+  `run-state-lifecycle-and-markers.md` needed the deepest pass: unlike the
+  other two docs it had not been re-verified since 0.13.0/0.14.0 (the
+  2026-08-17 entry above re-stamped only `install-fence-mechanics.md` and
+  `model-preselection.md`, and the 2026-08-18 0.16.0 entry only the other two
+  docs of this trio), so most of its `SKILL.md:` citations were already stale
+  before this diff, including ones in spans this diff never touched: the
+  Run-state section's "seven files" code-fence citation stopped one line
+  short of `06-handoff.md`, the run-base paragraph's three citations and the
+  `SKILL.md:79` "grounding-mcp 0.6.0 docs" pointer (actually line 82) had
+  drifted off their sentences, and the Discover-step citation landed on the
+  tail of step 1 instead of the "before mapping terrain by hand" clause. All
+  were corrected by direct read against the current file, the same "check
+  every citation, do not assume a uniform offset" discipline used elsewhere
+  in this log, applied here to citations outside this fix-round's own diff
+  because the task scope was "every citation in these three docs," not just
+  the ones this diff broke. `subagent-contracts-superset.md` additionally
+  needed two `task-slicer.md:` citation corrections (the output-contract
+  block and the scope-boundaries sentence) since that installed prompt also
+  gained a bullet in this fix-round; `explorer.md` and `implementer.md`
+  citations were left untouched, as neither file changed.
+
+  `test/docs-consistency.test.ts` gained three new `describe` blocks (one per
+  0.17.0 lesson: split-by-default, diff-as-file plus its provenance anchor,
+  and the round-2 halt rule) pinning prose that a full-revert of all three
+  0.17.0 changes had left completely unguarded (163/163 green on revert,
+  the gap this fix-round closes). Mutation-tested for real, one lesson at a
+  time: reverting just the split-by-default prose (`SKILL.md` step 4 plus
+  `task-slicer.md`'s bullet) to its pre-0.17.0 wording turned exactly the 3
+  tests in that new block red; reverting just the diff-as-file prose
+  (`SKILL.md` step 7's fallback and provenance clauses plus `reviewer.md`'s
+  bullet) turned exactly the 4 tests in that block red; reverting just the
+  round-2 halt prose (step 8's reference sentence and the whole `## Round-2
+  halt rule` section) turned exactly the 5 tests in that block red; no other
+  test was affected by any of the three mutants. Each mutant was restored to
+  the byte-identical pre-mutant state (verified via `diff` against a saved
+  copy) before moving to the next. Full suite 175/175 (163 + 12 new),
+  `tsc --noEmit` clean, `tsc --noEmit -p tsconfig.test.json` clean,
+  `npm run build` clean, `okf-kit check docs/okf --strict` clean (9
+  `sources-fresh` staleness warnings before the timestamp bump in this pass,
+  0 findings after).

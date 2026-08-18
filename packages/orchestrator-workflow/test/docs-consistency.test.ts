@@ -808,3 +808,144 @@ describe("acceptance_recommendation mandatory rule ships in the skill and the re
     );
   });
 });
+
+/**
+ * 0.17.0 anchors a live review-fix-run lesson: a high-risk task whose
+ * acceptance criteria allow recording a divergence instead of changing
+ * behavior (its outcome undetermined at slice time) defaults to its own PR,
+ * instead of being bundled with a lower-risk sibling task whose shipping
+ * should not wait on it. Before this describe block existed, reverting the
+ * SKILL.md step 4 and task-slicer.md prose additions alone left the full
+ * suite green, so nothing pinned either copy. Pins the property-first
+ * trigger phrasing, the retained quoted example, and the its-own-PR default
+ * in both the SKILL.md reference copy and the installed task-slicer.md
+ * prompt.
+ */
+describe("split-by-default rule for documented-divergence sub-tasks ships in the skill and the task-slicer prompt", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const taskSlicerMd = unwrap(readAsset("agents/task-slicer.md"));
+
+  it("SKILL.md step 4 carries the property-first trigger and its retained example phrasing", () => {
+    expect(skillMd).toContain(
+      "whose acceptance criteria allow recording the divergence instead of changing behavior, so its outcome is undetermined at slice time",
+    );
+    expect(skillMd).toContain(
+      '"... or record the divergence as a deliberate, documented boundary"',
+    );
+  });
+
+  it("SKILL.md step 4 defaults the task to its own PR instead of bundling", () => {
+    expect(skillMd).toContain(
+      "is planned as its own PR (its own independently shippable unit) by default, not bundled with a lower-risk sibling task",
+    );
+  });
+
+  it("the installed task-slicer.md prompt carries the same trigger and default", () => {
+    expect(taskSlicerMd).toContain(
+      "whose acceptance criteria allow recording the divergence instead of changing behavior, so its outcome is undetermined at slice time",
+    );
+    expect(taskSlicerMd).toContain(
+      '"... or record the divergence as a deliberate, documented boundary"',
+    );
+    expect(taskSlicerMd).toContain(
+      "is planned as its own PR (its own independently shippable unit) by default, not bundled with a lower-risk sibling task",
+    );
+  });
+});
+
+/**
+ * 0.17.0 also anchors the diff-as-file reviewer briefing lesson: when the
+ * reviewer's environment cannot use version control to see the diff, the
+ * orchestrator supplies it as a pre-generated file instead of expecting the
+ * reviewer to derive it, and the reviewer explicitly reports when it could
+ * only reconstruct the delta some other way, instead of silently reviewing
+ * less than the full change. A same-day fix-round added the provenance
+ * anchor: the briefing names the base/head revision the diff was generated
+ * from, and the reviewer states the base/head pair it reviewed in its
+ * report. Pins both the fallback rule and the provenance anchor in the
+ * SKILL.md reference copy and the installed reviewer.md prompt.
+ */
+describe("diff-as-file reviewer briefing ships in the skill and the reviewer prompt", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("SKILL.md step 7 covers the policy-gated fallback and the explicit-report clause", () => {
+    expect(skillMd).toContain(
+      "supply the diff as a pre-generated file in the briefing instead of expecting the reviewer to derive it",
+    );
+    expect(skillMd).toContain(
+      "have the reviewer report explicitly if it could only reconstruct the delta some other way, rather than silently reviewing less than the full change",
+    );
+  });
+
+  it("SKILL.md step 7 names the base/head revision provenance anchor", () => {
+    expect(skillMd).toContain(
+      "naming in the briefing the base and head revision the diff was generated from",
+    );
+  });
+
+  it("the installed reviewer.md prompt carries the same fallback and explicit-report clause", () => {
+    expect(reviewerMd).toContain(
+      "review the diff file the orchestrator supplied in the briefing instead",
+    );
+    expect(reviewerMd).toContain(
+      "say so explicitly in your report rather than silently reviewing less than the full change",
+    );
+  });
+
+  it("reviewer.md states the base/head revision provenance anchor", () => {
+    expect(reviewerMd).toContain(
+      "State the base and head revision you reviewed in your report",
+    );
+  });
+});
+
+/**
+ * 0.17.0's third anchored lesson: a named "Round-2 halt rule" section closes
+ * a repeating review-fix cycle instead of letting it keep accreting one-off
+ * case patches (boundary tokens, spellings). The rule makes its own
+ * occurrence count explicit: the recurrence that trips the signal IS the
+ * defect class's second occurrence, so the orchestrator stops the first
+ * time the signal fires rather than waiting for a third occurrence, a
+ * fix-round clarification of the shipped wording ("stop at the second such
+ * occurrence"), which read ambiguously with the round count.
+ */
+describe("round-2 halt rule ships in the skill", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("carries the section heading and step 8's reference to it", () => {
+    expect(skillMd).toContain("## Round-2 halt rule");
+    expect(skillMd).toContain(
+      "Watch for the round-2 halt signal across repeated review-fix cycles (see Round-2 halt rule below)",
+    );
+  });
+
+  it("states the halt trigger and the unambiguous occurrence count", () => {
+    expect(skillMd).toContain(
+      "a review round finds a new defect of the same class a previous round's fix already addressed, so the class has recurred once after being fixed",
+    );
+    expect(skillMd).toContain(
+      "Stop the first time this signal fires: the recurrence is already the class's second occurrence, so do not wait for a third one before stopping",
+    );
+  });
+
+  it("instructs naming the structural cause and splitting or redesigning", () => {
+    expect(skillMd).toContain("Name the structural cause in one sentence");
+    expect(skillMd).toContain(
+      "decide to split or redesign rather than keep accreting cases",
+    );
+  });
+
+  it("states the ship-the-healthy-half and refile-the-removed-half response", () => {
+    expect(skillMd).toContain("Ship the healthy half on its own verification");
+    expect(skillMd).toContain(
+      "refile the removed half as its own task carrying the measurement history that led to the split",
+    );
+  });
+
+  it("escalates unsatisfiable acceptance criteria to the operator as a glossed merge-hold", () => {
+    expect(skillMd).toContain(
+      "go to the operator as a merge-hold (hold the change unmerged and hand the decision to the operator)",
+    );
+  });
+});
