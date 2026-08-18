@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { READ_ONLY_ROLES, ROLES } from "../src/models.js";
+import { DEFAULT_MODELS, READ_ONLY_ROLES, ROLES } from "../src/models.js";
 import { readAsset } from "../src/assets.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -371,6 +371,113 @@ describe("subagent misfire rule ships in the skill", () => {
 });
 
 /**
+ * 0.18.0 adds a concrete workaround for the near-instant, no-tool-activity
+ * misfire signal, measured across repeated reviewer-subagent incidents where
+ * a resume with the assignment explicitly repeated turned a misfired first
+ * spawn into a contract-valid review. Pins the resume-over-respawn
+ * preference, the repeat-the-assignment mechanic, the respawn fallback
+ * condition, and the reviewer/model correlation noted as an open lead
+ * rather than a proven cause. A same-day review-fix round then hardened
+ * three more things: the "has resolved" claim is now bound to recorded
+ * outcomes instead of asserted as a universal rate, the preference is
+ * explicitly scoped away from a structurally different mid-run
+ * watchdog-stall misfire class where resume did not work, and the
+ * parenthetical signal definition itself is pinned.
+ */
+describe("the misfire rule prefers resume with a repeated assignment for the no-tool-activity signal", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("states the resume-over-respawn preference for this signal", () => {
+    expect(skillMd).toContain(
+      "For the near-instant, no-tool-activity signal specifically, prefer resume over a fresh respawn",
+    );
+  });
+
+  it("states the repeat-the-assignment mechanic instead of a generic retry", () => {
+    expect(skillMd).toContain(
+      "send the same subagent a message that explicitly repeats the original assignment rather than a generic retry",
+    );
+  });
+
+  it("states why resume beats a fresh respawn for this signal", () => {
+    expect(skillMd).toContain(
+      "resume keeps the subagent's prior turn in context while a fresh spawn starts cold and risks the same misfire again",
+    );
+  });
+
+  it("pins the near-instant misfire signal's own parenthetical definition", () => {
+    expect(skillMd).toContain(
+      "(a return within seconds, zero tool calls, harness or system boilerplate instead of the output contract)",
+    );
+  });
+
+  it("binds the 'has resolved on first resume' claim to recorded outcomes, not a universal rate", () => {
+    expect(skillMd).toContain(
+      "whose outcome was recorded (four so far) has resolved on the first resume attempt",
+    );
+  });
+
+  it("states the respawn fallback is conditional on the resume attempt itself misfiring", () => {
+    expect(skillMd).toContain(
+      "fall back to a fresh respawn only if the resume attempt itself misfires the same way",
+    );
+  });
+
+  it("notes the reviewer/model correlation as an open lead, not a confirmed cause", () => {
+    expect(skillMd).toContain(
+      "So far this signal has only been observed for the reviewer role, the one role whose default model differs from the other roles'",
+    );
+    expect(skillMd).toContain(
+      "treat that correlation as an open lead worth watching as more incidents accumulate, not as a confirmed cause",
+    );
+  });
+
+  it("the 'default model differs' claim is grounded in DEFAULT_MODELS, not asserted in prose alone", () => {
+    const otherRoles = ROLES.filter((role) => role !== "reviewer");
+    expect(otherRoles.length).toBeGreaterThan(0);
+    for (const role of otherRoles) {
+      expect(DEFAULT_MODELS.reviewer).not.toBe(DEFAULT_MODELS[role]);
+    }
+  });
+
+  it("scopes the resume-over-respawn preference away from the mid-run watchdog-stall misfire class", () => {
+    expect(skillMd).toContain(
+      "This resume-over-respawn preference does not extend to a structurally different misfire class",
+    );
+    expect(skillMd).toContain(
+      "treat a watchdog stall as outside this preference",
+    );
+  });
+
+  it("states the watchdog-stall class did not resolve on resume and needed a fresh constrained respawn instead", () => {
+    expect(skillMd).toContain(
+      "did not resolve on resume in the one measured incident of that class, it stalled a second time, and only a fresh, explicitly constrained respawn produced a contract-valid review",
+    );
+  });
+});
+
+/**
+ * 0.18.0 also hardens the installed reviewer prompt itself: force the first
+ * turn to be a tool call so a text-only opening turn (harness boilerplate,
+ * a restated-instructions preamble) cannot stand in for the review.
+ */
+describe("the reviewer prompt forces an immediate first tool call", () => {
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("instructs opening with a tool call before any analysis", () => {
+    expect(reviewerMd).toContain(
+      "Begin your very first turn with a tool call (read the diff or the changed files) before writing any analysis.",
+    );
+  });
+
+  it("forbids a text-only opening turn", () => {
+    expect(reviewerMd).toContain(
+      "Do not open with commentary, a restatement of these instructions, or any other text-only turn.",
+    );
+  });
+});
+
+/**
  * The read-only posture is tool-level only for Edit/Write/NotebookEdit; Bash
  * mutation is guarded by instruction alone. README must say so honestly
  * instead of implying full closure (the residual bit in practice: a reviewer
@@ -420,7 +527,10 @@ describe("task slicer output schema is a superset of the implementer input contr
   /** Extracts the first ```yaml fenced block found after `heading` in `doc`. */
   function yamlBlockAfter(doc: string, heading: string): string {
     const headingIndex = doc.indexOf(heading);
-    expect(headingIndex, `heading "${heading}" not found`).toBeGreaterThanOrEqual(0);
+    expect(
+      headingIndex,
+      `heading "${heading}" not found`,
+    ).toBeGreaterThanOrEqual(0);
     const match = doc.slice(headingIndex).match(/```yaml\n([\s\S]*?)```/);
     expect(match, `no yaml block found after "${heading}"`).toBeTruthy();
     return (match as RegExpMatchArray)[1];
@@ -443,7 +553,10 @@ describe("task slicer output schema is a superset of the implementer input contr
   });
 
   it("task-slicer.md's output structure carries the list-shaped task fields with the mirrored list shape", () => {
-    const block = yamlBlockAfter(taskSlicerRaw, "Return exactly this structure");
+    const block = yamlBlockAfter(
+      taskSlicerRaw,
+      "Return exactly this structure",
+    );
     for (const field of listShapedTaskFields) {
       expect(
         block,
@@ -453,16 +566,30 @@ describe("task slicer output schema is a superset of the implementer input contr
   });
 
   it("no field required by the subagent input contract is absent from the slicer output schema", () => {
-    const subagentBlock = yamlBlockAfter(skillMdRaw, "## Subagent input contract");
-    const slicerBlock = yamlBlockAfter(skillMdRaw, "## Task slicer output contract");
+    const subagentBlock = yamlBlockAfter(
+      skillMdRaw,
+      "## Subagent input contract",
+    );
+    const slicerBlock = yamlBlockAfter(
+      skillMdRaw,
+      "## Task slicer output contract",
+    );
     // Derive the required set from the subagent input contract itself so a
     // field added there cannot silently go missing from the slicer output.
     // Delegation mechanics are what the orchestrator supplies when spawning
     // (role, task_id, the context/expected_output wrappers), not per-task
     // planning output the slicer must produce.
-    const delegationMechanics = ["role", "task_id", "context", "expected_output", "format"];
+    const delegationMechanics = [
+      "role",
+      "task_id",
+      "context",
+      "expected_output",
+      "format",
+    ];
     const topLevel = [...subagentBlock.matchAll(/^(\w+):/gm)].map((m) => m[1]);
-    const contextChildren = [...subagentBlock.matchAll(/^ {2}(\w+):/gm)].map((m) => m[1]);
+    const contextChildren = [...subagentBlock.matchAll(/^ {2}(\w+):/gm)].map(
+      (m) => m[1],
+    );
     const required = [...topLevel, ...contextChildren].filter(
       (field) => !delegationMechanics.includes(field),
     );
@@ -510,7 +637,10 @@ describe("task slicer output schema is a superset of the implementer input contr
     let cursor = -1;
     for (const token of order) {
       const idx = block.indexOf(token);
-      expect(idx, `"${token}" not found in task slicer output contract`).toBeGreaterThan(cursor);
+      expect(
+        idx,
+        `"${token}" not found in task slicer output contract`,
+      ).toBeGreaterThan(cursor);
       cursor = idx;
     }
   });
@@ -608,9 +738,7 @@ describe("reproduction requirement ships in the skill and the reviewer prompt", 
       'When acceptance rests on empirical or probabilistic evidence (flake rates, benchmarks, "n runs green", performance/timing numbers), the reviewer must',
     );
     expect(skillMd).toContain("independently reproduce it");
-    expect(skillMd).toContain(
-      "not a re-read of the implementer's log",
-    );
+    expect(skillMd).toContain("not a re-read of the implementer's log");
   });
 
   it("step 7 excludes one-shot deterministic checks from the trigger", () => {
@@ -645,7 +773,9 @@ describe("reproduction requirement ships in the skill and the reviewer prompt", 
       return (match as RegExpMatchArray)[0].replace(/\n```$/, "");
     };
     const skillBlock = extractReproductionBlock(readAsset("skill/SKILL.md"));
-    const reviewerBlock = extractReproductionBlock(readAsset("agents/reviewer.md"));
+    const reviewerBlock = extractReproductionBlock(
+      readAsset("agents/reviewer.md"),
+    );
     // Guard the extraction itself: a regex that silently matched nothing or
     // an empty span would make the equality check below vacuous.
     expect(skillBlock.length).toBeGreaterThan(20);

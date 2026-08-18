@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The four subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-08-18T17:00:00Z
+timestamp: 2026-08-18T20:00:00Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -32,7 +32,7 @@ exactly as `packages/orchestrator-workflow/test/docs-consistency.test.ts:173`
 computes it: `ROLES.filter((role) => !READ_ONLY_ROLES.has(role))` →
 `task-slicer, implementer`. That posture is tool-level only for
 Edit/Write/NotebookEdit; Bash mutation is guarded by prompt instruction alone,
-which `packages/orchestrator-workflow/test/docs-consistency.test.ts:379-386`
+which `packages/orchestrator-workflow/test/docs-consistency.test.ts:486-493`
 pins README.md to state honestly ("guarded by instruction only", "nothing
 technically prevents it") rather than claiming full closure. Enforcement
 mechanics for that posture are out of this doc's lane; see
@@ -62,7 +62,7 @@ final output, nothing else" block:
   Both copies gained a `mutation_probes` field in 0.16.0; see
   [Mutation probes requirement](#mutation-probes-requirement-0160) below.
 - Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:270-291`
-  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:56-77`. Both
+  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:60-81`. Both
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below.
 - Task-slicer:
@@ -82,12 +82,12 @@ automated drift guard, which corrects what this doc previously reported here
 subagent-input relationship has the equality-and-superset test suite
 documented below; the reviewer pair has had a byte-for-byte `reproduction`
 field equality test since 0.14.0
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:641-653`); the
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:769-783`); the
 implementer pair gained a byte-for-byte `mutation_probes` field equality
 test in 0.16.0
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:714-727`),
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:844-857`),
 reinforced by an exact-sub-field-name pin added in a same-day R2 fix-round
-(`test/docs-consistency.test.ts:769-774`) that catches a mutant the plain
+(`test/docs-consistency.test.ts:899-904`) that catches a mutant the plain
 equality test cannot: renaming a sub-field identically in both copies still
 passes the equality check (it only proves the two copies match each other),
 but fails the exact-name pin. Only the explorer pair still has no dedicated
@@ -99,7 +99,7 @@ Every field the subagent input contract requires must have a same-named
 counterpart in the task-slicer's per-task output, so the orchestrator copies
 task fields 1:1 into the implementer contract at delegation time instead of
 inventing values. This was not always true:
-`packages/orchestrator-workflow/CHANGELOG.md:208-235` (0.10.0) records that the
+`packages/orchestrator-workflow/CHANGELOG.md:321-348` (0.10.0) records that the
 slicer contract previously omitted `constraints`, `allowed_changes`,
 `forbidden_changes` even though the implementer input contract already
 required them, forcing the orchestrator to fabricate that content when
@@ -123,24 +123,24 @@ acceptance_criteria, constraints, allowed_changes, and forbidden_changes 1:1
 into the subagent input contract when delegating implementation, rather than
 inventing new field values."
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:401-585`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:508-714`
 enforces this. The load-bearing check derives the *required* field set from
 the live subagent-input yaml block itself rather than hardcoding it
-(`test/docs-consistency.test.ts:455-479`): it regex-extracts top-level fields
+(`test/docs-consistency.test.ts:568-606`): it regex-extracts top-level fields
 plus `context.*` children, subtracts pure delegation mechanics (`role,
 task_id, context, expected_output, format`), and asserts every remaining name
 appears in the slicer output block, so a field added to the subagent input
 contract later cannot silently go undocumented in the slicer output; the test
 fails instead. Supporting checks in the same suite: both slicer-output copies
 (`SKILL.md` and `task-slicer.md`) carry the same fields in the same order
-(`test/docs-consistency.test.ts:481-492`); the original field order
+(`test/docs-consistency.test.ts:608-619`); the original field order
 (`id, title, goal, relevant_files, ... dependencies, risk`) survives around
-the newer fields (`test/docs-consistency.test.ts:494-516`); `02-tasks.md`'s
+the newer fields (`test/docs-consistency.test.ts:621-646`); `02-tasks.md`'s
 sections map 1:1 to the fields in order
-(`test/docs-consistency.test.ts:523-542`); and `task-slicer.md` must frame
+(`test/docs-consistency.test.ts:653-672`); and `task-slicer.md` must frame
 `allowed_changes`/`forbidden_changes` as scope boundaries for the
 implementer, not implementation instructions
-(`test/docs-consistency.test.ts:580-584`, prompt text at
+(`test/docs-consistency.test.ts:710-714`, prompt text at
 `packages/orchestrator-workflow/assets/agents/task-slicer.md:27-29`).
 
 ## Subagent misfire rule (0.11.0)
@@ -162,26 +162,56 @@ to parse against its role's output contract. Two detection signals:
 
 Response: treat a misfire as a failed spawn: resume or respawn the
 subagent; never fold the non-contract output into run state or count it as a
-completed step (`SKILL.md:375-377`). Record every misfire in
-`03-decisions.md` (`SKILL.md:377`). Review-gate consequence, stated
+completed step (`SKILL.md:375-377`). Since 0.18.0, for the near-instant,
+no-tool-activity signal specifically, the rule states a concrete preference
+rather than leaving the resume-or-respawn choice open: prefer resume over a
+fresh respawn, sending the same subagent a message that explicitly repeats
+the original assignment rather than a generic retry, since resume keeps the
+subagent's prior turn in context while a fresh spawn starts cold
+(`SKILL.md:377-380`); fall back to a fresh respawn only if the resume
+attempt itself misfires the same way (`SKILL.md:384-385`). Every incident of
+this exact signal whose outcome was recorded (four so far: three on
+2026-07-16, one on 2026-07-20) has resolved on the first resume attempt
+(`SKILL.md:381-384`) — a same-day review-fix round bound this claim to the
+recorded count after finding the original wording asserted a universal
+resolve rate the record did not support (see Motivation below). The
+preference is scoped away from a second, structurally different misfire
+class measured separately: a mid-run watchdog stall did not resolve on
+resume (it stalled a second time) and needed a fresh, explicitly
+constrained respawn instead (`SKILL.md:389-395`). Record every misfire in
+`03-decisions.md` (`SKILL.md:395-396`). Review-gate consequence, stated
 explicitly: a misfired review is not a review and never satisfies the review
-gate, since review is never skipped (`SKILL.md:377-379`). Review-gate
+gate, since review is never skipped (`SKILL.md:396-397`). Review-gate
 severities and waiver mechanics themselves are out of this doc's lane; see
 [review-gate-and-waivers.md](review-gate-and-waivers.md).
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:185-206` (0.11.0): a
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:298-319` (0.11.0): a
 live incident where a reviewer subagent spawn returned in 5 seconds with 0
 tool uses, handing back harness hook-boilerplate instead of the reviewer
 output contract; a resume of the same spawn produced a correct full review.
 Before 0.11.0 the kit said nothing about malformed returns, leaving room to
-silently accept a non-review as a passed review gate.
+silently accept a non-review as a passed review gate. 0.18.0's
+resume-over-respawn extension has its own motivation
+(`packages/orchestrator-workflow/CHANGELOG.md:12-21`, agent-tasks task
+a932b12a): two further sessions (2026-07-19, 2026-07-20) reproduced the
+identical signal; the 2026-07-19 session's resume outcome was never
+recorded, which is exactly the gap this fix-round's claim-binding closes.
 
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:335-371` pins
-the rule clause-by-clause: section heading present (338-340), both detection
-signals named verbatim (342-347), the scoping language that prevents
-false-positive misfires (349-354), the resume-or-respawn response plus the
-non-evidence rule (356-361), the `03-decisions.md` record requirement
-(363-365), and the review-gate consequence sentence (367-370).
+the 0.11.0 rule clause-by-clause: section heading present (338-340), both
+detection signals named verbatim (342-347), the scoping language that
+prevents false-positive misfires (349-354), the resume-or-respawn response
+plus the non-evidence rule (356-361), the `03-decisions.md` record
+requirement (363-365), and the review-gate consequence sentence (367-370).
+`test/docs-consistency.test.ts:387-457` pins the 0.18.0 extension and this
+fix-round's hardening in one `describe` block: the resume-over-respawn
+preference (390-394), the repeat-the-assignment mechanic (396-400), why
+resume beats a fresh respawn (402-406), the parenthetical signal definition
+(408-412), the claim-binding to recorded outcomes (414-418), the
+conditional respawn fallback (420-424), the model-correlation note as an
+open lead (426-433), a derived assertion against `DEFAULT_MODELS` itself
+rather than prose alone (435-441), and the watchdog-stall scope carve-out
+plus its own resolution detail (443-456).
 
 ## Reproduction requirement (0.14.0)
 
@@ -193,16 +223,16 @@ reproduce it — its own runs or measurements, not a re-read of the
 implementer's log — and record method, sample size, and result against the
 implementer's claim. The trigger is deliberately narrow: a single
 deterministic check (one test run, `tsc`, lint) does not qualify. The
-installed `packages/orchestrator-workflow/assets/agents/reviewer.md:47-52`
+installed `packages/orchestrator-workflow/assets/agents/reviewer.md:51-56`
 prompt carries the same rule verbatim (second-person voice). Both output
 contracts gained a matching `reproduction` field
 (`method, sample_size, result, matches_implementer_claim`,
-`SKILL.md:286-290` and `reviewer.md:72-76`); `matches_implementer_claim`
+`SKILL.md:286-290` and `reviewer.md:76-80`); `matches_implementer_claim`
 accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:99-128` (0.14.0): the
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:212-241` (0.14.0): the
 agent-dx run `2026-07-18-harness-subprocess-test-deflake` accepted an
 implementer's "8/8 green" flake-rate claim on a `maxWorkers` cap fix, then
 the reviewer independently reran the suite and found 2/6 red on an
@@ -244,20 +274,20 @@ the identical placeholder block. An output missing the field when probes
 identically in both copies since the R2 pass as "treated as a misfire, not
 evidence" (the installed prompt alone previously said "incomplete").
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:688-728` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:818-858` pins
 the original 0.16.0 shape: the installed prompt's instruction and field
-mention (692-698), the claim-only-what-was-measured rule (700-705), the
-misfire-rule sentence (707-712), and a byte-for-byte cross-copy equality
-check on the field block (714-727).
-`test/docs-consistency.test.ts:746-782` pins the R2 additions: step 6's
-sentence and its claim-only-what-was-measured reference (750-761), the
-not-applicable clause in both copies (763-767), and two exact-string pins
-(769-781) that catch a rename applied identically to both copies — a mutant
+mention (822-828), the claim-only-what-was-measured rule (830-835), the
+misfire-rule sentence (837-842), and a byte-for-byte cross-copy equality
+check on the field block (844-857).
+`test/docs-consistency.test.ts:876-912` pins the R2 additions: step 6's
+sentence and its claim-only-what-was-measured reference (880-891), the
+not-applicable clause in both copies (893-897), and two exact-string pins
+(899-911) that catch a rename applied identically to both copies — a mutant
 the cross-copy equality check above cannot catch on its own, since it only
 proves the two copies match each other, not that either still uses the
 pinned sub-field names.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:8-54` (0.16.0 plus
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:121-167` (0.16.0 plus
 its same-day R2 follow-up, agent-tasks task 16637a96): a 16-round dogfood
 where two implementer rounds dropped briefed-as-mandatory mutation probes
 from their return entirely; review of the resulting change then found the

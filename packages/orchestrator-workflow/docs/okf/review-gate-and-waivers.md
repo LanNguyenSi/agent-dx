@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-08-18T17:00:00Z
+timestamp: 2026-08-18T20:00:00Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -51,7 +51,7 @@ rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
 resupply it instead of inferring one from the findings list" (`SKILL.md:
-293-295`; the installed `reviewer.md:26-27` prompt carries the mirrored
+293-295`; the installed `reviewer.md:30-31` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.
@@ -106,7 +106,7 @@ blank, `open`, `TODO`, "leaves the finding unresolved and ARMS the gate"
 until changed. The example row was narrowed to `accepted/defer` in 0.7.4
 after a prior `accepted/fix/defer/reject` example misled a run into an
 unexpectedly armed gate
-(`packages/orchestrator-workflow/CHANGELOG.md:271-285`).
+(`packages/orchestrator-workflow/CHANGELOG.md:384-398`).
 
 The two column headers are load-bearing for a second, independent reason:
 `05-review-findings.md:9` documents them as the anchor the grounding-mcp
@@ -116,7 +116,7 @@ dropping either header hides the table from the reader regardless of
 Decision values; the load-bearing comment (plus a one-sentence transfer
 rule in SKILL.md) was added in 0.7.3 after a live run drifted onto an
 unparseable `Severity | Finding | Resolution` convention, while the shipped
-header itself was already correct (`CHANGELOG.md:287-303`, the
+header itself was already correct (`CHANGELOG.md:400-416`, the
 already-correct-header statement within that entry).
 
 ## Fail-closed acceptance markers
@@ -152,13 +152,17 @@ findings-table header convention and the Decision-legend vocabulary above.
 
 Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 5 seconds with 0 tool uses, handing back harness boilerplate instead of the
-reviewer output contract (`CHANGELOG.md:185-206`). The Subagent misfire rule
+reviewer output contract (`CHANGELOG.md:298-319`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
-(`SKILL.md:377-379`), pinned by
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:367-370`. Full
-misfire mechanics (detection signals, resume-vs-respawn, the
-`03-decisions.md` record) are out of scope here; see
+(`SKILL.md:396-397`), pinned by
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:367-370`. Since
+0.18.0 the rule also names resume over a fresh respawn as the preferred
+response for the near-instant, no-tool-activity signal specifically (scoped
+away from a separately measured mid-run watchdog-stall class where resume
+did not work). Full misfire mechanics (detection signals, the
+resume-over-respawn preference and its scope, the `03-decisions.md` record)
+are out of scope here; see
 [subagent-contracts-superset.md](subagent-contracts-superset.md).
 
 ## Reproduction requirement (0.14.0)
@@ -173,13 +177,13 @@ evidence, the reviewer must reproduce it independently — its own runs or
 measurements — and record method, sample size, and result against the
 implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
-same rule (`reviewer.md:47-52`), and both output contracts gained a matching
+same rule (`reviewer.md:51-56`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`SKILL.md:286-290`, `reviewer.md:72-76`); `matches_implementer_claim`
+field (`SKILL.md:286-290`, `reviewer.md:76-80`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
-Motivating incident (`CHANGELOG.md:99-128`): agent-dx run
+Motivating incident (`CHANGELOG.md:212-241`): agent-dx run
 `2026-07-18-harness-subprocess-test-deflake`, reviewer pass 1. The
 implementer's evidence read "8/8" full-suite runs green for a `maxWorkers`
 concurrency cap; the reviewer reran the suite independently (6 sequential
@@ -199,7 +203,7 @@ all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
 `SKILL.md:293-295` states it and adds the orchestrator's response when it is
 missing — ask the reviewer to resupply it, rather than infer one from the
-findings — and the installed `reviewer.md:26-27` prompt carries the mirrored
+findings — and the installed `reviewer.md:30-31` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part
@@ -208,9 +212,9 @@ verdict.
 
 Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
-(`CHANGELOG.md:8-54`, agent-tasks task 16637a96): one reviewer round in that
-dogfood omitted `acceptance_recommendation` entirely.
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:792-810` pins
+(`CHANGELOG.md:121-167`, agent-tasks task 16637a96): one reviewer round in
+that dogfood omitted `acceptance_recommendation` entirely.
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:922-940` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.
 
 ## See also
