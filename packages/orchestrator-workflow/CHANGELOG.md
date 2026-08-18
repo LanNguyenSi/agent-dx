@@ -5,6 +5,39 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-08-18
+
+### Changed
+
+- Anchors three process lessons from a live review-fix run in the kit
+  procedures (`SKILL.md` plus the installed `task-slicer.md` and
+  `reviewer.md` prompts), each docs/prompt-only:
+  - **Round-2 halt criterion.** Step 8 (Decide acceptance) now names a stop
+    signal for a repeating review-fix cycle: a review round finds a new
+    defect of the same class the previous round's fix addressed, and the
+    next fix would again be case-by-case enumeration (boundary tokens,
+    spellings, and similar one-off patches). On the second such occurrence,
+    stop patching, name the structural cause in one sentence, and split or
+    redesign instead of continuing: ship the healthy half on its own
+    verification and refile the removed half as its own task carrying the
+    measurement history that led to the split. Failing acceptance criteria
+    go to the operator as a merge-hold.
+  - **Split-by-default for documented-divergence sub-tasks.** Step 4 (Slice
+    tasks) and the task-slicer prompt now default a high-risk sub-task whose
+    goal offers a documented-divergence alternative (acceptance criteria
+    phrased along the lines of "... or record the divergence as a
+    deliberate, documented boundary") to its own PR, instead of bundling it
+    with a lower-risk sibling task whose shipping should not wait on it.
+  - **Diff-as-file reviewer briefing.** Step 7 (Delegate review) and the
+    reviewer prompt now cover the case where the reviewer's environment
+    cannot use version control to see the diff (for example a policy-gated
+    repository): the orchestrator supplies the diff as a pre-generated file
+    in the briefing instead of expecting the reviewer to derive it, and the
+    reviewer explicitly reports when it could only reconstruct the delta
+    some other way instead of silently reviewing less than the full change.
+
+  Motivated by agent-tasks task 66c548ad.
+
 ## [0.16.0] - 2026-08-18
 
 ### Changed

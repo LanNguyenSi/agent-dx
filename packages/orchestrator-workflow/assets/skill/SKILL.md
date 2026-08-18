@@ -111,7 +111,11 @@ directory and the subagents.
    criteria, constraints, suggested tests, allowed changes, forbidden
    changes, dependencies, risk. Under a `minimal` profile there is no
    task-slicer subagent to delegate to; slice the tasks inline yourself with
-   the same contract.
+   the same contract. When a task is high risk and its goal offers a
+   documented-divergence alternative (acceptance criteria phrased along the
+   lines of "... or record the divergence as a deliberate, documented
+   boundary"), plan it as its own PR by default instead of bundling it with
+   a lower-risk sibling task whose shipping should not wait on it.
 5. **Validate tasks.** Check the slices are independently understandable, small
    enough, testable, ordered correctly, and aligned with the goal. Fix the
    slicing before any implementation starts.
@@ -125,10 +129,16 @@ directory and the subagents.
    claim there that is not backed by a check it actually ran as unverified.
    Record meaningful decisions in `03-decisions.md` and consolidate
    evidence in `04-implementation-summary.md`.
-7. **Delegate review.** Send the diff to the reviewer subagent. The reviewer
-   checks spec compliance, architecture consistency, edge cases, security,
-   test adequacy (including whether new tests would fail if the change were
-   reverted), and maintainability. Findings go to `05-review-findings.md`;
+7. **Delegate review.** Send the diff to the reviewer subagent. When the
+   reviewer's environment cannot use version control to see the diff (for
+   example a policy-gated repository), supply the diff as a pre-generated
+   file in the briefing instead of expecting the reviewer to derive it, and
+   have the reviewer report explicitly if it could only reconstruct the
+   delta some other way, rather than silently reviewing less than the full
+   change. The reviewer checks spec compliance, architecture consistency,
+   edge cases, security, test adequacy (including whether new tests would
+   fail if the change were reverted), and maintainability. Findings go to
+   `05-review-findings.md`;
    transfer each finding from the reviewer output contract into the table's
    columns as-is, keeping the Severity and Decision headers unchanged, since
    those two are what the orchestrator-workflow completeness reader verifies.
@@ -150,7 +160,17 @@ directory and the subagents.
    findings require the orchestrator to record a rationale. Deferring a high
    or critical finding counts as a waiver and follows the same rules. Record
    all decisions and waivers in `03-decisions.md` and summarize waivers in
-   the Accepted Waivers section of `06-handoff.md`.
+   the Accepted Waivers section of `06-handoff.md`. Watch for a round-2 halt
+   signal across repeated review-fix cycles: a review round finds a new
+   defect of the same class the previous round's fix addressed, and the next
+   fix would again be case-by-case enumeration (boundary tokens, spellings,
+   and similar one-off patches). Stop at the second such occurrence instead
+   of patching again: name the structural cause in one sentence, and decide
+   to split or redesign rather than keep accreting cases. Ship the healthy
+   half on its own verification, and refile the removed half as its own task
+   carrying the measurement history that led to the split. Acceptance
+   criteria that cannot be satisfied this way go to the operator as a
+   merge-hold.
 9. **Hand off.** Before filling `06-handoff.md`, apply this optional
    guidance: when the repo carries a curated knowledge bundle (for example a
    `docs/okf/` directory with an index), check whether the change touches
