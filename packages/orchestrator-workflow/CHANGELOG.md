@@ -35,6 +35,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Motivated by agent-tasks task 16637a96.
 
+  Review-fix follow-up (same task): `mutation_probes` shipped with no
+  trigger the kit itself ever produced (SKILL.md step 6 said nothing about
+  naming probes) and no not-applicable signal (an implementer never given
+  probes returned the same placeholder block as one that silently dropped
+  them). Step 6 now instructs the orchestrator to name the mutation probes
+  to run in the task assignment whenever acceptance rests on a test that
+  must fail without the change, and carries a short reference to the
+  claim-only-what-was-measured rule. Both `mutation_probes` rule-text
+  copies (`SKILL.md`'s reference paragraph and the installed
+  `implementer.md` prompt) gained a not-applicable clause: when the
+  assignment names no probes, the implementer returns `mutation_probes: []`
+  rather than omitting the field, so "none asked for" is distinguishable
+  from "asked for and not reported". The installed prompt's wording for a
+  missing field changed from "incomplete" to "treated as a misfire, not
+  evidence", matching the Subagent misfire rule's own language; that rule's
+  paragraph also had an uneven line-wrap seam (left by the original 0.16.0
+  edit) rewrapped.
+
 ## [0.15.0] - 2026-08-17
 
 ### Added

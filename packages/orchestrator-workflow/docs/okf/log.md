@@ -171,3 +171,89 @@
   `test/docs-consistency.test.ts` and `test/template-markers.test.ts` are
   both in code this pass never edited, confirmed by diffing prettier's
   reformatted output against the current file).
+
+- 2026-08-18: re-verified and re-stamped subagent-contracts-superset.md and
+  review-gate-and-waivers.md against package version 0.16.0 plus a same-day
+  R2 fix-round on it (agent-tasks task 16637a96): the 0.16.0 feature commit
+  (`mutation_probes` field, claim-only-what-was-measured rule,
+  `acceptance_recommendation` hard-mandatory) landed without any docs/okf
+  update, breaking with the 0.13.0/0.14.0/0.15.0 precedent of updating the
+  bundle in the same commit as the feature; the R2 pass closed that gap and
+  also hardened the feature itself on review findings (`mutation_probes`
+  shipped with no trigger the kit itself ever produced — SKILL.md step 6
+  said nothing about naming probes — and no not-applicable signal, so an
+  implementer never given probes and one that silently dropped them
+  returned the identical placeholder block; both closed by a new step-6
+  sentence and a `mutation_probes: []` clause added to both output-contract
+  copies). Two content-false claims were caught and corrected in
+  subagent-contracts-superset.md: (1) "only the task-slicer/subagent-input
+  relationship has a dedicated equality-and-superset test suite" was already
+  false at the doc's own 2026-08-17 stamp, since the reviewer pair had a
+  byte-for-byte `reproduction`-field test since 0.14.0
+  (`test/docs-consistency.test.ts:641-653`); the doc now states the true
+  current set of three guarded pairs (task-slicer/subagent-input, reviewer,
+  implementer — the last two by byte-for-byte field-block equality tests)
+  and names explorer as the one pair still without a dedicated guard; (2)
+  the Subagent misfire rule's "Two detection signals" enumeration omitted
+  the `mutation_probes`-omission trigger added in 0.16.0, now folded into
+  signal 1 as the explicit example it is in `SKILL.md`'s own prose. A new
+  "Mutation probes requirement (0.16.0)" section was added (the doc
+  previously never mentioned the field at all) mirroring the existing
+  "Reproduction requirement (0.14.0)" section's structure and depth.
+  review-gate-and-waivers.md gained a new "Acceptance-recommendation
+  mandatory rule (0.16.0)" section plus a mention in its existing
+  `acceptance_recommendation` paragraph, and had three specifically
+  reported stale citations corrected (`SKILL.md:238` for the reviewer
+  severity enum, now resolving to the implementer contract's `recommendation`
+  line, corrected to `:264`; `:242` for the `acceptance_recommendation`
+  field, corrected to `:268`; `:330-332` for the misfire rule's review-gate
+  consequence sentence, corrected to `:364-366`).
+
+  Investigating those three citations surfaced a wider, pre-existing
+  problem: nearly every `SKILL.md:`/`CHANGELOG.md:`/`test/docs-consistency.
+  test.ts:` citation in both docs downstream of `SKILL.md`'s Workflow step 6
+  was already stale at each doc's own last-stamped commit, not only because
+  of this diff — spot checks (e.g. the Explorer output contract citation,
+  the Subagent input contract citation, the CHANGELOG 0.11.0 motivation
+  citation) resolved to wrong content even at the 0.15.0-era commit the
+  docs claimed to be verified against, meaning a past re-stamp pass marked
+  these docs current without re-deriving every citation from the file
+  content directly. This pass fixed every citation of that kind actually
+  read while rewriting the two docs' bodies (re-derived from the current
+  file, not computed by applying a line-count delta to the old, already-
+  wrong citation), but did not attempt a citation-by-citation audit of
+  spans this pass did not otherwise touch or of citations into files this
+  diff never changed (`agents-md-section.md`, the templates, `models.ts`,
+  `template-markers.test.ts`) — those are flagged as a follow-up, not
+  fixed here, per the task's own boundary ("pre-existing stale entries on
+  OTHER docs/parts are not yours to fix"). model-preselection.md was
+  re-stamped only, no content change: its one shifted source
+  (`test/docs-consistency.test.ts`, appended-at-end in this diff same as in
+  0.14.0's re-stamp) does not touch the specific line ranges the doc cites
+  (`test/docs-consistency.test.ts:28-32, :34-41, :43-47, :49-59, :61-70`,
+  all inside the "docs enumerate every installed role" block at the top of
+  the file, unaffected by every append-at-end change since 0.11.0),
+  confirmed unchanged by direct read.
+
+  `test/docs-consistency.test.ts` gained one new `describe` block (37
+  lines, appended after the 0.16.0 mutation-probes block so no earlier test
+  citation shifted) pinning the R2 additions, including two exact-string
+  pins that close a gap the existing byte-for-byte cross-copy equality test
+  could not: a same-named field rename applied identically to both
+  `SKILL.md` and `implementer.md` passes the cross-copy check (it only
+  proves the two copies match each other) but now fails the new pins.
+  Mutation-tested for real: deleting the new step-6 sentence, renaming
+  `restored_verified` to `restored_check` in both copies, and deleting the
+  `mutation_probes: []` clause from both copies each turned exactly the
+  intended new test(s) red (the rename mutant specifically left the
+  pre-existing cross-copy equality test green, confirming the gap it
+  closes), and each was restored to the pre-mutant byte-for-byte state
+  before re-verifying green. Full suite 163/163 (158 already on the branch
+  at the 0.16.0-R1 commit + 5 new R2 tests in one new describe block, plus
+  a wording fix to one pre-existing assertion in the 0.16.0-R1 describe
+  block so it tracks the "incomplete" → "treated as a misfire, not
+  evidence" wording change), `tsc --noEmit` clean, `tsc --noEmit -p
+  tsconfig.test.json` clean, `npm run build` clean. `CHANGELOG.md`
+  gained a "Review-fix follow-up" paragraph inside the existing
+  (unreleased) 0.16.0 entry rather than a new version heading, per the
+  task's instruction to keep the version at 0.16.0.

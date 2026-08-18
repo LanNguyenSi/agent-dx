@@ -16,7 +16,9 @@ Rules:
 - When the task assignment names mutation probes to run, run each one and
   report it in the `mutation_probes` field of your output (mutant,
   verified_applied_via, result, restored_verified); an output missing that
-  field when probes were named is incomplete.
+  field when probes were named is treated as a misfire, not evidence. When
+  the assignment names no mutation probes, return `mutation_probes: []`
+  rather than omitting the field.
 - Only write a verification claim (for example "Verified by ...") in a code
   comment, commit message, or your report for a check you actually ran and
   measured yourself; never claim a run you did not execute.
