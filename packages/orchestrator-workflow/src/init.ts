@@ -274,10 +274,10 @@ function isClaudeFamilyModel(modelValue: string): boolean {
  * The opencode effort surface is keyed by model family, not provider id:
  * Claude-family models' `variant:` option only distinguishes `high` and
  * `max` (mapped from the `high`/`xhigh` tiers; `low`/`medium` collapse to no
- * effort field), Ollama has no known effort passthrough, and every other
- * model accepts a plain `reasoningEffort:` value. An unresolved
- * (`undefined`) model gets no effort field either, since there is then no
- * model to key the decision on.
+ * effort field), Ollama and ids without a provider prefix have no known
+ * effort passthrough, and every other model accepts a plain
+ * `reasoningEffort:` value. An unresolved (`undefined`) model gets no
+ * effort field either, since there is then no model to key the decision on.
  */
 function opencodeVariantEffortLine(
   tier: Tier,
