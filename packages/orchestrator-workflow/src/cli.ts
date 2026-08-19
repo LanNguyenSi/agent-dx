@@ -8,18 +8,25 @@ import inquirer from "inquirer";
 import { PACKAGE_VERSION } from "./assets.js";
 import type { Harness } from "./detect.js";
 import { HARNESSES, detectHarnesses, parseHarnessList } from "./detect.js";
-import type { Profile, Role } from "./models.js";
+import type { ModelClass, Profile, Role } from "./models.js";
 import {
+  CLASS_MODELS,
   DEFAULT_MODELS,
   DEFAULT_PROFILE,
   MODEL_ALIASES,
+  MODEL_CLASSES,
   PROFILES,
   assertValidModelId,
   parseModelsSpec,
   parseProfile,
   rolesForProfile,
 } from "./models.js";
-import { loadOpencodeCatalog, resolveOpencodeModels } from "./opencode.js";
+import {
+  detectProvider,
+  loadOpencodeCatalog,
+  resolveAlias,
+  resolveOpencodeModels,
+} from "./opencode.js";
 import { readInstalledManifest, runInit } from "./init.js";
 import type { UninstallReport } from "./uninstall.js";
 import { runUninstall } from "./uninstall.js";
@@ -165,6 +172,10 @@ program
     "--opencode-provider <id>",
     "opencode provider id for alias resolution (e.g. github-copilot); auto-detected when omitted",
   )
+  .option(
+    "--tiers",
+    "also render per-role effort-tier subagent variants (<role>-<tier>.md); default: off, or the previously installed value on a re-run",
+  )
   .action(
     async (
       dir: string,
@@ -175,6 +186,7 @@ program
         models?: string;
         profile?: string;
         opencodeProvider?: string;
+        tiers?: boolean;
       },
     ) => {
       const targetDir = requireDirectory(dir);
@@ -243,10 +255,19 @@ program
       if (interactive && !opts.models)
         models = await promptModels(models, rolesForProfile(profile));
 
+      // Explicit --tiers always turns the feature on; a plain re-run keeps
+      // whatever the previous install had (default false for a fresh
+      // install), same override-vs-persist rule as --profile/--models above.
+      // No interactive prompt: tiers is opt-in via the flag only.
+      const tiers = opts.tiers ? true : (previous?.tiers ?? false);
+
       // Resolve opencode model aliases against the live catalog when the opencode
       // harness is selected. The shell-out stays here in the CLI so runInit
       // remains pure.
       let opencodeModels: Record<Role, string | undefined> | undefined;
+      let opencodeClassModels:
+        | Record<ModelClass, string | undefined>
+        | undefined;
       if (harnesses.includes("opencode")) {
         const catalog = loadOpencodeCatalog();
         const { resolved, warnings } = resolveOpencodeModels(models, {
@@ -257,6 +278,22 @@ program
         for (const w of warnings) {
           process.stderr.write(`Warning: ${w}\n`);
         }
+        if (tiers) {
+          const providerResult = detectProvider({
+            catalog,
+            explicit: opts.opencodeProvider,
+          });
+          opencodeClassModels = {} as Record<ModelClass, string | undefined>;
+          for (const modelClass of MODEL_CLASSES) {
+            opencodeClassModels[modelClass] = providerResult.provider
+              ? resolveAlias(
+                  providerResult.provider,
+                  CLASS_MODELS[modelClass],
+                  catalog,
+                )
+              : undefined;
+          }
+        }
       }
 
       const report = runInit({
@@ -266,6 +303,8 @@ program
         profile,
         force: opts.force,
         opencodeModels,
+        tiers,
+        opencodeClassModels,
       });
 
       showPaths("Created", report.written);

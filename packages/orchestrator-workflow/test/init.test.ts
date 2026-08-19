@@ -941,6 +941,234 @@ describe("cli smoke", () => {
   });
 });
 
+describe("tier variants (`--tiers`)", () => {
+  it("a legacy manifest with no tiers field defaults to false and renders like the no-tiers baseline", () => {
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    mkdirSync(join(target, ".ai", "workflow"), { recursive: true });
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          kit: "orchestrator-workflow",
+          version: "0.18.0",
+          harnesses: ["claude"],
+          models: DEFAULT_MODELS,
+          profile: "full",
+          files: {},
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    runInit(defaultOptions());
+
+    const agents = readdirSync(join(target, ".claude", "agents")).sort();
+    expect(agents).toEqual([
+      "explorer.md",
+      "implementer.md",
+      "reviewer.md",
+      "task-slicer.md",
+    ]);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.tiers).toBe(false);
+  });
+
+  it("tiers=true, claude, full profile: exactly 13 agent files with the right model/effort per variant", () => {
+    runInit({ ...defaultOptions(), profile: "full", tiers: true });
+
+    const agents = readdirSync(join(target, ".claude", "agents")).sort();
+    expect(agents.length).toBe(13);
+
+    // Dedicated anti-downgrade check: the reviewer default file must still
+    // be opus, unaffected by tiers being on.
+    const reviewer = readFileSync(
+      join(target, ".claude", "agents", "reviewer.md"),
+      "utf8",
+    );
+    expect(reviewer).toContain("model: opus");
+    expect(reviewer).not.toContain("effort:");
+
+    const explorerLow = readFileSync(
+      join(target, ".claude", "agents", "explorer-low.md"),
+      "utf8",
+    );
+    expect(explorerLow).toContain("model: haiku");
+    expect(explorerLow).toContain("effort: low");
+    expect(explorerLow).toContain("disallowedTools: Edit, Write, NotebookEdit");
+
+    const implementerXhigh = readFileSync(
+      join(target, ".claude", "agents", "implementer-xhigh.md"),
+      "utf8",
+    );
+    expect(implementerXhigh).toContain("model: opus");
+    expect(implementerXhigh).toContain("effort: xhigh");
+  });
+
+  it("never renders a <role>-<defaultTier>.md variant; the file set is collision-free", () => {
+    runInit({ ...defaultOptions(), profile: "full", tiers: true });
+    const agents = new Set(readdirSync(join(target, ".claude", "agents")));
+
+    expect(agents.has("explorer-medium.md")).toBe(false);
+    expect(agents.has("task-slicer-medium.md")).toBe(false);
+    expect(agents.has("implementer-medium.md")).toBe(false);
+    expect(agents.has("reviewer-high.md")).toBe(false);
+    // 4 default files + 9 variants (explorer/task-slicer: 2 each,
+    // implementer: 3, reviewer: 2), no duplicates.
+    expect(agents.size).toBe(13);
+  });
+
+  it("opencode: an anthropic-resolved class id gets variant: high/max on the high/xhigh tiers, none on low", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+      opencodeClassModels: {
+        small: "anthropic/claude-haiku-4-5",
+        medium: "anthropic/claude-sonnet-4-6",
+        large: "anthropic/claude-opus-4-8",
+      },
+    });
+
+    const reviewerXhigh = readFileSync(
+      join(target, ".opencode", "agents", "reviewer-xhigh.md"),
+      "utf8",
+    );
+    expect(reviewerXhigh).toContain("model: anthropic/claude-opus-4-8");
+    expect(reviewerXhigh).toContain("variant: max");
+
+    const implementerHigh = readFileSync(
+      join(target, ".opencode", "agents", "implementer-high.md"),
+      "utf8",
+    );
+    expect(implementerHigh).toContain("model: anthropic/claude-sonnet-4-6");
+    expect(implementerHigh).toContain("variant: high");
+
+    const implementerLow = readFileSync(
+      join(target, ".opencode", "agents", "implementer-low.md"),
+      "utf8",
+    );
+    expect(implementerLow).toContain("model: anthropic/claude-haiku-4-5");
+    expect(implementerLow).not.toContain("variant:");
+    expect(implementerLow).not.toContain("reasoningEffort");
+  });
+
+  it("opencode: an ollama-resolved class id gets no effort field", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+      opencodeClassModels: {
+        small: "ollama/llama3",
+        medium: "ollama/llama3",
+        large: "ollama/llama3",
+      },
+    });
+
+    const implementerHigh = readFileSync(
+      join(target, ".opencode", "agents", "implementer-high.md"),
+      "utf8",
+    );
+    expect(implementerHigh).toContain("model: ollama/llama3");
+    expect(implementerHigh).not.toContain("variant:");
+    expect(implementerHigh).not.toContain("reasoningEffort");
+  });
+
+  it("opencode: a non-anthropic, non-ollama resolved class id gets reasoningEffort", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+      opencodeClassModels: {
+        small: "openrouter/some-small-model",
+        medium: "openrouter/some-model",
+        large: "openrouter/some-large-model",
+      },
+    });
+
+    const implementerHigh = readFileSync(
+      join(target, ".opencode", "agents", "implementer-high.md"),
+      "utf8",
+    );
+    expect(implementerHigh).toContain("reasoningEffort: high");
+    expect(implementerHigh).not.toContain("variant:");
+  });
+
+  it("a second run with tiers=true changes no file (idempotent)", () => {
+    runInit({ ...defaultOptions(), profile: "full", tiers: true });
+    const before = snapshot(target);
+
+    const report = runInit({
+      ...defaultOptions(),
+      profile: "full",
+      tiers: true,
+    });
+    const after = snapshot(target);
+
+    expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
+    for (const [path, content] of after) {
+      expect(content, path).toBe(before.get(path));
+    }
+    expect(report.written).toEqual([]);
+    expect(report.updated).toEqual([]);
+    expect(report.conflicted).toEqual([]);
+  });
+
+  it("uninstall removes the tier-variant files it installed (ledger tracking via installKitFile)", () => {
+    runInit({ ...defaultOptions(), profile: "full", tiers: true });
+    const explorerLowPath = join(
+      target,
+      ".claude",
+      "agents",
+      "explorer-low.md",
+    );
+    expect(existsSync(explorerLowPath)).toBe(true);
+
+    runUninstall({ targetDir: target });
+    expect(existsSync(explorerLowPath)).toBe(false);
+  });
+
+  it("records tiers:true in the manifest", () => {
+    runInit({ ...defaultOptions(), profile: "full", tiers: true });
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(manifest.tiers).toBe(true);
+  });
+
+  describe("CLI --tiers override-vs-persist", () => {
+    const run = (...extra: string[]) =>
+      spawnSync(
+        process.execPath,
+        ["--import", "tsx", "src/cli.ts", "init", target, "--yes", ...extra],
+        { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+      );
+
+    it("a plain re-run without --tiers keeps the previously installed tiers value", () => {
+      expect(run("--tiers").status).toBe(0);
+      expect(
+        existsSync(join(target, ".claude", "agents", "explorer-low.md")),
+      ).toBe(true);
+
+      const second = run();
+      expect(second.status, second.stderr).toBe(0);
+      expect(
+        existsSync(join(target, ".claude", "agents", "explorer-low.md")),
+      ).toBe(true);
+      const manifest = JSON.parse(
+        readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+      );
+      expect(manifest.tiers).toBe(true);
+    });
+  });
+});
+
 describe("cli smoke — opencode harness", () => {
   // Each test gets a fresh empty bin dir that the spawned process uses as its
   // PATH. This ensures `opencode` cannot be found regardless of the host
