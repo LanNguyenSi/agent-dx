@@ -67,9 +67,10 @@ additionally gets one subagent file per non-default effort tier, named
 would collide with the plain `<role>.md` file); see the package README's
 "Effort tiers" section for the full role/tier table and the per-harness
 frontmatter shape. `--tiers` is off by default and has no interactive
-prompt equivalent in the manual fallback below: the automated installer is
-the only path that renders tier-variant files; a manual scaffold (step 4)
-does not cover them. Nothing else in the repository is modified. Locally edited files are
+prompt equivalent in the manual fallback below (nor does its negation,
+`--no-tiers`): the automated installer is the only path that renders
+tier-variant files; a manual scaffold (step 4) does not cover them.
+Nothing else in the repository is modified. Locally edited files are
 reported as conflicts and left alone, never overwritten silently; the
 exceptions are the kit-owned surfaces: `.ai/workflow/manifest.json` (the
 kit's state file, rewritten whenever the applied state changes) and the
@@ -113,15 +114,17 @@ steps in the repository you were asked to install into.
      --harness <claude,codex,opencode> \
      --profile <minimal|full> \
      --models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>" \
-     [--tiers]
+     [--tiers | --no-tiers]
    ```
 
    Omit `--profile` to keep `full` (or, on a re-run, whatever profile was
    installed previously); omit the models for roles the chosen profile does
    not install. Add `--tiers` only when the operator asked for tier
-   variants; omit it to keep tiers off (or, on a re-run, whatever value was
-   previously installed). If the command reports conflicts, show them to the
-   operator and ask before re-running with --force.
+   variants; add `--no-tiers` only when the operator explicitly wants them
+   turned off on a re-run that previously had them on; omit both to keep
+   tiers off on a fresh install, or whatever value was previously installed
+   on a re-run. If the command reports conflicts, show them to the operator
+   and ask before re-running with --force.
 
 4. Only if npx or the registry is unavailable, scaffold manually from
    https://github.com/LanNguyenSi/agent-dx/tree/master/packages/orchestrator-workflow/assets.

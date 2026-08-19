@@ -206,15 +206,20 @@ produces (still `manifest.models[role]`, no `effort:` key), and each variant
 lives next to it as `<role>-<tier>.md`.
 
 Default off, like every optional pack in this kit: a fresh install renders
-no variant files unless asked. `--tiers` turns the feature on for that run;
-a plain re-run with no `--tiers` flag keeps whatever the previous install
-had, the same override-vs-persist rule already used for `--profile` and
-`--models`. There is no interactive prompt for it: `tiers` is opt-in via the
-flag only.
+no variant files unless asked. `--tiers` turns the feature on for that run,
+`--no-tiers` turns it off; a plain re-run with neither flag keeps whatever
+the previous install had, the same override-vs-persist rule already used
+for `--profile` and `--models`. There is no interactive prompt for it:
+`tiers` is opt-in/off via the flags only.
 
 ```bash
 npx orchestrator-workflow init --tiers --yes
 ```
+
+Turning tiers back off with `--no-tiers` after having them on follows the
+same pattern as a `full` → `minimal` profile downgrade: `init` prints a note
+naming the now-untracked `<role>-<tier>.md` variant files and how to remove
+them, rather than deleting them or leaving the leftover unexplained.
 
 **Which tiers each role gets.** A role never gets a variant file for its own
 default tier: that would collide with, and duplicate, the default file.

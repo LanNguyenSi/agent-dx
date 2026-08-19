@@ -537,3 +537,87 @@
   was caught by `prettier --check` and fixed with `--write` before commit;
   the pre-existing `test/template-markers.test.ts` warning is unrelated and
   untouched by this pass, matching the baseline measured before any edit).
+
+- 2026-08-19: fix-round-1 on 0.19.0's `--tiers` feature (agent-tasks reviewer
+  pass on task T-003, 6 medium + 4 low findings, 0 high/critical) re-verified
+  and re-stamped model-preselection.md and install-fence-mechanics.md again,
+  the two docs the review's own findings (M1 opencode no-op variants + no
+  warning, M2 one-way `--tiers`, M3 downgrade-note gap, M4 provider-vs-family
+  effort dispatch, L2 unused `TIERS`/`isTier` exports, L3 stale citations)
+  directly touch. Every citation into `models.ts`/`init.ts`/`cli.ts` shifted
+  by the fix commit was re-derived from a direct read of the current file at
+  that exact location (grep for the anchor phrase or `it(...)`/`describe(...)`
+  title, then read the exact span), not a computed offset applied blindly —
+  the same discipline every prior pass in this log used — though three
+  distinct uniform shifts turned out to hold across large stretches of
+  `cli.ts` and `test/init.test.ts` (a `--no-tiers` commander option addition
+  shifted every `cli.ts` line after it by a flat +4 before the tiers-
+  resolution rewrite itself added another +6; an `import { DEFAULT_TIER,
+  ROLE_TIERS }` addition shifted every `test/init.test.ts` line after it by a
+  flat +2 until the first new test insertion point), and each shift was
+  spot-checked against a handful of independently re-read anchors before
+  being trusted for the rest of its span. One citation-accuracy miss from
+  this pass's own first draft was caught in its own second read-back before
+  commit: four `test/init.test.ts` citations inside the flat-+2-shift zone
+  (the AGENTS.md-restore-on-mangle test, the inline-marker-immunity test,
+  and both CLAUDE.md-import tests) were initially copied forward unshifted
+  on the wrong assumption that "the cited source file (`writers.ts`) didn't
+  change" meant "the test citation doesn't need to move either" — it does,
+  since the test *file* still shifted even though the function under test
+  did not; all four were corrected by direct re-read before this entry was
+  written, the same "verify, don't assume — even inside a region you already
+  trust" lesson the 2026-08-17 entry above names for exactly this failure
+  mode.
+
+  Both docs also gained substantial new content, not just corrected
+  citations, since three of the four medium findings changed actual runtime
+  behavior the docs described: model-preselection.md's "Effort tiers"
+  section now documents `--no-tiers` (the commander-negatable counterpart to
+  `--tiers`, M2), the family-based (not provider-id-based) opencode effort
+  dispatch via the new `isClaudeFamilyModel` helper (M4, with the concrete
+  failure mode named — a `github-copilot/claude-*` or nested
+  `openrouter/anthropic/claude-*` model previously fell through to
+  `reasoningEffort:` instead of `variant:`), and a new "Unresolved-class
+  guard" paragraph covering both halves of M1 (the per-class stderr warning
+  in `cli.ts`, and `init.ts` now skipping the write entirely for a variant
+  that would carry neither a `model:` nor an effort line). The "Docs-
+  consistency pins" section gained a fifth guard entry (L4's second
+  `describe`, pinning README's Tier -> model class/alias/effort table
+  against `TIER_DEFS`/`CLASS_MODELS`, mirroring the existing role/tier-table
+  guard). install-fence-mechanics.md's "What `init` writes" section replaced
+  its own prior finding (the T-002 pass above had documented the `tiers:
+  true -> false` silent-no-note asymmetry as a real gap, correctly, since
+  fixing it was out of T-002's docs-only scope) with the fix itself: the new
+  `--no-tiers`-driven downgrade-note block (M2) and the profile-downgrade
+  note loop's extension to also cover a dropped role's tier-variant files
+  when `previous.tiers` was true (M3), plus why the two note loops never
+  double-fire (they iterate disjoint role sets — dropped roles vs. still-
+  installed roles). The `L1` content-assertion addition (pinning the exact
+  four-line legacy default-file frontmatter, not just the file-set) and the
+  new invariant test (`DEFAULT_TIER[role]` is always a member of
+  `ROLE_TIERS[role]`, from the review's Missing Tests list rather than a
+  numbered finding) are both cited in the "Tests" section's now-longer
+  enumeration of the `tier variants` describe block.
+
+  `okf-kit check docs/okf --strict` immediately before this pass's commit:
+  9 `sources-fresh` warnings — 2 on review-gate-and-waivers.md, 4 on
+  run-state-lifecycle-and-markers.md, 3 on subagent-contracts-superset.md,
+  none on either doc this pass touches (their own timestamps were already
+  the newest in the bundle from the T-002 pass above, so nothing had gone
+  stale against them yet at measurement time; the 9 warnings are all
+  mtime-driven staleness against files this fix-round's *commit* had not
+  yet touched from git's perspective — `docs-consistency.test.ts`,
+  `CHANGELOG.md`, `README.md`, `INSTALL-AGENT.md`, `models.ts` — since this
+  checker keys "changed" off each file's last commit time, not raw
+  filesystem mtime, so uncommitted working-tree edits do not move the
+  needle until committed). Measured again after this pass's commit: see the
+  commit's own PR/handoff note for the post-commit count, since committing
+  is this pass's last step and the pre-commit number above is what a
+  working-tree-only measurement can honestly report. Full suite 226/226
+  (206 baseline + 20 new: 11 in `test/init.test.ts` for M1/M2/M3/M4/M5/the
+  invariant test, 9 in `test/docs-consistency.test.ts` for L4), `tsc
+  --noEmit` clean, `tsc --noEmit -p tsconfig.test.json` clean, `npm run
+  build` clean, `prettier --check` clean for every file this pass touched
+  (three files needed `--write`: `src/init.ts`, `test/docs-consistency.test.ts`,
+  `test/init.test.ts`; the pre-existing `test/template-markers.test.ts`
+  warning is unrelated and untouched, matching every prior pass's baseline).

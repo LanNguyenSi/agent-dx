@@ -4,12 +4,15 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  CLASS_MODELS,
   DEFAULT_MODELS,
   DEFAULT_TIER,
   READ_ONLY_ROLES,
   ROLES,
   ROLE_TIERS,
+  TIER_DEFS,
 } from "../src/models.js";
+import type { Tier } from "../src/models.js";
 import { readAsset } from "../src/assets.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -1157,5 +1160,83 @@ describe("README tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () 
       .map((m) => m[1])
       .filter((cell) => cell !== "Role" && !/^-+$/.test(cell));
     expect(dataRows.sort()).toEqual([...ROLES].sort());
+  });
+});
+
+/**
+ * L4 (review round 1 on 0.19.0): the "Effort tiers" section carries a
+ * second table, Tier -> model class -> model alias -> requested effort
+ * (`TIER_DEFS`/`CLASS_MODELS` in `src/models.ts`), that the tier-table guard
+ * above does not touch (it only pins the Role/Tiers-available/Default-tier
+ * table). Nothing previously guarded this second table against drifting
+ * from its source maps, so this mirrors the same source-of-truth discipline
+ * for it: located by its own header text and sliced off at the next blank
+ * line, so it is never confused with either of the two other same-shaped
+ * tables earlier in the file.
+ */
+describe("README tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS exactly", () => {
+  const readmeMd = readDoc("README.md");
+  const tiersInOrder = Object.keys(TIER_DEFS) as Tier[];
+
+  function tierModelClassTableSection(): string {
+    const headerIdx = readmeMd.indexOf(
+      "| Tier | Model class | Model alias | Effort requested |",
+    );
+    expect(
+      headerIdx,
+      "README tier-to-model-class table header not found",
+    ).toBeGreaterThanOrEqual(0);
+    const afterHeader = readmeMd.slice(headerIdx);
+    const endIdx = afterHeader.indexOf("\n\n");
+    expect(
+      endIdx,
+      "README tier-to-model-class table did not terminate before a blank line",
+    ).toBeGreaterThan(0);
+    return afterHeader.slice(0, endIdx);
+  }
+
+  function tierModelClassRow(tier: Tier): {
+    modelClass: string;
+    alias: string;
+    effort: string;
+  } {
+    const match = tierModelClassTableSection().match(
+      new RegExp(`^\\| ${tier} \\| ([^|]+) \\| ([^|]+) \\| ([^|]+) \\|$`, "m"),
+    );
+    expect(
+      match,
+      `README tier-to-model-class row for "${tier}" not found`,
+    ).toBeTruthy();
+    const [, modelClassCell, aliasCell, effortCell] = match as RegExpMatchArray;
+    return {
+      modelClass: modelClassCell.trim(),
+      alias: aliasCell.replace(/`/g, "").trim(),
+      effort: effortCell.replace(/`/g, "").trim(),
+    };
+  }
+
+  for (const tier of tiersInOrder) {
+    const def = TIER_DEFS[tier];
+
+    it(`lists TIER_DEFS["${tier}"]'s model class and effort in the "${tier}" row`, () => {
+      const row = tierModelClassRow(tier);
+      expect(row.modelClass).toBe(def.modelClass);
+      expect(row.effort).toBe(def.effort);
+    });
+
+    it(`lists CLASS_MODELS["${def.modelClass}"] as the "${tier}" row's model alias`, () => {
+      expect(tierModelClassRow(tier).alias).toBe(CLASS_MODELS[def.modelClass]);
+    });
+  }
+
+  it("has exactly one row per tier, no extra or missing rows", () => {
+    const dataRows = [
+      ...tierModelClassTableSection().matchAll(
+        /^\| ([\w-]+) \| [^|]+ \| [^|]+ \| [^|]+ \|$/gm,
+      ),
+    ]
+      .map((m) => m[1])
+      .filter((cell) => cell !== "Tier" && !/^-+$/.test(cell));
+    expect(dataRows.sort()).toEqual([...tiersInOrder].sort());
   });
 });

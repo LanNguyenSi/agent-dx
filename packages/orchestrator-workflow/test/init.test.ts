@@ -19,7 +19,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runInit } from "../src/init.js";
 import {
   DEFAULT_MODELS,
+  DEFAULT_TIER,
   ROLES,
+  ROLE_TIERS,
   parseModelsSpec,
   parseProfile,
   rolesForProfile,
@@ -839,6 +841,48 @@ describe("profile downgrade (full -> minimal) leaves a note about untracked role
       true,
     );
   });
+
+  it("with tiers on, the downgrade note also covers the dropped roles' variant files", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+    });
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+      tiers: true,
+    });
+
+    // explorer and task-slicer each get one note for their base file plus
+    // one note per non-default tier (low, high — medium is their own
+    // DEFAULT_TIER and never gets a variant file): 1 + 2 notes per role,
+    // 2 dropped roles, 1 harness = 6 notes total.
+    expect(report.notes.length).toBe(6);
+    for (const role of ["explorer", "task-slicer"] as const) {
+      const basePath = join(".claude", "agents", `${role}.md`);
+      expect(report.notes.some((note) => note.includes(basePath))).toBe(true);
+      for (const tier of ROLE_TIERS[role]) {
+        if (tier === DEFAULT_TIER[role]) continue;
+        const variantPath = join(".claude", "agents", `${role}-${tier}.md`);
+        expect(
+          report.notes.some((note) => note.includes(variantPath)),
+          variantPath,
+        ).toBe(true);
+      }
+    }
+
+    // The variant files themselves are untouched, only untracked, same as
+    // the base files above.
+    expect(
+      existsSync(join(target, ".claude", "agents", "explorer-low.md")),
+    ).toBe(true);
+  });
 });
 
 describe("kit-owned file conflicts", () => {
@@ -972,6 +1016,29 @@ describe("tier variants (`--tiers`)", () => {
     ]);
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     expect(manifest.tiers).toBe(false);
+
+    // Content assertion, not just the file-set check above: pins the exact
+    // pre-0.19.0 frontmatter shape (four lines, no `effort:`) so a change to
+    // composeClaudeAgent cannot silently alter the legacy (tiers-off) render
+    // path without failing here.
+    const explorer = readFileSync(
+      join(target, ".claude", "agents", "explorer.md"),
+      "utf8",
+    );
+    const frontmatterMatch = explorer.match(/^---\n([\s\S]*?)\n---\n/);
+    expect(
+      frontmatterMatch,
+      "explorer.md has no frontmatter block",
+    ).toBeTruthy();
+    const frontmatterLines = (frontmatterMatch as RegExpMatchArray)[1].split(
+      "\n",
+    );
+    expect(frontmatterLines).toEqual([
+      "name: explorer",
+      expect.stringMatching(/^description: "/),
+      "model: sonnet",
+      "disallowedTools: Edit, Write, NotebookEdit",
+    ]);
   });
 
   it("tiers=true, claude, full profile: exactly 13 agent files with the right model/effort per variant", () => {
@@ -1100,6 +1167,101 @@ describe("tier variants (`--tiers`)", () => {
     expect(implementerHigh).not.toContain("variant:");
   });
 
+  it("opencode: a claude-family model behind a non-anthropic provider (github-copilot) still gets the variant: rule, not reasoningEffort", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+      opencodeClassModels: {
+        small: "github-copilot/claude-haiku-4.5",
+        medium: "github-copilot/claude-sonnet-4.6",
+        large: "github-copilot/claude-opus-4.8",
+      },
+    });
+
+    const implementerHigh = readFileSync(
+      join(target, ".opencode", "agents", "implementer-high.md"),
+      "utf8",
+    );
+    expect(implementerHigh).toContain(
+      "model: github-copilot/claude-sonnet-4.6",
+    );
+    expect(implementerHigh).toContain("variant: high");
+    expect(implementerHigh).not.toContain("reasoningEffort");
+  });
+
+  it("opencode: a claude-family model behind a nested-path provider (openrouter/anthropic/claude-*) still gets the variant: rule", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+      opencodeClassModels: {
+        small: "openrouter/anthropic/claude-haiku-4.5",
+        medium: "openrouter/anthropic/claude-sonnet-4.6",
+        large: "openrouter/anthropic/claude-opus-4.8",
+      },
+    });
+
+    const reviewerXhigh = readFileSync(
+      join(target, ".opencode", "agents", "reviewer-xhigh.md"),
+      "utf8",
+    );
+    expect(reviewerXhigh).toContain(
+      "model: openrouter/anthropic/claude-opus-4.8",
+    );
+    expect(reviewerXhigh).toContain("variant: max");
+    expect(reviewerXhigh).not.toContain("reasoningEffort");
+  });
+
+  it("opencode: an unresolved class model (undefined) renders no variant file at all, not a no-op file with neither model: nor an effort line", () => {
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+      // opencodeClassModels omitted entirely: every class resolves to
+      // undefined, the same shape as an empty live catalog or a set of
+      // fully-qualified --models that never triggered class resolution.
+    });
+
+    const agents = readdirSync(join(target, ".opencode", "agents"));
+    // Only the 4 default per-role files; none of the 9 tier variants were
+    // written, since every one of them would have carried neither model:
+    // nor an effort line.
+    expect(agents.sort()).toEqual([
+      "explorer.md",
+      "implementer.md",
+      "reviewer.md",
+      "task-slicer.md",
+    ]);
+    expect(report.written.some((path) => path.includes("-low.md"))).toBe(false);
+    expect(report.written.some((path) => path.includes("-high.md"))).toBe(
+      false,
+    );
+    expect(report.written.some((path) => path.includes("-xhigh.md"))).toBe(
+      false,
+    );
+
+    // No ledger entry for the skipped files either.
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(
+      Object.keys(manifest.files).some((path) => path.includes("-low.md")),
+    ).toBe(false);
+  });
+
+  it("tier data invariant: DEFAULT_TIER[role] is always a member of ROLE_TIERS[role]", () => {
+    for (const role of ROLES) {
+      expect(ROLE_TIERS[role], role).toContain(DEFAULT_TIER[role]);
+    }
+  });
+
   it("a second run with tiers=true changes no file (idempotent)", () => {
     runInit({ ...defaultOptions(), profile: "full", tiers: true });
     const before = snapshot(target);
@@ -1165,6 +1327,70 @@ describe("tier variants (`--tiers`)", () => {
         readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
       );
       expect(manifest.tiers).toBe(true);
+    });
+
+    it("a flagless init on a fresh target renders exactly the 4 default agent files and writes tiers: false", () => {
+      const result = run();
+      expect(result.status, result.stderr).toBe(0);
+
+      const agents = readdirSync(join(target, ".claude", "agents")).sort();
+      expect(agents).toEqual([
+        "explorer.md",
+        "implementer.md",
+        "reviewer.md",
+        "task-slicer.md",
+      ]);
+      const manifest = JSON.parse(
+        readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+      );
+      expect(manifest.tiers).toBe(false);
+    });
+
+    it("--no-tiers turns the feature off on a fresh install (no previous manifest to persist)", () => {
+      const result = run("--no-tiers");
+      expect(result.status, result.stderr).toBe(0);
+      expect(
+        existsSync(join(target, ".claude", "agents", "explorer-low.md")),
+      ).toBe(false);
+      const manifest = JSON.parse(
+        readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+      );
+      expect(manifest.tiers).toBe(false);
+    });
+
+    it("--no-tiers overrides a previously installed --tiers value (true -> false transition), leaving a leftover note for the variant files", () => {
+      expect(run("--tiers").status).toBe(0);
+      expect(
+        existsSync(join(target, ".claude", "agents", "explorer-low.md")),
+      ).toBe(true);
+
+      const second = run("--no-tiers");
+      expect(second.status, second.stderr).toBe(0);
+      // The transition itself does not delete the file (same leftover
+      // pattern as the profile downgrade), only stops tracking it.
+      expect(
+        existsSync(join(target, ".claude", "agents", "explorer-low.md")),
+      ).toBe(true);
+      expect(second.stdout).toContain(
+        join(".claude", "agents", "explorer-low.md"),
+      );
+      expect(second.stdout).toContain(
+        "now untracked after tiers were turned off",
+      );
+
+      const manifest = JSON.parse(
+        readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+      );
+      expect(manifest.tiers).toBe(false);
+    });
+
+    it("prints the tiers status in both the 'Found existing install' line and the closing summary", () => {
+      expect(run("--tiers").status).toBe(0);
+      const second = run();
+      expect(second.status, second.stderr).toBe(0);
+      expect(second.stdout).toContain("Found existing install");
+      expect(second.stdout).toMatch(/Found existing install.*tiers: true/);
+      expect(second.stdout).toMatch(/installed for: claude.*tiers: true/);
     });
   });
 });
@@ -1251,5 +1477,48 @@ describe("cli smoke — opencode harness", () => {
       PATH: emptyBinDir,
     });
     expect(result.status, result.stderr).toBe(0);
+  });
+
+  it("--tiers with an empty catalog warns once per unresolved model class on stderr and renders no variant files", () => {
+    const result = runOpencodeCli(["--tiers"], { PATH: emptyBinDir });
+    expect(result.status, result.stderr).toBe(0);
+    for (const modelClass of ["small", "medium", "large"]) {
+      expect(result.stderr, modelClass).toContain(
+        `Tier model class "${modelClass}"`,
+      );
+    }
+    expect(result.stdout).not.toContain(`Tier model class`);
+
+    const agents = readdirSync(join(target, ".opencode", "agents"));
+    expect(agents.sort()).toEqual([
+      "explorer.md",
+      "implementer.md",
+      "reviewer.md",
+      "task-slicer.md",
+    ]);
+  });
+
+  it("--tiers with fully-qualified --models but still no live catalog: same warning + no variant files (FQ role models do not bypass class resolution)", () => {
+    const result = runOpencodeCli(
+      [
+        "--tiers",
+        "--models",
+        "explorer=openrouter/some-model,task-slicer=openrouter/some-model,implementer=openrouter/some-model,reviewer=openrouter/some-model",
+      ],
+      { PATH: emptyBinDir },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    for (const modelClass of ["small", "medium", "large"]) {
+      expect(result.stderr, modelClass).toContain(
+        `Tier model class "${modelClass}"`,
+      );
+    }
+    const agents = readdirSync(join(target, ".opencode", "agents"));
+    expect(agents.sort()).toEqual([
+      "explorer.md",
+      "implementer.md",
+      "reviewer.md",
+      "task-slicer.md",
+    ]);
   });
 });

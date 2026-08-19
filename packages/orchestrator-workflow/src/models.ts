@@ -150,12 +150,6 @@ export function parseModelsSpec(
  */
 export type Tier = "low" | "medium" | "high" | "xhigh";
 
-export const TIERS: Tier[] = ["low", "medium", "high", "xhigh"];
-
-export function isTier(value: string): value is Tier {
-  return (TIERS as string[]).includes(value);
-}
-
 /**
  * Which tiers each role gets a variant file for. A tier outside a role's
  * list is never rendered for that role (e.g. explorer/task-slicer never get

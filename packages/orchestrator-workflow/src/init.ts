@@ -255,25 +255,42 @@ function composeClaudeAgentVariant(role: Role, tier: Tier): string {
 }
 
 /**
- * The opencode effort surface is provider-dependent: Anthropic's `variant:`
- * option only distinguishes `high` and `max` (mapped from the `high`/`xhigh`
- * tiers; `low`/`medium` collapse to no effort field), Ollama has no known
- * effort passthrough, and other providers accept a plain `reasoningEffort:`
- * value. An unresolved (`undefined`) model gets no effort field either,
- * since there is then no provider to key the decision on.
+ * Whether a resolved opencode model id belongs to the Claude family,
+ * regardless of which provider is fronting it (`anthropic/claude-...`,
+ * `github-copilot/claude-...`, `openrouter/anthropic/claude-...`, ...): the
+ * segment after the provider prefix contains `claude-`, or the id starts
+ * with `anthropic/` outright. Dispatch on family rather than provider id
+ * because the `variant:` effort surface is a property of the model being
+ * served, not of which provider happens to front it.
+ */
+function isClaudeFamilyModel(modelValue: string): boolean {
+  if (modelValue.startsWith("anthropic/")) return true;
+  const slash = modelValue.indexOf("/");
+  const remainder = slash === -1 ? "" : modelValue.slice(slash + 1);
+  return remainder.includes("claude-");
+}
+
+/**
+ * The opencode effort surface is keyed by model family, not provider id:
+ * Claude-family models' `variant:` option only distinguishes `high` and
+ * `max` (mapped from the `high`/`xhigh` tiers; `low`/`medium` collapse to no
+ * effort field), Ollama has no known effort passthrough, and every other
+ * model accepts a plain `reasoningEffort:` value. An unresolved
+ * (`undefined`) model gets no effort field either, since there is then no
+ * model to key the decision on.
  */
 function opencodeVariantEffortLine(
   tier: Tier,
   modelValue: string | undefined,
 ): string | undefined {
   if (!modelValue) return undefined;
-  const slash = modelValue.indexOf("/");
-  const provider = slash === -1 ? undefined : modelValue.slice(0, slash);
-  if (provider === "anthropic") {
+  if (isClaudeFamilyModel(modelValue)) {
     if (tier === "high") return "variant: high";
     if (tier === "xhigh") return "variant: max";
     return undefined;
   }
+  const slash = modelValue.indexOf("/");
+  const provider = slash === -1 ? undefined : modelValue.slice(0, slash);
   if (provider === undefined || provider === "ollama") return undefined;
   return `reasoningEffort: ${TIER_DEFS[tier].effort}`;
 }
@@ -340,6 +357,48 @@ export function runInit(options: InitOptions): Report {
         report.notes.push(
           `${relativePath}: now untracked after the full -> ${profile} profile downgrade; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
         );
+        // A dropped role that also had tiers on previously left behind its
+        // own <role>-<tier>.md variant files, not just its base file; the
+        // note loop above only knew about <role>.md, so those variants went
+        // unmentioned even though they are equally untracked now.
+        if (previous.tiers) {
+          for (const tier of ROLE_TIERS[role]) {
+            if (tier === DEFAULT_TIER[role]) continue;
+            const variantPath = join(
+              harnessDir,
+              "agents",
+              `${role}-${tier}.md`,
+            );
+            report.notes.push(
+              `${variantPath}: now untracked after the full -> ${profile} profile downgrade; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // A tiers on -> off transition leaves each still-installed role's
+  // <role>-<tier>.md variant files behind on disk, the same untracked-
+  // leftover shape as the full -> minimal profile downgrade above (a role
+  // dropped from the profile is handled by the block above instead, so
+  // there is no overlap between the two loops). Surface it the same way:
+  // a note per file instead of a silent, unexplained leftover.
+  if (previous && previous.tiers && !tiers) {
+    const harnessDirs = options.harnesses.filter(
+      (harness): harness is "claude" | "opencode" =>
+        harness === "claude" || harness === "opencode",
+    );
+    for (const harness of harnessDirs) {
+      const harnessDir = harness === "claude" ? ".claude" : ".opencode";
+      for (const role of rolesForProfile(profile)) {
+        for (const tier of ROLE_TIERS[role]) {
+          if (tier === DEFAULT_TIER[role]) continue;
+          const relativePath = join(harnessDir, "agents", `${role}-${tier}.md`);
+          report.notes.push(
+            `${relativePath}: now untracked after tiers were turned off; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+          );
+        }
       }
     }
   }
@@ -428,6 +487,15 @@ export function runInit(options: InitOptions): Report {
           if (tier === DEFAULT_TIER[role]) continue;
           const modelClass = TIER_DEFS[tier].modelClass;
           const variantModelValue = options.opencodeClassModels?.[modelClass];
+          const effortLine = opencodeVariantEffortLine(tier, variantModelValue);
+          if (variantModelValue === undefined && effortLine === undefined) {
+            // Neither a model: nor an effort line would be rendered: this
+            // variant would be a silent no-op duplicate carrying nothing
+            // beyond the base file's own (possibly also unresolved) model
+            // line. Skip it entirely rather than write an indistinguishable
+            // file with no ledger entry to compare it against.
+            continue;
+          }
           installKitFile(
             join(".opencode", "agents", `${role}-${tier}.md`),
             composeOpencodeAgentVariant(role, tier, variantModelValue),
