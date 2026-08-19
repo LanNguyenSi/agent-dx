@@ -621,3 +621,66 @@
   (three files needed `--write`: `src/init.ts`, `test/docs-consistency.test.ts`,
   `test/init.test.ts`; the pre-existing `test/template-markers.test.ts`
   warning is unrelated and untouched, matching every prior pass's baseline).
+
+- 2026-08-19: re-verified and re-stamped review-gate-and-waivers.md,
+  run-state-lifecycle-and-markers.md, and subagent-contracts-superset.md
+  against the tier-branch tip (agent-dx `task/48ea90ac-effort-tiers`,
+  commits c78e44a/99506da/96b853c): the fix-round-1 entry above left this
+  trio's `sources-fresh` warnings unaddressed as out of its own scope (2 on
+  review-gate-and-waivers.md, 4 on run-state-lifecycle-and-markers.md, 3 on
+  subagent-contracts-superset.md, all mtime-driven against `CHANGELOG.md`,
+  `README.md`, `INSTALL-AGENT.md`, and `test/docs-consistency.test.ts`
+  changed by the T-001/T-002/T-003 commits, plus `src/models.ts` for
+  subagent-contracts-superset.md); this pass closes that gap. Neither
+  `test/init.test.ts` nor `SKILL.md`/`reviewer.md`/`implementer.md`/
+  `task-slicer.md`/`agents-md-section.md`/the templates changed on this
+  branch, so no citation into those files needed checking.
+
+  Every citation in the three docs into a file this branch actually changed
+  was checked by direct read against the current file content, not shifted
+  by an assumed offset. Before trusting any shift, each file's diff was read
+  for its hunk count and shape, then the shift was spot-checked against a
+  dozen-plus independently re-read anchors, not trusted on the strength of
+  one match: `CHANGELOG.md` gained exactly one 59-line entry (0.19.0)
+  inserted at its old line 8 in a single hunk with no other change anywhere
+  in the file (`git diff --stat`: 59 insertions, 0 deletions), so every
+  `CHANGELOG.md:` citation in all three docs shifted by a flat +59 with no
+  exceptions. `test/docs-consistency.test.ts` changed in exactly two hunks: a
+  +9-line import-statement expansion (five new named imports plus a `Tier`
+  type import from `src/models.js`) within the file's first ten lines, and a
+  +152-line append at its old EOF (old line 1079); every citation these three
+  docs make falls between those two hunks, so all of them shifted by a flat
+  +9. `src/models.ts` citations (`ROLES` at 3-8, `READ_ONLY_ROLES` at 14-17,
+  `DEFAULT_MODELS` at 70-75, all in subagent-contracts-superset.md) needed no
+  correction at all, confirmed unchanged by direct read: the branch's
+  ~55-line tier block is purely appended after the file's old line 142, past
+  every citation into it. `README.md:91-96` (run-state-lifecycle-and-markers.md's
+  "What gets installed" code-fence citation, supporting the same
+  copy-from-templates claim as the INSTALL-AGENT.md citation below) also
+  needed no correction, confirmed byte-identical by direct read: both of the
+  branch's README diff hunks land at old line 195 and 208, well after the
+  cited span. `INSTALL-AGENT.md:44-45,110-113` (the doc's other citation for
+  that claim) did need correction, since the branch's INSTALL-AGENT.md diff
+  has six hunks spread through the file rather than one uniform shift:
+  `44-45` (the Write-surface bullet listing `.ai/workflow/templates/00-goal.md`
+  through `06-handoff.md`) moved to `47-48` (a flat +3 from the first hunk,
+  which lands entirely above it); `110-113` (the manual-fallback step 4
+  bullet listing the same templates) moved to `135-138`, found by locating
+  the unchanged bullet text directly in the current file rather than
+  computing a shift, since that citation's own span sits inside the fourth
+  of the six hunks, which rewrites content immediately around it.
+
+  No content-false claims were found in this pass; every citation checked
+  still supported the sentence it was attached to once its line numbers were
+  corrected, so no prose changed, only `path:line` pointers and the three
+  docs' `timestamp:` frontmatter (bumped to `2026-08-19T22:30:00Z`, matching
+  the stamp install-fence-mechanics.md and model-preselection.md already
+  carry from the T-002/T-003 passes). `okf-kit check docs/okf --strict`
+  immediately before this pass: 9 `sources-fresh` warnings, exactly the count
+  and distribution the fix-round-1 entry above predicted. After this pass: 0
+  warnings, 0 findings. Full suite unchanged at 226/226 (no `src/` or `test/`
+  file was touched by this pass), `prettier --check` unchanged from the
+  pre-existing single `test/template-markers.test.ts` warning baseline (also
+  untouched by this pass). No mutation probes were named for this task: it
+  is a pure citation- and timestamp-correction pass with no new or changed
+  test assertions to mutate.

@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff]
-timestamp: 2026-08-18T20:00:00Z
+timestamp: 2026-08-19T22:30:00Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -23,7 +23,7 @@ One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:57-66).
 The orchestrator creates it by copying `.ai/workflow/templates/`
 (SKILL.md:68-69; packages/orchestrator-workflow/README.md:91-96;
-packages/orchestrator-workflow/INSTALL-AGENT.md:44-45,110-113). The newest run
+packages/orchestrator-workflow/INSTALL-AGENT.md:47-48,135-138). The newest run
 directory is the active one; older directories are the auditable history and
 must not be edited (SKILL.md:70, "Do not edit past runs"). Three of the
 seven files carry a `<!-- solution-acceptance: <key> = <value> -->`
@@ -52,11 +52,11 @@ lie behind the fork point of the change (the merge-base with the remote
 default branch) (SKILL.md:80-81). The in-repo changelog entry adds the
 consumer's malformed-value behavior: a valid sha gets an exact binding, a
 malformed value blocks explicitly via a 7-40 hex guard, and only a bare
-`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:356-360,
+`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:415-419,
 "grounding-mcp 0.6.0 reads this marker"; SKILL.md:82 points to "the
 grounding-mcp 0.6.0 docs for the full consumer semantics", so external
 reader internals are not verified from this repo). Introduced in 0.9.0
-(CHANGELOG.md:350-367). Pinned by template-markers.test.ts:19,33-37 (exactly
+(CHANGELOG.md:409-426). Pinned by template-markers.test.ts:19,33-37 (exactly
 one `run-base` marker, defaulting to `TODO`) and :39-43 (the literal line,
 wrapper included).
 
@@ -78,7 +78,7 @@ value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
 non-accepting (fail-closed)" (SKILL.md:177-181). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
-(CHANGELOG.md:452-463). Consumer is "the harness solution-acceptance
+(CHANGELOG.md:511-522). Consumer is "the harness solution-acceptance
 run-gate" per SKILL.md:179-180; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18 (regexes) and :21-31 (one marker per
@@ -94,7 +94,7 @@ locates this table by its header row and verifies unresolved findings from
 those two columns. Do not rename or drop them."
 (05-review-findings.md:9; line 10 and the 0.7.3 changelog entry attribute
 that reader to grounding-mcp). This was a reactive fix (0.7.3,
-CHANGELOG.md:400-416): a live run had drifted onto
+CHANGELOG.md:459-475): a live run had drifted onto
 `| Severity | Finding | Resolution |` (no Decision column), and the reader
 failed closed with an explicit "not in the expected table format" blocker
 rather than silently passing. The Decision legend defines
@@ -103,7 +103,7 @@ resolved only when its Decision is `accepted` or `defer`; every other value
 (`fix`, `reject`, blank, `open`, `TODO`) leaves it unresolved and **arms**
 the completeness gate (05-review-findings.md:10). The template's example row
 was deliberately narrowed to `accepted/defer` only (0.7.4,
-CHANGELOG.md:384-398) so the template itself never invites `fix`/`reject`
+CHANGELOG.md:443-457) so the template itself never invites `fix`/`reject`
 as if they were resolutions. Pinned by template-markers.test.ts:59-70
 (header row carries both `severity` and `decision` cells), :72-74 (the
 load-bearing comment exists), :76-90 (example row's Decision cell is
@@ -174,13 +174,13 @@ discovery-side rule (the Discover step already checks `docs/okf/` before
 hand-mapping terrain, SKILL.md:96-97); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
-(CHANGELOG.md:274-296). Pinned by
-docs-consistency.test.ts:268-275 (the hook's opening phrase, anchored so a
+(CHANGELOG.md:333-355). Pinned by
+docs-consistency.test.ts:277-284 (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
-"docs/okf/" also occur in the Discover-step test), :277-281 (source-overlap
-check phrase), :283-287 (both responses named), :289-292 (validator-run
-phrase, `okf-kit check` framed as an example), :294-297 (non-gate
-optionality phrase), and :299-314 (the template section, its outcome
+"docs/okf/" also occur in the Discover-step test), :286-290 (source-overlap
+check phrase), :292-296 (both responses named), :298-301 (validator-run
+phrase, `okf-kit check` framed as an example), :303-306 (non-gate
+optionality phrase), and :308-323 (the template section, its outcome
 vocabulary, and that it is marked Optional and bundle-scoped).
 
 ## Where the shapes are pinned, and what belongs to sibling docs
@@ -199,9 +199,9 @@ anything inside it.
 (role enumeration, review-gate wording, instruction trust boundary,
 subagent misfire rule, task-slicer/subagent-contract field superset); only
 its `run-base fill instruction ships in the skill`
-(docs-consistency.test.ts:317-325) and
+(docs-consistency.test.ts:326-334) and
 `hand off keeps a curated knowledge bundle current`
-(docs-consistency.test.ts:264-315) `describe` blocks are this doc's topic.
+(docs-consistency.test.ts:273-324) `describe` blocks are this doc's topic.
 The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see
