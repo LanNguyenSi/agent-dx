@@ -302,9 +302,9 @@ program
             opencodeClassModels[modelClass] = resolved;
             if (resolved !== undefined) continue;
             // One warning per unresolved model class: without it, every
-            // effort-tier variant keyed to this class silently rendered
-            // with no model: line (init.ts now additionally skips a
-            // variant that would also carry no effort line at all).
+            // effort-tier variant keyed to this class is silently skipped
+            // (init.ts skips the variant write entirely when the class
+            // model is unresolved), with nothing on stderr saying why.
             const reason = providerResult.provider
               ? `provider "${providerResult.provider}" has no "${alias}" model in the catalog`
               : providerResult.ambiguous

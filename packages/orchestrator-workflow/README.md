@@ -263,8 +263,9 @@ families:
   `high`. This collapse is deliberate and documented, not a bug: a
   `low`/`medium` variant on a Claude-family model still gets its class's
   `model:` line, just no `variant:` line.
-- **Ollama**: no effort field at all. There is no known effort passthrough
-  for Ollama.
+- **Ollama, or an id with no provider prefix**: no effort field at all.
+  There is no known effort passthrough for Ollama, and an id with no `/`
+  resolves to no provider to key the decision on.
 - **Every other non-Claude-family model**: a plain `reasoningEffort: <tier>`
   line, `xhigh` included (opencode's built-in OpenAI-style variants
   document an `xhigh` reasoning effort).

@@ -38,8 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `github-copilot/claude-...`, or the nested
   `openrouter/anthropic/claude-...`) gets `variant: high`/`variant: max` for
   the `high`/`xhigh` tiers only (`low`/`medium` collapse to no effort field,
-  a documented opencode `variant:` limitation, not a bug), Ollama gets no
-  effort field at all, and every other non-Claude-family model gets a plain
+  a documented opencode `variant:` limitation, not a bug), Ollama or a provider-less
+  id gets no effort field, and every other non-Claude-family model gets a plain
   `reasoningEffort: <tier>` line; the variant's `model:` line resolves
   through the same live `opencode models` catalog lookup as the base
   per-role model, keyed by the tier's model class instead of by role. A tier

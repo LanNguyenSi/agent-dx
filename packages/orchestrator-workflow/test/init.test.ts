@@ -970,6 +970,60 @@ describe("leftover notes are ledger-driven, not enumeration-driven (review round
   });
 });
 
+/**
+ * Review round 3 (R3-L1): the R2-M2 describe block above proved the
+ * `previous.files`-gate on the *tiers-off* leftover-note loop
+ * (`previous.tiers && !tiers`, init.ts:409-425) is what stops phantom notes
+ * for never-written variant files, but its own mutation probe only ever
+ * exercised that one loop. The sibling `previous.files[variantPath] !==
+ * undefined` gate inside the *full -> minimal profile-downgrade* loop's
+ * tier-variant sub-loop (init.ts ~393) was left completely untested: on
+ * HEAD it behaves correctly, but a mutant that always pushes the note
+ * (`if (true)`) survived the full suite. This test closes that gap
+ * directly, combining an opencode install whose tier-class models never
+ * resolved (so the M1 guard wrote zero variant files) with a full ->
+ * minimal downgrade that still has tiers on, the one combination that can
+ * tell "gated on the ledger" apart from "gated on nothing" for this
+ * specific sub-loop.
+ */
+describe("profile-downgrade variant-file notes are ledger-driven too (review round 3, R3-L1)", () => {
+  it("opencode + tiers on + unresolved tier-class models (0 variant files ever written), then full -> minimal with tiers still on: exactly the two dropped roles' base-file notes, no phantom variant notes", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+      // opencodeClassModels omitted entirely: every tier class is
+      // unresolved, so the M1 guard skips every opencode variant write;
+      // only the 4 base .opencode/agents/<role>.md files land on disk and
+      // in the manifest's file ledger.
+    });
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+      tiers: true,
+    });
+
+    expect(report.notes.length).toBe(2);
+    for (const role of ["explorer", "task-slicer"] as const) {
+      const basePath = join(".opencode", "agents", `${role}.md`);
+      expect(report.notes.some((note) => note.includes(basePath))).toBe(true);
+    }
+    // No variant-file note for either dropped role's low/high tier: those
+    // files were never written in the first place, so a ledger-driven gate
+    // must not mention them.
+    expect(
+      report.notes.every(
+        (note) => !note.includes("-low.md") && !note.includes("-high.md"),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("kit-owned file conflicts", () => {
   it("keeps local edits without --force and reports them", () => {
     runInit(defaultOptions());
@@ -1226,6 +1280,34 @@ describe("tier variants (`--tiers`)", () => {
       "utf8",
     );
     expect(implementerHigh).toContain("model: ollama/llama3");
+    expect(implementerHigh).not.toContain("variant:");
+    expect(implementerHigh).not.toContain("reasoningEffort");
+  });
+
+  it("opencode: a resolved class id with no provider prefix (no '/') gets a model: line but no effort field (review round 3, R3-L4)", () => {
+    // opencodeVariantEffortLine only looks up a provider by splitting on the
+    // first "/"; an id with none resolves to `provider === undefined`, the
+    // same no-effort-field outcome as Ollama, but via a distinct code path
+    // (not the Ollama string check) that the README's "Every other
+    // non-Claude-family model" bullet previously implied did not exist.
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+      opencodeClassModels: {
+        small: "local-model",
+        medium: "local-model",
+        large: "local-model",
+      },
+    });
+
+    const implementerHigh = readFileSync(
+      join(target, ".opencode", "agents", "implementer-high.md"),
+      "utf8",
+    );
+    expect(implementerHigh).toContain("model: local-model");
     expect(implementerHigh).not.toContain("variant:");
     expect(implementerHigh).not.toContain("reasoningEffort");
   });

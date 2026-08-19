@@ -815,11 +815,175 @@
   `--write` before commit; the pre-existing `test/template-markers.test.ts`
   warning is unrelated and untouched, matching every prior pass's
   baseline). Mutation probes (named in the task assignment): removing the
-  `previous.files`-gate condition from both `init.ts` note loops (reverting
-  to unconditional `ROLE_TIERS` enumeration) turned the new
-  "opencode + unresolved tier-class models... exactly 0 leftover notes"
-  test red (9 phantom notes instead of 0), restored and re-verified green;
-  resetting `cli.ts`'s warning text to the pre-fix-round-2 wording turned
-  both strengthened stderr tests red, restored and re-verified green. Both
-  mutants were applied and restored with the working tree committed first,
-  per this repo's commit-before-mutation-probe convention.
+  `previous.files`-gate condition from the tiers-off note loop (`init.ts`'s
+  `previous.tiers && !tiers` block, the one the new "opencode + unresolved
+  tier-class models... exactly 0 leftover notes" test exercises; reverting
+  to unconditional `ROLE_TIERS` enumeration) turned that test red (9
+  phantom notes instead of 0), restored and re-verified green — this probe
+  demonstrates only that one loop's gate; the review-round-2 fix touched an
+  analogous gate inside the full -> minimal profile-downgrade loop's own
+  tier-variant sub-loop (`init.ts` ~393) too, but no test in this round
+  exercised that second gate specifically, a coverage gap review round 3
+  (R3-L1, see below) later found and closed with its own dedicated mutation
+  probe. Resetting `cli.ts`'s warning text to the pre-fix-round-2 wording
+  turned both strengthened stderr tests red, restored and re-verified
+  green. Both mutants were applied and restored with the working tree
+  committed first, per this repo's commit-before-mutation-probe convention.
+
+- 2026-08-19: fix-round-3 on `--tiers` (review round 3, 0 medium, 4 low
+  findings, 0 high/critical, agent-dx branch `task/48ea90ac-effort-tiers`,
+  base 32e83f5) re-verified and re-stamped model-preselection.md and
+  install-fence-mechanics.md again, the two docs review-round-3's own
+  findings (R3-L1 the untested profile-downgrade ledger gate, R3-L2 the
+  factually-wrong `effortLine`-parameter JSDoc/doc rationale repeated in
+  both docs, R3-L3 the stale `cli.ts` warning-comment wording, R3-L4 the
+  lost no-provider-prefix case in README's opencode-effort prose) directly
+  touch; log.md itself is also in scope, both for its own R3-L1 precision
+  fix (below) and as the file carrying this entry.
+
+  R3-L1 is the structural fix, mirroring R2-M2's shape one level down: the
+  review-round-2 pass proved the *tiers-off* leftover-note loop's
+  `previous.files`-gate was real (a mutant reverting it to unconditional
+  `ROLE_TIERS` enumeration turned a dedicated test red), but its mutation
+  probe never touched the sibling gate inside the *full -> minimal
+  profile-downgrade* loop's own tier-variant sub-loop (`init.ts` ~393,
+  `if (previous.files[variantPath] !== undefined)`) — on HEAD that gate
+  behaves identically to its sibling, but nothing in the 233-test suite
+  actually exercised it, so a `if (true)` mutant there survived silently.
+  A new `test/init.test.ts:989-1025` `describe` closes the gap: an opencode
+  install whose tier-class models never resolved (so, same as the R2-M2
+  test above it, the M1 guard writes zero variant files) followed by a
+  full -> minimal downgrade that still has tiers on asserts exactly the two
+  dropped roles' base-file notes and no phantom `-low.md`/`-high.md`
+  variant notes. Measured directly in this pass, working tree committed
+  first per this repo's commit-before-mutation-probe convention: reverting
+  `init.ts`'s gate to `if (true)` turned exactly this one new test red (6
+  notes instead of the expected 2 — the 2 real base-file notes plus 4
+  phantom variant notes, one per non-default tier of each of the two
+  dropped roles), with the other 232 tests unaffected; restored to the
+  byte-identical pre-mutant state (confirmed via `git diff`) and the full
+  suite (233/233) went green again, both verified directly, not assumed.
+  This pass also precised the review-round-2 log entry's own mutation-probe
+  sentence above: it had described the tiers-off-loop probe as covering
+  "both `init.ts` note loops," which overstated what that probe actually
+  demonstrated (only the tiers-off loop; the profile-downgrade loop's own
+  gate was the untested one R3-L1 found) — corrected in place rather than
+  left to imply a coverage this bundle did not have at the time.
+
+  R3-L2 is a pure-comment correctness fix, no behavior change: the
+  `effortLine` parameter's JSDoc on `composeOpencodeAgentVariant`
+  (`init.ts:298-304`) claimed the caller passes the value in "since the
+  caller already needs that same value to decide whether to skip writing
+  this variant at all" — false since fix-round-1: the skip decision (`init.ts:511`,
+  `variantModelValue === undefined`) depends only on the class model's
+  resolution, computed and checked *before* `effortLine` exists at all
+  (`init.ts:526` computes it only after that check passes); the real reason
+  for the fourth-parameter change (review-round-2, R2-L1) is a single
+  computed value instead of two independent call sites for it. The JSDoc
+  was rewritten to state that; both OKF docs repeated the same wrong
+  rationale (model-preselection.md's "Composition" paragraph, and a
+  self-contradictory passage in install-fence-mechanics.md's "What `init`
+  writes" section that had already *proved* the skip check does not depend
+  on `effortLine` two sentences earlier via the R2-L1 equivalence proof,
+  then contradicted its own proof by attributing the fourth-parameter
+  change to that same dependency) — both corrected the same way, in place,
+  crediting R3-L2 explicitly so a future re-verification pass does not
+  mistake the correction for original fix-round-2 content.
+
+  R3-L3 is likewise a pure-comment fix: the code comment directly above
+  `cli.ts`'s per-unresolved-class-model warning (`cli.ts:304-307`) still
+  read like the pre-fix-round-1 world ("every effort-tier variant... 
+  silently rendered with no model: line"), a description fix-round-1's own
+  M1 guard had already made false (the variant is skipped entirely, not
+  rendered with a field omitted) but which review-round-2's wording pass
+  only fixed in the *warning text itself* and the comment directly above
+  the `process.stderr.write` call, not in this second, slightly higher
+  comment that motivates the `const reason` computation below it. Reworded
+  to state the real semantics plainly: "init.ts skips the variant write
+  entirely when the class model is unresolved." No line count changed in
+  either `init.ts` or `cli.ts` (both edits kept their surrounding
+  functions' line numbers stable), confirmed directly rather than assumed,
+  so no citation into either file needed re-deriving because of these two
+  fixes specifically — only R3-L1's test insertions shifted `init.test.ts`
+  citations, handled separately below.
+
+  R3-L4 restores a lost case in README's opencode-effort bullet list
+  ("Effort tiers" section): the Ollama bullet had narrowed from
+  "Ollama, or an id with no provider prefix" (the actual dispatch in
+  `opencodeVariantEffortLine`, `init.ts:282-296`, whose provider lookup
+  splits on the first `/` and treats `provider === undefined` the same as
+  `provider === "ollama"`) down to just "Ollama" at some earlier rewrite,
+  making the following "every other non-Claude-family model gets
+  `reasoningEffort:`" bullet false for an unqualified id. Restored as
+  "Ollama, or an id with no provider prefix: no effort field at all."; the
+  identical lost case was also found, while re-verifying, in this bundle's
+  own model-preselection.md prose (the "Per-harness frontmatter behavior"
+  paragraph) and in the CHANGELOG 0.19.0 entry's opencode-effort sentence,
+  both corrected the same way (the CHANGELOG fix was rewrapped to hold the
+  same 3-line span as before specifically so it would not shift any of the
+  three CHANGELOG-citing docs outside this task's scope, which were left
+  untouched). A new `test/init.test.ts:1287-1313` test pins the runtime
+  behavior directly: an opencode install with a resolved-but-unqualified
+  class id (`"local-model"`, no `/`) renders a variant file carrying a
+  `model:` line but no `variant:`/`reasoningEffort:` line, inserted right
+  after the existing Ollama-outcome test since it is the same code-path
+  family. `test/docs-consistency.test.ts`'s existing substring-based README
+  opencode-effort-prose guard (`:1244-1302`, from review-round-2) needed no
+  change: it asserts the prose contains "Claude-family" and does not
+  contain either of two specific stale phrases, neither of which this
+  wording change touches, confirmed by re-reading that test directly rather
+  than assumed safe.
+
+  `src/init.ts` and `src/cli.ts` citations in both docs were re-derived by
+  direct read against the current file at each exact location, the same
+  discipline as every entry above; both files' own diffs in this pass
+  landed inside existing functions/comments with no net line-count change
+  (verified via `git diff --stat`: `init.ts` +8/-8, `cli.ts` +6/-6), so no
+  citation into either file needed re-deriving because of this pass's
+  `src/` edits specifically. `test/init.test.ts` is the one file whose
+  shift needed real care: `git diff --stat` shows a clean +82 lines, 0
+  deletions, in exactly two hunks (`git diff` hunk headers: `@@ -970,6
+  +970,60 @@` and `@@ -1230,6 +1284,34 @@`), giving a three-zone shift
+  rather than one uniform delta — old line <= 972 unshifted, 973-1232
+  shifted +54 (the R3-L1 `describe` block, inserted right after the
+  existing R2-M2 one and before the kit-owned-file-conflicts one), and
+  >= 1233 shifted +82 (the R3-L4 test, inserted between the existing Ollama
+  and non-Claude-family `reasoningEffort` tests inside the `tier variants`
+  describe). Every citation from either doc landing at or after old line
+  973 was individually relocated this way and spot-checked by reading the
+  exact target span in the current file (not trusted on the shift formula
+  alone), the same "verify every citation, do not assume a uniform offset"
+  discipline the 2026-08-17 and both 2026-08-18 entries above established;
+  one citation spanning both R3-L4-affected zones (the "three
+  opencode-provider-branch outcomes" sentence in model-preselection.md,
+  previously one contiguous `:1173-1253` range covering three tests now
+  separated by the newly-inserted R3-L4 test) was split into three
+  sub-citations with the new test's own outcome named explicitly between
+  them, rather than left as a single range that would now silently also
+  bound content the sentence never described. `README.md` and
+  `CHANGELOG.md` citations in both primary docs needed no correction: the
+  R3-L4 README edit landed inside the already-uncited opencode-effort
+  prose span (lines 251-286, per the review-round-2 entry above, still
+  uncited by line number here), and the CHANGELOG edit was deliberately
+  kept to its original 3-line span for the reason stated above.
+
+  `okf-kit check docs/okf --strict`: 0 warnings, 0 findings both
+  immediately before this pass's edits (measured directly via `git stash` /
+  `okf-kit check` / `git stash pop` against the review-round-2 commit,
+  32e83f5, not assumed from the round-2 entry's own closing count) and
+  after, for the same same-day-headroom reason the 2026-08-18 (R2) entry
+  above documents: both docs' `timestamp:` frontmatter was bumped to
+  `2026-08-19T23:59:00Z`, comfortably past every commit made today. Full
+  suite 233/233 (231 baseline + 2 new: the R3-L1 profile-downgrade-notes
+  test and the R3-L4 no-provider-prefix-id test), `tsc --noEmit` clean,
+  `tsc --noEmit -p tsconfig.test.json` clean, `npm run build` clean,
+  `npm run format:check` clean (the pre-existing `test/template-markers.test.ts`
+  warning is unrelated and untouched, matching every prior pass's
+  baseline; README.md/CHANGELOG.md are outside that script's glob, same as
+  every prior pass, so their own formatting was left as found rather than
+  reformatted wholesale). Mutation probes (named in the task assignment):
+  covered in the R3-L1 paragraph above (the profile-downgrade ledger-gate
+  mutant, 6 notes instead of 2, restored and re-verified green). No probe
+  was named or run for R3-L2/R3-L3/R3-L4 beyond the R3-L4 behavioral test
+  itself, since those three findings are comment/docs-only or a single
+  additive assertion, not a fix with a named mutation target.

@@ -297,10 +297,10 @@ function opencodeVariantEffortLine(
 
 /**
  * Composes a tier-variant sibling of `composeOpencodeAgent`. `effortLine` is
- * computed once by the caller (via `opencodeVariantEffortLine`) and passed
- * in rather than recomputed here, since the caller already needs that same
- * value to decide whether to skip writing this variant at all (see the
- * opencode tier loop in `runInit`).
+ * decided once, at the single call site in the opencode tier loop of
+ * `runInit` (via `opencodeVariantEffortLine`), and passed in rather than
+ * recomputed here, so there is exactly one place that decides it instead
+ * of a second, independent source of truth for the same value.
  */
 function composeOpencodeAgentVariant(
   role: Role,
