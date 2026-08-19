@@ -436,3 +436,104 @@
   identical single warning, 0 new findings — the model-preselection.md
   warning is expected to persist until a pass that actually touches its
   cited ranges re-stamps it; not fixed here, per the task's own boundary.
+
+- 2026-08-19: re-verified and re-stamped install-fence-mechanics.md and
+  model-preselection.md again against package version 0.19.0 (`--tiers` on
+  `init`, agent-dx task T-002, docs-only follow-up to the T-001 feature
+  commit c78e44a). `models.ts` gained a ~60-line tier block appended after
+  `parseModelsSpec` (line 144 onward): `Tier`, `ROLE_TIERS`, `DEFAULT_TIER`,
+  `ModelClass`, `TIER_DEFS`, `CLASS_MODELS`. Because that block is purely
+  appended at the end of the file, every existing `models.ts:` citation in
+  both docs (all of them at or before line 144) needed no correction at
+  all, confirmed by direct read rather than assumed. `cli.ts` and `init.ts`
+  were not so lucky: `cli.ts` gained new imports (`ModelClass`,
+  `CLASS_MODELS`, `MODEL_CLASSES`, `detectProvider`, `resolveAlias`) plus a
+  `tiers` resolution block and an opencode-class-model resolution block
+  inside the `init` action, shifting every citation from the profile-block
+  onward; `init.ts` gained a `tiers`/`opencodeClassModels` pair on
+  `InitOptions` (+16 lines) and a `tiers` field on `Manifest` (+2), which
+  shifted `readInstalledManifest` and everything through its own
+  tiers-fallback addition by a uniform +22 (verified against four
+  independent citations, not assumed), then diverged further below that
+  point once the four new compose/effort-line functions and the two
+  tier-rendering loops were added. Every `cli.ts:` and `init.ts:` citation
+  in both docs was re-derived from a direct read of the current file at
+  that exact location, not a computed offset applied blindly, the same
+  discipline as the 2026-08-17 entry above. `test/init.test.ts` needed a
+  narrower fix: the new `describe("tier variants (\`--tiers\`)")` block was
+  inserted at the file's old line 941 (confirmed from the commit's own
+  diff hunk header), so every citation before that line in both docs
+  (`test/init.test.ts:100-106`, `:275-306`, `:464-509`, `:511-534`,
+  `:721-758`, `:921-941`) needed no change, while the two citations past it
+  (`:995-1007`, `:1009-1016`, the opencode-absent-binary tests) shifted by
+  the same uniform +228 the insertion added; both kinds of claim were
+  confirmed by direct read, not inferred from the insertion size alone.
+  `INSTALL-AGENT.md` itself changed under this same task (the `--tiers`
+  question, command example, manifest-JSON `"tiers": false` field, and a
+  new manual-fallback carve-out stating that path never renders
+  tier-variant files), so every `INSTALL-AGENT.md:` citation in both docs
+  was re-derived from the edited file, not the pre-edit one.
+
+  Both docs also gained new content, not just corrected citations:
+  model-preselection.md gained a full "Effort tiers (`--tiers`)" section
+  (tier data, composition, rendering, manifest/re-install semantics, cross-
+  references to the two new source files touched) plus tier-aware
+  additions to its existing "What gets preselected", "Flow", "Per-harness
+  frontmatter behavior", "Re-install behavior", "Docs-consistency pins",
+  and "Solution-neutral notes" sections; install-fence-mechanics.md gained
+  a tiers-aware paragraph in "What `init` writes", a `tiers` field and
+  seeding-bullet addition in "manifest.json: shape and consumers", a
+  tiers-idempotence bullet in "Re-install / upgrade semantics", a
+  tiers-uninstall bullet in "Uninstall: exact removal surface", and a
+  tier-test-coverage sentence in "Tests". One structural finding surfaced
+  during this re-verification, not present before: unlike a `full` ->
+  `minimal` profile downgrade, which prints an explicit `report.notes`
+  entry naming the now-untracked role files, a `tiers: true` -> `tiers:
+  false` re-run is a structurally identical leftover-files case (the
+  previously rendered `<role>-<tier>.md` files are simply dropped from the
+  new manifest's `files` ledger, neither deleted nor re-tracked) but prints
+  no equivalent note at all; both docs now state this asymmetry explicitly
+  rather than silently assuming parity with the profile case. This is
+  reported as a documentation finding, not fixed in `src/` here, since
+  T-002's scope is docs-only.
+
+  A new task/T-002-scoped test/docs-consistency.test.ts `describe` (a sixth
+  test alongside the existing four model-enumeration guards plus the
+  read-only-role brace-list guard) pins README's new "Effort tiers" table
+  against `ROLE_TIERS`/`DEFAULT_TIER` directly, per role, per column, plus
+  a row-count check; both docs' "Docs-consistency pins" sections now cite
+  it. Mutation-tested for real against the full suite, not just the one
+  test file: removing `"low"` from `ROLE_TIERS.explorer` in `src/models.ts`
+  turned 5 of 206 tests red, the intended target (the explorer
+  tiers-column assertion in the new `describe`) plus 4 pre-existing
+  `test/init.test.ts` tests in the 0.19.0 `tier variants` block that assert
+  actual rendering behavior (the 13-file count, the collision-free file
+  set, the uninstall-removes-variants check, and the CLI re-run
+  persistence check all depend on `explorer` actually having a `low`
+  tier); this is expected collateral from mutating a source of runtime
+  behavior, not a sign the new docs-consistency test is redundant with
+  those, the same reasoning the 0.18.0 entry above applies to a
+  `DEFAULT_MODELS` mutation. Every other role's tiers/default-tier
+  assertion in the same new `describe`, and the remaining 201 tests
+  overall, stayed green. Restoring the line brought the file back to a
+  byte-identical, empty `git diff`, and the full suite (206/206) went
+  green again, both verified directly, not assumed.
+
+  `okf-kit check docs/okf --strict` before this pass: 10 `sources-fresh`
+  warnings (4 on install-fence-mechanics.md, 5 on model-preselection.md, 1
+  on subagent-contracts-superset.md, all mtime-driven staleness against
+  `src/models.ts`/`src/cli.ts`/`src/init.ts`/`test/init.test.ts` changed by
+  the T-001 commit). After this pass: 1 warning, the pre-existing
+  subagent-contracts-superset.md `src/models.ts` staleness, unchanged and
+  explicitly out of this task's scope (T-002 named only
+  install-fence-mechanics.md and model-preselection.md for re-verification;
+  subagent-contracts-superset.md's own citations into `models.ts:3-8` are
+  unaffected by the purely-appended tier block, so nothing in it is
+  actually stale content-wise, only its staleness-by-mtime signal is). Full
+  suite 206/206 (197 + 9 new), `tsc --noEmit` clean, `tsc --noEmit -p
+  tsconfig.test.json` clean, `npm run build` clean, `prettier --check`
+  clean for every file this pass touched (one new-file formatting issue in
+  `test/docs-consistency.test.ts`, introduced by this pass's own additions,
+  was caught by `prettier --check` and fixed with `--write` before commit;
+  the pre-existing `test/template-markers.test.ts` warning is unrelated and
+  untouched by this pass, matching the baseline measured before any edit).

@@ -3,7 +3,13 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_MODELS, READ_ONLY_ROLES, ROLES } from "../src/models.js";
+import {
+  DEFAULT_MODELS,
+  DEFAULT_TIER,
+  READ_ONLY_ROLES,
+  ROLES,
+  ROLE_TIERS,
+} from "../src/models.js";
 import { readAsset } from "../src/assets.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -1077,5 +1083,79 @@ describe("round-2 halt rule ships in the skill", () => {
     expect(skillMd).toContain(
       "go to the operator as a merge-hold (hold the change unmerged and hand the decision to the operator)",
     );
+  });
+});
+
+/**
+ * 0.19.0 adds `--tiers`: `models.ts` gains `ROLE_TIERS` (which effort tiers
+ * each role gets a variant file for) and `DEFAULT_TIER` (the tier a role's
+ * plain, unsuffixed file already corresponds to, so no variant is ever
+ * rendered for it). README's new "Effort tiers" section carries a table of
+ * that same data for humans; nothing previously guarded the two staying in
+ * sync. This pins the table against `ROLE_TIERS`/`DEFAULT_TIER` directly
+ * (not a hardcoded expected string), so a tier added to or removed from
+ * either source without a matching table edit fails here, the same
+ * source-of-truth discipline as the model-preselection enumeration guards
+ * above. The table is located by its own header text and sliced off at the
+ * next blank line, so a row belonging to the unrelated model-preselection
+ * table (which also has an `explorer`/`task-slicer`/`implementer`/`reviewer`
+ * first column, higher up in the same file) is never accidentally matched.
+ */
+describe("README tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () => {
+  const readmeMd = readDoc("README.md");
+
+  /** The tier table's own markdown block, isolated from the unrelated
+   * model-preselection table earlier in the file (same first column). */
+  function tierTableSection(): string {
+    const headerIdx = readmeMd.indexOf(
+      "| Role | Tiers available | Default tier",
+    );
+    expect(
+      headerIdx,
+      "README tier table header not found",
+    ).toBeGreaterThanOrEqual(0);
+    const afterHeader = readmeMd.slice(headerIdx);
+    const endIdx = afterHeader.indexOf("\n\n");
+    expect(
+      endIdx,
+      "README tier table did not terminate before a blank line",
+    ).toBeGreaterThan(0);
+    return afterHeader.slice(0, endIdx);
+  }
+
+  function tierTableRow(role: (typeof ROLES)[number]): {
+    tiers: string[];
+    defaultTier: string;
+  } {
+    const match = tierTableSection().match(
+      new RegExp(`^\\| ${role} \\| ([^|]+) \\| ([^|]+) \\|$`, "m"),
+    );
+    expect(match, `README tier table row for "${role}" not found`).toBeTruthy();
+    const [, tiersCell, defaultTierCell] = match as RegExpMatchArray;
+    return {
+      tiers: tiersCell.split(",").map((tier) => tier.trim()),
+      defaultTier: defaultTierCell.trim(),
+    };
+  }
+
+  for (const role of ROLES) {
+    it(`lists exactly ROLE_TIERS["${role}"], in order, in the Tiers available column`, () => {
+      expect(tierTableRow(role).tiers).toEqual(ROLE_TIERS[role]);
+    });
+
+    it(`lists DEFAULT_TIER["${role}"] in the Default tier column`, () => {
+      expect(tierTableRow(role).defaultTier).toBe(DEFAULT_TIER[role]);
+    });
+  }
+
+  it("has exactly one row per role, no extra or missing rows", () => {
+    // Excludes the header row itself ("Role") and the markdown table's
+    // separator row ("---"), which the row shape also matches.
+    const dataRows = [
+      ...tierTableSection().matchAll(/^\| ([\w-]+) \| [^|]+ \| [^|]+ \|$/gm),
+    ]
+      .map((m) => m[1])
+      .filter((cell) => cell !== "Role" && !/^-+$/.test(cell));
+    expect(dataRows.sort()).toEqual([...ROLES].sort());
   });
 });

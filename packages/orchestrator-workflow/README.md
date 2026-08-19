@@ -195,6 +195,84 @@ Nested-path providers like `openrouter` (whose ids look like
 be supplied as a fully-qualified `--models` entry, e.g.
 `reviewer=openrouter/anthropic/claude-opus-4.8`.
 
+## Effort tiers
+
+`--tiers` renders an additional per-role subagent definition for each
+non-default effort tier, alongside the one default (unsuffixed) agent file
+`--profile` already installs. Each tier variant is a standalone subagent
+definition, not a modification of the default file: the default file
+(`<role>.md`) stays byte-identical to what a tiers-off install already
+produces (still `manifest.models[role]`, no `effort:` key), and each variant
+lives next to it as `<role>-<tier>.md`.
+
+Default off, like every optional pack in this kit: a fresh install renders
+no variant files unless asked. `--tiers` turns the feature on for that run;
+a plain re-run with no `--tiers` flag keeps whatever the previous install
+had, the same override-vs-persist rule already used for `--profile` and
+`--models`. There is no interactive prompt for it: `tiers` is opt-in via the
+flag only.
+
+```bash
+npx orchestrator-workflow init --tiers --yes
+```
+
+**Which tiers each role gets.** A role never gets a variant file for its own
+default tier: that would collide with, and duplicate, the default file.
+
+| Role | Tiers available | Default tier (no variant file) |
+|---|---|---|
+| explorer | low, medium, high | medium |
+| task-slicer | low, medium, high | medium |
+| implementer | low, medium, high, xhigh | medium |
+| reviewer | medium, high, xhigh | high |
+
+With `--profile full` and every tier rendered, that is 4 default files plus
+9 variant files: 13 files total per harness.
+
+**Tier → model class → effort.** Each tier resolves to a model class and an
+effort value:
+
+| Tier | Model class | Model alias | Effort requested |
+|---|---|---|---|
+| low | small | `haiku` | `low` |
+| medium | medium | `sonnet` | `medium` |
+| high | medium | `sonnet` | `high` |
+| xhigh | large | `opus` | `xhigh` |
+
+Claude Code variants carry both a `model:` line (the class's alias) and an
+`effort: <tier>` line in frontmatter. Read-only roles (explorer, reviewer)
+keep `disallowedTools: Edit, Write, NotebookEdit` on their variants too.
+
+**opencode variants are provider-dependent**, since opencode's effort
+surface is not uniform across providers:
+
+- **Anthropic** (`anthropic/...` model ids): only `high` and `xhigh` get an
+  effort field, as `variant: high` and `variant: max` respectively; `low`
+  and `medium` collapse to no effort field at all, since Anthropic's
+  opencode `variant:` option does not distinguish an effort below `high`.
+  This collapse is deliberate and documented, not a bug: a `low`/`medium`
+  variant on Anthropic still gets its class's `model:` line, just no
+  `variant:` line.
+- **Ollama, or a model opencode could not resolve to a fully-qualified id**:
+  no effort field at all. There is no known effort passthrough for Ollama,
+  and an unresolved model leaves no provider to key the decision on.
+- **Every other provider**: a plain `reasoningEffort: <tier>` line.
+
+The variant's `model:` line is resolved the same way the base per-role model
+is (an `opencode models` catalog lookup against the auto-detected or
+`--opencode-provider`-specified provider), just keyed by the tier's model
+class instead of by role; when no resolution is possible the `model:` line
+is omitted, the same fallback as the base model.
+
+**Warning: `CLAUDE_CODE_EFFORT_LEVEL` overrides every agent's frontmatter
+`effort:`, tier variants included.** Claude Code's `effort:` frontmatter
+field does work: it reaches the model request as `output_config.effort`.
+But when the harness environment sets `CLAUDE_CODE_EFFORT_LEVEL`, that
+environment variable wins over the frontmatter `effort:` on every installed
+agent, tier variants and default files alike, not just the one this feature
+adds. Check for it before relying on a specific tier variant's requested
+effort actually taking effect.
+
 ## Ownership and re-runs
 
 `init` is idempotent: a second run changes nothing. The rules:
@@ -208,8 +286,9 @@ be supplied as a fully-qualified `--models` entry, e.g.
   updates files you never touched and reports files you edited as conflicts
   instead of overwriting them; `--force` overwrites those too.
 - `.ai/workflow/manifest.json` is the kit's state file. It records the applied
-  version, harnesses, role profile, models, and file hashes, and is rewritten
-  whenever that state changes; do not edit it by hand.
+  version, harnesses, role profile, models, the `--tiers` flag, and file
+  hashes, and is rewritten whenever that state changes; do not edit it by
+  hand.
 
 ## Uninstall
 

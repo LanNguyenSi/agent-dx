@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-08-18T13:00:00Z
+timestamp: 2026-08-19T21:00:00Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -41,7 +41,12 @@ Defaults (`src/models.ts:70-75`, documented in
 
 `ModelAlias` is `"sonnet" | "opus" | "haiku"` (`src/models.ts:62-64`); a
 role's value may also be a full model id or, for opencode, a fully-qualified
-`provider/model-id` string (see below).
+`provider/model-id` string (see below). Since 0.19.0, each role's
+preselected model coexists with an independent, opt-in axis: effort-tier
+subagent *variants* (`--tiers`), covered in its own section below, since
+they extend the frontmatter surface (an `effort:`/`variant:`/
+`reasoningEffort:` line) rather than changing how the base per-role model
+itself is chosen.
 
 ## Flow: `--models` → manifest → subagent frontmatter
 
@@ -56,36 +61,45 @@ role's value may also be a full model id or, for opencode, a fully-qualified
    as `DEFAULT_MODELS` overlaid with the *previous* manifest's models (if
    any), then applies `--models` on top; when running interactively with no
    `--models`, it prompts per role instead, defaulting each prompt to the
-   already-resolved value (`src/cli.ts:238-244`, prompt UI at
-   `src/cli.ts:92-135`). Since 0.15.0 the interactive prompt only asks about
-   the roles `rolesForProfile(profile)` selects (`src/cli.ts:92-97`
+   already-resolved value (`src/cli.ts:250-256`, prompt UI at
+   `src/cli.ts:99-142`). Since 0.15.0 the interactive prompt only asks about
+   the roles `rolesForProfile(profile)` selects (`src/cli.ts:99-104`
    iterates a `roles` parameter instead of the full `ROLES` list), so a
-   `minimal` install is not asked for `explorer`/`task-slicer` models.
+   `minimal` install is not asked for `explorer`/`task-slicer` models. Since
+   0.19.0 the CLI also resolves `tiers` right after models, on the same
+   override-vs-persist rule but with no interactive prompt at all
+   (`src/cli.ts:258-262`); see "Effort tiers" below.
 3. **Manifest.** `runInit` writes the resolved map to
-   `.ai/workflow/manifest.json` under `models` (`src/init.ts:310-346`),
-   alongside `kit`, `version`, `harnesses`, `profile`, and per-file hashes.
-   On the next run, `readInstalledManifest` reads it back and re-validates
-   every value with `assertValidModelId`; an invalid stored id is silently
-   dropped (falling back to `DEFAULT_MODELS` for that role) rather than
-   crashing (`src/init.ts:93-154`, specifically 111-123).
+   `.ai/workflow/manifest.json` under `models` (`src/init.ts:440-478`,
+   `desired` object at `:442-450`), alongside `kit`, `version`, `harnesses`,
+   `profile`, `tiers` (since 0.19.0), and per-file hashes. On the next run,
+   `readInstalledManifest` reads it back and re-validates every value with
+   `assertValidModelId`; an invalid stored id is silently dropped (falling
+   back to `DEFAULT_MODELS` for that role) rather than crashing
+   (`src/init.ts:115-183`, specifically `:133-145`).
 4. **Per-harness frontmatter.** For each selected harness, `runInit` calls a
    `compose*Agent` function per role that turns the resolved model string
-   into that harness's frontmatter shape (`src/init.ts:160-196`,
-   invocations at `src/init.ts:281-308`). Since 0.15.0 those invocations
-   iterate `rolesForProfile(profile)` rather than the unconditional `ROLES`
-   list, so a role's preselected model is only ever composed into a
-   subagent file when the profile actually installs that role — see
-   [install-fence-mechanics.md](install-fence-mechanics.md).
+   into that harness's frontmatter shape (`src/init.ts:189-225`,
+   invocations at `src/init.ts:393-397` for Claude Code and `:417-425` for
+   opencode). Since 0.15.0 those invocations iterate `rolesForProfile(profile)`
+   rather than the unconditional `ROLES` list, so a role's preselected model
+   is only ever composed into a subagent file when the profile actually
+   installs that role, see
+   [install-fence-mechanics.md](install-fence-mechanics.md). Since 0.19.0 a
+   second, sibling pair of `compose*AgentVariant` functions
+   (`src/init.ts:240-255` Claude Code, `:281-305` opencode) composes the
+   tier-variant files from the same `readAgentAsset` body; see "Effort
+   tiers" below for what differs in their frontmatter.
 
 ## Per-harness frontmatter behavior
 
 - **Claude Code.** `composeClaudeAgent` always emits a `model:` line;
   `claudeModelValue` is the identity function, so aliases and full ids pass
-  through unchanged (`src/models.ts:85-87`, `src/init.ts:160-174`). The
+  through unchanged (`src/models.ts:85-87`, `src/init.ts:189-203`). The
   read-only roles (`explorer`, `reviewer`, per `READ_ONLY_ROLES` at
   `src/models.ts:14-17`) additionally get
   `disallowedTools: Edit, Write, NotebookEdit` right after `model:`
-  (`src/init.ts:169-171`). Test coverage:
+  (`src/init.ts:198-200`). Test coverage:
   `test/init.test.ts:100-106` (`model: sonnet` / `model: opus` present) and
   `:464-509` (per-role alias mix installs correctly for Claude while
   opencode differs, see below).
@@ -104,56 +118,156 @@ role's value may also be a full model id or, for opencode, a fully-qualified
   `-fast`/`-thinking`/`-mini`/`-latest` deprioritized). `composeOpencodeAgent`
   emits `model:` only when a resolved value exists; otherwise the line is
   omitted entirely so the subagent inherits the session/default model
-  (`src/init.ts:176-196`, comment at 186-187). Nested-path providers such as
-  `openrouter/anthropic/claude-...` are never alias-auto-resolved and must be
-  passed as fully-qualified `--models` entries (`README.md:188-191`,
+  (`src/init.ts:205-225`, comment at `:215-216`). Nested-path providers such
+  as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
+  must be passed as fully-qualified `--models` entries (`README.md:188-191`,
   confirmed by `test/init.test.ts:511-534`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
-  absent: every role's file omits `model:` (`test/init.test.ts:995-1007`),
+  absent: every role's file omits `model:` (`test/init.test.ts:1223-1235`),
   and the disambiguation hint goes to stderr, never stdout
-  (`test/init.test.ts:1009-1016`).
+  (`test/init.test.ts:1237-1244`).
 - **Codex.** Codex gets no per-role subagent definition files at all: `init`
   installs only `.agents/skills/orchestrator-workflow/SKILL.md` for the
-  `codex` harness (`src/init.ts:292-294`); there is no `model:` surface for
+  `codex` harness (`src/init.ts:411-413`); there is no `model:` surface for
   Codex because "there is no standardized project-level subagent
   definition" and the skill instructs running roles inline instead
   (`README.md:105`), regardless of `--profile` — Codex has no per-role
-  files to select from either way.
+  files to select from either way. `--tiers` follows the same rule for the
+  same reason: Codex gets no tier-variant files either, since it never gets
+  a per-role file to render a variant of.
+
+## Effort tiers (`--tiers`)
+
+Since 0.19.0, `init` also accepts `--tiers`: for each role, it renders one
+additional subagent file per effort tier the role has that is not that
+role's own default tier, alongside the base `<role>.md` file described
+above. Off by default; there is no interactive prompt for it at all
+(`src/cli.ts:258-262`; the code comment there states explicitly why: tiers
+is opt-in via the flag only).
+
+**Tier data (`src/models.ts:146-205`).** `Tier` is
+`"low" | "medium" | "high" | "xhigh"` (`:151`). `ROLE_TIERS` (`:164-169`) is
+which tiers each role gets a variant for: explorer and task-slicer
+`low, medium, high`; implementer all four; reviewer `medium, high, xhigh`.
+`DEFAULT_TIER` (`:176-181`) is the tier each role's plain file already
+corresponds to (`medium` for explorer/task-slicer/implementer, `high` for
+reviewer), the tier a variant is never rendered for since that would both
+collide with and duplicate the default file (`init.ts:400` Claude Code,
+`:428` opencode, both a `continue` guarded by
+`tier === DEFAULT_TIER[role]`). `TIER_DEFS` (`:193-198`) maps each tier to a
+`ModelClass` (`"small" | "medium" | "large"`, `:183`) and its requested
+`effort` value (the tier's own name). `CLASS_MODELS` (`:201-205`) maps each
+class to a `ModelAlias`: `small`->`haiku`, `medium`->`sonnet`,
+`large`->`opus`.
+
+**Composition.** `composeClaudeAgentVariant` (`init.ts:240-255`) is the
+tier-variant sibling of `composeClaudeAgent`: same frontmatter shape plus
+`model: <CLASS_MODELS[modelClass]>` and `effort: <tier>` (in that order,
+right after `description:`), and the same `disallowedTools:` line for
+`READ_ONLY_ROLES`. `composeOpencodeAgentVariant` (`init.ts:281-305`) is the
+opencode sibling; its effort line is provider-dependent, decided by
+`opencodeVariantEffortLine` (`init.ts:265-279`): the resolved `model:`
+value's provider prefix (the text before the first `/`) is read directly
+off the string, not looked up in a table. `anthropic` gets `variant: high`
+for the `high` tier and `variant: max` for `xhigh`; `low`/`medium` on
+`anthropic` get no effort line at all (Anthropic's opencode `variant:`
+option does not distinguish an effort below `high`, a documented collapse,
+not a bug: the variant still gets its class's `model:` line). `ollama`,
+and any tier whose class model could not be resolved to a fully-qualified
+id at all (`modelValue` is `undefined`), also get no effort line. Every
+other provider gets a plain `reasoningEffort: <tier>` line. Both variant
+composers share `tierDescriptionSuffix` (`init.ts:227-232`), which appends
+`" (Effort tier: <tier>.)"` to the role's own description.
+
+**Rendering (`init.ts:391-438`).** For each harness and each role
+`rolesForProfile(profile)` selects, `runInit` writes the base file exactly
+as it always has, then, only `if (tiers)`, loops `ROLE_TIERS[role]`
+skipping the role's `DEFAULT_TIER` and writes `<role>-<tier>.md`
+(`:398-406` Claude Code, `:426-436` opencode). The base file's own
+composition call is untouched by this addition, so a tiers-off install
+renders byte-identical output to pre-0.19.0: a structural, not just tested,
+guarantee against a silent model downgrade (the reviewer's `opus` default
+in particular). With `--profile full` and tiers on, that is 4 base files
+plus 9 variants: 13 total per harness (`test/init.test.ts:977-1006` pins
+the count and, as a dedicated anti-downgrade check, that `reviewer.md`
+itself still carries `model: opus` and no `effort:` line). opencode's
+variant `model:` values come from a new, separate resolution pass keyed by
+`ModelClass` instead of `Role` (`InitOptions.opencodeClassModels`,
+`init.ts:62-70`; resolved in `cli.ts` at `:281-296`, mirroring the existing
+per-role opencode resolution just above it at `:271-280` but iterating
+`MODEL_CLASSES` through the same `resolveAlias` against the same detected
+provider).
+
+**Manifest and re-install.** The chosen value is recorded in a new `tiers`
+boolean on `.ai/workflow/manifest.json` (`Manifest.tiers`, `init.ts:83-84`).
+A manifest written before tiers existed (no `tiers` key) degrades to
+`false` (`init.ts:166-170`), the same per-field-degradation style already
+used for a missing `profile` field just above it (`:158-164`): a legacy
+manifest never rendered variant files, so `false` is the only value
+consistent with what is actually on disk. `cli.ts` resolves the flag with
+the same override-vs-persist rule as `--profile`/`--models`, but with no
+interactive branch: `opts.tiers ? true : (previous?.tiers ?? false)`
+(`cli.ts:262`), an explicit `--tiers` always turns it on, a plain re-run
+keeps whatever the previous install had, and a fresh install with no prior
+manifest defaults to off. Variant files flow through the same
+`installKitFile` hash ledger as every other kit-owned file
+(`init.ts:352-369`, unchanged by this feature), so idempotence, conflict
+detection, and `uninstall` (see
+[install-fence-mechanics.md](install-fence-mechanics.md)) all cover them
+automatically with no tier-specific removal code.
+
+README documents `--tiers`, the role/tier table, the tier -> model
+class/effort table, and the opencode provider behavior in its own "Effort
+tiers" section, including a warning that `CLAUDE_CODE_EFFORT_LEVEL` (a
+harness environment variable, wire-verified 2026-08-19 to override
+frontmatter `effort:` on every installed agent when set) beats the
+frontmatter `effort:` this feature adds. `INSTALL-AGENT.md` documents the
+flag in its init question and command example and states plainly that the
+manual fallback path never renders tier-variant files.
 
 ## Re-install behavior
 
 A re-run with no `--models` reuses the previously chosen models rather than
 resetting to shipped defaults: `models = { ...DEFAULT_MODELS,
-...(previous?.models ?? {}) }` in `src/cli.ts:238-241`. The same
-override-vs-persist rule now also covers `--profile` (`src/cli.ts:230-236`):
-a plain re-run keeps the previously installed profile, an explicit
-`--profile` overrides it. Test:
+...(previous?.models ?? {}) }` in `src/cli.ts:250-253`. The same
+override-vs-persist rule now also covers `--profile` (`src/cli.ts:238-248`)
+and, since 0.19.0, `--tiers` (`src/cli.ts:258-262`, see "Effort tiers"
+above): a plain re-run keeps the previously installed value for each, an
+explicit flag overrides it. Test:
 `test/init.test.ts:921-941` runs `init --models implementer=haiku`, then a
 plain `init` re-run, and asserts the manifest and the installed
 `.claude/agents/implementer.md` both still carry `haiku`. A hand-edited or
 damaged manifest degrades gracefully per-field: a non-object `harnesses`
 falls back to `[]` filtered against known harnesses, each model id is
-re-validated, with invalid entries dropped back to that role's default, and a
-missing `profile` field degrades to `"full"` rather than `"minimal"`
-(`src/init.ts:93-154`; end-to-end proof at `test/init.test.ts:275-306`,
+re-validated, with invalid entries dropped back to that role's default, a
+missing `profile` field degrades to `"full"` rather than `"minimal"`, and
+(since 0.19.0) a missing `tiers` field degrades to `false`
+(`src/init.ts:115-183`; end-to-end proof at `test/init.test.ts:275-306`,
 where a malformed `reviewer: 'opus: "x"'` is dropped to `opus` while a valid
 sibling `implementer: "haiku"` survives; the `profile`-fallback proof is
 `test/init.test.ts:721-758`, see
 [install-fence-mechanics.md](install-fence-mechanics.md) for why that test
-starts from a target with no prior `full` install).
+starts from a target with no prior `full` install; the `tiers`-fallback
+proof is `test/init.test.ts:945-975`, see "Effort tiers" above).
 
 The manual/agent install path (`INSTALL-AGENT.md`) mirrors this contract by
 hand: step 2 tells the agent to *ask* the operator for harnesses, the role
-profile, and per-role models rather than guess, suggesting the same defaults
-and skipping the model question for a role the chosen profile does not
-install (`INSTALL-AGENT.md:23-28, 82-92`); step 4's manual fallback spells
-out byte-precise placement (`model:` line directly after `description:` for
+profile, per-role models, and (since 0.19.0) whether to render tier
+variants, rather than guess, suggesting the same defaults and skipping the
+model question for a role the chosen profile does not install
+(`INSTALL-AGENT.md:23-30, 93-107`); step 4's manual fallback spells out
+byte-precise placement (`model:` line directly after `description:` for
 Claude Code, scoped to `.claude/agents/<role>.md` for each role in the
-chosen profile, `INSTALL-AGENT.md:119-128`; conditional `model:` line only
-for fully-qualified opencode ids, `INSTALL-AGENT.md:130-156`) and an example
-`manifest.json` shape carrying the `profile` field and keyed by all four
-roles under `full` (`INSTALL-AGENT.md:157-176`; under `minimal`, `models`
-only needs the `implementer` and `reviewer` keys, `INSTALL-AGENT.md:178-180`).
+chosen profile, `INSTALL-AGENT.md:141-150`; conditional `model:` line only
+for fully-qualified opencode ids, `INSTALL-AGENT.md:152-178`) and an example
+`manifest.json` shape carrying the `profile` and (since 0.19.0) `tiers`
+fields and keyed by all four roles under `full`
+(`INSTALL-AGENT.md:179-199`; under `minimal`, `models` only needs the
+`implementer` and `reviewer` keys, `INSTALL-AGENT.md:201-205`). That same
+step 4 states explicitly that the manual path never renders tier-variant
+files regardless of what the operator asked for, since there is no live
+`opencode models` catalog to resolve a tier's class model against in a
+manual install (`INSTALL-AGENT.md:126-131`).
 
 ## Orchestrator-runs-on-session-model policy
 
@@ -186,13 +300,21 @@ A fifth, adjacent test guards the read-only-role brace lists
 `INSTALL-AGENT.md` (`:34-41`); it is role-enumeration generally, not
 model-specific, but shares the same drift-prevention purpose.
 
+Since 0.19.0, a sixth, standalone `describe` (`:1089-1160`) guards a new
+tier-specific enumeration site: README's "Effort tiers" role/tier table
+against `ROLE_TIERS` and `DEFAULT_TIER` directly, per role and column
+(tiers-available list order, default-tier value, and a row-count check with
+no extras or omissions), so a tier added to or removed from either
+`models.ts` map without a matching table edit fails loudly the same way a
+role addition already does for the four sites above.
+
 ## Solution-neutral notes for future edits
 
-Any change to `ROLES`, `DEFAULT_MODELS`, or the harness list should expect
-`test/docs-consistency.test.ts` to fail loudly in the corresponding doc
-before a fix is complete; treat that suite as the authoritative check for
-"did I update every place a role/model is enumerated," not just the four
-docs quoted above.
+Any change to `ROLES`, `DEFAULT_MODELS`, the harness list, or (since 0.19.0)
+`ROLE_TIERS`/`DEFAULT_TIER` should expect `test/docs-consistency.test.ts` to
+fail loudly in the corresponding doc before a fix is complete; treat that
+suite as the authoritative check for "did I update every place a
+role/model/tier is enumerated," not just the docs quoted above.
 
 See [subagent-contracts-superset.md](subagent-contracts-superset.md) for the
 role I/O contracts these models are attached to, and

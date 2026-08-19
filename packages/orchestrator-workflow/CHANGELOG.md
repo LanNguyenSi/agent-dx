@@ -5,6 +5,65 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-08-19
+
+### Added
+
+- `init` gains `--tiers`: renders an additional per-role subagent variant
+  file for each non-default effort tier, alongside the one default
+  (unsuffixed) agent file `--profile` already installs. Off by default, like
+  every optional pack in this kit; a plain re-run with no `--tiers` flag
+  keeps whatever the previous install had, the same override-vs-persist rule
+  already used for `--profile`/`--models`, and there is no interactive
+  prompt, tiers is opt-in via the flag only. `models.ts` adds `Tier`
+  (`low|medium|high|xhigh`), `ROLE_TIERS` (which tiers each role gets:
+  explorer/task-slicer `low,medium,high`; implementer all four;
+  reviewer `medium,high,xhigh`), `DEFAULT_TIER` (the tier each role's plain
+  file already corresponds to: `medium` for explorer/task-slicer/implementer,
+  `high` for reviewer, never rendered as its own variant since that would
+  both collide with and duplicate the default file), `TIER_DEFS` (tier ->
+  model class + requested effort), and `CLASS_MODELS` (model class -> model
+  alias: `small`->`haiku`, `medium`->`sonnet`, `large`->`opus`). The default
+  file for every role stays byte-identical to a tiers-off install (still
+  `manifest.models[role]`, no `effort:` key) whether or not `--tiers` is
+  passed, so the reviewer's `opus` default can never be silently downgraded
+  by this feature; a dedicated regression test pins that. Variant files are
+  named `<role>-<tier>.md`; with `--profile full` and tiers on, that is 4
+  default files plus 9 variants (13 total). Claude Code variants carry
+  `model: <class alias>` and `effort: <tier>` frontmatter (plus
+  `disallowedTools: Edit, Write, NotebookEdit` for the read-only roles, same
+  as the default file). opencode variants are provider-dependent: Anthropic
+  ids get `variant: high`/`variant: max` for the `high`/`xhigh` tiers only
+  (`low`/`medium` collapse to no effort field, a documented Anthropic
+  `variant:` limitation, not a bug), Ollama and unresolved models get no
+  effort field at all, and every other provider gets a plain
+  `reasoningEffort: <tier>` line; the variant's `model:` line resolves
+  through the same live `opencode models` catalog lookup as the base
+  per-role model, keyed by the tier's model class instead of by role. The
+  chosen value is recorded in a new `tiers` boolean on
+  `.ai/workflow/manifest.json`; a manifest written before tiers existed (no
+  `tiers` key) degrades to `false`, the same per-field-degradation style
+  already used for a missing `profile` field. Variant files flow through the
+  existing `installKitFile` hash ledger, so idempotence, conflict detection,
+  and `uninstall` all cover them automatically with no dedicated code.
+  Motivated by a harness capability probe (2026-08-19): Claude Code's
+  `effort:` subagent frontmatter is wire-verified to reach the model request
+  as `output_config.effort`, which is what makes rendering per-tier
+  frontmatter variants worth doing at all, but the same probe also found
+  that the `CLAUDE_CODE_EFFORT_LEVEL` environment variable always overrides
+  frontmatter `effort:` on every installed agent when set, tier variants and
+  default files alike; README's new "Effort tiers" section documents that
+  override explicitly as a warning, not a footnote. README documents the
+  flag, the role/tier table, the tier -> model class/effort table, and the
+  opencode provider behavior; `INSTALL-AGENT.md` documents `--tiers` in the
+  init question/example and the manifest JSON shape, and states the manual
+  fallback path does not render tier variants at all. A new, narrowly scoped
+  `docs-consistency.test.ts` check enumerates the README tier table against
+  `ROLE_TIERS`/`DEFAULT_TIER` directly, so a role or tier added to either
+  without a matching table update fails loudly. Both OKF bundle docs
+  touching the installer (`model-preselection.md`,
+  `install-fence-mechanics.md`) are re-verified and re-stamped.
+
 ## [0.18.0] - 2026-08-18
 
 ### Changed

@@ -21,7 +21,9 @@ them.
 - [Model preselection](model-preselection.md), how each subagent role's
   model is chosen (defaults, `--models`, interactive prompt), persisted in
   `manifest.json`, composed into Claude/opencode/Codex frontmatter, preserved
-  across re-installs, and kept in sync with docs by consistency tests.
+  across re-installs, and kept in sync with docs by consistency tests; since
+  0.19.0 also covers the opt-in `--tiers` effort-tier subagent variants
+  (`<role>-<tier>.md`) rendered alongside each role's base file.
 
 ## Invariants
 
