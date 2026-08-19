@@ -885,6 +885,91 @@ describe("profile downgrade (full -> minimal) leaves a note about untracked role
   });
 });
 
+/**
+ * Review round 2 (R2-M2): both leftover-note loops above previously derived
+ * their note set from `ROLE_TIERS`/`options.harnesses` rather than from what
+ * the previous install actually wrote (`previous.files`/`previous.harnesses`).
+ * That produced two distinct wrong outcomes the profile-downgrade tests above
+ * never exercised (they never combine tiers with an unresolved opencode
+ * catalog, and never change the harness selection between runs): a phantom
+ * note for a variant file that was never written (opencode + an unresolved
+ * tier-class catalog, where the M1 guard already skips the write), and a
+ * missing note for a real leftover whose harness was dropped from
+ * `options.harnesses` this run even though its files are still on disk. Both
+ * cases are exercised directly here.
+ */
+describe("leftover notes are ledger-driven, not enumeration-driven (review round 2, R2-M2)", () => {
+  it("opencode + unresolved tier-class models (0 variant files ever written): turning tiers off emits exactly 0 leftover notes", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+      // opencodeClassModels omitted entirely: every class is unresolved,
+      // so the M1 unresolved-class guard writes zero tier-variant files and
+      // records zero of them in the manifest's file ledger.
+    });
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: false,
+    });
+
+    expect(report.notes).toEqual([]);
+  });
+
+  it("a claude install with tiers on, then a re-run switching to --harness opencode --no-tiers: the real .claude variant leftovers are named (not the never-installed .opencode harness)", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: true,
+    });
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      tiers: false,
+    });
+
+    for (const role of ["explorer", "task-slicer"] as const) {
+      for (const tier of ["low", "high"] as const) {
+        const variantPath = join(".claude", "agents", `${role}-${tier}.md`);
+        expect(
+          report.notes.some((note) => note.includes(variantPath)),
+          variantPath,
+        ).toBe(true);
+      }
+    }
+    for (const tier of ["low", "high", "xhigh"] as const) {
+      const variantPath = join(".claude", "agents", `implementer-${tier}.md`);
+      expect(
+        report.notes.some((note) => note.includes(variantPath)),
+        variantPath,
+      ).toBe(true);
+    }
+    for (const tier of ["medium", "xhigh"] as const) {
+      const variantPath = join(".claude", "agents", `reviewer-${tier}.md`);
+      expect(
+        report.notes.some((note) => note.includes(variantPath)),
+        variantPath,
+      ).toBe(true);
+    }
+    // The .opencode harness was only just added this run and was never
+    // previously installed, so it must not contribute any leftover note.
+    expect(report.notes.every((note) => !note.includes(".opencode"))).toBe(
+      true,
+    );
+  });
+});
+
 describe("kit-owned file conflicts", () => {
   it("keeps local edits without --force and reports them", () => {
     runInit(defaultOptions());
@@ -1479,12 +1564,21 @@ describe("cli smoke — opencode harness", () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it("--tiers with an empty catalog warns once per unresolved model class on stderr and renders no variant files", () => {
+  it("--tiers with an empty catalog warns once per unresolved model class on stderr, states the real effect (no file, not a missing model: line) and the real scope (opencode only), and renders no variant files", () => {
     const result = runOpencodeCli(["--tiers"], { PATH: emptyBinDir });
     expect(result.status, result.stderr).toBe(0);
-    for (const modelClass of ["small", "medium", "large"]) {
+    // Full-wording assertion (review round 2, R2-M3): the message must
+    // state the real rendering effect (no opencode variant file at all,
+    // not "model: will be omitted") and the real scope (opencode only;
+    // Claude Code variants are unaffected), not just name the model class.
+    const classToAlias: Record<string, string> = {
+      small: "haiku",
+      medium: "sonnet",
+      large: "opus",
+    };
+    for (const [modelClass, alias] of Object.entries(classToAlias)) {
       expect(result.stderr, modelClass).toContain(
-        `Tier model class "${modelClass}"`,
+        `Warning: Tier model class "${modelClass}" (alias "${alias}") could not be resolved to an opencode model id (no provider offering Claude models found in the live catalog); no opencode effort-tier variant files will be rendered for this class (Claude Code variants are unaffected).`,
       );
     }
     expect(result.stdout).not.toContain(`Tier model class`);
@@ -1508,9 +1602,14 @@ describe("cli smoke — opencode harness", () => {
       { PATH: emptyBinDir },
     );
     expect(result.status, result.stderr).toBe(0);
-    for (const modelClass of ["small", "medium", "large"]) {
+    const classToAlias: Record<string, string> = {
+      small: "haiku",
+      medium: "sonnet",
+      large: "opus",
+    };
+    for (const [modelClass, alias] of Object.entries(classToAlias)) {
       expect(result.stderr, modelClass).toContain(
-        `Tier model class "${modelClass}"`,
+        `Warning: Tier model class "${modelClass}" (alias "${alias}") could not be resolved to an opencode model id (no provider offering Claude models found in the live catalog); no opencode effort-tier variant files will be rendered for this class (Claude Code variants are unaffected).`,
       );
     }
     const agents = readdirSync(join(target, ".opencode", "agents"));

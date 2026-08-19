@@ -310,8 +310,13 @@ program
               : providerResult.ambiguous
                 ? `multiple providers offer Claude models in the live catalog; cannot auto-detect`
                 : `no provider offering Claude models found in the live catalog`;
+            // States the real effect (no variant file at all, not just a
+            // missing model: line, since init.ts skips the write entirely
+            // when the class never resolves) and the real scope (opencode
+            // only: Claude Code variants resolve model: from a plain alias
+            // and need no live catalog lookup, so they are unaffected).
             process.stderr.write(
-              `Warning: Tier model class "${modelClass}" (alias "${alias}"): ${reason}; model: will be omitted for its effort-tier variants.\n`,
+              `Warning: Tier model class "${modelClass}" (alias "${alias}") could not be resolved to an opencode model id (${reason}); no opencode effort-tier variant files will be rendered for this class (Claude Code variants are unaffected).\n`,
             );
           }
         }

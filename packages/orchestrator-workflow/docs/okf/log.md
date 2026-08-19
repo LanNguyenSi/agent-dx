@@ -684,3 +684,142 @@
   untouched by this pass). No mutation probes were named for this task: it
   is a pure citation- and timestamp-correction pass with no new or changed
   test assertions to mutate.
+
+- 2026-08-19: fix-round-2 on `--tiers` (review round 2, 3 medium + 2 low
+  findings, 0 high/critical, agent-dx branch `task/48ea90ac-effort-tiers`,
+  base 68c1acf) re-verified and re-stamped model-preselection.md and
+  install-fence-mechanics.md again, the two docs review-round-2's own
+  findings (R2-M1 stale README/CHANGELOG opencode-effort prose, R2-M2
+  enumeration-driven leftover notes, R2-M3 the M1 warning's stale wording,
+  R2-L1 the redundant `effortLine` double-computation, R2-L2 leftover-note
+  test coverage gaps) directly touch, plus a citation-only re-stamp of
+  review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, and
+  subagent-contracts-superset.md (their shared `CHANGELOG.md:` citations all
+  shifted by the same flat amount the 0.19.0 CHANGELOG entry's own R2-M1
+  content correction added).
+
+  R2-M2 is the structural fix: both leftover-note loops in `init.ts`
+  previously derived their note set from `ROLE_TIERS`/`options.harnesses`
+  (an enumeration of what *could* exist) rather than from what the previous
+  install actually wrote (`previous.files`/`previous.harnesses`, the
+  ledger). That produced phantom notes for variant files an unresolved
+  opencode tier-class catalog had already skipped writing (the M1 guard),
+  and silently dropped real leftover notes whenever the current run's
+  `--harness` selection no longer included the harness the leftover file
+  actually lived under. Both loops now gate every candidate note on the
+  exact relative path being a key of `previous.files`, and both iterate
+  `previous.harnesses` instead of `options.harnesses`; `ROLE_TIERS[role]`
+  is now used only to enumerate candidate tier suffixes to probe against
+  the ledger, never as the note-emission source of truth. R2-L1 simplified
+  the opencode variant-skip check the same equivalence-proof way: the
+  fix-round-1 form gated on `variantModelValue === undefined && effortLine
+  === undefined`, but `opencodeVariantEffortLine` always returns `undefined`
+  when its own `modelValue` argument is `undefined`, so the second clause
+  never added any filtering the first did not already provide; the skip
+  check now reads `variantModelValue === undefined` alone, and
+  `composeOpencodeAgentVariant` takes the already-computed effort line as a
+  fourth parameter instead of recomputing it internally. R2-M3 corrected
+  the M1 unresolved-class warning's own wording, which had claimed "model:
+  will be omitted for its effort-tier variants" when the real,
+  already-shipped fix-round-1 effect was "no variant file is rendered for
+  this class at all" (a stronger, better outcome the warning undersold),
+  and which never named its own opencode-only scope; the corrected wording
+  states both. R2-M1 is the docs-only sibling of R2-M3 and M4: README's
+  opencode-effort prose and the CHANGELOG 0.19.0 entry still described the
+  pre-fix-round-1 dispatch (provider-string-keyed, M4's bug) and the
+  pre-fix-round-1 unresolved-class behavior (a rendered file with just the
+  `model:` line omitted, M1's original bug), neither ever corrected once
+  fix-round-1 shipped the actual code fixes; both docs now use family terms
+  ("Claude-family models", matching `isClaudeFamilyModel`) and state the
+  real unresolved-class effect.
+
+  `src/init.ts` and `src/cli.ts` citations in both docs were re-derived by
+  direct read against the current file at each exact location, not a
+  computed offset applied blindly, the same discipline as every entry
+  above; `git diff` for both files landed in several small, non-adjacent
+  hunks rather than one uniform shift (`init.ts`: six hunks spanning the
+  `composeOpencodeAgentVariant` JSDoc/signature change, the new
+  `previousHarnessDirs` block, both note loops' ledger-check rewrite, and
+  the opencode tier loop's restructured skip check; `cli.ts`: one hunk, the
+  warning-text rewrite), so each citation was individually relocated by
+  grep-for-anchor-then-read rather than by any single delta. `test/init.test.ts`
+  citations needed the same per-hunk treatment for the block after its own
+  insertion point (a new `describe("leftover notes are ledger-driven, not
+  enumeration-driven (review round 2, R2-M2)")`, `init.test.ts:888-971`,
+  inserted right after the existing profile-downgrade `describe` and before
+  the kit-owned-file-conflicts one) plus the two strengthened R2-M3 stderr
+  tests further down; everything between those two insertion points shifted
+  by a uniform, spot-checked +85 (confirmed against a dozen-plus
+  independently re-read anchors spanning both re-run and CLI-level tests,
+  not trusted on one match, before being applied to the rest of that span).
+  `README.md` and `CHANGELOG.md` citations in both docs turned out to need
+  no correction at all: neither doc had ever cited a line inside either
+  file's changed region (README's opencode-effort prose, lines 251-286;
+  CHANGELOG's 0.19.0 entry, lines 8-74), confirmed by a targeted grep before
+  concluding no fix was needed there, rather than assumed from the section
+  names alone. The three CHANGELOG-citing docs outside this task's direct
+  scope (review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
+  subagent-contracts-superset.md) needed the flat `CHANGELOG.md:` +8 shift
+  described above; every one of their existing citations was spot-checked
+  against the shifted file at three different distances from the edit point
+  (a citation seven lines after the edit, one about 15 lines after, and one
+  more than 400 lines after) before applying the shift to the rest.
+
+  Both primary docs also gained substantial new content, not just corrected
+  citations: model-preselection.md's "Composition" and "Unresolved-class
+  guard" paragraphs were rewritten for R2-L1's parameter change and R2-M3's
+  corrected warning wording respectively, its "Manifest and re-install"
+  section gained an R2-M2 paragraph on the ledger-driven note mechanics
+  plus a cross-reference to install-fence-mechanics.md's fuller treatment,
+  its "README documents..." paragraph now names the R2-M1 correction
+  explicitly instead of silently citing the (now-different) README
+  section, and its "Docs-consistency pins" section gained a third guard
+  entry for the new `test/docs-consistency.test.ts` `describe` pinning the
+  corrected README prose (`:1244-1302`, appended at the file's end).
+  install-fence-mechanics.md's "What `init` writes" section gained the same
+  R2-L1/R2-M3 mechanics paragraph and a substantially rewritten
+  M2/M3-plus-R2-M2 paragraph explaining why neither the fix-round-1
+  `previous.tiers` boolean gate nor the original `ROLE_TIERS`/
+  `options.harnesses` enumeration was sufficient, and its "Tests" section
+  gained a description of the new `init.test.ts:888-971` `describe` and the
+  two strengthened stderr-wording tests.
+
+  `okf-kit check docs/okf --strict`: both immediately before and after this
+  pass's commit, the check reports 0 warnings, 0 findings, for a mechanical
+  reason worth recording rather than treating as proof of nothing having
+  gone stale: this bundle's docs carry a `timestamp:` frontmatter value
+  chosen with same-day headroom (`2026-08-19T22:30:00Z` UTC, comfortably
+  past every commit made so far today in this session's local `+02:00`
+  wall-clock), so the `sources-fresh` rule's mtime-based staleness gate
+  cannot fire against any same-day commit regardless of whether the doc's
+  actual prose was re-verified, only a commit crossing into the next UTC
+  day would trip it. Verified directly rather than assumed: a disposable
+  local test (a scratch commit of the `src`/`test` changes alone, with the
+  docs' frontmatter `timestamp:` temporarily set far in the past,
+  `2020-01-01T00:00:00Z`, then reset back out via `git reset --soft` before
+  any real commit) reproduced 5 `STALE` warnings against exactly the
+  sources this diff touches, confirming the checker's mechanism itself
+  works correctly and would have caught a genuinely stale doc; the 0/0
+  reading at this pass's actual, same-day timestamps is the tool's known
+  date-granularity limit, not a false negative, and the doc content itself
+  was independently re-verified by the direct-read citation discipline
+  described above, not by trusting the checker's clean report alone. Full
+  suite 231/231 (226 baseline + 3 new in
+  `test/docs-consistency.test.ts` for R2-M1's README-prose guard + 2 new in
+  `test/init.test.ts` for R2-M2's ledger-driven-notes `describe`, the two
+  existing R2-M3 stderr tests strengthened in place rather than added),
+  `tsc --noEmit` clean, `tsc --noEmit -p tsconfig.test.json` clean, `npm
+  run build` clean, `prettier --check` clean for every file this pass
+  touched (one new formatting issue in `src/init.ts`, introduced by this
+  pass's own edits, was caught by `prettier --check` and fixed with
+  `--write` before commit; the pre-existing `test/template-markers.test.ts`
+  warning is unrelated and untouched, matching every prior pass's
+  baseline). Mutation probes (named in the task assignment): removing the
+  `previous.files`-gate condition from both `init.ts` note loops (reverting
+  to unconditional `ROLE_TIERS` enumeration) turned the new
+  "opencode + unresolved tier-class models... exactly 0 leftover notes"
+  test red (9 phantom notes instead of 0), restored and re-verified green;
+  resetting `cli.ts`'s warning text to the pre-fix-round-2 wording turned
+  both strengthened stderr tests red, restored and re-verified green. Both
+  mutants were applied and restored with the working tree committed first,
+  per this repo's commit-before-mutation-probe convention.

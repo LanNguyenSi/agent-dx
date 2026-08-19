@@ -32,15 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default files plus 9 variants (13 total). Claude Code variants carry
   `model: <class alias>` and `effort: <tier>` frontmatter (plus
   `disallowedTools: Edit, Write, NotebookEdit` for the read-only roles, same
-  as the default file). opencode variants are provider-dependent: Anthropic
-  ids get `variant: high`/`variant: max` for the `high`/`xhigh` tiers only
-  (`low`/`medium` collapse to no effort field, a documented Anthropic
-  `variant:` limitation, not a bug), Ollama and unresolved models get no
-  effort field at all, and every other provider gets a plain
+  as the default file). opencode variants key off the resolved model's
+  family, not its provider prefix: a Claude-family id (any provider fronting
+  a `claude-`-named model, e.g. `anthropic/claude-...`,
+  `github-copilot/claude-...`, or the nested
+  `openrouter/anthropic/claude-...`) gets `variant: high`/`variant: max` for
+  the `high`/`xhigh` tiers only (`low`/`medium` collapse to no effort field,
+  a documented opencode `variant:` limitation, not a bug), Ollama gets no
+  effort field at all, and every other non-Claude-family model gets a plain
   `reasoningEffort: <tier>` line; the variant's `model:` line resolves
   through the same live `opencode models` catalog lookup as the base
-  per-role model, keyed by the tier's model class instead of by role. The
-  chosen value is recorded in a new `tiers` boolean on
+  per-role model, keyed by the tier's model class instead of by role. A tier
+  whose class model cannot be resolved at all renders no variant file for
+  that class, not a file with the `model:` line simply omitted, and the CLI
+  warns once per unresolved class on stderr; this guard and its warning
+  are opencode-scoped only, since Claude Code variants resolve `model:` from
+  a plain alias and need no live catalog lookup. The chosen value is
+  recorded in a new `tiers` boolean on
   `.ai/workflow/manifest.json`; a manifest written before tiers existed (no
   `tiers` key) degrades to `false`, the same per-field-degradation style
   already used for a missing `profile` field. Variant files flow through the

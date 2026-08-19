@@ -248,26 +248,39 @@ Claude Code variants carry both a `model:` line (the class's alias) and an
 `effort: <tier>` line in frontmatter. Read-only roles (explorer, reviewer)
 keep `disallowedTools: Edit, Write, NotebookEdit` on their variants too.
 
-**opencode variants are provider-dependent**, since opencode's effort
-surface is not uniform across providers:
+**opencode variants key off the resolved model's family, not its provider
+prefix**, since opencode's effort surface is not uniform across model
+families:
 
-- **Anthropic** (`anthropic/...` model ids): only `high` and `xhigh` get an
-  effort field, as `variant: high` and `variant: max` respectively; `low`
-  and `medium` collapse to no effort field at all, since Anthropic's
-  opencode `variant:` option does not distinguish an effort below `high`.
-  This collapse is deliberate and documented, not a bug: a `low`/`medium`
-  variant on Anthropic still gets its class's `model:` line, just no
-  `variant:` line.
-- **Ollama, or a model opencode could not resolve to a fully-qualified id**:
-  no effort field at all. There is no known effort passthrough for Ollama,
-  and an unresolved model leaves no provider to key the decision on.
-- **Every other provider**: a plain `reasoningEffort: <tier>` line.
+- **Claude-family models** (any resolved id whose provider is
+  `anthropic/`, or whose segment after the provider prefix contains
+  `claude-`, which covers `anthropic/claude-...` as well as a Claude model
+  fronted by a different provider, e.g. `github-copilot/claude-sonnet-4.6`
+  or the nested `openrouter/anthropic/claude-opus-4.8`): only `high` and
+  `xhigh` get an effort field, as `variant: high` and `variant: max`
+  respectively; `low` and `medium` collapse to no effort field at all,
+  since opencode's `variant:` option does not distinguish an effort below
+  `high`. This collapse is deliberate and documented, not a bug: a
+  `low`/`medium` variant on a Claude-family model still gets its class's
+  `model:` line, just no `variant:` line.
+- **Ollama**: no effort field at all. There is no known effort passthrough
+  for Ollama.
+- **Every other non-Claude-family model**: a plain `reasoningEffort: <tier>`
+  line, `xhigh` included (opencode's built-in OpenAI-style variants
+  document an `xhigh` reasoning effort).
 
 The variant's `model:` line is resolved the same way the base per-role model
 is (an `opencode models` catalog lookup against the auto-detected or
 `--opencode-provider`-specified provider), just keyed by the tier's model
-class instead of by role; when no resolution is possible the `model:` line
-is omitted, the same fallback as the base model.
+class instead of by role. When that lookup cannot resolve a model for a
+class, the CLI warns once on stderr and **no variant file is rendered for
+that class at all**, not a file with a missing `model:` line: a variant
+with no resolved model would carry neither a `model:` nor an effort line, an
+indistinguishable no-op duplicate of the base file with no ledger entry to
+compare it against, so `init` skips writing it entirely. This guard and its
+warning are opencode-scoped only; Claude Code variants resolve `model:` from
+a plain alias (`haiku`/`sonnet`/`opus`) and need no live catalog lookup, so
+they are unaffected.
 
 **Warning: `CLAUDE_CODE_EFFORT_LEVEL` overrides every agent's frontmatter
 `effort:`, tier variants included.** Claude Code's `effort:` frontmatter

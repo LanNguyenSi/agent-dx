@@ -1240,3 +1240,63 @@ describe("README tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS
     expect(dataRows.sort()).toEqual([...tiersInOrder].sort());
   });
 });
+
+/**
+ * Review round 2 (R2-M1): before this fix, README's opencode-effort prose
+ * (and the CHANGELOG 0.19.0 entry) still described the pre-fix-round-1
+ * dispatch (keyed on the literal provider id `anthropic/...`, review finding
+ * M4's bug) and the pre-fix-round-1 unresolved-class behavior (a rendered
+ * file with the `model:` line merely omitted, rather than the file being
+ * skipped entirely, review finding M1's fix). This site-specific guard pins
+ * the corrected README prose directly, isolating the opencode-effort section
+ * from the rest of the "Effort tiers" section the same way the two table
+ * guards above isolate their own tables, so a regression back to the stale
+ * provider-scoped wording fails here rather than silently reappearing.
+ */
+describe("README opencode-effort prose uses family terms, not the stale provider-scoped claim (review round 2, R2-M1)", () => {
+  const readmeMd = readDoc("README.md");
+
+  /** The opencode-effort prose block, isolated from the rest of the
+   * "Effort tiers" section by its own opening bold lead-in and the next
+   * bold lead-in ("Warning: `CLAUDE_CODE_EFFORT_LEVEL`...") that follows it,
+   * so a phrase elsewhere in the section can never accidentally satisfy (or
+   * fail) these assertions. */
+  function opencodeEffortSection(): string {
+    const startIdx = readmeMd.indexOf(
+      "**opencode variants key off the resolved model's family",
+    );
+    expect(
+      startIdx,
+      "README opencode-effort prose lead-in not found",
+    ).toBeGreaterThanOrEqual(0);
+    const endIdx = readmeMd.indexOf(
+      "**Warning: `CLAUDE_CODE_EFFORT_LEVEL`",
+      startIdx,
+    );
+    expect(
+      endIdx,
+      "README opencode-effort prose did not terminate before the CLAUDE_CODE_EFFORT_LEVEL warning",
+    ).toBeGreaterThan(startIdx);
+    return readmeMd.slice(startIdx, endIdx);
+  }
+
+  it("carries the family-based framing, not the old provider-dependent one", () => {
+    expect(opencodeEffortSection()).toContain("Claude-family");
+    expect(opencodeEffortSection()).not.toContain("provider-dependent");
+  });
+
+  it("does not describe dispatch as scoped to `anthropic/` model ids", () => {
+    // The pre-fix-round-1 (M4) claim: dispatch keyed on the literal
+    // `anthropic/...` provider prefix rather than the model's family. A
+    // Claude-family model fronted by a different provider (e.g.
+    // `github-copilot/claude-sonnet-4.6`) must be documented as still
+    // getting the `variant:` rule, which this exact scope phrase denies.
+    expect(opencodeEffortSection()).not.toContain("`anthropic/...` model ids");
+  });
+
+  it("states the real M1 effect (no variant file at all) instead of the pre-fix 'model: will be omitted' claim", () => {
+    const section = opencodeEffortSection();
+    expect(section).toContain("no variant file is rendered for");
+    expect(section).not.toContain("model: will be omitted");
+  });
+});
