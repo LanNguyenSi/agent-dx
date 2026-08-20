@@ -1201,9 +1201,10 @@ describe("tier variants (`--tiers`)", () => {
     expect(manifest.tiers).toBe(false);
 
     // Content assertion, not just the file-set check above: pins the exact
-    // pre-0.19.0 frontmatter shape (four lines, no `effort:`) so a change to
-    // composeClaudeAgent cannot silently alter the legacy (tiers-off) render
-    // path without failing here.
+    // current default-file frontmatter shape (five lines, `effort: medium`
+    // pinned unconditionally since the 0.22.0 default-effort-pin change) so
+    // a change to composeClaudeAgent cannot silently alter the legacy
+    // (tiers-off) render path without failing here.
     const explorer = readFileSync(
       join(target, ".claude", "agents", "explorer.md"),
       "utf8",
@@ -1220,8 +1221,80 @@ describe("tier variants (`--tiers`)", () => {
       "name: explorer",
       expect.stringMatching(/^description: "/),
       "model: sonnet",
+      "effort: medium",
       "disallowedTools: Edit, Write, NotebookEdit",
     ]);
+  });
+
+  it("default agent files are byte-identical whether tiers is on or off (0.22.0 pinned-default-effort invariant)", () => {
+    // The pinned default effort (`TIER_DEFS[DEFAULT_TIER[role]].effort`) is
+    // decided inside composeClaudeAgent/composeOpencodeAgent themselves and
+    // does not read the `tiers` flag at all, so every role's default
+    // (unsuffixed) file must render byte-identically regardless of whether
+    // `--tiers` also renders sibling variant files alongside it. This is
+    // the acceptance test for that invariant, not just an inference from
+    // reading the source: two separate targets, one with tiers off and one
+    // with tiers on, are diffed file by file for both harnesses.
+    //
+    // `opencodeModels` supplies anthropic-resolved ids (the same pattern the
+    // "opencode default files: reviewer/advisor get variant: high..." test
+    // below uses) rather than leaving it unset: a bare alias resolves to
+    // `undefined` via `opencodeModelValue`, which would make the opencode
+    // half of this comparison vacuous (neither side ever gets a `model:` or
+    // effort line, so the byte-diff cannot actually exercise the pin). With
+    // a resolved model, reviewer/advisor's `variant: high` line participates
+    // in the diff for real.
+    const targetTiersOff = mkdtempSync(join(tmpdir(), "ow-tiers-off-"));
+    const targetTiersOn = mkdtempSync(join(tmpdir(), "ow-tiers-on-"));
+    const opencodeModels = {
+      explorer: "anthropic/claude-sonnet-4-6",
+      "task-slicer": "anthropic/claude-sonnet-4-6",
+      implementer: "anthropic/claude-sonnet-4-6",
+      reviewer: "anthropic/claude-opus-4-8",
+      advisor: "anthropic/claude-opus-4-8",
+    };
+    try {
+      runInit({
+        ...defaultOptions(),
+        targetDir: targetTiersOff,
+        harnesses: ["claude", "opencode"],
+        profile: "full",
+        opencodeModels,
+        tiers: false,
+      });
+      runInit({
+        ...defaultOptions(),
+        targetDir: targetTiersOn,
+        harnesses: ["claude", "opencode"],
+        profile: "full",
+        opencodeModels,
+        tiers: true,
+      });
+      for (const role of ROLES) {
+        for (const [harnessDir] of [[".claude"], [".opencode"]] as const) {
+          const relativePath = join(harnessDir, "agents", `${role}.md`);
+          const off = readFileSync(join(targetTiersOff, relativePath), "utf8");
+          const on = readFileSync(join(targetTiersOn, relativePath), "utf8");
+          expect(on, `${relativePath} differs between tiers on/off`).toBe(off);
+        }
+      }
+      // Sanity check that the comparison above is not accidentally vacuous:
+      // reviewer/advisor's opencode default file must actually carry the
+      // resolved model and its `variant: high` effort line on both targets.
+      for (const targetDir of [targetTiersOff, targetTiersOn]) {
+        for (const role of ["reviewer", "advisor"] as const) {
+          const rendered = readFileSync(
+            join(targetDir, ".opencode", "agents", `${role}.md`),
+            "utf8",
+          );
+          expect(rendered).toContain("model: anthropic/claude-opus-4-8");
+          expect(rendered).toContain("variant: high");
+        }
+      }
+    } finally {
+      rmSync(targetTiersOff, { recursive: true, force: true });
+      rmSync(targetTiersOn, { recursive: true, force: true });
+    }
   });
 
   it("tiers=true, claude, full profile: exactly 15 agent files with the right model/effort per variant", () => {
@@ -1234,13 +1307,14 @@ describe("tier variants (`--tiers`)", () => {
     expect(agents.length).toBe(15);
 
     // Dedicated anti-downgrade check: the reviewer default file must still
-    // be opus, unaffected by tiers being on.
+    // be opus with its own pinned default effort (`high`, from
+    // DEFAULT_TIER.reviewer), unaffected by tiers being on.
     const reviewer = readFileSync(
       join(target, ".claude", "agents", "reviewer.md"),
       "utf8",
     );
     expect(reviewer).toContain("model: opus");
-    expect(reviewer).not.toContain("effort:");
+    expect(reviewer).toContain("effort: high");
 
     const explorerLow = readFileSync(
       join(target, ".claude", "agents", "explorer-low.md"),
@@ -1257,14 +1331,15 @@ describe("tier variants (`--tiers`)", () => {
     expect(implementerXhigh).toContain("model: opus");
     expect(implementerXhigh).toContain("effort: xhigh");
 
-    // advisor's default file stays opus with no effort: line, same
-    // anti-downgrade shape as reviewer above.
+    // advisor's default file stays opus with its own pinned default effort
+    // (`high`, from DEFAULT_TIER.advisor), same anti-downgrade shape as
+    // reviewer above.
     const advisor = readFileSync(
       join(target, ".claude", "agents", "advisor.md"),
       "utf8",
     );
     expect(advisor).toContain("model: opus");
-    expect(advisor).not.toContain("effort:");
+    expect(advisor).toContain("effort: high");
     expect(advisor).toContain("disallowedTools: Edit, Write, NotebookEdit");
 
     // advisor's only variant is xhigh (DEFAULT_TIER["advisor"] is "high",
@@ -1295,6 +1370,135 @@ describe("tier variants (`--tiers`)", () => {
     // implementer: 3, reviewer: 2, advisor: 1), no duplicates. 13 -> 15
     // since 0.21.0 (advisor added).
     expect(agents.size).toBe(15);
+  });
+
+  it("opencode default files: reviewer/advisor get variant: high on an anthropic-resolved model, the three medium-default roles get no effort field", () => {
+    // The unsuffixed default file's effort line is keyed by the role's own
+    // DEFAULT_TIER via opencodeEffortLine, the same dispatch the tier
+    // variants use: a Claude-family model only carries a `variant:` field
+    // for `high`/`xhigh`, so explorer/task-slicer/implementer (DEFAULT_TIER
+    // "medium") get no effort field at all, matching the tiers-off,
+    // no-effort-pin era output byte for byte on this axis.
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      opencodeModels: {
+        explorer: "anthropic/claude-sonnet-4-6",
+        "task-slicer": "anthropic/claude-sonnet-4-6",
+        implementer: "anthropic/claude-sonnet-4-6",
+        reviewer: "anthropic/claude-opus-4-8",
+        advisor: "anthropic/claude-opus-4-8",
+      },
+    });
+
+    const reviewer = readFileSync(
+      join(target, ".opencode", "agents", "reviewer.md"),
+      "utf8",
+    );
+    expect(reviewer).toContain("model: anthropic/claude-opus-4-8");
+    expect(reviewer).toContain("variant: high");
+
+    const advisor = readFileSync(
+      join(target, ".opencode", "agents", "advisor.md"),
+      "utf8",
+    );
+    expect(advisor).toContain("model: anthropic/claude-opus-4-8");
+    expect(advisor).toContain("variant: high");
+
+    for (const role of ["explorer", "task-slicer", "implementer"] as const) {
+      const rendered = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(rendered).toContain("model: anthropic/claude-sonnet-4-6");
+      expect(rendered).not.toContain("variant:");
+      expect(rendered).not.toContain("reasoningEffort");
+    }
+  });
+
+  it("opencode default files: a non-Claude-family provider-qualified model gets a plain reasoningEffort: line keyed by the role's own DEFAULT_TIER", () => {
+    // Mirrors the anthropic-resolved test above, but for the
+    // non-Claude-family, non-Ollama branch of opencodeEffortLine: unlike the
+    // Claude-family `variant:` field (which cannot express an effort below
+    // `high`), a plain `reasoningEffort:` model can and does render the
+    // medium-default roles' own pinned effort, not just reviewer/advisor's.
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      opencodeModels: {
+        explorer: "openai/gpt-5",
+        "task-slicer": "openai/gpt-5",
+        implementer: "openai/gpt-5",
+        reviewer: "openai/gpt-5",
+        advisor: "openai/gpt-5",
+      },
+    });
+
+    for (const role of ["explorer", "task-slicer", "implementer"] as const) {
+      const rendered = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(rendered).toContain("model: openai/gpt-5");
+      expect(rendered).toContain("reasoningEffort: medium");
+      expect(rendered).not.toContain("variant:");
+    }
+
+    for (const role of ["reviewer", "advisor"] as const) {
+      const rendered = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(rendered).toContain("model: openai/gpt-5");
+      expect(rendered).toContain("reasoningEffort: high");
+      expect(rendered).not.toContain("variant:");
+    }
+  });
+
+  it("opencode default files: an Ollama or provider-less resolved model gets no effort field at all", () => {
+    // A *resolved* model (unlike the omitted-`model:` case elsewhere in this
+    // file) that is neither Claude-family nor a provider-qualified non-Ollama
+    // id still gets no effort field: opencodeEffortLine's `provider ===
+    // "ollama"` and `provider === undefined` branches both return
+    // `undefined`. Checked here against the default (unsuffixed) file, the
+    // same dispatch tier variants already cover.
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      opencodeModels: {
+        explorer: "ollama/llama3",
+        "task-slicer": "ollama/llama3",
+        implementer: "ollama/llama3",
+        reviewer: "no-provider-model",
+        advisor: "no-provider-model",
+      },
+    });
+
+    for (const role of ["explorer", "task-slicer", "implementer"] as const) {
+      const rendered = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(rendered).toContain("model: ollama/llama3");
+      expect(rendered).not.toContain("variant:");
+      expect(rendered).not.toContain("reasoningEffort");
+    }
+
+    for (const role of ["reviewer", "advisor"] as const) {
+      const rendered = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(rendered).toContain("model: no-provider-model");
+      expect(rendered).not.toContain("variant:");
+      expect(rendered).not.toContain("reasoningEffort");
+    }
   });
 
   it("opencode: an anthropic-resolved class id gets variant: high/max on the high/xhigh tiers, none on low", () => {
@@ -1358,7 +1562,7 @@ describe("tier variants (`--tiers`)", () => {
   });
 
   it("opencode: a resolved class id with no provider prefix (no '/') gets a model: line but no effort field (review round 3, R3-L4)", () => {
-    // opencodeVariantEffortLine only looks up a provider by splitting on the
+    // opencodeEffortLine only looks up a provider by splitting on the
     // first "/"; an id with none resolves to `provider === undefined`, the
     // same no-effort-field outcome as Ollama, but via a distinct code path
     // (not the Ollama string check) that the README's "Every other

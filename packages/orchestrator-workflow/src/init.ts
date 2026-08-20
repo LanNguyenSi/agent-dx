@@ -186,6 +186,22 @@ function yamlQuote(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+/**
+ * Composes the unsuffixed default agent file. It carries a pinned
+ * `effort: <TIER_DEFS[DEFAULT_TIER[role]].effort>` line unconditionally
+ * (medium for explorer/task-slicer/implementer, high for reviewer/advisor),
+ * regardless of whether `--tiers` is on: this is the deterministic tier
+ * ladder's floor, not a tier-variant feature, so a default spawn no longer
+ * silently inherits the orchestrator session's effort. Since the pin does
+ * not depend on the `tiers` flag, the default file's content still stays
+ * byte-identical whether or not tier variants are also rendered, the same
+ * invariant `composeClaudeAgentVariant`'s own doc comment below describes.
+ * Computed inline here rather than passed in like `composeOpencodeAgent`'s
+ * `effortLine`: `TIER_DEFS[DEFAULT_TIER[role]].effort` is a pure function of
+ * `role` alone, with no model-dependent dispatch on Claude Code the way
+ * opencode's family-based `opencodeEffortLine` has, so there is no second,
+ * potentially-diverging computation here to guard against.
+ */
 function composeClaudeAgent(role: Role, model: string): string {
   const asset = readAgentAsset(role);
   const frontmatter = [
@@ -193,6 +209,7 @@ function composeClaudeAgent(role: Role, model: string): string {
     `name: ${asset.name}`,
     `description: ${yamlQuote(asset.description)}`,
     `model: ${claudeModelValue(model)}`,
+    `effort: ${TIER_DEFS[DEFAULT_TIER[role]].effort}`,
   ];
   // Read-only roles keep every read/search tool but cannot mutate files.
   if (READ_ONLY_ROLES.has(role)) {
@@ -202,9 +219,18 @@ function composeClaudeAgent(role: Role, model: string): string {
   return [...frontmatter, "", asset.body.trimEnd(), ""].join("\n");
 }
 
+/**
+ * Composes the unsuffixed default opencode agent file. `effortLine` is the
+ * same pinned-default-effort line a tier variant would carry, decided once
+ * by the caller via `opencodeEffortLine(DEFAULT_TIER[role], modelValue)`
+ * (single source of truth, the same pattern `composeOpencodeAgentVariant`
+ * already uses for its own effort line) and passed in rather than
+ * recomputed here.
+ */
 function composeOpencodeAgent(
   role: Role,
   modelValue: string | undefined,
+  effortLine: string | undefined,
 ): string {
   const asset = readAgentAsset(role);
   const frontmatter = [
@@ -216,6 +242,9 @@ function composeOpencodeAgent(
   // Omitting it lets the subagent inherit the session/default model.
   if (modelValue) {
     frontmatter.push(`model: ${modelValue}`);
+  }
+  if (effortLine) {
+    frontmatter.push(effortLine);
   }
   if (READ_ONLY_ROLES.has(role)) {
     frontmatter.push("permission:", "  edit: deny");
@@ -234,8 +263,8 @@ function tierDescriptionSuffix(
 /**
  * Composes a tier-variant sibling of `composeClaudeAgent` (`<role>-<tier>.md`).
  * The default-tier file is never rendered here (callers skip it via
- * `DEFAULT_TIER`), so `composeClaudeAgent`'s own output stays byte-identical
- * whether or not tiers are on.
+ * `DEFAULT_TIER`), so `composeClaudeAgent`'s own output (pinned default
+ * effort included) stays byte-identical whether or not tiers are on.
  */
 function composeClaudeAgentVariant(role: Role, tier: Tier): string {
   const asset = readAgentAsset(role);
@@ -278,8 +307,12 @@ function isClaudeFamilyModel(modelValue: string): boolean {
  * effort passthrough, and every other model accepts a plain
  * `reasoningEffort:` value. An unresolved (`undefined`) model gets no
  * effort field either, since there is then no model to key the decision on.
+ * Shared by both the default (unsuffixed) agent file, keyed by the role's
+ * own `DEFAULT_TIER`, and the tier-variant files, keyed by the variant's own
+ * suffix tier: the dispatch rule is identical either way, only which tier
+ * gets passed in differs.
  */
-function opencodeVariantEffortLine(
+function opencodeEffortLine(
   tier: Tier,
   modelValue: string | undefined,
 ): string | undefined {
@@ -298,7 +331,7 @@ function opencodeVariantEffortLine(
 /**
  * Composes a tier-variant sibling of `composeOpencodeAgent`. `effortLine` is
  * decided once, at the single call site in the opencode tier loop of
- * `runInit` (via `opencodeVariantEffortLine`), and passed in rather than
+ * `runInit` (via `opencodeEffortLine`), and passed in rather than
  * recomputed here, so there is exactly one place that decides it instead
  * of a second, independent source of truth for the same value.
  */
@@ -499,9 +532,13 @@ export function runInit(options: InitOptions): Report {
         options.opencodeModels !== undefined
           ? options.opencodeModels[role]
           : opencodeModelValue(options.models[role]);
+      const defaultEffortLine = opencodeEffortLine(
+        DEFAULT_TIER[role],
+        modelValue,
+      );
       installKitFile(
         join(".opencode", "agents", `${role}.md`),
-        composeOpencodeAgent(role, modelValue),
+        composeOpencodeAgent(role, modelValue, defaultEffortLine),
       );
       if (tiers) {
         for (const tier of ROLE_TIERS[role]) {
@@ -509,8 +546,8 @@ export function runInit(options: InitOptions): Report {
           const modelClass = TIER_DEFS[tier].modelClass;
           const variantModelValue = options.opencodeClassModels?.[modelClass];
           if (variantModelValue === undefined) {
-            // No model resolved for this class: opencodeVariantEffortLine
-            // always returns undefined too when its modelValue argument is
+            // No model resolved for this class: opencodeEffortLine always
+            // returns undefined too when its modelValue argument is
             // undefined (it short-circuits on that first), so this variant
             // would carry neither a model: nor an effort line, a silent
             // no-op duplicate of the base file's own (possibly also
@@ -520,10 +557,10 @@ export function runInit(options: InitOptions): Report {
             // (e.g. a low/medium tier on a Claude-family model, or any
             // Ollama model) is NOT skipped by this check: it still renders
             // with just its model: line, see the effort-field dispatch
-            // rules in opencodeVariantEffortLine above.
+            // rules in opencodeEffortLine above.
             continue;
           }
-          const effortLine = opencodeVariantEffortLine(tier, variantModelValue);
+          const effortLine = opencodeEffortLine(tier, variantModelValue);
           installKitFile(
             join(".opencode", "agents", `${role}-${tier}.md`),
             composeOpencodeAgentVariant(

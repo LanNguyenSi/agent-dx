@@ -146,10 +146,15 @@ steps in the repository you were asked to install into.
      for `full`; only `implementer` and `reviewer` for `minimal`),
      `.claude/agents/<role>.md` from
      `assets/agents/<role>.md` with `model: <operator's choice>` added as a
-     new line directly after the `description:` line (that placement matches
-     the installer's output byte for byte). For the explorer, reviewer, and
-     advisor roles additionally, `disallowedTools: Edit, Write, NotebookEdit` goes on a new
-     line directly after the `model:` line. Ensure `CLAUDE.md` exists and
+     new line directly after the `description:` line, then
+     `effort: <medium|high>` on the next line (`medium` for explorer,
+     task-slicer, and implementer; `high` for reviewer and advisor; this
+     pinned default effort is unconditional, not tied to whether the
+     operator asked for `--tiers`; see the package README's "Effort tiers"
+     section), that placement matching the installer's output byte for
+     byte. For the explorer, reviewer, and advisor roles additionally,
+     `disallowedTools: Edit, Write, NotebookEdit` goes on a new line
+     directly after the `effort:` line. Ensure `CLAUDE.md` exists and
      contains a line `@AGENTS.md`.
    - Codex: `.agents/skills/orchestrator-workflow/SKILL.md`, same skill file.
    - opencode: `.opencode/skills/orchestrator-workflow/SKILL.md` from
@@ -166,9 +171,21 @@ steps in the repository you were asked to install into.
      which is the safe portable fallback. The installed CLI resolves aliases
      to fully-qualified ids by running `opencode models` at install time; in a
      manual install you may not have a live catalog, so omitting `model:` is
-     correct. For the explorer, reviewer, and advisor roles additionally, `permission:` goes on a new
-     line directly after `mode: subagent` (or after `model:` when that line is
-     present), followed by `  edit: deny` (two-space indent) on the next line.
+     correct. When you do have a fully-qualified `model:` value, add the same
+     pinned-default-effort line (see the package README's "Effort tiers"
+     section for the exact dispatch rule), keyed by
+     the role's own default tier instead of a suffix tier (`medium` for
+     explorer/task-slicer/implementer, `high` for reviewer/advisor): a
+     resolved Claude-family model gets `variant: high` for reviewer/advisor
+     and no effort line at all for the three medium-default roles, a
+     non-Claude-family provider-qualified model gets `reasoningEffort:
+     medium` or `reasoningEffort: high`, and Ollama or a provider-less id
+     gets no effort line either way; when `model:` is omitted (the common
+     manual-fallback case above), omit the effort line too, the same
+     no-live-catalog fallback. For the explorer, reviewer, and advisor roles
+     additionally, `permission:` goes on a new line directly after
+     `mode: subagent` (or after `model:`/the effort line when present),
+     followed by `  edit: deny` (two-space indent) on the next line.
      Example read-only role frontmatter (explorer, reviewer, or advisor) when
      no model is resolved:
      ```yaml

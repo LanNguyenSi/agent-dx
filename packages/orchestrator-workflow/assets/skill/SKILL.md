@@ -134,10 +134,13 @@ directory and the subagents.
    enough, testable, ordered correctly, and aligned with the goal. Fix the
    slicing before any implementation starts.
 6. **Delegate implementation.** Send each implementer subagent one narrow task
-   contract (format below). When tier variants are installed, pick the
-   implementer tier (the installed `implementer-<tier>` subagents, if any) by
-   the task's complexity and risk, at your own judgment, defaulting to the
-   unsuffixed subagent when unsure; record a non-default tier choice with a
+   contract (format below). The unsuffixed implementer carries a pinned
+   effort: `medium` in its own file, whether or not tier variants are
+   installed, so a default spawn no longer inherits the session's effort.
+   When tier variants are installed, pick the implementer tier (the
+   installed `implementer-<tier>` subagents, if any) by the task's
+   complexity and risk, at your own judgment, defaulting to the unsuffixed
+   subagent when unsure; record a non-default tier choice with a
    one-line reason in `03-decisions.md` when the task is non-trivial. When a
    task's acceptance rests on a test that must fail without the change, name
    the mutation probes to run in the task assignment; the implementer reports

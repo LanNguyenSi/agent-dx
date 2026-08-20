@@ -60,6 +60,11 @@ default, not a ritual.
   downshift at all: its default `high` is already its only non-`-xhigh`
   tier. Spawn only variants that are actually installed. Tier choice is a
   conscious decision, not a ritual; when unsure, use the default.
+- Every unsuffixed default subagent carries its own pinned default effort
+  baked into its own file, not inherited from the orchestrator session:
+  medium for the explorer, the task-slicer, and the implementer; high for
+  the reviewer and the advisor. This holds whether or not tier variants are
+  installed; it is not gated on `--tiers`.
 - Under the `full` profile, an advisor subagent is available for escalation
   only: architectural uncertainty, requirements that contradict each other,
   multiple valid solution paths where committing to one is expensive to

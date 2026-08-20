@@ -215,8 +215,27 @@ non-default effort tier, alongside the one default (unsuffixed) agent file
 `--profile` already installs. Each tier variant is a standalone subagent
 definition, not a modification of the default file: the default file
 (`<role>.md`) stays byte-identical to what a tiers-off install already
-produces (still `manifest.models[role]`, no `effort:` key), and each variant
-lives next to it as `<role>-<tier>.md`.
+produces, and each variant lives next to it as `<role>-<tier>.md`.
+
+**Every default file carries its own pinned effort, independent of
+`--tiers`.** Since 0.22.0, `composeClaudeAgent`/`composeOpencodeAgent` add
+the role's own `TIER_DEFS[DEFAULT_TIER[role]].effort` to the default
+(unsuffixed) file unconditionally: `effort: medium` for explorer,
+task-slicer, and implementer; `effort: high` for reviewer and advisor
+(opencode: a `variant: high` line when the resolved model is Claude-family,
+following the same dispatch rule tier variants use, `reasoningEffort:
+medium`/`reasoningEffort: high` for a non-Claude-family provider-qualified
+model, nothing for Ollama, a provider-less id, or an unresolved model). This
+pin does not depend on `tiers`, so a plain install (no `--tiers`) already
+carries it; the flag only controls whether the additional `<role>-<tier>.md`
+variant files are also rendered. The motivation: a default spawn used to
+silently inherit the orchestrator session's own effort, so a `high`-effort
+orchestrator session made every default subagent spawn at `high` too,
+regardless of the role's own intended weight; the pin makes each role's
+effort deterministic and independent of the caller's session. A `--tiers`-off
+install (the default) has no variant files and therefore no in-install
+escalation path off a default's pinned effort; run `init --tiers` afterward
+if a task ever needs one.
 
 Default off, like every optional pack in this kit: a fresh install renders
 no variant files unless asked. `--tiers` turns the feature on for that run,
@@ -306,6 +325,14 @@ environment variable wins over the frontmatter `effort:` on every installed
 agent, tier variants and default files alike, not just the one this feature
 adds. Check for it before relying on a specific tier variant's requested
 effort actually taking effect.
+
+The pin is also emitted unconditionally regardless of which model the role
+resolves to via `--models`, including a model with no effort support at all
+(e.g. `--models reviewer=haiku` still renders `model: haiku` followed by
+`effort: high`). A wire probe on 2026-08-19 (not re-measured for this doc)
+showed the Claude Code CLI silently drops the `effort:` parameter for Haiku
+4.5 rather than rejecting it: the value is ignored, not an install-time or
+run-time error.
 
 ## Ownership and re-runs
 
