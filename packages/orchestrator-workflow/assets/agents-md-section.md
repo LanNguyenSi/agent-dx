@@ -53,8 +53,12 @@ default, not a ritual.
   picks the effort tier per task by complexity and risk, at its own
   judgment. The unsuffixed default subagent is the normal case; a `-low`
   variant fits mechanical, narrowly scoped tasks; `-high`/`-xhigh` fit
-  high-risk changes, hard problems, or repeated failed attempts. Tier choice
-  is a conscious decision, not a ritual; when unsure, use the default.
+  high-risk changes, hard problems, or repeated failed attempts. Not every
+  role gets every tier: `-xhigh` exists only for the implementer and the
+  reviewer, and the reviewer's downshift is `-medium` rather than `-low`,
+  since its default already sits at high. Spawn only variants that are
+  actually installed. Tier choice is a conscious decision, not a ritual;
+  when unsure, use the default.
 
 ### Review gate
 

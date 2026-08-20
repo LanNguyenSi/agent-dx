@@ -19,7 +19,11 @@ Scale the ceremony to the task. The workflow below is the default for
 non-trivial work; a trivial change (a typo, a one-line fix) may be done
 directly by the orchestrator and reviewed by it, without slicing or spawning
 subagents. Review judgment still applies to every change; only the size of
-the apparatus changes.
+the apparatus changes. When tier variants are installed, this same
+per-task discretion applies to every subagent spawn, including Discover
+and Slice tasks, not just the Delegate implementation and Delegate review
+steps below that name it explicitly; those two steps are instances of the
+rule, not its full scope.
 
 ## Roles
 
@@ -128,43 +132,42 @@ directory and the subagents.
    unsuffixed subagent when unsure; record a non-default tier choice with a
    one-line reason in `03-decisions.md` when the task is non-trivial. When a
    task's acceptance rests on a test that must fail without the change, name
-   the mutation probes to run in the task assignment; the implementer
-   reports each one in the output contract's `mutation_probes` field (apply
-   the mutant for real, observe the named test fail, restore, re-verify).
-   Hold the implementer's report to the claim-only-what-was-measured rule
-   too: treat any verification
-   claim there that is not backed by a check it actually ran as unverified.
-   Record meaningful decisions in `03-decisions.md` and consolidate
+   the mutation probes to run in the task assignment; the implementer reports
+   each one in the output contract's `mutation_probes` field (apply the mutant
+   for real, observe the named test fail, restore, re-verify). Hold the
+   implementer's report to the claim-only-what-was-measured rule too: treat any
+   verification claim there that is not backed by a check it actually ran as
+   unverified. Record meaningful decisions in `03-decisions.md` and consolidate
    evidence in `04-implementation-summary.md`.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed
    `reviewer-<tier>` subagents, if any) by the task's complexity and risk, at
-   your own judgment, defaulting to the unsuffixed subagent when unsure;
-   record a non-default tier choice with a one-line reason in
-   `03-decisions.md` when the task is non-trivial. When the
-   reviewer's environment cannot use version control to see the diff (for
-   example a policy-gated repository), supply the diff as a pre-generated file
-   in the briefing instead of expecting the reviewer to derive it, and have the
-   reviewer report explicitly if it could only reconstruct the delta some other
-   way, rather than silently reviewing less than the full change. The reviewer
-   checks spec compliance, architecture consistency, edge cases, security, test
-   adequacy (including whether new tests would fail if the change were
-   reverted), and maintainability. Findings go to `05-review-findings.md`;
-   transfer each finding from the reviewer output contract into the table's
-   columns as-is, keeping the Severity and Decision headers unchanged, since
-   those two are what the orchestrator-workflow completeness reader verifies.
-   Replace the shipped placeholder/legend row with the transferred findings;
-   for a genuine zero-findings review, delete that row instead of leaving it in
-   place, since the completeness reader treats an untouched placeholder row
-   with no finding rows as the template never having been filled in. When
-   acceptance rests on empirical or probabilistic evidence (flake rates,
-   benchmarks, "n runs green", performance/timing numbers), the reviewer must
-   independently reproduce it — its own runs or measurements, not a re-read of
-   the implementer's log — and record the method, sample size, and result
-   against the implementer's claim in the reviewer output contract's
-   `reproduction` field. This does not apply to deterministic checks (a single
-   test run, `tsc`, lint): only claims that could vary run to run trigger it.
+   your own judgment, defaulting to the unsuffixed subagent when unsure; record
+   a non-default tier choice with a one-line reason in `03-decisions.md` when
+   the task is non-trivial. When the reviewer's environment cannot use version
+   control to see the diff (for example a policy-gated repository), supply the
+   diff as a pre-generated file in the briefing instead of expecting the
+   reviewer to derive it, and have the reviewer report explicitly if it could
+   only reconstruct the delta some other way, rather than silently reviewing
+   less than the full change. The reviewer checks spec compliance, architecture
+   consistency, edge cases, security, test adequacy (including whether new
+   tests would fail if the change were reverted), and maintainability. Findings
+   go to `05-review-findings.md`; transfer each finding from the reviewer
+   output contract into the table's columns as-is, keeping the Severity and
+   Decision headers unchanged, since those two are what the
+   orchestrator-workflow completeness reader verifies. Replace the shipped
+   placeholder/legend row with the transferred findings; for a genuine
+   zero-findings review, delete that row instead of leaving it in place, since
+   the completeness reader treats an untouched placeholder row with no finding
+   rows as the template never having been filled in. When acceptance rests on
+   empirical or probabilistic evidence (flake rates, benchmarks, "n runs
+   green", performance/timing numbers), the reviewer must independently
+   reproduce it — its own runs or measurements, not a re-read of the
+   implementer's log — and record the method, sample size, and result against
+   the implementer's claim in the reviewer output contract's `reproduction`
+   field. This does not apply to deterministic checks (a single test run,
+   `tsc`, lint): only claims that could vary run to run trigger it.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high

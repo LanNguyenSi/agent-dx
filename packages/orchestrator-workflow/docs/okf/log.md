@@ -1044,6 +1044,29 @@
   `agents-md-section.md:104-110` -> `:110-116`, itself verified against
   the current file, not computed blind).
 
+  Correction (same-day review round 1 on this pass): the "82 total ...
+  checked directly against the current file content" claim above should be
+  read as 82 checked, not 82 verified correct — the review found two of
+  them were checked but still left wrong. `run-state-lifecycle-and-
+  markers.md:172`'s compound citation `SKILL.md:177-178,172-173` shifted
+  only its first range; the second range, for the "Repos without a bundle
+  are unaffected" quote, kept a stale value instead of this pass's own
+  correct `182-183`. `:152`'s compound citation (`SKILL.md:18-22,
+  103-107`) was a separate, pre-existing miss already stale before this
+  pass and not caught by the "check every citation" work above; its
+  correct value at this pass's baseline was `18-22, 108-112`. The same
+  review round's compound-citation grep sweep (a pattern matching two
+  comma-joined line numbers in one citation, run across every file in
+  `docs/okf/`) also caught a third citation outside the 82's stated scope:
+  `run-state-lifecycle-and-markers.md:26`'s `INSTALL-AGENT.md:47-48`, one
+  line short of the actual `.ai/workflow/templates/00-goal.md` through
+  `06-handoff.md` bullet, corrected to `:46-47`. All three were fixed in
+  that round; because the round's own SKILL.md edits (one new
+  Intent-paragraph sentence, two rewrapped step paragraphs) shifted lines
+  again, every `SKILL.md:` citation across all four docs — not just these
+  three — was re-verified a second time against the post-round file rather
+  than assumed to still hold from the numbers recorded above.
+
   `okf-kit check docs/okf --strict`: 0 warnings, 0 findings on the
   pre-existing baseline (package version 0.19.0, before this pass's
   edits). After committing this pass's content edits (package version

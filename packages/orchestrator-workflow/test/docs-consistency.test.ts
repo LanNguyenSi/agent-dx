@@ -12,7 +12,7 @@ import {
   ROLE_TIERS,
   TIER_DEFS,
 } from "../src/models.js";
-import type { Tier } from "../src/models.js";
+import type { Role, Tier } from "../src/models.js";
 import { readAsset } from "../src/assets.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -1307,13 +1307,25 @@ describe("README opencode-effort prose uses family terms, not the stale provider
  * tier. The operator framing was explicit: discretion by complexity and
  * risk, no rigid assignment table, no ritual. This pins the policy in
  * agents-md-section.md's Scaling delegation bullet list and in both
- * SKILL.md "Delegate implementation"/"Delegate review" steps. The anti-drift
- * check scopes to `ROLE_TIERS.implementer` specifically, not a bundle-wide
- * "exists somewhere in ROLE_TIERS" check: `implementer` is the one role
- * whose tier list covers all three suffixes the prose names (`low`, `high`,
- * `xhigh`), so a suffix silently dropped from just that array would be
- * masked by a role that still carries it (e.g. `xhigh` also lives under
- * `reviewer`) if the check were not scoped this way.
+ * SKILL.md "Delegate implementation"/"Delegate review" steps.
+ *
+ * Review round 1 (M1) found the original prose over-generalized: it named
+ * `-low`/`-high`/`-xhigh` as if every role got every tier, when in fact
+ * `-xhigh` exists only for the implementer and the reviewer, and the
+ * reviewer's own downshift is `-medium` (its default already sits at
+ * `high`, so it has no `-low` variant). The bullet now carries a
+ * qualifying sentence naming that explicitly. The anti-drift check below
+ * was rebuilt to match: instead of checking every named suffix against
+ * `ROLE_TIERS.implementer` alone (which would have let a `-medium` claim
+ * about the reviewer pass even if `ROLE_TIERS.reviewer` never carried
+ * `medium`), it maps each suffix to the specific role(s) the prose claims
+ * it for and checks membership against that role's own `ROLE_TIERS` entry,
+ * and that the suffix is not that role's own `DEFAULT_TIER` (a tier a role
+ * defaults to never gets a suffixed variant file). The suffix-set check
+ * itself is a non-vacuity floor plus a minimum-membership check
+ * (`arrayContaining`), not a byte-exact `toEqual` pin: an exact pin blocked
+ * this fix round's own legitimate `-medium` addition (review round 1
+ * finding L2).
  */
 describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md delegate steps", () => {
   const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
@@ -1341,7 +1353,21 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
     );
   });
 
-  it("every tier suffix named in the policy prose exists in ROLE_TIERS.implementer (anti-drift)", () => {
+  /**
+   * Which role(s) the qualifying bullet names each suffix for: the generic
+   * low/high/xhigh sentence targets the implementer (the one role whose
+   * tier list covers all three), and the qualifying sentence's follow-up
+   * claims name `-xhigh` for the implementer and the reviewer and
+   * `-medium` for the reviewer specifically.
+   */
+  const TIER_SUFFIX_ROLE_CLAIMS: Partial<Record<Tier, Role[]>> = {
+    low: ["implementer"],
+    high: ["implementer"],
+    xhigh: ["implementer", "reviewer"],
+    medium: ["reviewer"],
+  };
+
+  it("every tier suffix named in the policy prose exists in the role(s) it names, and is not that role's own default (anti-drift)", () => {
     const bulletIdx = agentsMdSection.indexOf(
       "When tier variants are installed",
     );
@@ -1352,15 +1378,35 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
       "tier-policy bullet did not terminate at the expected closing phrase",
     ).toBeGreaterThan(bulletIdx);
     const bullet = agentsMdSection.slice(bulletIdx, bulletEnd);
-    const suffixes = [...bullet.matchAll(/`-(\w+)`/g)].map((m) => m[1] as Tier);
-    // Guard the extraction itself: if this drops to 0, the loop below would
-    // vacuously pass without checking anything.
-    expect(suffixes).toEqual(["low", "high", "xhigh"]);
+    const rawSuffixes = [...bullet.matchAll(/`-(\w+)`/g)].map(
+      (m) => m[1] as Tier,
+    );
+    // Guard the extraction itself: if this drops to 0, the checks below
+    // would vacuously pass without checking anything.
+    expect(rawSuffixes.length).toBeGreaterThan(0);
+    const suffixes = [...new Set(rawSuffixes)];
+    // Minimum-membership floor, not a byte-exact pin, so a future
+    // legitimate addition (like this round's own `-medium`) does not need
+    // to touch this test to stay green.
+    expect(suffixes).toEqual(
+      expect.arrayContaining(["low", "high", "xhigh", "medium"]),
+    );
     for (const suffix of suffixes) {
+      const roles = TIER_SUFFIX_ROLE_CLAIMS[suffix];
       expect(
-        ROLE_TIERS.implementer,
-        `suffix "-${suffix}" named in the policy prose is missing from ROLE_TIERS.implementer`,
-      ).toContain(suffix);
+        roles,
+        `suffix "-${suffix}" named in the policy prose has no entry in TIER_SUFFIX_ROLE_CLAIMS; update the map`,
+      ).toBeDefined();
+      for (const role of roles as Role[]) {
+        expect(
+          ROLE_TIERS[role],
+          `suffix "-${suffix}" named in the policy prose for ${role} is missing from ROLE_TIERS.${role}`,
+        ).toContain(suffix);
+        expect(
+          DEFAULT_TIER[role],
+          `suffix "-${suffix}" named in the policy prose for ${role} equals ROLE_TIERS.${role}'s own default tier, so no "-${suffix}" variant file is ever rendered for ${role}`,
+        ).not.toBe(suffix);
+      }
     }
   });
 
