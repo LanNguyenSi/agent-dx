@@ -1,27 +1,37 @@
-export type Role = "explorer" | "task-slicer" | "implementer" | "reviewer";
+export type Role =
+  | "explorer"
+  | "task-slicer"
+  | "implementer"
+  | "reviewer"
+  | "advisor";
 
 export const ROLES: Role[] = [
   "explorer",
   "task-slicer",
   "implementer",
   "reviewer",
+  "advisor",
 ];
 
 /**
  * Roles that map the terrain or judge work without changing it. They are
- * installed with a read-only posture (no file-mutation tools).
+ * installed with a read-only posture (no file-mutation tools). The advisor
+ * escalation role joins this set for the same reason as explorer/reviewer:
+ * it reads and recommends but never edits.
  */
 export const READ_ONLY_ROLES: ReadonlySet<Role> = new Set<Role>([
   "explorer",
   "reviewer",
+  "advisor",
 ]);
 
 /**
  * A profile selects which subagent roles init installs. `full` is every
  * role (today's unconditional behavior); `minimal` drops the planning
- * (task-slicer) and discovery (explorer) roles and keeps only the
- * write+check pair. The reviewer is never omitted from either profile
- * (Standing Rule: always review), so `minimal` is not "just implementer".
+ * (task-slicer), discovery (explorer), and escalation (advisor) roles and
+ * keeps only the write+check pair. The reviewer is never omitted from
+ * either profile (Standing Rule: always review), so `minimal` is not "just
+ * implementer".
  */
 export type Profile = "minimal" | "full";
 
@@ -72,6 +82,7 @@ export const DEFAULT_MODELS: Record<Role, string> = {
   "task-slicer": "sonnet",
   implementer: "sonnet",
   reviewer: "opus",
+  advisor: "opus",
 };
 
 export function isModelAlias(value: string): value is ModelAlias {
@@ -160,6 +171,7 @@ export const ROLE_TIERS: Record<Role, Tier[]> = {
   "task-slicer": ["low", "medium", "high"],
   implementer: ["low", "medium", "high", "xhigh"],
   reviewer: ["medium", "high", "xhigh"],
+  advisor: ["high", "xhigh"],
 };
 
 /**
@@ -172,6 +184,7 @@ export const DEFAULT_TIER: Record<Role, Tier> = {
   "task-slicer": "medium",
   implementer: "medium",
   reviewer: "high",
+  advisor: "high",
 };
 
 export type ModelClass = "small" | "medium" | "large";

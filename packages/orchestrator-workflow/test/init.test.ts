@@ -473,6 +473,7 @@ describe("harness selection and model mapping", () => {
         "task-slicer": "haiku",
         implementer: "sonnet",
         reviewer: "opus",
+        advisor: "opus",
       },
     });
 
@@ -519,6 +520,7 @@ describe("harness selection and model mapping", () => {
         "task-slicer": "sonnet",
         implementer: "claude-sonnet-4-6",
         reviewer: "openrouter/some-model",
+        advisor: "opus",
       },
     });
     const implementer = readFileSync(
@@ -545,6 +547,7 @@ describe("harness selection and model mapping", () => {
         "task-slicer": "github-copilot/claude-sonnet-4.6",
         implementer: "github-copilot/claude-sonnet-4.6",
         reviewer: "github-copilot/claude-opus-4.8",
+        advisor: "github-copilot/claude-opus-4.8",
       },
     });
     const explorer = readFileSync(
@@ -616,7 +619,10 @@ describe("profile selection", () => {
       const listAgents = (dir: string) =>
         readdirSync(join(dir, ".claude", "agents")).sort();
       expect(listAgents(target)).toEqual(listAgents(explicitTarget));
+      // 5 roles since 0.21.0 (advisor added): explorer, implementer,
+      // reviewer, task-slicer, plus advisor (full profile only).
       expect(listAgents(target)).toEqual([
+        "advisor.md",
         "explorer.md",
         "implementer.md",
         "reviewer.md",
@@ -861,10 +867,12 @@ describe("profile downgrade (full -> minimal) leaves a note about untracked role
 
     // explorer and task-slicer each get one note for their base file plus
     // one note per non-default tier (low, high — medium is their own
-    // DEFAULT_TIER and never gets a variant file): 1 + 2 notes per role,
-    // 2 dropped roles, 1 harness = 6 notes total.
-    expect(report.notes.length).toBe(6);
-    for (const role of ["explorer", "task-slicer"] as const) {
+    // DEFAULT_TIER and never gets a variant file): 1 + 2 notes per role.
+    // advisor (added 0.21.0, full-profile-only) is a third dropped role: its
+    // only non-default tier is xhigh (its DEFAULT_TIER is high), so it
+    // contributes 1 + 1 notes. (3+3+2) notes, 1 harness = 8 notes total.
+    expect(report.notes.length).toBe(8);
+    for (const role of ["explorer", "task-slicer", "advisor"] as const) {
       const basePath = join(".claude", "agents", `${role}.md`);
       expect(report.notes.some((note) => note.includes(basePath))).toBe(true);
       for (const tier of ROLE_TIERS[role]) {
@@ -987,7 +995,7 @@ describe("leftover notes are ledger-driven, not enumeration-driven (review round
  * specific sub-loop.
  */
 describe("profile-downgrade variant-file notes are ledger-driven too (review round 3, R3-L1)", () => {
-  it("opencode + tiers on + unresolved tier-class models (0 variant files ever written), then full -> minimal with tiers still on: exactly the two dropped roles' base-file notes, no phantom variant notes", () => {
+  it("opencode + tiers on + unresolved tier-class models (0 variant files ever written), then full -> minimal with tiers still on: exactly the three dropped roles' base-file notes, no phantom variant notes", () => {
     runInit({
       targetDir: target,
       harnesses: ["opencode"],
@@ -996,7 +1004,7 @@ describe("profile-downgrade variant-file notes are ledger-driven too (review rou
       tiers: true,
       // opencodeClassModels omitted entirely: every tier class is
       // unresolved, so the M1 guard skips every opencode variant write;
-      // only the 4 base .opencode/agents/<role>.md files land on disk and
+      // only the 5 base .opencode/agents/<role>.md files land on disk and
       // in the manifest's file ledger.
     });
 
@@ -1008,8 +1016,10 @@ describe("profile-downgrade variant-file notes are ledger-driven too (review rou
       tiers: true,
     });
 
-    expect(report.notes.length).toBe(2);
-    for (const role of ["explorer", "task-slicer"] as const) {
+    // 3 dropped roles (explorer, task-slicer, advisor since 0.21.0), each
+    // contributing exactly one base-file note.
+    expect(report.notes.length).toBe(3);
+    for (const role of ["explorer", "task-slicer", "advisor"] as const) {
       const basePath = join(".opencode", "agents", `${role}.md`);
       expect(report.notes.some((note) => note.includes(basePath))).toBe(true);
     }
@@ -1146,8 +1156,10 @@ describe("tier variants (`--tiers`)", () => {
 
     runInit(defaultOptions());
 
+    // 5 roles since 0.21.0 (advisor added, full-profile-only).
     const agents = readdirSync(join(target, ".claude", "agents")).sort();
     expect(agents).toEqual([
+      "advisor.md",
       "explorer.md",
       "implementer.md",
       "reviewer.md",
@@ -1180,11 +1192,14 @@ describe("tier variants (`--tiers`)", () => {
     ]);
   });
 
-  it("tiers=true, claude, full profile: exactly 13 agent files with the right model/effort per variant", () => {
+  it("tiers=true, claude, full profile: exactly 15 agent files with the right model/effort per variant", () => {
     runInit({ ...defaultOptions(), profile: "full", tiers: true });
 
+    // 13 -> 15 since 0.21.0: advisor adds its own default file plus one
+    // xhigh variant (its only non-default tier; DEFAULT_TIER["advisor"] is
+    // "high").
     const agents = readdirSync(join(target, ".claude", "agents")).sort();
-    expect(agents.length).toBe(13);
+    expect(agents.length).toBe(15);
 
     // Dedicated anti-downgrade check: the reviewer default file must still
     // be opus, unaffected by tiers being on.
@@ -1209,6 +1224,28 @@ describe("tier variants (`--tiers`)", () => {
     );
     expect(implementerXhigh).toContain("model: opus");
     expect(implementerXhigh).toContain("effort: xhigh");
+
+    // advisor's default file stays opus with no effort: line, same
+    // anti-downgrade shape as reviewer above.
+    const advisor = readFileSync(
+      join(target, ".claude", "agents", "advisor.md"),
+      "utf8",
+    );
+    expect(advisor).toContain("model: opus");
+    expect(advisor).not.toContain("effort:");
+    expect(advisor).toContain("disallowedTools: Edit, Write, NotebookEdit");
+
+    // advisor's only variant is xhigh (DEFAULT_TIER["advisor"] is "high",
+    // so no advisor-high.md is ever rendered — see the next test).
+    const advisorXhigh = readFileSync(
+      join(target, ".claude", "agents", "advisor-xhigh.md"),
+      "utf8",
+    );
+    expect(advisorXhigh).toContain("model: opus");
+    expect(advisorXhigh).toContain("effort: xhigh");
+    expect(advisorXhigh).toContain(
+      "disallowedTools: Edit, Write, NotebookEdit",
+    );
   });
 
   it("never renders a <role>-<defaultTier>.md variant; the file set is collision-free", () => {
@@ -1219,9 +1256,13 @@ describe("tier variants (`--tiers`)", () => {
     expect(agents.has("task-slicer-medium.md")).toBe(false);
     expect(agents.has("implementer-medium.md")).toBe(false);
     expect(agents.has("reviewer-high.md")).toBe(false);
-    // 4 default files + 9 variants (explorer/task-slicer: 2 each,
-    // implementer: 3, reviewer: 2), no duplicates.
-    expect(agents.size).toBe(13);
+    // advisor's DEFAULT_TIER is "high" (its default file already IS the
+    // high-effort variant), so advisor-high.md must never be rendered.
+    expect(agents.has("advisor-high.md")).toBe(false);
+    // 5 default files + 10 variants (explorer/task-slicer: 2 each,
+    // implementer: 3, reviewer: 2, advisor: 1), no duplicates. 13 -> 15
+    // since 0.21.0 (advisor added).
+    expect(agents.size).toBe(15);
   });
 
   it("opencode: an anthropic-resolved class id gets variant: high/max on the high/xhigh tiers, none on low", () => {
@@ -1397,10 +1438,11 @@ describe("tier variants (`--tiers`)", () => {
     });
 
     const agents = readdirSync(join(target, ".opencode", "agents"));
-    // Only the 4 default per-role files; none of the 9 tier variants were
-    // written, since every one of them would have carried neither model:
-    // nor an effort line.
+    // Only the 5 default per-role files (advisor added 0.21.0); none of the
+    // 10 tier variants were written, since every one of them would have
+    // carried neither model: nor an effort line.
     expect(agents.sort()).toEqual([
+      "advisor.md",
       "explorer.md",
       "implementer.md",
       "reviewer.md",
@@ -1496,12 +1538,14 @@ describe("tier variants (`--tiers`)", () => {
       expect(manifest.tiers).toBe(true);
     });
 
-    it("a flagless init on a fresh target renders exactly the 4 default agent files and writes tiers: false", () => {
+    it("a flagless init on a fresh target renders exactly the 5 default agent files and writes tiers: false", () => {
       const result = run();
       expect(result.status, result.stderr).toBe(0);
 
+      // 4 -> 5 since 0.21.0 (advisor added, full-profile-only).
       const agents = readdirSync(join(target, ".claude", "agents")).sort();
       expect(agents).toEqual([
+        "advisor.md",
         "explorer.md",
         "implementer.md",
         "reviewer.md",
@@ -1665,8 +1709,10 @@ describe("cli smoke — opencode harness", () => {
     }
     expect(result.stdout).not.toContain(`Tier model class`);
 
+    // 5 default files since 0.21.0 (advisor added, full-profile-only).
     const agents = readdirSync(join(target, ".opencode", "agents"));
     expect(agents.sort()).toEqual([
+      "advisor.md",
       "explorer.md",
       "implementer.md",
       "reviewer.md",
@@ -1694,8 +1740,12 @@ describe("cli smoke — opencode harness", () => {
         `Warning: Tier model class "${modelClass}" (alias "${alias}") could not be resolved to an opencode model id (no provider offering Claude models found in the live catalog); no opencode effort-tier variant files will be rendered for this class (Claude Code variants are unaffected).`,
       );
     }
+    // 5 default files since 0.21.0 (advisor added, full-profile-only); the
+    // --models spec above omits advisor, so it renders on its DEFAULT_MODELS
+    // default (opus) like any unmentioned role.
     const agents = readdirSync(join(target, ".opencode", "agents"));
     expect(agents.sort()).toEqual([
+      "advisor.md",
       "explorer.md",
       "implementer.md",
       "reviewer.md",

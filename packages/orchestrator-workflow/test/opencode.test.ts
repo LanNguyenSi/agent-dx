@@ -213,6 +213,7 @@ describe("resolveOpencodeModels — FQ ids pass through", () => {
       "task-slicer": "github-copilot/claude-sonnet-4.6",
       implementer: "github-copilot/claude-sonnet-4.6",
       reviewer: "github-copilot/claude-opus-4.8",
+      advisor: "github-copilot/claude-opus-4.8",
     };
     const { resolved, warnings } = resolveOpencodeModels(models, {
       catalog: [],
