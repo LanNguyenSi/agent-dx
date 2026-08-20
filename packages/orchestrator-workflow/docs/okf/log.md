@@ -1434,3 +1434,41 @@
   measurement this pass could honestly report) should be taken to confirm
   whether the `sources-fresh` gate actually fires against them at that
   point.
+- 2026-08-20 (fix round, agent-dx task T-001-fix1, review findings F1-F10):
+  corrects a factual gap left by the 2026-08-20 T-001 entry above. That
+  entry's own claim ("every citation into or after it was re-checked
+  individually rather than assumed to share one uniform delta") was not
+  actually true for `model-preselection.md`: a subsequent review pass found
+  eleven `init.ts:` citation sites in that doc still pointing at stale line
+  ranges left over from before the 0.22.0 diff shifted the file, including
+  two that pointed at the wrong block entirely rather than merely a shifted
+  one (the "tiers: true -> false" leftover-note claim cited a line range that
+  was actually the *full -> minimal* downgrade's own base-file note, not the
+  tiers-off block; the "full -> minimal downgrade also notes tier-variant
+  files" claim cited the top of that downgrade's `if`-block, not its own
+  tier-variant sub-loop), and one internal self-contradiction (the "Flow"
+  section's own compose-variant-pair citation read stale numbers while the
+  "Composition" section a few lines below it, describing the same two
+  functions, already cited the correct ones). This same fix round also added
+  a short JSDoc half-sentence to `composeClaudeAgent` (finding F10, resolving
+  a separate JSDoc contradiction, no logic change), which shifted every line
+  at or after `init.ts:199` down by 5; every citation below was re-derived
+  from a direct read of the file *after* that edit, not from the doc's own
+  arithmetic on the pre-F10 file, so the numbers below are the final,
+  post-this-round values. All eleven sites were corrected: the manifest-write
+  block (was `:541-579`/`:543-551`, now `:578-616`/`:580-588`), the
+  compose*Agent pair (was `:189-225`, now `:189-254`), the claude/opencode
+  invocation sites (was `:473-477`/`:497-505`, now `:507-510`/`:539-542`),
+  the compose*AgentVariant pair (was `:240-255`/`:305-328`, now
+  `:269-284`/`:338-361`, resolving the self-contradiction above), the
+  `composeOpencodeAgent` comment (was `:235-236`, now `:241-242`), the codex
+  block (was `:491-493`, now `:524-526`), the two `DEFAULT_TIER`-continue
+  guards (was `:480`/`:508`, now `:513`/`:545`), the two mislabeled
+  leftover-note citations described above (was `:409-425`, now `:442-458`;
+  was `:384-398`, now `:417-432`), the matching approximate citation for the
+  same tier-variant sub-loop (was `~393`, now `~423`), and the
+  `installKitFile` citation (was `:432-449`, now `:460-482`). No other
+  `init.ts:` citation in the file needed correction; each was independently
+  re-verified against the post-F10 file regardless. This entry exists so the
+  audit trail records the gap honestly rather than silently rewriting the
+  prior entry's claim: the fix, not just the doc content, is logged.

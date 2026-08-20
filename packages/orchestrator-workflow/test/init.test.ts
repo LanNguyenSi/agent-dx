@@ -1235,19 +1235,39 @@ describe("tier variants (`--tiers`)", () => {
     // the acceptance test for that invariant, not just an inference from
     // reading the source: two separate targets, one with tiers off and one
     // with tiers on, are diffed file by file for both harnesses.
+    //
+    // `opencodeModels` supplies anthropic-resolved ids (the same pattern the
+    // "opencode default files: reviewer/advisor get variant: high..." test
+    // below uses) rather than leaving it unset: a bare alias resolves to
+    // `undefined` via `opencodeModelValue`, which would make the opencode
+    // half of this comparison vacuous (neither side ever gets a `model:` or
+    // effort line, so the byte-diff cannot actually exercise the pin). With
+    // a resolved model, reviewer/advisor's `variant: high` line participates
+    // in the diff for real.
     const targetTiersOff = mkdtempSync(join(tmpdir(), "ow-tiers-off-"));
     const targetTiersOn = mkdtempSync(join(tmpdir(), "ow-tiers-on-"));
+    const opencodeModels = {
+      explorer: "anthropic/claude-sonnet-4-6",
+      "task-slicer": "anthropic/claude-sonnet-4-6",
+      implementer: "anthropic/claude-sonnet-4-6",
+      reviewer: "anthropic/claude-opus-4-8",
+      advisor: "anthropic/claude-opus-4-8",
+    };
     try {
       runInit({
         ...defaultOptions(),
         targetDir: targetTiersOff,
         harnesses: ["claude", "opencode"],
+        profile: "full",
+        opencodeModels,
         tiers: false,
       });
       runInit({
         ...defaultOptions(),
         targetDir: targetTiersOn,
         harnesses: ["claude", "opencode"],
+        profile: "full",
+        opencodeModels,
         tiers: true,
       });
       for (const role of ROLES) {
@@ -1256,6 +1276,19 @@ describe("tier variants (`--tiers`)", () => {
           const off = readFileSync(join(targetTiersOff, relativePath), "utf8");
           const on = readFileSync(join(targetTiersOn, relativePath), "utf8");
           expect(on, `${relativePath} differs between tiers on/off`).toBe(off);
+        }
+      }
+      // Sanity check that the comparison above is not accidentally vacuous:
+      // reviewer/advisor's opencode default file must actually carry the
+      // resolved model and its `variant: high` effort line on both targets.
+      for (const targetDir of [targetTiersOff, targetTiersOn]) {
+        for (const role of ["reviewer", "advisor"] as const) {
+          const rendered = readFileSync(
+            join(targetDir, ".opencode", "agents", `${role}.md`),
+            "utf8",
+          );
+          expect(rendered).toContain("model: anthropic/claude-opus-4-8");
+          expect(rendered).toContain("variant: high");
         }
       }
     } finally {
@@ -1380,6 +1413,89 @@ describe("tier variants (`--tiers`)", () => {
         "utf8",
       );
       expect(rendered).toContain("model: anthropic/claude-sonnet-4-6");
+      expect(rendered).not.toContain("variant:");
+      expect(rendered).not.toContain("reasoningEffort");
+    }
+  });
+
+  it("opencode default files: a non-Claude-family provider-qualified model gets a plain reasoningEffort: line keyed by the role's own DEFAULT_TIER", () => {
+    // Mirrors the anthropic-resolved test above, but for the
+    // non-Claude-family, non-Ollama branch of opencodeEffortLine: unlike the
+    // Claude-family `variant:` field (which cannot express an effort below
+    // `high`), a plain `reasoningEffort:` model can and does render the
+    // medium-default roles' own pinned effort, not just reviewer/advisor's.
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      opencodeModels: {
+        explorer: "openai/gpt-5",
+        "task-slicer": "openai/gpt-5",
+        implementer: "openai/gpt-5",
+        reviewer: "openai/gpt-5",
+        advisor: "openai/gpt-5",
+      },
+    });
+
+    for (const role of ["explorer", "task-slicer", "implementer"] as const) {
+      const rendered = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(rendered).toContain("model: openai/gpt-5");
+      expect(rendered).toContain("reasoningEffort: medium");
+      expect(rendered).not.toContain("variant:");
+    }
+
+    for (const role of ["reviewer", "advisor"] as const) {
+      const rendered = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(rendered).toContain("model: openai/gpt-5");
+      expect(rendered).toContain("reasoningEffort: high");
+      expect(rendered).not.toContain("variant:");
+    }
+  });
+
+  it("opencode default files: an Ollama or provider-less resolved model gets no effort field at all", () => {
+    // A *resolved* model (unlike the omitted-`model:` case elsewhere in this
+    // file) that is neither Claude-family nor a provider-qualified non-Ollama
+    // id still gets no effort field: opencodeEffortLine's `provider ===
+    // "ollama"` and `provider === undefined` branches both return
+    // `undefined`. Checked here against the default (unsuffixed) file, the
+    // same dispatch tier variants already cover.
+    runInit({
+      targetDir: target,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "full",
+      opencodeModels: {
+        explorer: "ollama/llama3",
+        "task-slicer": "ollama/llama3",
+        implementer: "ollama/llama3",
+        reviewer: "no-provider-model",
+        advisor: "no-provider-model",
+      },
+    });
+
+    for (const role of ["explorer", "task-slicer", "implementer"] as const) {
+      const rendered = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(rendered).toContain("model: ollama/llama3");
+      expect(rendered).not.toContain("variant:");
+      expect(rendered).not.toContain("reasoningEffort");
+    }
+
+    for (const role of ["reviewer", "advisor"] as const) {
+      const rendered = readFileSync(
+        join(target, ".opencode", "agents", `${role}.md`),
+        "utf8",
+      );
+      expect(rendered).toContain("model: no-provider-model");
       expect(rendered).not.toContain("variant:");
       expect(rendered).not.toContain("reasoningEffort");
     }

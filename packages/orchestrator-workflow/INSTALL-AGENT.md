@@ -172,8 +172,8 @@ steps in the repository you were asked to install into.
      to fully-qualified ids by running `opencode models` at install time; in a
      manual install you may not have a live catalog, so omitting `model:` is
      correct. When you do have a fully-qualified `model:` value, add the same
-     pinned-default-effort line the tier variants use below (see the package
-     README's "Effort tiers" section for the exact dispatch rule), keyed by
+     pinned-default-effort line (see the package README's "Effort tiers"
+     section for the exact dispatch rule), keyed by
      the role's own default tier instead of a suffix tier (`medium` for
      explorer/task-slicer/implementer, `high` for reviewer/advisor): a
      resolved Claude-family model gets `variant: high` for reviewer/advisor

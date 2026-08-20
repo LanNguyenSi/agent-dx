@@ -1520,7 +1520,8 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
  * silently drifting.
  */
 describe("pinned-default-effort policy ships in the AGENTS.md section and is not framed as tiers-gated", () => {
-  const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+  const agentsMdSectionRaw = readAsset("agents-md-section.md");
+  const agentsMdSection = unwrap(agentsMdSectionRaw);
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
 
   function parseRoleList(raw: string): Role[] {
@@ -1593,6 +1594,21 @@ describe("pinned-default-effort policy ships in the AGENTS.md section and is not
     expect(bullet).toContain("not gated on `--tiers`");
   });
 
+  it("the pinned-default-effort statement starts its own bullet in the raw (non-unwrapped) source, not appended to the end of the tiers-gated bullet", () => {
+    // The whitespace-collapsed `agentsMdSection` string used elsewhere in
+    // this describe block cannot distinguish "own bullet" from "appended to
+    // the end of the tiers-gated bullet's text": both collapse to the same
+    // space-joined string. Assert against the raw, un-unwrapped asset text
+    // instead, requiring a "\n- " (or file-start "- ") bullet boundary
+    // directly before the statement.
+    expect(
+      /^- Every unsuffixed default subagent carries its own pinned default effort/m.test(
+        agentsMdSectionRaw,
+      ),
+      'pinned-default-effort statement must begin its own bullet line (start with "- "), not be appended inside another bullet\'s text',
+    ).toBe(true);
+  });
+
   it("the pinned-default-effort bullet sits outside the tiers-gated bullet's own span", () => {
     // The tiers-gated bullet ends at its own "use the default." phrase (see
     // the describe block above); the pinned-default-effort bullet must start
@@ -1616,14 +1632,40 @@ describe("pinned-default-effort policy ships in the AGENTS.md section and is not
     expect(end).toBeGreaterThan(start);
     const step = skillMd.slice(start, end);
     const match = step.match(
-      /its pinned default effort is `(\w+)`, not inherited from the session/,
+      /carries a pinned effort: `(\w+)` in its own file, whether or not tier variants are installed/,
     );
     expect(
       match,
-      "pinned-default-effort parenthetical not found in step 6",
+      "pinned-default-effort sentence not found in step 6",
     ).toBeTruthy();
     const claimed = (match as RegExpMatchArray)[1];
     expect(claimed).toBe(TIER_DEFS[DEFAULT_TIER.implementer].effort);
+  });
+
+  it('SKILL.md step 6\'s pinned-default-effort sentence sits outside the "When tier variants are installed..." clause, so it also holds for a tiers-off install', () => {
+    // Mirrors the agents-md-section.md positional test above: the pinned-
+    // effort statement must not be readable as scoped to the tiers-on
+    // conditional it happens to sit next to in prose.
+    const start = skillMd.indexOf("**Delegate implementation.**");
+    const end = skillMd.indexOf("**Delegate review.**");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const step = skillMd.slice(start, end);
+    const tiersGatedStart = step.indexOf("When tier variants are installed");
+    expect(tiersGatedStart).toBeGreaterThanOrEqual(0);
+    const tiersGatedEnd = step.indexOf("is non-trivial.", tiersGatedStart);
+    expect(tiersGatedEnd).toBeGreaterThan(tiersGatedStart);
+    const pinnedIdx = step.indexOf(
+      "carries a pinned effort: `medium` in its own file",
+    );
+    expect(
+      pinnedIdx,
+      "pinned-default-effort sentence not found",
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      pinnedIdx < tiersGatedStart || pinnedIdx >= tiersGatedEnd,
+      "pinned-default-effort sentence must not sit inside the tiers-gated clause's own span",
+    ).toBe(true);
   });
 });
 

@@ -196,6 +196,11 @@ function yamlQuote(value: string): string {
  * not depend on the `tiers` flag, the default file's content still stays
  * byte-identical whether or not tier variants are also rendered, the same
  * invariant `composeClaudeAgentVariant`'s own doc comment below describes.
+ * Computed inline here rather than passed in like `composeOpencodeAgent`'s
+ * `effortLine`: `TIER_DEFS[DEFAULT_TIER[role]].effort` is a pure function of
+ * `role` alone, with no model-dependent dispatch on Claude Code the way
+ * opencode's family-based `opencodeEffortLine` has, so there is no second,
+ * potentially-diverging computation here to guard against.
  */
 function composeClaudeAgent(role: Role, model: string): string {
   const asset = readAgentAsset(role);

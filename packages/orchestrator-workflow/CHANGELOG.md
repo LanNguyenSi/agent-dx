@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is also on, since the pin does not read the `tiers` flag; this invariant
   is now belt-and-suspenders tested directly (a two-target diff, not just
   inferred from reading the source).
+  A `--tiers`-off install (the default) renders no variant files at all, so
+  it has no in-install escalation path off a default's pinned effort; pull
+  `init --tiers` afterward if a task needs one.
 
 ## [0.21.0] - 2026-08-20
 
