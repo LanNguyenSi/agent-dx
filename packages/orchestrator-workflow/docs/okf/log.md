@@ -1317,3 +1317,120 @@
   previously stated 241 + 6; verified by running the full suite at commit
   60d15b8 (pre-advisor, 0.20.0) in a separate worktree (238/238) against the
   current suite (247/247 before this round's own new tests, 255/255 after).
+
+- 2026-08-20: re-verified and re-stamped model-preselection.md and
+  install-fence-mechanics.md against 0.22.0 (agent-dx task T-001, pinned
+  default effort): every unsuffixed default agent file now carries
+  `TIER_DEFS[DEFAULT_TIER[role]].effort` unconditionally (`effort: medium`
+  for explorer/task-slicer/implementer, `effort: high` for reviewer/advisor
+  on Claude Code; the matching `variant:`/`reasoningEffort:` dispatch on
+  opencode, via `opencodeEffortLine`, renamed from `opencodeVariantEffortLine`
+  since it is no longer variant-only), so a default spawn no longer silently
+  inherits the orchestrator session's own effort. Both docs previously
+  stated the opposite as a load-bearing invariant: the pre-0.19.0-manifest
+  legacy-frontmatter test was cited as "four-line frontmatter with no
+  `effort:`", and the tiers=true anti-downgrade check was cited as
+  `reviewer.md`/`advisor.md` staying `opus` "with no `effort:` line", both
+  now false, corrected in place (five-line frontmatter with `effort: medium`
+  pinned; `effort: high` pinned on the anti-downgrade check). Both docs also
+  gained a new "Pinned default effort (0.22.0)" subsection under "Effort
+  tiers" (model-preselection.md) and a corresponding paragraph in "What
+  `init` writes" (install-fence-mechanics.md) stating the rule is
+  unconditional, not gated on `--tiers`, the same "not framed as tiers-gated"
+  requirement `assets/agents-md-section.md`'s own new bullet and the
+  docs-consistency test guarding it enforce in the installed prose.
+
+  Every `init.ts:` citation touching a function this task's diff changed
+  (`composeClaudeAgent`, `composeOpencodeAgent`, `opencodeEffortLine`,
+  `composeClaudeAgentVariant`, `isClaudeFamilyModel`,
+  `composeOpencodeAgentVariant`, the claude/opencode default- and
+  tier-rendering blocks inside `runInit`, the manifest-write block) was
+  re-derived from a direct read of the current file at that exact location,
+  not a computed offset applied blindly, the discipline every entry above
+  uses: `runInit` itself moved from old line 330 to 358 (the new JSDoc
+  comments on the composer functions above it account for the shift), and
+  every citation into or after it was re-checked individually rather than
+  assumed to share one uniform delta. `test/init.test.ts` citations inside
+  and after the `describe("tier variants (\`--tiers\`)")` block needed the
+  same per-anchor treatment: two new tests were inserted inside that block
+  (the byte-identity-across-tiers test after the legacy-manifest test, and
+  the opencode default-file effort test after the collision-free-file-set
+  test), so every citation from that point through the CLI-smoke describe
+  at the file's end was re-derived by grepping each test's own title text in
+  the current file rather than shifted by a guessed delta; the two
+  citations for tests fully inside the untouched nested
+  `describe("CLI --tiers override-vs-persist")` block were left as a single
+  outer-range citation rather than re-derived per-test, since none of that
+  nested block's own content changed and re-deriving five more exact
+  sub-ranges for unchanged content was judged out of this pass's proportion
+  (recorded here as a deliberate scope cut, not an oversight). Citations
+  into `cli.ts`, `models.ts`, `README.md`'s non-effort-tiers sections, and
+  the three docs this task's diff never touches
+  (review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
+  subagent-contracts-superset.md) were spot-checked (grepped for
+  `opencodeVariantEffortLine`/`composeClaudeAgent`/`composeOpencodeAgent`
+  and for stale "no effort:" phrasing) and confirmed unaffected; none of
+  the three peripheral docs mention any of those symbols.
+
+  `README.md` gained a new "Every default file carries its own pinned
+  effort, independent of `--tiers`" paragraph in its "Effort tiers" section
+  (the previous "no `effort:` key" claim about the default file was also
+  corrected there); `INSTALL-AGENT.md`'s manual-fallback step 4 gained the
+  matching byte-precise placement rule for Claude Code (`effort:` line
+  directly after `model:`, before `disallowedTools:`) and a pointer note
+  for opencode (the same family-based dispatch tier variants already used,
+  keyed by the role's own default tier instead of a suffix tier).
+  `assets/agents-md-section.md`'s Scaling delegation bullet list and
+  `assets/skill/SKILL.md` step 6 both gained prose stating the same rule,
+  guarded by a new, derivation-based `test/docs-consistency.test.ts`
+  `describe` (not a hand-maintained role list, parses the prose's
+  medium/high role split and checks it against
+  `ROLES.filter((role) => TIER_DEFS[DEFAULT_TIER[role]].effort === ...)`
+  directly, plus a positional check that the new bullet sits strictly
+  outside the pre-existing tiers-gated bullet's own span), the task's own
+  instruction named this discipline explicitly, citing 0.21.0's
+  hand-mapped-guard lesson (a mutant proving a hand-maintained map missed a
+  wrong role name) as the reason.
+
+  Mutation-tested for real, one change at a time, each reverted and
+  restored to the byte-identical pre-mutant state (verified by re-reading
+  the file, not assumed) before moving to the next: deleting the new
+  `` `effort: ${TIER_DEFS[DEFAULT_TIER[role]].effort}` `` line from
+  `composeClaudeAgent` turned the legacy-manifest frontmatter-shape test red
+  (1 test); reverting `agents-md-section.md`'s new pinned-default-effort
+  bullet to the pre-change wording (deleting the bullet entirely) turned
+  all 3 tests in the new "pinned-default-effort policy ships..." `describe`
+  red (the role-split derivation check, the not-gated-on-tiers phrase
+  check, and the outside-the-tiers-gated-bullet positional check). Full
+  suite 261/261 (255 baseline + 2 new tests in the `tier variants` describe
+  block + 4 new tests in the new docs-consistency `describe`, net +6:
+  the arithmetic reconciles as 255 + 2 + 4 = 261), `tsc --noEmit` clean,
+  `tsc --noEmit -p tsconfig.test.json` clean, `npm run build` clean,
+  `prettier --check` clean for every file this pass touched (the
+  pre-existing `test/template-markers.test.ts` warning is unrelated and
+  untouched, matching every prior pass's baseline).
+
+  `okf-kit check docs/okf --strict`: 0 warnings, 0 findings both before and
+  after this pass's edits, working-tree-only and uncommitted at measurement
+  time, per the mechanical reason the 0.19.0 fix-round-2 entry above
+  documents (the `sources-fresh` gate keys staleness off each source's last
+  *commit* time, not filesystem mtime, so an uncommitted working-tree edit
+  cannot move the needle regardless of whether the doc's own prose was
+  actually re-verified), this 0/0 result is reported as expected-and-
+  uninformative given the measurement conditions, not as evidence the
+  content re-verification above was unnecessary or already satisfied.
+  review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, and
+  subagent-contracts-superset.md were left un-re-stamped: this task's diff
+  touches `CHANGELOG.md`, `assets/agents-md-section.md`, and
+  `test/docs-consistency.test.ts`, which all three list as `sources:`, but
+  none of their own subject matter (review gate, run-state lifecycle,
+  subagent contracts) is affected by the pinned-default-effort change
+  content-wise, confirmed by grepping all three for the changed symbols and
+  finding no hits; per the 0.14.0/0.17.0/0.18.0 precedent above, a source
+  whose own cited content did not move is left un-re-stamped rather than
+  re-stamped on churn alone. Not fixed here, per this task's own boundary:
+  once these three docs are next touched for their own subject matter, a
+  full commit-time `okf-kit check` re-run (not the working-tree-only
+  measurement this pass could honestly report) should be taken to confirm
+  whether the `sources-fresh` gate actually fires against them at that
+  point.

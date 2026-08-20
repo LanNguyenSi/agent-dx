@@ -1505,6 +1505,129 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
 });
 
 /**
+ * 0.22.0 pins every unsuffixed default subagent's effort in its own file
+ * (`TIER_DEFS[DEFAULT_TIER[role]].effort`, applied unconditionally by
+ * `composeClaudeAgent`/`composeOpencodeAgent` regardless of the `tiers`
+ * flag), so a default spawn no longer silently inherits the orchestrator
+ * session's effort. agents-md-section.md's Scaling delegation bullet list
+ * states this as its own bullet, deliberately NOT nested inside the
+ * tiers-gated "When tier variants are installed..." bullet, so it cannot be
+ * misread as a `--tiers`-only behavior. The role/effort split named in the
+ * prose is parsed out and checked against `DEFAULT_TIER`/`TIER_DEFS`
+ * directly (not a hand-maintained role list), the same
+ * derive-from-source-of-truth discipline the tier-suffix guards above use,
+ * so a future role addition or a wrong effort claim fails here rather than
+ * silently drifting.
+ */
+describe("pinned-default-effort policy ships in the AGENTS.md section and is not framed as tiers-gated", () => {
+  const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  function parseRoleList(raw: string): Role[] {
+    return raw
+      .replace(/,?\s*and\s+/g, ", ")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => entry.replace(/^the\s+/, "")) as Role[];
+  }
+
+  function pinnedEffortBullet(): string {
+    const idx = agentsMdSection.indexOf(
+      "Every unsuffixed default subagent carries its own pinned default effort",
+    );
+    expect(
+      idx,
+      "pinned-default-effort bullet not found",
+    ).toBeGreaterThanOrEqual(0);
+    // agentsMdSection is line-unwrapped (all whitespace collapsed to single
+    // spaces), so a "\n- " bullet-boundary search does not work here; bound
+    // the end at the next bullet's own known lead-in phrase instead.
+    const end = agentsMdSection.indexOf(
+      "Under the `full` profile, an advisor subagent is available",
+      idx,
+    );
+    expect(
+      end,
+      "pinned-default-effort bullet did not terminate before the next bullet",
+    ).toBeGreaterThan(idx);
+    return agentsMdSection.slice(idx, end);
+  }
+
+  it("names exactly the medium-tier and high-tier roles derived from DEFAULT_TIER/TIER_DEFS (structural)", () => {
+    const bullet = pinnedEffortBullet();
+    const match = bullet.match(/medium for ([^;]+); high for ([^.]+)\./);
+    expect(
+      match,
+      "medium/high role split not found in the bullet",
+    ).toBeTruthy();
+    const [, mediumRaw, highRaw] = match as RegExpMatchArray;
+    const parsedMedium = parseRoleList(mediumRaw);
+    const parsedHigh = parseRoleList(highRaw);
+    expect(parsedMedium.length).toBeGreaterThan(0);
+    expect(parsedHigh.length).toBeGreaterThan(0);
+    for (const role of [...parsedMedium, ...parsedHigh]) {
+      expect(
+        (ROLES as string[]).includes(role),
+        `"${role}" parsed from the prose is not a known role`,
+      ).toBe(true);
+    }
+    const derivedMedium = ROLES.filter(
+      (role) => TIER_DEFS[DEFAULT_TIER[role]].effort === "medium",
+    );
+    const derivedHigh = ROLES.filter(
+      (role) => TIER_DEFS[DEFAULT_TIER[role]].effort === "high",
+    );
+    expect(new Set(parsedMedium)).toEqual(new Set(derivedMedium));
+    expect(new Set(parsedHigh)).toEqual(new Set(derivedHigh));
+    // Every role in ROLES falls into exactly one of the two buckets: guards
+    // against a future tier whose effort is neither "medium" nor "high"
+    // going undocumented by this bullet's two-bucket phrasing.
+    expect(parsedMedium.length + parsedHigh.length).toBe(ROLES.length);
+  });
+
+  it("states the pin is not gated on --tiers", () => {
+    const bullet = pinnedEffortBullet();
+    expect(bullet).toContain("not inherited from the orchestrator session");
+    expect(bullet).toContain("whether or not tier variants are installed");
+    expect(bullet).toContain("not gated on `--tiers`");
+  });
+
+  it("the pinned-default-effort bullet sits outside the tiers-gated bullet's own span", () => {
+    // The tiers-gated bullet ends at its own "use the default." phrase (see
+    // the describe block above); the pinned-default-effort bullet must start
+    // strictly after that point, so a reader (or a future edit) cannot fold
+    // it back inside the "When tier variants are installed..." conditional.
+    const tiersGatedEnd = agentsMdSection.indexOf(
+      "use the default.",
+      agentsMdSection.indexOf("When tier variants are installed"),
+    );
+    expect(tiersGatedEnd).toBeGreaterThan(0);
+    const pinnedIdx = agentsMdSection.indexOf(
+      "Every unsuffixed default subagent carries its own pinned default effort",
+    );
+    expect(pinnedIdx).toBeGreaterThan(tiersGatedEnd);
+  });
+
+  it('SKILL.md step 6 "Delegate implementation" names the implementer default\'s pinned effort, derived from TIER_DEFS/DEFAULT_TIER', () => {
+    const start = skillMd.indexOf("**Delegate implementation.**");
+    const end = skillMd.indexOf("**Delegate review.**");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const step = skillMd.slice(start, end);
+    const match = step.match(
+      /its pinned default effort is `(\w+)`, not inherited from the session/,
+    );
+    expect(
+      match,
+      "pinned-default-effort parenthetical not found in step 6",
+    ).toBeTruthy();
+    const claimed = (match as RegExpMatchArray)[1];
+    expect(claimed).toBe(TIER_DEFS[DEFAULT_TIER.implementer].effort);
+  });
+});
+
+/**
  * 0.21.0 adds the advisor role: a fifth, read-only, `full`-profile-only
  * subagent consulted only at defined escalation triggers (architectural
  * uncertainty, conflicting requirements, a high-commitment fork among valid

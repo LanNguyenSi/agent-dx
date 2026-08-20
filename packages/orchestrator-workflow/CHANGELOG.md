@@ -5,6 +5,45 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-08-20
+
+### Changed
+
+- **Default subagent spawns no longer inherit the orchestrator session's
+  effort.** Every unsuffixed default agent file (`explorer.md`,
+  `task-slicer.md`, `implementer.md`, `reviewer.md`, `advisor.md`) now
+  carries its own pinned default effort, unconditionally, regardless of
+  whether `--tiers` is on: `effort: medium` for explorer, task-slicer, and
+  implementer, `effort: high` for reviewer and advisor
+  (`TIER_DEFS[DEFAULT_TIER[role]].effort`, the same tier data `--tiers`
+  already used, applied by `composeClaudeAgent` for every install, tiers
+  flag or not). opencode gets the matching pinned line via
+  `opencodeEffortLine` (renamed from `opencodeVariantEffortLine`, now shared
+  by the default file and the tier variants): a resolved Claude-family model
+  gets `variant: high` for reviewer/advisor and no effort field at all for
+  the three medium-default roles (opencode's `variant:` option does not
+  distinguish an effort below `high`, the same collapse tier variants
+  already documented), a non-Claude-family provider-qualified model gets
+  `reasoningEffort: medium`/`reasoningEffort: high`, and Ollama, a
+  provider-less id, or an unresolved model gets no effort field either way.
+  Practically: on a high-effort orchestrator session, a default subagent
+  spawn used to silently run at that same high effort; it now runs at its
+  own role's pinned effort instead, which is weaker (and cheaper) for the
+  three medium-default roles. Escalate deliberately via the `-high`/`-xhigh`
+  tier variants (`--tiers`) when a task actually needs more.
+  **`CLAUDE_CODE_EFFORT_LEVEL` still beats this pin**: when the harness
+  environment sets that variable, it overrides every installed agent's
+  frontmatter `effort:`, default files and tier variants alike, the same
+  warning `--tiers` already carried. **opencode cannot express `medium` for
+  a Claude-family model at all**: the `variant:` field only distinguishes
+  `high`/`max`, so a Claude-family default file for explorer, task-slicer,
+  or implementer renders with no effort field, falling back to whatever the
+  resolved model's own default happens to be.
+  The default file's content stays byte-identical whether or not `--tiers`
+  is also on, since the pin does not read the `tiers` flag; this invariant
+  is now belt-and-suspenders tested directly (a two-target diff, not just
+  inferred from reading the source).
+
 ## [0.21.0] - 2026-08-20
 
 ### Added

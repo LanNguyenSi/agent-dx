@@ -137,7 +137,8 @@ directory and the subagents.
    contract (format below). When tier variants are installed, pick the
    implementer tier (the installed `implementer-<tier>` subagents, if any) by
    the task's complexity and risk, at your own judgment, defaulting to the
-   unsuffixed subagent when unsure; record a non-default tier choice with a
+   unsuffixed subagent when unsure (its pinned default effort is `medium`,
+   not inherited from the session); record a non-default tier choice with a
    one-line reason in `03-decisions.md` when the task is non-trivial. When a
    task's acceptance rests on a test that must fail without the change, name
    the mutation probes to run in the task assignment; the implementer reports
