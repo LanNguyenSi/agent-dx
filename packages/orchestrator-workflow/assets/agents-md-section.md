@@ -59,6 +59,16 @@ default, not a ritual.
   since its default already sits at high. Spawn only variants that are
   actually installed. Tier choice is a conscious decision, not a ritual;
   when unsure, use the default.
+- Under the `full` profile, an advisor subagent is available for escalation
+  only: architectural uncertainty, requirements that contradict each other,
+  multiple valid solution paths where committing to one is expensive to
+  reverse, repeated implementation failures on the same task, a review
+  deadlock, or a high-risk decision. The orchestrator spawns it only at one
+  of these triggers, never as a standard pipeline step; using it is a
+  judgment call, the same discretion already used for tier choice. The
+  advisor returns a recommendation with options, pros, cons, and risk; the
+  orchestrator still decides, and a critical risk still goes to the
+  operator.
 
 ### Review gate
 
@@ -117,9 +127,9 @@ Workflow state lives under `.ai/`:
 
 - The orchestrator runs on the session's main model. Use the strongest
   reasoning model available.
-- Per-role model preferences (explorer, task slicer, implementer, reviewer) are
-  recorded in `.ai/workflow/manifest.json` and, where the harness supports
-  per-agent models, in the subagent definitions themselves.
+- Per-role model preferences (explorer, task slicer, implementer, reviewer,
+  advisor) are recorded in `.ai/workflow/manifest.json` and, where the
+  harness supports per-agent models, in the subagent definitions themselves.
 
 ### Definition of done
 

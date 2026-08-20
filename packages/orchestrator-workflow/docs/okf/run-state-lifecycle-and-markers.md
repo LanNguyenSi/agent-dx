@@ -20,12 +20,12 @@ sources:
 # Run-state lifecycle and machine-readable markers
 
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
-`00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:61-70).
+`00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:65-78).
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(SKILL.md:72-73; packages/orchestrator-workflow/README.md:91-96;
+(SKILL.md:80-81; packages/orchestrator-workflow/README.md:91-96;
 packages/orchestrator-workflow/INSTALL-AGENT.md:46-47,135-138). The newest run
 directory is the active one; older directories are the auditable history and
-must not be edited (SKILL.md:74, "Do not edit past runs"). Three of the
+must not be edited (SKILL.md:82, "Do not edit past runs"). Three of the
 seven files carry a `<!-- solution-acceptance: <key> = <value> -->`
 HTML-comment marker, all sharing one comment prefix but split across two
 opposite fail postures. This doc covers those markers and the
@@ -42,21 +42,21 @@ YAML contracts referenced below live in
 byte-exact by packages/orchestrator-workflow/test/template-markers.test.ts:39-43).
 At run creation the orchestrator replaces `TODO` with the pre-change repo
 HEAD (`git rev-parse HEAD`), recorded before the run's first implementation
-commit (SKILL.md:77-79). Despite sharing the `solution-acceptance:` prefix
+commit (SKILL.md:86-87). Despite sharing the `solution-acceptance:` prefix
 with the two verdict markers below, run-base is not a verdict: it is a
 change-binding signal for run-completeness readers, and it fails **open**
-(SKILL.md:80-81). Left as `TODO` it does not block anything, the reader
+(SKILL.md:89-90). Left as `TODO` it does not block anything, the reader
 just falls back to a tolerant day-granular date heuristic. When filled, the
 recorded sha must resolve in the repo, be an ancestor of HEAD, and must not
 lie behind the fork point of the change (the merge-base with the remote
-default branch) (SKILL.md:84-85). The in-repo changelog entry adds the
+default branch) (SKILL.md:91-93). The in-repo changelog entry adds the
 consumer's malformed-value behavior: a valid sha gets an exact binding, a
 malformed value blocks explicitly via a 7-40 hex guard, and only a bare
-`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:447-451,
-"grounding-mcp 0.6.0 reads this marker"; SKILL.md:86 points to "the
+`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:497-501,
+"grounding-mcp 0.6.0 reads this marker"; SKILL.md:94 points to "the
 grounding-mcp 0.6.0 docs for the full consumer semantics", so external
 reader internals are not verified from this repo). Introduced in 0.9.0
-(CHANGELOG.md:441-458). Pinned by template-markers.test.ts:19,33-37 (exactly
+(CHANGELOG.md:491-508). Pinned by template-markers.test.ts:19,33-37 (exactly
 one `run-base` marker, defaulting to `TODO`) and :39-43 (the literal line,
 wrapper included).
 
@@ -76,10 +76,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (SKILL.md:190-194). A freshly-copied run is
+non-accepting (fail-closed)" (SKILL.md:202-206). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
-(CHANGELOG.md:543-554). Consumer is "the harness solution-acceptance
-run-gate" per SKILL.md:192-193; this doc cites that in-repo statement only, it
+(CHANGELOG.md:593-604). Consumer is "the harness solution-acceptance
+run-gate" per SKILL.md:204-205; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18 (regexes) and :21-31 (one marker per
 template, default `TODO`).
@@ -94,7 +94,7 @@ locates this table by its header row and verifies unresolved findings from
 those two columns. Do not rename or drop them."
 (05-review-findings.md:9; line 10 and the 0.7.3 changelog entry attribute
 that reader to grounding-mcp). This was a reactive fix (0.7.3,
-CHANGELOG.md:491-507): a live run had drifted onto
+CHANGELOG.md:541-557): a live run had drifted onto
 `| Severity | Finding | Resolution |` (no Decision column), and the reader
 failed closed with an explicit "not in the expected table format" blocker
 rather than silently passing. The Decision legend defines
@@ -103,7 +103,7 @@ resolved only when its Decision is `accepted` or `defer`; every other value
 (`fix`, `reject`, blank, `open`, `TODO`) leaves it unresolved and **arms**
 the completeness gate (05-review-findings.md:10). The template's example row
 was deliberately narrowed to `accepted/defer` only (0.7.4,
-CHANGELOG.md:475-489) so the template itself never invites `fix`/`reject`
+CHANGELOG.md:525-539) so the template itself never invites `fix`/`reject`
 as if they were resolutions. Pinned by template-markers.test.ts:59-70
 (header row carries both `severity` and `decision` cells), :72-74 (the
 load-bearing comment exists), :76-90 (example row's Decision cell is
@@ -129,7 +129,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and
 SKILL.md's step 7 carries the same one-sentence rule
-(SKILL.md:159-163). The runtime half (grounding-mcp's reader treating a
+(SKILL.md:167-171). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -149,7 +149,7 @@ oversight to fix later: `02-tasks.md` records a planning artifact (the task
 slices an orchestrator produced before implementation), not an acceptance
 signal like a review recommendation or a final status. SKILL.md's own
 scaling rule allows slicing to be skipped entirely for a small or
-well-understood change (SKILL.md:18-22, 112-116: task slicing is "for
+well-understood change (SKILL.md:18-22, 120-124: task slicing is "for
 non-trivial changes"; a trivial change may skip the run directory
 altogether). Folding `02-tasks.md` into the completeness check would force
 every legitimately slim run — one that correctly skipped slicing — to
@@ -167,14 +167,14 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (SKILL.md:180-188). It is explicitly non-gating: "apply
+`okf-kit check`) (SKILL.md:192-200). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:180-181,185-186). This is the symmetric counterpart to the 0.8.0
+(SKILL.md:192-193,197-198). This is the symmetric counterpart to the 0.8.0
 discovery-side rule (the Discover step already checks `docs/okf/` before
-hand-mapping terrain, SKILL.md:100-101); the 0.12.0 changelog entry names it
+hand-mapping terrain, SKILL.md:108-109); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
-(CHANGELOG.md:365-387). Pinned by
+(CHANGELOG.md:415-437). Pinned by
 docs-consistency.test.ts:277-284 (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
 "docs/okf/" also occur in the Discover-step test), :286-290 (source-overlap
@@ -206,8 +206,8 @@ The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see
 [review-gate-and-waivers.md](review-gate-and-waivers.md). The
-explorer/implementer/reviewer/task-slicer YAML contracts referenced by
-SKILL.md's Workflow steps are out of scope here too; see
+explorer/implementer/reviewer/task-slicer/advisor YAML contracts referenced
+by SKILL.md's Workflow steps are out of scope here too; see
 [subagent-contracts-superset.md](subagent-contracts-superset.md).
 
 ## Gotcha for anyone grepping `solution-acceptance:`

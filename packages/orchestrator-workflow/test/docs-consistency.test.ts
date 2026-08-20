@@ -434,7 +434,10 @@ describe("the misfire rule prefers resume with a repeated assignment for the no-
 
   it("notes the reviewer/model correlation as an open lead, not a confirmed cause", () => {
     expect(skillMd).toContain(
-      "So far this signal has only been observed for the reviewer role, the one role whose default model differs from the other roles'",
+      "So far this signal has only been observed for the reviewer role, a role whose default model differs from explorer's, task-slicer's, and implementer's",
+    );
+    expect(skillMd).toContain(
+      "since 0.21.0 the advisor shares the reviewer's default model too, though the signal itself has never been observed for the advisor",
     );
     expect(skillMd).toContain(
       "treat that correlation as an open lead worth watching as more incidents accumulate, not as a confirmed cause",
@@ -442,11 +445,18 @@ describe("the misfire rule prefers resume with a repeated assignment for the no-
   });
 
   it("the 'default model differs' claim is grounded in DEFAULT_MODELS, not asserted in prose alone", () => {
-    const otherRoles = ROLES.filter((role) => role !== "reviewer");
-    expect(otherRoles.length).toBeGreaterThan(0);
-    for (const role of otherRoles) {
+    // Since 0.21.0 the advisor shares the reviewer's default model, so the
+    // claim is scoped to the roles the prose actually names (explorer,
+    // task-slicer, implementer), not "the other roles" generically.
+    const namedRoles: Role[] = ["explorer", "task-slicer", "implementer"];
+    expect(namedRoles.length).toBeGreaterThan(0);
+    for (const role of namedRoles) {
       expect(DEFAULT_MODELS.reviewer).not.toBe(DEFAULT_MODELS[role]);
     }
+    // Grounds the "since 0.21.0 the advisor shares that model" half of the
+    // prose: if this ever goes false without the prose being corrected back
+    // to a differs-from-all-roles claim, this test should catch the drift.
+    expect(DEFAULT_MODELS.advisor).toBe(DEFAULT_MODELS.reviewer);
   });
 
   it("scopes the resume-over-respawn preference away from the mid-run watchdog-stall misfire class", () => {
@@ -1435,6 +1445,98 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
     );
     expect(step).toContain(
       "record a non-default tier choice with a one-line reason in `03-decisions.md` when the task is non-trivial",
+    );
+  });
+});
+
+/**
+ * 0.21.0 adds the advisor role: a fifth, read-only, `full`-profile-only
+ * subagent consulted only at defined escalation triggers (architectural
+ * uncertainty, conflicting requirements, a high-commitment fork among valid
+ * options, repeated implementation failures, a review deadlock, a high-risk
+ * decision). It recommends; the orchestrator still decides. This pins the
+ * escalation policy paragraph in agents-md-section.md's Scaling delegation
+ * bullet list (the one site with no other guard: none of the enumeration
+ * tests above would catch its deletion, since it is prose describing when to
+ * spawn the role, not a list the enumeration checks scan), plus the four
+ * SKILL.md additions: the Roles-section bullet, the new Advisor output
+ * contract block, step 8's advisor-trigger sentence, and the harness notes'
+ * full-profile role enumeration.
+ */
+describe("advisor escalation policy ships in the AGENTS.md section and SKILL.md", () => {
+  const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("agents-md-section.md's Scaling delegation bullet list names the advisor's escalation triggers and the recommends-never-decides rule", () => {
+    const scalingIdx = agentsMdSection.indexOf("### Scaling delegation");
+    const reviewGateIdx = agentsMdSection.indexOf("### Review gate");
+    expect(scalingIdx).toBeGreaterThanOrEqual(0);
+    expect(reviewGateIdx).toBeGreaterThan(scalingIdx);
+    const scalingSection = agentsMdSection.slice(scalingIdx, reviewGateIdx);
+    expect(scalingSection).toContain(
+      "an advisor subagent is available for escalation only",
+    );
+    expect(scalingSection).toContain(
+      "architectural uncertainty, requirements that contradict each other, multiple valid solution paths where committing to one is expensive to reverse, repeated implementation failures on the same task, a review deadlock, or a high-risk decision",
+    );
+    expect(scalingSection).toContain(
+      "The orchestrator spawns it only at one of these triggers, never as a standard pipeline step",
+    );
+    expect(scalingSection).toContain(
+      "the orchestrator still decides, and a critical risk still goes to the operator",
+    );
+  });
+
+  it("SKILL.md's Roles section carries the Advisor bullet, scoped to full profile, read-only, escalation-only", () => {
+    const rolesIdx = skillMd.indexOf("## Roles");
+    const runStateIdx = skillMd.indexOf("## Run state");
+    expect(rolesIdx).toBeGreaterThanOrEqual(0);
+    expect(runStateIdx).toBeGreaterThan(rolesIdx);
+    const rolesSection = skillMd.slice(rolesIdx, runStateIdx);
+    expect(rolesSection).toContain(
+      "**Advisor** (optional, read-only, `full` profile only)",
+    );
+    expect(rolesSection).toContain(
+      "never decides and never writes code. Not a standard pipeline step",
+    );
+  });
+
+  it("SKILL.md carries a dedicated Advisor output contract block with the escalation-necessity check documented", () => {
+    expect(skillMd).toContain("## Advisor output contract");
+    const field =
+      "status: done | partial | blocked role: advisor escalation_necessary: yes | no";
+    expect(skillMd).toContain(field);
+    expect(skillMd).toContain(
+      "The advisor first checks whether the escalation was actually necessary",
+    );
+    expect(skillMd).toContain(
+      "it does not decide, and a critical risk still goes to the operator",
+    );
+  });
+
+  it("the subagent input contract's role enum includes advisor", () => {
+    expect(skillMd).toContain(
+      "role: advisor | explorer | implementer | reviewer | task_slicer",
+    );
+  });
+
+  it("step 8 (Decide acceptance) names the advisor triggers and that the orchestrator may spawn it before deciding", () => {
+    const start = skillMd.indexOf("**Decide acceptance.**");
+    const handOffIdx = skillMd.indexOf("**Hand off.**");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(handOffIdx).toBeGreaterThan(start);
+    const step = skillMd.slice(start, handOffIdx);
+    expect(step).toContain(
+      "At an advisor trigger (architectural uncertainty, conflicting requirements, a high-commitment fork among valid options, repeated implementation failures, a review deadlock, a high-risk decision), the orchestrator may spawn the advisor subagent before deciding",
+    );
+    expect(step).toContain(
+      "the advisor recommends, the orchestrator still decides",
+    );
+  });
+
+  it("the harness notes name advisor among the full-profile Claude Code roles", () => {
+    expect(skillMd).toContain(
+      "explorer, task-slicer, implementer, reviewer, advisor under `full`; implementer and reviewer only under `minimal`",
     );
   });
 });

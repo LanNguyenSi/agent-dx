@@ -101,15 +101,15 @@ Per selected harness:
 
 | Harness | Files | Notes |
 |---|---|---|
-| Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{explorer,task-slicer,implementer,reviewer}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter; the read-only explorer and reviewer also get `disallowedTools: Edit, Write, NotebookEdit`. |
+| Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter; the read-only explorer, reviewer, and advisor also get `disallowedTools: Edit, Write, NotebookEdit`. |
 | OpenAI Codex | `.agents/skills/orchestrator-workflow/SKILL.md` | Codex reads `AGENTS.md` natively. There is no standardized project-level subagent definition; the skill instructs running the roles inline with the same contracts. |
-| opencode | `.opencode/skills/orchestrator-workflow/SKILL.md`, `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` | opencode reads `AGENTS.md` natively. Subagents get `mode: subagent`; the read-only explorer and reviewer also get `permission: edit: deny`. Model resolution is described below. |
+| opencode | `.opencode/skills/orchestrator-workflow/SKILL.md`, `.opencode/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` | opencode reads `AGENTS.md` natively. Subagents get `mode: subagent`; the read-only explorer, reviewer, and advisor also get `permission: edit: deny`. Model resolution is described below. |
 
-**Read-only posture, honestly stated.** For the explorer and reviewer the
-read-only posture is enforced at the tool level only for the file-mutation
-tools (`disallowedTools: Edit, Write, NotebookEdit` on Claude Code,
-`permission: edit: deny` on opencode). Bash stays available because both roles
-must run tests and linters, so shell-level mutation (`git checkout`,
+**Read-only posture, honestly stated.** For the explorer, reviewer, and
+advisor the read-only posture is enforced at the tool level only for the
+file-mutation tools (`disallowedTools: Edit, Write, NotebookEdit` on Claude
+Code, `permission: edit: deny` on opencode). Bash stays available because
+these roles must run tests and linters, so shell-level mutation (`git checkout`,
 `git restore`, `git clean`, `git stash`, `git reset`, `sed -i`, redirecting
 output into a file) is guarded by instruction only: the agent prompts forbid
 it explicitly, but nothing technically prevents it. This residual has bitten in practice (a
@@ -125,13 +125,25 @@ opencode only; Codex has no per-role files to select from):
 
 | Profile | Roles installed | When to use it |
 |---|---|---|
-| `full` (default) | explorer, task-slicer, implementer, reviewer | the full workflow: read-only discovery, task slicing, implementation, review |
-| `minimal` | implementer, reviewer | a small or well-understood repo where discovery and slicing add ceremony without payoff |
+| `full` (default) | explorer, task-slicer, implementer, reviewer, advisor | the full workflow: read-only discovery, task slicing, implementation, review, and escalation to an advisor when needed |
+| `minimal` | implementer, reviewer | a small or well-understood repo where discovery, slicing, and escalation add ceremony without payoff |
 
 The reviewer is never omitted from either profile: the Standing Rule "always
 review" applies regardless of profile, so `minimal` is the write+check pair,
 not "just implementer". There is no per-role checklist; the two profiles are
 the only supported shapes.
+
+**Advisor (escalation).** The fifth `full`-profile role, `advisor`, is
+read-only and consulted only when the orchestrator hits one of a defined set
+of triggers: architectural uncertainty, requirements that contradict each
+other, multiple valid solution paths where committing to one is expensive to
+reverse, repeated implementation failures on the same task, a review
+deadlock, or a high-risk decision. It is not a standard pipeline step; like
+tier choice, spawning it is the orchestrator's own judgment call. The advisor
+lays out the options with their pros, cons, and risk, and gives a
+recommendation — it recommends, never decides, and never writes code; the
+orchestrator still decides, and a critical risk still goes to the operator.
+`minimal` never installs it, the same as explorer and task-slicer.
 
 ```bash
 npx orchestrator-workflow init --profile minimal --yes
@@ -152,16 +164,16 @@ precedent already in place for dropping a harness from `--harness` on a
 re-run: files for roles no longer in the profile are simply no longer
 installed or tracked in the manifest; they are not automatically deleted
 from disk. `init` detects a `full` → `minimal` downgrade and prints a note
-naming the now-untracked `task-slicer.md` / `explorer.md` agent files and how
-to remove them. For a fully clean switch, run `orchestrator-workflow
+naming the now-untracked `task-slicer.md` / `explorer.md` / `advisor.md`
+agent files and how to remove them. For a fully clean switch, run `orchestrator-workflow
 uninstall` first, or remove those files by hand. Uninstalling a `minimal`
 install that has never been downgraded from `full` is always clean on its
 own: it only ever removes what it actually installed, so there is nothing to
 report as missing for the roles that were never written. A `minimal` install
 reached via a `full` → `minimal` downgrade is not clean in that sense: the
-downgrade's now-untracked `task-slicer.md` / `explorer.md` files are not in
-the manifest's file ledger, so uninstall leaves them on disk without
-reporting them at all.
+downgrade's now-untracked `task-slicer.md` / `explorer.md` / `advisor.md`
+files are not in the manifest's file ledger, so uninstall leaves them on disk
+without reporting them at all.
 
 ## Model preselection
 
@@ -173,6 +185,7 @@ Each subagent role gets a model, chosen interactively or via `--models`:
 | task-slicer | `sonnet` | structured decomposition, no deep reasoning needed |
 | implementer | `sonnet` | fast, cheap, good enough for narrow pre-sliced tasks |
 | reviewer | `opus` | skeptical review benefits from the strongest model |
+| advisor | `opus` | escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default |
 
 The orchestrator itself runs on the session's main model; use the strongest
 reasoning model available. The chosen mapping is recorded in
@@ -230,9 +243,10 @@ default tier: that would collide with, and duplicate, the default file.
 | task-slicer | low, medium, high | medium |
 | implementer | low, medium, high, xhigh | medium |
 | reviewer | medium, high, xhigh | high |
+| advisor | high, xhigh | high |
 
-With `--profile full` and every tier rendered, that is 4 default files plus
-9 variant files: 13 files total per harness.
+With `--profile full` and every tier rendered, that is 5 default files plus
+10 variant files: 15 files total per harness.
 
 **Tier → model class → effort.** Each tier resolves to a model class and an
 effort value:
@@ -245,8 +259,9 @@ effort value:
 | xhigh | large | `opus` | `xhigh` |
 
 Claude Code variants carry both a `model:` line (the class's alias) and an
-`effort: <tier>` line in frontmatter. Read-only roles (explorer, reviewer)
-keep `disallowedTools: Edit, Write, NotebookEdit` on their variants too.
+`effort: <tier>` line in frontmatter. Read-only roles (explorer, reviewer,
+advisor) keep `disallowedTools: Edit, Write, NotebookEdit` on their variants
+too.
 
 **opencode variants key off the resolved model's family, not its provider
 prefix**, since opencode's effort surface is not uniform across model
