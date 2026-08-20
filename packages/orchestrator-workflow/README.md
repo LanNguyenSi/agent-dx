@@ -195,6 +195,103 @@ Nested-path providers like `openrouter` (whose ids look like
 be supplied as a fully-qualified `--models` entry, e.g.
 `reviewer=openrouter/anthropic/claude-opus-4.8`.
 
+## Effort tiers
+
+`--tiers` renders an additional per-role subagent definition for each
+non-default effort tier, alongside the one default (unsuffixed) agent file
+`--profile` already installs. Each tier variant is a standalone subagent
+definition, not a modification of the default file: the default file
+(`<role>.md`) stays byte-identical to what a tiers-off install already
+produces (still `manifest.models[role]`, no `effort:` key), and each variant
+lives next to it as `<role>-<tier>.md`.
+
+Default off, like every optional pack in this kit: a fresh install renders
+no variant files unless asked. `--tiers` turns the feature on for that run,
+`--no-tiers` turns it off; a plain re-run with neither flag keeps whatever
+the previous install had, the same override-vs-persist rule already used
+for `--profile` and `--models`. There is no interactive prompt for it:
+`tiers` is opt-in/off via the flags only.
+
+```bash
+npx orchestrator-workflow init --tiers --yes
+```
+
+Turning tiers back off with `--no-tiers` after having them on follows the
+same pattern as a `full` → `minimal` profile downgrade: `init` prints a note
+naming the now-untracked `<role>-<tier>.md` variant files and how to remove
+them, rather than deleting them or leaving the leftover unexplained.
+
+**Which tiers each role gets.** A role never gets a variant file for its own
+default tier: that would collide with, and duplicate, the default file.
+
+| Role | Tiers available | Default tier (no variant file) |
+|---|---|---|
+| explorer | low, medium, high | medium |
+| task-slicer | low, medium, high | medium |
+| implementer | low, medium, high, xhigh | medium |
+| reviewer | medium, high, xhigh | high |
+
+With `--profile full` and every tier rendered, that is 4 default files plus
+9 variant files: 13 files total per harness.
+
+**Tier → model class → effort.** Each tier resolves to a model class and an
+effort value:
+
+| Tier | Model class | Model alias | Effort requested |
+|---|---|---|---|
+| low | small | `haiku` | `low` |
+| medium | medium | `sonnet` | `medium` |
+| high | medium | `sonnet` | `high` |
+| xhigh | large | `opus` | `xhigh` |
+
+Claude Code variants carry both a `model:` line (the class's alias) and an
+`effort: <tier>` line in frontmatter. Read-only roles (explorer, reviewer)
+keep `disallowedTools: Edit, Write, NotebookEdit` on their variants too.
+
+**opencode variants key off the resolved model's family, not its provider
+prefix**, since opencode's effort surface is not uniform across model
+families:
+
+- **Claude-family models** (any resolved id whose provider is
+  `anthropic/`, or whose segment after the provider prefix contains
+  `claude-`, which covers `anthropic/claude-...` as well as a Claude model
+  fronted by a different provider, e.g. `github-copilot/claude-sonnet-4.6`
+  or the nested `openrouter/anthropic/claude-opus-4.8`): only `high` and
+  `xhigh` get an effort field, as `variant: high` and `variant: max`
+  respectively; `low` and `medium` collapse to no effort field at all,
+  since opencode's `variant:` option does not distinguish an effort below
+  `high`. This collapse is deliberate and documented, not a bug: a
+  `low`/`medium` variant on a Claude-family model still gets its class's
+  `model:` line, just no `variant:` line.
+- **Ollama, or an id with no provider prefix**: no effort field at all.
+  There is no known effort passthrough for Ollama, and an id with no `/`
+  resolves to no provider to key the decision on.
+- **Every other non-Claude-family model**: a plain `reasoningEffort: <tier>`
+  line, `xhigh` included (opencode's built-in OpenAI-style variants
+  document an `xhigh` reasoning effort).
+
+The variant's `model:` line is resolved the same way the base per-role model
+is (an `opencode models` catalog lookup against the auto-detected or
+`--opencode-provider`-specified provider), just keyed by the tier's model
+class instead of by role. When that lookup cannot resolve a model for a
+class, the CLI warns once on stderr and **no variant file is rendered for
+that class at all**, not a file with a missing `model:` line: a variant
+with no resolved model would carry neither a `model:` nor an effort line, an
+indistinguishable no-op duplicate of the base file with no ledger entry to
+compare it against, so `init` skips writing it entirely. This guard and its
+warning are opencode-scoped only; Claude Code variants resolve `model:` from
+a plain alias (`haiku`/`sonnet`/`opus`) and need no live catalog lookup, so
+they are unaffected.
+
+**Warning: `CLAUDE_CODE_EFFORT_LEVEL` overrides every agent's frontmatter
+`effort:`, tier variants included.** Claude Code's `effort:` frontmatter
+field does work: it reaches the model request as `output_config.effort`.
+But when the harness environment sets `CLAUDE_CODE_EFFORT_LEVEL`, that
+environment variable wins over the frontmatter `effort:` on every installed
+agent, tier variants and default files alike, not just the one this feature
+adds. Check for it before relying on a specific tier variant's requested
+effort actually taking effect.
+
 ## Ownership and re-runs
 
 `init` is idempotent: a second run changes nothing. The rules:
@@ -208,8 +305,9 @@ be supplied as a fully-qualified `--models` entry, e.g.
   updates files you never touched and reports files you edited as conflicts
   instead of overwriting them; `--force` overwrites those too.
 - `.ai/workflow/manifest.json` is the kit's state file. It records the applied
-  version, harnesses, role profile, models, and file hashes, and is rewritten
-  whenever that state changes; do not edit it by hand.
+  version, harnesses, role profile, models, the `--tiers` flag, and file
+  hashes, and is rewritten whenever that state changes; do not edit it by
+  hand.
 
 ## Uninstall
 

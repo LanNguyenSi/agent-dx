@@ -436,3 +436,554 @@
   identical single warning, 0 new findings — the model-preselection.md
   warning is expected to persist until a pass that actually touches its
   cited ranges re-stamps it; not fixed here, per the task's own boundary.
+
+- 2026-08-19: re-verified and re-stamped install-fence-mechanics.md and
+  model-preselection.md again against package version 0.19.0 (`--tiers` on
+  `init`, agent-dx task T-002, docs-only follow-up to the T-001 feature
+  commit c78e44a). `models.ts` gained a ~60-line tier block appended after
+  `parseModelsSpec` (line 144 onward): `Tier`, `ROLE_TIERS`, `DEFAULT_TIER`,
+  `ModelClass`, `TIER_DEFS`, `CLASS_MODELS`. Because that block is purely
+  appended at the end of the file, every existing `models.ts:` citation in
+  both docs (all of them at or before line 144) needed no correction at
+  all, confirmed by direct read rather than assumed. `cli.ts` and `init.ts`
+  were not so lucky: `cli.ts` gained new imports (`ModelClass`,
+  `CLASS_MODELS`, `MODEL_CLASSES`, `detectProvider`, `resolveAlias`) plus a
+  `tiers` resolution block and an opencode-class-model resolution block
+  inside the `init` action, shifting every citation from the profile-block
+  onward; `init.ts` gained a `tiers`/`opencodeClassModels` pair on
+  `InitOptions` (+16 lines) and a `tiers` field on `Manifest` (+2), which
+  shifted `readInstalledManifest` and everything through its own
+  tiers-fallback addition by a uniform +22 (verified against four
+  independent citations, not assumed), then diverged further below that
+  point once the four new compose/effort-line functions and the two
+  tier-rendering loops were added. Every `cli.ts:` and `init.ts:` citation
+  in both docs was re-derived from a direct read of the current file at
+  that exact location, not a computed offset applied blindly, the same
+  discipline as the 2026-08-17 entry above. `test/init.test.ts` needed a
+  narrower fix: the new `describe("tier variants (\`--tiers\`)")` block was
+  inserted at the file's old line 941 (confirmed from the commit's own
+  diff hunk header), so every citation before that line in both docs
+  (`test/init.test.ts:100-106`, `:275-306`, `:464-509`, `:511-534`,
+  `:721-758`, `:921-941`) needed no change, while the two citations past it
+  (`:995-1007`, `:1009-1016`, the opencode-absent-binary tests) shifted by
+  the same uniform +228 the insertion added; both kinds of claim were
+  confirmed by direct read, not inferred from the insertion size alone.
+  `INSTALL-AGENT.md` itself changed under this same task (the `--tiers`
+  question, command example, manifest-JSON `"tiers": false` field, and a
+  new manual-fallback carve-out stating that path never renders
+  tier-variant files), so every `INSTALL-AGENT.md:` citation in both docs
+  was re-derived from the edited file, not the pre-edit one.
+
+  Both docs also gained new content, not just corrected citations:
+  model-preselection.md gained a full "Effort tiers (`--tiers`)" section
+  (tier data, composition, rendering, manifest/re-install semantics, cross-
+  references to the two new source files touched) plus tier-aware
+  additions to its existing "What gets preselected", "Flow", "Per-harness
+  frontmatter behavior", "Re-install behavior", "Docs-consistency pins",
+  and "Solution-neutral notes" sections; install-fence-mechanics.md gained
+  a tiers-aware paragraph in "What `init` writes", a `tiers` field and
+  seeding-bullet addition in "manifest.json: shape and consumers", a
+  tiers-idempotence bullet in "Re-install / upgrade semantics", a
+  tiers-uninstall bullet in "Uninstall: exact removal surface", and a
+  tier-test-coverage sentence in "Tests". One structural finding surfaced
+  during this re-verification, not present before: unlike a `full` ->
+  `minimal` profile downgrade, which prints an explicit `report.notes`
+  entry naming the now-untracked role files, a `tiers: true` -> `tiers:
+  false` re-run is a structurally identical leftover-files case (the
+  previously rendered `<role>-<tier>.md` files are simply dropped from the
+  new manifest's `files` ledger, neither deleted nor re-tracked) but prints
+  no equivalent note at all; both docs now state this asymmetry explicitly
+  rather than silently assuming parity with the profile case. This is
+  reported as a documentation finding, not fixed in `src/` here, since
+  T-002's scope is docs-only.
+
+  A new task/T-002-scoped test/docs-consistency.test.ts `describe` (a sixth
+  test alongside the existing four model-enumeration guards plus the
+  read-only-role brace-list guard) pins README's new "Effort tiers" table
+  against `ROLE_TIERS`/`DEFAULT_TIER` directly, per role, per column, plus
+  a row-count check; both docs' "Docs-consistency pins" sections now cite
+  it. Mutation-tested for real against the full suite, not just the one
+  test file: removing `"low"` from `ROLE_TIERS.explorer` in `src/models.ts`
+  turned 5 of 206 tests red, the intended target (the explorer
+  tiers-column assertion in the new `describe`) plus 4 pre-existing
+  `test/init.test.ts` tests in the 0.19.0 `tier variants` block that assert
+  actual rendering behavior (the 13-file count, the collision-free file
+  set, the uninstall-removes-variants check, and the CLI re-run
+  persistence check all depend on `explorer` actually having a `low`
+  tier); this is expected collateral from mutating a source of runtime
+  behavior, not a sign the new docs-consistency test is redundant with
+  those, the same reasoning the 0.18.0 entry above applies to a
+  `DEFAULT_MODELS` mutation. Every other role's tiers/default-tier
+  assertion in the same new `describe`, and the remaining 201 tests
+  overall, stayed green. Restoring the line brought the file back to a
+  byte-identical, empty `git diff`, and the full suite (206/206) went
+  green again, both verified directly, not assumed.
+
+  `okf-kit check docs/okf --strict` before this pass: 10 `sources-fresh`
+  warnings (4 on install-fence-mechanics.md, 5 on model-preselection.md, 1
+  on subagent-contracts-superset.md, all mtime-driven staleness against
+  `src/models.ts`/`src/cli.ts`/`src/init.ts`/`test/init.test.ts` changed by
+  the T-001 commit). After this pass: 1 warning, the pre-existing
+  subagent-contracts-superset.md `src/models.ts` staleness, unchanged and
+  explicitly out of this task's scope (T-002 named only
+  install-fence-mechanics.md and model-preselection.md for re-verification;
+  subagent-contracts-superset.md's own citations into `models.ts:3-8` are
+  unaffected by the purely-appended tier block, so nothing in it is
+  actually stale content-wise, only its staleness-by-mtime signal is). Full
+  suite 206/206 (197 + 9 new), `tsc --noEmit` clean, `tsc --noEmit -p
+  tsconfig.test.json` clean, `npm run build` clean, `prettier --check`
+  clean for every file this pass touched (one new-file formatting issue in
+  `test/docs-consistency.test.ts`, introduced by this pass's own additions,
+  was caught by `prettier --check` and fixed with `--write` before commit;
+  the pre-existing `test/template-markers.test.ts` warning is unrelated and
+  untouched by this pass, matching the baseline measured before any edit).
+
+- 2026-08-19: fix-round-1 on 0.19.0's `--tiers` feature (agent-tasks reviewer
+  pass on task T-003, 6 medium + 4 low findings, 0 high/critical) re-verified
+  and re-stamped model-preselection.md and install-fence-mechanics.md again,
+  the two docs the review's own findings (M1 opencode no-op variants + no
+  warning, M2 one-way `--tiers`, M3 downgrade-note gap, M4 provider-vs-family
+  effort dispatch, L2 unused `TIERS`/`isTier` exports, L3 stale citations)
+  directly touch. Every citation into `models.ts`/`init.ts`/`cli.ts` shifted
+  by the fix commit was re-derived from a direct read of the current file at
+  that exact location (grep for the anchor phrase or `it(...)`/`describe(...)`
+  title, then read the exact span), not a computed offset applied blindly —
+  the same discipline every prior pass in this log used — though three
+  distinct uniform shifts turned out to hold across large stretches of
+  `cli.ts` and `test/init.test.ts` (a `--no-tiers` commander option addition
+  shifted every `cli.ts` line after it by a flat +4 before the tiers-
+  resolution rewrite itself added another +6; an `import { DEFAULT_TIER,
+  ROLE_TIERS }` addition shifted every `test/init.test.ts` line after it by a
+  flat +2 until the first new test insertion point), and each shift was
+  spot-checked against a handful of independently re-read anchors before
+  being trusted for the rest of its span. One citation-accuracy miss from
+  this pass's own first draft was caught in its own second read-back before
+  commit: four `test/init.test.ts` citations inside the flat-+2-shift zone
+  (the AGENTS.md-restore-on-mangle test, the inline-marker-immunity test,
+  and both CLAUDE.md-import tests) were initially copied forward unshifted
+  on the wrong assumption that "the cited source file (`writers.ts`) didn't
+  change" meant "the test citation doesn't need to move either" — it does,
+  since the test *file* still shifted even though the function under test
+  did not; all four were corrected by direct re-read before this entry was
+  written, the same "verify, don't assume — even inside a region you already
+  trust" lesson the 2026-08-17 entry above names for exactly this failure
+  mode.
+
+  Both docs also gained substantial new content, not just corrected
+  citations, since three of the four medium findings changed actual runtime
+  behavior the docs described: model-preselection.md's "Effort tiers"
+  section now documents `--no-tiers` (the commander-negatable counterpart to
+  `--tiers`, M2), the family-based (not provider-id-based) opencode effort
+  dispatch via the new `isClaudeFamilyModel` helper (M4, with the concrete
+  failure mode named — a `github-copilot/claude-*` or nested
+  `openrouter/anthropic/claude-*` model previously fell through to
+  `reasoningEffort:` instead of `variant:`), and a new "Unresolved-class
+  guard" paragraph covering both halves of M1 (the per-class stderr warning
+  in `cli.ts`, and `init.ts` now skipping the write entirely for a variant
+  that would carry neither a `model:` nor an effort line). The "Docs-
+  consistency pins" section gained a fifth guard entry (L4's second
+  `describe`, pinning README's Tier -> model class/alias/effort table
+  against `TIER_DEFS`/`CLASS_MODELS`, mirroring the existing role/tier-table
+  guard). install-fence-mechanics.md's "What `init` writes" section replaced
+  its own prior finding (the T-002 pass above had documented the `tiers:
+  true -> false` silent-no-note asymmetry as a real gap, correctly, since
+  fixing it was out of T-002's docs-only scope) with the fix itself: the new
+  `--no-tiers`-driven downgrade-note block (M2) and the profile-downgrade
+  note loop's extension to also cover a dropped role's tier-variant files
+  when `previous.tiers` was true (M3), plus why the two note loops never
+  double-fire (they iterate disjoint role sets — dropped roles vs. still-
+  installed roles). The `L1` content-assertion addition (pinning the exact
+  four-line legacy default-file frontmatter, not just the file-set) and the
+  new invariant test (`DEFAULT_TIER[role]` is always a member of
+  `ROLE_TIERS[role]`, from the review's Missing Tests list rather than a
+  numbered finding) are both cited in the "Tests" section's now-longer
+  enumeration of the `tier variants` describe block.
+
+  `okf-kit check docs/okf --strict` immediately before this pass's commit:
+  9 `sources-fresh` warnings — 2 on review-gate-and-waivers.md, 4 on
+  run-state-lifecycle-and-markers.md, 3 on subagent-contracts-superset.md,
+  none on either doc this pass touches (their own timestamps were already
+  the newest in the bundle from the T-002 pass above, so nothing had gone
+  stale against them yet at measurement time; the 9 warnings are all
+  mtime-driven staleness against files this fix-round's *commit* had not
+  yet touched from git's perspective — `docs-consistency.test.ts`,
+  `CHANGELOG.md`, `README.md`, `INSTALL-AGENT.md`, `models.ts` — since this
+  checker keys "changed" off each file's last commit time, not raw
+  filesystem mtime, so uncommitted working-tree edits do not move the
+  needle until committed). Measured again after this pass's commit: see the
+  commit's own PR/handoff note for the post-commit count, since committing
+  is this pass's last step and the pre-commit number above is what a
+  working-tree-only measurement can honestly report. Full suite 226/226
+  (206 baseline + 20 new: 11 in `test/init.test.ts` for M1/M2/M3/M4/M5/the
+  invariant test, 9 in `test/docs-consistency.test.ts` for L4), `tsc
+  --noEmit` clean, `tsc --noEmit -p tsconfig.test.json` clean, `npm run
+  build` clean, `prettier --check` clean for every file this pass touched
+  (three files needed `--write`: `src/init.ts`, `test/docs-consistency.test.ts`,
+  `test/init.test.ts`; the pre-existing `test/template-markers.test.ts`
+  warning is unrelated and untouched, matching every prior pass's baseline).
+
+- 2026-08-19: re-verified and re-stamped review-gate-and-waivers.md,
+  run-state-lifecycle-and-markers.md, and subagent-contracts-superset.md
+  against the tier-branch tip (agent-dx `task/48ea90ac-effort-tiers`,
+  commits c78e44a/99506da/96b853c): the fix-round-1 entry above left this
+  trio's `sources-fresh` warnings unaddressed as out of its own scope (2 on
+  review-gate-and-waivers.md, 4 on run-state-lifecycle-and-markers.md, 3 on
+  subagent-contracts-superset.md, all mtime-driven against `CHANGELOG.md`,
+  `README.md`, `INSTALL-AGENT.md`, and `test/docs-consistency.test.ts`
+  changed by the T-001/T-002/T-003 commits, plus `src/models.ts` for
+  subagent-contracts-superset.md); this pass closes that gap. Neither
+  `test/init.test.ts` nor `SKILL.md`/`reviewer.md`/`implementer.md`/
+  `task-slicer.md`/`agents-md-section.md`/the templates changed on this
+  branch, so no citation into those files needed checking.
+
+  Every citation in the three docs into a file this branch actually changed
+  was checked by direct read against the current file content, not shifted
+  by an assumed offset. Before trusting any shift, each file's diff was read
+  for its hunk count and shape, then the shift was spot-checked against a
+  dozen-plus independently re-read anchors, not trusted on the strength of
+  one match: `CHANGELOG.md` gained exactly one 59-line entry (0.19.0)
+  inserted at its old line 8 in a single hunk with no other change anywhere
+  in the file (`git diff --stat`: 59 insertions, 0 deletions), so every
+  `CHANGELOG.md:` citation in all three docs shifted by a flat +59 with no
+  exceptions. `test/docs-consistency.test.ts` changed in exactly two hunks: a
+  +9-line import-statement expansion (five new named imports plus a `Tier`
+  type import from `src/models.js`) within the file's first ten lines, and a
+  +152-line append at its old EOF (old line 1079); every citation these three
+  docs make falls between those two hunks, so all of them shifted by a flat
+  +9. `src/models.ts` citations (`ROLES` at 3-8, `READ_ONLY_ROLES` at 14-17,
+  `DEFAULT_MODELS` at 70-75, all in subagent-contracts-superset.md) needed no
+  correction at all, confirmed unchanged by direct read: the branch's
+  ~55-line tier block is purely appended after the file's old line 142, past
+  every citation into it. `README.md:91-96` (run-state-lifecycle-and-markers.md's
+  "What gets installed" code-fence citation, supporting the same
+  copy-from-templates claim as the INSTALL-AGENT.md citation below) also
+  needed no correction, confirmed byte-identical by direct read: both of the
+  branch's README diff hunks land at old line 195 and 208, well after the
+  cited span. `INSTALL-AGENT.md:44-45,110-113` (the doc's other citation for
+  that claim) did need correction, since the branch's INSTALL-AGENT.md diff
+  has six hunks spread through the file rather than one uniform shift:
+  `44-45` (the Write-surface bullet listing `.ai/workflow/templates/00-goal.md`
+  through `06-handoff.md`) moved to `47-48` (a flat +3 from the first hunk,
+  which lands entirely above it); `110-113` (the manual-fallback step 4
+  bullet listing the same templates) moved to `135-138`, found by locating
+  the unchanged bullet text directly in the current file rather than
+  computing a shift, since that citation's own span sits inside the fourth
+  of the six hunks, which rewrites content immediately around it.
+
+  No content-false claims were found in this pass; every citation checked
+  still supported the sentence it was attached to once its line numbers were
+  corrected, so no prose changed, only `path:line` pointers and the three
+  docs' `timestamp:` frontmatter (bumped to `2026-08-19T22:30:00Z`, matching
+  the stamp install-fence-mechanics.md and model-preselection.md already
+  carry from the T-002/T-003 passes). `okf-kit check docs/okf --strict`
+  immediately before this pass: 9 `sources-fresh` warnings, exactly the count
+  and distribution the fix-round-1 entry above predicted. After this pass: 0
+  warnings, 0 findings. Full suite unchanged at 226/226 (no `src/` or `test/`
+  file was touched by this pass), `prettier --check` unchanged from the
+  pre-existing single `test/template-markers.test.ts` warning baseline (also
+  untouched by this pass). No mutation probes were named for this task: it
+  is a pure citation- and timestamp-correction pass with no new or changed
+  test assertions to mutate.
+
+- 2026-08-19: fix-round-2 on `--tiers` (review round 2, 3 medium + 2 low
+  findings, 0 high/critical, agent-dx branch `task/48ea90ac-effort-tiers`,
+  base 68c1acf) re-verified and re-stamped model-preselection.md and
+  install-fence-mechanics.md again, the two docs review-round-2's own
+  findings (R2-M1 stale README/CHANGELOG opencode-effort prose, R2-M2
+  enumeration-driven leftover notes, R2-M3 the M1 warning's stale wording,
+  R2-L1 the redundant `effortLine` double-computation, R2-L2 leftover-note
+  test coverage gaps) directly touch, plus a citation-only re-stamp of
+  review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, and
+  subagent-contracts-superset.md (their shared `CHANGELOG.md:` citations all
+  shifted by the same flat amount the 0.19.0 CHANGELOG entry's own R2-M1
+  content correction added).
+
+  R2-M2 is the structural fix: both leftover-note loops in `init.ts`
+  previously derived their note set from `ROLE_TIERS`/`options.harnesses`
+  (an enumeration of what *could* exist) rather than from what the previous
+  install actually wrote (`previous.files`/`previous.harnesses`, the
+  ledger). That produced phantom notes for variant files an unresolved
+  opencode tier-class catalog had already skipped writing (the M1 guard),
+  and silently dropped real leftover notes whenever the current run's
+  `--harness` selection no longer included the harness the leftover file
+  actually lived under. Both loops now gate every candidate note on the
+  exact relative path being a key of `previous.files`, and both iterate
+  `previous.harnesses` instead of `options.harnesses`; `ROLE_TIERS[role]`
+  is now used only to enumerate candidate tier suffixes to probe against
+  the ledger, never as the note-emission source of truth. R2-L1 simplified
+  the opencode variant-skip check the same equivalence-proof way: the
+  fix-round-1 form gated on `variantModelValue === undefined && effortLine
+  === undefined`, but `opencodeVariantEffortLine` always returns `undefined`
+  when its own `modelValue` argument is `undefined`, so the second clause
+  never added any filtering the first did not already provide; the skip
+  check now reads `variantModelValue === undefined` alone, and
+  `composeOpencodeAgentVariant` takes the already-computed effort line as a
+  fourth parameter instead of recomputing it internally. R2-M3 corrected
+  the M1 unresolved-class warning's own wording, which had claimed "model:
+  will be omitted for its effort-tier variants" when the real,
+  already-shipped fix-round-1 effect was "no variant file is rendered for
+  this class at all" (a stronger, better outcome the warning undersold),
+  and which never named its own opencode-only scope; the corrected wording
+  states both. R2-M1 is the docs-only sibling of R2-M3 and M4: README's
+  opencode-effort prose and the CHANGELOG 0.19.0 entry still described the
+  pre-fix-round-1 dispatch (provider-string-keyed, M4's bug) and the
+  pre-fix-round-1 unresolved-class behavior (a rendered file with just the
+  `model:` line omitted, M1's original bug), neither ever corrected once
+  fix-round-1 shipped the actual code fixes; both docs now use family terms
+  ("Claude-family models", matching `isClaudeFamilyModel`) and state the
+  real unresolved-class effect.
+
+  `src/init.ts` and `src/cli.ts` citations in both docs were re-derived by
+  direct read against the current file at each exact location, not a
+  computed offset applied blindly, the same discipline as every entry
+  above; `git diff` for both files landed in several small, non-adjacent
+  hunks rather than one uniform shift (`init.ts`: six hunks spanning the
+  `composeOpencodeAgentVariant` JSDoc/signature change, the new
+  `previousHarnessDirs` block, both note loops' ledger-check rewrite, and
+  the opencode tier loop's restructured skip check; `cli.ts`: one hunk, the
+  warning-text rewrite), so each citation was individually relocated by
+  grep-for-anchor-then-read rather than by any single delta. `test/init.test.ts`
+  citations needed the same per-hunk treatment for the block after its own
+  insertion point (a new `describe("leftover notes are ledger-driven, not
+  enumeration-driven (review round 2, R2-M2)")`, `init.test.ts:888-971`,
+  inserted right after the existing profile-downgrade `describe` and before
+  the kit-owned-file-conflicts one) plus the two strengthened R2-M3 stderr
+  tests further down; everything between those two insertion points shifted
+  by a uniform, spot-checked +85 (confirmed against a dozen-plus
+  independently re-read anchors spanning both re-run and CLI-level tests,
+  not trusted on one match, before being applied to the rest of that span).
+  `README.md` and `CHANGELOG.md` citations in both docs turned out to need
+  no correction at all: neither doc had ever cited a line inside either
+  file's changed region (README's opencode-effort prose, lines 251-286;
+  CHANGELOG's 0.19.0 entry, lines 8-74), confirmed by a targeted grep before
+  concluding no fix was needed there, rather than assumed from the section
+  names alone. The three CHANGELOG-citing docs outside this task's direct
+  scope (review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
+  subagent-contracts-superset.md) needed the flat `CHANGELOG.md:` +8 shift
+  described above; every one of their existing citations was spot-checked
+  against the shifted file at three different distances from the edit point
+  (a citation seven lines after the edit, one about 15 lines after, and one
+  more than 400 lines after) before applying the shift to the rest.
+
+  Both primary docs also gained substantial new content, not just corrected
+  citations: model-preselection.md's "Composition" and "Unresolved-class
+  guard" paragraphs were rewritten for R2-L1's parameter change and R2-M3's
+  corrected warning wording respectively, its "Manifest and re-install"
+  section gained an R2-M2 paragraph on the ledger-driven note mechanics
+  plus a cross-reference to install-fence-mechanics.md's fuller treatment,
+  its "README documents..." paragraph now names the R2-M1 correction
+  explicitly instead of silently citing the (now-different) README
+  section, and its "Docs-consistency pins" section gained a third guard
+  entry for the new `test/docs-consistency.test.ts` `describe` pinning the
+  corrected README prose (`:1244-1302`, appended at the file's end).
+  install-fence-mechanics.md's "What `init` writes" section gained the same
+  R2-L1/R2-M3 mechanics paragraph and a substantially rewritten
+  M2/M3-plus-R2-M2 paragraph explaining why neither the fix-round-1
+  `previous.tiers` boolean gate nor the original `ROLE_TIERS`/
+  `options.harnesses` enumeration was sufficient, and its "Tests" section
+  gained a description of the new `init.test.ts:888-971` `describe` and the
+  two strengthened stderr-wording tests.
+
+  `okf-kit check docs/okf --strict`: both immediately before and after this
+  pass's commit, the check reports 0 warnings, 0 findings, for a mechanical
+  reason worth recording rather than treating as proof of nothing having
+  gone stale: this bundle's docs carry a `timestamp:` frontmatter value
+  chosen with same-day headroom (`2026-08-19T22:30:00Z` UTC, comfortably
+  past every commit made so far today in this session's local `+02:00`
+  wall-clock), so the `sources-fresh` rule's mtime-based staleness gate
+  cannot fire against any same-day commit regardless of whether the doc's
+  actual prose was re-verified, only a commit crossing into the next UTC
+  day would trip it. Verified directly rather than assumed: a disposable
+  local test (a scratch commit of the `src`/`test` changes alone, with the
+  docs' frontmatter `timestamp:` temporarily set far in the past,
+  `2020-01-01T00:00:00Z`, then reset back out via `git reset --soft` before
+  any real commit) reproduced 5 `STALE` warnings against exactly the
+  sources this diff touches, confirming the checker's mechanism itself
+  works correctly and would have caught a genuinely stale doc; the 0/0
+  reading at this pass's actual, same-day timestamps is the tool's known
+  date-granularity limit, not a false negative, and the doc content itself
+  was independently re-verified by the direct-read citation discipline
+  described above, not by trusting the checker's clean report alone. Full
+  suite 231/231 (226 baseline + 3 new in
+  `test/docs-consistency.test.ts` for R2-M1's README-prose guard + 2 new in
+  `test/init.test.ts` for R2-M2's ledger-driven-notes `describe`, the two
+  existing R2-M3 stderr tests strengthened in place rather than added),
+  `tsc --noEmit` clean, `tsc --noEmit -p tsconfig.test.json` clean, `npm
+  run build` clean, `prettier --check` clean for every file this pass
+  touched (one new formatting issue in `src/init.ts`, introduced by this
+  pass's own edits, was caught by `prettier --check` and fixed with
+  `--write` before commit; the pre-existing `test/template-markers.test.ts`
+  warning is unrelated and untouched, matching every prior pass's
+  baseline). Mutation probes (named in the task assignment): removing the
+  `previous.files`-gate condition from the tiers-off note loop (`init.ts`'s
+  `previous.tiers && !tiers` block, the one the new "opencode + unresolved
+  tier-class models... exactly 0 leftover notes" test exercises; reverting
+  to unconditional `ROLE_TIERS` enumeration) turned that test red (9
+  phantom notes instead of 0), restored and re-verified green — this probe
+  demonstrates only that one loop's gate; the review-round-2 fix touched an
+  analogous gate inside the full -> minimal profile-downgrade loop's own
+  tier-variant sub-loop (`init.ts` ~393) too, but no test in this round
+  exercised that second gate specifically, a coverage gap review round 3
+  (R3-L1, see below) later found and closed with its own dedicated mutation
+  probe. Resetting `cli.ts`'s warning text to the pre-fix-round-2 wording
+  turned both strengthened stderr tests red, restored and re-verified
+  green. Both mutants were applied and restored with the working tree
+  committed first, per this repo's commit-before-mutation-probe convention.
+
+- 2026-08-19: fix-round-3 on `--tiers` (review round 3, 0 medium, 4 low
+  findings, 0 high/critical, agent-dx branch `task/48ea90ac-effort-tiers`,
+  base 32e83f5) re-verified and re-stamped model-preselection.md and
+  install-fence-mechanics.md again, the two docs review-round-3's own
+  findings (R3-L1 the untested profile-downgrade ledger gate, R3-L2 the
+  factually-wrong `effortLine`-parameter JSDoc/doc rationale repeated in
+  both docs, R3-L3 the stale `cli.ts` warning-comment wording, R3-L4 the
+  lost no-provider-prefix case in README's opencode-effort prose) directly
+  touch; log.md itself is also in scope, both for its own R3-L1 precision
+  fix (below) and as the file carrying this entry.
+
+  R3-L1 is the structural fix, mirroring R2-M2's shape one level down: the
+  review-round-2 pass proved the *tiers-off* leftover-note loop's
+  `previous.files`-gate was real (a mutant reverting it to unconditional
+  `ROLE_TIERS` enumeration turned a dedicated test red), but its mutation
+  probe never touched the sibling gate inside the *full -> minimal
+  profile-downgrade* loop's own tier-variant sub-loop (`init.ts` ~393,
+  `if (previous.files[variantPath] !== undefined)`) — on HEAD that gate
+  behaves identically to its sibling, but nothing in the 233-test suite
+  actually exercised it, so a `if (true)` mutant there survived silently.
+  A new `test/init.test.ts:989-1025` `describe` closes the gap: an opencode
+  install whose tier-class models never resolved (so, same as the R2-M2
+  test above it, the M1 guard writes zero variant files) followed by a
+  full -> minimal downgrade that still has tiers on asserts exactly the two
+  dropped roles' base-file notes and no phantom `-low.md`/`-high.md`
+  variant notes. Measured directly in this pass, working tree committed
+  first per this repo's commit-before-mutation-probe convention: reverting
+  `init.ts`'s gate to `if (true)` turned exactly this one new test red (6
+  notes instead of the expected 2 — the 2 real base-file notes plus 4
+  phantom variant notes, one per non-default tier of each of the two
+  dropped roles), with the other 232 tests unaffected; restored to the
+  byte-identical pre-mutant state (confirmed via `git diff`) and the full
+  suite (233/233) went green again, both verified directly, not assumed.
+  This pass also precised the review-round-2 log entry's own mutation-probe
+  sentence above: it had described the tiers-off-loop probe as covering
+  "both `init.ts` note loops," which overstated what that probe actually
+  demonstrated (only the tiers-off loop; the profile-downgrade loop's own
+  gate was the untested one R3-L1 found) — corrected in place rather than
+  left to imply a coverage this bundle did not have at the time.
+
+  R3-L2 is a pure-comment correctness fix, no behavior change: the
+  `effortLine` parameter's JSDoc on `composeOpencodeAgentVariant`
+  (`init.ts:298-304`) claimed the caller passes the value in "since the
+  caller already needs that same value to decide whether to skip writing
+  this variant at all" — false since fix-round-1: the skip decision (`init.ts:511`,
+  `variantModelValue === undefined`) depends only on the class model's
+  resolution, computed and checked *before* `effortLine` exists at all
+  (`init.ts:526` computes it only after that check passes); the real reason
+  for the fourth-parameter change (review-round-2, R2-L1) is a single
+  computed value instead of two independent call sites for it. The JSDoc
+  was rewritten to state that; both OKF docs repeated the same wrong
+  rationale (model-preselection.md's "Composition" paragraph, and a
+  self-contradictory passage in install-fence-mechanics.md's "What `init`
+  writes" section that had already *proved* the skip check does not depend
+  on `effortLine` two sentences earlier via the R2-L1 equivalence proof,
+  then contradicted its own proof by attributing the fourth-parameter
+  change to that same dependency) — both corrected the same way, in place,
+  crediting R3-L2 explicitly so a future re-verification pass does not
+  mistake the correction for original fix-round-2 content.
+
+  R3-L3 is likewise a pure-comment fix: the code comment directly above
+  `cli.ts`'s per-unresolved-class-model warning (`cli.ts:304-307`) still
+  read like the pre-fix-round-1 world ("every effort-tier variant... 
+  silently rendered with no model: line"), a description fix-round-1's own
+  M1 guard had already made false (the variant is skipped entirely, not
+  rendered with a field omitted) but which review-round-2's wording pass
+  only fixed in the *warning text itself* and the comment directly above
+  the `process.stderr.write` call, not in this second, slightly higher
+  comment that motivates the `const reason` computation below it. Reworded
+  to state the real semantics plainly: "init.ts skips the variant write
+  entirely when the class model is unresolved." No line count changed in
+  either `init.ts` or `cli.ts` (both edits kept their surrounding
+  functions' line numbers stable), confirmed directly rather than assumed,
+  so no citation into either file needed re-deriving because of these two
+  fixes specifically — only R3-L1's test insertions shifted `init.test.ts`
+  citations, handled separately below.
+
+  R3-L4 restores a lost case in README's opencode-effort bullet list
+  ("Effort tiers" section): the Ollama bullet had narrowed from
+  "Ollama, or an id with no provider prefix" (the actual dispatch in
+  `opencodeVariantEffortLine`, `init.ts:282-296`, whose provider lookup
+  splits on the first `/` and treats `provider === undefined` the same as
+  `provider === "ollama"`) down to just "Ollama" at some earlier rewrite,
+  making the following "every other non-Claude-family model gets
+  `reasoningEffort:`" bullet false for an unqualified id. Restored as
+  "Ollama, or an id with no provider prefix: no effort field at all."; the
+  identical lost case was also found, while re-verifying, in this bundle's
+  own model-preselection.md prose (the "Per-harness frontmatter behavior"
+  paragraph) and in the CHANGELOG 0.19.0 entry's opencode-effort sentence,
+  both corrected the same way (the CHANGELOG fix was rewrapped to hold the
+  same 3-line span as before specifically so it would not shift any of the
+  three CHANGELOG-citing docs outside this task's scope, which were left
+  untouched). A new `test/init.test.ts:1287-1313` test pins the runtime
+  behavior directly: an opencode install with a resolved-but-unqualified
+  class id (`"local-model"`, no `/`) renders a variant file carrying a
+  `model:` line but no `variant:`/`reasoningEffort:` line, inserted right
+  after the existing Ollama-outcome test since it is the same code-path
+  family. `test/docs-consistency.test.ts`'s existing substring-based README
+  opencode-effort-prose guard (`:1244-1302`, from review-round-2) needed no
+  change: it asserts the prose contains "Claude-family" and does not
+  contain either of two specific stale phrases, neither of which this
+  wording change touches, confirmed by re-reading that test directly rather
+  than assumed safe.
+
+  `src/init.ts` and `src/cli.ts` citations in both docs were re-derived by
+  direct read against the current file at each exact location, the same
+  discipline as every entry above; both files' own diffs in this pass
+  landed inside existing functions/comments with no net line-count change
+  (verified via `git diff --stat`: `init.ts` +8/-8, `cli.ts` +6/-6), so no
+  citation into either file needed re-deriving because of this pass's
+  `src/` edits specifically. `test/init.test.ts` is the one file whose
+  shift needed real care: `git diff --stat` shows a clean +82 lines, 0
+  deletions, in exactly two hunks (`git diff` hunk headers: `@@ -970,6
+  +970,60 @@` and `@@ -1230,6 +1284,34 @@`), giving a three-zone shift
+  rather than one uniform delta — old line <= 972 unshifted, 973-1232
+  shifted +54 (the R3-L1 `describe` block, inserted right after the
+  existing R2-M2 one and before the kit-owned-file-conflicts one), and
+  >= 1233 shifted +82 (the R3-L4 test, inserted between the existing Ollama
+  and non-Claude-family `reasoningEffort` tests inside the `tier variants`
+  describe). Every citation from either doc landing at or after old line
+  973 was individually relocated this way and spot-checked by reading the
+  exact target span in the current file (not trusted on the shift formula
+  alone), the same "verify every citation, do not assume a uniform offset"
+  discipline the 2026-08-17 and both 2026-08-18 entries above established;
+  one citation spanning both R3-L4-affected zones (the "three
+  opencode-provider-branch outcomes" sentence in model-preselection.md,
+  previously one contiguous `:1173-1253` range covering three tests now
+  separated by the newly-inserted R3-L4 test) was split into three
+  sub-citations with the new test's own outcome named explicitly between
+  them, rather than left as a single range that would now silently also
+  bound content the sentence never described. `README.md` and
+  `CHANGELOG.md` citations in both primary docs needed no correction: the
+  R3-L4 README edit landed inside the already-uncited opencode-effort
+  prose span (lines 251-286, per the review-round-2 entry above, still
+  uncited by line number here), and the CHANGELOG edit was deliberately
+  kept to its original 3-line span for the reason stated above.
+
+  `okf-kit check docs/okf --strict`: 0 warnings, 0 findings both
+  immediately before this pass's edits (measured directly via `git stash` /
+  `okf-kit check` / `git stash pop` against the review-round-2 commit,
+  32e83f5, not assumed from the round-2 entry's own closing count) and
+  after, for the same same-day-headroom reason the 2026-08-18 (R2) entry
+  above documents: both docs' `timestamp:` frontmatter was bumped to
+  `2026-08-19T23:59:00Z`, comfortably past every commit made today. Full
+  suite 233/233 (231 baseline + 2 new: the R3-L1 profile-downgrade-notes
+  test and the R3-L4 no-provider-prefix-id test), `tsc --noEmit` clean,
+  `tsc --noEmit -p tsconfig.test.json` clean, `npm run build` clean,
+  `npm run format:check` clean (the pre-existing `test/template-markers.test.ts`
+  warning is unrelated and untouched, matching every prior pass's
+  baseline; README.md/CHANGELOG.md are outside that script's glob, same as
+  every prior pass, so their own formatting was left as found rather than
+  reformatted wholesale). Mutation probes (named in the task assignment):
+  covered in the R3-L1 paragraph above (the profile-downgrade ledger-gate
+  mutant, 6 notes instead of 2, restored and re-verified green). No probe
+  was named or run for R3-L2/R3-L3/R3-L4 beyond the R3-L4 behavioral test
+  itself, since those three findings are comment/docs-only or a single
+  additive assertion, not a fix with a named mutation target.

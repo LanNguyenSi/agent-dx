@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-08-18T20:00:00Z
+timestamp: 2026-08-19T23:45:00Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -106,7 +106,7 @@ blank, `open`, `TODO`, "leaves the finding unresolved and ARMS the gate"
 until changed. The example row was narrowed to `accepted/defer` in 0.7.4
 after a prior `accepted/fix/defer/reject` example misled a run into an
 unexpectedly armed gate
-(`packages/orchestrator-workflow/CHANGELOG.md:384-398`).
+(`packages/orchestrator-workflow/CHANGELOG.md:451-465`).
 
 The two column headers are load-bearing for a second, independent reason:
 `05-review-findings.md:9` documents them as the anchor the grounding-mcp
@@ -116,7 +116,7 @@ dropping either header hides the table from the reader regardless of
 Decision values; the load-bearing comment (plus a one-sentence transfer
 rule in SKILL.md) was added in 0.7.3 after a live run drifted onto an
 unparseable `Severity | Finding | Resolution` convention, while the shipped
-header itself was already correct (`CHANGELOG.md:400-416`, the
+header itself was already correct (`CHANGELOG.md:467-483`, the
 already-correct-header statement within that entry).
 
 ## Fail-closed acceptance markers
@@ -134,15 +134,15 @@ different fail-closed design than the run-base marker, which fails open; see
 
 ## Three surfaces kept in sync
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:78-108`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:87-117`
 ("review gate ships in the policy, skill, and handoff template") pins the
 invariant across all three: `agents-md-section.md`'s `### Review gate`
 heading plus "block final acceptance until fixed or explicitly waived" and
-"waived by the operator" (test lines 83-89); `SKILL.md`'s "block acceptance
+"waived by the operator" (test lines 92-98); `SKILL.md`'s "block acceptance
 until fixed or explicitly waived" and "Accepted Waivers section of
-`06-handoff.md`" phrasing (test lines 91-96); `06-handoff.md`'s `##
+`06-handoff.md`" phrasing (test lines 100-105); `06-handoff.md`'s `##
 Accepted Waivers` heading and its `Finding | Severity | Rationale` header
-(test lines 98-101). A negative pin (test lines 103-107) guards against a
+(test lines 107-110). A negative pin (test lines 112-116) guards against a
 superseded softer wording, "addressed or consciously accepted by the
 orchestrator", reappearing in `agents-md-section.md`. A second suite,
 `test/template-markers.test.ts:56-98`, independently pins the
@@ -152,11 +152,11 @@ findings-table header convention and the Decision-legend vocabulary above.
 
 Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 5 seconds with 0 tool uses, handing back harness boilerplate instead of the
-reviewer output contract (`CHANGELOG.md:298-319`). The Subagent misfire rule
+reviewer output contract (`CHANGELOG.md:365-386`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
 (`SKILL.md:396-397`), pinned by
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:367-370`. Since
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:376-379`. Since
 0.18.0 the rule also names resume over a fresh respawn as the preferred
 response for the near-instant, no-tool-activity signal specifically (scoped
 away from a separately measured mid-run watchdog-stall class where resume
@@ -183,7 +183,7 @@ field (`SKILL.md:286-290`, `reviewer.md:76-80`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
-Motivating incident (`CHANGELOG.md:212-241`): agent-dx run
+Motivating incident (`CHANGELOG.md:279-308`): agent-dx run
 `2026-07-18-harness-subprocess-test-deflake`, reviewer pass 1. The
 implementer's evidence read "8/8" full-suite runs green for a `maxWorkers`
 concurrency cap; the reviewer reran the suite independently (6 sequential
@@ -212,9 +212,9 @@ verdict.
 
 Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
-(`CHANGELOG.md:121-167`, agent-tasks task 16637a96): one reviewer round in
+(`CHANGELOG.md:188-234`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:922-940` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:931-949` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.
 
 ## See also

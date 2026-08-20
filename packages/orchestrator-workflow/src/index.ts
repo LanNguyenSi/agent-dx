@@ -5,11 +5,16 @@ export type { UninstallReport } from "./uninstall.js";
 export { detectHarnesses, parseHarnessList, HARNESSES } from "./detect.js";
 export type { Harness } from "./detect.js";
 export {
+  CLASS_MODELS,
   DEFAULT_MODELS,
   DEFAULT_PROFILE,
+  DEFAULT_TIER,
   MODEL_ALIASES,
+  MODEL_CLASSES,
   PROFILES,
   ROLES,
+  ROLE_TIERS,
+  TIER_DEFS,
   claudeModelValue,
   isProfile,
   opencodeModelValue,
@@ -17,6 +22,6 @@ export {
   parseProfile,
   rolesForProfile,
 } from "./models.js";
-export type { ModelAlias, Profile, Role } from "./models.js";
+export type { ModelAlias, ModelClass, Profile, Role, Tier } from "./models.js";
 export type { Report } from "./writers.js";
 export { PACKAGE_VERSION } from "./assets.js";

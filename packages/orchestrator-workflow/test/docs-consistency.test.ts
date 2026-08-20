@@ -3,7 +3,16 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_MODELS, READ_ONLY_ROLES, ROLES } from "../src/models.js";
+import {
+  CLASS_MODELS,
+  DEFAULT_MODELS,
+  DEFAULT_TIER,
+  READ_ONLY_ROLES,
+  ROLES,
+  ROLE_TIERS,
+  TIER_DEFS,
+} from "../src/models.js";
+import type { Tier } from "../src/models.js";
 import { readAsset } from "../src/assets.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -1077,5 +1086,217 @@ describe("round-2 halt rule ships in the skill", () => {
     expect(skillMd).toContain(
       "go to the operator as a merge-hold (hold the change unmerged and hand the decision to the operator)",
     );
+  });
+});
+
+/**
+ * 0.19.0 adds `--tiers`: `models.ts` gains `ROLE_TIERS` (which effort tiers
+ * each role gets a variant file for) and `DEFAULT_TIER` (the tier a role's
+ * plain, unsuffixed file already corresponds to, so no variant is ever
+ * rendered for it). README's new "Effort tiers" section carries a table of
+ * that same data for humans; nothing previously guarded the two staying in
+ * sync. This pins the table against `ROLE_TIERS`/`DEFAULT_TIER` directly
+ * (not a hardcoded expected string), so a tier added to or removed from
+ * either source without a matching table edit fails here, the same
+ * source-of-truth discipline as the model-preselection enumeration guards
+ * above. The table is located by its own header text and sliced off at the
+ * next blank line, so a row belonging to the unrelated model-preselection
+ * table (which also has an `explorer`/`task-slicer`/`implementer`/`reviewer`
+ * first column, higher up in the same file) is never accidentally matched.
+ */
+describe("README tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () => {
+  const readmeMd = readDoc("README.md");
+
+  /** The tier table's own markdown block, isolated from the unrelated
+   * model-preselection table earlier in the file (same first column). */
+  function tierTableSection(): string {
+    const headerIdx = readmeMd.indexOf(
+      "| Role | Tiers available | Default tier",
+    );
+    expect(
+      headerIdx,
+      "README tier table header not found",
+    ).toBeGreaterThanOrEqual(0);
+    const afterHeader = readmeMd.slice(headerIdx);
+    const endIdx = afterHeader.indexOf("\n\n");
+    expect(
+      endIdx,
+      "README tier table did not terminate before a blank line",
+    ).toBeGreaterThan(0);
+    return afterHeader.slice(0, endIdx);
+  }
+
+  function tierTableRow(role: (typeof ROLES)[number]): {
+    tiers: string[];
+    defaultTier: string;
+  } {
+    const match = tierTableSection().match(
+      new RegExp(`^\\| ${role} \\| ([^|]+) \\| ([^|]+) \\|$`, "m"),
+    );
+    expect(match, `README tier table row for "${role}" not found`).toBeTruthy();
+    const [, tiersCell, defaultTierCell] = match as RegExpMatchArray;
+    return {
+      tiers: tiersCell.split(",").map((tier) => tier.trim()),
+      defaultTier: defaultTierCell.trim(),
+    };
+  }
+
+  for (const role of ROLES) {
+    it(`lists exactly ROLE_TIERS["${role}"], in order, in the Tiers available column`, () => {
+      expect(tierTableRow(role).tiers).toEqual(ROLE_TIERS[role]);
+    });
+
+    it(`lists DEFAULT_TIER["${role}"] in the Default tier column`, () => {
+      expect(tierTableRow(role).defaultTier).toBe(DEFAULT_TIER[role]);
+    });
+  }
+
+  it("has exactly one row per role, no extra or missing rows", () => {
+    // Excludes the header row itself ("Role") and the markdown table's
+    // separator row ("---"), which the row shape also matches.
+    const dataRows = [
+      ...tierTableSection().matchAll(/^\| ([\w-]+) \| [^|]+ \| [^|]+ \|$/gm),
+    ]
+      .map((m) => m[1])
+      .filter((cell) => cell !== "Role" && !/^-+$/.test(cell));
+    expect(dataRows.sort()).toEqual([...ROLES].sort());
+  });
+});
+
+/**
+ * L4 (review round 1 on 0.19.0): the "Effort tiers" section carries a
+ * second table, Tier -> model class -> model alias -> requested effort
+ * (`TIER_DEFS`/`CLASS_MODELS` in `src/models.ts`), that the tier-table guard
+ * above does not touch (it only pins the Role/Tiers-available/Default-tier
+ * table). Nothing previously guarded this second table against drifting
+ * from its source maps, so this mirrors the same source-of-truth discipline
+ * for it: located by its own header text and sliced off at the next blank
+ * line, so it is never confused with either of the two other same-shaped
+ * tables earlier in the file.
+ */
+describe("README tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS exactly", () => {
+  const readmeMd = readDoc("README.md");
+  const tiersInOrder = Object.keys(TIER_DEFS) as Tier[];
+
+  function tierModelClassTableSection(): string {
+    const headerIdx = readmeMd.indexOf(
+      "| Tier | Model class | Model alias | Effort requested |",
+    );
+    expect(
+      headerIdx,
+      "README tier-to-model-class table header not found",
+    ).toBeGreaterThanOrEqual(0);
+    const afterHeader = readmeMd.slice(headerIdx);
+    const endIdx = afterHeader.indexOf("\n\n");
+    expect(
+      endIdx,
+      "README tier-to-model-class table did not terminate before a blank line",
+    ).toBeGreaterThan(0);
+    return afterHeader.slice(0, endIdx);
+  }
+
+  function tierModelClassRow(tier: Tier): {
+    modelClass: string;
+    alias: string;
+    effort: string;
+  } {
+    const match = tierModelClassTableSection().match(
+      new RegExp(`^\\| ${tier} \\| ([^|]+) \\| ([^|]+) \\| ([^|]+) \\|$`, "m"),
+    );
+    expect(
+      match,
+      `README tier-to-model-class row for "${tier}" not found`,
+    ).toBeTruthy();
+    const [, modelClassCell, aliasCell, effortCell] = match as RegExpMatchArray;
+    return {
+      modelClass: modelClassCell.trim(),
+      alias: aliasCell.replace(/`/g, "").trim(),
+      effort: effortCell.replace(/`/g, "").trim(),
+    };
+  }
+
+  for (const tier of tiersInOrder) {
+    const def = TIER_DEFS[tier];
+
+    it(`lists TIER_DEFS["${tier}"]'s model class and effort in the "${tier}" row`, () => {
+      const row = tierModelClassRow(tier);
+      expect(row.modelClass).toBe(def.modelClass);
+      expect(row.effort).toBe(def.effort);
+    });
+
+    it(`lists CLASS_MODELS["${def.modelClass}"] as the "${tier}" row's model alias`, () => {
+      expect(tierModelClassRow(tier).alias).toBe(CLASS_MODELS[def.modelClass]);
+    });
+  }
+
+  it("has exactly one row per tier, no extra or missing rows", () => {
+    const dataRows = [
+      ...tierModelClassTableSection().matchAll(
+        /^\| ([\w-]+) \| [^|]+ \| [^|]+ \| [^|]+ \|$/gm,
+      ),
+    ]
+      .map((m) => m[1])
+      .filter((cell) => cell !== "Tier" && !/^-+$/.test(cell));
+    expect(dataRows.sort()).toEqual([...tiersInOrder].sort());
+  });
+});
+
+/**
+ * Review round 2 (R2-M1): before this fix, README's opencode-effort prose
+ * (and the CHANGELOG 0.19.0 entry) still described the pre-fix-round-1
+ * dispatch (keyed on the literal provider id `anthropic/...`, review finding
+ * M4's bug) and the pre-fix-round-1 unresolved-class behavior (a rendered
+ * file with the `model:` line merely omitted, rather than the file being
+ * skipped entirely, review finding M1's fix). This site-specific guard pins
+ * the corrected README prose directly, isolating the opencode-effort section
+ * from the rest of the "Effort tiers" section the same way the two table
+ * guards above isolate their own tables, so a regression back to the stale
+ * provider-scoped wording fails here rather than silently reappearing.
+ */
+describe("README opencode-effort prose uses family terms, not the stale provider-scoped claim (review round 2, R2-M1)", () => {
+  const readmeMd = readDoc("README.md");
+
+  /** The opencode-effort prose block, isolated from the rest of the
+   * "Effort tiers" section by its own opening bold lead-in and the next
+   * bold lead-in ("Warning: `CLAUDE_CODE_EFFORT_LEVEL`...") that follows it,
+   * so a phrase elsewhere in the section can never accidentally satisfy (or
+   * fail) these assertions. */
+  function opencodeEffortSection(): string {
+    const startIdx = readmeMd.indexOf(
+      "**opencode variants key off the resolved model's family",
+    );
+    expect(
+      startIdx,
+      "README opencode-effort prose lead-in not found",
+    ).toBeGreaterThanOrEqual(0);
+    const endIdx = readmeMd.indexOf(
+      "**Warning: `CLAUDE_CODE_EFFORT_LEVEL`",
+      startIdx,
+    );
+    expect(
+      endIdx,
+      "README opencode-effort prose did not terminate before the CLAUDE_CODE_EFFORT_LEVEL warning",
+    ).toBeGreaterThan(startIdx);
+    return readmeMd.slice(startIdx, endIdx);
+  }
+
+  it("carries the family-based framing, not the old provider-dependent one", () => {
+    expect(opencodeEffortSection()).toContain("Claude-family");
+    expect(opencodeEffortSection()).not.toContain("provider-dependent");
+  });
+
+  it("does not describe dispatch as scoped to `anthropic/` model ids", () => {
+    // The pre-fix-round-1 (M4) claim: dispatch keyed on the literal
+    // `anthropic/...` provider prefix rather than the model's family. A
+    // Claude-family model fronted by a different provider (e.g.
+    // `github-copilot/claude-sonnet-4.6`) must be documented as still
+    // getting the `variant:` rule, which this exact scope phrase denies.
+    expect(opencodeEffortSection()).not.toContain("`anthropic/...` model ids");
+  });
+
+  it("states the real M1 effect (no variant file at all) instead of the pre-fix 'model: will be omitted' claim", () => {
+    const section = opencodeEffortSection();
+    expect(section).toContain("no variant file is rendered for");
+    expect(section).not.toContain("model: will be omitted");
   });
 });

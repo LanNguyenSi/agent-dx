@@ -22,19 +22,22 @@ which is mutable. For a stable audit, pin the URL to a commit SHA instead
    below).
 2. **Ask you, not guess**: which harnesses should get adapters, which role
    profile to install (`full` — every role, or `minimal` — implementer and
-   reviewer only; the reviewer is never optional), and which model each
-   installed subagent role should use. Suggested defaults: profile `full`;
-   explorer `sonnet`, task-slicer `sonnet`, implementer `sonnet`, reviewer
-   `opus`.
+   reviewer only; the reviewer is never optional), which model each
+   installed subagent role should use, and whether to also render effort-tier
+   subagent variants (`--tiers`; off by default, no per-tier model prompt
+   since tier models are chosen automatically). Suggested defaults: profile
+   `full`; explorer `sonnet`, task-slicer `sonnet`, implementer `sonnet`,
+   reviewer `opus`; tiers off.
 3. **Run the non-interactive installer** with your answers:
-   `npx orchestrator-workflow init --yes --harness ... --profile ... --models ...`.
+   `npx orchestrator-workflow init --yes --harness ... --profile ... --models ... [--tiers]`.
    If the installer reports conflicts with locally edited files, the agent
    shows them to you and asks before any `--force` re-run.
 4. **Manual fallback only when npx or the registry is unavailable**: create
    the same files by hand from this repository's `assets/` directory,
    following the byte-precise rules in step 4 below.
 5. **Report back**: which harnesses were installed, which profile and model
-   each role uses, and any conflicts left in place.
+   each role uses, whether effort-tier variants were rendered, and any
+   conflicts left in place.
 
 ### Write surface
 
@@ -58,7 +61,16 @@ The per-role agent files above are the `full` profile (the default); the
 `minimal` profile writes only the `implementer` and `reviewer` files for
 Claude Code and opencode and skips `task-slicer` and `explorer` entirely.
 Codex has no per-role files, so the profile choice does not change what it
-gets. Nothing else in the repository is modified. Locally edited files are
+gets. When `--tiers` is on, each installed Claude Code and opencode role
+additionally gets one subagent file per non-default effort tier, named
+`<role>-<tier>.md` (never a file for the role's own default tier, which
+would collide with the plain `<role>.md` file); see the package README's
+"Effort tiers" section for the full role/tier table and the per-harness
+frontmatter shape. `--tiers` is off by default and has no interactive
+prompt equivalent in the manual fallback below (nor does its negation,
+`--no-tiers`): the automated installer is the only path that renders
+tier-variant files; a manual scaffold (step 4) does not cover them.
+Nothing else in the repository is modified. Locally edited files are
 reported as conflicts and left alone, never overwritten silently; the
 exceptions are the kit-owned surfaces: `.ai/workflow/manifest.json` (the
 kit's state file, rewritten whenever the applied state changes) and the
@@ -90,6 +102,10 @@ steps in the repository you were asked to install into.
      `sonnet`, reviewer `opus`. Accept the aliases `sonnet`, `opus`,
      `haiku` or a full model id. Skip asking about a role's model when the
      chosen profile does not install that role.
+   - Whether to also render effort-tier subagent variants (`--tiers`)?
+     Default: off. There is no per-tier model question: tier models are
+     chosen automatically from the tier (see the package README's "Effort
+     tiers" section for the role/tier table and the model-class mapping).
 
 3. Run the non-interactive installer with the operator's answers:
 
@@ -97,16 +113,25 @@ steps in the repository you were asked to install into.
    npx orchestrator-workflow init --yes \
      --harness <claude,codex,opencode> \
      --profile <minimal|full> \
-     --models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>"
+     --models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>" \
+     [--tiers | --no-tiers]
    ```
 
    Omit `--profile` to keep `full` (or, on a re-run, whatever profile was
    installed previously); omit the models for roles the chosen profile does
-   not install. If the command reports conflicts, show them to the operator
+   not install. Add `--tiers` only when the operator asked for tier
+   variants; add `--no-tiers` only when the operator explicitly wants them
+   turned off on a re-run that previously had them on; omit both to keep
+   tiers off on a fresh install, or whatever value was previously installed
+   on a re-run. If the command reports conflicts, show them to the operator
    and ask before re-running with --force.
 
 4. Only if npx or the registry is unavailable, scaffold manually from
-   https://github.com/LanNguyenSi/agent-dx/tree/master/packages/orchestrator-workflow/assets
+   https://github.com/LanNguyenSi/agent-dx/tree/master/packages/orchestrator-workflow/assets.
+   This manual path does not cover `--tiers`: it never renders
+   `<role>-<tier>.md` variant files, regardless of what the operator asked
+   for in step 2; tell the operator tier variants require the automated
+   installer (step 3).
 
    - `.ai/workflow/templates/00-goal.md` through `06-handoff.md` from
      `assets/templates/`, unchanged.
@@ -164,6 +189,7 @@ steps in the repository you were asked to install into.
        "version": "0.5.0",
        "harnesses": ["claude", "opencode"],
        "profile": "full",
+       "tiers": false,
        "models": {
          "explorer": "sonnet",
          "task-slicer": "sonnet",
@@ -177,11 +203,14 @@ steps in the repository you were asked to install into.
 
      Under `minimal`, `models` only needs the `implementer` and `reviewer`
      keys (the roles actually installed); the missing keys fall back to the
-     kit's defaults if the profile is later switched back to `full`.
+     kit's defaults if the profile is later switched back to `full`. `tiers`
+     is always `false` from this manual path, since it never renders
+     tier-variant files (see step 4's opening note above).
 
      A manual install may leave the `files` hash map empty; a later `init`
      run then treats existing kit files conservatively and reports conflicts
      rather than overwriting them.
 
 5. Report back to the operator: which harnesses were installed, which model
-   each role uses, and any conflicts that were left in place.
+   each role uses, whether effort-tier variants were rendered, and any
+   conflicts that were left in place.

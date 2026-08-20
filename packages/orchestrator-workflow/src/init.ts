@@ -10,11 +10,15 @@ import {
 } from "./assets.js";
 import type { Harness } from "./detect.js";
 import { HARNESSES } from "./detect.js";
-import type { Profile, Role } from "./models.js";
+import type { ModelClass, Profile, Role, Tier } from "./models.js";
 import {
+  CLASS_MODELS,
   DEFAULT_PROFILE,
+  DEFAULT_TIER,
   READ_ONLY_ROLES,
   ROLES,
+  ROLE_TIERS,
+  TIER_DEFS,
   assertValidModelId,
   claudeModelValue,
   isProfile,
@@ -48,6 +52,22 @@ export interface InitOptions {
    * aliases, producing the same inherit-session-model behaviour for bare inputs.
    */
   opencodeModels?: Record<Role, string | undefined>;
+  /**
+   * Renders additional per-role effort-tier subagent variants
+   * (`<role>-<tier>.md`) alongside the default agent file. Defaults to
+   * `false` (today's unconditional behavior: only the default file), so
+   * existing callers that do not pass this field see no change.
+   */
+  tiers?: boolean;
+  /**
+   * Resolved fully-qualified opencode model ids per tier's model class
+   * (`small`/`medium`/`large`), or `undefined` to omit the `model:` line for
+   * that variant. Only consulted when `tiers` is true and the `opencode`
+   * harness is selected; mirrors `opencodeModels` but keyed by model class
+   * instead of role, since a tier variant's model is chosen by class, not
+   * by the role's own preselected model.
+   */
+  opencodeClassModels?: Record<ModelClass, string | undefined>;
 }
 
 const SKILL_NAME = "orchestrator-workflow";
@@ -60,6 +80,8 @@ export interface Manifest {
   models: Record<Role, string>;
   /** Which subagent roles were installed: `"minimal"` or `"full"`. */
   profile: Profile;
+  /** Whether per-role effort-tier subagent variants were rendered. */
+  tiers: boolean;
   /**
    * sha256 of every kit-owned file as installed. This is how a re-run tells
    * "upstream changed, safe to update" apart from "user edited, conflict".
@@ -141,12 +163,19 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
       ? candidate.profile
       : DEFAULT_PROFILE;
 
+  // A manifest written before tiers existed carries no `tiers` field; that
+  // install never rendered variant files, so it degrades to `false` here
+  // (the same per-field-degradation style as `profile` above) rather than
+  // throwing on a legacy manifest.
+  const tiers = typeof candidate.tiers === "boolean" ? candidate.tiers : false;
+
   return {
     kit: SKILL_NAME,
     version: typeof candidate.version === "string" ? candidate.version : "",
     harnesses,
     models: models as Record<Role, string>,
     profile,
+    tiers,
     files,
     installedAt:
       typeof candidate.installedAt === "string" ? candidate.installedAt : "",
@@ -195,6 +224,109 @@ function composeOpencodeAgent(
   return [...frontmatter, "", asset.body.trimEnd(), ""].join("\n");
 }
 
+function tierDescriptionSuffix(
+  asset: { description: string },
+  tier: Tier,
+): string {
+  return `${asset.description} (Effort tier: ${tier}.)`;
+}
+
+/**
+ * Composes a tier-variant sibling of `composeClaudeAgent` (`<role>-<tier>.md`).
+ * The default-tier file is never rendered here (callers skip it via
+ * `DEFAULT_TIER`), so `composeClaudeAgent`'s own output stays byte-identical
+ * whether or not tiers are on.
+ */
+function composeClaudeAgentVariant(role: Role, tier: Tier): string {
+  const asset = readAgentAsset(role);
+  const def = TIER_DEFS[tier];
+  const frontmatter = [
+    "---",
+    `name: ${asset.name}-${tier}`,
+    `description: ${yamlQuote(tierDescriptionSuffix(asset, tier))}`,
+    `model: ${claudeModelValue(CLASS_MODELS[def.modelClass])}`,
+    `effort: ${def.effort}`,
+  ];
+  if (READ_ONLY_ROLES.has(role)) {
+    frontmatter.push("disallowedTools: Edit, Write, NotebookEdit");
+  }
+  frontmatter.push("---");
+  return [...frontmatter, "", asset.body.trimEnd(), ""].join("\n");
+}
+
+/**
+ * Whether a resolved opencode model id belongs to the Claude family,
+ * regardless of which provider is fronting it (`anthropic/claude-...`,
+ * `github-copilot/claude-...`, `openrouter/anthropic/claude-...`, ...): the
+ * segment after the provider prefix contains `claude-`, or the id starts
+ * with `anthropic/` outright. Dispatch on family rather than provider id
+ * because the `variant:` effort surface is a property of the model being
+ * served, not of which provider happens to front it.
+ */
+function isClaudeFamilyModel(modelValue: string): boolean {
+  if (modelValue.startsWith("anthropic/")) return true;
+  const slash = modelValue.indexOf("/");
+  const remainder = slash === -1 ? "" : modelValue.slice(slash + 1);
+  return remainder.includes("claude-");
+}
+
+/**
+ * The opencode effort surface is keyed by model family, not provider id:
+ * Claude-family models' `variant:` option only distinguishes `high` and
+ * `max` (mapped from the `high`/`xhigh` tiers; `low`/`medium` collapse to no
+ * effort field), Ollama and ids without a provider prefix have no known
+ * effort passthrough, and every other model accepts a plain
+ * `reasoningEffort:` value. An unresolved (`undefined`) model gets no
+ * effort field either, since there is then no model to key the decision on.
+ */
+function opencodeVariantEffortLine(
+  tier: Tier,
+  modelValue: string | undefined,
+): string | undefined {
+  if (!modelValue) return undefined;
+  if (isClaudeFamilyModel(modelValue)) {
+    if (tier === "high") return "variant: high";
+    if (tier === "xhigh") return "variant: max";
+    return undefined;
+  }
+  const slash = modelValue.indexOf("/");
+  const provider = slash === -1 ? undefined : modelValue.slice(0, slash);
+  if (provider === undefined || provider === "ollama") return undefined;
+  return `reasoningEffort: ${TIER_DEFS[tier].effort}`;
+}
+
+/**
+ * Composes a tier-variant sibling of `composeOpencodeAgent`. `effortLine` is
+ * decided once, at the single call site in the opencode tier loop of
+ * `runInit` (via `opencodeVariantEffortLine`), and passed in rather than
+ * recomputed here, so there is exactly one place that decides it instead
+ * of a second, independent source of truth for the same value.
+ */
+function composeOpencodeAgentVariant(
+  role: Role,
+  tier: Tier,
+  modelValue: string | undefined,
+  effortLine: string | undefined,
+): string {
+  const asset = readAgentAsset(role);
+  const frontmatter = [
+    "---",
+    `description: ${yamlQuote(tierDescriptionSuffix(asset, tier))}`,
+    "mode: subagent",
+  ];
+  if (modelValue) {
+    frontmatter.push(`model: ${modelValue}`);
+  }
+  if (effortLine) {
+    frontmatter.push(effortLine);
+  }
+  if (READ_ONLY_ROLES.has(role)) {
+    frontmatter.push("permission:", "  edit: deny");
+  }
+  frontmatter.push("---");
+  return [...frontmatter, "", asset.body.trimEnd(), ""].join("\n");
+}
+
 export function runInit(options: InitOptions): Report {
   const { targetDir } = options;
   if (!existsSync(targetDir)) {
@@ -205,10 +337,30 @@ export function runInit(options: InitOptions): Report {
   }
   const force = options.force ?? false;
   const profile: Profile = options.profile ?? DEFAULT_PROFILE;
+  const tiers = options.tiers ?? false;
   const report = emptyReport();
 
   const previous = readInstalledManifest(targetDir);
   const installedFiles: Record<string, string> = {};
+
+  // Both leftover-note loops below are ledger-driven, not enumeration-
+  // driven: they only ever push a note for a relative path that the
+  // *previous* install actually recorded in `previous.files`, and only ever
+  // iterate `previous.harnesses` (the harnesses that install actually wrote
+  // files for), never `ROLE_TIERS`/`options.harnesses` as a source of truth.
+  // Deriving the note set from ROLE_TIERS/options.harnesses instead would
+  // (a) claim a leftover for a variant file that was never written in the
+  // first place (e.g. an opencode install whose tier-class models never
+  // resolved, so the unresolved-class guard skipped every variant write),
+  // and (b) miss a real leftover whose harness was dropped from
+  // options.harnesses this run, since that harness's files are still
+  // sitting on disk and still becoming untracked either way. The ledger
+  // (`previous.files`/`previous.harnesses`) is the only source of truth for
+  // "what did the previous install actually put on disk."
+  const previousHarnessDirs = (previous?.harnesses ?? []).filter(
+    (harness): harness is "claude" | "opencode" =>
+      harness === "claude" || harness === "opencode",
+  );
 
   // A full -> minimal downgrade drops explorer/task-slicer from the roles
   // installed, but (like dropping a harness from --harness) existing role
@@ -219,17 +371,55 @@ export function runInit(options: InitOptions): Report {
     const droppedRoles = rolesForProfile(previous.profile).filter(
       (role) => !rolesForProfile(profile).includes(role),
     );
-    const harnessDirs = options.harnesses.filter(
-      (harness): harness is "claude" | "opencode" =>
-        harness === "claude" || harness === "opencode",
-    );
-    for (const harness of harnessDirs) {
-      const harnessDir = harness === "claude" ? ".claude" : ".opencode";
+    for (const harnessDir of previousHarnessDirs.map((harness) =>
+      harness === "claude" ? ".claude" : ".opencode",
+    )) {
       for (const role of droppedRoles) {
         const relativePath = join(harnessDir, "agents", `${role}.md`);
-        report.notes.push(
-          `${relativePath}: now untracked after the full -> ${profile} profile downgrade; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
-        );
+        if (previous.files[relativePath] !== undefined) {
+          report.notes.push(
+            `${relativePath}: now untracked after the full -> ${profile} profile downgrade; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+          );
+        }
+        // A dropped role that also had tiers on previously left behind its
+        // own <role>-<tier>.md variant files, not just its base file; the
+        // note above only knows about <role>.md, so those variants would go
+        // unmentioned even though they are equally untracked now. ROLE_TIERS
+        // only supplies the candidate tier suffixes to probe; the ledger
+        // check above/below is what decides whether a note is actually due.
+        for (const tier of ROLE_TIERS[role]) {
+          if (tier === DEFAULT_TIER[role]) continue;
+          const variantPath = join(harnessDir, "agents", `${role}-${tier}.md`);
+          if (previous.files[variantPath] !== undefined) {
+            report.notes.push(
+              `${variantPath}: now untracked after the full -> ${profile} profile downgrade; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // A tiers on -> off transition leaves each still-installed role's
+  // <role>-<tier>.md variant files behind on disk, the same untracked-
+  // leftover shape as the full -> minimal profile downgrade above (a role
+  // dropped from the profile is handled by the block above instead, so
+  // there is no overlap between the two loops). Surface it the same way:
+  // a note per file instead of a silent, unexplained leftover.
+  if (previous && previous.tiers && !tiers) {
+    for (const harnessDir of previousHarnessDirs.map((harness) =>
+      harness === "claude" ? ".claude" : ".opencode",
+    )) {
+      for (const role of rolesForProfile(profile)) {
+        for (const tier of ROLE_TIERS[role]) {
+          if (tier === DEFAULT_TIER[role]) continue;
+          const relativePath = join(harnessDir, "agents", `${role}-${tier}.md`);
+          if (previous.files[relativePath] !== undefined) {
+            report.notes.push(
+              `${relativePath}: now untracked after tiers were turned off; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+            );
+          }
+        }
       }
     }
   }
@@ -285,6 +475,15 @@ export function runInit(options: InitOptions): Report {
         join(".claude", "agents", `${role}.md`),
         composeClaudeAgent(role, options.models[role]),
       );
+      if (tiers) {
+        for (const tier of ROLE_TIERS[role]) {
+          if (tier === DEFAULT_TIER[role]) continue;
+          installKitFile(
+            join(".claude", "agents", `${role}-${tier}.md`),
+            composeClaudeAgentVariant(role, tier),
+          );
+        }
+      }
     }
     ensureClaudeImport(report, join(targetDir, "CLAUDE.md"));
   }
@@ -304,6 +503,38 @@ export function runInit(options: InitOptions): Report {
         join(".opencode", "agents", `${role}.md`),
         composeOpencodeAgent(role, modelValue),
       );
+      if (tiers) {
+        for (const tier of ROLE_TIERS[role]) {
+          if (tier === DEFAULT_TIER[role]) continue;
+          const modelClass = TIER_DEFS[tier].modelClass;
+          const variantModelValue = options.opencodeClassModels?.[modelClass];
+          if (variantModelValue === undefined) {
+            // No model resolved for this class: opencodeVariantEffortLine
+            // always returns undefined too when its modelValue argument is
+            // undefined (it short-circuits on that first), so this variant
+            // would carry neither a model: nor an effort line, a silent
+            // no-op duplicate of the base file's own (possibly also
+            // unresolved) model line, with no ledger entry to compare it
+            // against. Skip it entirely rather than write that
+            // indistinguishable file. A *resolved* model with no effort line
+            // (e.g. a low/medium tier on a Claude-family model, or any
+            // Ollama model) is NOT skipped by this check: it still renders
+            // with just its model: line, see the effort-field dispatch
+            // rules in opencodeVariantEffortLine above.
+            continue;
+          }
+          const effortLine = opencodeVariantEffortLine(tier, variantModelValue);
+          installKitFile(
+            join(".opencode", "agents", `${role}-${tier}.md`),
+            composeOpencodeAgentVariant(
+              role,
+              tier,
+              variantModelValue,
+              effortLine,
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -315,6 +546,7 @@ export function runInit(options: InitOptions): Report {
     harnesses: [...options.harnesses].sort(),
     models: options.models,
     profile,
+    tiers,
     files: installedFiles,
   };
   const manifestPath = join(targetDir, MANIFEST_PATH);
@@ -326,6 +558,7 @@ export function runInit(options: InitOptions): Report {
       harnesses: previous.harnesses,
       models: previous.models,
       profile: previous.profile,
+      tiers: previous.tiers,
       files: previous.files,
     }) === JSON.stringify(desired)
   ) {

@@ -142,3 +142,58 @@ export function parseModelsSpec(
   }
   return result;
 }
+
+/**
+ * Effort tiers: additional per-role subagent variants rendered alongside the
+ * default (unsuffixed) agent file when the `tiers` feature is on. Default
+ * off; see `install-fence-mechanics.md` for the default-off pack rationale.
+ */
+export type Tier = "low" | "medium" | "high" | "xhigh";
+
+/**
+ * Which tiers each role gets a variant file for. A tier outside a role's
+ * list is never rendered for that role (e.g. explorer/task-slicer never get
+ * an `xhigh` variant, reviewer never gets a `low` variant).
+ */
+export const ROLE_TIERS: Record<Role, Tier[]> = {
+  explorer: ["low", "medium", "high"],
+  "task-slicer": ["low", "medium", "high"],
+  implementer: ["low", "medium", "high", "xhigh"],
+  reviewer: ["medium", "high", "xhigh"],
+};
+
+/**
+ * The tier each role's default (unsuffixed) agent file already corresponds
+ * to. No variant file is ever rendered for this tier: rendering one would
+ * both collide with the default file's name and duplicate it.
+ */
+export const DEFAULT_TIER: Record<Role, Tier> = {
+  explorer: "medium",
+  "task-slicer": "medium",
+  implementer: "medium",
+  reviewer: "high",
+};
+
+export type ModelClass = "small" | "medium" | "large";
+
+export const MODEL_CLASSES: ModelClass[] = ["small", "medium", "large"];
+
+interface TierDef {
+  modelClass: ModelClass;
+  /** Effort value requested from the harness for this tier. */
+  effort: Tier;
+}
+
+export const TIER_DEFS: Record<Tier, TierDef> = {
+  low: { modelClass: "small", effort: "low" },
+  medium: { modelClass: "medium", effort: "medium" },
+  high: { modelClass: "medium", effort: "high" },
+  xhigh: { modelClass: "large", effort: "xhigh" },
+};
+
+/** Which model alias backs each tier's model class. */
+export const CLASS_MODELS: Record<ModelClass, ModelAlias> = {
+  small: "haiku",
+  medium: "sonnet",
+  large: "opus",
+};
