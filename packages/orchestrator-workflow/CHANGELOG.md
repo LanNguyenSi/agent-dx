@@ -5,6 +5,60 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-08-20
+
+### Added
+
+- Advisor role: a fifth subagent, read-only and installed only under the
+  `full` profile (never under `minimal`, the same as explorer and
+  task-slicer), with a default model of `opus` (`ROLE_TIERS`: `high, xhigh`,
+  `DEFAULT_TIER`: `high`, so `--profile full --tiers` renders 15 files per
+  harness instead of 13: 5 default files plus 10 variants). Unlike the other
+  four roles, the advisor is escalation-only: the orchestrator spawns it only
+  at a defined set of triggers (architectural uncertainty, requirements that
+  contradict each other, multiple valid solution paths where committing to
+  one is expensive to reverse, repeated implementation failures on the same
+  task, a review deadlock, or a high-risk decision), never as a standard
+  pipeline step. The advisor reads the situation, lays out options with
+  pros/cons/risk, and recommends; it never decides and never writes code —
+  the orchestrator still decides, and a critical risk still goes to the
+  operator, the same hard rule the review gate already applies. This ships
+  as a docs/policy/prompt-only change on top of the prior commit's `models.ts`
+  core (`ROLES`, `READ_ONLY_ROLES`, `DEFAULT_MODELS`, `ROLE_TIERS`,
+  `DEFAULT_TIER`, and the `assets/agents/advisor.md` prompt): `README.md`
+  (role table, tier table, read-only posture, a new "Advisor (escalation)"
+  paragraph), `INSTALL-AGENT.md` (brace lists, `--models` example, manifest
+  JSON example, read-only-posture sentences, manual-scaffold role loops),
+  `assets/agents-md-section.md` (per-role model bullet plus a new Scaling
+  delegation bullet stating the escalation triggers and the
+  recommends-never-decides rule), and `assets/skill/SKILL.md` (a Roles-section
+  bullet, the subagent input contract's role enum, a new "Advisor output
+  contract" block, a step 8 sentence naming when the orchestrator may spawn
+  it, and the harness notes' full-profile role enumeration). See README.md's
+  "Advisor (escalation)" paragraph for the design rationale behind the
+  escalation-only framing.
+
+### Changed
+
+- The subagent misfire rule's model-correlation observation ("the reviewer
+  role, the one role whose default model differs from the other roles'") no
+  longer holds now that the advisor shares the reviewer's `opus` default;
+  reworded to name the roles the differing-model claim actually still holds
+  against (explorer, task-slicer, implementer) while keeping the historical
+  observation intact — this signal has still only ever been observed for the
+  reviewer role, never for the advisor. `test/docs-consistency.test.ts`'s
+  `DEFAULT_MODELS`-grounded pin for this claim was narrowed to match (scoped
+  to the three roles the prose now names, plus a new assertion that
+  `DEFAULT_MODELS.advisor` equals `DEFAULT_MODELS.reviewer`, grounding the
+  "since 0.21.0 the advisor shares that model" half of the corrected prose).
+- Full test suite grows to 247 (238 baseline + 9 new: 6 tests in a new
+  `describe` block pinning the escalation policy paragraph in
+  `agents-md-section.md` and the four `SKILL.md` additions listed above, 1
+  from the existing instruction-trust-boundary loop test picking up
+  `agents/advisor.md`, and 2 from the existing README tier-table loop test
+  picking up the advisor row; the misfire-rule fix reuses two existing
+  tests rather than adding new ones).
+
 ## [0.20.0] - 2026-08-20
 
 ### Added

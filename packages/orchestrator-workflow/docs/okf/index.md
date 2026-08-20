@@ -28,7 +28,8 @@ them.
 ## Invariants
 
 - [Subagent contracts and the slicer-superset invariant](subagent-contracts-superset.md),
-  the four role contracts, their read-only/writable split, where each I/O
+  the five role contracts (since 0.21.0's escalation-only advisor role;
+  four before it), their read-only/writable split, where each I/O
   contract is duplicated and by which tests, the
   task-slicer-output-is-a-lossless-superset invariant, and the 0.11.0
   subagent misfire rule.

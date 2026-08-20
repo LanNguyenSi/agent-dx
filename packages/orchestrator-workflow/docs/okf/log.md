@@ -1098,3 +1098,222 @@
   test/docs-consistency.test.ts that also read `ROLE_TIERS.implementer`,
   restored and re-verified green (src/models.ts itself was never
   committed with the mutant in place).
+
+- 2026-08-20: re-verified and re-stamped all five prose docs (index.md,
+  model-preselection.md, subagent-contracts-superset.md,
+  install-fence-mechanics.md, review-gate-and-waivers.md,
+  run-state-lifecycle-and-markers.md) against package version 0.21.0: a
+  fifth subagent role, `advisor`, escalation-only, read-only, `full`-profile
+  only, default model `opus`, tiers `high`/`xhigh` (`DEFAULT_TIER` `high`).
+  The core commit (agent-dx task T-001, `ROLES`/`READ_ONLY_ROLES`/
+  `DEFAULT_MODELS`/`ROLE_TIERS`/`DEFAULT_TIER` in `src/models.ts`, the
+  `assets/agents/advisor.md` prompt, and role-generic coverage additions in
+  `test/init.test.ts`/`test/opencode.test.ts`) landed without any docs/okf
+  update, repeating the 0.16.0/0.17.0/0.18.0 gap this log has flagged as a
+  precedent each time; this pass (T-002, docs/policy/guards follow-up)
+  closes it in the same commit as the remaining feature surface: `README.md`
+  (role table, tier table, read-only posture, a new "Advisor (escalation)"
+  paragraph and Role-profile-table row), `INSTALL-AGENT.md` (brace lists,
+  `--models` example, manifest JSON example, read-only-posture sentences,
+  manual-scaffold role loops), `assets/agents-md-section.md` (the per-role
+  model bullet, and a new Scaling-delegation bullet naming the escalation
+  triggers and the recommends-never-decides rule), and `assets/skill/SKILL.md`
+  (a Roles-section bullet, the subagent input contract's `role:` enum, a new
+  "Advisor output contract" block mirroring `advisor.md`'s own contract
+  byte-for-byte, a step 8 sentence naming when the orchestrator may spawn
+  it, and the harness notes' full-profile role enumeration).
+  `test/docs-consistency.test.ts` gained one new `describe`
+  ("advisor escalation policy ships in the AGENTS.md section and SKILL.md",
+  appended at the file's end) pinning the `agents-md-section.md` escalation
+  paragraph and the four `SKILL.md` additions, plus a narrower fix to the
+  pre-existing misfire-rule model-correlation test: since the advisor now
+  shares the reviewer's `opus` default, "the reviewer role, the one role
+  whose default model differs from the other roles'" stopped being true;
+  the prose (`SKILL.md`) and its test were both corrected to name the roles
+  the claim still holds against (explorer, task-slicer, implementer) while
+  keeping the historical observation (signal only ever seen for reviewer)
+  intact, plus a new `DEFAULT_MODELS.advisor === DEFAULT_MODELS.reviewer`
+  assertion grounding the "since 0.21.0 the advisor shares that model"
+  half of the corrected sentence. `package.json` bumped to 0.21.0;
+  `CHANGELOG.md` gained a new entry above 0.20.0 (50 lines).
+
+  Every `SKILL.md:`, `agents-md-section.md:`, `README.md:`,
+  `INSTALL-AGENT.md:`, `CHANGELOG.md:`, `src/models.ts:`,
+  `test/docs-consistency.test.ts:`, and `test/init.test.ts:` citation across
+  all six docs was checked directly against the current file content, the
+  same "check every citation, do not assume a uniform offset" discipline
+  every prior entry in this log has used, though several large uniform
+  shifts did hold and were spot-checked before being trusted: `CHANGELOG.md`
+  (+50, one hunk, the new 0.21.0 entry inserted above 0.20.0 with no other
+  change in the file); `docs-consistency.test.ts` (+10 for any citation at
+  or after old line 445, from this pass's own edit to the misfire-rule test
+  pair; +102 for any citation at or after old line 1440, from the new
+  advisor-policy `describe` appended at the file's end — both hunk
+  boundaries confirmed via `git diff -U0` before trusting either shift,
+  matching this log's established practice); `src/models.ts` (no uniform
+  shift usable — `ROLES` moved 3-8 -> 8-14, `READ_ONLY_ROLES` 14-17 -> 22-26,
+  `DEFAULT_MODELS` 70-75 -> 80-86, the tier-data block 146-199 -> 157-212,
+  every citation individually relocated by anchor text); `test/init.test.ts`
+  (T-001's own diff landed in 25 separate hunks scattered across the whole
+  file, from a single `advisor: "opus"` line in three early model-mapping
+  tests through the tier-variants `describe` block's many internal
+  insertions; a cumulative-shift table was built hunk-by-hunk and every
+  net-zero hunk's `new_start` was checked against `old_start + cumulative
+  shift` as a self-consistency proof before trusting the table, then every
+  citation actually used in `model-preselection.md`/`install-fence-
+  mechanics.md` was additionally spot-checked by direct read, not trusted on
+  the table alone — the tier-variants `describe`'s own internal boundaries
+  (each `it`'s start/end line) were located by `grep -n "^  it("` rather
+  than computed, since several sub-citations there needed splitting
+  differently than the old ranges once the advisor-specific assertions
+  (the 13->15 file-count test, the advisor-xhigh anti-downgrade check, the
+  note-count changes) were accounted for). `SKILL.md` and
+  `agents-md-section.md` shifts were computed from `git diff -U0` hunk
+  headers the same way, each net-zero hunk's `new_start` checked against
+  the running cumulative shift before trusting it for the surrounding span.
+
+  Content, not just citations, changed in both role-specific docs:
+  subagent-contracts-superset.md's "Four roles, two postures" section
+  became "Five roles, two postures" (the advisor's escalation-only,
+  full-profile-only character stated explicitly), its contract-location
+  list gained an Advisor entry noting the pair has no dedicated
+  byte-for-byte drift guard yet (the same honest gap the explorer pair
+  already had, not a new regression), and its Subagent-misfire-rule section
+  gained a paragraph on the 0.21.0 model-correlation-claim correction
+  described above. model-preselection.md's "What gets preselected" section,
+  its defaults table, its "Which tiers each role gets" tier-data paragraph,
+  and its "Rendering" paragraph (4 base files + 9 variants = 13 total,
+  now 5 + 10 = 15) all gained advisor rows/clauses; its "Docs-consistency
+  pins" section notes the guard proved itself for real — every enumeration
+  site failed red on the advisor addition until each listed doc was
+  updated. install-fence-mechanics.md's profile bullet notes `rolesForProfile`
+  itself needed no code change (`MINIMAL_PROFILE_ROLES` simply never named
+  advisor, the same way it never named explorer/task-slicer), its downgrade-
+  note paragraph states `droppedRoles` (`init.ts:371-373`) is computed
+  generically from the two profiles' resolved role sets rather than a
+  hardcoded pair, so a `full` -> `minimal` downgrade with advisor installed
+  now also names `advisor.md` (and, with tiers on, `advisor-xhigh.md`) with
+  no code change of its own, and its "Tests" bullet's file-count and
+  note-count figures were updated throughout (6 -> 8 notes for the
+  base-plus-tiers downgrade case, 13 -> 15 total agent files). One gap
+  flagged rather than closed, per this log's "declare what was and was not
+  verified" precedent (2026-08-17/18/19 entries above): install-fence-
+  mechanics.md's "the real .claude variant leftovers are named" sentence
+  (the R2-M2 harness-switch test) does not claim whether an
+  `advisor-xhigh.md` leftover note is now also present, since that specific
+  test's own assertions never enumerated an exact total count or advisor's
+  variant path either before or after this pass — not re-verified here,
+  explicitly out of this pass's scope rather than silently assumed
+  unaffected. review-gate-and-waivers.md and run-state-lifecycle-and-
+  markers.md needed citation corrections only (their content describes the
+  review gate and run-state markers, neither of which the advisor addition
+  touches); every `SKILL.md:`/`agents-md-section.md:`/`CHANGELOG.md:`
+  citation in both was individually re-derived and, where a phrase spanned
+  a boundary between differently-shifted zones, verified by direct read
+  rather than by applying either zone's shift blindly.
+
+  A temp-install check (`orchestrator-workflow init --yes --harness claude
+  --profile full --tiers --models "...,advisor=opus"` against a scratch
+  git-initialized target, cleaned up after) confirmed the acceptance
+  criteria directly rather than by reading test assertions alone: exactly
+  15 files under `.claude/agents/` (`advisor.md`, `advisor-xhigh.md`, plus
+  the 4 other roles' base-plus-variant sets), the generated `AGENTS.md`'s
+  fenced section contains the escalation paragraph
+  ("an advisor subagent is available for escalation only"), and the
+  generated `.claude/skills/orchestrator-workflow/SKILL.md` contains the
+  `## Advisor output contract` heading.
+
+  `okf-kit check docs/okf --strict`: 0 warnings, 0 findings both before this
+  pass's edits (working-tree-only, uncommitted) and after, for the same
+  mechanical reason the 2026-08-19 (0.19.0 R2) entry above documents: every
+  re-verified doc's `timestamp:` frontmatter already carried same-day
+  headroom (`2026-08-20T23:59:00Z`, inherited from the prior 0.20.0 pass)
+  comfortably past any commit made today, so the mtime-based `sources-fresh`
+  gate cannot fire against a same-day commit regardless of whether the
+  doc's own prose was re-verified — the checker's known date-granularity
+  limit, not a false negative; the doc content itself was independently
+  re-verified by the direct-read citation discipline described above, not
+  by trusting the checker's clean report alone. Full suite 247/247 (241
+  baseline + 6 new: one new `describe` in `test/docs-consistency.test.ts`
+  for the advisor escalation policy, the two misfire-rule tests reused
+  rather than added to), `tsc --noEmit` clean, `tsc --noEmit -p
+  tsconfig.test.json` clean, `npm run build` clean, `npm run format:check`
+  clean for every file this pass touched (the pre-existing
+  `test/template-markers.test.ts` warning is unrelated and untouched,
+  matching every prior pass's baseline; `README.md`/`CHANGELOG.md` are
+  outside that script's glob, same as every prior pass). Mutation probes
+  (named in the task assignment): (1) deleting the new escalation paragraph
+  from `agents-md-section.md` turned exactly the new "names the advisor's
+  escalation triggers" assertion red (126/127 tests in
+  `docs-consistency.test.ts`), restored and re-verified green (127/127,
+  byte-identical diff against the pre-mutant file); (2) temporarily removing
+  `advisor` from `ROLES` in `src/models.ts` turned exactly the four
+  enumeration tests red that the collateral was expected to hit (the
+  README/INSTALL-AGENT.md/agents-md-section.md role-list guards plus the
+  README tier-table row-count check), restored and re-verified green
+  (byte-identical diff against the pre-mutant file, full suite 247/247).
+  Both mutants were applied and restored with the working tree committed
+  first, per this repo's commit-before-mutation-probe convention, and both
+  restores were verified byte-identical via direct diff against the
+  pre-mutant, post-commit file.
+- 2026-08-20 (review round 1, 7 findings: H1, M1-M4, L1-L3): re-verified and
+  re-stamped `subagent-contracts-superset.md` against the round's changes to
+  `assets/agents-md-section.md`, `assets/skill/SKILL.md`,
+  `assets/agents/advisor.md`, `src/cli.ts`, `test/docs-consistency.test.ts`,
+  `test/init.test.ts`, and `CHANGELOG.md`, plus one targeted citation in
+  `install-fence-mechanics.md`. Content-level corrections (not just line
+  shifts): the "explorer and advisor pairs still have no dedicated automated
+  drift guard" claim was false the moment M2 shipped a byte-for-byte
+  equality test for the advisor contract (the same pattern the reviewer's
+  `reproduction` and implementer's `mutation_probes` fields already had);
+  reworded to "four of the five pairs" with the advisor's guard dated to
+  this round, and the "field-identical" claim for the advisor pair extended
+  to name the `escalation_necessary: warranted | unwarranted` correction
+  (M4, replacing a bare `yes | no` YAML-1.1-boolean-synonym enum). The
+  model-correlation paragraph (misfire rule) was extended to describe L2
+  (the differing-model role list is now derived from `DEFAULT_MODELS` via
+  `ROLES.filter((role) => DEFAULT_MODELS[role] !== DEFAULT_MODELS.reviewer)`
+  rather than hardcoded) and L3 (the advisor's zero-observation parenthetical
+  reworded from "the signal itself has never been observed for the advisor"
+  — which reads like negative evidence against the correlation — to "the
+  advisor has had no spawns yet, so it contributes no evidence either way").
+  Every citation into `SKILL.md`, `docs-consistency.test.ts`, and
+  `CHANGELOG.md` inside `subagent-contracts-superset.md` was individually
+  re-derived via `git diff -U0`'s hunk headers (cumulative-shift bookkeeping,
+  same method as the 0.21.0 entry above) and spot-checked by direct read at
+  every hunk boundary and every citation actually used, not trusted on the
+  arithmetic alone; none of this round's content changes touched
+  `model-preselection.md`, `run-state-lifecycle-and-markers.md`, or
+  `review-gate-and-waivers.md`'s subject matter (tier-variant rendering,
+  run-state markers, review-gate severities respectively), so those three
+  were left unstamped this round.
+
+  Declared gap, not silently assumed unaffected: `install-fence-mechanics.md`
+  and `model-preselection.md` carry roughly 50 additional `cli.ts`/
+  `init.test.ts` line citations (tier-variant rendering, harness/model
+  mapping, profile-downgrade notes) that also shifted by this round's small
+  `cli.ts` (`promptProfile`, +5 lines from old line 78 on) and
+  `test/init.test.ts` (+1 from old line 23, +4 from old line 377, +32 from
+  old line 405) edits. None of that content describes what this round
+  actually changed (M1's label derivation, M2's tripwire/pin additions) —
+  the underlying mechanics they document are untouched — so a mechanical
+  55-citation re-stamp of those two docs was scoped out of this pass rather
+  than risk transcription errors at that volume for peripheral-content
+  citations; the one citation in `install-fence-mechanics.md` that *does*
+  describe this round's own change (the Bash-guard tripwire test) was
+  re-derived and content-updated. Follow-up: a full mechanical re-stamp of
+  the remaining `cli.ts`/`init.test.ts` citations in both docs.
+
+  `okf-kit check docs/okf --strict`: 0 warnings, 0 findings both before this
+  pass's edits (working-tree-only, uncommitted) and after — re-verified by
+  direct read per the citation discipline above, not by trusting the
+  checker's clean report alone (same known date-granularity limit on the
+  `sources-fresh` gate the 0.21.0 entry above documents). CHANGELOG.md's
+  0.21.0 entry numbers were also corrected this round (M3): the test-suite
+  arithmetic actually measured 238 baseline + 9 new = 247 (6 tests in the
+  advisor-escalation-policy `describe` block, 1 from the pre-existing
+  instruction-trust-boundary loop picking up `agents/advisor.md`, 2 from the
+  pre-existing README tier-table loop picking up the advisor row), not the
+  previously stated 241 + 6; verified by running the full suite at commit
+  60d15b8 (pre-advisor, 0.20.0) in a separate worktree (238/238) against the
+  current suite (247/247 before this round's own new tests, 255/255 after).

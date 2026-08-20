@@ -54,11 +54,22 @@ default, not a ritual.
   judgment. The unsuffixed default subagent is the normal case; a `-low`
   variant fits mechanical, narrowly scoped tasks; `-high`/`-xhigh` fit
   high-risk changes, hard problems, or repeated failed attempts. Not every
-  role gets every tier: `-xhigh` exists only for the implementer and the
-  reviewer, and the reviewer's downshift is `-medium` rather than `-low`,
-  since its default already sits at high. Spawn only variants that are
-  actually installed. Tier choice is a conscious decision, not a ritual;
-  when unsure, use the default.
+  role gets every tier: `-xhigh` exists only for the implementer, the
+  reviewer, and the advisor. The reviewer's downshift is `-medium` rather
+  than `-low`, since its default already sits at high. The advisor has no
+  downshift at all: its default `high` is already its only non-`-xhigh`
+  tier. Spawn only variants that are actually installed. Tier choice is a
+  conscious decision, not a ritual; when unsure, use the default.
+- Under the `full` profile, an advisor subagent is available for escalation
+  only: architectural uncertainty, requirements that contradict each other,
+  multiple valid solution paths where committing to one is expensive to
+  reverse, repeated implementation failures on the same task, a review
+  deadlock, or a high-risk decision. The orchestrator spawns it only at one
+  of these triggers, never as a standard pipeline step; using it is a
+  judgment call, the same discretion already used for tier choice. The
+  advisor returns a recommendation with options, pros, cons, and risk; the
+  orchestrator still decides, and a critical risk still goes to the
+  operator.
 
 ### Review gate
 
@@ -117,9 +128,9 @@ Workflow state lives under `.ai/`:
 
 - The orchestrator runs on the session's main model. Use the strongest
   reasoning model available.
-- Per-role model preferences (explorer, task slicer, implementer, reviewer) are
-  recorded in `.ai/workflow/manifest.json` and, where the harness supports
-  per-agent models, in the subagent definitions themselves.
+- Per-role model preferences (explorer, task slicer, implementer, reviewer,
+  advisor) are recorded in `.ai/workflow/manifest.json` and, where the
+  harness supports per-agent models, in the subagent definitions themselves.
 
 ### Definition of done
 

@@ -27,7 +27,7 @@ which is mutable. For a stable audit, pin the URL to a commit SHA instead
    subagent variants (`--tiers`; off by default, no per-tier model prompt
    since tier models are chosen automatically). Suggested defaults: profile
    `full`; explorer `sonnet`, task-slicer `sonnet`, implementer `sonnet`,
-   reviewer `opus`; tiers off.
+   reviewer `opus`, advisor `opus`; tiers off.
 3. **Run the non-interactive installer** with your answers:
    `npx orchestrator-workflow init --yes --harness ... --profile ... --models ... [--tiers]`.
    If the installer reports conflicts with locally edited files, the agent
@@ -52,16 +52,16 @@ The install creates or touches only these paths:
 - `CLAUDE.md`: one `@AGENTS.md` import line appended when missing; the file
   is created with a short heading when absent (Claude Code harness only)
 - `.claude/skills/orchestrator-workflow/SKILL.md` and
-  `.claude/agents/{explorer,task-slicer,implementer,reviewer}.md` (Claude Code)
+  `.claude/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` (Claude Code)
 - `.agents/skills/orchestrator-workflow/SKILL.md` (Codex)
 - `.opencode/skills/orchestrator-workflow/SKILL.md` and
-  `.opencode/agents/{explorer,task-slicer,implementer,reviewer}.md` (opencode)
+  `.opencode/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` (opencode)
 
 The per-role agent files above are the `full` profile (the default); the
 `minimal` profile writes only the `implementer` and `reviewer` files for
-Claude Code and opencode and skips `task-slicer` and `explorer` entirely.
-Codex has no per-role files, so the profile choice does not change what it
-gets. When `--tiers` is on, each installed Claude Code and opencode role
+Claude Code and opencode and skips `task-slicer`, `explorer`, and `advisor`
+entirely. Codex has no per-role files, so the profile choice does not change
+what it gets. When `--tiers` is on, each installed Claude Code and opencode role
 additionally gets one subagent file per non-default effort tier, named
 `<role>-<tier>.md` (never a file for the role's own default tier, which
 would collide with the plain `<role>.md` file); see the package README's
@@ -95,13 +95,13 @@ steps in the repository you were asked to install into.
    - Which harnesses should get adapters: claude, codex, opencode?
      Suggest the detected ones.
    - Which role profile: `full` (explorer, task-slicer, implementer,
-     reviewer — the default) or `minimal` (implementer and reviewer only;
-     the reviewer is never optional under either profile)?
+     reviewer, advisor — the default) or `minimal` (implementer and reviewer
+     only; the reviewer is never optional under either profile)?
    - Which model for each role the chosen profile installs? Suggest the
      defaults: explorer `sonnet`, task-slicer `sonnet`, implementer
-     `sonnet`, reviewer `opus`. Accept the aliases `sonnet`, `opus`,
-     `haiku` or a full model id. Skip asking about a role's model when the
-     chosen profile does not install that role.
+     `sonnet`, reviewer `opus`, advisor `opus`. Accept the aliases `sonnet`,
+     `opus`, `haiku` or a full model id. Skip asking about a role's model
+     when the chosen profile does not install that role.
    - Whether to also render effort-tier subagent variants (`--tiers`)?
      Default: off. There is no per-tier model question: tier models are
      chosen automatically from the tier (see the package README's "Effort
@@ -113,7 +113,7 @@ steps in the repository you were asked to install into.
    npx orchestrator-workflow init --yes \
      --harness <claude,codex,opencode> \
      --profile <minimal|full> \
-     --models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>" \
+     --models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>,advisor=<model>" \
      [--tiers | --no-tiers]
    ```
 
@@ -142,13 +142,13 @@ steps in the repository you were asked to install into.
      `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:end -->`
      markers.
    - Claude Code: `.claude/skills/orchestrator-workflow/SKILL.md` from
-     `assets/skill/SKILL.md`. For each role in the chosen profile (all four
+     `assets/skill/SKILL.md`. For each role in the chosen profile (all five
      for `full`; only `implementer` and `reviewer` for `minimal`),
      `.claude/agents/<role>.md` from
      `assets/agents/<role>.md` with `model: <operator's choice>` added as a
      new line directly after the `description:` line (that placement matches
-     the installer's output byte for byte). For the explorer and reviewer
-     roles additionally, `disallowedTools: Edit, Write, NotebookEdit` goes on a new
+     the installer's output byte for byte). For the explorer, reviewer, and
+     advisor roles additionally, `disallowedTools: Edit, Write, NotebookEdit` goes on a new
      line directly after the `model:` line. Ensure `CLAUDE.md` exists and
      contains a line `@AGENTS.md`.
    - Codex: `.agents/skills/orchestrator-workflow/SKILL.md`, same skill file.
@@ -166,11 +166,11 @@ steps in the repository you were asked to install into.
      which is the safe portable fallback. The installed CLI resolves aliases
      to fully-qualified ids by running `opencode models` at install time; in a
      manual install you may not have a live catalog, so omitting `model:` is
-     correct. For the explorer and reviewer roles additionally, `permission:` goes on a new
+     correct. For the explorer, reviewer, and advisor roles additionally, `permission:` goes on a new
      line directly after `mode: subagent` (or after `model:` when that line is
      present), followed by `  edit: deny` (two-space indent) on the next line.
-     Example read-only role frontmatter (explorer or reviewer) when no model
-     is resolved:
+     Example read-only role frontmatter (explorer, reviewer, or advisor) when
+     no model is resolved:
      ```yaml
      ---
      description: "..."
@@ -194,7 +194,8 @@ steps in the repository you were asked to install into.
          "explorer": "sonnet",
          "task-slicer": "sonnet",
          "implementer": "sonnet",
-         "reviewer": "opus"
+         "reviewer": "opus",
+         "advisor": "opus"
        },
        "files": {},
        "installedAt": "2026-06-12T00:00:00.000Z"
