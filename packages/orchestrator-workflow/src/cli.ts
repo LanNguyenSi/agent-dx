@@ -75,6 +75,11 @@ async function promptHarnesses(
 }
 
 async function promptProfile(base: Profile): Promise<Profile> {
+  // Labels are derived from rolesForProfile so a future role addition (like
+  // the advisor role) shows up here automatically instead of silently
+  // falling out of sync with the roles the profile actually installs.
+  const fullRoles = rolesForProfile("full").join(", ");
+  const minimalRoles = rolesForProfile("minimal").join(", ");
   const { profile } = await inquirer.prompt<{ profile: Profile }>([
     {
       type: "list",
@@ -83,11 +88,11 @@ async function promptProfile(base: Profile): Promise<Profile> {
       default: base,
       choices: [
         {
-          name: "full — explorer, task-slicer, implementer, reviewer (default)",
+          name: `full — ${fullRoles} (default)`,
           value: "full",
         },
         {
-          name: "minimal — implementer, reviewer only (reviewer is never optional)",
+          name: `minimal — ${minimalRoles} only (reviewer is never optional)`,
           value: "minimal",
         },
       ],

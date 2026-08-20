@@ -437,7 +437,13 @@ describe("the misfire rule prefers resume with a repeated assignment for the no-
       "So far this signal has only been observed for the reviewer role, a role whose default model differs from explorer's, task-slicer's, and implementer's",
     );
     expect(skillMd).toContain(
-      "since 0.21.0 the advisor shares the reviewer's default model too, though the signal itself has never been observed for the advisor",
+      "since 0.21.0 the advisor shares the reviewer's default model too",
+    );
+    // L3: the zero-observation for the advisor must read explicitly as no
+    // evidence either way, not as if it were negative evidence against the
+    // correlation (the advisor role is too new to have been spawned at all).
+    expect(skillMd).toContain(
+      "the advisor has had no spawns yet, so it contributes no evidence either way",
     );
     expect(skillMd).toContain(
       "treat that correlation as an open lead worth watching as more incidents accumulate, not as a confirmed cause",
@@ -445,13 +451,17 @@ describe("the misfire rule prefers resume with a repeated assignment for the no-
   });
 
   it("the 'default model differs' claim is grounded in DEFAULT_MODELS, not asserted in prose alone", () => {
-    // Since 0.21.0 the advisor shares the reviewer's default model, so the
-    // claim is scoped to the roles the prose actually names (explorer,
-    // task-slicer, implementer), not "the other roles" generically.
-    const namedRoles: Role[] = ["explorer", "task-slicer", "implementer"];
+    // L2: derived from DEFAULT_MODELS rather than hardcoded, so a future
+    // role whose default model happens to match (or stop matching) the
+    // reviewer's is caught here instead of silently drifting from the
+    // prose's role list.
+    const namedRoles: Role[] = ROLES.filter(
+      (role) => DEFAULT_MODELS[role] !== DEFAULT_MODELS.reviewer,
+    );
     expect(namedRoles.length).toBeGreaterThan(0);
     for (const role of namedRoles) {
       expect(DEFAULT_MODELS.reviewer).not.toBe(DEFAULT_MODELS[role]);
+      expect(skillMd).toContain(`${role}'s`);
     }
     // Grounds the "since 0.21.0 the advisor shares that model" half of the
     // prose: if this ever goes false without the prose being corrected back
@@ -1363,21 +1373,7 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
     );
   });
 
-  /**
-   * Which role(s) the qualifying bullet names each suffix for: the generic
-   * low/high/xhigh sentence targets the implementer (the one role whose
-   * tier list covers all three), and the qualifying sentence's follow-up
-   * claims name `-xhigh` for the implementer and the reviewer and
-   * `-medium` for the reviewer specifically.
-   */
-  const TIER_SUFFIX_ROLE_CLAIMS: Partial<Record<Tier, Role[]>> = {
-    low: ["implementer"],
-    high: ["implementer"],
-    xhigh: ["implementer", "reviewer"],
-    medium: ["reviewer"],
-  };
-
-  it("every tier suffix named in the policy prose exists in the role(s) it names, and is not that role's own default (anti-drift)", () => {
+  it("the suffixes named in the policy prose are non-vacuous (low, high, xhigh, medium all appear)", () => {
     const bulletIdx = agentsMdSection.indexOf(
       "When tier variants are installed",
     );
@@ -1396,28 +1392,87 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
     expect(rawSuffixes.length).toBeGreaterThan(0);
     const suffixes = [...new Set(rawSuffixes)];
     // Minimum-membership floor, not a byte-exact pin, so a future
-    // legitimate addition (like this round's own `-medium`) does not need
-    // to touch this test to stay green.
+    // legitimate addition does not need to touch this test to stay green.
     expect(suffixes).toEqual(
       expect.arrayContaining(["low", "high", "xhigh", "medium"]),
     );
-    for (const suffix of suffixes) {
-      const roles = TIER_SUFFIX_ROLE_CLAIMS[suffix];
+  });
+
+  /**
+   * Review round 1 (H1, round-2-halt structural fix): a hand-maintained map
+   * (`TIER_SUFFIX_ROLE_CLAIMS`) used to check role-suffix membership. A
+   * mutant proved this cannot catch every drift: swapping the role named in
+   * the `-xhigh` exclusivity sentence for a wrong one (e.g. naming the
+   * explorer instead of the advisor) left the map untouched and the suite
+   * green, and the 0.21.0 release itself shipped with a since-corrected
+   * prose sentence the map never caught either. The fix below parses the
+   * roles the prose actually claims directly out of
+   * agents-md-section.md and asserts each parsed set against the
+   * equivalent set derived live from `ROLE_TIERS`/`DEFAULT_TIER`, so a
+   * future role addition to xhigh support, or any wrong role name in the
+   * prose, fails here without a parallel hand-edit to a map that can drift
+   * from the constants it exists to mirror. A role's "downshift" is the
+   * tier immediately below its `DEFAULT_TIER` in its own `ROLE_TIERS`
+   * list, or none when `DEFAULT_TIER` is already that role's first tier.
+   */
+  function downshiftTier(role: Role): Tier | undefined {
+    const tiers = ROLE_TIERS[role];
+    const idx = tiers.indexOf(DEFAULT_TIER[role]);
+    expect(
+      idx,
+      `DEFAULT_TIER.${role} not found in ROLE_TIERS.${role}`,
+    ).toBeGreaterThanOrEqual(0);
+    return idx > 0 ? tiers[idx - 1] : undefined;
+  }
+
+  function parseRoleList(raw: string): Role[] {
+    return raw
+      .replace(/,?\s*and\s+/g, ", ")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => entry.replace(/^the\s+/, "")) as Role[];
+  }
+
+  it("the -xhigh exclusivity sentence names exactly the roles derived from ROLE_TIERS/DEFAULT_TIER (structural)", () => {
+    const match = agentsMdSection.match(/`-xhigh` exists only for ([^.]+)\./);
+    expect(match, "xhigh-exclusivity sentence not found").toBeTruthy();
+    const parsedRoles = parseRoleList((match as RegExpMatchArray)[1]);
+    expect(parsedRoles.length).toBeGreaterThan(0);
+    for (const role of parsedRoles) {
       expect(
-        roles,
-        `suffix "-${suffix}" named in the policy prose has no entry in TIER_SUFFIX_ROLE_CLAIMS; update the map`,
-      ).toBeDefined();
-      for (const role of roles as Role[]) {
-        expect(
-          ROLE_TIERS[role],
-          `suffix "-${suffix}" named in the policy prose for ${role} is missing from ROLE_TIERS.${role}`,
-        ).toContain(suffix);
-        expect(
-          DEFAULT_TIER[role],
-          `suffix "-${suffix}" named in the policy prose for ${role} equals ROLE_TIERS.${role}'s own default tier, so no "-${suffix}" variant file is ever rendered for ${role}`,
-        ).not.toBe(suffix);
-      }
+        (ROLES as string[]).includes(role),
+        `"${role}" parsed from the prose is not a known role`,
+      ).toBe(true);
     }
+    const derivedRoles = ROLES.filter(
+      (role) =>
+        ROLE_TIERS[role].includes("xhigh") && DEFAULT_TIER[role] !== "xhigh",
+    );
+    expect(new Set(parsedRoles)).toEqual(new Set(derivedRoles));
+  });
+
+  it("the reviewer's downshift sentence names the tier derived from its own ROLE_TIERS/DEFAULT_TIER (structural)", () => {
+    const match = agentsMdSection.match(/The reviewer's downshift is `-(\w+)`/);
+    expect(match, "reviewer downshift sentence not found").toBeTruthy();
+    const claimed = (match as RegExpMatchArray)[1] as Tier;
+    expect(claimed).toBe(downshiftTier("reviewer"));
+  });
+
+  it("the advisor's no-downshift sentence is true against its own ROLE_TIERS/DEFAULT_TIER (structural)", () => {
+    expect(agentsMdSection).toContain("The advisor has no downshift at all");
+    expect(downshiftTier("advisor")).toBeUndefined();
+  });
+
+  it('SKILL.md step 8 "Decide acceptance" carries the discretionary advisor-tier rule', () => {
+    const start = skillMd.indexOf("**Decide acceptance.**");
+    const handOffIdx = skillMd.indexOf("**Hand off.**");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(handOffIdx).toBeGreaterThan(start);
+    const step = skillMd.slice(start, handOffIdx);
+    expect(step).toContain(
+      "pick the advisor tier (the installed `advisor-<tier>` subagent, if any) by the same complexity-and-risk judgment already used for the implementer and reviewer tiers",
+    );
   });
 
   it('SKILL.md step 6 "Delegate implementation" carries the discretionary tier rule and the decision-log clause', () => {
@@ -1504,7 +1559,7 @@ describe("advisor escalation policy ships in the AGENTS.md section and SKILL.md"
   it("SKILL.md carries a dedicated Advisor output contract block with the escalation-necessity check documented", () => {
     expect(skillMd).toContain("## Advisor output contract");
     const field =
-      "status: done | partial | blocked role: advisor escalation_necessary: yes | no";
+      "status: done | partial | blocked role: advisor escalation_necessary: warranted | unwarranted";
     expect(skillMd).toContain(field);
     expect(skillMd).toContain(
       "The advisor first checks whether the escalation was actually necessary",
@@ -1538,5 +1593,76 @@ describe("advisor escalation policy ships in the AGENTS.md section and SKILL.md"
     expect(skillMd).toContain(
       "explorer, task-slicer, implementer, reviewer, advisor under `full`; implementer and reviewer only under `minimal`",
     );
+  });
+});
+
+/**
+ * Review round 1 (M2): the advisor's yaml output-contract block (SKILL.md's
+ * reference copy vs. advisor.md's own final-output block) had no
+ * byte-for-byte drift guard, the same gap the reviewer's `reproduction`
+ * field (0.14.0) and `mutation_probes` field (0.16.0) closed for their own
+ * roles. This pins it the same way: extract the yaml block from both raw
+ * files (not line-unwrapped, so a wrapping difference would also be
+ * caught) and assert they are identical.
+ */
+describe("advisor output contract is byte-identical between SKILL.md and advisor.md (review round 1, M2)", () => {
+  it("the advisor output contract yaml block is byte-for-byte identical (raw, not line-unwrapped)", () => {
+    const extractBlock = (raw: string): string => {
+      const match = raw.match(
+        /^status: done \| partial \| blocked\nrole: advisor\n(?:.+\n)*?```/m,
+      );
+      expect(match, "advisor output contract block not found").toBeTruthy();
+      return (match as RegExpMatchArray)[0].replace(/\n```$/, "");
+    };
+    const skillBlock = extractBlock(readAsset("skill/SKILL.md"));
+    const advisorBlock = extractBlock(readAsset("agents/advisor.md"));
+    // Guard the extraction itself: an empty or near-empty match would make
+    // the equality check below vacuous.
+    expect(skillBlock.length).toBeGreaterThan(20);
+    expect(skillBlock).toBe(advisorBlock);
+  });
+});
+
+/**
+ * Review round 1 (M1): cli.ts's interactive --profile prompt hardcoded its
+ * choice labels' role lists ("full — explorer, task-slicer, implementer,
+ * reviewer (default)"), the one enumeration site outside the doc-guards
+ * above; it went stale the moment the advisor role shipped (0.21.0) since
+ * nothing forced it to track rolesForProfile. The fix derives both labels
+ * from rolesForProfile at call time; this pins that derivation in the
+ * source itself so a future hardcoded regression is caught even though the
+ * interactive prompt is not exercised by the non-interactive CLI tests
+ * (--yes skips it).
+ */
+describe("cli.ts's --profile prompt labels are derived from rolesForProfile, not hardcoded (review round 1, M1)", () => {
+  const cliSrc = readDoc("src/cli.ts");
+
+  it("promptProfile derives both choice labels from rolesForProfile instead of a literal role list", () => {
+    const start = cliSrc.indexOf("async function promptProfile");
+    const end = cliSrc.indexOf("const program = new Command();");
+    expect(start, "promptProfile not found").toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const fn = cliSrc.slice(start, end);
+    expect(fn).toContain('rolesForProfile("full").join(", ")');
+    expect(fn).toContain('rolesForProfile("minimal").join(", ")');
+    // Anti-drift: no literal comma-joined role list survives inside the
+    // choice labels themselves (the old hardcoded "explorer, task-slicer,
+    // implementer, reviewer" string that went stale on the advisor's
+    // arrival).
+    expect(fn).not.toMatch(/name:\s*`?"?full.*explorer.*task-slicer/);
+  });
+});
+
+/**
+ * Review round 1 (M4, optional): `matches_implementer_claim` was already
+ * pinned against bare yes/no (YAML 1.1 boolean synonyms) above; this scans
+ * every output-contract field in SKILL.md for the same antipattern so a
+ * future field (like the advisor's own `escalation_necessary`, corrected to
+ * `warranted | unwarranted` this round) cannot reintroduce it unnoticed.
+ */
+describe("no output-contract field in SKILL.md uses a bare yes/no enum (review round 1, M4)", () => {
+  it("scans SKILL.md for any field using a bare yes | no enum", () => {
+    const skillMd = readAsset("skill/SKILL.md");
+    expect(skillMd).not.toMatch(/:\s*yes\s*\|\s*no\b/);
   });
 });

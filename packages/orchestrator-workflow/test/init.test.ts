@@ -20,6 +20,7 @@ import { runInit } from "../src/init.js";
 import {
   DEFAULT_MODELS,
   DEFAULT_TIER,
+  READ_ONLY_ROLES,
   ROLES,
   ROLE_TIERS,
   parseModelsSpec,
@@ -363,7 +364,7 @@ describe("read-only roles (explorer, reviewer)", () => {
     expect(claudeImplementer).not.toContain("disallowedTools");
   });
 
-  it("pins the Bash no-mutation guard in both installed read-only agents", () => {
+  it("pins the Bash no-mutation guard in all installed read-only agents", () => {
     runInit({
       targetDir: target,
       harnesses: ["claude", "opencode"],
@@ -372,12 +373,15 @@ describe("read-only roles (explorer, reviewer)", () => {
 
     // Bash cannot be tool-disallowed (the roles must run tests), so the
     // guard is instruction-level and lives in the agent prompt body. This
-    // test is the mutation tripwire: removing the guard from either asset
-    // fails it for every install target.
+    // test is the mutation tripwire: removing the guard from any read-only
+    // asset fails it for every install target. Iterates READ_ONLY_ROLES
+    // (review round 1, M2) rather than a hardcoded ["explorer", "reviewer"]
+    // pair, so a future read-only role (like the advisor, added here in
+    // 0.21.0) is covered automatically instead of needing a parallel edit.
     const GUARD =
       "Bash is for running tests, linters, and read-only inspection ONLY";
     for (const harnessDir of [".claude", ".opencode"]) {
-      for (const role of ["explorer", "reviewer"]) {
+      for (const role of READ_ONLY_ROLES) {
         const installed = readFileSync(
           join(target, harnessDir, "agents", `${role}.md`),
           "utf8",
@@ -400,6 +404,34 @@ describe("read-only roles (explorer, reviewer)", () => {
         "utf8",
       );
       expect(implementer).not.toContain(GUARD);
+    }
+  });
+
+  it("pins the advisor's necessity-check, never-decides, and first-turn-tool-call rules (review round 1, M2)", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "opencode"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // advisor.md's prompt body was practically unguarded before this round
+    // (5/6 mutants survived, including deleting the Bash guard entirely);
+    // these three rules are the load-bearing ones the escalation contract
+    // depends on, so each gets its own substring pin.
+    for (const harnessDir of [".claude", ".opencode"]) {
+      const installed = readFileSync(
+        join(target, harnessDir, "agents", "advisor.md"),
+        "utf8",
+      );
+      expect(installed, `${harnessDir}/agents/advisor.md`).toContain(
+        "Start by checking whether the escalation was actually necessary.",
+      );
+      expect(installed, `${harnessDir}/agents/advisor.md`).toContain(
+        "You do not decide. The decision stays with the orchestrator; a critical\n  risk stays with the operator.",
+      );
+      expect(installed, `${harnessDir}/agents/advisor.md`).toContain(
+        "Begin your very first turn with a tool call",
+      );
     }
   });
 

@@ -188,7 +188,11 @@ directory and the subagents.
    requirements, a high-commitment fork among valid options, repeated
    implementation failures, a review deadlock, a high-risk decision), the
    orchestrator may spawn the advisor subagent before deciding; the advisor
-   recommends, the orchestrator still decides.
+   recommends, the orchestrator still decides. When tier variants are
+   installed, pick the advisor tier (the installed `advisor-<tier>`
+   subagent, if any) by the same complexity-and-risk judgment already used
+   for the implementer and reviewer tiers, defaulting to the unsuffixed
+   subagent (already effort `high`) when unsure.
 9. **Hand off.** Before filling `06-handoff.md`, apply this optional
    guidance: when the repo carries a curated knowledge bundle (for example a
    `docs/okf/` directory with an index), check whether the change touches
@@ -363,7 +367,7 @@ inventing new field values.
 ```yaml
 status: done | partial | blocked
 role: advisor
-escalation_necessary: yes | no
+escalation_necessary: warranted | unwarranted
 summary:
   - ""
 options:
@@ -383,7 +387,7 @@ open_questions:
 ```
 
 The advisor first checks whether the escalation was actually necessary
-(`escalation_necessary`); when the answer follows trivially from the context
+(`escalation_necessary`, `warranted` or `unwarranted`); when the answer follows trivially from the context
 it was given, it says so plainly instead of manufacturing options to fill
 out the shape. The advisor recommends; it does not decide, and a critical
 risk still goes to the operator.
@@ -440,12 +444,13 @@ boilerplate instead of the output contract) whose outcome was recorded
 fresh respawn only if the resume attempt itself misfires the same way. So
 far this signal has only been observed for the reviewer role, a role whose
 default model differs from explorer's, task-slicer's, and implementer's
-(since 0.21.0 the advisor shares the reviewer's default model too, though
-the signal itself has never been observed for the advisor; see the per-role
-model preferences); treat that correlation as an open lead worth watching as
-more incidents accumulate, not as a confirmed cause. This resume-over-respawn
-preference does not extend to a structurally different misfire class: a
-mid-run watchdog stall (the subagent goes idle partway through a run rather
+(since 0.21.0 the advisor shares the reviewer's default model too; the
+advisor has had no spawns yet, so it contributes no evidence either way; see
+the per-role model preferences); treat that correlation as an open lead
+worth watching as more incidents accumulate, not as a confirmed cause. This
+resume-over-respawn preference does not extend to a structurally different
+misfire class: a mid-run watchdog stall (the subagent goes idle partway
+through a run rather
 than returning near-instantly) did not resolve on resume in the one
 measured incident of that class, it stalled a second time, and only a
 fresh, explicitly constrained respawn produced a contract-valid review;

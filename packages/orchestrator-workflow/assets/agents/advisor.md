@@ -53,7 +53,7 @@ Return exactly this structure as your final output, nothing else:
 ```yaml
 status: done | partial | blocked
 role: advisor
-escalation_necessary: yes | no
+escalation_necessary: warranted | unwarranted
 summary:
   - ""
 options:

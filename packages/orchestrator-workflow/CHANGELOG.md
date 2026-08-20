@@ -34,8 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recommends-never-decides rule), and `assets/skill/SKILL.md` (a Roles-section
   bullet, the subagent input contract's role enum, a new "Advisor output
   contract" block, a step 8 sentence naming when the orchestrator may spawn
-  it, and the harness notes' full-profile role enumeration). See the design
-  rationale for the escalation-only framing.
+  it, and the harness notes' full-profile role enumeration). See README.md's
+  "Advisor (escalation)" paragraph for the design rationale behind the
+  escalation-only framing.
 
 ### Changed
 
@@ -50,10 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the three roles the prose now names, plus a new assertion that
   `DEFAULT_MODELS.advisor` equals `DEFAULT_MODELS.reviewer`, grounding the
   "since 0.21.0 the advisor shares that model" half of the corrected prose).
-- Full test suite grows to 247 (241 + 6 new: a new `describe` block pinning
-  the escalation policy paragraph in `agents-md-section.md` and the four
-  `SKILL.md` additions listed above; the misfire-rule fix reuses two
-  existing tests rather than adding new ones).
+- Full test suite grows to 247 (238 baseline + 9 new: 6 tests in a new
+  `describe` block pinning the escalation policy paragraph in
+  `agents-md-section.md` and the four `SKILL.md` additions listed above, 1
+  from the existing instruction-trust-boundary loop test picking up
+  `agents/advisor.md`, and 2 from the existing README tier-table loop test
+  picking up the advisor row; the misfire-rule fix reuses two existing
+  tests rather than adding new ones).
 
 ## [0.20.0] - 2026-08-20
 

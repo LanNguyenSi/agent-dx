@@ -1256,3 +1256,64 @@
   first, per this repo's commit-before-mutation-probe convention, and both
   restores were verified byte-identical via direct diff against the
   pre-mutant, post-commit file.
+- 2026-08-20 (review round 1, 7 findings: H1, M1-M4, L1-L3): re-verified and
+  re-stamped `subagent-contracts-superset.md` against the round's changes to
+  `assets/agents-md-section.md`, `assets/skill/SKILL.md`,
+  `assets/agents/advisor.md`, `src/cli.ts`, `test/docs-consistency.test.ts`,
+  `test/init.test.ts`, and `CHANGELOG.md`, plus one targeted citation in
+  `install-fence-mechanics.md`. Content-level corrections (not just line
+  shifts): the "explorer and advisor pairs still have no dedicated automated
+  drift guard" claim was false the moment M2 shipped a byte-for-byte
+  equality test for the advisor contract (the same pattern the reviewer's
+  `reproduction` and implementer's `mutation_probes` fields already had);
+  reworded to "four of the five pairs" with the advisor's guard dated to
+  this round, and the "field-identical" claim for the advisor pair extended
+  to name the `escalation_necessary: warranted | unwarranted` correction
+  (M4, replacing a bare `yes | no` YAML-1.1-boolean-synonym enum). The
+  model-correlation paragraph (misfire rule) was extended to describe L2
+  (the differing-model role list is now derived from `DEFAULT_MODELS` via
+  `ROLES.filter((role) => DEFAULT_MODELS[role] !== DEFAULT_MODELS.reviewer)`
+  rather than hardcoded) and L3 (the advisor's zero-observation parenthetical
+  reworded from "the signal itself has never been observed for the advisor"
+  — which reads like negative evidence against the correlation — to "the
+  advisor has had no spawns yet, so it contributes no evidence either way").
+  Every citation into `SKILL.md`, `docs-consistency.test.ts`, and
+  `CHANGELOG.md` inside `subagent-contracts-superset.md` was individually
+  re-derived via `git diff -U0`'s hunk headers (cumulative-shift bookkeeping,
+  same method as the 0.21.0 entry above) and spot-checked by direct read at
+  every hunk boundary and every citation actually used, not trusted on the
+  arithmetic alone; none of this round's content changes touched
+  `model-preselection.md`, `run-state-lifecycle-and-markers.md`, or
+  `review-gate-and-waivers.md`'s subject matter (tier-variant rendering,
+  run-state markers, review-gate severities respectively), so those three
+  were left unstamped this round.
+
+  Declared gap, not silently assumed unaffected: `install-fence-mechanics.md`
+  and `model-preselection.md` carry roughly 50 additional `cli.ts`/
+  `init.test.ts` line citations (tier-variant rendering, harness/model
+  mapping, profile-downgrade notes) that also shifted by this round's small
+  `cli.ts` (`promptProfile`, +5 lines from old line 78 on) and
+  `test/init.test.ts` (+1 from old line 23, +4 from old line 377, +32 from
+  old line 405) edits. None of that content describes what this round
+  actually changed (M1's label derivation, M2's tripwire/pin additions) —
+  the underlying mechanics they document are untouched — so a mechanical
+  55-citation re-stamp of those two docs was scoped out of this pass rather
+  than risk transcription errors at that volume for peripheral-content
+  citations; the one citation in `install-fence-mechanics.md` that *does*
+  describe this round's own change (the Bash-guard tripwire test) was
+  re-derived and content-updated. Follow-up: a full mechanical re-stamp of
+  the remaining `cli.ts`/`init.test.ts` citations in both docs.
+
+  `okf-kit check docs/okf --strict`: 0 warnings, 0 findings both before this
+  pass's edits (working-tree-only, uncommitted) and after — re-verified by
+  direct read per the citation discipline above, not by trusting the
+  checker's clean report alone (same known date-granularity limit on the
+  `sources-fresh` gate the 0.21.0 entry above documents). CHANGELOG.md's
+  0.21.0 entry numbers were also corrected this round (M3): the test-suite
+  arithmetic actually measured 238 baseline + 9 new = 247 (6 tests in the
+  advisor-escalation-policy `describe` block, 1 from the pre-existing
+  instruction-trust-boundary loop picking up `agents/advisor.md`, 2 from the
+  pre-existing README tier-table loop picking up the advisor row), not the
+  previously stated 241 + 6; verified by running the full suite at commit
+  60d15b8 (pre-advisor, 0.20.0) in a separate worktree (238/238) against the
+  current suite (247/247 before this round's own new tests, 255/255 after).

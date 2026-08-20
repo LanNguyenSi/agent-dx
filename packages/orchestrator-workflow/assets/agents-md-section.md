@@ -54,11 +54,12 @@ default, not a ritual.
   judgment. The unsuffixed default subagent is the normal case; a `-low`
   variant fits mechanical, narrowly scoped tasks; `-high`/`-xhigh` fit
   high-risk changes, hard problems, or repeated failed attempts. Not every
-  role gets every tier: `-xhigh` exists only for the implementer and the
-  reviewer, and the reviewer's downshift is `-medium` rather than `-low`,
-  since its default already sits at high. Spawn only variants that are
-  actually installed. Tier choice is a conscious decision, not a ritual;
-  when unsure, use the default.
+  role gets every tier: `-xhigh` exists only for the implementer, the
+  reviewer, and the advisor. The reviewer's downshift is `-medium` rather
+  than `-low`, since its default already sits at high. The advisor has no
+  downshift at all: its default `high` is already its only non-`-xhigh`
+  tier. Spawn only variants that are actually installed. Tier choice is a
+  conscious decision, not a ritual; when unsure, use the default.
 - Under the `full` profile, an advisor subagent is available for escalation
   only: architectural uncertainty, requirements that contradict each other,
   multiple valid solution paths where committing to one is expensive to
