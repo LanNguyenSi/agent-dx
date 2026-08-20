@@ -5,6 +5,30 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-08-20
+
+### Added
+
+- Tier-selection policy for the orchestrator, following up on 0.19.0's
+  `--tiers` rendering mechanics with the guidance that was missing: when tier
+  variants are installed (manifest `tiers: true`), the orchestrator picks
+  the effort tier per task by complexity and risk, at its own judgment. The
+  guidance is discretionary by design, not a rigid assignment table: the
+  unsuffixed default subagent is the normal case, a `-low` variant fits
+  mechanical, narrowly scoped tasks, `-high`/`-xhigh` fit high-risk changes,
+  hard problems, or repeated failed attempts, and tier choice is a conscious
+  decision rather than a ritual, defaulting to the unsuffixed subagent when
+  unsure. Ships in the generated `AGENTS.md` section's Scaling delegation
+  bullet list and in both of `SKILL.md`'s "Delegate implementation" and
+  "Delegate review" steps, each also instructing the orchestrator to record a
+  non-default tier choice with a one-line reason in `03-decisions.md` when
+  the task is non-trivial. `test/docs-consistency.test.ts` gains a new
+  `describe` block pinning the policy prose in `agents-md-section.md`, the
+  absence of a rigid tier-assignment table there, an anti-drift check that
+  the tier suffixes the prose names (`-low`, `-high`, `-xhigh`) actually
+  exist in `models.ts`'s `ROLE_TIERS.implementer`, and the rule's presence in
+  both `SKILL.md` delegate steps.
+
 ## [0.19.0] - 2026-08-19
 
 ### Added
