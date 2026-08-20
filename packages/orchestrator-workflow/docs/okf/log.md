@@ -1037,30 +1037,41 @@
   identified as needing correction), a reminder that a fix list assembled
   by hand needs its own verification pass, not just trust in the list.
   `install-fence-mechanics.md` and `index.md` carry no numeric citations
-  into any of the four changed files and needed no changes. `timestamp:`
-  frontmatter bumped to `2026-08-20T23:59:00Z` on all four re-verified
-  docs (model-preselection.md's citation touched was a single flat +6
-  shift, `agents-md-section.md:104-110` -> `:110-116`, itself verified
-  against the current file, not computed blind).
+  into any of the four changed files and needed no content changes.
+  `timestamp:` frontmatter bumped to `2026-08-20T23:59:00Z` on the four
+  re-verified docs plus, in a second pass below, `install-fence-mechanics.md`
+  (model-preselection.md's citation touched was a single flat +6 shift,
+  `agents-md-section.md:104-110` -> `:110-116`, itself verified against
+  the current file, not computed blind).
 
-  `okf-kit check docs/okf --strict`: 0 warnings, 0 findings both before
-  this pass's edits (the pre-existing baseline, package version 0.19.0)
-  and after (package version 0.20.0), continuing the same measured,
-  not-assumed reporting discipline as the entries above. Full suite
-  238/238 (233 baseline + 5 new: the tier-selection-policy describe block
-  in test/docs-consistency.test.ts), `tsc --noEmit` clean, `tsc --noEmit -p
-  tsconfig.test.json` clean, `npm run build` clean, `npm run format:check`
-  clean for every file this pass touched (the pre-existing
-  `test/template-markers.test.ts` warning is unrelated and untouched,
-  matching every prior pass's baseline; README.md/CHANGELOG.md are outside
-  that script's glob, same as every prior pass). Mutation probes (named in
-  the task assignment): (1) deleting the new tier-policy bullet from
-  agents-md-section.md turned the new "states the orchestrator picks the
-  tier..." assertion red, restored and re-verified green; (2) temporarily
-  removing `xhigh` from `ROLE_TIERS.implementer` in `src/models.ts` turned
-  the new "every tier suffix named in the policy prose exists in
-  ROLE_TIERS.implementer" assertion red together with the pre-existing
-  tier-data-invariant and README tier-table assertions in
-  test/init.test.ts and test/docs-consistency.test.ts that also read
-  `ROLE_TIERS.implementer`, restored and re-verified green (src/models.ts
-  itself was never committed with the mutant in place).
+  `okf-kit check docs/okf --strict`: 0 warnings, 0 findings on the
+  pre-existing baseline (package version 0.19.0, before this pass's
+  edits). After committing this pass's content edits (package version
+  0.20.0) it was still 0/0. Running the mutation probes below (edit,
+  measure, `git checkout --`) then touched `agents-md-section.md` and
+  `src/models.ts`'s mtimes past their restore, which tripped a
+  `sources-fresh` staleness warning on `install-fence-mechanics.md`
+  (`agents-md-section.md` is one of its listed sources, mtime now newer
+  than its own `timestamp:`) even though its content needed no edit;
+  content-checked directly against the current `agents-md-section.md`
+  (confirmed it only lists the file as a generic marker-fence-mechanics
+  source, citing no lines this pass touched) and its `timestamp:` was
+  bumped the same way as the other four docs, bringing the strict check
+  back to 0/0. Full suite 238/238 (233 baseline + 5 new: the
+  tier-selection-policy describe block in test/docs-consistency.test.ts),
+  `tsc --noEmit` clean, `tsc --noEmit -p tsconfig.test.json` clean,
+  `npm run build` clean, `npm run format:check` clean for every file this
+  pass touched (the pre-existing `test/template-markers.test.ts` warning
+  is unrelated and untouched, matching every prior pass's baseline;
+  README.md/CHANGELOG.md are outside that script's glob, same as every
+  prior pass). Mutation probes (named in the task assignment): (1)
+  deleting the new tier-policy bullet from agents-md-section.md turned the
+  new "states the orchestrator picks the tier..." assertion red, restored
+  and re-verified green; (2) temporarily removing `xhigh` from
+  `ROLE_TIERS.implementer` in `src/models.ts` turned the new "every tier
+  suffix named in the policy prose exists in ROLE_TIERS.implementer"
+  assertion red together with the pre-existing tier-data-invariant and
+  README tier-table assertions in test/init.test.ts and
+  test/docs-consistency.test.ts that also read `ROLE_TIERS.implementer`,
+  restored and re-verified green (src/models.ts itself was never
+  committed with the mutant in place).
