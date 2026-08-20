@@ -291,7 +291,7 @@ corrected in the same fix-round-2 pass, and
 family terms" `describe` (review finding R2-M1) guards the README half of
 that correction against regressing back to either stale claim.
 
-**Rendering (`init.ts:500-576`).** For each harness and each role
+**Rendering (`init.ts:504-576`).** For each harness and each role
 `rolesForProfile(profile)` selects, `runInit` writes the base file exactly
 as it always has (now including its own pinned default effort, see "Pinned
 default effort (0.22.0)" below), then, only `if (tiers)`, loops
