@@ -49,6 +49,12 @@ default, not a ritual.
   orchestrator may review it itself; reserve the reviewer subagent for
   changes whose risk or size warrants an independent skeptical pass. Either
   way, review is never skipped.
+- When tier variants are installed (manifest `tiers: true`), the orchestrator
+  picks the effort tier per task by complexity and risk, at its own
+  judgment. The unsuffixed default subagent is the normal case; a `-low`
+  variant fits mechanical, narrowly scoped tasks; `-high`/`-xhigh` fit
+  high-risk changes, hard problems, or repeated failed attempts. Tier choice
+  is a conscious decision, not a ritual; when unsure, use the default.
 
 ### Review gate
 

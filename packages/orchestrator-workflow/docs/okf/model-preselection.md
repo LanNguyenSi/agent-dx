@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-08-19T23:59:00Z
+timestamp: 2026-08-20T23:59:00Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -425,7 +425,7 @@ ever explained the opencode half of the omission
 ## Orchestrator-runs-on-session-model policy
 
 The installed `AGENTS.md` policy section carries a `### Models` subsection
-verbatim (`assets/agents-md-section.md:104-110`): "The orchestrator runs on
+verbatim (`assets/agents-md-section.md:110-116`): "The orchestrator runs on
 the session's main model. Use the strongest reasoning model available,"
 plus "Per-role model preferences ... are recorded in
 `.ai/workflow/manifest.json` and, where the harness supports per-agent

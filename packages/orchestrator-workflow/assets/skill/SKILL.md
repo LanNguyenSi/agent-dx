@@ -122,17 +122,27 @@ directory and the subagents.
    enough, testable, ordered correctly, and aligned with the goal. Fix the
    slicing before any implementation starts.
 6. **Delegate implementation.** Send each implementer subagent one narrow task
-   contract (format below). When a task's acceptance rests on a test that
-   must fail without the change, name the mutation probes to run in the
-   task assignment; the implementer reports each one in the output
-   contract's `mutation_probes` field (apply the mutant for real, observe
-   the named test fail, restore, re-verify). Hold the implementer's report
-   to the claim-only-what-was-measured rule too: treat any verification
+   contract (format below). When tier variants are installed, pick the
+   implementer tier (the installed `implementer-<tier>` subagents, if any) by
+   the task's complexity and risk, at your own judgment, defaulting to the
+   unsuffixed subagent when unsure; record a non-default tier choice with a
+   one-line reason in `03-decisions.md` when the task is non-trivial. When a
+   task's acceptance rests on a test that must fail without the change, name
+   the mutation probes to run in the task assignment; the implementer
+   reports each one in the output contract's `mutation_probes` field (apply
+   the mutant for real, observe the named test fail, restore, re-verify).
+   Hold the implementer's report to the claim-only-what-was-measured rule
+   too: treat any verification
    claim there that is not backed by a check it actually ran as unverified.
    Record meaningful decisions in `03-decisions.md` and consolidate
    evidence in `04-implementation-summary.md`.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
-   briefing the base and head revision the diff was generated from. When the
+   briefing the base and head revision the diff was generated from. When tier
+   variants are installed, pick the reviewer tier (the installed
+   `reviewer-<tier>` subagents, if any) by the task's complexity and risk, at
+   your own judgment, defaulting to the unsuffixed subagent when unsure;
+   record a non-default tier choice with a one-line reason in
+   `03-decisions.md` when the task is non-trivial. When the
    reviewer's environment cannot use version control to see the diff (for
    example a policy-gated repository), supply the diff as a pre-generated file
    in the briefing instead of expecting the reviewer to derive it, and have the

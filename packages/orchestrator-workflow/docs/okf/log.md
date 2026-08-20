@@ -987,3 +987,80 @@
   was named or run for R3-L2/R3-L3/R3-L4 beyond the R3-L4 behavioral test
   itself, since those three findings are comment/docs-only or a single
   additive assertion, not a fix with a named mutation target.
+- 2026-08-20: re-verified and re-stamped review-gate-and-waivers.md,
+  run-state-lifecycle-and-markers.md, subagent-contracts-superset.md, and
+  model-preselection.md against package version 0.20.0, which added a
+  tier-selection policy for the orchestrator (a new bullet in
+  agents-md-section.md's Scaling delegation list plus one new sentence in
+  each of SKILL.md's "Delegate implementation"/"Delegate review" steps, a
+  new `describe` block in test/docs-consistency.test.ts, and one new
+  CHANGELOG.md entry). Every `SKILL.md:`, `agents-md-section.md:`, and
+  `CHANGELOG.md:` citation across the four docs (82 total) was checked
+  directly against the current file content, not assumed from a computed
+  offset, the same "check every citation" discipline this log has used
+  since the 2026-08-19 (0.19.0 R3) entry above. `docs-consistency.test.ts`
+  citations needed no correction: the new describe block is appended after
+  the file's last existing line, so nothing above it shifted.
+  `CHANGELOG.md` citations needed a flat +24 shift (the new 0.20.0 entry
+  was prepended above the 0.19.0 entry, and every existing line below it
+  moved down by exactly 24 with no other edits), verified by spot-checking
+  several shifted citations' version-header lines against the actual file
+  before applying the shift bundle-wide. `SKILL.md` and
+  `agents-md-section.md` needed per-citation verification rather than a
+  uniform shift, since a direct read surfaced two separate problems: (1)
+  most citations in run-state-lifecycle-and-markers.md and
+  subagent-contracts-superset.md were accurate at the pre-0.20.0 baseline
+  and shifted cleanly (SKILL.md: flat +10 for any citation at or after old
+  line 139, since the two edited step paragraphs sit in a single diff hunk
+  spanning old lines 122-138; agents-md-section.md: flat +6 for any
+  citation at or after old line 52, the insertion point of the new tier
+  bullet); (2) two SKILL.md citations in subagent-contracts-superset.md
+  (`:124-133`, `:129-131`) pointed inside the rewrapped step-6 paragraph
+  itself and could not be shifted arithmetically, so they were remapped by
+  content match instead (`:124-138` for the whole step-6 paragraph, now
+  five lines longer; `:134-136` for the claim-only-what-was-measured
+  clause). Direct verification also surfaced a **pre-existing** problem
+  unrelated to this pass's own diff: every `agents-md-section.md:` citation
+  in review-gate-and-waivers.md was already stale at the pre-0.20.0
+  baseline (confirmed by reading the cited ranges against the 0.19.0 HEAD
+  content directly, not the new file), off by inconsistent amounts rather
+  than a uniform offset, most visibly the Waiver-rules bullets each citing
+  a range 6-13 lines earlier than their actual bullet. All eight of that
+  doc's `agents-md-section.md:` citations were corrected by direct
+  content match against the 0.19.0 baseline first, then mapped forward
+  through this pass's own +6 shift where the corrected old line fell at or
+  after 52. Two of the eight corrections were caught only on a second full
+  citation sweep after the first edit pass (an initial oversight: a
+  citation for the "Deferring such a finding counts as a waiver" quote and
+  one for the "waived by the operator... never waives a critical finding on
+  its own" quote were each left unedited in the first pass despite being
+  identified as needing correction), a reminder that a fix list assembled
+  by hand needs its own verification pass, not just trust in the list.
+  `install-fence-mechanics.md` and `index.md` carry no numeric citations
+  into any of the four changed files and needed no changes. `timestamp:`
+  frontmatter bumped to `2026-08-20T23:59:00Z` on all four re-verified
+  docs (model-preselection.md's citation touched was a single flat +6
+  shift, `agents-md-section.md:104-110` -> `:110-116`, itself verified
+  against the current file, not computed blind).
+
+  `okf-kit check docs/okf --strict`: 0 warnings, 0 findings both before
+  this pass's edits (the pre-existing baseline, package version 0.19.0)
+  and after (package version 0.20.0), continuing the same measured,
+  not-assumed reporting discipline as the entries above. Full suite
+  238/238 (233 baseline + 5 new: the tier-selection-policy describe block
+  in test/docs-consistency.test.ts), `tsc --noEmit` clean, `tsc --noEmit -p
+  tsconfig.test.json` clean, `npm run build` clean, `npm run format:check`
+  clean for every file this pass touched (the pre-existing
+  `test/template-markers.test.ts` warning is unrelated and untouched,
+  matching every prior pass's baseline; README.md/CHANGELOG.md are outside
+  that script's glob, same as every prior pass). Mutation probes (named in
+  the task assignment): (1) deleting the new tier-policy bullet from
+  agents-md-section.md turned the new "states the orchestrator picks the
+  tier..." assertion red, restored and re-verified green; (2) temporarily
+  removing `xhigh` from `ROLE_TIERS.implementer` in `src/models.ts` turned
+  the new "every tier suffix named in the policy prose exists in
+  ROLE_TIERS.implementer" assertion red together with the pre-existing
+  tier-data-invariant and README tier-table assertions in
+  test/init.test.ts and test/docs-consistency.test.ts that also read
+  `ROLE_TIERS.implementer`, restored and re-verified green (src/models.ts
+  itself was never committed with the mutant in place).

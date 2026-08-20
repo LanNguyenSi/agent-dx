@@ -1300,3 +1300,95 @@ describe("README opencode-effort prose uses family terms, not the stale provider
     expect(section).not.toContain("model: will be omitted");
   });
 });
+
+/**
+ * 0.20.0 adds a tier-selection policy for the orchestrator: 0.19.0 shipped
+ * the `--tiers` rendering mechanics but no guidance on when to spawn which
+ * tier. The operator framing was explicit: discretion by complexity and
+ * risk, no rigid assignment table, no ritual. This pins the policy in
+ * agents-md-section.md's Scaling delegation bullet list and in both
+ * SKILL.md "Delegate implementation"/"Delegate review" steps. The anti-drift
+ * check scopes to `ROLE_TIERS.implementer` specifically, not a bundle-wide
+ * "exists somewhere in ROLE_TIERS" check: `implementer` is the one role
+ * whose tier list covers all three suffixes the prose names (`low`, `high`,
+ * `xhigh`), so a suffix silently dropped from just that array would be
+ * masked by a role that still carries it (e.g. `xhigh` also lives under
+ * `reviewer`) if the check were not scoped this way.
+ */
+describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md delegate steps", () => {
+  const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("agents-md-section states the orchestrator picks the tier at its own judgment, gated on manifest tiers: true", () => {
+    expect(agentsMdSection).toContain(
+      "When tier variants are installed (manifest `tiers: true`), the orchestrator picks the effort tier per task by complexity and risk, at its own judgment.",
+    );
+    expect(agentsMdSection).toContain(
+      "Tier choice is a conscious decision, not a ritual; when unsure, use the default.",
+    );
+  });
+
+  it("agents-md-section carries no rigid tier-assignment table", () => {
+    // The policy is discretionary by design; a markdown table row (two or
+    // more "|" cell separators on one line) mapping tasks to tiers would
+    // reintroduce the rigid mapping the operator framing explicitly rejected.
+    const scalingIdx = agentsMdSection.indexOf("### Scaling delegation");
+    const reviewGateIdx = agentsMdSection.indexOf("### Review gate");
+    expect(scalingIdx).toBeGreaterThanOrEqual(0);
+    expect(reviewGateIdx).toBeGreaterThan(scalingIdx);
+    expect(agentsMdSection.slice(scalingIdx, reviewGateIdx)).not.toMatch(
+      /\|[^|\n]+\|[^|\n]+\|/,
+    );
+  });
+
+  it("every tier suffix named in the policy prose exists in ROLE_TIERS.implementer (anti-drift)", () => {
+    const bulletIdx = agentsMdSection.indexOf(
+      "When tier variants are installed",
+    );
+    expect(bulletIdx, "tier-policy bullet not found").toBeGreaterThanOrEqual(0);
+    const bulletEnd = agentsMdSection.indexOf("use the default.", bulletIdx);
+    expect(
+      bulletEnd,
+      "tier-policy bullet did not terminate at the expected closing phrase",
+    ).toBeGreaterThan(bulletIdx);
+    const bullet = agentsMdSection.slice(bulletIdx, bulletEnd);
+    const suffixes = [...bullet.matchAll(/`-(\w+)`/g)].map((m) => m[1] as Tier);
+    // Guard the extraction itself: if this drops to 0, the loop below would
+    // vacuously pass without checking anything.
+    expect(suffixes).toEqual(["low", "high", "xhigh"]);
+    for (const suffix of suffixes) {
+      expect(
+        ROLE_TIERS.implementer,
+        `suffix "-${suffix}" named in the policy prose is missing from ROLE_TIERS.implementer`,
+      ).toContain(suffix);
+    }
+  });
+
+  it('SKILL.md step 6 "Delegate implementation" carries the discretionary tier rule and the decision-log clause', () => {
+    const start = skillMd.indexOf("**Delegate implementation.**");
+    const end = skillMd.indexOf("**Delegate review.**");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const step = skillMd.slice(start, end);
+    expect(step).toContain(
+      "pick the implementer tier (the installed `implementer-<tier>` subagents, if any) by the task's complexity and risk, at your own judgment, defaulting to the unsuffixed subagent when unsure",
+    );
+    expect(step).toContain(
+      "record a non-default tier choice with a one-line reason in `03-decisions.md` when the task is non-trivial",
+    );
+  });
+
+  it('SKILL.md step 7 "Delegate review" carries the discretionary tier rule and the decision-log clause', () => {
+    const start = skillMd.indexOf("**Delegate review.**");
+    const end = skillMd.indexOf("**Decide acceptance.**");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const step = skillMd.slice(start, end);
+    expect(step).toContain(
+      "pick the reviewer tier (the installed `reviewer-<tier>` subagents, if any) by the task's complexity and risk, at your own judgment, defaulting to the unsuffixed subagent when unsure",
+    );
+    expect(step).toContain(
+      "record a non-default tier choice with a one-line reason in `03-decisions.md` when the task is non-trivial",
+    );
+  });
+});
