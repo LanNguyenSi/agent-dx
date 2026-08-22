@@ -198,7 +198,8 @@ steps in the repository you were asked to install into.
      ```
    - `.ai/workflow/manifest.json`, exactly this shape (harnesses MUST be an
      array, `profile` is `"minimal"` or `"full"`, models keyed by role,
-     version = the kit version you installed):
+     version = the kit version you installed, read from this kit's own
+     `packages/orchestrator-workflow/package.json` `version` field):
 
      ```json
      {
@@ -215,7 +216,7 @@ steps in the repository you were asked to install into.
          "advisor": "opus"
        },
        "files": {},
-       "installedAt": "2026-06-12T00:00:00.000Z"
+       "installedAt": "<ISO 8601 timestamp of this install>"
      }
      ```
 
