@@ -203,7 +203,7 @@ steps in the repository you were asked to install into.
      ```json
      {
        "kit": "orchestrator-workflow",
-       "version": "0.5.0",
+       "version": "<kit version you installed>",
        "harnesses": ["claude", "opencode"],
        "profile": "full",
        "tiers": false,
