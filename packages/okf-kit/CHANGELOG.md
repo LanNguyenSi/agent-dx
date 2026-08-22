@@ -5,6 +5,26 @@ All notable changes to `okf-kit` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-22
+
+### Added
+
+- New rule `citations-resolve`: for docs with a repo root, flags a
+  `` `path:N`/`path:N-M` `` citation (and its `` `:N` ``/`` -`M` ``/`` (`N`) ``
+  continuations) whose target file is missing, whose range is inverted or
+  exceeds the file, or whose start line is blank or (for a non-markdown
+  target) only a closing brace. Ported from agent-grounding's
+  `scripts/okf-citations-resolve.mjs` (agent-grounding PR #185), a
+  repo-local spike that closed a gap `sources-fresh` cannot: `sources-fresh`
+  only compares a doc's `sources` list against file mtimes, so it is
+  structurally blind to an edit that shifts line numbers inside a still-fresh
+  source file. `citations-resolve` gives every repo consuming okf-kit this
+  check without copying the script. See "Citation resolution
+  (citations-resolve)" in the README. Not ported: the original's
+  `docs/testing`-file expansion (an agent-grounding-specific convention, not
+  part of the OKF spec, and not exercised by the ported tests) -- this rule
+  only scans the docs already loaded for the bundle being checked.
+
 ## [0.4.0] - 2026-08-13
 
 ### Changed
