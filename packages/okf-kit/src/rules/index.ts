@@ -5,6 +5,7 @@ import { linksResolveRule } from "./links-resolve.js";
 import { noAbsoluteLinksRule } from "./no-absolute-links.js";
 import { sourcesShapeRule } from "./sources-shape.js";
 import { sourcesFreshRule } from "./sources-fresh.js";
+import { citationsResolveRule } from "./citations-resolve.js";
 
 export const allRules: Rule[] = [
   frontmatterRequiredRule,
@@ -13,6 +14,7 @@ export const allRules: Rule[] = [
   noAbsoluteLinksRule,
   sourcesShapeRule,
   sourcesFreshRule,
+  citationsResolveRule,
 ];
 
 export {
@@ -22,4 +24,5 @@ export {
   noAbsoluteLinksRule,
   sourcesShapeRule,
   sourcesFreshRule,
+  citationsResolveRule,
 };

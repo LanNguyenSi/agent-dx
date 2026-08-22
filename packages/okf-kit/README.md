@@ -69,6 +69,7 @@ Every template doc except `benchmark-template.md` ships with `sources: [path/to/
 | `no-absolute-links` | warning | Link targets should not start with `/`. GitHub resolves a leading slash against the repository root, not the bundle root, so an absolute link 404s once the bundle is viewed outside its own repository. Use a same-directory relative link instead. |
 | `sources-shape` | error | Frontmatter `sources`, when present, must be a non-empty array of non-empty strings. With a repo root (explicit or auto-detected), each listed path (file or directory) must also exist under it. |
 | `sources-fresh` | warning / notice | For docs with a `sources` list and a repo root, flags a source path whose last git commit is newer than both the doc's `timestamp` and the doc file's own last commit. See "Staleness (sources-fresh)" below. |
+| `citations-resolve` | warning / notice | For docs with a repo root, flags a `` `path:N`/`path:N-M` `` citation (and its `` `:N` ``/`` -`M` ``/`` (`N`) `` continuations) whose target file is missing, whose range is inverted or exceeds the file, or whose start line is blank or (for a non-markdown target) only a closing brace. See "Citation resolution (citations-resolve)" below. |
 
 ## repo-root auto-detection
 
@@ -99,6 +100,29 @@ Known limitation: the doc-commit comparison suppresses staleness for every sourc
 
 **Authoring guidance:** when you re-verify a doc against its sources, bump its frontmatter `timestamp` (and add a line to the bundle's `log.md`) so `sources-fresh` reflects that the doc is current again.
 
+## Citation resolution (citations-resolve)
+
+`sources-fresh` catches a source file changing after a doc's `timestamp`, but it is structurally blind to an edit that shifts *line numbers* inside a still-fresh file: a doc citing `path:42` keeps citing line 42 even after an edit moves the referenced content to line 50. `citations-resolve` finds every `` `path:N` ``/`` `path:N-M` `` citation in a doc, resolves `path` to a real file, and flags a citation that clearly cannot be pointing at real content any more. It is mechanical only (no symbol/AST resolution): it does not verify the cited line is *semantically* the right one, only that the target exists, the range is sound, and the start line is not blank or (for a non-markdown target) a lone closing brace/bracket.
+
+| Rule id | Meaning |
+|---------|---------|
+| `missing-file` | The cited path could not be resolved to a real file (see path resolution below). |
+| `path-traversal-rejected` | The cited path contains a `..` segment; rejected without ever being resolved. |
+| `inverted-range` | A range's end line is before its start line. |
+| `range-exceeds-file` | The cited line (or the end of a range) is past the end of the resolved file. |
+| `blank-start-line` | The start line resolves to a blank line. A citation whose start line is blank is flagged; cite the first content line instead. Consumers enabling this rule on an existing bundle should expect to fix citations like this once, the first time they turn it on. |
+| `closing-brace-start-line` | For a non-markdown target, the start line is only a closing brace/bracket/paren (`}`, `)`, `]`, optionally with a trailing `,`/`;`) -- a common signature of a cited block having moved. |
+| `unresolved-ambiguous` | More than one file in the repo matches the cited path; reported as a `notice` (never counted toward `--strict`), not guessed at. |
+| `unreadable-target` | The resolved target file exists but could not be read (e.g. permission denied); reported as a `notice` (never counted toward `--strict`) with the OS error code in `detail`, since an unreadable file is not evidence the citation itself is wrong. |
+
+**Continuation citations.** Once a sentence states a full `path:N` citation, prose commonly repeats just the line (or range) for a later reference in the same sentence: `` `:N` ``/`` `:N-M` `` (bare colon-prefixed), `` -`M` ``/`` –`M` `` (hyphen- or en-dash-led, the tail of a split range like `` `path:N`-`M` ``), or `` (`N`) `` (parenthesized). Each resolves against the nearest preceding citation in the same doc that resolved to a real file; a continuation right after an unresolved, ambiguous, or out-of-scope citation is silently skipped, not misattributed to an earlier, unrelated file.
+
+**Hard-wrapped prose.** A doc that hard-wraps prose at a fixed column can split a hyphenated filename across a line break right after its trailing `-` (e.g. `run-state-lifecycle-and-markers.md` wrapping to `run-state-lifecycle-and-\nmarkers.md`). A `` `path:N` `` match is skipped entirely (not checked, not counted as a citation) when it starts at column 0 of its line -- optionally after only whitespace or a list/quote marker (`-`, `*`, `>`, digits, `.`) -- and the previous line ends with `-`/`–`: the signature of a wrapped continuation rather than a genuine citation to a short bare filename.
+
+**Path resolution**, tried in order: (1) the doc's own frontmatter `sources` list, matched by exact suffix, only when exactly one source matches; (2) for a citedPath with no `/` only, doc-relative and then each ancestor directory of the doc up to the repo root, nearest first (so a bare filename like `README.md` prefers the README *for the package the doc lives in* over a same-named file that merely happens to also sit at the repo root); (3) repo-root-relative; (4) doc-relative; (5) the nearest earlier citation in the same doc whose path contains a `/` and ends with the same suffix (the "full path was mentioned earlier" convention); (6) a repo-wide search by basename. A cited path starting with `/` is treated as an absolute or placeholder path (e.g. inside a fabricated example stack trace) and skipped without a finding.
+
+Like `sources-fresh`, this rule requires a repo root (explicit `--repo-root` or auto-detected): without one, it emits a single bundle-level notice (`citation resolution skipped: not inside a git work tree`) rather than silently reporting nothing.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -113,7 +137,7 @@ This is advisory: don't fail the build on warnings unless you pass `--strict`. U
 
 ```yaml
 - name: OKF bundle check
-  run: npx okf-kit@0.4.0 check path/to/bundle
+  run: npx okf-kit@0.5.0 check path/to/bundle
 ```
 
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
