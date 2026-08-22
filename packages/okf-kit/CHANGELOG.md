@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/testing`-file expansion (an agent-grounding-specific convention, not
   part of the OKF spec, and not exercised by the ported tests) -- this rule
   only scans the docs already loaded for the bundle being checked.
+  `citations-resolve` findings are warn-level: an existing `okf-kit check
+  --strict` run that was previously green can now fail once this version is
+  picked up, purely from this rule's new warnings, with no other change to
+  the bundle. Two path-resolution refinements differ from the
+  agent-grounding original: (1) a bare filename with no `/` (e.g.
+  `README.md`) now tries the citing doc's own directory and each ancestor
+  directory up to the repo root, nearest first, before falling back to a
+  plain repo-root-relative lookup, so a package-level file is not shadowed
+  by a same-named file that happens to also sit at the repo root; (2) a
+  `` `path:N` `` match that starts at column 0 of its line, right after a
+  previous line ending in `-`/`–`, is treated as the phantom tail of a
+  filename hard-wrapped across the line break and skipped, instead of being
+  checked (and typically flagged `missing-file`) as its own citation.
 
 ## [0.4.0] - 2026-08-13
 

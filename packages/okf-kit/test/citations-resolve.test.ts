@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { loadBundle } from "../src/bundle.js";
 import { citationsResolveRule } from "../src/rules/citations-resolve.js";
 import type { Finding } from "../src/types.js";
-import { FIXTURES_DIR, loadFixture } from "./helpers.js";
+import { FIXTURES_DIR, loadFixture, runCli } from "./helpers.js";
 
 /**
  * Ported from agent-grounding's `scripts/okf-citations-resolve.test.mjs`
@@ -338,5 +338,195 @@ describe("citations-resolve", () => {
     // since an unset one short-circuits to the "skipped" notice above.
     const ctx = loadFixture("valid-bundle", FIXTURES_DIR);
     expect(citationsResolveRule.run(ctx)).toEqual([]);
+  });
+
+  // -- unresolved-ambiguous coverage (review round 2, finding 1) -----------
+
+  it("unresolved-ambiguous: two same-basename candidates produce a notice tagged [unresolved-ambiguous] with candidates in detail, and --strict alone does not fail on it", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-ambig-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src/a"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src/b"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/a/shared.ts"),
+        "export const a = 1;\n",
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/b/shared.ts"),
+        "export const b = 1;\n",
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "title: Ambiguous-basename fixture",
+          "---",
+          "",
+          "Bare-basename citation with two same-named candidates: `shared.ts:1`.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      const f = findingFor(findings, "shared.ts:1");
+      expect(f).toBeDefined();
+      expect(f?.severity).toBe("notice");
+      expect(f?.message).toContain("[unresolved-ambiguous]");
+      expect(f?.detail).toMatch(/^candidates: /);
+      expect(f?.detail).toContain("src/a/shared.ts");
+      expect(f?.detail).toContain("src/b/shared.ts");
+
+      // runCheck's exitCode only counts errors, and warnings under
+      // --strict (see cli.ts): a notice never counts toward either, so a
+      // bundle whose only finding is this unresolved-ambiguous notice must
+      // still exit 0 even with --strict.
+      const strictRun = runCli([
+        "check",
+        path.join(tmpRoot, "docs/okf"),
+        "--repo-root",
+        tmpRoot,
+        "--strict",
+      ]);
+      expect(strictRun.status).toBe(0);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  // -- unreadable target (review round 2, finding 2) -----------------------
+
+  const isUnsupportedForChmod =
+    process.platform === "win32" || process.getuid?.() === 0;
+
+  it.skipIf(isUnsupportedForChmod)(
+    "unreadable target: a chmod 000 file is reported as a notice tagged [unreadable-target] with the OS error code in detail, not a thrown error",
+    () => {
+      const tmpRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "okf-citations-resolve-unreadable-"),
+      );
+      const targetPath = path.join(tmpRoot, "src/secret.ts");
+      try {
+        fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+        fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+        fs.writeFileSync(targetPath, "export const a = 1;\n");
+        fs.chmodSync(targetPath, 0o000);
+        fs.writeFileSync(
+          path.join(tmpRoot, "docs/okf/doc.md"),
+          [
+            "---",
+            "type: reference",
+            "title: Unreadable-target fixture",
+            "sources:",
+            "  - src/secret.ts",
+            "---",
+            "",
+            "Citation into a file this process cannot read: `src/secret.ts:1`.",
+            "",
+          ].join("\n"),
+        );
+
+        const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+        const findings = citationsResolveRule.run(ctx);
+        const f = findingFor(findings, "src/secret.ts:1");
+        expect(f).toBeDefined();
+        expect(f?.severity).toBe("notice");
+        expect(f?.message).toContain("[unreadable-target]");
+        expect(f?.detail).toContain("errorCode:");
+      } finally {
+        fs.chmodSync(targetPath, 0o644); // restore so rmSync can clean up
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // -- root-README shadowing (review round 2, finding 3a) -------------------
+
+  it("path resolution: a bare filename citation prefers the nearest ancestor directory over a same-named file at the repo root (shadowing)", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shadow-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "packages/pkg/docs/okf"), {
+        recursive: true,
+      });
+      // Root-level README.md: short, so a wrong resolution here would trip
+      // range-exceeds-file for a citation meant for the package README.
+      fs.writeFileSync(
+        path.join(tmpRoot, "README.md"),
+        Array.from({ length: 5 }, (_, i) => `root line ${i + 1}`).join("\n") +
+          "\n",
+      );
+      // Package-level README.md: long enough to cover the cited range.
+      fs.writeFileSync(
+        path.join(tmpRoot, "packages/pkg/README.md"),
+        Array.from({ length: 20 }, (_, i) => `pkg line ${i + 1}`).join("\n") +
+          "\n",
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "packages/pkg/docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "title: README shadowing fixture",
+          "---",
+          "",
+          "Bare filename citation meaning this package's own README: `README.md:10-12`.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(
+        path.join(tmpRoot, "packages/pkg/docs/okf"),
+        tmpRoot,
+      );
+      const findings = citationsResolveRule.run(ctx);
+      expect(findingFor(findings, "README.md:10-12")).toBeUndefined();
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  // -- hard-wrapped path in prose (review round 2, finding 3b) --------------
+
+  it("hard-wrapped prose: a filename split across a line break by the wrap does not produce a phantom missing-file citation for its tail", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-wrap-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/run-state-lifecycle-and-markers.md"),
+        "line 1\nline 2\n",
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "title: Hard-wrap fixture",
+          "---",
+          "",
+          "See the details in src/run-state-lifecycle-and-",
+          "markers.md:1 for more.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      // Without the guard, CITATION_RE matches the phantom tail
+      // "markers.md:1" on its own (a bare filename that does not exist)
+      // and reports it as missing-file.
+      expect(findingFor(findings, "markers.md:1")).toBeUndefined();
+      expect(findings).toEqual([]);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 });

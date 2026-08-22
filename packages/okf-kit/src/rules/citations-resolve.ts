@@ -32,6 +32,25 @@ const RULE_ID = "citations-resolve";
  * one (that needs the actual symbol; out of scope for a warn-only mechanical
  * rule), nor citations without a file extension this rule recognises.
  *
+ * Hard-wrapped prose. Some docs hard-wrap prose at a fixed column, which can
+ * split a hyphenated filename like `run-state-lifecycle-and-markers.md`
+ * across a line break right after the trailing `-`. `CITATION_RE` cannot
+ * (and should not) span the newline to reassemble the real citedPath, but
+ * without a guard it instead matches the phantom tail on its own
+ * (`markers.md:172`), which usually does not exist as a file and produces a
+ * false `missing-file`. A `CITATION_RE` match is skipped entirely (neither
+ * checked nor counted as a real citation) when it starts at column 0 of its
+ * line -- optionally after only whitespace or a list/quote marker
+ * (`-`, `*`, `>`, digits, `.`) -- and the previous line ends with `-` or
+ * `–`: the signature of a wrapped continuation, not a new citation.
+ *
+ * Unreadable targets. A resolved target file that exists but cannot be read
+ * (permission denied, and similar OS-level failures) is reported as a
+ * bundle-level `notice` tagged `unreadable-target` with the OS error code in
+ * `detail`, rather than throwing and aborting the whole check: a citation
+ * pointing at a file the checker itself cannot read is not evidence the
+ * citation is wrong.
+ *
  * Porting decision (scope cut from the original): the original script also
  * scanned any `docs/testing/*.md` file that an okf doc's frontmatter
  * `sources` cited, an agent-grounding-specific convention (docs/testing is
@@ -52,20 +71,31 @@ const RULE_ID = "citations-resolve";
  *      suffix (`source === citedPath || source.endsWith('/' + citedPath)`),
  *      only when exactly one source matches -- the doc's author already
  *      disambiguated which physical file this citation means
- *   2. repo-root-relative (`<repoRoot>/<citedPath>`)
- *   3. doc-relative (`<dirname(doc)>/<citedPath>`)
- *   4. the nearest earlier citation *in the same doc* whose path contains a
+ *   2. for a citedPath with no `/` only: doc-relative, then each ancestor
+ *      directory of the doc up to (and including) repoRoot, nearest first
+ *      -- a bare filename like `README.md` almost always means "the README
+ *      *for the package this doc lives in*", and a repo-root-relative
+ *      lookup done first would instead silently resolve to an unrelated,
+ *      differently-sized file of the same name that happens to sit at the
+ *      repo root ("shadowing"). A citedPath containing a `/` skips straight
+ *      to step 3: the caller already qualified enough of the path that
+ *      "closest ancestor" guessing isn't needed.
+ *   3. repo-root-relative (`<repoRoot>/<citedPath>`)
+ *   4. doc-relative (`<dirname(doc)>/<citedPath>`) -- redundant with step 2
+ *      for a no-`/` citedPath (already tried there), the effective first
+ *      resolution attempt for a `/`-containing one
+ *   5. the nearest earlier citation *in the same doc* whose path contains a
  *      `/` and ends with the same suffix as citedPath (the "last full path
  *      mentioned" convention)
- *   5. a repo-wide search for a file whose path ends with citedPath (or,
+ *   6. a repo-wide search for a file whose path ends with citedPath (or,
  *      for a bare filename, whose basename equals it)
  * A citedPath starting with `/` is treated as out of scope (an absolute or
  * placeholder path, e.g. inside a fabricated example stack trace) and
- * skipped without a finding. When step 5 finds more than one candidate the
+ * skipped without a finding. When step 6 finds more than one candidate the
  * citation is reported as a `notice`-severity "ambiguous target" finding
  * rather than guessed at or false-flagged as missing (never counted toward
  * `--strict`). A citation resolved by none of the above, with zero
- * candidates at step 5, is reported as `missing-file`. A citedPath
+ * candidates at step 6, is reported as `missing-file`. A citedPath
  * containing a `..` segment is rejected outright (`path-traversal-rejected`)
  * without ever being resolved, so a malformed or hostile citation cannot
  * walk resolution outside the repo.
@@ -131,7 +161,10 @@ const EXCLUDED_DIRS = new Set([
   "okf-citations-resolve-fixtures",
 ]);
 
-type Problem = { rule: string; message: string };
+type Problem = { rule: string; message: string; code?: string };
+
+/** Per-root basename index, see findByBasename. */
+type BasenameCache = Map<string, Map<string, string[]>>;
 
 type Atom =
   | {
@@ -165,10 +198,20 @@ function hasParentSegment(citedPath: string): boolean {
   return citedPath.split("/").includes("..");
 }
 
-/** Repo-wide search for files with an exact basename, memoized per root. */
-const basenameIndexCache = new Map<string, Map<string, string[]>>();
-function findByBasename(root: string, basename: string): string[] {
-  let index = basenameIndexCache.get(root);
+/**
+ * Repo-wide search for files with an exact basename, memoized per root
+ * within `cache`. `cache` is built lazily and scoped to a single
+ * `citationsResolveRule.run(ctx)` invocation (see the rule's `run`), not
+ * held at module scope, so an in-process caller running the check
+ * repeatedly (e.g. in a long-lived process, or a test suite that edits
+ * fixtures between runs) never sees a stale index from an earlier run.
+ */
+function findByBasename(
+  cache: BasenameCache,
+  root: string,
+  basename: string,
+): string[] {
+  let index = cache.get(root);
   if (!index) {
     index = new Map<string, string[]>();
     const found = index;
@@ -193,7 +236,7 @@ function findByBasename(root: string, basename: string): string[] {
       }
     };
     walk(root);
-    basenameIndexCache.set(root, index);
+    cache.set(root, index);
   }
   return index.get(basename) ?? [];
 }
@@ -231,6 +274,32 @@ function findPriorQualifiedCitation(
 }
 
 /**
+ * For a bare (no `/`) citedPath, tries doc-relative first, then each
+ * ancestor directory of the doc, nearest first, up to and including `root`.
+ * Returns the first real file found, or `null`. See the "Path resolution"
+ * doc block above (step 2) for why this runs before the plain
+ * repo-root-relative lookup: a same-named file closer to the citing doc
+ * (e.g. a package's own `README.md`) should win over one that merely
+ * happens to also exist at the repo root.
+ */
+function resolveViaAncestorClimb(
+  root: string,
+  docAbsPath: string,
+  citedPath: string,
+): string | null {
+  const resolvedRoot = path.resolve(root);
+  let dir = path.dirname(docAbsPath);
+  for (;;) {
+    const candidate = path.resolve(dir, citedPath);
+    if (isFile(candidate)) return candidate;
+    if (path.resolve(dir) === resolvedRoot) return null;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null; // reached the filesystem root
+    dir = parent;
+  }
+}
+
+/**
  * Resolves a citation's path to a single real file. Returns `{ skip: true }`
  * for a citedPath out of scope (leading `/`), `{ path }` on a definitive
  * single resolution, `{ ambiguous: true, candidates }` when more than one
@@ -239,6 +308,7 @@ function findPriorQualifiedCitation(
  * calling this; it is not re-checked here.
  */
 function resolveCitation(
+  cache: BasenameCache,
   root: string,
   docAbsPath: string,
   docContent: string,
@@ -258,6 +328,11 @@ function resolveCitation(
     if (isFile(candidate)) return { path: candidate };
   }
 
+  if (!citedPath.includes("/")) {
+    const viaAncestor = resolveViaAncestorClimb(root, docAbsPath, citedPath);
+    if (viaAncestor) return { path: viaAncestor };
+  }
+
   const rootRelative = path.resolve(root, citedPath);
   if (isFile(rootRelative)) return { path: rootRelative };
 
@@ -273,7 +348,7 @@ function resolveCitation(
   const base = citedPath.includes("/")
     ? (citedPath.split("/").pop() as string)
     : citedPath;
-  const bySuffix = findByBasename(root, base).filter((m) => {
+  const bySuffix = findByBasename(cache, root, base).filter((m) => {
     const normalized = m.split(path.sep).join("/");
     return (
       normalized === citedPath ||
@@ -332,13 +407,38 @@ function checkRangeBound(
   return null;
 }
 
+/**
+ * Reads a resolved target's content, or reports why it couldn't be read
+ * (permission denied, and similar OS-level failures short of the file not
+ * existing at all -- `resolveCitation` already confirmed the target exists
+ * via `isFile`/`fs.statSync`, which does not require read permission).
+ * Returned as a `Problem` with `rule: "unreadable-target"` and `code` set to
+ * the OS error code, so callers can route it to a `notice`-severity finding
+ * (see pushUnreadable) instead of the usual `warning`-severity drift finding
+ * -- an unreadable file is not evidence the citation itself is wrong.
+ */
+function readTarget(resolvedPath: string): { content: string } | Problem {
+  try {
+    return { content: fs.readFileSync(resolvedPath, "utf8") };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code ?? "UNKNOWN";
+    return {
+      rule: "unreadable-target",
+      message: "target file exists but could not be read",
+      code,
+    };
+  }
+}
+
 function checkTarget(
   citedPath: string,
   startLine: number,
   endLine: number | null,
   resolvedPath: string,
 ): Problem | null {
-  const content = fs.readFileSync(resolvedPath, "utf8");
+  const read = readTarget(resolvedPath);
+  if ("rule" in read) return read;
+  const content = read.content;
   const lines = splitLines(content);
   const lineCount = lines.length;
 
@@ -374,8 +474,9 @@ function checkRangeBoundOnly(
   endLine: number,
   resolvedPath: string,
 ): Problem | null {
-  const content = fs.readFileSync(resolvedPath, "utf8");
-  const lineCount = splitLines(content).length;
+  const read = readTarget(resolvedPath);
+  if ("rule" in read) return read;
+  const lineCount = splitLines(read.content).length;
   return checkRangeBound(startLine, endLine, lineCount);
 }
 
@@ -472,7 +573,49 @@ function pushAmbiguous(
   });
 }
 
-function scanDoc(root: string, bundleDir: string, doc: BundleDoc): Finding[] {
+function pushUnreadable(
+  findings: Finding[],
+  file: string,
+  citation: string,
+  resolvedTo: string,
+  code: string,
+): void {
+  findings.push({
+    ruleId: RULE_ID,
+    severity: "notice",
+    file,
+    message: `\`${citation}\`: target file exists but could not be read [unreadable-target]`,
+    detail: `resolvedTo: ${resolvedTo}, errorCode: ${code}`,
+  });
+}
+
+/**
+ * True when a `CITATION_RE` match at `matchIndex` is the phantom tail of a
+ * filename hard-wrapped across a line break (see the "Hard-wrapped prose"
+ * doc block above): the match starts at column 0 of its line, optionally
+ * after only whitespace or a list/quote marker, and the previous line ends
+ * with `-` or `–`.
+ */
+function isWrappedPathContinuation(
+  content: string,
+  matchIndex: number,
+): boolean {
+  const lineStart = content.lastIndexOf("\n", matchIndex - 1) + 1;
+  if (lineStart === 0) return false; // no previous line to have wrapped from
+  const prefix = content.slice(lineStart, matchIndex);
+  if (!/^[\s>*.\d-]*$/.test(prefix)) return false;
+  const prevLineEnd = lineStart - 1; // index of the newline just before lineStart
+  const prevLineStart = content.lastIndexOf("\n", prevLineEnd - 1) + 1;
+  const prevLine = content.slice(prevLineStart, prevLineEnd);
+  return /[-–]$/.test(prevLine);
+}
+
+function scanDoc(
+  cache: BasenameCache,
+  root: string,
+  bundleDir: string,
+  doc: BundleDoc,
+): Finding[] {
   const findings: Finding[] = [];
   const content = doc.raw;
   const sources = getValidSources(doc.frontmatter.parsed) ?? [];
@@ -482,6 +625,7 @@ function scanDoc(root: string, bundleDir: string, doc: BundleDoc): Finding[] {
   const re = new RegExp(CITATION_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
+    if (isWrappedPathContinuation(content, m.index)) continue;
     fullAtoms.push({
       kind: "full",
       index: m.index,
@@ -512,7 +656,15 @@ function scanDoc(root: string, bundleDir: string, doc: BundleDoc): Finding[] {
         atom.value,
         governing.resolvedPath,
       );
-      if (problem) {
+      if (problem?.rule === "unreadable-target") {
+        pushUnreadable(
+          findings,
+          doc.relPath,
+          citation,
+          path.relative(root, governing.resolvedPath),
+          problem.code ?? "UNKNOWN",
+        );
+      } else if (problem) {
         pushDrift(
           findings,
           doc.relPath,
@@ -535,7 +687,15 @@ function scanDoc(root: string, bundleDir: string, doc: BundleDoc): Finding[] {
         endLine,
         governing.resolvedPath,
       );
-      if (problem) {
+      if (problem?.rule === "unreadable-target") {
+        pushUnreadable(
+          findings,
+          doc.relPath,
+          citation,
+          path.relative(root, governing.resolvedPath),
+          problem.code ?? "UNKNOWN",
+        );
+      } else if (problem) {
         pushDrift(
           findings,
           doc.relPath,
@@ -566,6 +726,7 @@ function scanDoc(root: string, bundleDir: string, doc: BundleDoc): Finding[] {
     }
 
     const resolution = resolveCitation(
+      cache,
       root,
       docAbsPath,
       content,
@@ -580,7 +741,7 @@ function scanDoc(root: string, bundleDir: string, doc: BundleDoc): Finding[] {
         doc.relPath,
         citation,
         "missing-file",
-        `could not resolve ${citedPath}: tried doc sources, repo-root, doc-relative, nearest prior qualified mention, repo-wide search; no candidate file exists`,
+        `could not resolve ${citedPath}: tried doc sources, ancestor climb (bare filenames only), repo-root, doc-relative, nearest prior qualified mention, repo-wide search; no candidate file exists`,
       );
       governing = null;
       lastStartLine = null;
@@ -599,7 +760,15 @@ function scanDoc(root: string, bundleDir: string, doc: BundleDoc): Finding[] {
     }
 
     const problem = checkTarget(citedPath, startLine, endLine, resolution.path);
-    if (problem) {
+    if (problem?.rule === "unreadable-target") {
+      pushUnreadable(
+        findings,
+        doc.relPath,
+        citation,
+        path.relative(root, resolution.path),
+        problem.code ?? "UNKNOWN",
+      );
+    } else if (problem) {
       pushDrift(
         findings,
         doc.relPath,
@@ -635,6 +804,9 @@ export const citationsResolveRule: Rule = {
       ];
     }
     const root = ctx.repoRoot;
-    return ctx.docs.flatMap((doc) => scanDoc(root, ctx.bundleDir, doc));
+    // Fresh per invocation: see findByBasename's doc comment for why this
+    // is not held at module scope.
+    const cache: BasenameCache = new Map();
+    return ctx.docs.flatMap((doc) => scanDoc(cache, root, ctx.bundleDir, doc));
   },
 };
