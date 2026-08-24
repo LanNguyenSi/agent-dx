@@ -33,6 +33,7 @@ For teams that want a clearer model for review depth and implementation quality:
 
 - [Review Levels and Implementation Standards (English)](references/review-levels-and-implementation-standards.md)
 - [Review-Stufen und Qualitätsstandards (Deutsch)](references/review-stufen-und-qualitaetsstandards.md)
+- [npm Lockfile CVE Remediation (English)](references/npm-lockfile-cve-remediation.md) (no German companion yet)
 - [Implementation Agent Standard (English)](standards/implementation-agent-standard.md)
 - [Implementierungs-Agent-Standard (Deutsch)](standards/implementierungs-agent-standard.md)
 
