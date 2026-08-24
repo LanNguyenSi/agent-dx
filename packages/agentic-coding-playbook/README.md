@@ -33,11 +33,14 @@ For teams that want a clearer model for review depth and implementation quality:
 
 - [Review Levels and Implementation Standards (English)](references/review-levels-and-implementation-standards.md)
 - [Review-Stufen und Qualitätsstandards (Deutsch)](references/review-stufen-und-qualitaetsstandards.md)
-- [npm Lockfile CVE Remediation (English)](references/npm-lockfile-cve-remediation.md) (no German companion yet)
 - [Implementation Agent Standard (English)](standards/implementation-agent-standard.md)
 - [Implementierungs-Agent-Standard (Deutsch)](standards/implementierungs-agent-standard.md)
 
 These companion documents describe the difference between no review, normal review, and rigorous review, and propose a practical `Role + Skill + Standard` model for implementation agents.
+
+For teams remediating dependency CVEs in an npm lockfile specifically:
+
+- [npm Lockfile CVE Remediation (English)](references/npm-lockfile-cve-remediation.md) (no German companion yet)
 
 ## Operational artifacts
 
