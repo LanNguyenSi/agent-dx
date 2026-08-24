@@ -57,8 +57,9 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 | `comment-slop` (5 rules) | off, opt in via `--pack` | JSDoc on trivial getters, comments that restate the next line, orphan markers (`// removed`, `// kept for backcompat`), comment-heavier-than-body helpers, ASCII banner dividers |
 | `code-slop` (9 rules) | off, opt in via `--pack` | try/catch around code that cannot throw, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers |
 | `ui-slop` (6 rules) | off, opt in via `--pack ui-slop` | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX. |
+| `placement-slop` (5 rules) | off, opt in via `--pack placement-slop` | Org-, machine-, and point-in-time-bound evidence leaking into reusable instruction files (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, agent/skill prompt files): home paths, dated evidence, tally phrases (`n=8`, `p=0.016`, `so far`), opaque ids, and configured org markers. |
 
-The three opt-in packs (`comment-slop`, `code-slop`, `ui-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
+The four opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
 
 Run `slop-detector list-rules` for the full rule catalogue with severities and rationales.
 
@@ -104,6 +105,43 @@ Known v1 limitations (tracked as M3 follow-ups):
 - `@media`-wrapped top-level selectors are not walked recursively by `ui-slop/monospace-everywhere`.
 - `transition: all` is flagged, but `animation: <name>` referencing a `@keyframes` outside the same file is not cross-resolved.
 
+### `placement-slop` by example
+
+Opt in with `--pack placement-slop`. Every rule below only looks at instruction files: `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, and Markdown under `.claude/agents/`, `.opencode/agents/`, `.claude/skills/` (plus anything matched by `placement.instructionGlobs`). The same content in, say, `README.md` never fires.
+
+```markdown
+<!-- placement-slop/home-path (block) -->
+Set `DEPSIGHT_TOKEN` from `~/git/pandora/.env` before running the sweep.
+
+<!-- placement-slop/dated-evidence + placement-slop/tally-phrase (warn) -->
+As of 2026-08-24 (n=8), the low tier reached accept a median 320 seconds
+slower, p=0.016, so prefer the default tier.
+
+<!-- placement-slop/opaque-id (warn) -->
+See agent-tasks task 7f38899d for the write-up.
+
+<!-- placement-slop/org-marker (block), with placement.markers: ["depsight"] -->
+Run the depsight rescan before merging.
+```
+
+Every rule reports the durable instruction it thinks should replace the evidence-bound line, not just what tripped: a home path should become repo-relative, a dated measurement should become the standing rule it justified, an opaque id should become a link or be dropped, and an org marker should either be genericized or explicitly allow-listed.
+
+`placement.allow` is the escape hatch for a line that legitimately carries a marker, e.g. an install URL:
+
+```yaml
+# slop.config.yml
+packs:
+  placement-slop: true
+
+placement:
+  markers:
+    - "depsight"
+  allow:
+    - "github\\.com/example-org/"
+```
+
+With that config, `install from https://github.com/example-org/kit` does not fire `org-marker` (the `allow` pattern matches the whole line), while a bare `depsight` mention elsewhere in the file still does.
+
 ## What a run looks like
 
 ```
@@ -146,6 +184,7 @@ flowchart LR
         H["comment-slop.ts<br/>off by default"]
         I["code-slop.ts<br/>off by default"]
         J["ui-slop.ts<br/>off by default"]
+        P["placement-slop.ts<br/>off by default"]
     end
 
     K["engine.ts<br/>checkPath / checkFiles / checkText"]
@@ -166,6 +205,7 @@ flowchart LR
     H --> E
     I --> E
     J --> E
+    P --> E
     E --> K
     K --> L
     L --> M
@@ -217,9 +257,23 @@ treatAsProse:
 
 treatAsCode:
   - "**/Dockerfile.*"
+
+placement:
+  markers:
+    - "depsight"
+  instructionGlobs:
+    - "**/PLAYBOOK.md"
+  allow:
+    - "github\\.com/example-org/"
 ```
 
-Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles.
+Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, and `placement.allow` default to `[]`.
+
+The `placement` block only matters once `placement-slop` is enabled (see [`placement-slop` by example](#placement-slop-by-example)):
+
+- `markers`: regex patterns (compiled as given, no implicit `i` flag) naming this org's own handles, products, or paths: each match is a `placement-slop/org-marker` violation. Empty by default, so the rule never fires until you configure it.
+- `instructionGlobs`: additive glob patterns, on top of the pack's built-in instruction-file globs (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/**`, `.opencode/agents/**`, `.claude/skills/**`).
+- `allow`: regex patterns; a line matching any of these is skipped by every rule in the pack (the escape hatch for something like a legitimate install URL that carries an org handle).
 
 ## Cross-file rules (experimental)
 

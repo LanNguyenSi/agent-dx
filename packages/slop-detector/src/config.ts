@@ -5,7 +5,14 @@ import { z } from "zod";
 import type { PackId, ResolvedConfig, RuleOverride, Severity } from "./types.js";
 
 const SeveritySchema = z.enum(["block", "warn", "info"]);
-const PackIdSchema = z.enum(["agent-tics", "prose-slop", "comment-slop", "code-slop", "ui-slop"]);
+const PackIdSchema = z.enum([
+  "agent-tics",
+  "prose-slop",
+  "comment-slop",
+  "code-slop",
+  "ui-slop",
+  "placement-slop",
+]);
 
 const RuleOverrideSchema = z.object({
   severity: SeveritySchema.optional(),
@@ -22,6 +29,31 @@ const EntrypointGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
     'entrypointGlobs patterns are matched relative to the scan root (or the nearest package.json directory), not as absolute paths — remove the leading "/"',
 });
 
+// `placement.markers` and `placement.allow` are regex pattern strings the
+// placement-slop pack compiles at check time (`new RegExp(pattern, ...)`).
+// A pattern that can't compile would otherwise fail silently way downstream
+// inside a rule's `check`, so reject it here, at config parse time, with a
+// message that names the bad pattern.
+const RegexPatternSchema = z.string().refine(
+  (pattern) => {
+    try {
+      new RegExp(pattern);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  (pattern) => ({
+    message: `Invalid regular expression in placement config: "${pattern}"`,
+  }),
+);
+
+const PlacementConfigSchema = z.object({
+  markers: z.array(RegexPatternSchema).optional(),
+  instructionGlobs: z.array(z.string()).optional(),
+  allow: z.array(RegexPatternSchema).optional(),
+});
+
 const ConfigFileSchema = z.object({
   packs: z.record(PackIdSchema, z.boolean()).optional(),
   rules: z.record(z.string(), RuleOverrideSchema).optional(),
@@ -30,6 +62,7 @@ const ConfigFileSchema = z.object({
   treatAsCode: z.array(z.string()).optional(),
   corpus: z.boolean().optional(),
   entrypointGlobs: z.array(EntrypointGlobSchema).optional(),
+  placement: PlacementConfigSchema.optional(),
 });
 
 export type ConfigFile = z.infer<typeof ConfigFileSchema>;
@@ -40,6 +73,7 @@ const DEFAULT_PACKS: Record<PackId, boolean> = {
   "comment-slop": false,
   "code-slop": false,
   "ui-slop": false,
+  "placement-slop": false,
 };
 
 const DEFAULT_IGNORES = [
@@ -78,6 +112,7 @@ export function defaultConfig(): ResolvedConfig {
     treatAsProse: [],
     treatAsCode: [],
     entrypointGlobs: [],
+    placement: { markers: [], instructionGlobs: [], allow: [] },
   };
 }
 
@@ -93,6 +128,11 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
     treatAsCode: file.treatAsCode ?? [],
     corpus: file.corpus,
     entrypointGlobs: file.entrypointGlobs ?? [],
+    placement: {
+      markers: file.placement?.markers ?? [],
+      instructionGlobs: file.placement?.instructionGlobs ?? [],
+      allow: file.placement?.allow ?? [],
+    },
   };
 }
 

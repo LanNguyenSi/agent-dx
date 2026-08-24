@@ -11,7 +11,7 @@ function code(text: string, fileName = "fixture.ts"): FileTarget {
 }
 
 const config: ResolvedConfig = {
-  packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false },
+  packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false, "placement-slop": false },
   ruleOverrides: {},
   ignorePaths: [],
   treatAsProse: [],
@@ -695,7 +695,7 @@ function runCorpusRule(
     paths.push(p);
   }
   const cfg: ResolvedConfig = {
-    packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false },
+    packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false, "placement-slop": false },
     ruleOverrides: { [ruleId]: { enabled: true } },
     ignorePaths: [],
     treatAsProse: [],
@@ -962,7 +962,7 @@ describe("code-slop/unused-export", () => {
     const p = join(tmpDir, "a.ts");
     writeFileSync(p, `export function helperA() { return 1; }\n`);
     const cfg: ResolvedConfig = {
-      packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false },
+      packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false, "placement-slop": false },
       ruleOverrides: { "code-slop/unused-export": { enabled: true } },
       ignorePaths: [],
       treatAsProse: [],
@@ -979,7 +979,7 @@ describe("code-slop/unused-export", () => {
     mkdirSync(join(tmpDir, "src"), { recursive: true });
     writeFileSync(p, `export function helperA() { return 1; }\n`);
     const cfg: ResolvedConfig = {
-      packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false },
+      packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false, "placement-slop": false },
       ruleOverrides: { "code-slop/unused-export": { enabled: true } },
       ignorePaths: [],
       treatAsProse: [],

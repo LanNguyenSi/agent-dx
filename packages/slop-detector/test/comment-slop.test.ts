@@ -7,7 +7,7 @@ function code(text: string, fileName = "fixture.ts"): FileTarget {
 }
 
 const config: ResolvedConfig = {
-  packs: { "agent-tics": false, "prose-slop": false, "comment-slop": true, "code-slop": false, "ui-slop": false },
+  packs: { "agent-tics": false, "prose-slop": false, "comment-slop": true, "code-slop": false, "ui-slop": false, "placement-slop": false },
   ruleOverrides: {},
   ignorePaths: [],
   treatAsProse: [],

@@ -21,6 +21,7 @@ const config: ResolvedConfig = {
     "comment-slop": false,
     "code-slop": false,
     "ui-slop": true,
+    "placement-slop": false,
   },
   ruleOverrides: {},
   ignorePaths: [],

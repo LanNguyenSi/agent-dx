@@ -1,6 +1,6 @@
 {
   "name": "slop-detector",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Configurable AI-slop linter for PRs — catches the visible tells of AI-generated code, prose, and UIs",
   "main": "dist/index.js",
   "type": "module",
@@ -13,7 +13,8 @@
     "./packs/agent-tics": "./dist/packs/agent-tics.js",
     "./packs/prose-slop": "./dist/packs/prose-slop.js",
     "./packs/comment-slop": "./dist/packs/comment-slop.js",
-    "./packs/code-slop": "./dist/packs/code-slop.js"
+    "./packs/code-slop": "./dist/packs/code-slop.js",
+    "./packs/placement-slop": "./dist/packs/placement-slop.js"
   },
   "files": [
     "dist",

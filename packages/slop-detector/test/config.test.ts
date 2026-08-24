@@ -71,4 +71,58 @@ describe("config", () => {
     fs.writeFileSync(file, `entrypointGlobs:\n  - "/src/index.ts"\n`);
     expect(() => loadConfig(file)).toThrow(/entrypointGlobs/);
   });
+
+  it("defaultConfig and mergeConfig default placement to empty arrays", () => {
+    expect(defaultConfig().placement).toEqual({
+      markers: [],
+      instructionGlobs: [],
+      allow: [],
+    });
+    expect(mergeConfig({}).placement).toEqual({
+      markers: [],
+      instructionGlobs: [],
+      allow: [],
+    });
+  });
+
+  it("mergeConfig parses a placement block", () => {
+    const cfg = mergeConfig({
+      placement: {
+        markers: ["example-org"],
+        instructionGlobs: ["**/PLAYBOOK.md"],
+        allow: ["github\\.com/example-org/"],
+      },
+    });
+    expect(cfg.placement).toEqual({
+      markers: ["example-org"],
+      instructionGlobs: ["**/PLAYBOOK.md"],
+      allow: ["github\\.com/example-org/"],
+    });
+  });
+
+  it("loadConfig rejects an invalid regex in placement.markers", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `placement:\n  markers:\n    - "("\n`);
+    expect(() => loadConfig(file)).toThrow(/Invalid regular expression/);
+  });
+
+  it("loadConfig rejects an invalid regex in placement.allow", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `placement:\n  allow:\n    - "["\n`);
+    expect(() => loadConfig(file)).toThrow(/Invalid regular expression/);
+  });
+
+  it("loadConfig omitting placement entirely yields [] defaults", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs:\n  prose-slop: false\n`);
+    const cfg = loadConfig(file);
+    expect(cfg.placement).toEqual({
+      markers: [],
+      instructionGlobs: [],
+      allow: [],
+    });
+  });
 });

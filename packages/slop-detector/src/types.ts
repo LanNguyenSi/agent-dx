@@ -1,6 +1,12 @@
 export type Severity = "block" | "warn" | "info";
 
-export type PackId = "agent-tics" | "prose-slop" | "comment-slop" | "code-slop" | "ui-slop";
+export type PackId =
+  | "agent-tics"
+  | "prose-slop"
+  | "comment-slop"
+  | "code-slop"
+  | "ui-slop"
+  | "placement-slop";
 
 export interface FileTarget {
   path: string;
@@ -127,6 +133,22 @@ export interface ResolvedConfig {
    * is not a breaking change.
    */
   entrypointGlobs?: string[];
+  /**
+   * Config surface for the `placement-slop` pack: org-, machine-, and
+   * point-in-time-bound evidence leaking into reusable instruction files.
+   * All three fields default to `[]` in `defaultConfig`/`mergeConfig`, so a
+   * hand-built `ResolvedConfig` that omits `placement` entirely (as opposed
+   * to one produced by those two functions) still works: every rule reads
+   * through `config.placement?.<field> ?? []`.
+   */
+  placement?: {
+    /** Regex patterns (compiled as given, no implicit flags) naming this org's own handles/products/paths. */
+    markers: string[];
+    /** Additive glob patterns, on top of the pack's built-in instruction-file globs (SKILL.md, AGENTS.md, ...). */
+    instructionGlobs: string[];
+    /** Regex patterns; a line matching any of these is skipped by every rule in the pack. */
+    allow: string[];
+  };
 }
 
 export interface CheckSummary {
