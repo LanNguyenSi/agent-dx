@@ -140,8 +140,18 @@ export function checkFiles(
     process.env.SLOP_CORPUS === "1" ||
     options.corpusEnabled === true ||
     options.config.corpus === true;
+  // `buildCorpus` gets the caller's raw `options.scanRoot` (possibly
+  // undefined), NOT `resolvedScanRoot`: `resolvedScanRoot` always falls
+  // back to `process.cwd()` when no package.json is found near the
+  // scanned files, but `buildCorpus`'s own fallback
+  // (`pkgRoot = scanRoot ?? _findNearestPackageRoot(files)`) has no cwd
+  // fallback by design — passing the resolved value here would make
+  // `_resolveEntrypoints` run against an unrelated cwd package.json
+  // instead of resolving no entrypoints, silently pulling that package's
+  // exports into the corpus. `resolvedScanRoot` is still what
+  // `RuleContext.scanRoot` (placement instruction globs) uses below.
   const corpus = wantCorpus
-    ? buildCorpus(files, options.config, resolvedScanRoot)
+    ? buildCorpus(files, options.config, options.scanRoot)
     : undefined;
 
   const violations: Violation[] = [];
