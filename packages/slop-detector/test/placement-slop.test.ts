@@ -5,6 +5,7 @@ import path from "node:path";
 import { checkText, checkPath } from "../src/engine.js";
 import { defaultConfig, mergeConfig } from "../src/config.js";
 import { allPacks } from "../src/packs/registry.js";
+import type { PackDefinition, Rule, RuleContext } from "../src/types.js";
 
 const baseOpts = () => ({
   packs: allPacks,
@@ -224,7 +225,7 @@ describe("placement-slop", () => {
     });
   });
 
-  describe("URL / markdown-link exclusion (home-path, dated-evidence, opaque-id)", () => {
+  describe("URL / markdown-link exclusion (home-path, dated-evidence, opaque-id, tally-phrase)", () => {
     it("home-path does not fire on a /home/ path segment inside a URL", () => {
       const text = "See https://example.com/home/config for the sample.";
       const v = checkText(text, "x/SKILL.md", baseOpts());
@@ -262,6 +263,23 @@ describe("placement-slop", () => {
       const v = checkText(text, "x/SKILL.md", baseOpts());
       expect(
         v.find((x) => x.ruleId === "placement-slop/dated-evidence"),
+      ).toBeDefined();
+    });
+
+    it("tally-phrase does not fire on n= / p= query params inside a URL", () => {
+      const text =
+        "See https://example.com/results?n=8&p=0.016 for the raw numbers.";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/tally-phrase"),
+      ).toBeUndefined();
+    });
+
+    it("tally-phrase still fires on 'n=8' outside a URL", () => {
+      const text = "the A/B measurement (n=8) held up under review";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/tally-phrase"),
       ).toBeDefined();
     });
   });
@@ -492,5 +510,121 @@ describe("placement-slop: scan-root-relative instructionGlobs (via checkPath)", 
       packFilter: ["placement-slop"],
     });
     expect(summary.warnings).toBeUndefined();
+  });
+
+  // ── single-file scan-root regression (round-3 fix) ──────────────────────
+  //
+  // `checkPath(<file>)` used to set `scanRoot: options.scanRoot ?? rootPath`
+  // even when `rootPath` is a file, so `path.relative(scanRoot, file)` came
+  // out `""` and no instruction glob (built-in or configured) could ever
+  // match: `checkPath(<file>)` silently reported zero violations while
+  // scanning the same file's parent directory found them fine. Fixed by
+  // routing every scan-root derivation through one `resolveScanRoot`
+  // helper that dirnames a file target.
+
+  it("(a) checkPath on a single FILE with a configured instructionGlobs pattern fires home-path", () => {
+    const filePath = path.join(tmp, "sub", "PLAYBOOK.md");
+    const cfg = mergeConfig({
+      packs: { "placement-slop": true },
+      placement: { instructionGlobs: ["**/PLAYBOOK.md"] },
+    });
+    const summary = checkPath(filePath, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["placement-slop"],
+    });
+    expect(summary.filesScanned).toBe(1);
+    expect(
+      summary.violations.find((v) => v.ruleId === "placement-slop/home-path"),
+    ).toBeDefined();
+  });
+
+  it("(b) checkPath on a single default-glob FILE (SKILL.md) fires home-path with no placement config", () => {
+    const filePath = path.join(tmp, "SKILL.md");
+    fs.writeFileSync(
+      filePath,
+      "Set the token from ~/work/project/.env before running.\n",
+    );
+    const summary = checkPath(filePath, {
+      packs: allPacks,
+      config: mergeConfig({ packs: { "placement-slop": true } }),
+      packFilter: ["placement-slop"],
+    });
+    expect(summary.filesScanned).toBe(1);
+    expect(
+      summary.violations.find((v) => v.ruleId === "placement-slop/home-path"),
+    ).toBeDefined();
+  });
+
+  it("(c) a single-file target and its parent-directory target report the same violations for that file", () => {
+    const filePath = path.join(tmp, "SKILL.md");
+    fs.writeFileSync(
+      filePath,
+      "Set the token from ~/work/project/.env before running.\n",
+    );
+    const opts = {
+      packs: allPacks,
+      config: mergeConfig({ packs: { "placement-slop": true } }),
+      packFilter: ["placement-slop"],
+    };
+
+    const fileSummary = checkPath(filePath, opts);
+    const dirSummary = checkPath(tmp, opts);
+
+    const shape = (v: (typeof fileSummary.violations)[number]) => ({
+      ruleId: v.ruleId,
+      line: v.line,
+      column: v.column,
+      matched: v.matched,
+    });
+    const fileViolationsForFile = fileSummary.violations
+      .filter((v) => v.path === filePath)
+      .map(shape);
+    const dirViolationsForFile = dirSummary.violations
+      .filter((v) => v.path === filePath)
+      .map(shape);
+
+    expect(fileViolationsForFile.length).toBeGreaterThan(0);
+    expect(fileViolationsForFile).toEqual(dirViolationsForFile);
+  });
+
+  it("(e) ctx.scanRoot seen by a rule is always an absolute directory, even from a relative invocation after a cwd change", () => {
+    const seenScanRoots: string[] = [];
+    const probeRule: Rule = {
+      id: "placement-slop/__scanroot-probe",
+      pack: "placement-slop",
+      defaultSeverity: "info",
+      enabledByDefault: true,
+      rationale: "test probe: records ctx.scanRoot, fires no violations.",
+      appliesTo: () => true,
+      check(ctx: RuleContext) {
+        if (ctx.scanRoot) seenScanRoots.push(ctx.scanRoot);
+        return [];
+      },
+    };
+    const probePack: PackDefinition = {
+      id: "placement-slop",
+      description: "test probe pack",
+      rules: [probeRule],
+    };
+
+    const originalCwd = process.cwd();
+    process.chdir(tmp);
+    let summary: ReturnType<typeof checkPath>;
+    try {
+      summary = checkPath("sub/PLAYBOOK.md", {
+        packs: [probePack],
+        config: mergeConfig({ packs: { "placement-slop": true } }),
+        packFilter: ["placement-slop"],
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+
+    expect(summary.filesScanned).toBe(1);
+    expect(seenScanRoots.length).toBeGreaterThan(0);
+    for (const root of seenScanRoots) {
+      expect(path.isAbsolute(root)).toBe(true);
+    }
   });
 });

@@ -269,6 +269,7 @@ const tallyPhrase: Rule = {
       TALLY_PHRASE,
       (matched) =>
         `Tally/measurement phrase \`${matched}\` in an instruction file: cite the durable conclusion, not the one run's numbers.`,
+      { skipExcludedSpans: true },
     );
   },
 };

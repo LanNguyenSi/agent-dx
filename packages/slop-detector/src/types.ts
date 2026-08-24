@@ -170,10 +170,10 @@ export interface CheckSummary {
   infoCount: number;
   /**
    * Engine-level configuration warnings, distinct from lint violations —
-   * currently only populated with one entry per `entrypointGlobs` pattern
-   * that matched zero scanned files. Absent (not just empty) when there is
-   * nothing to report, so existing consumers that don't check for it are
-   * unaffected.
+   * currently populated with one entry per zero-match glob pattern from
+   * either `entrypointGlobs` or `placement.instructionGlobs`. Absent (not
+   * just empty) when there is nothing to report, so existing consumers
+   * that don't check for it are unaffected.
    */
   warnings?: string[];
 }

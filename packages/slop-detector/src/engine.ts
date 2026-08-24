@@ -126,16 +126,23 @@ export function checkFiles(
   files: string[],
   options: CheckOptions,
 ): CheckSummary {
+  // Route through `resolveScanRoot` so a `scanRoot` that happens to point
+  // at a file (not just a directory) still resolves to the file's parent
+  // directory, same contract every other caller of `resolveScanRoot` gets.
+  // `_findNearestPackageRoot`/`process.cwd()` already return absolute
+  // directories by construction, so they don't need it.
+  const resolvedScanRoot = options.scanRoot
+    ? resolveScanRoot(options.scanRoot)
+    : (_findNearestPackageRoot(files) ?? process.cwd());
+
   // Build the corpus when explicitly requested (env, config option, or option flag).
   const wantCorpus =
     process.env.SLOP_CORPUS === "1" ||
     options.corpusEnabled === true ||
     options.config.corpus === true;
   const corpus = wantCorpus
-    ? buildCorpus(files, options.config, options.scanRoot)
+    ? buildCorpus(files, options.config, resolvedScanRoot)
     : undefined;
-  const resolvedScanRoot =
-    options.scanRoot ?? _findNearestPackageRoot(files) ?? process.cwd();
 
   const violations: Violation[] = [];
   let scanned = 0;
@@ -188,8 +195,49 @@ export function checkPath(
   const files = walkDir(rootPath, options.config);
   return checkFiles(files, {
     ...options,
-    scanRoot: options.scanRoot ?? rootPath,
+    // `resolveScanRoot` collapses `rootPath` (or an explicit
+    // `options.scanRoot`) down to an absolute DIRECTORY: when the target
+    // is a single file, that's the file's parent directory, not the file
+    // itself. Passing the file itself through unresolved was the bug:
+    // `path.relative(file, file)` is `""`, so a single-file `checkPath`
+    // call could never match any `placement.instructionGlobs` pattern
+    // even though scanning the same file's parent directory did.
+    scanRoot: resolveScanRoot(options.scanRoot ?? rootPath),
   });
+}
+
+/**
+ * Resolve the absolute scan-root DIRECTORY for an arbitrary check target:
+ * a file or a directory, given relative, `./`-prefixed, or absolute. This
+ * is the single place `RuleContext.scanRoot` is derived from a target
+ * path: `checkPath` (from its `rootPath` argument or an explicit
+ * `options.scanRoot`), `checkFiles` (from `options.scanRoot`), and
+ * `resolveScanRootForFile` (`checkText`'s fallback, from an explicit
+ * `options.scanRoot`) all route through it. That guarantees a single-file
+ * target and its parent directory resolve to the exact same scan root,
+ * and therefore the same `path.relative(scanRoot, file)`, regardless of
+ * which one was scanned or how its path was spelled.
+ *
+ * Without this, `checkPath(<file>)` used the file itself as the scan root:
+ * `path.relative(file, file)` is `""`, so no `placement.instructionGlobs`
+ * pattern (built-in or configured) could ever match a single-file target,
+ * even though scanning its parent directory matched fine. That's the same
+ * class of bug as the pack's original raw-path-match issue: a scan result
+ * silently depending on the *shape* of the invocation rather than the
+ * target's actual location, so it's fixed here structurally, in one
+ * place, instead of special-cased per caller.
+ */
+function resolveScanRoot(target: string): string {
+  const abs = path.resolve(target);
+  try {
+    if (fs.statSync(abs).isFile()) return path.dirname(abs);
+  } catch {
+    // Doesn't exist on disk (e.g. a synthetic path in a test, or a race
+    // with something deleting it): treat it as directory-shaped and
+    // return it as-is, same as this function's behaviour for any other
+    // non-file path.
+  }
+  return abs;
 }
 
 /**
@@ -201,7 +249,7 @@ export function checkPath(
  * is found, same as `_resolveEntrypointGlobs`'s `globRoot` fallback.
  */
 function resolveScanRootForFile(filePath: string, scanRoot?: string): string {
-  if (scanRoot) return path.resolve(scanRoot);
+  if (scanRoot) return resolveScanRoot(scanRoot);
   return (
     _findNearestPackageRootFrom(path.dirname(path.resolve(filePath))) ??
     process.cwd()
