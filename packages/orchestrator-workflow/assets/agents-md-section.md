@@ -50,16 +50,36 @@ default, not a ritual.
   changes whose risk or size warrants an independent skeptical pass. Either
   way, review is never skipped.
 - When tier variants are installed (manifest `tiers: true`), the orchestrator
-  picks the effort tier per task by complexity and risk, at its own
-  judgment. The unsuffixed default subagent is the normal case; a `-low`
-  variant fits mechanical, narrowly scoped tasks; `-high`/`-xhigh` fit
-  high-risk changes, hard problems, or repeated failed attempts. Not every
-  role gets every tier: `-xhigh` exists only for the implementer, the
-  reviewer, and the advisor. The reviewer's downshift is `-medium` rather
-  than `-low`, since its default already sits at high. The advisor has no
-  downshift at all: its default `high` is already its only non-`-xhigh`
-  tier. Spawn only variants that are actually installed. Tier choice is a
-  conscious decision, not a ritual; when unsure, use the default.
+  picks the effort tier per task by complexity and risk, at its own judgment.
+  The unsuffixed default subagent is the normal case; `-high`/`-xhigh` fit
+  high-risk changes, hard problems, or repeated failed attempts. For the
+  implementer specifically, `-low` is spawned only when none of the following
+  hold: an acceptance criterion demands a test, typecheck, lint, or build run;
+  the task assignment names mutation probes to run; or the task slicer's
+  `suggested_tests` came back non-empty. This is checkable against the task
+  contract rather than a judgment about how hard the task looks: any one of
+  those three excludes `implementer-low`, and the task runs on the unsuffixed
+  implementer or higher, even when the change looks mechanical (a bugfix
+  included); when it is unclear whether a criterion demands a run, exclude
+  `implementer-low`. This rule is anchored by an A/B measurement of
+  implementer-low as installed (Haiku 4.5) against the default implementer
+  (Sonnet 5, effort medium) (2026-08-24, n=8, identical tasks in both tiers,
+  blinded reviews, agent-tasks task 7f38899d): implementer-low reached accept
+  a median 320 seconds slower (p=0.016), drew 9 high-plus-critical review
+  findings against 1, and needed 8 fix rounds against 1. The A/B's
+  implementer-low ran on Haiku 4.5, which does not support the `effort`
+  parameter (per Anthropic's model reference), so the harness ignores the
+  pinned `effort: low` on that model; the measurement compared Haiku 4.5
+  without effort control against Sonnet 5 at `effort: medium`. For the
+  explorer and the task-slicer, a `-low` variant still suits narrowly scoped,
+  mechanical work; no equivalent measurement exists for those two roles, so
+  their rule is unchanged. Not every role gets every tier: `-xhigh` exists
+  only for the implementer, the reviewer, and the advisor. The reviewer's
+  downshift is `-medium` rather than `-low`, since its default already sits at
+  high. The advisor has no downshift at all: its default `high` is already its
+  only non-`-xhigh` tier. Spawn only variants that are actually installed.
+  Tier choice is a conscious decision, not a ritual; when unsure, use the
+  default.
 - Every unsuffixed default subagent carries its own pinned default effort
   baked into its own file, not inherited from the orchestrator session:
   medium for the explorer, the task-slicer, and the implementer; high for

@@ -190,7 +190,7 @@
   relationship has a dedicated equality-and-superset test suite" was already
   false at the doc's own 2026-08-17 stamp, since the reviewer pair had a
   byte-for-byte `reproduction`-field test since 0.14.0
-  (`test/docs-consistency.test.ts:641-653`); the doc now states the true
+  (`test/docs-consistency.test.ts:822-836`); the doc now states the true
   current set of three guarded pairs (task-slicer/subagent-input, reviewer,
   implementer — the last two by byte-for-byte field-block equality tests)
   and names explorer as the one pair still without a dedicated guard; (2)
@@ -1505,3 +1505,226 @@
   `citations-resolve` does not treat past narrative about a since-corrected
   citation as a live pointer into the current source. okf-staleness.yml's
   pin was bumped to okf-kit 0.5.0 in the fix-round-1 change.
+- 2026-08-24: re-verified and re-stamped review-gate-and-waivers.md,
+  run-state-lifecycle-and-markers.md, subagent-contracts-superset.md, and
+  model-preselection.md against package version 0.22.0+ (Unreleased; the
+  implementer-low tier-rule tightening, operator decision after Tier-A/B
+  measurement, agent-tasks task 7f38899d): agents-md-section.md's Scaling
+  delegation bullet and SKILL.md step 6 both grew, since `-low` is no
+  longer discretionary for the implementer but a checkable gate on the
+  task contract. This entry's own claim above, that every citation was
+  re-derived from a direct read rather than a blind offset shift, was
+  false: a fix-round review found the rule text itself invented two
+  contract field names, `mutation_probes` and `verification_commands`, that
+  the kit's subagent input contract does not define (the input contract
+  carries `acceptance_criteria`; `mutation_probes` is an implementer-OUTPUT
+  field, and `verification_commands` exists nowhere in the kit's
+  contracts), and found the citation fix had in fact been a blind +8-line
+  shift rather than a genuine re-derivation, still wrong in 44 changed
+  lines across the four docs (examples: review-gate-and-waivers.md's
+  `SKILL.md:310` for the reviewer severity field, true `317`;
+  subagent-contracts-superset.md's five output-contract-block ranges, each
+  missing its own closing fence line, e.g. the explorer block's true end
+  is `248`, not `245`). The fix round reworded the rule to cite only
+  vocabulary the kit's contracts actually define (an acceptance criterion
+  demanding a test/typecheck/lint/build run, the task assignment naming
+  mutation probes to run, or the task slicer's `suggested_tests` coming
+  back non-empty), added a `docs-consistency.test.ts` pin that derives that
+  vocabulary from the Subagent input and Task slicer output contract
+  blocks directly instead of hand-listing it, and re-derived every
+  `agents-md-section.md:`/`SKILL.md:`/`docs-consistency.test.ts:` citation
+  in the four docs from a direct read of the current files. The pass also
+  found subagent-contracts-superset.md's two advisor-pair
+  `docs-consistency.test.ts` citations, and model-preselection.md's
+  matching citation to the pinned-default-effort test, had drifted onto
+  the wrong `describe` block boundaries (the advisor-escalation-policy and
+  advisor-byte-identical blocks moved when an earlier fix-round inserted
+  lines above them); all three were corrected against the current test
+  file. One citation, `SKILL.md:448-450` on the pre-0.21.0
+  model-correlation clause explicitly marked historical, had been wrongly
+  shifted by the earlier blind offset even though it documents a past
+  state rather than the live file; it was restored to its true historical
+  value (`440-442`, confirmed against `origin/master`) instead of being
+  re-derived against current content. `model-preselection.md`'s
+  `timestamp:` was left at its already-current value: its timestamp already
+  read the current date, so no restamp was needed; two citations in it were
+  corrected. `npx okf-kit@0.5.0 check` on this bundle after the fix
+  round: 0 errors, 0 warnings (the remaining 21 notices are the pre-existing
+  bare-filename ambiguity in this log's own historical narrative, per the
+  convention below). log.md's own historical entries (the
+  `agents-md-section.md:104-110 -> 110-116` and `SKILL.md:177-178,172-173`
+  narrative lines above) were left untouched per the convention noted
+  above: they record a past pass's before/after values, not live pointers
+  into the current source.
+- 2026-08-24: fix-round-2 review found the round-1 derivation pin above
+  still checked only two hand-picked names (`acceptance_criteria` present,
+  a literal ban on `verification_commands`), so a mutant rewording the gate
+  to cite a different invented field (`verification_steps`) stayed green
+  despite the "derives" language this log used to describe it (HIGH). The
+  pin now regex-extracts every backtick-quoted snake_case identifier out of
+  two narrow slices, the implementer tier-gate sentence(s) in
+  agents-md-section.md and its counterpart in SKILL.md step 6, and asserts
+  each one is a field the Subagent input contract or the Task slicer output
+  contract actually defines; the old whole-block/whole-doc
+  `not.toContain("mutation_probes"/"verification_commands")` assertions were
+  dropped as superseded by that membership check, and the old-wording
+  negative pin was narrowed to the same two slices so it no longer forces
+  the unrelated explorer/task-slicer sentence's wording (MEDIUM-2, LOW-4).
+  The gate's "checkable criterion, not a judgment call" framing was softened
+  to "checkable against the task contract rather than a judgment about how
+  hard the task looks" and a fail-safe tie-break ("when it is unclear
+  whether a criterion demands a run, exclude `implementer-low`") was added
+  to agents-md-section.md, SKILL.md step 6, and the CHANGELOG (MEDIUM-1).
+  The A/B-anchor sentence now names what was actually compared
+  ("implementer-low as installed (Haiku 4.5) against the default
+  implementer (Sonnet 5, effort medium)") in agents-md-section.md and the
+  CHANGELOG (RESIDUAL), and the dangling-antecedent parenthetical after
+  "does not support the `effort` parameter" was replaced with "per
+  Anthropic's model reference", "was inert" precised to "the harness
+  ignores the pinned `effort: low` on that model" (LOW-3). These wording
+  edits added net lines to agents-md-section.md (+4) and SKILL.md (+1,
+  step 6 only) and restructured test/docs-consistency.test.ts (two new
+  module-level helpers plus the rewritten pin, net +69 from the insertion
+  point onward); every `agents-md-section.md:`/`SKILL.md:`/
+  `docs-consistency.test.ts:` citation in this bundle's four sibling docs
+  past each insertion point was re-derived from a direct read of the
+  current files rather than by offset math alone (each corrected value was
+  independently confirmed against the actual file content before being
+  written). Also LOW-2:
+  subagent-contracts-superset.md's task-slicer-scope-boundaries citation
+  was off by ten lines pre-existing (`729-733`, the real `it()` block was
+  at `739-743` before this round's shift, confirmed by direct read); now
+  `765-769` after the shift. `npx okf-kit@0.5.0 check` on this bundle after
+  the fix round: 0 errors, 0 warnings, 21 notices (same pre-existing
+  bare-filename ambiguities as above). Note: this pass surfaced several
+  pre-existing citation/content mismatches unrelated to this fix's scope
+  (for example review-gate-and-waivers.md's and
+  run-state-lifecycle-and-markers.md's several `CHANGELOG.md:` citations,
+  and model-preselection.md's two `:1187-1252`/`:1254-1312`-style
+  shorthand citations, each pointing at content from a different entry
+  than the one described), left as pre-existing and out of this
+  narrowly-scoped fix round at the time; re-derived in fix round 3 instead
+  of left as pre-existing (see the fix-round-3 entry below).
+- 2026-08-24: fix-round-3 review found 0 high, 3 medium, 7 low findings
+  (16 mutants total). MEDIUM-3: added test pins for two round-2 wording
+  additions that had shipped unpinned, the softened gate framing
+  ("checkable against the task contract rather than a judgment about how
+  hard the task looks", pinned against agents-md-section.md's own gate
+  slice) and the fail-safe tie-break sentence ("when it is unclear whether
+  a criterion demands a run, exclude `implementer-low`", pinned against
+  both agents-md-section.md's gate slice and SKILL.md step 6's wider
+  slice, since the tie-break sentence sits inside SKILL.md's step-6 slice
+  but outside its narrower implementer-gate sub-slice). LOW-3: added a
+  per-doc pin on the A/B measurement's three headline numbers (`median
+  320 seconds slower`, `p=0.016`, `9 high-plus-critical`) in both
+  agents-md-section.md and SKILL.md, each as three separate substring
+  assertions rather than one exact phrase, since the two docs word the
+  parenthetical differently (comma-separated in SKILL.md, parenthetical in
+  agents-md-section.md and the CHANGELOG). MEDIUM-2/LOW-4: the
+  agents-md-section.md gate slice's endPhrase was narrowed from the tier
+  bullet's own "use the default." close to the gate's own tie-break close,
+  "exclude `implementer-low`." (confirmed `suggested_tests` still falls
+  inside the narrowed slice); a mutant reverting only the unrelated
+  explorer/task-slicer sentence to its old wording ("a `-low` variant fits
+  mechanical, narrowly scoped tasks") now measurably stays green (M9), so
+  the round-2 log entry's claim that this scoping had already landed is
+  now true and was left as written rather than corrected. LOW-1: the three
+  `phraseBoundedSlice` calls that used to run as `const`s in the describe
+  body (so a phrase-drift `expect()` failure there collapsed the whole
+  file's test collection, not just the tests that touch the slice) were
+  converted to memoized getter functions called from inside each `it`;
+  verified for real by mutating "For the implementer specifically" to "For
+  an implementer specifically" and rerunning the suite: 4 named tests
+  failed with "Tests 4 failed | 146 passed", no suite-collection error,
+  against the pre-fix behavior of a full-file collapse (mutant restored
+  and reverified green afterward, both before and after the later prettier
+  pass). LOW-2 was attempted and reverted: the proposed regex
+  (`/^ {0,2}<id>:/m` per contract block) breaks on `suggested_tests`, which
+  sits at 4-space indent under `tasks: - id: T-001` in the Task slicer
+  output contract block, not 0-2; making the membership check indent-aware
+  would need a per-field indent table with no clear source of truth, so
+  the existing whole-block-substring check was left in place instead
+  (documented here rather than in a doc comment, since no doc-adjacent
+  change resulted). LOW-6/LOW-9: the CHANGELOG `[Unreleased]` entry's "so
+  its pinned `effort: low` was inert" was changed to "so the harness
+  ignores the pinned `effort: low` on that model" to mirror
+  agents-md-section.md's already-corrected wording from fix round 2; both
+  the CHANGELOG bullet and agents-md-section.md's tier bullet were
+  re-flowed to the surrounding column width (the CHANGELOG bullet had two
+  stray short lines, 44 and 39 characters, mid-paragraph; the
+  agents-md-section.md bullet had one, 26 characters) with no wording
+  change beyond the one substitution. LOW-5/LOW-8: closed the unclosed
+  parenthesis in this log's own fix-round-2 closing note (the "for example
+  ... shorthand citations" clause had never closed its opening "("); MED-1:
+  all 16 `CHANGELOG.md:` citations found across
+  review-gate-and-waivers.md (5), run-state-lifecycle-and-markers.md (6),
+  and subagent-contracts-superset.md (5) were re-derived by direct read
+  against the current CHANGELOG.md (the reviewer's count was 14; this pass
+  found 16 distinct citation sites, all wrong, and fixed all 16 rather than
+  reconciling the count). Two topics are each cited from two docs with the
+  same corrected value (the 0.7.3 header-already-correct citation and the
+  0.7.4 example-row-narrowing citation), confirmed independently against
+  CHANGELOG.md both times. Every `docs-consistency.test.ts:` citation this
+  round's own test-file edits displaced was then re-derived by direct
+  read, in two passes: first after the MEDIUM-3/LOW-1 test edits (a net
+  +82-line insertion inside the "tier-selection policy" describe, shifting
+  `pinned-default-effort`/`advisor escalation`/`advisor output contract`
+  and both README-table describes below the insertion point), then again
+  after this round's own `npx prettier --write` pass on the test file
+  additionally collapsed two long single-argument `.indexOf(...)` calls
+  (one pre-existing, at the top of the file before any of this round's
+  edits, one inside this round's own new code) into single lines, a net
+  -4 shift compounding the first pass's numbers; a uniform -2 held for
+  every fully qualified `docs-consistency.test.ts:` citation between the
+  first collapse and the second, verified by direct read; the 27 short-form
+  citations without a file name (bare parenthesised ranges and `:NNN-NNN`
+  forms in subagent-contracts-superset.md and run-state-lifecycle-and-
+  markers.md) were NOT re-derived in this round and were corrected in the
+  round-4 follow-up below. This second pass also caught and fixed a stale live-pointer
+  citation naming test lines `641-653` in this log's own fix-round-1 entry
+  above (a leftover from an earlier round, unrelated to this round's edits
+  until the prettier shift broke it), corrected to the docs-consistency
+  test file's current `822-836`; `npx okf-kit@0.5.0 check` flagged this one
+  as a `closing-brace-start-line` warning before the fix, 0 errors/0
+  warnings/21 notices after. Mutation probes (all applied on a working-tree
+  copy, restored and reverified after each): M2 (`verification_commands`
+  cited instead of the correct vocabulary) 2 failed/148 passed; M3
+  (`mutation_probes`/`verification_steps` cited) 2 failed/148 passed; M5
+  (see LOW-1 above) 4 failed/146 passed, no suite collapse; M9 (only the
+  explorer/task-slicer sentence reverted) 150/150 green; M10 (tie-break
+  sentence removed from agents-md-section.md) 4 failed/146 passed; M11
+  (tie-break sentence removed from SKILL.md step 6) 1 failed/149 passed;
+  M12 (gate framing reverted to "checkable criterion, not a judgment
+  call") 1 failed/149 passed; M14 (agents-md-section.md's `9
+  high-plus-critical` changed to `5`) 1 failed/149 passed; M15 (SKILL.md's
+  `median 320 seconds slower` changed to `220`) 1 failed/149 passed. Full
+  suite after the fix round: 275/275 (271 baseline + 4 new pins:
+  checkable-framing, tie-break-in-both-docs, and one A/B-numbers pin per
+  doc), `tsc --noEmit` and `tsc --noEmit -p tsconfig.test.json` both exit
+  0, `prettier --check` clean for `test/docs-consistency.test.ts`
+  (`test/template-markers.test.ts` left dirty, pre-existing and out of
+  scope per the fix-round-3 assignment), `npx okf-kit@0.5.0 check`: 0
+  errors, 0 warnings, 21 notices (same pre-existing bare-filename
+  ambiguities as every prior pass in this log).
+
+## 2026-08-24 (round 4 follow-up, orchestrator, after review round 4)
+
+- Review round 4 (reviewer, opus high) confirmed every round-3 finding
+  closed (10 mutants re-run, 68 citations read) and found one regression
+  from round 3: the `prettier --write` pass shortened
+  `test/docs-consistency.test.ts` by 2 lines and the 27 short-form
+  citations (22 in subagent-contracts-superset.md, 5 in
+  run-state-lifecycle-and-markers.md) had not been re-derived. All 27 were
+  corrected by a uniform -2 against the reviewer's per-citation target
+  list, spot-checked by direct read (each start line is an `it(` head,
+  each end line its closing `});`). Also corrected: model-preselection.md
+  `:1117-1174` -> `:1151-1208` (the 0.19.0 guard describe, pre-existing
+  drift widened by this change), run-state-lifecycle-and-markers.md
+  `CHANGELOG.md:568-570` -> `568-573` (range now covers the hex-guard and
+  date-heuristic clause). Consciously accepted, recorded in the run
+  decisions: substring membership in the vocabulary pin (a yaml-key match
+  was tried and reverted, see round 3), pre-existing
+  `template-markers.test.ts` prettier drift, and the absence of a mechanical
+  guard for short-form citations (okf-kit resolves file targets only);
+  that guard is a follow-up, not part of this change.
+
