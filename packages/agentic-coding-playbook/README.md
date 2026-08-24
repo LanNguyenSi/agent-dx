@@ -38,6 +38,10 @@ For teams that want a clearer model for review depth and implementation quality:
 
 These companion documents describe the difference between no review, normal review, and rigorous review, and propose a practical `Role + Skill + Standard` model for implementation agents.
 
+For teams remediating dependency CVEs in an npm lockfile specifically:
+
+- [npm Lockfile CVE Remediation (English)](references/npm-lockfile-cve-remediation.md) (no German companion yet)
+
 ## Operational artifacts
 
 For teams that want to apply this model directly in a repository, this package also contains reusable artifacts:
