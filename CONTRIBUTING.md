@@ -34,10 +34,12 @@ Each package is self-contained, no root install.
 
 ## Releases and npm credentials
 
-All npm writes (publish, deprecate) run in CI via the `NPM_TOKEN` repository
-secret (see `.github/workflows/publish-npm.yml` and `npm-deprecate.yml`).
-There is no working local npm token; do not debug a local `E401`/`E404`,
-trigger the workflow instead.
+Publishing runs in CI via npm Trusted Publishing (OIDC, `id-token: write`;
+see `.github/workflows/publish-npm.yml`) and needs no npm token. The other
+npm writes (deprecate, dist-tag) still run via the `NPM_TOKEN` repository
+secret (see `npm-deprecate.yml` and `npm-dist-tag.yml`), since OIDC only
+covers `npm publish`. There is no working local npm token; do not debug a
+local `E401`/`E404`, trigger the workflow instead.
 
 ## Style
 
