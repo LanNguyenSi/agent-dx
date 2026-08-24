@@ -50,15 +50,16 @@ slop-detector check . --format json
 
 Each pack groups related rules. Enable or disable per repo via `slop.config.yml`.
 
-| Pack | Default | Catches |
-|------|---------|---------|
-| `agent-tics` (7 rules) | on | Stray `</result>` / `</invoke>` tags, auto-appended Claude Code footers, doubled Summary headings, template TODO placeholders |
-| `prose-slop` (7 rules) | on | Em-dashes in prose, hedging openers, empty marketing adjectives, signature LLM idioms like `delve into`, `tapestry of`, `leverage the power of` |
-| `comment-slop` (5 rules) | off, opt in via `--pack` | JSDoc on trivial getters, comments that restate the next line, orphan markers (`// removed`, `// kept for backcompat`), comment-heavier-than-body helpers, ASCII banner dividers |
-| `code-slop` (9 rules) | off, opt in via `--pack` | try/catch around code that cannot throw, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers |
-| `ui-slop` (6 rules) | off, opt in via `--pack ui-slop` | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX. |
+| Pack                       | Default                                 | Catches                                                                                                                                                                                                                                                                    |
+| -------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent-tics` (7 rules)     | on                                      | Stray `</result>` / `</invoke>` tags, auto-appended Claude Code footers, doubled Summary headings, template TODO placeholders                                                                                                                                              |
+| `prose-slop` (7 rules)     | on                                      | Em-dashes in prose, hedging openers, empty marketing adjectives, signature LLM idioms like `delve into`, `tapestry of`, `leverage the power of`                                                                                                                            |
+| `comment-slop` (5 rules)   | off, opt in via `--pack`                | JSDoc on trivial getters, comments that restate the next line, orphan markers (`// removed`, `// kept for backcompat`), comment-heavier-than-body helpers, ASCII banner dividers                                                                                           |
+| `code-slop` (9 rules)      | off, opt in via `--pack`                | try/catch around code that cannot throw, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers  |
+| `ui-slop` (6 rules)        | off, opt in via `--pack ui-slop`        | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX.                                                                   |
+| `placement-slop` (5 rules) | off, opt in via `--pack placement-slop` | Org-, machine-, and point-in-time-bound evidence leaking into reusable instruction files (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, agent/skill prompt files): home paths, dated evidence, tally phrases (`n=8`, `p=0.016`, `so far`), opaque ids, and configured org markers. |
 
-The three opt-in packs (`comment-slop`, `code-slop`, `ui-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
+The four opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
 
 Run `slop-detector list-rules` for the full rule catalogue with severities and rationales.
 
@@ -81,28 +82,81 @@ Opt in with `--pack ui-slop`. Examples that trip the four default-on rules:
 
 /* ui-slop/animate-layout-properties */
 @keyframes grow {
-  from { width: 100px; }
-  to   { width: 200px; }
+  from {
+    width: 100px;
+  }
+  to {
+    width: 200px;
+  }
 }
-.panel { transition: height 0.3s ease; }
+.panel {
+  transition: height 0.3s ease;
+}
 ```
 
 ```html
 <!-- ui-slop/skipped-heading-levels -->
 <section>
   <h1>Title</h1>
-  <h3>Subtitle</h3>   <!-- skipped h2 -->
+  <h3>Subtitle</h3>
+  <!-- skipped h2 -->
 </section>
 ```
 
 The two off-by-default info rules (`ui-slop/monospace-everywhere`, `ui-slop/flat-type-hierarchy`) need an explicit `rules.<id>.enabled: true` in `slop.config.yml` or a CLI override; they remain off because both have legitimate counter-uses (technical-product landing pages, mature design systems with subtle steps).
 
 Known v1 limitations (tracked as M3 follow-ups):
+
 - Tailwind class strings like `bg-gradient-to-r from-purple-500 to-cyan-500` are not detected; only literal CSS / hex / hsl in style declarations.
 - JSX inline `style={{ background: 'linear-gradient(...)' }}` literals are not scanned for rules 1-3 (only `ui-slop/skipped-heading-levels` walks JSX).
 - Vue / Svelte single-file-component `<style>` blocks are detected as `markup`, so CSS-shape rules don't fire on them; extract the styles or scope a separate `.css` file.
 - `@media`-wrapped top-level selectors are not walked recursively by `ui-slop/monospace-everywhere`.
 - `transition: all` is flagged, but `animation: <name>` referencing a `@keyframes` outside the same file is not cross-resolved.
+
+### `placement-slop` by example
+
+Opt in with `--pack placement-slop`. Every rule below only looks at instruction files: `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, and Markdown under `.claude/agents/`, `.opencode/agents/`, `.claude/skills/` (plus anything matched by `placement.instructionGlobs`). The same content in, say, `README.md` never fires.
+
+```markdown
+<!-- placement-slop/home-path (block) -->
+
+Set `API_TOKEN` from `~/work/project/.env` before running the sweep.
+
+<!-- placement-slop/dated-evidence + placement-slop/tally-phrase (warn) -->
+
+As of 2026-08-24 (n=8), the low tier reached accept a median 320 seconds
+slower, p=0.016, so prefer the default tier.
+
+<!-- placement-slop/opaque-id (warn) -->
+
+See agent-tasks task 7f38899d for the write-up.
+
+<!-- placement-slop/org-marker (block), with placement.markers: ["example-org"] -->
+
+Run the example-org rescan before merging.
+```
+
+Every rule reports the durable instruction it thinks should replace the evidence-bound line, not just what tripped: a home path should become repo-relative, a dated measurement should become the standing rule it justified, an opaque id should become a link or be dropped, and an org marker should either be genericized or explicitly allow-listed.
+
+`home-path`, `dated-evidence`, `opaque-id`, and `tally-phrase` skip matches inside an `http(s)://`/`www.` URL or a markdown link target (`](...)`) — a path segment, a date, a hex id, or a `?n=8`/`?p=0.016`-shaped query parameter that's part of a real link isn't leaked evidence. `home-path` also treats an angle-bracket placeholder (`/Users/<name>/`, `/home/<user>/`) as already-generic and doesn't flag it. A real account name in a path (`/home/node/app`, a container convention) still fires: telling a genuine machine-bound path apart from a container-convention one isn't a clean heuristic, so it's still flagged — add a `placement.allow` entry or a disable comment for that line if it's a false positive in your repo.
+
+`placement.allow` is the escape hatch for a line that legitimately carries a marker, e.g. an install URL:
+
+```yaml
+# slop.config.yml
+packs:
+  placement-slop: true
+
+placement:
+  markers:
+    - "example-org"
+  allow:
+    - "github\\.com/example-org/"
+```
+
+With that config, `install from https://github.com/example-org/kit` does not fire `org-marker` (the `allow` pattern matches the whole line), while a bare `example-org` mention elsewhere in the file still does.
+
+An `allow` match suppresses every rule in the pack for that line, including `block`-severity ones like `home-path` and `org-marker` — it's a per-line escape hatch, not just for `org-marker`. To silence a single rule (or a single occurrence) instead of the whole line, use a per-line disable comment: `<!-- slop-detector:disable-line=placement-slop/home-path -->` or `<!-- slop-detector:disable-next-line=placement-slop -->` (see [Per-line opt-out](#per-line-opt-out)).
 
 ## What a run looks like
 
@@ -146,6 +200,7 @@ flowchart LR
         H["comment-slop.ts<br/>off by default"]
         I["code-slop.ts<br/>off by default"]
         J["ui-slop.ts<br/>off by default"]
+        P["placement-slop.ts<br/>off by default"]
     end
 
     K["engine.ts<br/>checkPath / checkFiles / checkText"]
@@ -166,6 +221,7 @@ flowchart LR
     H --> E
     I --> E
     J --> E
+    P --> E
     E --> K
     K --> L
     L --> M
@@ -217,34 +273,51 @@ treatAsProse:
 
 treatAsCode:
   - "**/Dockerfile.*"
+
+placement:
+  markers:
+    - "example-org"
+  instructionGlobs:
+    - "**/PLAYBOOK.md"
+  allow:
+    - "github\\.com/example-org/"
 ```
 
-Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles.
+Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, and `placement.allow` default to `[]`.
+
+The `placement` block only matters once `placement-slop` is enabled (see [`placement-slop` by example](#placement-slop-by-example)):
+
+- `markers`: regex patterns (compiled as given, no implicit `i` flag) naming this org's own handles, products, or paths: each match is a `placement-slop/org-marker` violation. Empty by default, so the rule never fires until you configure it. A pattern that would match the empty string (e.g. `"a*"`) is rejected at config-load time, and matching runs per line with a 50-violations-per-file cap, so a runaway or pathological pattern can't blow up the output. These are repo-authored regexes, evaluated by the linter itself, not by an external process.
+- `instructionGlobs`: additive glob patterns, on top of the pack's built-in instruction-file globs (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/**`, `.opencode/agents/**`, `.claude/skills/**`); this only ever widens the built-in set, it can't narrow it. Matched against each scanned file's path relative to the scan root (the same root `entrypointGlobs` uses — see [Marking a src barrel as an entrypoint](#marking-a-src-barrel-as-an-entrypoint)). `check packages/foo`, `check ./packages/foo`, and `check /abs/path/packages/foo` are three spellings of the _same_ directory and resolve a given pattern identically; a single-file target (`check packages/foo/SKILL.md`) resolves the scan root to that file's own parent directory, so it also shares patterns with `check packages/foo`: a pattern is tied to _what directory you're scanning_, not to whether the target was a file or a directory. The consequence: changing the scan target to a genuinely different root (e.g. `check .` from the repo root instead of `check packages/foo`) means every pattern has to be rewritten relative to the new root too. A pattern must not start with `/`, same restriction as `entrypointGlobs`, and a leading `./` is normalized away. A pattern that matches zero scanned files is surfaced in `CheckSummary.warnings`, same mechanism as an unmatched `entrypointGlobs` pattern. For CI, the simplest invariant is `check .` from the repo root paired with a config file: one fixed scan root, so the patterns never need to change with the invocation.
+- `allow`: regex patterns (also rejected at config-load time if they'd match the empty string, and matched per line); a line matching any of these is skipped by every rule in the pack, including `block`-severity ones (the escape hatch for something like a legitimate install URL that carries an org handle). For narrower, single-rule suppression use a per-line disable comment instead (see [Per-line opt-out](#per-line-opt-out)).
 
 ## Cross-file rules (experimental)
 
-Two `code-slop` rules analyse symbols across all files in the scan root rather than per file.  They are **off by default** and require a corpus pre-pass that parses every TypeScript/JavaScript file once before the rule loop runs. The pre-pass also builds an inverted name → referencing-files index, so `unused-export`'s "does any other file use this?" check is an O(1) map lookup per export rather than an O(files) scan repeated for every export in the scan root.
+Two `code-slop` rules analyse symbols across all files in the scan root rather than per file. They are **off by default** and require a corpus pre-pass that parses every TypeScript/JavaScript file once before the rule loop runs. The pre-pass also builds an inverted name → referencing-files index, so `unused-export`'s "does any other file use this?" check is an O(1) map lookup per export rather than an O(files) scan repeated for every export in the scan root.
 
-| Rule | Default severity | What it finds |
-|------|-----------------|---------------|
-| `code-slop/unused-export` | warn | Exported symbols not imported by any other file and not reachable via `package.json` entrypoints (`main`, `bin`, `exports`, or `entrypointGlobs`). |
-| `code-slop/single-callsite-helper` | warn | Named functions/`const`s with a body of at most 3 statements that are called from at most one place in the package (candidates for inlining). Exempts files reachable via an entrypoint, same as `unused-export` — a helper whose only real callers are external to the scan is expected to show a low in-package call count. Precision cost of that exemption: it's file-wide, so a genuinely inlinable one-callsite helper that happens to live in the entrypoint/barrel file is now permanently invisible to this rule, not just the helpers that are actually part of the public API. This also applies to a bare `export *` barrel target, not just `package.json`/`entrypointGlobs` entrypoints — see the blast-radius note in Known limitations below. |
+| Rule                               | Default severity | What it finds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code-slop/unused-export`          | warn             | Exported symbols not imported by any other file and not reachable via `package.json` entrypoints (`main`, `bin`, `exports`, or `entrypointGlobs`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `code-slop/single-callsite-helper` | warn             | Named functions/`const`s with a body of at most 3 statements that are called from at most one place in the package (candidates for inlining). Exempts files reachable via an entrypoint, same as `unused-export` — a helper whose only real callers are external to the scan is expected to show a low in-package call count. Precision cost of that exemption: it's file-wide, so a genuinely inlinable one-callsite helper that happens to live in the entrypoint/barrel file is now permanently invisible to this rule, not just the helpers that are actually part of the public API. This also applies to a bare `export *` barrel target, not just `package.json`/`entrypointGlobs` entrypoints — see the blast-radius note in Known limitations below. |
 
 ### Enabling the corpus pre-pass
 
 Three equivalent switches, use whichever fits your workflow:
 
 **Environment variable** (one-off or CI step):
+
 ```sh
 SLOP_CORPUS=1 slop-detector check src/
 ```
 
 **Config file** (`slop.config.yml`):
+
 ```yaml
 corpus: true
 ```
 
 **Programmatic API** (`CheckOptions`):
+
 ```ts
 import { checkFiles } from "slop-detector";
 checkFiles(files, { packs, config, corpusEnabled: true });
@@ -256,7 +329,7 @@ Because both rules are `enabledByDefault: false` you must also enable them via `
 
 ```yaml
 # slop.config.yml
-corpus: true          # enable the pre-pass
+corpus: true # enable the pre-pass
 
 rules:
   code-slop/unused-export:
@@ -276,11 +349,11 @@ entrypointGlobs:
   - "src/index.ts"
 ```
 
-Patterns are matched against each scanned file's path relative to `scanRoot` (the CLI passes the path/directory you told it to `check`); when no `scanRoot` is available (e.g. a bare `checkFiles([...])` call with no option), the nearest directory containing a `package.json` is used, and failing that, `process.cwd()`. A pattern must not start with `/` — that can never match a relative path and is rejected at config-load time. A pattern that matches zero scanned files (a typo, or the wrong root assumption) doesn't fail silently: `checkFiles`'s returned `CheckSummary.warnings` names it. There's no equivalent guard against an *overly broad* pattern, though — `entrypointGlobs: ["**"]` is valid config that silently exempts every file and reduces both rules to zero output; treat a broad barrel pattern as suspicious paired with the two rules producing nothing.
+Patterns are matched against each scanned file's path relative to `scanRoot` (the CLI passes the path/directory you told it to `check`); when no `scanRoot` is available (e.g. a bare `checkFiles([...])` call with no option), the nearest directory containing a `package.json` is used, and failing that, `process.cwd()`. A pattern must not start with `/` — that can never match a relative path and is rejected at config-load time. A pattern that matches zero scanned files (a typo, or the wrong root assumption) doesn't fail silently: `checkFiles`'s returned `CheckSummary.warnings` names it. There's no equivalent guard against an _overly broad_ pattern, though — `entrypointGlobs: ["**"]` is valid config that silently exempts every file and reduces both rules to zero output; treat a broad barrel pattern as suspicious paired with the two rules producing nothing.
 
 ### Known limitations (v1)
 
-- **Name-only, scope-blind symbol matching.** The corpus matches symbols by identifier name across files, not by import binding or lexical scope. Two unrelated exports with the same name in different files are counted as references to each other (false negative on `unused-export`). A local variable or parameter that shadows an imported/exported name may likewise suppress a violation (false positive suppression). Both re-export forms are handled: a named re-export (`export { x } from "./mod.js"`) counts as a reference to `x`, so the original declaration is no longer flagged — but the re-export statement itself is also tracked as an export *of the barrel file*, so if nothing consumes `x` from the barrel either (and the barrel isn't an entrypoint), the "unused" violation simply moves from the declaration to the barrel rather than disappearing; that's a defensible outcome (the barrel re-export genuinely is the dead surface in that case) but worth knowing when triaging a violation's location. `export * as ns from "./mod.js"` declares a real name (`ns`) on the barrel file and is tracked exactly like a named re-export — same "moves to the barrel" behavior applies to it. A *bare* `export * from "./mod.js"` (no `as ns`) is different: it declares no trackable name of its own, so instead the whole resolved target file is treated as reachable public API (like a `main`/`entrypointGlobs` entrypoint) rather than tracking which individual symbols the barrel actually forwards — resolving that precisely would mean walking the full re-export graph. **Blast radius of that exemption: it applies to both corpus rules, not just `unused-export`.** A file that's the target of a bare `export *` is fully invisible to `single-callsite-helper` too — a genuinely dead or genuinely inlinable symbol inside it won't be flagged by either rule, not only the ones actually re-exported through the barrel. TypeScript's `export = foo` (CommonJS-style export assignment) is recognised as neither an export nor a reference at all; a file using it will misbehave under both corpus rules. A **non-call** use of an identifier (passing a function by reference, e.g. `arr.map(helperA)`, `setTimeout(helperA)`, `export const onClick = helperA`) is also still not tracked, so a helper consumed only that way can be misflagged as unused or single-callsite. Treat both rules as directional signals to double-check, not ground truth, until these are closed.
+- **Name-only, scope-blind symbol matching.** The corpus matches symbols by identifier name across files, not by import binding or lexical scope. Two unrelated exports with the same name in different files are counted as references to each other (false negative on `unused-export`). A local variable or parameter that shadows an imported/exported name may likewise suppress a violation (false positive suppression). Both re-export forms are handled: a named re-export (`export { x } from "./mod.js"`) counts as a reference to `x`, so the original declaration is no longer flagged — but the re-export statement itself is also tracked as an export _of the barrel file_, so if nothing consumes `x` from the barrel either (and the barrel isn't an entrypoint), the "unused" violation simply moves from the declaration to the barrel rather than disappearing; that's a defensible outcome (the barrel re-export genuinely is the dead surface in that case) but worth knowing when triaging a violation's location. `export * as ns from "./mod.js"` declares a real name (`ns`) on the barrel file and is tracked exactly like a named re-export — same "moves to the barrel" behavior applies to it. A _bare_ `export * from "./mod.js"` (no `as ns`) is different: it declares no trackable name of its own, so instead the whole resolved target file is treated as reachable public API (like a `main`/`entrypointGlobs` entrypoint) rather than tracking which individual symbols the barrel actually forwards — resolving that precisely would mean walking the full re-export graph. **Blast radius of that exemption: it applies to both corpus rules, not just `unused-export`.** A file that's the target of a bare `export *` is fully invisible to `single-callsite-helper` too — a genuinely dead or genuinely inlinable symbol inside it won't be flagged by either rule, not only the ones actually re-exported through the barrel. TypeScript's `export = foo` (CommonJS-style export assignment) is recognised as neither an export nor a reference at all; a file using it will misbehave under both corpus rules. A **non-call** use of an identifier (passing a function by reference, e.g. `arr.map(helperA)`, `setTimeout(helperA)`, `export const onClick = helperA`) is also still not tracked, so a helper consumed only that way can be misflagged as unused or single-callsite. Treat both rules as directional signals to double-check, not ground truth, until these are closed.
 - **`buildCorpus` still makes a separate initial pass** over every file before the per-file rule loop runs. Measured on a synthetic 500-file project (median of 7 warmed runs, `code-slop` pack with both corpus rules enabled): `checkFiles` took ~172ms with the corpus pre-pass off and ~343ms with it on — the extra pass costs roughly as much as the rest of the scan combined (about half of corpus-on runtime), several times more than the O(files²)→O(1) lookup this change removed. It exists because `buildCorpus` and the per-file rule loop each construct their own `FileTarget` for the same file, and `parseTsFile`'s cache is a `WeakMap` keyed by that object — so the second pass's parse is always a cache miss, never reused. Unlike the double-parse `code-slop/unused-export` used to do (fixed in this change: it now reads `corpus.exportsByFile` directly instead of re-parsing), this one is structural: threading the corpus's own `FileTarget`s through into the main loop, or keying the parse cache by path+text instead of by object identity, would close it, but that's a `checkFiles`-level change and is an open follow-up, not something fixed here.
 
 ## Per-line opt-out
@@ -295,6 +368,7 @@ Or scope by pack:
 
 ```md
 <!-- slop-detector:disable-next-line=agent-tics -->
+
 </result> a real example for the docs
 ```
 
@@ -306,13 +380,13 @@ Or scope by pack:
 // package.json
 {
   "scripts": {
-    "slop": "slop-detector check ."
+    "slop": "slop-detector check .",
   },
   "husky": {
     "hooks": {
-      "pre-commit": "npm run slop"
-    }
-  }
+      "pre-commit": "npm run slop",
+    },
+  },
 }
 ```
 
@@ -321,8 +395,8 @@ For a faster, staged-files-only variant pair with [lint-staged](https://github.c
 ```jsonc
 {
   "lint-staged": {
-    "*.md": "slop-detector check"
-  }
+    "*.md": "slop-detector check",
+  },
 }
 ```
 
@@ -343,13 +417,13 @@ slop-detector also ships a stdio [MCP](https://modelcontextprotocol.io) server (
 
 It exposes one tool, `slop_check`:
 
-| Param | Type | Notes |
-|-------|------|-------|
-| `text` | string | In-memory string to scan. Mutually exclusive with `path`. |
-| `path` | string | File or directory to scan. Mutually exclusive with `text`. |
-| `filename` | string | Filename assumed for `text` input (prose-vs-code detection). |
-| `packs` | string[] | Restrict to these packs; off-by-default packs only run when named. |
-| `configPath` | string | Path to a `slop.config.yml` / `.json`. |
+| Param        | Type     | Notes                                                              |
+| ------------ | -------- | ------------------------------------------------------------------ |
+| `text`       | string   | In-memory string to scan. Mutually exclusive with `path`.          |
+| `path`       | string   | File or directory to scan. Mutually exclusive with `text`.         |
+| `filename`   | string   | Filename assumed for `text` input (prose-vs-code detection).       |
+| `packs`      | string[] | Restrict to these packs; off-by-default packs only run when named. |
+| `configPath` | string   | Path to a `slop.config.yml` / `.json`.                             |
 
 It returns each violation as `SEVERITY line:col rule message`, grouped by file, plus a one-line tally.
 
@@ -370,11 +444,11 @@ Run `npm run build` first so `dist/mcp.js` exists.
 
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | No `block`-severity violations. `warn` and `info` are reported but do not fail the run. |
-| 1 | At least one `block`-severity violation. |
-| 2 | CLI invocation error (missing config, unreadable path). |
+| Code | Meaning                                                                                 |
+| ---- | --------------------------------------------------------------------------------------- |
+| 0    | No `block`-severity violations. `warn` and `info` are reported but do not fail the run. |
+| 1    | At least one `block`-severity violation.                                                |
+| 2    | CLI invocation error (missing config, unreadable path).                                 |
 
 ## Roadmap
 

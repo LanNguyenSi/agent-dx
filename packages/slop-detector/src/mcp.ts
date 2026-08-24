@@ -38,7 +38,7 @@ server.registerTool(
   {
     title: "Slop check",
     description:
-      "Scan text or a file/directory for AI-slop tells: em-dashes in prose, hedging openers, leaked MCP serialization artefacts (</result> tags), doubled '## Summary' headings, empty marketing adjectives, and (with the code-slop / comment-slop packs) defensive try/catch and JSDoc on trivial getters. Pass `text` to scan an in-memory string such as a commit message or PR body, or `path` to scan a file or directory tree. Returns each violation as `SEVERITY line:col rule message` plus a one-line tally.",
+      "Scan text or a file/directory for AI-slop tells: em-dashes in prose, hedging openers, leaked MCP serialization artefacts (</result> tags), doubled '## Summary' headings, empty marketing adjectives, and (with the code-slop / comment-slop / placement-slop packs) defensive try/catch and JSDoc on trivial getters, and org-/machine-/date-bound evidence leaking into instruction files. Pass `text` to scan an in-memory string such as a commit message or PR body, or `path` to scan a file or directory tree. Returns each violation as `SEVERITY line:col rule message` plus a one-line tally.",
     inputSchema: {
       text: z
         .string()
@@ -62,7 +62,7 @@ server.registerTool(
         .array(z.string())
         .optional()
         .describe(
-          'Restrict to these rule packs (e.g. ["prose-slop"], ["code-slop"]). The off-by-default packs (code-slop, comment-slop) only run when named here. Default: every default-on pack.',
+          'Restrict to these rule packs (e.g. ["prose-slop"], ["code-slop"]). The off-by-default packs (comment-slop, code-slop, ui-slop, placement-slop) only run when named here. Default: every default-on pack.',
         ),
       configPath: z
         .string()

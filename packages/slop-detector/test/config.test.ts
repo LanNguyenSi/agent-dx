@@ -16,28 +16,47 @@ describe("config", () => {
 
   it("config can disable an entire pack", () => {
     const cfg = mergeConfig({ packs: { "prose-slop": false } });
-    const v = checkText("seamless — cutting-edge.", "x.md", { packs: allPacks, config: cfg });
+    const v = checkText("seamless — cutting-edge.", "x.md", {
+      packs: allPacks,
+      config: cfg,
+    });
     expect(v.filter((x) => x.pack === "prose-slop")).toHaveLength(0);
   });
 
   it("config can promote a rule from warn to block", () => {
-    const cfg = mergeConfig({ rules: { "prose-slop/em-dash": { severity: "block" } } });
+    const cfg = mergeConfig({
+      rules: { "prose-slop/em-dash": { severity: "block" } },
+    });
     const v = checkText("hi — there", "x.md", { packs: allPacks, config: cfg });
     const m = v.find((x) => x.ruleId === "prose-slop/em-dash");
     expect(m?.severity).toBe("block");
   });
 
   it("config can disable a single rule via override", () => {
-    const cfg = mergeConfig({ rules: { "prose-slop/em-dash": { enabled: false } } });
-    const v = checkText("hi — there seamless", "x.md", { packs: allPacks, config: cfg });
+    const cfg = mergeConfig({
+      rules: { "prose-slop/em-dash": { enabled: false } },
+    });
+    const v = checkText("hi — there seamless", "x.md", {
+      packs: allPacks,
+      config: cfg,
+    });
     expect(v.find((x) => x.ruleId === "prose-slop/em-dash")).toBeUndefined();
-    expect(v.find((x) => x.ruleId === "prose-slop/marketing-adjectives")).toBeDefined();
+    expect(
+      v.find((x) => x.ruleId === "prose-slop/marketing-adjectives"),
+    ).toBeDefined();
   });
 
   it("config can enable an off-by-default rule", () => {
-    const cfg = mergeConfig({ rules: { "prose-slop/redundant-note": { enabled: true } } });
-    const v = checkText("Note: hello", "x.md", { packs: allPacks, config: cfg });
-    expect(v.find((x) => x.ruleId === "prose-slop/redundant-note")).toBeDefined();
+    const cfg = mergeConfig({
+      rules: { "prose-slop/redundant-note": { enabled: true } },
+    });
+    const v = checkText("Note: hello", "x.md", {
+      packs: allPacks,
+      config: cfg,
+    });
+    expect(
+      v.find((x) => x.ruleId === "prose-slop/redundant-note"),
+    ).toBeDefined();
   });
 
   it("loadConfig parses a YAML file", () => {
@@ -49,7 +68,9 @@ describe("config", () => {
     );
     const cfg = loadConfig(file);
     expect(cfg.packs["prose-slop"]).toBe(false);
-    expect(cfg.ruleOverrides["agent-tics/stray-result-tag"].severity).toBe("warn");
+    expect(cfg.ruleOverrides["agent-tics/stray-result-tag"].severity).toBe(
+      "warn",
+    );
   });
 
   it("loadConfig accepts a scan-root-relative entrypointGlobs pattern", () => {
@@ -70,5 +91,90 @@ describe("config", () => {
     const file = path.join(tmp, "slop.config.yml");
     fs.writeFileSync(file, `entrypointGlobs:\n  - "/src/index.ts"\n`);
     expect(() => loadConfig(file)).toThrow(/entrypointGlobs/);
+  });
+
+  it("defaultConfig and mergeConfig default placement to empty arrays", () => {
+    expect(defaultConfig().placement).toEqual({
+      markers: [],
+      instructionGlobs: [],
+      allow: [],
+    });
+    expect(mergeConfig({}).placement).toEqual({
+      markers: [],
+      instructionGlobs: [],
+      allow: [],
+    });
+  });
+
+  it("mergeConfig parses a placement block", () => {
+    const cfg = mergeConfig({
+      placement: {
+        markers: ["example-org"],
+        instructionGlobs: ["**/PLAYBOOK.md"],
+        allow: ["github\\.com/example-org/"],
+      },
+    });
+    expect(cfg.placement).toEqual({
+      markers: ["example-org"],
+      instructionGlobs: ["**/PLAYBOOK.md"],
+      allow: ["github\\.com/example-org/"],
+    });
+  });
+
+  it("loadConfig rejects an invalid regex in placement.markers", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `placement:\n  markers:\n    - "("\n`);
+    expect(() => loadConfig(file)).toThrow(/Invalid regular expression/);
+  });
+
+  it("loadConfig rejects an invalid regex in placement.allow", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `placement:\n  allow:\n    - "["\n`);
+    expect(() => loadConfig(file)).toThrow(/Invalid regular expression/);
+  });
+
+  it("loadConfig omitting placement entirely yields [] defaults", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs:\n  prose-slop: false\n`);
+    const cfg = loadConfig(file);
+    expect(cfg.placement).toEqual({
+      markers: [],
+      instructionGlobs: [],
+      allow: [],
+    });
+  });
+
+  it("loadConfig rejects a placement.markers pattern that matches the empty string", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `placement:\n  markers:\n    - "a*"\n`);
+    expect(() => loadConfig(file)).toThrow(/matches the empty string/);
+  });
+
+  it("loadConfig rejects a placement.allow pattern that matches the empty string", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `placement:\n  allow:\n    - ".*"\n`);
+    expect(() => loadConfig(file)).toThrow(/matches the empty string/);
+  });
+
+  it("loadConfig rejects a placement.instructionGlobs pattern with a leading slash", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `placement:\n  instructionGlobs:\n    - "/SKILL.md"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/instructionGlobs/);
+  });
+
+  it("mergeConfig normalizes a leading './' in placement.instructionGlobs", () => {
+    const cfg = mergeConfig({
+      placement: { instructionGlobs: ["./sub/**/*.md"] },
+    });
+    expect(cfg.placement?.instructionGlobs).toEqual(["sub/**/*.md"]);
   });
 });

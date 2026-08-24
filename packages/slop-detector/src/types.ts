@@ -1,6 +1,12 @@
 export type Severity = "block" | "warn" | "info";
 
-export type PackId = "agent-tics" | "prose-slop" | "comment-slop" | "code-slop" | "ui-slop";
+export type PackId =
+  | "agent-tics"
+  | "prose-slop"
+  | "comment-slop"
+  | "code-slop"
+  | "ui-slop"
+  | "placement-slop";
 
 export interface FileTarget {
   path: string;
@@ -67,6 +73,17 @@ export interface RuleContext {
   config: ResolvedConfig;
   /** Present only when SLOP_CORPUS=1 env var or config.corpus:true is active. */
   corpus?: Corpus;
+  /**
+   * The absolute directory a scan-root-relative glob (e.g.
+   * `placement.instructionGlobs`) should be matched against. Always
+   * populated by `checkText`/`checkFiles`/`checkPath`: `CheckOptions.scanRoot`
+   * when given, else the nearest directory containing a `package.json`
+   * (walked up from the file being checked), else `process.cwd()` — the
+   * same fallback order `buildCorpus`/`_resolveEntrypointGlobs` use for
+   * `entrypointGlobs`. Optional only so a hand-built `RuleContext` (as
+   * opposed to one produced by the engine) still type-checks.
+   */
+  scanRoot?: string;
 }
 
 export interface Violation {
@@ -127,6 +144,22 @@ export interface ResolvedConfig {
    * is not a breaking change.
    */
   entrypointGlobs?: string[];
+  /**
+   * Config surface for the `placement-slop` pack: org-, machine-, and
+   * point-in-time-bound evidence leaking into reusable instruction files.
+   * All three fields default to `[]` in `defaultConfig`/`mergeConfig`, so a
+   * hand-built `ResolvedConfig` that omits `placement` entirely (as opposed
+   * to one produced by those two functions) still works: every rule reads
+   * through `config.placement?.<field> ?? []`.
+   */
+  placement?: {
+    /** Regex patterns (compiled as given, no implicit flags) naming this org's own handles/products/paths. */
+    markers: string[];
+    /** Additive glob patterns, on top of the pack's built-in instruction-file globs (SKILL.md, AGENTS.md, ...). */
+    instructionGlobs: string[];
+    /** Regex patterns; a line matching any of these is skipped by every rule in the pack. */
+    allow: string[];
+  };
 }
 
 export interface CheckSummary {
@@ -137,10 +170,10 @@ export interface CheckSummary {
   infoCount: number;
   /**
    * Engine-level configuration warnings, distinct from lint violations —
-   * currently only populated with one entry per `entrypointGlobs` pattern
-   * that matched zero scanned files. Absent (not just empty) when there is
-   * nothing to report, so existing consumers that don't check for it are
-   * unaffected.
+   * currently populated with one entry per zero-match glob pattern from
+   * either `entrypointGlobs` or `placement.instructionGlobs`. Absent (not
+   * just empty) when there is nothing to report, so existing consumers
+   * that don't check for it are unaffected.
    */
   warnings?: string[];
 }

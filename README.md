@@ -26,7 +26,7 @@ See [packages/okf-kit](packages/okf-kit) for the full install and usage guide.
 
 ## slop-detector
 
-[`slop-detector`](packages/slop-detector) is the AI-slop linter for PRs: it catches leaked tool-call XML, doubled `## Summary` headings, hedging openers, marketing adjectives, JSDoc on trivial getters, and other agent-generated tells across five rule packs (`agent-tics`, `prose-slop`, `comment-slop`, `code-slop`, `ui-slop`; some packs are opt-in). It runs in pre-commit, in CI as a status check, or ad-hoc against a path.
+[`slop-detector`](packages/slop-detector) is the AI-slop linter for PRs: it catches leaked tool-call XML, doubled `## Summary` headings, hedging openers, marketing adjectives, JSDoc on trivial getters, and other agent-generated tells across six rule packs (`agent-tics`, `prose-slop`, `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`; some packs are opt-in). It runs in pre-commit, in CI as a status check, or ad-hoc against a path.
 
 Not yet published to npm (the bare `slop-detector` name belongs to an unrelated third-party package), so it runs from a local build:
 
@@ -43,7 +43,7 @@ Full pack reference, sample output, the scan pipeline, and the rationale (includ
 |---------|--------------|-----|
 | [orchestrator-workflow](packages/orchestrator-workflow) | Installer for an orchestrator-led agent workflow: `.ai/` run state, an `AGENTS.md` policy section, and subagent definitions with preselected models for Claude Code, Codex, and opencode. | published |
 | [okf-kit](packages/okf-kit) | CLI that validates OKF v0.1 knowledge bundles: frontmatter shape, reserved files, link resolution, absolute-link warnings, `sources` shape. | published |
-| [slop-detector](packages/slop-detector) | AI-slop linter for PRs: leaked tool-call XML, doubled Summary headings, hedging openers, marketing adjectives, and more across five rule packs. | not published (name taken; run from a local build) |
+| [slop-detector](packages/slop-detector) | AI-slop linter for PRs: leaked tool-call XML, doubled Summary headings, hedging openers, marketing adjectives, and more across six rule packs. | not published (name taken; run from a local build) |
 | [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. | not published |
 | [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. | not published |
 | [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. | private |
