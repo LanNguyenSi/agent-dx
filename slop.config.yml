@@ -1,0 +1,13 @@
+packs:
+  placement-slop: true
+
+placement:
+  instructionGlobs:
+    - "packages/orchestrator-workflow/assets/**/*.md"
+    - "packages/agentic-coding-playbook/**/*.md"
+  markers:
+    - "LanNguyenSi"
+  allow:
+    - "github\\.com/LanNguyenSi/"
+    - "raw\\.githubusercontent\\.com/LanNguyenSi/"
+    - "npmjs\\.com/"
