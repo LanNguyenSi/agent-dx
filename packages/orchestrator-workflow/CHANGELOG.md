@@ -5,6 +5,101 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-08-24
+
+### Changed
+
+- **Moved org-, machine-, and point-in-time-bound evidence out of the kit's
+  reusable instruction files; rule text is unchanged.** Public,
+  tool-agnostic kit files (`SKILL.md`, `agents-md-section.md`) now carry
+  rules and procedures only; the measurements, dates, sample sizes, task
+  ids, and incident tallies that used to sit inline are recorded here in
+  the changelog instead, with a one-line pointer left in prose.
+  - `SKILL.md` step 6 ("Delegate implementation"): the parenthetical
+    `(2026-08-24 A/B measurement, n=8: implementer-low reached accept a
+    median 320 seconds slower, p=0.016, with 9 high-plus-critical review
+    findings against 1 and 8 fix rounds against 1)` is now `(anchored by an
+    A/B measurement; see CHANGELOG 0.23.0)`. The full numbers already live
+    in the 0.23.0 entry below.
+  - `agents-md-section.md`'s Scaling delegation bullet: the paragraph
+    naming the A/B's `n=8`, the median slowdown, `p=0.016`, the
+    high-plus-critical finding count, the fix-round count, the Haiku 4.5
+    model detail, and agent-tasks task `7f38899d` is replaced by "This rule
+    is anchored by an A/B measurement; the data and the model caveat are
+    recorded in the orchestrator-workflow CHANGELOG (0.23.0)." Same data,
+    same 0.23.0 entry.
+  - `SKILL.md`'s "Subagent misfire rule": the incident tally `(four so
+    far)` and the whole reviewer/model-correlation passage ("So far this
+    signal has only been observed for the reviewer role ...", including the
+    0.21.0 advisor remark and the pointer to the per-role model
+    preferences) are removed. The rule itself (the signal definition, the
+    contract-parse and near-instant detection signals, the
+    resume-over-respawn preference and its reasoning, the respawn fallback,
+    the watchdog-stall exception, the `03-decisions.md` record requirement,
+    and "a misfired review is not a review") is unchanged. The removed
+    passage, verbatim, for the durable record: "Every incident of this
+    exact signal (a return within seconds, zero tool calls, harness or
+    system boilerplate instead of the output contract) whose outcome was
+    recorded (four so far) has resolved on the first resume attempt; fall
+    back to a fresh respawn only if the resume attempt itself misfires the
+    same way. So far this signal has only been observed for the reviewer
+    role, a role whose default model differs from explorer's,
+    task-slicer's, and implementer's (since 0.21.0 the advisor shares the
+    reviewer's default model too; the advisor has had no spawns yet, so it
+    contributes no evidence either way; see the per-role model
+    preferences); treat that correlation as an open lead worth watching as
+    more incidents accumulate, not as a confirmed cause." Of the four
+    resume outcomes recorded for that signal, three were on 2026-07-16 and
+    one was on 2026-07-20. The watchdog-stall exception's removed sentence,
+    also verbatim: "This resume-over-respawn preference does not extend to
+    a structurally different misfire class: a mid-run watchdog stall (the
+    subagent goes idle partway through a run rather than returning
+    near-instantly) did not resolve on resume in the one measured incident
+    of that class, it stalled a second time, and only a fresh, explicitly
+    constrained respawn produced a contract-valid review; treat a watchdog
+    stall as outside this preference."
+  - `SKILL.md`'s Run state paragraph: "see the grounding-mcp 0.6.0 docs for
+    the full consumer semantics" is now "see the consuming gate's
+    documentation (grounding-mcp) for the full consumer semantics", dropping
+    the pinned version number.
+
+### Added
+
+- **Reviewer placement check.** `reviewer.md`'s "Check, at minimum" list
+  gains a check for org-, machine-, or point-in-time-bound evidence (dates,
+  sample sizes, task ids, home paths, incident tallies) leaking into a
+  reusable instruction file (a skill, an agent prompt, an AGENTS.md
+  section, a template); the fix it recommends is moving the evidence to the
+  changelog, the run files, or the consuming workspace and leaving a
+  one-line pointer.
+- **Hand-off placement check.** `SKILL.md` step 9 ("Hand off") gains one
+  sentence for the orchestrator: check before handing off that no such
+  evidence was added to a reusable instruction file.
+- **`placement-guard` CI job.** A dedicated job in agent-dx's
+  `.github/workflows/ci.yml`, separate from the package matrix, builds
+  `slop-detector` and runs its opt-in `placement-slop` pack against the
+  monorepo's instruction files (`packages/orchestrator-workflow/assets/**`
+  and `packages/agentic-coding-playbook/**`, configured via the repo-root
+  `slop.config.yml`), failing on block-level violations.
+- **Root `slop.config.yml`.** Opts the `placement-slop` pack in for the CI
+  job, configures the `LanNguyenSi` org marker with `allow` entries for its
+  two legitimate repo links (`github.com/LanNguyenSi/`,
+  `raw.githubusercontent.com/LanNguyenSi/`, both anchored to a full
+  `https://` URL), widens the pack's instruction-file globs to cover this
+  package's `assets/` tree and the `agentic-coding-playbook` package, and
+  overrides `placement-slop/dated-evidence`, `placement-slop/tally-phrase`,
+  and `placement-slop/opaque-id` from their pack default of `warn` to
+  `block`, so the CI job actually fails on a leaked date, tally phrase, or
+  opaque id instead of only warning (a home path or an unlisted org marker
+  was already `block` by pack default). `packages/github-api-tool/SKILL.md`
+  carries two pre-existing dated examples that this severity change would
+  now block; it is `ignorePaths`-excluded pending a follow-up cleanup of
+  that unrelated package.
+  Known limit of the pack, unchanged here: an `allow` match suppresses
+  every placement rule on that line, so a home path or a date that shares
+  a line with an allowed repo URL is not reported; a span-scoped allow is
+  a slop-detector follow-up.
+
 ## [0.23.0] - 2026-08-24
 
 ### Changed

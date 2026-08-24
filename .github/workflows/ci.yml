@@ -15,6 +15,29 @@ concurrency:
 # package.json), and `scaffoldkit` is a Python sub-package (handled in its
 # own toolchain), so nothing to build/test for those here.
 jobs:
+  placement-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/slop-detector/package-lock.json
+
+      - name: Install slop-detector
+        working-directory: packages/slop-detector
+        run: npm ci
+
+      - name: Build slop-detector
+        working-directory: packages/slop-detector
+        run: npm run build
+
+      - name: Check for org-, machine-, or point-in-time-bound evidence in instruction files
+        run: node packages/slop-detector/dist/cli.js check . --pack placement-slop --config slop.config.yml
+
   lint-cli-flag-order:
     runs-on: ubuntu-latest
     timeout-minutes: 2
