@@ -2219,11 +2219,19 @@ describe("the placement-guard CI job and slop.config.yml stay wired up (0.24.0)"
  */
 describe("the CHANGELOG 0.24.0 evidence note carries the four durable evidence facts", () => {
   const changelogMd = readDoc("CHANGELOG.md");
+  // Scope to the 0.24.0 section only: the same substrings recur in older
+  // entries, so a whole-file assertion would pass even if the note were
+  // mangled (review round 2 mutation test).
+  const start = changelogMd.indexOf("## [0.24.0]");
+  const next = changelogMd.indexOf("\n## [", start + 1);
+  const section = changelogMd.slice(start, next === -1 ? undefined : next);
 
-  it("names the incident count, the reviewer role, the watchdog class, and the earliest incident date", () => {
-    expect(changelogMd).toContain("four");
-    expect(changelogMd).toContain("reviewer role");
-    expect(changelogMd).toContain("watchdog");
-    expect(changelogMd).toContain("2026-07-16");
+  it("names the incident count, the reviewer role, the watchdog class, and the incident dates inside the 0.24.0 section", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(section).toContain("four");
+    expect(section).toContain("reviewer role");
+    expect(section).toContain("watchdog");
+    expect(section).toContain("three were on 2026-07-16");
+    expect(section).toContain("one was on 2026-07-20");
   });
 });

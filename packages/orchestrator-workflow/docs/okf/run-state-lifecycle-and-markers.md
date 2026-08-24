@@ -52,14 +52,14 @@ lie behind the fork point of the change (the merge-base with the remote
 default branch) (SKILL.md:91-93). The in-repo changelog entry adds the
 consumer's malformed-value behavior: a valid sha gets an exact binding, a
 malformed value blocks explicitly via a 7-40 hex guard, and only a bare
-`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:659-664,
+`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:663-668,
 "grounding-mcp 0.6.0 reads this marker"; SKILL.md:94 points to "the
 consuming gate's documentation (grounding-mcp) for the full consumer
 semantics" (0.24.0 placement pass dropped the pinned `0.6.0` version
 number from this pointer; the CHANGELOG's 0.9.0 entry above still carries
 the version-specific historical claim), so external reader internals are
 not verified from this repo). Introduced in 0.9.0
-(CHANGELOG.md:658-671). Pinned by template-markers.test.ts:19,33-37 (exactly
+(CHANGELOG.md:662-675). Pinned by template-markers.test.ts:19,33-37 (exactly
 one `run-base` marker, defaulting to `TODO`) and :39-43 (the literal line,
 wrapper included).
 
@@ -81,7 +81,7 @@ value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
 non-accepting (fail-closed)" (SKILL.md:219-223). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
-(CHANGELOG.md:760-767). Consumer is "the harness solution-acceptance
+(CHANGELOG.md:764-771). Consumer is "the harness solution-acceptance
 run-gate" per SKILL.md:220-221; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18 (regexes) and :21-31 (one marker per
@@ -97,7 +97,7 @@ locates this table by its header row and verifies unresolved findings from
 those two columns. Do not rename or drop them."
 (05-review-findings.md:9; line 10 and the 0.7.3 changelog entry attribute
 that reader to grounding-mcp). This was a reactive fix (0.7.3,
-CHANGELOG.md:708-720): a live run had drifted onto
+CHANGELOG.md:712-724): a live run had drifted onto
 `| Severity | Finding | Resolution |` (no Decision column), and the reader
 failed closed with an explicit "not in the expected table format" blocker
 rather than silently passing. The Decision legend defines
@@ -106,7 +106,7 @@ resolved only when its Decision is `accepted` or `defer`; every other value
 (`fix`, `reject`, blank, `open`, `TODO`) leaves it unresolved and **arms**
 the completeness gate (05-review-findings.md:10). The template's example row
 was deliberately narrowed to `accepted/defer` only (0.7.4,
-CHANGELOG.md:692-702) so the template itself never invites `fix`/`reject`
+CHANGELOG.md:696-706) so the template itself never invites `fix`/`reject`
 as if they were resolutions. Pinned by template-markers.test.ts:59-70
 (header row carries both `severity` and `decision` cells), :72-74 (the
 load-bearing comment exists), :76-90 (example row's Decision cell is
@@ -184,7 +184,7 @@ discovery-side rule (the Discover step already checks `docs/okf/` before
 hand-mapping terrain, SKILL.md:108-109); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
-(CHANGELOG.md:582-600). Pinned by
+(CHANGELOG.md:586-604). Pinned by
 docs-consistency.test.ts:300-307 (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
 "docs/okf/" also occur in the Discover-step test), :309-313 (source-overlap

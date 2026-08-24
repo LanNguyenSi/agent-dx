@@ -95,6 +95,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries two pre-existing dated examples that this severity change would
   now block; it is `ignorePaths`-excluded pending a follow-up cleanup of
   that unrelated package.
+  Known limit of the pack, unchanged here: an `allow` match suppresses
+  every placement rule on that line, so a home path or a date that shares
+  a line with an allowed repo URL is not reported; a span-scoped allow is
+  a slop-detector follow-up.
 
 ## [0.23.0] - 2026-08-24
 

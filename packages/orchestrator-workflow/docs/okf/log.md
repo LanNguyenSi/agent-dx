@@ -1809,7 +1809,9 @@
   guard was re-run clean (0 violations, exit 0), then a negative control
   (a dated, tallied line added to SKILL.md) confirmed it now exits 1 with a
   `block` finding, then the guard was re-run clean again after restoring
-  the file. The CHANGELOG's 0.24.0 evidence note now quotes the two
+  the file. Residual, disclosed rather than fixed: the pack applies an
+  `allow` match to the whole line, so a home path or date sharing a line
+  with an allowed URL is not reported (slop-detector follow-up). The CHANGELOG's 0.24.0 evidence note now quotes the two
   removed SKILL.md sentences verbatim and states the incident dates (three
   on 2026-07-16, one on 2026-07-20); moving that note under `### Changed`
   as a sub-bullet (instead of its own H3) shifted every `CHANGELOG.md:`
