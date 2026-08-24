@@ -42,7 +42,7 @@ exactly as `packages/orchestrator-workflow/test/docs-consistency.test.ts:182`
 computes it: `ROLES.filter((role) => !READ_ONLY_ROLES.has(role))` →
 `task-slicer, implementer`. That posture is tool-level only for
 Edit/Write/NotebookEdit; Bash mutation is guarded by prompt instruction alone,
-which `packages/orchestrator-workflow/test/docs-consistency.test.ts:506-512`
+which `packages/orchestrator-workflow/test/docs-consistency.test.ts:515-522`
 pins README.md to state honestly ("guarded by instruction only", "nothing
 technically prevents it") rather than claiming full closure — since 0.21.0
 the pinned phrase names `explorer, reviewer, and advisor` instead of just
@@ -67,7 +67,7 @@ fenced yaml block (the orchestrator's reference copy), once in the role's
 installed prompt, in its trailing "Return exactly this structure as your
 final output, nothing else" block:
 
-- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:209-233`
+- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:215-237`
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:47-70`.
 - Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:263-288`
@@ -306,7 +306,7 @@ accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:358-386` (0.14.0): the
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:399-429` (0.14.0): the
 agent-dx run `2026-07-18-harness-subprocess-test-deflake` accepted an
 implementer's "8/8 green" flake-rate claim on a `maxWorkers` cap fix, then
 the reviewer independently reran the suite and found 2/6 red on an
