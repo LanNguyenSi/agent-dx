@@ -37,11 +37,11 @@
   the template's old line 14 down by +1, and none of the three docs'
   `05-review-findings.md:` citations past that point were re-checked against
   it in the first pass. Review caught four resulting stale citations —
-  review-gate-and-waivers.md's `05-review-findings.md:25` (Acceptance
-  Recommendation enum line, should read `:26`) and `:27` (the
+  review-gate-and-waivers.md's `05-review-findings.md:26` (Acceptance
+  Recommendation enum line, should read `:26`) and `27` (the
   acceptance-recommendation marker, should read `:28`), and
-  run-state-lifecycle-and-markers.md's matching `:27` (marker, `:28`) and
-  `:23-25` (heading/blank/enum span, `:24-26`) — all four now corrected and
+  run-state-lifecycle-and-markers.md's matching `27` (marker, `:28`) and
+  `23-25` (heading/blank/enum span, `:24-26`) — all four now corrected and
   re-verified by direct read against the current template. A full sweep of
   every `05-review-findings.md:` citation across the bundle (docs, SKILL.md,
   tests) confirmed these were the only four affected; citations at or before
@@ -159,8 +159,8 @@
   pre-existing warnings unrelated to this fix-round —
   run-state-lifecycle-and-markers.md's `README.md`/`INSTALL-AGENT.md`
   staleness and subagent-contracts-superset.md's `src/models.ts` staleness
-  (its `models.ts:27-32` `DEFAULT_MODELS` citation, at minimum, is now
-  stale too, having moved to `:70-75` by the same Profile-block insertion
+  (its `models.ts:28-32` `DEFAULT_MODELS` citation, at minimum, is now
+  stale too, having moved to `70-75` by the same Profile-block insertion
   documented above). Neither install-fence-mechanics.md nor
   model-preselection.md contributes any finding to that run. Full suite
   152/152 (147 + 5 new: the fallback test above, three downgrade-note
@@ -1041,7 +1041,7 @@
   `timestamp:` frontmatter bumped to `2026-08-20T23:59:00Z` on the four
   re-verified docs plus, in a second pass below, `install-fence-mechanics.md`
   (model-preselection.md's citation touched was a single flat +6 shift,
-  `agents-md-section.md:104-110` -> `:110-116`, itself verified against
+  `agents-md-section.md:104-110` -> `110-116`, itself verified against
   the current file, not computed blind).
 
   Correction (same-day review round 1 on this pass): the "82 total ...
@@ -1472,3 +1472,11 @@
   re-verified against the post-F10 file regardless. This entry exists so the
   audit trail records the gap honestly rather than silently rewriting the
   prior entry's claim: the fix, not just the doc content, is logged.
+
+- 2026-08-24 (agent-tasks 1d6e0b3e, okf-kit 0.5.0 rollout): ran the new
+  citations-resolve rule (okf-kit 0.5.0, PR #111) against this bundle for
+  the first time and fixed every resulting warning; full details in the
+  agent-dx repo's commit for agent-tasks 1d6e0b3e rather than repeated here,
+  to avoid re-introducing the same kind of stale bare line-number citation
+  this pass exists to fix. okf-staleness.yml's pin was bumped to okf-kit
+  0.5.0 in the same change.

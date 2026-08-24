@@ -53,7 +53,7 @@ jobs:
         # (exit 0, no output). The output assertion below exists to catch
         # any regression of that failure mode: never assert on exit code
         # alone here.
-        run: npm install -g okf-kit@0.3.1
+        run: npm install -g okf-kit@0.5.0
 
       - name: Assert CLI is alive (output, not exit code)
         shell: bash
@@ -99,9 +99,19 @@ jobs:
               jq -r '.findings[] | "\(.severity | ascii_upcase) \(.ruleId) \(.file): \(.message)"' okf-report.json
               echo '```'
               echo ""
-              echo "A STALE warning means a \`sources:\` path changed after the"
-              echo "doc's verification timestamp: re-verify the doc against the"
-              echo "source, then update its timestamp. This job never blocks."
+              echo "A sources-fresh STALE warning means a \`sources:\` path"
+              echo "changed after the doc's verification timestamp: re-verify"
+              echo "the doc against the source, then update its timestamp."
+              echo "A citations-resolve warning (blank-start-line,"
+              echo "closing-brace-start-line, missing-file, inverted-range,"
+              echo "range-exceeds-file) means a \`path:N\`/\`path:N-M\` citation"
+              echo "in the doc's prose no longer points at real content, even"
+              echo "though the source file itself is not stale: re-check the"
+              echo "citation against the file's current line numbers and"
+              echo "correct it (no timestamp bump needed for this rule alone)."
+              echo "A citations-resolve notice (ambiguous target,"
+              echo "unreadable-target) is informational only and never counts"
+              echo "toward --strict. This job never blocks either way."
             else
               echo "Clean, no findings."
             fi
@@ -113,7 +123,7 @@ jobs:
           jq -r '
             [.findings[] | select(.severity == "warning")]
             | group_by(.file)[]
-            | "\(.[0].file): \(length) warning(s), stale sources, full list in the job summary"
+            | "\(.[0].file): \(length) warning(s) (stale sources and/or unresolved citations), full list in the job summary"
           ' okf-report.json | while IFS= read -r line; do
             echo "::warning title=OKF bundle drift::${line}"
           done
