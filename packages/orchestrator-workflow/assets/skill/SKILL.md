@@ -141,7 +141,16 @@ directory and the subagents.
    installed `implementer-<tier>` subagents, if any) by the task's
    complexity and risk, at your own judgment, defaulting to the unsuffixed
    subagent when unsure; record a non-default tier choice with a
-   one-line reason in `03-decisions.md` when the task is non-trivial. When a
+   one-line reason in `03-decisions.md` when the task is non-trivial.
+   `implementer-low` is spawned only when none of the following hold: an
+   acceptance criterion demands a test, typecheck, lint, or build run; the
+   task assignment names mutation probes to run; or the task slicer's
+   `suggested_tests` came back non-empty. Any one of those three excludes
+   `implementer-low`, even for a change that looks mechanical (a bugfix
+   included) (2026-08-24 A/B measurement, n=8: implementer-low reached accept
+   a median 320 seconds slower, p=0.016, with 9 high-plus-critical review
+   findings against 1 and 8 fix rounds against 1). When it is unclear
+   whether a criterion demands a run, exclude `implementer-low`. When a
    task's acceptance rests on a test that must fail without the change, name
    the mutation probes to run in the task assignment; the implementer reports
    each one in the output contract's `mutation_probes` field (apply the mutant

@@ -5,6 +5,32 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Tightened the `implementer-low` tier rule from discretion to a checkable
+  gate on the task contract.** `agents-md-section.md`'s Scaling delegation
+  bullet and `SKILL.md` step 6 ("Delegate implementation") no longer say
+  `-low` "fits mechanical, narrowly scoped tasks" for the implementer;
+  `implementer-low` is now spawned only when none of the following hold: an
+  acceptance criterion demands a test, typecheck, lint, or build run; the task
+  assignment names mutation probes to run; or the task slicer's
+  `suggested_tests` came back non-empty. A task with any of those, including a
+  bugfix that looks mechanical, runs on the unsuffixed implementer or higher.
+  When it is unclear whether a criterion demands a run, exclude
+  `implementer-low`. The explorer and the task-slicer keep the prior
+  discretionary `-low` guidance unchanged, since no equivalent measurement
+  exists for those roles. Operator decision 2026-08-24 after a Tier-A/B
+  measurement of implementer-low as installed (Haiku 4.5) against the default
+  implementer (Sonnet 5, effort medium) (agent-tasks task 7f38899d), blinded,
+  n=8, identical tasks in both tiers: implementer-low reached accept a median
+  320 seconds slower (p=0.016), drew 9 high-plus-critical review findings
+  against 1, and needed 8 fix rounds against 1. The A/B's implementer-low ran
+  on Haiku 4.5, which does not support the `effort` parameter, so the harness
+  ignores the pinned `effort: low` on that model; the measurement compared
+  Haiku 4.5 without effort control against Sonnet 5 at `effort: medium`.
+
 ## [0.22.0] - 2026-08-20
 
 ### Changed

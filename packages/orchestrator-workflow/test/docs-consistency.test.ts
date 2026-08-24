@@ -84,6 +84,30 @@ function unwrap(text: string): string {
   return text.replace(/\s+/g, " ");
 }
 
+/**
+ * Slices `source` from the first occurrence of `startPhrase` through the
+ * end of the first occurrence of `endPhrase` that follows it (inclusive of
+ * `endPhrase` itself). Used to bound a derivation to exactly the sentence(s)
+ * that state a rule, rather than a whole doc or a whole bullet, so a check
+ * built on the slice cannot be satisfied by unrelated text elsewhere.
+ */
+function phraseBoundedSlice(
+  source: string,
+  startPhrase: string,
+  endPhrase: string,
+): string {
+  const start = source.indexOf(startPhrase);
+  expect(start, `"${startPhrase}" not found`).toBeGreaterThanOrEqual(0);
+  const end = source.indexOf(endPhrase, start);
+  expect(end, `"${endPhrase}" not found after start`).toBeGreaterThan(start);
+  return source.slice(start, end + endPhrase.length);
+}
+
+/** Backtick-quoted lowercase identifiers containing at least one underscore. */
+function backtickSnakeCaseIdentifiers(text: string): string[] {
+  return [...text.matchAll(/`([a-z][a-z0-9_]*_[a-z0-9_]+)`/g)].map((m) => m[1]);
+}
+
 describe("review gate ships in the policy, skill, and handoff template", () => {
   const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
@@ -1501,6 +1525,234 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
     expect(step).toContain(
       "record a non-default tier choice with a one-line reason in `03-decisions.md` when the task is non-trivial",
     );
+  });
+
+  /**
+   * 2026-08-24 (operator decision after Tier-A/B measurement, agent-tasks
+   * task 7f38899d): the old `-low` guidance ("fits mechanical, narrowly
+   * scoped tasks") was discretionary and, for the implementer specifically,
+   * proved wrong in a blinded A/B (n=8): implementer-low reached accept a
+   * median 320s slower (p=0.016), with 9 high-plus-critical review findings
+   * against 1 and 8 fix rounds against 1. A first fix round worded the gate
+   * around `mutation_probes` and `verification_commands` fields the kit's
+   * subagent input contract does not define (fix1 review, HIGH-1): the
+   * subagent input contract (SKILL.md's "Subagent input contract" block)
+   * carries `acceptance_criteria`, not `mutation_probes`/
+   * `verification_commands`, and the task slicer's output contract carries
+   * `suggested_tests`. The rule now names only that existing vocabulary:
+   * an acceptance criterion demanding a test/typecheck/lint/build run, the
+   * task assignment naming mutation probes to run (a phrase step 6 already
+   * used for the implementer's own mutation_probes output field), or the
+   * task slicer's `suggested_tests` coming back non-empty. These checks pin
+   * the corrected wording in both docs and guard against the old sentence,
+   * or the invented field names, resurfacing for the implementer.
+   */
+  it("agents-md-section states the implementer-low gate using only existing contract vocabulary (no test/typecheck/lint/build AC, no mutation probes named, no suggested_tests)", () => {
+    expect(agentsMdSection).toContain(
+      "`-low` is spawned only when none of the following hold: an acceptance criterion demands a test, typecheck, lint, or build run; the task assignment names mutation probes to run; or the task slicer's `suggested_tests` came back non-empty",
+    );
+    expect(agentsMdSection).toContain(
+      "any one of those three excludes `implementer-low`, and the task runs on the unsuffixed implementer or higher",
+    );
+  });
+
+  it("SKILL.md step 6 carries the same implementer-low gate", () => {
+    const start = skillMd.indexOf("**Delegate implementation.**");
+    const end = skillMd.indexOf("**Delegate review.**");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const step = skillMd.slice(start, end);
+    expect(step).toContain(
+      "`implementer-low` is spawned only when none of the following hold: an acceptance criterion demands a test, typecheck, lint, or build run; the task assignment names mutation probes to run; or the task slicer's `suggested_tests` came back non-empty",
+    );
+    expect(step).toContain(
+      "Any one of those three excludes `implementer-low`, even for a change that looks mechanical",
+    );
+  });
+
+  /**
+   * The implementer-low gate sentence(s) in each doc, sliced narrowly so a
+   * check built on them cannot be satisfied by unrelated prose elsewhere in
+   * the doc: agents-md-section.md's slice runs from "For the implementer
+   * specifically" through the gate's own tie-break close, "exclude
+   * `implementer-low`." (fix-round-3, MEDIUM-2/LOW-4: narrowed from the
+   * tier bullet's own "use the default." close, which pulled in the
+   * unrelated explorer/task-slicer sentence, the `-xhigh` sentence, the
+   * reviewer-downshift and advisor sentences, and the closing tier-choice
+   * sentence, so a mutant touching only those was never actually scoped out
+   * on purpose). SKILL.md step 6's slice runs from "`implementer-low` is
+   * spawned only" through that sentence's own "came back non-empty." close
+   * (step 6's later mutation-probe-reporting sentence, which also mentions
+   * `mutation_probes`, sits outside this slice on purpose: it is a
+   * reporting instruction, not part of the tier-gate rule). The fail-safe
+   * tie-break sentence itself ("when it is unclear ... exclude
+   * `implementer-low`") sits inside agents-md-section.md's slice but
+   * outside SKILL.md's narrower `skillImplementerGateSlice`, so the tests
+   * below that pin it use the wider `skillStep6Slice` for SKILL.md instead.
+   *
+   * Each slice is computed lazily, memoized behind a getter called from
+   * inside each `it` rather than at describe-body evaluation time
+   * (fix-round-3, LOW-1): a `phraseBoundedSlice` failure used to throw
+   * while the test file was still being collected, which vitest reports as
+   * a whole-file collection error (every test in this file failing, not
+   * just the ones that touch this slice); the getters confine a
+   * phrase-drift failure to the named tests that actually call them.
+   */
+  let agentsImplementerGateSliceCache: string | undefined;
+  function agentsImplementerGateSlice(): string {
+    if (agentsImplementerGateSliceCache === undefined) {
+      agentsImplementerGateSliceCache = phraseBoundedSlice(
+        agentsMdSection,
+        "For the implementer specifically",
+        "exclude `implementer-low`.",
+      );
+    }
+    return agentsImplementerGateSliceCache;
+  }
+  let skillStep6SliceCache: string | undefined;
+  function skillStep6Slice(): string {
+    if (skillStep6SliceCache === undefined) {
+      skillStep6SliceCache = phraseBoundedSlice(
+        skillMd,
+        "**Delegate implementation.**",
+        "**Delegate review.**",
+      );
+    }
+    return skillStep6SliceCache;
+  }
+  let skillImplementerGateSliceCache: string | undefined;
+  function skillImplementerGateSlice(): string {
+    if (skillImplementerGateSliceCache === undefined) {
+      skillImplementerGateSliceCache = phraseBoundedSlice(
+        skillStep6Slice(),
+        "`implementer-low` is spawned only",
+        "came back non-empty.",
+      );
+    }
+    return skillImplementerGateSliceCache;
+  }
+
+  it("the implementer-low gate slice in each doc no longer carries the old discretionary '-low' guidance", () => {
+    expect(agentsImplementerGateSlice()).not.toContain(
+      "fits mechanical, narrowly scoped tasks",
+    );
+    expect(skillImplementerGateSlice()).not.toContain(
+      "fits mechanical, narrowly scoped tasks",
+    );
+  });
+
+  /**
+   * fix-round-3 (MEDIUM-3): fix-round-2 softened the gate's framing from
+   * "checkable criterion, not a judgment call" to "checkable against the
+   * task contract rather than a judgment about how hard the task looks",
+   * but nothing pinned the new wording, so a mutant reverting it to the old
+   * phrase stayed green.
+   */
+  it("agents-md-section frames the gate as checkable against the task contract, not a judgment about how hard the task looks", () => {
+    expect(agentsImplementerGateSlice()).toContain(
+      "checkable against the task contract rather than a judgment about how hard the task looks",
+    );
+  });
+
+  /**
+   * fix-round-3 (MEDIUM-2/LOW-4): fix-round-2 added a fail-safe tie-break
+   * ("when it is unclear whether a criterion demands a run, exclude
+   * `implementer-low`") to both agents-md-section.md and SKILL.md step 6,
+   * but nothing pinned it, so a mutant dropping the sentence from either
+   * doc stayed green.
+   */
+  it("both docs carry the fail-safe tie-break: when unclear, exclude implementer-low", () => {
+    expect(agentsImplementerGateSlice()).toContain(
+      "when it is unclear whether a criterion demands a run, exclude `implementer-low`",
+    );
+    expect(skillStep6Slice()).toContain(
+      "When it is unclear whether a criterion demands a run, exclude `implementer-low`",
+    );
+  });
+
+  /**
+   * fix-round-3 (LOW-3): the A/B measurement's own headline numbers (the
+   * median slowdown, its p-value, and the high-plus-critical finding count)
+   * were unpinned in both docs, so a mutant quietly changing one of them in
+   * either agents-md-section.md or SKILL.md stayed green.
+   */
+  it("agents-md-section states the A/B measurement's headline numbers", () => {
+    expect(agentsMdSection).toContain("median 320 seconds slower");
+    expect(agentsMdSection).toContain("p=0.016");
+    expect(agentsMdSection).toContain("9 high-plus-critical");
+  });
+
+  it("SKILL.md states the same A/B measurement headline numbers", () => {
+    expect(skillMd).toContain("median 320 seconds slower");
+    expect(skillMd).toContain("p=0.016");
+    expect(skillMd).toContain("9 high-plus-critical");
+  });
+
+  /**
+   * HIGH-2 fix (fix-round-2 review): the fix-round-1 pin below this comment
+   * used to only check two hand-picked field names (that
+   * `acceptance_criteria` is present, and a literal ban on the string
+   * "verification_commands") without deriving anything from the gate's own
+   * wording, so a mutant that reworded the gate to cite a different
+   * invented field (for example `verification_steps`) stayed green. This
+   * pin instead regex-extracts every backtick-quoted snake_case identifier
+   * (a lowercase word containing at least one underscore) out of the two
+   * gate slices above, then asserts each one is a field either the
+   * Subagent input contract or the Task slicer output contract actually
+   * defines (both blocks read raw, not unwrapped, so the yaml field names
+   * are read verbatim). A gate that cites any field neither contract block
+   * defines - the old invented `verification_commands`, a new invented name
+   * like `verification_steps`, or an implementer-OUTPUT-only field like
+   * `mutation_probes` that neither the input nor the slicer contract
+   * carries - fails this pin without needing a hand-picked literal ban for
+   * every possible invented name.
+   */
+  it("every backtick-quoted snake_case identifier the implementer-low gate cites (in either doc) is a field the subagent input or task slicer output contract actually defines", () => {
+    const skillMdRaw = readAsset("skill/SKILL.md");
+    const inputContractStart = skillMdRaw.indexOf("## Subagent input contract");
+    const inputContractEnd = skillMdRaw.indexOf(
+      "## Implementer output contract",
+      inputContractStart,
+    );
+    expect(inputContractStart).toBeGreaterThanOrEqual(0);
+    expect(inputContractEnd).toBeGreaterThan(inputContractStart);
+    const inputContractBlock = skillMdRaw.slice(
+      inputContractStart,
+      inputContractEnd,
+    );
+
+    const slicerContractStart = skillMdRaw.indexOf(
+      "## Task slicer output contract",
+    );
+    const slicerContractEnd = skillMdRaw.indexOf(
+      "## Advisor output contract",
+      slicerContractStart,
+    );
+    expect(slicerContractStart).toBeGreaterThanOrEqual(0);
+    expect(slicerContractEnd).toBeGreaterThan(slicerContractStart);
+    const slicerContractBlock = skillMdRaw.slice(
+      slicerContractStart,
+      slicerContractEnd,
+    );
+
+    // Sanity: the field names the gate cites really live in these blocks.
+    expect(inputContractBlock).toContain("acceptance_criteria");
+    expect(slicerContractBlock).toContain("suggested_tests");
+
+    const cited = new Set([
+      ...backtickSnakeCaseIdentifiers(agentsImplementerGateSlice()),
+      ...backtickSnakeCaseIdentifiers(skillImplementerGateSlice()),
+    ]);
+    // Guard the extraction itself: if this drops to 0, the membership check
+    // below would vacuously pass without checking anything.
+    expect(cited.size).toBeGreaterThan(0);
+    for (const identifier of cited) {
+      expect(
+        inputContractBlock.includes(identifier) ||
+          slicerContractBlock.includes(identifier),
+        `\`${identifier}\` is cited by the implementer-low gate but is not a field either the Subagent input contract or the Task slicer output contract defines`,
+      ).toBe(true);
+    }
   });
 });
 
