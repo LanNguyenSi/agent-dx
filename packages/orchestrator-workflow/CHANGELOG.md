@@ -5,6 +5,83 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-08-24
+
+### Changed
+
+- **Moved org-, machine-, and point-in-time-bound evidence out of the kit's
+  reusable instruction files; rule text is unchanged.** Public,
+  tool-agnostic kit files (`SKILL.md`, `agents-md-section.md`) now carry
+  rules and procedures only; the measurements, dates, sample sizes, task
+  ids, and incident tallies that used to sit inline are recorded here in
+  the changelog instead, with a one-line pointer left in prose.
+  - `SKILL.md` step 6 ("Delegate implementation"): the parenthetical
+    `(2026-08-24 A/B measurement, n=8: implementer-low reached accept a
+    median 320 seconds slower, p=0.016, with 9 high-plus-critical review
+    findings against 1 and 8 fix rounds against 1)` is now `(anchored by an
+    A/B measurement; see CHANGELOG 0.23.0)`. The full numbers already live
+    in the 0.23.0 entry below.
+  - `agents-md-section.md`'s Scaling delegation bullet: the paragraph
+    naming the A/B's `n=8`, the median slowdown, `p=0.016`, the
+    high-plus-critical finding count, the fix-round count, the Haiku 4.5
+    model detail, and agent-tasks task `7f38899d` is replaced by "This rule
+    is anchored by an A/B measurement; the data and the model caveat are
+    recorded in the orchestrator-workflow CHANGELOG (0.23.0)." Same data,
+    same 0.23.0 entry.
+  - `SKILL.md`'s "Subagent misfire rule": the incident tally `(four so
+    far)` and the whole reviewer/model-correlation passage ("So far this
+    signal has only been observed for the reviewer role ...", including the
+    0.21.0 advisor remark and the pointer to the per-role model
+    preferences) are removed. The rule itself (the signal definition, the
+    contract-parse and near-instant detection signals, the
+    resume-over-respawn preference and its reasoning, the respawn fallback,
+    the watchdog-stall exception, the `03-decisions.md` record requirement,
+    and "a misfired review is not a review") is unchanged. The evidence note
+    below is the durable record of what was removed.
+  - `SKILL.md`'s Run state paragraph: "see the grounding-mcp 0.6.0 docs for
+    the full consumer semantics" is now "see the consuming gate's
+    documentation (grounding-mcp) for the full consumer semantics", dropping
+    the pinned version number.
+
+### Added
+
+- **Reviewer placement check.** `reviewer.md`'s "Check, at minimum" list
+  gains a check for org-, machine-, or point-in-time-bound evidence (dates,
+  sample sizes, task ids, home paths, incident tallies) leaking into a
+  reusable instruction file (a skill, an agent prompt, an AGENTS.md
+  section, a template); the fix it recommends is moving the evidence to the
+  changelog, the run files, or the consuming workspace and leaving a
+  one-line pointer.
+- **Hand-off placement check.** `SKILL.md` step 9 ("Hand off") gains one
+  sentence for the orchestrator: check before handing off that no such
+  evidence was added to a reusable instruction file.
+- **`placement-guard` CI job.** A dedicated job in agent-dx's
+  `.github/workflows/ci.yml`, separate from the package matrix, builds
+  `slop-detector` and runs its opt-in `placement-slop` pack against the
+  monorepo's instruction files (`packages/orchestrator-workflow/assets/**`
+  and `packages/agentic-coding-playbook/**`, configured via the repo-root
+  `slop.config.yml`), failing on block-level violations (a home path or an
+  unlisted org marker in an instruction file).
+- **Root `slop.config.yml`.** Opts the `placement-slop` pack in for the CI
+  job, configures the `LanNguyenSi` org marker with `allow` entries for its
+  legitimate repo and package-registry links, and widens the pack's
+  instruction-file globs to cover this package's `assets/` tree and the
+  `agentic-coding-playbook` package.
+
+### Evidence note (moved out of `SKILL.md`'s Subagent misfire rule)
+
+Every incident of the near-instant, no-tool-activity misfire signal whose
+outcome was recorded (four so far) has resolved on the first resume
+attempt; all four were in the reviewer role, a role whose default model
+differs from explorer's, task-slicer's, and implementer's (since 0.21.0 the
+advisor shares the reviewer's default model too, but the advisor has had no
+spawns yet, so it contributes no evidence either way). Treat that
+correlation as an open lead worth watching as more incidents accumulate,
+not as a confirmed cause. Separately, one recorded incident of the
+structurally different mid-run watchdog-stall misfire class did not resolve
+on resume (it stalled a second time); only a fresh, explicitly constrained
+respawn produced a contract-valid review for that incident.
+
 ## [0.23.0] - 2026-08-24
 
 ### Changed

@@ -90,8 +90,8 @@ run-completeness readers, not an acceptance verdict, and it fails open:
 left as `TODO` it does not block anything, the reader just falls back to a
 tolerant day-granular date heuristic. The recorded base must resolve in the
 repo, be an ancestor of HEAD, and must not lie behind the fork point of the
-change (the merge-base with the remote default branch); see the
-grounding-mcp 0.6.0 docs for the full consumer semantics.
+change (the merge-base with the remote default branch); see the consuming
+gate's documentation (grounding-mcp) for the full consumer semantics.
 
 ## Workflow
 
@@ -147,10 +147,8 @@ directory and the subagents.
    task assignment names mutation probes to run; or the task slicer's
    `suggested_tests` came back non-empty. Any one of those three excludes
    `implementer-low`, even for a change that looks mechanical (a bugfix
-   included) (2026-08-24 A/B measurement, n=8: implementer-low reached accept
-   a median 320 seconds slower, p=0.016, with 9 high-plus-critical review
-   findings against 1 and 8 fix rounds against 1). When it is unclear
-   whether a criterion demands a run, exclude `implementer-low`. When a
+   included) (anchored by an A/B measurement; see CHANGELOG 0.23.0). When it is
+   unclear whether a criterion demands a run, exclude `implementer-low`. When a
    task's acceptance rests on a test that must fail without the change, name
    the mutation probes to run in the task assignment; the implementer reports
    each one in the output contract's `mutation_probes` field (apply the mutant
@@ -213,7 +211,10 @@ directory and the subagents.
    validator when one is available (for example `okf-kit check`). Repos
    without a bundle are unaffected. Then fill `06-handoff.md` and report to the
    operator: what changed, why, how it was verified, known risks, accepted
-   waivers, suggested next step.
+   waivers, suggested next step. Before handing off, check that no org-,
+   machine- or point-in-time-bound evidence was added to a reusable
+   instruction file; such evidence belongs in the changelog, the run files or
+   the consuming workspace, with a pointer left behind.
 
 When finalizing `05-review-findings.md` and `06-handoff.md`, replace the `TODO`
 in each `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
@@ -451,22 +452,14 @@ explicitly repeats the original assignment rather than a generic retry,
 since resume keeps the subagent's prior turn in context while a fresh spawn
 starts cold and risks the same misfire again. Every incident of this exact
 signal (a return within seconds, zero tool calls, harness or system
-boilerplate instead of the output contract) whose outcome was recorded
-(four so far) has resolved on the first resume attempt; fall back to a
-fresh respawn only if the resume attempt itself misfires the same way. So
-far this signal has only been observed for the reviewer role, a role whose
-default model differs from explorer's, task-slicer's, and implementer's
-(since 0.21.0 the advisor shares the reviewer's default model too; the
-advisor has had no spawns yet, so it contributes no evidence either way; see
-the per-role model preferences); treat that correlation as an open lead
-worth watching as more incidents accumulate, not as a confirmed cause. This
-resume-over-respawn preference does not extend to a structurally different
-misfire class: a mid-run watchdog stall (the subagent goes idle partway
-through a run rather
-than returning near-instantly) did not resolve on resume in the one
-measured incident of that class, it stalled a second time, and only a
-fresh, explicitly constrained respawn produced a contract-valid review;
-treat a watchdog stall as outside this preference. Record every misfire in
+boilerplate instead of the output contract) whose outcome was recorded has
+resolved on the first resume attempt; fall back to a fresh respawn only if
+the resume attempt itself misfires the same way. This resume-over-respawn
+preference does not extend to a structurally different misfire class: a
+mid-run watchdog stall (the subagent goes idle partway through a run rather
+than returning near-instantly) did not resolve on resume; only a fresh,
+explicitly constrained respawn produced a contract-valid review; treat a
+watchdog stall as outside this preference. Record every misfire in
 `03-decisions.md`. This matters most for review: a misfired review is not a
 review and never satisfies the review gate, since review is never skipped.
 

@@ -52,11 +52,14 @@ lie behind the fork point of the change (the merge-base with the remote
 default branch) (SKILL.md:91-93). The in-repo changelog entry adds the
 consumer's malformed-value behavior: a valid sha gets an exact binding, a
 malformed value blocks explicitly via a 7-40 hex guard, and only a bare
-`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:568-573,
+`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:645-650,
 "grounding-mcp 0.6.0 reads this marker"; SKILL.md:94 points to "the
-grounding-mcp 0.6.0 docs for the full consumer semantics", so external
-reader internals are not verified from this repo). Introduced in 0.9.0
-(CHANGELOG.md:567-580). Pinned by template-markers.test.ts:19,33-37 (exactly
+consuming gate's documentation (grounding-mcp) for the full consumer
+semantics" (0.24.0 placement pass dropped the pinned `0.6.0` version
+number from this pointer; the CHANGELOG's 0.9.0 entry above still carries
+the version-specific historical claim), so external reader internals are
+not verified from this repo). Introduced in 0.9.0
+(CHANGELOG.md:644-657). Pinned by template-markers.test.ts:19,33-37 (exactly
 one `run-base` marker, defaulting to `TODO`) and :39-43 (the literal line,
 wrapper included).
 
@@ -76,9 +79,9 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (SKILL.md:218-222). A freshly-copied run is
+non-accepting (fail-closed)" (SKILL.md:219-223). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
-(CHANGELOG.md:669-676). Consumer is "the harness solution-acceptance
+(CHANGELOG.md:746-753). Consumer is "the harness solution-acceptance
 run-gate" per SKILL.md:220-221; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18 (regexes) and :21-31 (one marker per
@@ -94,7 +97,7 @@ locates this table by its header row and verifies unresolved findings from
 those two columns. Do not rename or drop them."
 (05-review-findings.md:9; line 10 and the 0.7.3 changelog entry attribute
 that reader to grounding-mcp). This was a reactive fix (0.7.3,
-CHANGELOG.md:617-629): a live run had drifted onto
+CHANGELOG.md:694-706): a live run had drifted onto
 `| Severity | Finding | Resolution |` (no Decision column), and the reader
 failed closed with an explicit "not in the expected table format" blocker
 rather than silently passing. The Decision legend defines
@@ -103,7 +106,7 @@ resolved only when its Decision is `accepted` or `defer`; every other value
 (`fix`, `reject`, blank, `open`, `TODO`) leaves it unresolved and **arms**
 the completeness gate (05-review-findings.md:10). The template's example row
 was deliberately narrowed to `accepted/defer` only (0.7.4,
-CHANGELOG.md:601-611) so the template itself never invites `fix`/`reject`
+CHANGELOG.md:678-688) so the template itself never invites `fix`/`reject`
 as if they were resolutions. Pinned by template-markers.test.ts:59-70
 (header row carries both `severity` and `decision` cells), :72-74 (the
 load-bearing comment exists), :76-90 (example row's Decision cell is
@@ -129,7 +132,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and
 SKILL.md's step 7 carries the same one-sentence rule
-(SKILL.md:179-183). The runtime half (grounding-mcp's reader treating a
+(SKILL.md:177-181). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -167,20 +170,27 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (SKILL.md:208-213). It is explicitly non-gating: "apply
+`okf-kit check`) (SKILL.md:206-211). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:208-209,213-214). This is the symmetric counterpart to the 0.8.0
+(SKILL.md:206-207,211-212). Since 0.24.0 (placement rule) step 9 also
+carries a one-sentence placement check for the orchestrator: before handing
+off, check that no org-, machine- or point-in-time-bound evidence was added
+to a reusable instruction file (SKILL.md:214-217); the fix is to move the
+evidence to the changelog, the run files, or the consuming workspace, with a
+pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
+matching check for the same thing on the implementer side of a run. This is
+the symmetric counterpart to the 0.8.0
 discovery-side rule (the Discover step already checks `docs/okf/` before
 hand-mapping terrain, SKILL.md:108-109); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
-(CHANGELOG.md:491-509). Pinned by
-docs-consistency.test.ts:301-308 (the hook's opening phrase, anchored so a
+(CHANGELOG.md:568-586). Pinned by
+docs-consistency.test.ts:300-307 (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
-"docs/okf/" also occur in the Discover-step test), :310-314 (source-overlap
-check phrase), :316-320 (both responses named), :322-325 (validator-run
-phrase, `okf-kit check` framed as an example), :327-330 (non-gate
-optionality phrase), and :332-347 (the template section, its outcome
+"docs/okf/" also occur in the Discover-step test), :309-313 (source-overlap
+check phrase), :315-319 (both responses named), :321-324 (validator-run
+phrase, `okf-kit check` framed as an example), :326-329 (non-gate
+optionality phrase), and :331-346 (the template section, its outcome
 vocabulary, and that it is marked Optional and bundle-scoped).
 
 ## Where the shapes are pinned, and what belongs to sibling docs
@@ -199,9 +209,9 @@ anything inside it.
 (role enumeration, review-gate wording, instruction trust boundary,
 subagent misfire rule, task-slicer/subagent-contract field superset); only
 its `run-base fill instruction ships in the skill`
-(docs-consistency.test.ts:350-358) and
+(docs-consistency.test.ts:349-357) and
 `hand off keeps a curated knowledge bundle current`
-(docs-consistency.test.ts:297-348) `describe` blocks are this doc's topic.
+(docs-consistency.test.ts:296-347) `describe` blocks are this doc's topic.
 The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see

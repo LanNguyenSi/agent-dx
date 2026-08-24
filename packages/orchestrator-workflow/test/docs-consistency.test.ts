@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   CLASS_MODELS,
-  DEFAULT_MODELS,
   DEFAULT_TIER,
   READ_ONLY_ROLES,
   ROLES,
@@ -408,14 +407,16 @@ describe("subagent misfire rule ships in the skill", () => {
  * misfire signal, measured across repeated reviewer-subagent incidents where
  * a resume with the assignment explicitly repeated turned a misfired first
  * spawn into a contract-valid review. Pins the resume-over-respawn
- * preference, the repeat-the-assignment mechanic, the respawn fallback
- * condition, and the reviewer/model correlation noted as an open lead
- * rather than a proven cause. A same-day review-fix round then hardened
- * three more things: the "has resolved" claim is now bound to recorded
- * outcomes instead of asserted as a universal rate, the preference is
- * explicitly scoped away from a structurally different mid-run
- * watchdog-stall misfire class where resume did not work, and the
- * parenthetical signal definition itself is pinned.
+ * preference, the repeat-the-assignment mechanic, and the respawn fallback
+ * condition. A same-day review-fix round then hardened two more things: the
+ * "has resolved" claim is bound to recorded outcomes instead of asserted as
+ * a universal rate, and the preference is explicitly scoped away from a
+ * structurally different mid-run watchdog-stall misfire class where resume
+ * did not work; the parenthetical signal definition itself is pinned too.
+ * 0.24.0 (placement rule) removes the incident tally and the reviewer/model
+ * correlation passage from this rule; both were point-in-time evidence, now
+ * recorded in the CHANGELOG instead of kit prose, so the tests that pinned
+ * that passage are removed here along with it.
  */
 describe("the misfire rule prefers resume with a repeated assignment for the no-tool-activity signal", () => {
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
@@ -444,9 +445,9 @@ describe("the misfire rule prefers resume with a repeated assignment for the no-
     );
   });
 
-  it("binds the 'has resolved on first resume' claim to recorded outcomes, not a universal rate", () => {
+  it("binds the 'has resolved on first resume' claim to recorded outcomes", () => {
     expect(skillMd).toContain(
-      "whose outcome was recorded (four so far) has resolved on the first resume attempt",
+      "whose outcome was recorded has resolved on the first resume attempt",
     );
   });
 
@@ -456,41 +457,15 @@ describe("the misfire rule prefers resume with a repeated assignment for the no-
     );
   });
 
-  it("notes the reviewer/model correlation as an open lead, not a confirmed cause", () => {
-    expect(skillMd).toContain(
-      "So far this signal has only been observed for the reviewer role, a role whose default model differs from explorer's, task-slicer's, and implementer's",
+  it("no longer carries the incident tally or the reviewer/model correlation passage (0.24.0 placement rule)", () => {
+    expect(skillMd).not.toContain("(four so far)");
+    expect(skillMd).not.toContain(
+      "So far this signal has only been observed",
     );
-    expect(skillMd).toContain(
+    expect(skillMd).not.toContain(
       "since 0.21.0 the advisor shares the reviewer's default model too",
     );
-    // L3: the zero-observation for the advisor must read explicitly as no
-    // evidence either way, not as if it were negative evidence against the
-    // correlation (the advisor role is too new to have been spawned at all).
-    expect(skillMd).toContain(
-      "the advisor has had no spawns yet, so it contributes no evidence either way",
-    );
-    expect(skillMd).toContain(
-      "treat that correlation as an open lead worth watching as more incidents accumulate, not as a confirmed cause",
-    );
-  });
-
-  it("the 'default model differs' claim is grounded in DEFAULT_MODELS, not asserted in prose alone", () => {
-    // L2: derived from DEFAULT_MODELS rather than hardcoded, so a future
-    // role whose default model happens to match (or stop matching) the
-    // reviewer's is caught here instead of silently drifting from the
-    // prose's role list.
-    const namedRoles: Role[] = ROLES.filter(
-      (role) => DEFAULT_MODELS[role] !== DEFAULT_MODELS.reviewer,
-    );
-    expect(namedRoles.length).toBeGreaterThan(0);
-    for (const role of namedRoles) {
-      expect(DEFAULT_MODELS.reviewer).not.toBe(DEFAULT_MODELS[role]);
-      expect(skillMd).toContain(`${role}'s`);
-    }
-    // Grounds the "since 0.21.0 the advisor shares that model" half of the
-    // prose: if this ever goes false without the prose being corrected back
-    // to a differs-from-all-roles claim, this test should catch the drift.
-    expect(DEFAULT_MODELS.advisor).toBe(DEFAULT_MODELS.reviewer);
+    expect(skillMd).not.toContain("see the per-role model preferences");
   });
 
   it("scopes the resume-over-respawn preference away from the mid-run watchdog-stall misfire class", () => {
@@ -504,7 +479,7 @@ describe("the misfire rule prefers resume with a repeated assignment for the no-
 
   it("states the watchdog-stall class did not resolve on resume and needed a fresh constrained respawn instead", () => {
     expect(skillMd).toContain(
-      "did not resolve on resume in the one measured incident of that class, it stalled a second time, and only a fresh, explicitly constrained respawn produced a contract-valid review",
+      "did not resolve on resume; only a fresh, explicitly constrained respawn produced a contract-valid review",
     );
   });
 });
@@ -1671,21 +1646,31 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
   });
 
   /**
-   * fix-round-3 (LOW-3): the A/B measurement's own headline numbers (the
-   * median slowdown, its p-value, and the high-plus-critical finding count)
-   * were unpinned in both docs, so a mutant quietly changing one of them in
-   * either agents-md-section.md or SKILL.md stayed green.
+   * 0.24.0 (placement rule): the A/B measurement's headline numbers (n=8,
+   * the median slowdown, its p-value, the high-plus-critical finding count,
+   * the task id) are point-in-time evidence and moved out of both docs into
+   * the CHANGELOG 0.23.0 entry; each doc keeps a one-line pointer instead.
+   * These checks pin the pointer and guard against the raw numbers
+   * resurfacing in kit prose.
    */
-  it("agents-md-section states the A/B measurement's headline numbers", () => {
-    expect(agentsMdSection).toContain("median 320 seconds slower");
-    expect(agentsMdSection).toContain("p=0.016");
-    expect(agentsMdSection).toContain("9 high-plus-critical");
+  it("agents-md-section points to the CHANGELOG instead of stating the A/B measurement's headline numbers", () => {
+    expect(agentsMdSection).toContain(
+      "This rule is anchored by an A/B measurement; the data and the model caveat are recorded in the orchestrator-workflow CHANGELOG (0.23.0).",
+    );
+    expect(agentsMdSection).not.toContain("median 320 seconds slower");
+    expect(agentsMdSection).not.toContain("p=0.016");
+    expect(agentsMdSection).not.toContain("9 high-plus-critical");
+    expect(agentsMdSection).not.toContain("7f38899d");
   });
 
-  it("SKILL.md states the same A/B measurement headline numbers", () => {
-    expect(skillMd).toContain("median 320 seconds slower");
-    expect(skillMd).toContain("p=0.016");
-    expect(skillMd).toContain("9 high-plus-critical");
+  it("SKILL.md points to the CHANGELOG instead of stating the A/B measurement's headline numbers", () => {
+    expect(skillMd).toContain(
+      "(anchored by an A/B measurement; see CHANGELOG 0.23.0)",
+    );
+    expect(skillMd).not.toContain("median 320 seconds slower");
+    expect(skillMd).not.toContain("p=0.016");
+    expect(skillMd).not.toContain("9 high-plus-critical");
+    expect(skillMd).not.toContain("7f38899d");
   });
 
   /**
@@ -2128,5 +2113,51 @@ describe("okf-kit version pin stays in sync across the workflow, its README, and
       "npx okf-kit@<version> example not found in README.md",
     ).not.toBeNull();
     expect(match?.[1]).toBe(version);
+  });
+});
+
+/**
+ * 0.24.0 adds a generic placement check: the reviewer looks for org-,
+ * machine-, or point-in-time-bound evidence leaking into a reusable
+ * instruction file, and the orchestrator's hand-off step carries the same
+ * check before filling 06-handoff.md. Both are new rules, not moved
+ * evidence, so they get their own positive pins.
+ */
+describe("the placement check ships in reviewer.md and the SKILL.md hand-off step (0.24.0)", () => {
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("reviewer.md's check list flags org-, machine-, or point-in-time-bound evidence in a reusable instruction file", () => {
+    expect(reviewerMd).toContain(
+      "Placement: does the change add org-, machine- or point-in-time-bound evidence (dates, sample sizes, task ids, home paths, incident tallies) to a reusable instruction file (a skill, an agent prompt, an AGENTS.md section, a template)?",
+    );
+    expect(reviewerMd).toContain(
+      "the fix is to move the evidence to the changelog, the run files or the consuming workspace and leave a one-line pointer",
+    );
+  });
+
+  it("SKILL.md step 9 (Hand off) checks for the same kind of leaked evidence before handoff", () => {
+    expect(skillMd).toContain(
+      "Before handing off, check that no org-, machine- or point-in-time-bound evidence was added to a reusable instruction file",
+    );
+    expect(skillMd).toContain(
+      "such evidence belongs in the changelog, the run files or the consuming workspace, with a pointer left behind",
+    );
+  });
+});
+
+/**
+ * 0.24.0 also generalizes the run-state paragraph's pointer to the
+ * consuming gate's docs, dropping the pinned grounding-mcp version number
+ * (point-in-time evidence) while keeping the same pointer.
+ */
+describe("the run-base paragraph points to the consuming gate's docs without a pinned version (0.24.0)", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("names the consuming gate's documentation generically, without a version number", () => {
+    expect(skillMd).toContain(
+      "see the consuming gate's documentation (grounding-mcp) for the full consumer semantics",
+    );
+    expect(skillMd).not.toContain("grounding-mcp 0.6.0");
   });
 });

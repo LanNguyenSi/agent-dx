@@ -1728,3 +1728,57 @@
   guard for short-form citations (okf-kit resolves file targets only);
   that guard is a follow-up, not part of this change.
 
+
+## 2026-08-24 (0.24.0, implementer)
+
+- Package version 0.24.0: the placement rule. Moved org-, machine-, and
+  point-in-time-bound evidence out of the kit's reusable instruction files
+  (`SKILL.md`, `agents-md-section.md`) into the CHANGELOG's new `[0.24.0]`
+  entry, with a one-line pointer left in prose; rule text is unchanged.
+  Removed: the A/B measurement's headline numbers from SKILL.md step 6 and
+  from agents-md-section.md's Scaling delegation bullet (both now point to
+  "CHANGELOG 0.23.0"); the incident tally (`(four so far)`) and the whole
+  reviewer/model-correlation passage from SKILL.md's Subagent misfire rule
+  (both now live in the 0.24.0 CHANGELOG entry's Evidence note); the pinned
+  `grounding-mcp 0.6.0` version number from the run-base paragraph (now "the
+  consuming gate's documentation (grounding-mcp)"). Added: a placement check
+  to `reviewer.md`'s "Check, at minimum" list, a matching one-sentence check
+  to SKILL.md step 9 (Hand off), a `placement-guard` CI job, and a root
+  `slop.config.yml` enabling the `placement-slop` pack for this package's
+  `assets/` tree and the `agentic-coding-playbook` package.
+- Inserting the `[0.24.0]` CHANGELOG entry above `[0.23.0]` shifted every
+  existing `CHANGELOG.md:` line citation across the bundle by a uniform
+  +77 (verified: the new `[0.23.0]` heading moved from line 8 to line 85,
+  and every other pre-existing entry's content was spot-checked at its
+  shifted position before being applied — none were re-derived from the
+  offset alone). All `CHANGELOG.md:` citations in subagent-contracts-
+  superset.md, review-gate-and-waivers.md, and run-state-lifecycle-and-
+  markers.md were corrected by this offset. The SKILL.md edits themselves
+  were not a uniform shift: two in-place same-length edits (the
+  `grounding-mcp` pointer at old/new :93-94; the AC1 parenthetical at old
+  :150-153 -> new :150-151, a -2 net) sit ahead of the Subagent misfire
+  rule's content rewrite (old :454-469, 16 lines -> new :455-462, 8 lines,
+  a further -7 net after an intervening +3 from the new step-9 sentence at
+  old :216 -> new :214-217), so every `SKILL.md:` citation at or after the
+  package's old line 150 was re-verified against the current file directly
+  (heading text, yaml-fence boundaries, or exact quoted prose) rather than
+  derived from a single offset; a handful of citations straddling an edit
+  boundary (SKILL.md step 6's own line range, spanning the -2 zone; the
+  0.14.0 reproduction-requirement citation, likewise) needed hand
+  recomputation rather than a mechanical shift. `test/docs-consistency.test.ts`
+  citations were similarly re-verified directly rather than offset, since
+  the file's own edits (one import line removed; the Subagent misfire
+  rule's `describe` block rewritten, net +2 lines; two new `describe` blocks
+  appended for the new positive/negative pins) are not a uniform shift
+  either; the two new `describe` blocks appended at the file's end (46
+  lines, after the pre-existing okf-kit version-pin block, unaffected by
+  this pass) were pure appends, shifting nothing before them.
+  `npx okf-kit@0.5.0 check packages/orchestrator-workflow/docs/okf`: before
+  the docs/okf fixes (kit assets already edited) 43 findings (errors 0,
+  warnings 22, notices 21); after, 21 findings (errors 0, warnings 0,
+  notices 21), matching the pre-change baseline exactly (same 21
+  `unresolved-ambiguous` bare-filename notices as every prior pass in this
+  log). No new evidence was added to the bundle beyond what the CHANGELOG
+  0.24.0 entry itself carries; the Subagent misfire rule section gained one
+  new paragraph explaining the 0.24.0 removal and pointing at the
+  CHANGELOG, not new measurements of its own.

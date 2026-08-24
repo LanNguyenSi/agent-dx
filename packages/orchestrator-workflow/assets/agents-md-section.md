@@ -61,20 +61,13 @@ default, not a ritual.
   those three excludes `implementer-low`, and the task runs on the unsuffixed
   implementer or higher, even when the change looks mechanical (a bugfix
   included); when it is unclear whether a criterion demands a run, exclude
-  `implementer-low`. This rule is anchored by an A/B measurement of
-  implementer-low as installed (Haiku 4.5) against the default implementer
-  (Sonnet 5, effort medium) (2026-08-24, n=8, identical tasks in both tiers,
-  blinded reviews, agent-tasks task 7f38899d): implementer-low reached accept
-  a median 320 seconds slower (p=0.016), drew 9 high-plus-critical review
-  findings against 1, and needed 8 fix rounds against 1. The A/B's
-  implementer-low ran on Haiku 4.5, which does not support the `effort`
-  parameter (per Anthropic's model reference), so the harness ignores the
-  pinned `effort: low` on that model; the measurement compared Haiku 4.5
-  without effort control against Sonnet 5 at `effort: medium`. For the
-  explorer and the task-slicer, a `-low` variant still suits narrowly scoped,
-  mechanical work; no equivalent measurement exists for those two roles, so
-  their rule is unchanged. Not every role gets every tier: `-xhigh` exists
-  only for the implementer, the reviewer, and the advisor. The reviewer's
+  `implementer-low`. This rule is anchored by an A/B measurement; the data
+  and the model caveat are recorded in the orchestrator-workflow CHANGELOG
+  (0.23.0). For the explorer and the task-slicer, a `-low` variant still
+  suits narrowly scoped, mechanical work; no equivalent measurement exists
+  for those two roles, so their rule is unchanged. Not every role gets every
+  tier: `-xhigh` exists only for the implementer, the reviewer, and the
+  advisor. The reviewer's
   downshift is `-medium` rather than `-low`, since its default already sits at
   high. The advisor has no downshift at all: its default `high` is already its
   only non-`-xhigh` tier. Spawn only variants that are actually installed.
