@@ -59,7 +59,7 @@ below.
 ## Waiver rules
 
 - Critical: "waived by the operator. The orchestrator never waives a
-  critical finding on its own" (`agents-md-section.md:80-81`); SKILL.md
+  critical finding on its own" (`agents-md-section.md:86-87`); SKILL.md
   step 8 echoes "critical findings require operator sign-off"
   (`SKILL.md:179-181`).
 - High: "waived by the orchestrator with a recorded rationale"

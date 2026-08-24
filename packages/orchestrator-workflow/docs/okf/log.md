@@ -37,11 +37,11 @@
   the template's old line 14 down by +1, and none of the three docs'
   `05-review-findings.md:` citations past that point were re-checked against
   it in the first pass. Review caught four resulting stale citations —
-  review-gate-and-waivers.md's `05-review-findings.md:25` (Acceptance
-  Recommendation enum line, should read `:26`) and `:27` (the
+  review-gate-and-waivers.md's `05-review-findings.md`, line 25 (Acceptance
+  Recommendation enum line, should read `:26`) and `27` (the
   acceptance-recommendation marker, should read `:28`), and
-  run-state-lifecycle-and-markers.md's matching `:27` (marker, `:28`) and
-  `:23-25` (heading/blank/enum span, `:24-26`) — all four now corrected and
+  run-state-lifecycle-and-markers.md's matching `27` (marker, `:28`) and
+  `23-25` (heading/blank/enum span, `:24-26`) — all four now corrected and
   re-verified by direct read against the current template. A full sweep of
   every `05-review-findings.md:` citation across the bundle (docs, SKILL.md,
   tests) confirmed these were the only four affected; citations at or before
@@ -159,9 +159,9 @@
   pre-existing warnings unrelated to this fix-round —
   run-state-lifecycle-and-markers.md's `README.md`/`INSTALL-AGENT.md`
   staleness and subagent-contracts-superset.md's `src/models.ts` staleness
-  (its `models.ts:27-32` `DEFAULT_MODELS` citation, at minimum, is now
-  stale too, having moved to `:70-75` by the same Profile-block insertion
-  documented above). Neither install-fence-mechanics.md nor
+  (its `models.ts` `DEFAULT_MODELS` citation, at minimum, is now stale too
+  — it cited lines 27-32 at the time, having moved to `70-75` by the same
+  Profile-block insertion documented above). Neither install-fence-mechanics.md nor
   model-preselection.md contributes any finding to that run. Full suite
   152/152 (147 + 5 new: the fallback test above, three downgrade-note
   tests, and a docs-consistency pin for the new profile-aware "run any
@@ -1041,7 +1041,7 @@
   `timestamp:` frontmatter bumped to `2026-08-20T23:59:00Z` on the four
   re-verified docs plus, in a second pass below, `install-fence-mechanics.md`
   (model-preselection.md's citation touched was a single flat +6 shift,
-  `agents-md-section.md:104-110` -> `:110-116`, itself verified against
+  `agents-md-section.md:104-110` -> `110-116`, itself verified against
   the current file, not computed blind).
 
   Correction (same-day review round 1 on this pass): the "82 total ...
@@ -1472,3 +1472,36 @@
   re-verified against the post-F10 file regardless. This entry exists so the
   audit trail records the gap honestly rather than silently rewriting the
   prior entry's claim: the fix, not just the doc content, is logged.
+
+- 2026-08-24 (agent-tasks 1d6e0b3e, okf-kit 0.5.0 rollout): ran the new
+  citations-resolve rule (okf-kit 0.5.0, PR #111) against this bundle for
+  the first time. Fix-round-1 silenced the rule's own warnings with a blind
+  `+1`-style shift on every flagged citation instead of checking each one
+  against the real symbol/heading/quote it was meant to point at; review
+  found roughly half of the "fixed" citations landed on the wrong content
+  even though the mechanical rule (no symbol/AST resolution, see
+  citations-resolve's own doc comment) could not detect that, plus two
+  historical `05-review-findings.md`/`models.ts` citations in this log
+  renumbered instead of left alone, two ranges collapsed to a single line,
+  and the doc-touch itself silently suppressing two real pre-existing
+  `sources-fresh` STALE warnings against `INSTALL-AGENT.md` via
+  `sources-fresh`'s doc-committed-at/after-source override (a `git log`
+  timestamp effect, not a frontmatter one — touching a doc file at all
+  updates its own last-commit time, regardless of what the edit is).
+  Fix-round-2 re-derived every round-1-touched citation from a direct read
+  of the actual current source (`src/init.ts`/`src/cli.ts`/`SKILL.md`/
+  `CHANGELOG.md`/`test/*.test.ts` did not change between the base commit and
+  fix-round-1, so "true" meant finding where the cited symbol/heading/quote
+  really lives today, not deriving an offset), restored the two historical
+  values this log had falsified, and genuinely re-verified
+  install-fence-mechanics.md and model-preselection.md against the current
+  `INSTALL-AGENT.md` (one drifted citation each, both corrected; both docs'
+  `timestamp:` bumped only after that direct-read check, not merely because
+  the file was touched). Full per-citation detail in the agent-dx repo's
+  commit for agent-tasks 1d6e0b3e rather than repeated here. Convention
+  note: historical bare line numbers in this log (like the `27`/`23-25`
+  forms two paragraphs above and the `models.ts` reference just above) are
+  deliberately written without the leading colon/`path:N` adjacency so
+  `citations-resolve` does not treat past narrative about a since-corrected
+  citation as a live pointer into the current source. okf-staleness.yml's
+  pin was bumped to okf-kit 0.5.0 in the fix-round-1 change.

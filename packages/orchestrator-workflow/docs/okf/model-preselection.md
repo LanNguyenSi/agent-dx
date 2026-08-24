@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-08-20T23:59:00Z
+timestamp: 2026-08-24T23:59:00Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -71,8 +71,8 @@ below.
    any), then applies `--models` on top; when running interactively with no
    `--models`, it prompts per role instead, defaulting each prompt to the
    already-resolved value (`src/cli.ts:254-260`, prompt UI at
-   `src/cli.ts:99-142`). Since 0.15.0 the interactive prompt only asks about
-   the roles `rolesForProfile(profile)` selects (`src/cli.ts:99-104`
+   `src/cli.ts:104-147`). Since 0.15.0 the interactive prompt only asks about
+   the roles `rolesForProfile(profile)` selects (`src/cli.ts:104-109`
    iterates a `roles` parameter instead of the full `ROLES` list), so a
    `minimal` install is not asked for `explorer`/`task-slicer` models (and,
    since 0.21.0, not for `advisor` either — the same `rolesForProfile`
@@ -80,7 +80,7 @@ below.
    required). Since
    0.19.0 the CLI also resolves `tiers` right after models, on the same
    override-vs-persist rule, now via a `--tiers`/`--no-tiers` negatable pair
-   with no interactive prompt at all (`src/cli.ts:262-272`; see "Effort
+   with no interactive prompt at all (`src/cli.ts:267-277`; see "Effort
    tiers" below).
 3. **Manifest.** `runInit` writes the resolved map to
    `.ai/workflow/manifest.json` under `models` (`src/init.ts:578-616`,
@@ -145,7 +145,7 @@ below.
   must be passed as fully-qualified `--models` entries (`README.md:206-209`,
   confirmed by `test/init.test.ts:514-538`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
-  absent: every role's file omits `model:` (`test/init.test.ts:1780-1792`,
+  absent: every role's file omits `model:` (`test/init.test.ts:1896-1908`,
   the loop is `for (const role of ROLES)` so it already covers `advisor` for
   free, no test edit needed for the 0.21.0 role addition; an omitted `model:`
   also means `opencodeEffortLine` short-circuits to no effort line, so this
@@ -167,7 +167,7 @@ Since 0.19.0, `init` also accepts `--tiers`: for each role, it renders one
 additional subagent file per effort tier the role has that is not that
 role's own default tier, alongside the base `<role>.md` file described
 above. Off by default; there is no interactive prompt for it at all
-(`src/cli.ts:262-272`; the code comment there states explicitly why: tiers
+(`src/cli.ts:267-277`; the code comment there states explicitly why: tiers
 is opt-in/off via the flags only). A fix-round-1 correction on the initial
 0.19.0 release (review finding M2) added commander's negatable-option
 counterpart, `--no-tiers`, so a re-run can explicitly turn a previously
@@ -280,7 +280,7 @@ needs no live catalog lookup at all. The corrected wording
 "<alias>") could not be resolved to an opencode model id (<reason>); no
 opencode effort-tier variant files will be rendered for this class (Claude
 Code variants are unaffected).`, stating both the real rendering effect and
-the real harness scope; `test/init.test.ts:1693-1754` asserts the full
+the real harness scope; `test/init.test.ts:1929-1957` asserts the full
 wording verbatim (a review-round-2 strengthening of the fix-round-1 tests,
 which had only asserted the model class name appeared somewhere in
 stderr). README's opencode-effort prose and the CHANGELOG 0.19.0 entry
@@ -296,7 +296,7 @@ that correction against regressing back to either stale claim.
 as it always has (now including its own pinned default effort, see "Pinned
 default effort (0.22.0)" below), then, only `if (tiers)`, loops
 `ROLE_TIERS[role]` skipping the role's `DEFAULT_TIER` and writes
-`<role>-<tier>.md` (`:506-514` Claude Code, `:538-569` opencode, the
+`<role>-<tier>.md` (`:506-514` Claude Code, `:539-569` opencode, the
 opencode loop now carrying the unresolved-class skip described above). The
 base file's own composition call takes no `tiers`-flag input at all, so a
 tiers-off install renders byte-identical output to a tiers-on install (not,
@@ -320,7 +320,7 @@ line since 0.22.0). opencode's variant `model:` values come from a new,
 separate resolution pass keyed by `ModelClass` instead of `Role`
 (`InitOptions.opencodeClassModels`, `init.ts:62-70`; resolved in `cli.ts` at
 `:291-322`, mirroring the existing per-role opencode resolution just above
-it at `:281-290`). The Claude-family-`variant:` and Ollama-no-effort-field
+it at `cli.ts:286-295`). The Claude-family-`variant:` and Ollama-no-effort-field
 provider-branch outcomes are pinned at `test/init.test.ts:1388-1446`; a
 resolved class id with no provider prefix at all (no `/`) reaches the same
 no-effort-field outcome as Ollama but via `opencodeEffortLine`'s
@@ -396,14 +396,14 @@ used for a missing `profile` field just above it (`:158-164`): a legacy
 manifest never rendered variant files, so `false` is the only value
 consistent with what is actually on disk. `cli.ts` resolves the flag with
 the same override-vs-persist rule as `--profile`/`--models`, but with no
-interactive branch: `opts.tiers ?? previous?.tiers ?? false` (`cli.ts:272`).
+interactive branch: `opts.tiers ?? previous?.tiers ?? false` (`cli.ts:277`).
 This is the fix-round-1 form (review finding M2); the original 0.19.0
 release read `opts.tiers ? true : (previous?.tiers ?? false)`, which had no
 way to express an explicit "turn it off" short of hand-editing the
 manifest, since commander only ever set `opts.tiers` to `true` or left it
 `undefined` — there was no negated flag to produce `false`. commander's
 negatable-option pairing (`--tiers` / `--no-tiers` declared under the same
-`"tiers"` option name, `cli.ts:175-182`) resolves `opts.tiers` to `true`
+`"tiers"` option name, `cli.ts:180-187`) resolves `opts.tiers` to `true`
 when `--tiers` is passed, `false` when `--no-tiers` is passed, and
 `undefined` when neither is passed; `test/init.test.ts:1560-1596` verifies
 this end-to-end against the installed commander version (`--no-tiers` on a
@@ -436,7 +436,7 @@ writes" section for the full mechanics, and
 `test/init.test.ts:896-979`'s dedicated `describe` for both cases exercised
 directly. That block's own mutation probe covered only the *tiers-off* note
 loop's ledger gate; review round 3 (R3-L1) added a sibling
-`test/init.test.ts:997-1035` `describe` proving the ledger gate inside the
+`test/init.test.ts:1029-1067` `describe` proving the ledger gate inside the
 *full -> minimal profile-downgrade* loop's own tier-variant sub-loop
 (`init.ts` ~423) the same way, after a mutant that always pushed that note
 (`if (true)` in place of the `previous.files` check) survived the full
@@ -471,7 +471,7 @@ A re-run with no `--models` reuses the previously chosen models rather than
 resetting to shipped defaults: `models = { ...DEFAULT_MODELS,
 ...(previous?.models ?? {}) }` in `src/cli.ts:254-257`. The same
 override-vs-persist rule now also covers `--profile` (`src/cli.ts:242-252`)
-and, since 0.19.0, `--tiers`/`--no-tiers` (`src/cli.ts:262-272`, see
+and, since 0.19.0, `--tiers`/`--no-tiers` (`src/cli.ts:267-277`, see
 "Effort tiers" above): a plain re-run keeps the previously installed value
 for each, an explicit flag overrides it. Test:
 `test/init.test.ts:1114-1134` runs `init --models implementer=haiku`, then a
@@ -482,7 +482,7 @@ falls back to `[]` filtered against known harnesses, each model id is
 re-validated, with invalid entries dropped back to that role's default, a
 missing `profile` field degrades to `"full"` rather than `"minimal"`, and
 (since 0.19.0) a missing `tiers` field degrades to `false`
-(`src/init.ts:115-183`; end-to-end proof at `test/init.test.ts:277-308`,
+(`src/init.ts:115-183`; end-to-end proof at `test/init.test.ts:278-308`,
 where a malformed `reviewer: 'opus: "x"'` is dropped to `opus` while a valid
 sibling `implementer: "haiku"` survives; the `profile`-fallback proof is
 `test/init.test.ts:729-766`, see
@@ -502,8 +502,8 @@ chosen profile, `INSTALL-AGENT.md:144-153`; conditional `model:` line only
 for fully-qualified opencode ids, `INSTALL-AGENT.md:155-181`) and an example
 `manifest.json` shape carrying the `profile` and (since 0.19.0) `tiers`
 fields and keyed by all five roles under `full` since 0.21.0 (was four)
-(`INSTALL-AGENT.md:182-203`; under `minimal`, `models` only needs the
-`implementer` and `reviewer` keys, `INSTALL-AGENT.md:205-209`). That same
+(`INSTALL-AGENT.md:199-221`; under `minimal`, `models` only needs the
+`implementer` and `reviewer` keys, `INSTALL-AGENT.md:223-227`). That same
 step 4 states explicitly that the manual path never renders tier-variant
 files regardless of what the operator asked for. Since fix-round-1 (review
 finding L3) this is framed as an installer-scope decision — composing
@@ -517,7 +517,7 @@ ever explained the opencode half of the omission
 ## Orchestrator-runs-on-session-model policy
 
 The installed `AGENTS.md` policy section carries a `### Models` subsection
-verbatim (`assets/agents-md-section.md:110-116`): "The orchestrator runs on
+verbatim (`assets/agents-md-section.md:132-138`): "The orchestrator runs on
 the session's main model. Use the strongest reasoning model available,"
 plus "Per-role model preferences ... are recorded in
 `.ai/workflow/manifest.json` and, where the harness supports per-agent

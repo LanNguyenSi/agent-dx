@@ -1831,3 +1831,50 @@ describe("no output-contract field in SKILL.md uses a bare yes/no enum (review r
     expect(skillMd).not.toMatch(/:\s*yes\s*\|\s*no\b/);
   });
 });
+
+/**
+ * agent-tasks 1d6e0b3e fix-round-2: the okf-kit version this repo's own
+ * `.github/workflows/okf-staleness.yml` pins (via `npm install -g
+ * okf-kit@<version>`) and the version `packages/okf-kit/README.md`'s own
+ * "Pin the version" CI example pins (via `npx okf-kit@<version> check
+ * path/to/bundle`) must both track `packages/okf-kit/package.json`'s actual
+ * published version, derived rather than hardcoded, so a version bump in
+ * one place cannot silently leave the workflow or the README's own example
+ * pointing at a stale okf-kit release.
+ */
+describe("okf-kit version pin stays in sync across the workflow, its README, and package.json", () => {
+  // Local to this describe block (not hoisted to the top of the file)
+  // deliberately: this file is itself cited by many `path:N` line numbers
+  // across the docs/okf bundle, so a helper added above existing code would
+  // shift every citation after it, exactly the class of bug this fix-round
+  // exists to correct. Appending only at the end of the file keeps every
+  // pre-existing citation's line number intact.
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+
+  const okfKitPackageJson = JSON.parse(
+    readRepoFile("packages/okf-kit/package.json"),
+  ) as { version: string };
+  const version = okfKitPackageJson.version;
+
+  it("okf-staleness.yml installs the same okf-kit version as package.json", () => {
+    const workflow = readRepoFile(".github/workflows/okf-staleness.yml");
+    const match = workflow.match(/npm install -g okf-kit@([\w.-]+)/);
+    expect(
+      match,
+      "okf-kit install line not found in okf-staleness.yml",
+    ).not.toBeNull();
+    expect(match?.[1]).toBe(version);
+  });
+
+  it("okf-kit's own README npx example pins the same version as package.json", () => {
+    const readme = readRepoFile("packages/okf-kit/README.md");
+    const match = readme.match(/npx okf-kit@([\w.-]+) check path\/to\/bundle/);
+    expect(
+      match,
+      "npx okf-kit@<version> example not found in README.md",
+    ).not.toBeNull();
+    expect(match?.[1]).toBe(version);
+  });
+});

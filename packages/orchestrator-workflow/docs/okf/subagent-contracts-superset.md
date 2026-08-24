@@ -42,7 +42,7 @@ exactly as `packages/orchestrator-workflow/test/docs-consistency.test.ts:182`
 computes it: `ROLES.filter((role) => !READ_ONLY_ROLES.has(role))` →
 `task-slicer, implementer`. That posture is tool-level only for
 Edit/Write/NotebookEdit; Bash mutation is guarded by prompt instruction alone,
-which `packages/orchestrator-workflow/test/docs-consistency.test.ts:505-512`
+which `packages/orchestrator-workflow/test/docs-consistency.test.ts:515-522`
 pins README.md to state honestly ("guarded by instruction only", "nothing
 technically prevents it") rather than claiming full closure — since 0.21.0
 the pinned phrase names `explorer, reviewer, and advisor` instead of just
@@ -67,19 +67,19 @@ fenced yaml block (the orchestrator's reference copy), once in the role's
 installed prompt, in its trailing "Return exactly this structure as your
 final output, nothing else" block:
 
-- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:208-233`
+- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:215-237`
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:47-70`.
-- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:262-288`
+- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:263-288`
   vs. `packages/orchestrator-workflow/assets/agents/implementer.md:36-62`.
   Both copies gained a `mutation_probes` field in 0.16.0; see
   [Mutation probes requirement](#mutation-probes-requirement-0160) below.
-- Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:299-320`
+- Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:300-320`
   vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:60-81`. Both
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below.
 - Task-slicer:
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:328-358`
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:329-358`
   (`## Task slicer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/task-slicer.md:36-66`.
 - Advisor (since 0.21.0):
@@ -93,7 +93,7 @@ final output, nothing else" block:
   added in review round 1 (M2) — see below.
 - Subagent input contract (the shape the orchestrator sends when delegating,
   not a role's own output) lives only in
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:241-258`; there is no
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:242-258`; there is no
   installed-prompt counterpart because it is what the orchestrator constructs,
   not what a subagent returns. Its `role:` enum
   (`role: advisor | explorer | implementer | reviewer | task_slicer`) is the
@@ -147,11 +147,11 @@ required them, forcing the orchestrator to fabricate that content when
 delegating.
 
 Current per-task slicer shape
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:328-358`): `id, title,
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:329-358`): `id, title,
 goal, relevant_files, relevant_docs, acceptance_criteria, constraints,
 suggested_tests, allowed_changes, forbidden_changes, dependencies, risk`, in
 that order. The subagent input contract
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:241-258`) requires:
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:242-258`) requires:
 `role, task_id, goal, context.relevant_files, context.relevant_docs,
 constraints, acceptance_criteria, allowed_changes, forbidden_changes,
 expected_output.format`. `suggested_tests` is the one slicer field with no
@@ -195,7 +195,7 @@ misfire rule`): a subagent return is a misfire, not evidence, when it fails
 to parse against its role's output contract. Two detection signals:
 
 1. Contract-parse failure: the output does not parse against the role's
-   contract (`SKILL.md:427-430`). Since a same-day R2 fix-round on 0.16.0
+   contract (`SKILL.md:428-430`). Since a same-day R2 fix-round on 0.16.0
    this signal names an explicit example: an implementer return that omits
    the `mutation_probes` field even though the task assignment named
    mutation probes to run (`SKILL.md:428-430`).
@@ -306,7 +306,7 @@ accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:357-386` (0.14.0): the
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:399-429` (0.14.0): the
 agent-dx run `2026-07-18-harness-subprocess-test-deflake` accepted an
 implementer's "8/8 green" flake-rate claim on a `maxWorkers` cap fix, then
 the reviewer independently reran the suite and found 2/6 red on an
