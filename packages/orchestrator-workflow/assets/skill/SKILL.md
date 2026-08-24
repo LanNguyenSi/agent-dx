@@ -212,9 +212,9 @@ directory and the subagents.
    without a bundle are unaffected. Then fill `06-handoff.md` and report to the
    operator: what changed, why, how it was verified, known risks, accepted
    waivers, suggested next step. Before handing off, check that no org-,
-   machine- or point-in-time-bound evidence was added to a reusable
-   instruction file; such evidence belongs in the changelog, the run files or
-   the consuming workspace, with a pointer left behind.
+   machine-, or point-in-time-bound evidence was added to a reusable
+   instruction file; such evidence belongs in the changelog, the run files,
+   or the consuming workspace, with a pointer left behind.
 
 When finalizing `05-review-findings.md` and `06-handoff.md`, replace the `TODO`
 in each `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum

@@ -36,8 +36,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     contract-parse and near-instant detection signals, the
     resume-over-respawn preference and its reasoning, the respawn fallback,
     the watchdog-stall exception, the `03-decisions.md` record requirement,
-    and "a misfired review is not a review") is unchanged. The evidence note
-    below is the durable record of what was removed.
+    and "a misfired review is not a review") is unchanged. The removed
+    passage, verbatim, for the durable record: "Every incident of this
+    exact signal (a return within seconds, zero tool calls, harness or
+    system boilerplate instead of the output contract) whose outcome was
+    recorded (four so far) has resolved on the first resume attempt; fall
+    back to a fresh respawn only if the resume attempt itself misfires the
+    same way. So far this signal has only been observed for the reviewer
+    role, a role whose default model differs from explorer's,
+    task-slicer's, and implementer's (since 0.21.0 the advisor shares the
+    reviewer's default model too; the advisor has had no spawns yet, so it
+    contributes no evidence either way; see the per-role model
+    preferences); treat that correlation as an open lead worth watching as
+    more incidents accumulate, not as a confirmed cause." Of the four
+    resume outcomes recorded for that signal, three were on 2026-07-16 and
+    one was on 2026-07-20. The watchdog-stall exception's removed sentence,
+    also verbatim: "This resume-over-respawn preference does not extend to
+    a structurally different misfire class: a mid-run watchdog stall (the
+    subagent goes idle partway through a run rather than returning
+    near-instantly) did not resolve on resume in the one measured incident
+    of that class, it stalled a second time, and only a fresh, explicitly
+    constrained respawn produced a contract-valid review; treat a watchdog
+    stall as outside this preference."
   - `SKILL.md`'s Run state paragraph: "see the grounding-mcp 0.6.0 docs for
     the full consumer semantics" is now "see the consuming gate's
     documentation (grounding-mcp) for the full consumer semantics", dropping
@@ -60,27 +80,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `slop-detector` and runs its opt-in `placement-slop` pack against the
   monorepo's instruction files (`packages/orchestrator-workflow/assets/**`
   and `packages/agentic-coding-playbook/**`, configured via the repo-root
-  `slop.config.yml`), failing on block-level violations (a home path or an
-  unlisted org marker in an instruction file).
+  `slop.config.yml`), failing on block-level violations.
 - **Root `slop.config.yml`.** Opts the `placement-slop` pack in for the CI
   job, configures the `LanNguyenSi` org marker with `allow` entries for its
-  legitimate repo and package-registry links, and widens the pack's
-  instruction-file globs to cover this package's `assets/` tree and the
-  `agentic-coding-playbook` package.
-
-### Evidence note (moved out of `SKILL.md`'s Subagent misfire rule)
-
-Every incident of the near-instant, no-tool-activity misfire signal whose
-outcome was recorded (four so far) has resolved on the first resume
-attempt; all four were in the reviewer role, a role whose default model
-differs from explorer's, task-slicer's, and implementer's (since 0.21.0 the
-advisor shares the reviewer's default model too, but the advisor has had no
-spawns yet, so it contributes no evidence either way). Treat that
-correlation as an open lead worth watching as more incidents accumulate,
-not as a confirmed cause. Separately, one recorded incident of the
-structurally different mid-run watchdog-stall misfire class did not resolve
-on resume (it stalled a second time); only a fresh, explicitly constrained
-respawn produced a contract-valid review for that incident.
+  two legitimate repo links (`github.com/LanNguyenSi/`,
+  `raw.githubusercontent.com/LanNguyenSi/`, both anchored to a full
+  `https://` URL), widens the pack's instruction-file globs to cover this
+  package's `assets/` tree and the `agentic-coding-playbook` package, and
+  overrides `placement-slop/dated-evidence`, `placement-slop/tally-phrase`,
+  and `placement-slop/opaque-id` from their pack default of `warn` to
+  `block`, so the CI job actually fails on a leaked date, tally phrase, or
+  opaque id instead of only warning (a home path or an unlisted org marker
+  was already `block` by pack default). `packages/github-api-tool/SKILL.md`
+  carries two pre-existing dated examples that this severity change would
+  now block; it is `ignorePaths`-excluded pending a follow-up cleanup of
+  that unrelated package.
 
 ## [0.23.0] - 2026-08-24
 

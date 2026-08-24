@@ -2129,19 +2129,19 @@ describe("the placement check ships in reviewer.md and the SKILL.md hand-off ste
 
   it("reviewer.md's check list flags org-, machine-, or point-in-time-bound evidence in a reusable instruction file", () => {
     expect(reviewerMd).toContain(
-      "Placement: does the change add org-, machine- or point-in-time-bound evidence (dates, sample sizes, task ids, home paths, incident tallies) to a reusable instruction file (a skill, an agent prompt, an AGENTS.md section, a template)?",
+      "Placement: does the change add org-, machine-, or point-in-time-bound evidence (dates, sample sizes, task ids, home paths, incident tallies) to a reusable instruction file (a skill, an agent prompt, an AGENTS.md section, a template)?",
     );
     expect(reviewerMd).toContain(
-      "the fix is to move the evidence to the changelog, the run files or the consuming workspace and leave a one-line pointer",
+      "the fix is to move the evidence to the changelog, the run files, or the consuming workspace and leave a one-line pointer",
     );
   });
 
   it("SKILL.md step 9 (Hand off) checks for the same kind of leaked evidence before handoff", () => {
     expect(skillMd).toContain(
-      "Before handing off, check that no org-, machine- or point-in-time-bound evidence was added to a reusable instruction file",
+      "Before handing off, check that no org-, machine-, or point-in-time-bound evidence was added to a reusable instruction file",
     );
     expect(skillMd).toContain(
-      "such evidence belongs in the changelog, the run files or the consuming workspace, with a pointer left behind",
+      "such evidence belongs in the changelog, the run files, or the consuming workspace, with a pointer left behind",
     );
   });
 });
@@ -2159,5 +2159,71 @@ describe("the run-base paragraph points to the consuming gate's docs without a p
       "see the consuming gate's documentation (grounding-mcp) for the full consumer semantics",
     );
     expect(skillMd).not.toContain("grounding-mcp 0.6.0");
+  });
+});
+
+/**
+ * Review round 2 fix (finding G): the 0.24.0 CHANGELOG evidence note
+ * records the reviewer/advisor model correlation, but nothing pinned that
+ * `DEFAULT_MODELS` actually still gives them the same default today. A
+ * one-line mechanical anchor for that record, so a future model change for
+ * either role is a deliberate, visible edit rather than a silent drift the
+ * CHANGELOG note would then misdescribe.
+ */
+describe("the reviewer/advisor default-model correlation the CHANGELOG 0.24.0 evidence note records is still true", () => {
+  // Imported dynamically, not added to the top-level import block: this
+  // file is itself cited by many `path:N` line numbers across the docs/okf
+  // bundle, and a new top-level import line would shift every citation
+  // below it, exactly the class of bug this fix-round exists to correct.
+  it("DEFAULT_MODELS gives the advisor and the reviewer the same default model", async () => {
+    const { DEFAULT_MODELS } = await import("../src/models.js");
+    expect(DEFAULT_MODELS.advisor).toBe(DEFAULT_MODELS.reviewer);
+  });
+});
+
+/**
+ * Review round 2 fix (finding H): the placement-guard CI job and the root
+ * slop.config.yml are both new in 0.24.0 but had no test coverage. A typo
+ * or an accidental removal in either file would silently drop the guard
+ * from CI (or drop this package's assets from what it scans) with nothing
+ * to catch it.
+ */
+describe("the placement-guard CI job and slop.config.yml stay wired up (0.24.0)", () => {
+  // Local to this describe block, not hoisted, for the same reason as the
+  // okf-kit version-pin block above: this file is itself cited by many
+  // `path:N` line numbers across the docs/okf bundle, so a helper added
+  // above existing code would shift every citation after it. Appending
+  // only at the end of the file keeps every pre-existing citation intact.
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+
+  it(".github/workflows/ci.yml carries a placement-guard job", () => {
+    const workflow = readRepoFile(".github/workflows/ci.yml");
+    expect(workflow).toMatch(/^\s*placement-guard:/m);
+  });
+
+  it("slop.config.yml lists this package's assets tree under placement.instructionGlobs", () => {
+    const slopConfig = readRepoFile("slop.config.yml");
+    expect(slopConfig).toContain(
+      "packages/orchestrator-workflow/assets/**/*.md",
+    );
+  });
+});
+
+/**
+ * Review round 2 fix (finding H): the CHANGELOG's 0.24.0 evidence note was
+ * rewritten to quote the removed SKILL.md passage verbatim and add the
+ * incident dates; nothing pinned that content, so a future edit could
+ * silently drop it back to a paraphrase or lose the dates again.
+ */
+describe("the CHANGELOG 0.24.0 evidence note carries the four durable evidence facts", () => {
+  const changelogMd = readDoc("CHANGELOG.md");
+
+  it("names the incident count, the reviewer role, the watchdog class, and the earliest incident date", () => {
+    expect(changelogMd).toContain("four");
+    expect(changelogMd).toContain("reviewer role");
+    expect(changelogMd).toContain("watchdog");
+    expect(changelogMd).toContain("2026-07-16");
   });
 });

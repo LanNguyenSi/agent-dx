@@ -130,7 +130,7 @@ top-level shape, a substring-presence pin, not byte-for-byte equality — but
 review round 1 (M2) closed that gap: a dedicated
 `describe("advisor output contract is byte-identical between SKILL.md and
 advisor.md (review round 1, M2)")` block
-(`test/docs-consistency.test.ts:2009-2024`) extracts the yaml block from
+(`test/docs-consistency.test.ts:2010-2026`) extracts the yaml block from
 both raw files and asserts equality, the same pattern the reviewer and
 implementer pairs use.
 
@@ -140,7 +140,7 @@ Every field the subagent input contract requires must have a same-named
 counterpart in the task-slicer's per-task output, so the orchestrator copies
 task fields 1:1 into the implementer contract at delegation time instead of
 inventing values. This was not always true:
-`packages/orchestrator-workflow/CHANGELOG.md:615-638` (0.10.0) records that the
+`packages/orchestrator-workflow/CHANGELOG.md:629-652` (0.10.0) records that the
 slicer contract previously omitted `constraints`, `allowed_changes`,
 `forbidden_changes` even though the implementer input contract already
 required them, forcing the orchestrator to fabricate that content when
@@ -248,14 +248,14 @@ incident count is now evidence rather than rule text too. `SKILL.md:93-94`
 placement pass) similarly drops a pinned `grounding-mcp 0.6.0` version
 number in favor of "the consuming gate's documentation (grounding-mcp)".
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:592-609` (0.11.0): a
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:606-623` (0.11.0): a
 live incident where a reviewer subagent spawn returned in 5 seconds with 0
 tool uses, handing back harness hook-boilerplate instead of the reviewer
 output contract; a resume of the same spawn produced a correct full review.
 Before 0.11.0 the kit said nothing about malformed returns, leaving room to
 silently accept a non-review as a passed review gate. 0.18.0's
 resume-over-respawn extension has its own motivation
-(`packages/orchestrator-workflow/CHANGELOG.md:302-354`, agent-tasks task
+(`packages/orchestrator-workflow/CHANGELOG.md:316-368`, agent-tasks task
 a932b12a): two further sessions (2026-07-19, 2026-07-20) reproduced the
 identical signal; the 2026-07-19 session's resume outcome was never
 recorded, which is exactly the gap this fix-round's claim-binding closes.
@@ -300,7 +300,7 @@ accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:506-531` (0.14.0): the
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:520-545` (0.14.0): the
 agent-dx run `2026-07-18-harness-subprocess-test-deflake` accepted an
 implementer's "8/8 green" flake-rate claim on a `maxWorkers` cap fix, then
 the reviewer independently reran the suite and found 2/6 red on an
@@ -314,14 +314,14 @@ field.
 
 Shipped in 0.16.0 and hardened the same day in an R2 fix-round after review
 caught two gaps (see Motivation below).
-`packages/orchestrator-workflow/assets/skill/SKILL.md:136-154` (step 6, added
+`packages/orchestrator-workflow/assets/skill/SKILL.md:136-155` (step 6, added
 in the R2 pass): when a task's acceptance rests on a test that must fail
 without the change, the orchestrator names the mutation probes to run in the
 task assignment; the implementer reports each one in the output contract's
 `mutation_probes` field (apply the mutant for real, observe the named test
 fail, restore, re-verify). Step 6 also carries a short
 orchestrator-checkable reference to the installed implementer prompt's
-claim-only-what-was-measured rule (`SKILL.md:154-157`): treat a verification
+claim-only-what-was-measured rule (`SKILL.md:155-158`): treat a verification
 claim in the implementer's report as unverified unless it is backed by a
 check the implementer actually ran. Before this R2 pass step 6 said nothing
 about naming probes at all — the field's only trigger lived in the misfire
@@ -342,20 +342,20 @@ the identical placeholder block. An output missing the field when probes
 identically in both copies since the R2 pass as "treated as a misfire, not
 evidence" (the installed prompt alone previously said "incomplete").
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:846-885` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:846-886` pins
 the original 0.16.0 shape: the installed prompt's instruction and field
-mention (849-855), the claim-only-what-was-measured rule (857-862), the
+mention (850-856), the claim-only-what-was-measured rule (858-863), the
 misfire-rule sentence (865-870), and a byte-for-byte cross-copy equality
 check on the field block (872-885).
 `test/docs-consistency.test.ts:904-940` pins the R2 additions: step 6's
 sentence and its claim-only-what-was-measured reference (908-919), the
 not-applicable clause in both copies (921-925), and two exact-string pins
-(927-938) that catch a rename applied identically to both copies — a mutant
+(927-939) that catch a rename applied identically to both copies — a mutant
 the cross-copy equality check above cannot catch on its own, since it only
 proves the two copies match each other, not that either still uses the
 pinned sub-field names.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:415-457` (0.16.0 plus
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:429-471` (0.16.0 plus
 its same-day R2 follow-up, agent-tasks task 16637a96): a 16-round dogfood
 where two implementer rounds dropped briefed-as-mandatory mutation probes
 from their return entirely; review of the resulting change then found the

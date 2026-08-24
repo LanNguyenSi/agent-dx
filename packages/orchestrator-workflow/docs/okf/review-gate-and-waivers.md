@@ -35,8 +35,8 @@ Reviewer findings carry `severity: low | medium | high | critical`
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
-(`agents-md-section.md:101-104`). Medium and low are "addressed or consciously
-accepted at the orchestrator's judgment" (`agents-md-section.md:112-113`); no
+(`agents-md-section.md:93-96`). Medium and low are "addressed or consciously
+accepted at the orchestrator's judgment" (`agents-md-section.md:104-105`); no
 waiver bookkeeping applies to them.
 
 Do not conflate two distinct vocabularies attached to the same review: the
@@ -59,13 +59,13 @@ below.
 ## Waiver rules
 
 - Critical: "waived by the operator. The orchestrator never waives a
-  critical finding on its own" (`agents-md-section.md:106-107`); SKILL.md
+  critical finding on its own" (`agents-md-section.md:98-99`); SKILL.md
   step 8 echoes "critical findings require operator sign-off"
   (`SKILL.md:191`).
 - High: "waived by the orchestrator with a recorded rationale"
-  (`agents-md-section.md:108-109`; `SKILL.md:191-192`).
+  (`agents-md-section.md:100-101`; `SKILL.md:191-192`).
 - Deferring counts as waiving, for both severities: "Deferring such a
-  finding counts as a waiver" (`agents-md-section.md:102`). SKILL.md makes
+  finding counts as a waiver" (`agents-md-section.md:94`). SKILL.md makes
   the symmetry explicit: "Deferring a high or critical finding counts as a
   waiver and follows the same rules" (`SKILL.md:192-193`). A deferred
   critical still needs operator sign-off; a deferred high still needs an
@@ -76,7 +76,7 @@ below.
   (`03-decisions.md:3`); the Reason cell is where the sign-off or rationale
   text lives, there is no separate waiver schema.
 - Summarized in `06-handoff.md`'s Accepted Waivers section
-  (`agents-md-section.md:110-111`; `SKILL.md:194-195`), instructed to "Mirror
+  (`agents-md-section.md:102-103`; `SKILL.md:194-195`), instructed to "Mirror
   03-decisions.md"
   (`packages/orchestrator-workflow/assets/templates/06-handoff.md:21`) via a
   `Finding | Severity | Rationale | Approved By` table
@@ -106,7 +106,7 @@ blank, `open`, `TODO`, "leaves the finding unresolved and ARMS the gate"
 until changed. The example row was narrowed to `accepted/defer` in 0.7.4
 after a prior `accepted/fix/defer/reject` example misled a run into an
 unexpectedly armed gate
-(`packages/orchestrator-workflow/CHANGELOG.md:678-688`).
+(`packages/orchestrator-workflow/CHANGELOG.md:692-702`).
 
 The two column headers are load-bearing for a second, independent reason:
 `05-review-findings.md:9` documents them as the anchor the grounding-mcp
@@ -116,7 +116,7 @@ dropping either header hides the table from the reader regardless of
 Decision values; the load-bearing comment (plus a one-sentence transfer
 rule in SKILL.md) was added in 0.7.3 after a live run drifted onto an
 unparseable `Severity | Finding | Resolution` convention, while the shipped
-header itself was already correct (`CHANGELOG.md:694-706`, the
+header itself was already correct (`CHANGELOG.md:708-720`, the
 already-correct-header statement within that entry).
 
 ## Fail-closed acceptance markers
@@ -152,7 +152,7 @@ findings-table header convention and the Decision-legend vocabulary above.
 
 Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 5 seconds with 0 tool uses, handing back harness boilerplate instead of the
-reviewer output contract (`CHANGELOG.md:592-609`). The Subagent misfire rule
+reviewer output contract (`CHANGELOG.md:606-623`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
 (`SKILL.md:463-464`), pinned by
@@ -183,7 +183,7 @@ field (`SKILL.md:328-332`, `reviewer.md:76-80`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
-Motivating incident (`CHANGELOG.md:506-531`): agent-dx run
+Motivating incident (`CHANGELOG.md:520-545`): agent-dx run
 `2026-07-18-harness-subprocess-test-deflake`, reviewer pass 1. The
 implementer's evidence read "8/8" full-suite runs green for a `maxWorkers`
 concurrency cap; the reviewer reran the suite independently (6 sequential
@@ -212,7 +212,7 @@ verdict.
 
 Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
-(`CHANGELOG.md:415-439`, agent-tasks task 16637a96): one reviewer round in
+(`CHANGELOG.md:429-453`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:950-968` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.

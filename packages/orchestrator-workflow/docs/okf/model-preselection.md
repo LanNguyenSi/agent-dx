@@ -517,7 +517,7 @@ ever explained the opencode half of the omission
 ## Orchestrator-runs-on-session-model policy
 
 The installed `AGENTS.md` policy section carries a `### Models` subsection
-verbatim (`assets/agents-md-section.md:147-151`): "The orchestrator runs on
+verbatim (`assets/agents-md-section.md:146-150`): "The orchestrator runs on
 the session's main model. Use the strongest reasoning model available,"
 plus "Per-role model preferences ... are recorded in
 `.ai/workflow/manifest.json` and, where the harness supports per-agent

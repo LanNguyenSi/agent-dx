@@ -61,18 +61,17 @@ default, not a ritual.
   those three excludes `implementer-low`, and the task runs on the unsuffixed
   implementer or higher, even when the change looks mechanical (a bugfix
   included); when it is unclear whether a criterion demands a run, exclude
-  `implementer-low`. This rule is anchored by an A/B measurement; the data
-  and the model caveat are recorded in the orchestrator-workflow CHANGELOG
-  (0.23.0). For the explorer and the task-slicer, a `-low` variant still
-  suits narrowly scoped, mechanical work; no equivalent measurement exists
-  for those two roles, so their rule is unchanged. Not every role gets every
-  tier: `-xhigh` exists only for the implementer, the reviewer, and the
-  advisor. The reviewer's
-  downshift is `-medium` rather than `-low`, since its default already sits at
-  high. The advisor has no downshift at all: its default `high` is already its
-  only non-`-xhigh` tier. Spawn only variants that are actually installed.
-  Tier choice is a conscious decision, not a ritual; when unsure, use the
-  default.
+  `implementer-low`. This rule is anchored by an A/B measurement; the data and
+  the model caveat are recorded in the orchestrator-workflow CHANGELOG
+  (0.23.0). For the explorer and the task-slicer, a `-low` variant still suits
+  narrowly scoped, mechanical work; no equivalent measurement exists for those
+  two roles, so their rule is unchanged. Not every role gets every tier:
+  `-xhigh` exists only for the implementer, the reviewer, and the advisor. The
+  reviewer's downshift is `-medium` rather than `-low`, since its default
+  already sits at high. The advisor has no downshift at all: its default `high`
+  is already its only non-`-xhigh` tier. Spawn only variants that are actually
+  installed. Tier choice is a conscious decision, not a ritual; when unsure,
+  use the default.
 - Every unsuffixed default subagent carries its own pinned default effort
   baked into its own file, not inherited from the orchestrator session:
   medium for the explorer, the task-slicer, and the implementer; high for

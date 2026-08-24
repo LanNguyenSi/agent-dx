@@ -1,6 +1,24 @@
 packs:
   placement-slop: true
 
+# The three evidence-class rules default to warn upstream; block them here
+# so the placement-guard CI job actually fails on a home path or an
+# unlisted org marker in an instruction file instead of only warning.
+rules:
+  placement-slop/dated-evidence:
+    severity: block
+  placement-slop/tally-phrase:
+    severity: block
+  placement-slop/opaque-id:
+    severity: block
+
+# github-api-tool/SKILL.md carries two pre-existing dated examples
+# (~lines 131, 255) that the dated-evidence rule now blocks now that it's
+# severity: block above. That package is out of scope for this change; a
+# follow-up should clean those examples and drop this ignore.
+ignorePaths:
+  - "packages/github-api-tool/SKILL.md"
+
 placement:
   instructionGlobs:
     - "packages/orchestrator-workflow/assets/**/*.md"
@@ -8,6 +26,5 @@ placement:
   markers:
     - "LanNguyenSi"
   allow:
-    - "github\\.com/LanNguyenSi/"
-    - "raw\\.githubusercontent\\.com/LanNguyenSi/"
-    - "npmjs\\.com/"
+    - "https://github\\.com/LanNguyenSi/"
+    - "https://raw\\.githubusercontent\\.com/LanNguyenSi/"

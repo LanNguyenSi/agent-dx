@@ -21,11 +21,11 @@ Check, at minimum:
 - Test adequacy: are the new or changed behaviors covered, and would the new
   tests actually fail if the change were reverted? Flag inert tests.
 - Maintainability: naming, dead code, needless abstraction, doc drift.
-- Placement: does the change add org-, machine- or point-in-time-bound
+- Placement: does the change add org-, machine-, or point-in-time-bound
   evidence (dates, sample sizes, task ids, home paths, incident tallies) to a
   reusable instruction file (a skill, an agent prompt, an AGENTS.md section, a
   template)? Report it; the fix is to move the evidence to the changelog, the
-  run files or the consuming workspace and leave a one-line pointer.
+  run files, or the consuming workspace and leave a one-line pointer.
 
 Rules:
 
