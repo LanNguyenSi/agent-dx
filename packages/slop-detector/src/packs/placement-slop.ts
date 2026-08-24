@@ -36,12 +36,29 @@ function appliesToInstructionCandidate(file: FileTarget): boolean {
   return file.kind === "prose";
 }
 
-function isInstructionFile(filePath: string, config: ResolvedConfig): boolean {
-  const normalized = filePath.split(path.sep).join("/");
-  if (DEFAULT_INSTRUCTION_REGEXES.some((re) => re.test(normalized)))
-    return true;
-  const extra = config.placement?.instructionGlobs ?? [];
-  return extra.some((g) => globToRegex(g).test(normalized));
+/**
+ * `filePath` relativized to `scanRoot` and forward-slash normalized, so a
+ * glob written as `packages/foo/**` matches identically whether the CLI was
+ * invoked with a relative, `./`-prefixed, or absolute scan path — all three
+ * resolve to the same absolute `scanRoot` and the same absolute `filePath`,
+ * so `path.relative` of the two always agrees.
+ */
+function relativizeToScanRoot(filePath: string, scanRoot: string): string {
+  const rel = path.relative(scanRoot, path.resolve(filePath));
+  return rel.split(path.sep).join("/");
+}
+
+function isInstructionFile(ctx: RuleContext): boolean {
+  // `scanRoot` is always populated by the engine (`checkText`/`checkFiles`/
+  // `checkPath`); the `process.cwd()` fallback only matters for a
+  // hand-built `RuleContext` a test or a future caller constructs directly.
+  const relPath = relativizeToScanRoot(
+    ctx.file.path,
+    ctx.scanRoot ?? process.cwd(),
+  );
+  if (DEFAULT_INSTRUCTION_REGEXES.some((re) => re.test(relPath))) return true;
+  const extra = ctx.config.placement?.instructionGlobs ?? [];
+  return extra.some((g) => globToRegex(g).test(relPath));
 }
 
 /** Line numbers (1-based) whose text matches one of `config.placement.allow`. */
@@ -55,6 +72,48 @@ function allowedLineNumbers(text: string, config: ResolvedConfig): Set<number> {
     if (regexes.some((re) => re.test(lines[i]))) out.add(i + 1);
   }
   return out;
+}
+
+/** Absolute offset (into `text`) each line starts at, indexed by 0-based line number. */
+function lineStartOffsets(text: string): number[] {
+  const starts: number[] = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") starts.push(i + 1);
+  }
+  return starts;
+}
+
+/**
+ * Spans of `text` that home-path / dated-evidence / opaque-id must not
+ * fire inside: an `http(s)://` or `www.` URL, and a markdown link target
+ * (`](...)`). A path segment, a date, or a hex id that's part of a real
+ * link isn't org-, machine-, or point-in-time-bound leakage — it's the
+ * link doing its job.
+ */
+const URL_OR_WWW_SPAN = /(?:https?:\/\/|www\.)\S+/g;
+const MD_LINK_TARGET_SPAN = /\]\([^)\s]*\)/g;
+
+function computeExcludedSpans(
+  text: string,
+): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const m of findAllRegex(text, URL_OR_WWW_SPAN)) {
+    spans.push({ start: m.index, end: m.index + m.match.length });
+  }
+  for (const m of findAllRegex(text, MD_LINK_TARGET_SPAN)) {
+    spans.push({ start: m.index, end: m.index + m.match.length });
+  }
+  return spans;
+}
+
+function insideAnySpan(
+  offset: number,
+  matchLength: number,
+  spans: Array<{ start: number; end: number }>,
+): boolean {
+  return spans.some(
+    (span) => offset >= span.start && offset + matchLength <= span.end,
+  );
 }
 
 function makeViolation(
@@ -80,22 +139,40 @@ function makeViolation(
   };
 }
 
+interface ScanOptions {
+  /** Skip a match that falls inside a URL or markdown link target span. */
+  skipExcludedSpans?: boolean;
+  /** Skip a match for a rule-specific reason (e.g. an all-digit "opaque id"). */
+  shouldSkip?: (
+    match: { index: number; match: string },
+    file: FileTarget,
+  ) => boolean;
+}
+
 /**
  * Shared scan: only instruction files are considered, `placement.allow`
- * lines are skipped, and every remaining match of `re` (global) is turned
- * into a violation via `describe`.
+ * lines are skipped, and every remaining match of `re` (global), run over
+ * the whole file text (so a phrase wrapped across a line break still
+ * matches), is turned into a violation via `describe`.
  */
 function scanInstructionFile(
   rule: Rule,
   ctx: RuleContext,
   re: RegExp,
   describe: (matched: string) => string,
+  opts: ScanOptions = {},
 ): Violation[] {
   const { file, config } = ctx;
-  if (!isInstructionFile(file.path, config)) return [];
+  if (!isInstructionFile(ctx)) return [];
   const allowed = allowedLineNumbers(file.text, config);
+  const excluded = opts.skipExcludedSpans
+    ? computeExcludedSpans(file.text)
+    : [];
   const violations: Violation[] = [];
   for (const m of findAllRegex(file.text, re)) {
+    if (excluded.length > 0 && insideAnySpan(m.index, m.match.length, excluded))
+      continue;
+    if (opts.shouldSkip?.(m, file)) continue;
     const { line } = offsetToLineCol(file.text, m.index);
     if (allowed.has(line)) continue;
     violations.push(makeViolation(rule, file, m, describe(m.match)));
@@ -106,6 +183,16 @@ function scanInstructionFile(
 // ─────────────────────────── Rule 1: home-path ───────────────────────────
 
 const HOME_PATH = /(~\/|\$HOME\/|\/Users\/[^/\s]+\/|\/home\/[^/\s]+\/)/g;
+
+// `/Users/<name>/` and `/home/<user>/` written with an angle-bracket
+// placeholder is already the generic form this rule wants — it isn't a
+// leaked machine-bound path, it's the *documentation* of one. A real
+// account name (`/home/node/app`, a container convention) still fires:
+// telling those two apart in general is not a clean heuristic, so the
+// placeholder form is the only carve-out (see README "by example" section).
+function isPlaceholderHomePath(matched: string): boolean {
+  return /^\/(?:Users|home)\/<[^>]+>\/$/.test(matched);
+}
 
 const homePath: Rule = {
   id: "placement-slop/home-path",
@@ -122,6 +209,10 @@ const homePath: Rule = {
       HOME_PATH,
       (matched) =>
         `Machine-bound home path \`${matched}\` in an instruction file: use a repo-relative path instead.`,
+      {
+        skipExcludedSpans: true,
+        shouldSkip: (m) => isPlaceholderHomePath(m.match),
+      },
     );
   },
 };
@@ -145,14 +236,23 @@ const datedEvidence: Rule = {
       DATED_EVIDENCE,
       (matched) =>
         `Dated evidence \`${matched}\` in an instruction file: point-in-time measurements go stale, so state the durable rule instead.`,
+      { skipExcludedSpans: true },
     );
   },
 };
 
 // ─────────────────────────── Rule 3: tally-phrase ───────────────────────────
 
+// Multi-word alternatives use `\s+` rather than a literal space so a phrase
+// wrapped across a line break by a formatter or an editor's soft wrap ("So\nfar")
+// still matches — `scanInstructionFile` already runs `re` over the whole file
+// text rather than per line, but a literal space in the source pattern still
+// wouldn't cross the `\n` `so\nfar` leaves behind. The negative lookbehind on
+// `to date` excludes the unrelated idiom "up to date" (a currency claim, not a
+// tally phrase); it only catches a single space between "up" and "to" — an
+// arbitrary run of whitespace there is not worth a variable-width lookbehind.
 const TALLY_PHRASE =
-  /\b(so far|to date|the one measured|only observed)\b|\bn\s*=\s*\d+\b|\bp\s*=\s*0\.\d+\b|\bmedian\s+\d+\s+(seconds|ms)\b/gi;
+  /\bso\s+far\b|(?<!up\s)\bto\s+date\b|\bthe\s+one\s+measured\b|\bonly\s+observed\b|\bn\s*=\s*\d+\b|\bp\s*=\s*0\.\d+\b|\bmedian\s+\d+\s+(seconds|ms)\b/gi;
 
 const tallyPhrase: Rule = {
   id: "placement-slop/tally-phrase",
@@ -176,16 +276,12 @@ const tallyPhrase: Rule = {
 // ─────────────────────────── Rule 4: opaque-id ───────────────────────────
 
 const OPAQUE_ID = /\b[0-9a-f]{8}\b/g;
-const URL_SPAN = /https?:\/\/\S+/g;
 
-function insideAnyUrl(
-  offset: number,
-  matchLength: number,
-  urlSpans: Array<{ start: number; end: number }>,
-): boolean {
-  return urlSpans.some(
-    (span) => offset >= span.start && offset + matchLength <= span.end,
-  );
+// An all-digit 8-char run ("12345678", a date written without dashes) is
+// never a hex id in practice; requiring at least one a-f letter cuts that
+// false-positive class without needing a separate digit-run exemption.
+function hasNoHexLetter(matched: string): boolean {
+  return !/[a-f]/i.test(matched);
 }
 
 const opaqueId: Rule = {
@@ -197,32 +293,27 @@ const opaqueId: Rule = {
     "A standalone 8-char lowercase hex id (a task id, a commit's short SHA) is only resolvable against the tracker or repo it was minted in. It reads as a precise reference but is opaque and often dead outside that one system.",
   appliesTo: appliesToInstructionCandidate,
   check(ctx: RuleContext): Violation[] {
-    const { file, config } = ctx;
-    if (!isInstructionFile(file.path, config)) return [];
-    const allowed = allowedLineNumbers(file.text, config);
-    const urlSpans = findAllRegex(file.text, URL_SPAN).map((m) => ({
-      start: m.index,
-      end: m.index + m.match.length,
-    }));
-    const violations: Violation[] = [];
-    for (const m of findAllRegex(file.text, OPAQUE_ID)) {
-      if (insideAnyUrl(m.index, m.match.length, urlSpans)) continue;
-      const { line } = offsetToLineCol(file.text, m.index);
-      if (allowed.has(line)) continue;
-      violations.push(
-        makeViolation(
-          opaqueId,
-          file,
-          m,
-          `Opaque id \`${m.match}\` in an instruction file: only resolvable against the tracker/repo it was minted in.`,
-        ),
-      );
-    }
-    return violations;
+    return scanInstructionFile(
+      opaqueId,
+      ctx,
+      OPAQUE_ID,
+      (matched) =>
+        `Opaque id \`${matched}\` in an instruction file: only resolvable against the tracker/repo it was minted in.`,
+      {
+        skipExcludedSpans: true,
+        shouldSkip: (m, file) =>
+          hasNoHexLetter(m.match) || file.text[m.index - 1] === "#",
+      },
+    );
   },
 };
 
 // ─────────────────────────── Rule 5: org-marker ───────────────────────────
+
+// `placement.markers` is repo-authored config, but a pathological pattern
+// (or a marker that happens to match on every line of a large file) could
+// still produce an unbounded violation list; cap it per rule per file.
+const MAX_MARKER_VIOLATIONS_PER_FILE = 50;
 
 const orgMarker: Rule = {
   id: "placement-slop/org-marker",
@@ -234,24 +325,34 @@ const orgMarker: Rule = {
   appliesTo: appliesToInstructionCandidate,
   check(ctx: RuleContext): Violation[] {
     const { file, config } = ctx;
-    if (!isInstructionFile(file.path, config)) return [];
+    if (!isInstructionFile(ctx)) return [];
     const markers = config.placement?.markers ?? [];
     if (markers.length === 0) return [];
     const allowed = allowedLineNumbers(file.text, config);
+    const lines = file.text.split("\n");
+    const lineStarts = lineStartOffsets(file.text);
     const violations: Violation[] = [];
-    for (const pattern of markers) {
+    markerLoop: for (const pattern of markers) {
+      // Matched per line, not over the whole file text: a pathological
+      // pattern's cost is then bounded by line length rather than file
+      // size, and it keeps `allowedLineNumbers`' per-line granularity
+      // consistent with what actually gets matched.
       const re = new RegExp(pattern, "g");
-      for (const m of findAllRegex(file.text, re)) {
-        const { line } = offsetToLineCol(file.text, m.index);
-        if (allowed.has(line)) continue;
-        violations.push(
-          makeViolation(
-            orgMarker,
-            file,
-            m,
-            `Org-specific marker \`${m.match}\` (pattern \`${pattern}\`) in an instruction file: keep it organisation-neutral, or add a line to \`placement.allow\`.`,
-          ),
-        );
+      for (let i = 0; i < lines.length; i++) {
+        const lineNo = i + 1;
+        if (allowed.has(lineNo)) continue;
+        for (const m of findAllRegex(lines[i], re)) {
+          if (violations.length >= MAX_MARKER_VIOLATIONS_PER_FILE)
+            break markerLoop;
+          violations.push(
+            makeViolation(
+              orgMarker,
+              file,
+              { index: lineStarts[i] + m.index, match: m.match },
+              `Org-specific marker \`${m.match}\` (pattern \`${pattern}\`) in an instruction file: keep it organisation-neutral, or add a line to \`placement.allow\`.`,
+            ),
+          );
+        }
       }
     }
     return violations;

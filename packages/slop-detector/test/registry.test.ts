@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { allPacks } from "../src/packs/registry.js";
 
-// These counts are documented in prose in this package's rule-pack table
+// These counts are documented in prose in two places: the repo root
+// README.md ("six rule packs") and this package's own rule-pack table
 // (README.md). The assertions below fail if a rule is added or removed
 // without the docs being updated, so the numbers cannot silently drift from
 // the registry.

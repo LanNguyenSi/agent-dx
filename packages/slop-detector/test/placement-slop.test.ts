@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { checkText } from "../src/engine.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { checkText, checkPath } from "../src/engine.js";
 import { defaultConfig, mergeConfig } from "../src/config.js";
 import { allPacks } from "../src/packs/registry.js";
 
@@ -130,7 +133,7 @@ describe("placement-slop", () => {
   });
 
   it("off by default: the pack does not run without --pack / packs.placement-slop: true", () => {
-    const v = checkText("~/git/pandora/.env 2026-08-24 n=8", "x/SKILL.md", {
+    const v = checkText("~/work/project/.env 2026-08-24 n=8", "x/SKILL.md", {
       packs: allPacks,
       config: defaultConfig(),
     });
@@ -139,7 +142,7 @@ describe("placement-slop", () => {
 
   it("enabled via packs.placement-slop: true in config (no --pack needed)", () => {
     const cfg = mergeConfig({ packs: { "placement-slop": true } });
-    const v = checkText("~/git/pandora/.env", "x/SKILL.md", {
+    const v = checkText("~/work/project/.env", "x/SKILL.md", {
       packs: allPacks,
       config: cfg,
     });
@@ -152,7 +155,7 @@ describe("placement-slop", () => {
     const cfg = mergeConfig({
       placement: { instructionGlobs: ["**/PLAYBOOK.md"] },
     });
-    const v = checkText("~/git/pandora/.env", "x/PLAYBOOK.md", {
+    const v = checkText("~/work/project/.env", "x/PLAYBOOK.md", {
       packs: allPacks,
       config: cfg,
       packFilter: ["placement-slop"],
@@ -163,7 +166,7 @@ describe("placement-slop", () => {
 
     // A file matching neither the default globs nor the additive one is
     // still untouched.
-    const vOther = checkText("~/git/pandora/.env", "x/NOTES.md", {
+    const vOther = checkText("~/work/project/.env", "x/NOTES.md", {
       packs: allPacks,
       config: cfg,
       packFilter: ["placement-slop"],
@@ -176,11 +179,318 @@ describe("placement-slop", () => {
     // Simulate a hand-built config from before this pack existed.
     delete (cfg as { placement?: unknown }).placement;
     expect(() =>
-      checkText("~/git/pandora/.env example-org", "x/SKILL.md", {
+      checkText("~/work/project/.env example-org", "x/SKILL.md", {
         packs: allPacks,
         config: cfg,
         packFilter: ["placement-slop"],
       }),
     ).not.toThrow();
+  });
+
+  describe("tally-phrase across a line wrap", () => {
+    it("fires on 'so far' wrapped across a newline, reporting the first token's line", () => {
+      const text = "line one\nline two\nSo\nfar has this held.";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      const hit = v.find((x) => x.ruleId === "placement-slop/tally-phrase");
+      expect(hit).toBeDefined();
+      expect(hit?.line).toBe(3);
+    });
+
+    it("fires on 'the one measured' wrapped across a newline, reporting the first token's line", () => {
+      const text = "context\nthe one\nmeasured so far was different.";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      const hit = v.find(
+        (x) =>
+          x.ruleId === "placement-slop/tally-phrase" && /the/i.test(x.matched),
+      );
+      expect(hit).toBeDefined();
+      expect(hit?.line).toBe(2);
+    });
+
+    it("does not fire on 'up to date' (negative lookbehind excludes the currency idiom)", () => {
+      const text = "Keep this file up to date as the project evolves.";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/tally-phrase"),
+      ).toBeUndefined();
+    });
+
+    it("still fires on a standalone 'to date' not preceded by 'up'", () => {
+      const text = "No regression has been found to date.";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/tally-phrase"),
+      ).toBeDefined();
+    });
+  });
+
+  describe("URL / markdown-link exclusion (home-path, dated-evidence, opaque-id)", () => {
+    it("home-path does not fire on a /home/ path segment inside a URL", () => {
+      const text = "See https://example.com/home/config for the sample.";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeUndefined();
+    });
+
+    it("home-path does not fire on an angle-bracket placeholder segment", () => {
+      const text = "The token lives at /home/<user>/config on any box.";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeUndefined();
+    });
+
+    it("home-path still fires on a real-looking container account path (documented limitation)", () => {
+      const text = "mount the volume at /home/node/app in the container.";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeDefined();
+    });
+
+    it("dated-evidence does not fire on a date-shaped URL path segment", () => {
+      const text = "Report: https://example.com/reports/2026-08-24/summary.md";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/dated-evidence"),
+      ).toBeUndefined();
+    });
+
+    it("dated-evidence still fires on a bare date outside a URL", () => {
+      const text = "Measured on 2026-08-24 during the sweep.";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/dated-evidence"),
+      ).toBeDefined();
+    });
+  });
+
+  describe("opaque-id refinements", () => {
+    it("does not fire on an all-digit 8-char run", () => {
+      const v = checkText("build 12345678 shipped", "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/opaque-id"),
+      ).toBeUndefined();
+    });
+
+    it("does not fire on an 8-digit date written without dashes", () => {
+      const v = checkText("as of 20260824 this held", "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/opaque-id"),
+      ).toBeUndefined();
+    });
+
+    it("does not fire on an 8-hex run immediately preceded by '#' (color / anchor)", () => {
+      const v = checkText("background: #aabbccdd;", "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/opaque-id"),
+      ).toBeUndefined();
+    });
+
+    it("does not fire on a hex run inside a markdown link target", () => {
+      const v = checkText(
+        "See [x](../commits/deadbeef) for details.",
+        "x/SKILL.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/opaque-id"),
+      ).toBeUndefined();
+    });
+
+    it("fires on the same hex string used as a bare reference", () => {
+      const v = checkText(
+        "task deadbeef was blinded",
+        "x/SKILL.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/opaque-id"),
+      ).toBeDefined();
+    });
+
+    it("does not fire on a 40-char SHA (no internal 8-char word boundary)", () => {
+      const v = checkText(
+        "commit abcdef0123456789abcdef0123456789abcdef01 landed",
+        "x/SKILL.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/opaque-id"),
+      ).toBeUndefined();
+    });
+  });
+
+  describe("org-marker: case sensitivity, per-line matching, and the violation cap", () => {
+    it("markers are matched case-sensitively (no implicit 'i' flag)", () => {
+      const cfg = mergeConfig({ placement: { markers: ["example-org"] } });
+      const opts = {
+        packs: allPacks,
+        config: cfg,
+        packFilter: ["placement-slop"],
+      };
+
+      const lower = checkText("run the example-org sweep", "x/SKILL.md", opts);
+      expect(
+        lower.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeDefined();
+
+      const upper = checkText("run the EXAMPLE-ORG sweep", "x/SKILL.md", opts);
+      expect(
+        upper.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+    });
+
+    it("caps org-marker violations per rule per file", () => {
+      const lines = Array.from(
+        { length: 60 },
+        (_, i) => `line ${i} example-org`,
+      );
+      const cfg = mergeConfig({ placement: { markers: ["example-org"] } });
+      const v = checkText(lines.join("\n"), "x/SKILL.md", {
+        packs: allPacks,
+        config: cfg,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.filter((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toHaveLength(50);
+    });
+  });
+
+  describe("disable comments scoped to placement-slop", () => {
+    it("disable-line suppresses a single placement rule on that line", () => {
+      const text =
+        "Set the token from ~/work/project/.env <!-- slop-detector:disable-line=placement-slop/home-path -->";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeUndefined();
+    });
+
+    it("disable-next-line scoped to the whole pack suppresses every placement rule on the next line", () => {
+      const text =
+        "<!-- slop-detector:disable-next-line=placement-slop -->\nSet the token from ~/work/project/.env";
+      const v = checkText(text, "x/SKILL.md", baseOpts());
+      expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
+    });
+  });
+
+  describe("globToRegex: '**/' anchors on a path segment (finding placement-slop/#7)", () => {
+    it("does not treat docs/SUBAGENTS.md as an AGENTS.md instruction file", () => {
+      const v = checkText(
+        "~/work/project/.env example-org",
+        "docs/SUBAGENTS.md",
+        {
+          packs: allPacks,
+          config: mergeConfig({ placement: { markers: ["example-org"] } }),
+          packFilter: ["placement-slop"],
+        },
+      );
+      expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
+    });
+
+    it("does not treat docs/MYSKILL.md as a SKILL.md instruction file", () => {
+      const v = checkText(
+        "~/work/project/.env example-org",
+        "docs/MYSKILL.md",
+        {
+          packs: allPacks,
+          config: mergeConfig({ placement: { markers: ["example-org"] } }),
+          packFilter: ["placement-slop"],
+        },
+      );
+      expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
+    });
+
+    it("still treats a real AGENTS.md as an instruction file", () => {
+      const v = checkText("~/work/project/.env", "docs/AGENTS.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeDefined();
+    });
+  });
+});
+
+describe("placement-slop: scan-root-relative instructionGlobs (via checkPath)", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-placement-root-"));
+    fs.mkdirSync(path.join(tmp, "sub"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, "sub", "PLAYBOOK.md"),
+      "Set the token from ~/work/project/.env before running.\n",
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("matches an additive instructionGlobs pattern the same way for a relative, ./-prefixed, and absolute scan path", () => {
+    // `checkPath`'s scanRoot is the exact directory string it's given (see
+    // README's "Marking a src barrel as an entrypoint" for the sibling
+    // convention on `entrypointGlobs`), so all three invocations here scan
+    // `tmp` — the glob is written relative to `tmp`, matching its child
+    // `sub/PLAYBOOK.md`. Before this fix, three different string spellings
+    // of the same directory produced three different (raw, unrelativized)
+    // match results; after it, `path.resolve` collapses all three to the
+    // same absolute scanRoot, so the relative path — and the match — is
+    // identical regardless of which form was passed.
+    const relRoot = path.relative(process.cwd(), tmp);
+    const dotRoot = "./" + relRoot;
+
+    const cfg = mergeConfig({
+      packs: { "placement-slop": true },
+      placement: { instructionGlobs: ["sub/**/*.md"] },
+    });
+    const opts = {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["placement-slop"],
+    };
+
+    const relative = checkPath(relRoot, opts);
+    const dotPrefixed = checkPath(dotRoot, opts);
+    const absolute = checkPath(tmp, opts);
+
+    for (const summary of [relative, dotPrefixed, absolute]) {
+      expect(summary.filesScanned).toBe(1);
+      expect(
+        summary.violations.find((v) => v.ruleId === "placement-slop/home-path"),
+      ).toBeDefined();
+    }
+  });
+
+  it("surfaces a warning when a placement.instructionGlobs pattern matches no scanned files", () => {
+    const cfg = mergeConfig({
+      packs: { "placement-slop": true },
+      placement: { instructionGlobs: ["sub/**/*.md", "sub/**/TYPO.md"] },
+    });
+    const summary = checkPath(tmp, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["placement-slop"],
+    });
+    expect(
+      summary.warnings?.some((w) =>
+        w.includes('placement.instructionGlobs pattern "sub/**/TYPO.md"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not warn when every instructionGlobs pattern matches a scanned file", () => {
+    const cfg = mergeConfig({
+      packs: { "placement-slop": true },
+      placement: { instructionGlobs: ["sub/**/*.md"] },
+    });
+    const summary = checkPath(tmp, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["placement-slop"],
+    });
+    expect(summary.warnings).toBeUndefined();
   });
 });

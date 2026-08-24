@@ -73,6 +73,17 @@ export interface RuleContext {
   config: ResolvedConfig;
   /** Present only when SLOP_CORPUS=1 env var or config.corpus:true is active. */
   corpus?: Corpus;
+  /**
+   * The absolute directory a scan-root-relative glob (e.g.
+   * `placement.instructionGlobs`) should be matched against. Always
+   * populated by `checkText`/`checkFiles`/`checkPath`: `CheckOptions.scanRoot`
+   * when given, else the nearest directory containing a `package.json`
+   * (walked up from the file being checked), else `process.cwd()` — the
+   * same fallback order `buildCorpus`/`_resolveEntrypointGlobs` use for
+   * `entrypointGlobs`. Optional only so a hand-built `RuleContext` (as
+   * opposed to one produced by the engine) still type-checks.
+   */
+  scanRoot?: string;
 }
 
 export interface Violation {

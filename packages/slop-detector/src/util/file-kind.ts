@@ -56,10 +56,15 @@ const BINARY_EXT = new Set([
   ".node",
 ]);
 
-export function detectFileKind(filePath: string, config?: ResolvedConfig): FileKind {
+export function detectFileKind(
+  filePath: string,
+  config?: ResolvedConfig,
+): FileKind {
   const normalized = filePath.split(path.sep).join("/");
-  if (config?.treatAsProse.some((p) => matchesGlob(normalized, p))) return "prose";
-  if (config?.treatAsCode.some((p) => matchesGlob(normalized, p))) return "code";
+  if (config?.treatAsProse.some((p) => matchesGlob(normalized, p)))
+    return "prose";
+  if (config?.treatAsCode.some((p) => matchesGlob(normalized, p)))
+    return "code";
 
   const ext = path.extname(filePath).toLowerCase();
   if (BINARY_EXT.has(ext)) return "binary";
@@ -69,8 +74,10 @@ export function detectFileKind(filePath: string, config?: ResolvedConfig): FileK
   if (CODE_EXT.has(ext)) return "code";
 
   const base = path.basename(filePath).toLowerCase();
-  if (base.startsWith("readme") || base === "changelog" || base === "license") return "prose";
-  if (base === "dockerfile" || base.endsWith(".env") || base === "makefile") return "code";
+  if (base.startsWith("readme") || base === "changelog" || base === "license")
+    return "prose";
+  if (base === "dockerfile" || base.endsWith(".env") || base === "makefile")
+    return "code";
 
   return "prose";
 }
@@ -86,9 +93,20 @@ export function globToRegex(glob: string): RegExp {
     const c = glob[i];
     if (c === "*") {
       if (glob[i + 1] === "*") {
-        re += ".*";
         i++;
-        if (glob[i + 1] === "/") i++;
+        if (glob[i + 1] === "/") {
+          // `**/` matches zero or more *whole* path segments, not an
+          // arbitrary substring — `.*` alone let `**/AGENTS.md` match
+          // `docs/SUBAGENTS.md` (".*" happily eats "docs/SUB" and leaves
+          // a literal "AGENTS.md" suffix match) even though "SUBAGENTS.md"
+          // is a different filename on a different segment boundary.
+          // `(?:.*/)?` only ever stops right after a "/", so what follows
+          // must start a fresh path segment.
+          re += "(?:.*/)?";
+          i++;
+        } else {
+          re += ".*";
+        }
       } else {
         re += "[^/]*";
       }

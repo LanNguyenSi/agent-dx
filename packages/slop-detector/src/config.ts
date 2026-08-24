@@ -2,7 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
-import type { PackId, ResolvedConfig, RuleOverride, Severity } from "./types.js";
+import type {
+  PackId,
+  ResolvedConfig,
+  RuleOverride,
+  Severity,
+} from "./types.js";
 
 const SeveritySchema = z.enum(["block", "warn", "info"]);
 const PackIdSchema = z.enum([
@@ -33,26 +38,65 @@ const EntrypointGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
 // placement-slop pack compiles at check time (`new RegExp(pattern, ...)`).
 // A pattern that can't compile would otherwise fail silently way downstream
 // inside a rule's `check`, so reject it here, at config parse time, with a
-// message that names the bad pattern.
-const RegexPatternSchema = z.string().refine(
-  (pattern) => {
-    try {
-      new RegExp(pattern);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-  (pattern) => ({
-    message: `Invalid regular expression in placement config: "${pattern}"`,
-  }),
-);
+// message that names the bad pattern. A pattern that compiles but matches
+// the empty string (e.g. "a*") is rejected too: `org-marker` and the
+// `allow` line-scan run these patterns against every line of every
+// instruction file, and a zero-width match would either match at every
+// character position (unbounded, meaningless violations) or, for `allow`,
+// silently suppress every line in the file.
+const RegexPatternSchema = z
+  .string()
+  .refine(
+    (pattern) => {
+      try {
+        new RegExp(pattern);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    (pattern) => ({
+      message: `Invalid regular expression in placement config: "${pattern}"`,
+    }),
+  )
+  .refine(
+    (pattern) => {
+      try {
+        return !new RegExp(pattern).test("");
+      } catch {
+        // Already reported by the first `.refine` above; don't double-report.
+        return true;
+      }
+    },
+    (pattern) => ({
+      message: `Regular expression in placement config matches the empty string, which would match every position in every scanned line: "${pattern}"`,
+    }),
+  );
+
+// `placement.instructionGlobs` is matched against a path already made
+// relative to the scan root (see `isInstructionFile` in
+// packs/placement-slop.ts and `_resolveEntrypointGlobs` in engine.ts for
+// the sibling mechanism) — same reasoning as `EntrypointGlobSchema` above:
+// a leading "/" can never match that relative path.
+const InstructionGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
+  message:
+    'placement.instructionGlobs patterns are matched relative to the scan root (or the nearest package.json directory), not as absolute paths — remove the leading "/"',
+});
 
 const PlacementConfigSchema = z.object({
   markers: z.array(RegexPatternSchema).optional(),
-  instructionGlobs: z.array(z.string()).optional(),
+  instructionGlobs: z.array(InstructionGlobSchema).optional(),
   allow: z.array(RegexPatternSchema).optional(),
 });
+
+// A pattern written as `./foo/**/*.md` means the same thing as `foo/**/*.md`
+// once it's matched against an already-relativized path (`path.relative`
+// never produces a leading "./"), but users naturally type the "./" prefix.
+// Normalize it away at merge time so both `isInstructionFile` and the
+// zero-match warning in `checkFiles` compile the exact same pattern string.
+function stripLeadingDotSlash(glob: string): string {
+  return glob.startsWith("./") ? glob.slice(2) : glob;
+}
 
 const ConfigFileSchema = z.object({
   packs: z.record(PackIdSchema, z.boolean()).optional(),
@@ -118,7 +162,10 @@ export function defaultConfig(): ResolvedConfig {
 
 export function mergeConfig(file: ConfigFile): ResolvedConfig {
   const base = defaultConfig();
-  const packs: Record<PackId, boolean> = { ...base.packs, ...(file.packs ?? {}) };
+  const packs: Record<PackId, boolean> = {
+    ...base.packs,
+    ...(file.packs ?? {}),
+  };
   const ruleOverrides: Record<string, RuleOverride> = { ...(file.rules ?? {}) };
   return {
     packs,
@@ -130,7 +177,9 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
     entrypointGlobs: file.entrypointGlobs ?? [],
     placement: {
       markers: file.placement?.markers ?? [],
-      instructionGlobs: file.placement?.instructionGlobs ?? [],
+      instructionGlobs: (file.placement?.instructionGlobs ?? []).map(
+        stripLeadingDotSlash,
+      ),
       allow: file.placement?.allow ?? [],
     },
   };
