@@ -123,7 +123,9 @@ jobs:
         # npm 10, so upgrade first. Auth comes from the GitHub OIDC token
         # (permissions.id-token: write above) matched against the package's
         # Trusted Publisher entry on npmjs.com (repo LanNguyenSi/agent-dx,
-        # workflow publish-npm.yml) — no NPM_TOKEN secret involved.
+        # workflow publish-npm.yml) — no NPM_TOKEN secret involved. Both
+        # published packages, orchestrator-workflow and okf-kit, need their
+        # own separate Trusted Publisher entry pointing at this file.
         run: npm install -g npm@11
 
       - name: Publish
