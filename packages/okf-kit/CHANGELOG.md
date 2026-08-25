@@ -10,24 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `citations-resolve` now also resolves **short-form** citations: a bare
-  (no backtick, no file name) `:N-M` colon-range or `(N-M)` parenthesized
-  range, bound to the last full `path:N-M` citation named earlier in the
-  same paragraph (a paragraph boundary is a blank line). A short-form
-  citation with no full citation earlier in its own paragraph is reported
-  `short-form-unbound` (notice), not silently skipped. Only a range form
-  is recognised (`(373-375)`, `:580-588`); a bare single number (`(1)`,
-  `:5`) is not, since it is too easily an unrelated enumeration marker
-  (e.g. a numbered list) rather than a citation. A candidate match is only
-  collected when it passes a plausibility gate (inverted or implausibly
-  wide range rejected; a pair that both look like a year, or, colon-form
-  only, a well-known port pair, is never a citation), and is never
-  collected at all inside a fenced/indented code block, an inline code
-  span, or a Markdown table row. Reserved files (`index.md`, `log.md`) are
-  excluded from short-form matching: they are append-only narrative
-  journals that routinely describe historical "old N-M -> new X-Y"
-  line-number deltas as prose, not live citations against current content,
-  which bare-range matching cannot tell apart from a real short-form
-  citation; full/continuation citations in reserved files are unaffected.
+  (no backtick, no file name) `:N-M` colon-range, collected only when the
+  nearest preceding non-whitespace text is a serial connective (`,`, `;`,
+  `(`, or the word `and`/`or`) and bound to the last full `path:N-M`
+  citation named earlier in the same paragraph (a paragraph boundary is a
+  blank line), with no further check on the two ranges' relationship. A
+  gate-cleared candidate with no full citation earlier in its own
+  paragraph is reported `short-form-unbound` (notice), not silently
+  skipped; a candidate the gate rejects is dropped before binding is ever
+  attempted and produces no finding of any kind. Only a range form is
+  recognised (`:580-588`); a bare single number (`:5`) is not, since it is
+  too easily an unrelated enumeration marker (e.g. a numbered list) rather
+  than a citation. Never collected at all inside a fenced/indented code
+  block, an inline code span, or a Markdown table row. Reserved files
+  (`index.md`, `log.md`) are excluded from short-form matching: they are
+  append-only narrative journals that routinely describe historical "old
+  :N-M -> new :X-Y" line-number deltas as prose, not live citations
+  against current content; full/continuation citations in reserved files
+  are unaffected. A bare parenthesized range `(N-M)` is deliberately NOT
+  collected as a short-form citation at all -- see "Fixed" below for why.
   See "Short-form citations" in the README for the full shape/exclusion
   rules and their known limitations.
 - `citations-resolve` now additionally checks, for a short-form citation's
@@ -36,8 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`test-range-start-not-head`, a **warning**) and ends on a matching
   closing `});` line (`test-range-end-not-closing`, a **notice**: a
   correct start with a short end is also consistent with a deliberate
-  partial citation, not necessarily drift). Applied to both short-form
-  syntaxes alike.
+  partial citation, not necessarily drift).
 - `citations-resolve` now additionally checks, for any short-form
   citation's range into a Markdown target, whether its start or end line
   is a bare bracket (`)`, `]`, `}`, `(`, `[`, `{`, optionally with a
@@ -45,13 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a boundary that drifted onto structural punctuation rather than real
   content. This is a **notice**, not a warning (`markdown-range-boundary-bracket-or-fence`):
   mechanical verification of "is this still the same block" is far less
-  reliable for prose than for code brace structure, and is applied to both
-  short-form syntaxes since a false positive here is only advisory. A
-  range starting on a genuine *opening* fence line is exempted from the
-  fence-as-drift-signal part of this check: citing a fenced block starting
-  at its own opening delimiter is the natural, correct way to cite it.
+  reliable for prose than for code brace structure. A range starting on a
+  genuine *opening* fence line is exempted from the fence-as-drift-signal
+  part of this check: citing a fenced block starting at its own opening
+  delimiter is the natural, correct way to cite it.
 
-### Fixed (review round 2)
+### Fixed
 
 - The test-file block-boundary check above previously applied only to
   paren-form short forms, on the documented theory that a colon-form short
@@ -71,13 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `short-form-unbound` previously fired at warning severity, so an
   unrecognised bare `N-M` range anywhere in ordinary prose (a year range,
   a port range, a small plain-English number range) could fail a
-  consumer's `--strict` run. It is now a notice. A plausibility gate was
-  also added before a bare range is even collected as a short-form
-  candidate at all (see "Added" above), closing the sharper half of the
-  same bug: an unrelated numeric range in prose silently binding to a real
-  citation target and being checked (and, for a year or well-known-port
-  shaped range, sometimes producing a false `range-exceeds-file`) rather
-  than merely being reported unbound.
+  consumer's `--strict` run. It is now a notice.
 - Short-form matching previously scanned fenced code blocks, indented code
   blocks, Markdown table rows, and (partially -- only a match directly
   touching a backtick was excluded) inline code spans for bare ranges. All
@@ -94,32 +87,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target, `log.md`, narrating historical deltas): the target document was
   named, `CITATION_RE` just never matched it as a full citation. Reworded
   to "no full `path:N` citation earlier in this paragraph to bind to".
+- Three successive rounds tried to separate a real short-form citation
+  from ordinary prose that merely contains an N-M-shaped number pair by
+  deciding from the range's *values*: an inverted-pair/span-cap check,
+  then a year/well-known-port plausibility gate, then a
+  containment-or-adjacency check against the paragraph's last full
+  citation (`isContainedOrAdjacent`, now removed -- there is no longer a
+  second value-shape filter layered behind the gate). All three were
+  defeated by the same class of false positive: a doc with
+  `src/t.test.ts:3-7` followed by "covers phases (1-2), (2-4), and (5-6)"
+  produced two false `test-range-start-not-head` warnings under the
+  containment/adjacency version, because every real paren-form citation
+  this rule was ever built against has the identical shape
+  `<English word> (N-M)` as ordinary prose -- there is no lexical signal
+  that tells them apart. The bare parenthesized form `(N-M)` is therefore
+  no longer collected as a short-form citation candidate at all. Measured
+  against this rule's own dogfood bundle
+  (`packages/orchestrator-workflow/docs/okf`), a compiled copy with paren
+  collection disabled produced an identical finding count to one with it
+  enabled (39 findings / 17 warnings / 22 notices either way) -- dropping
+  it cost nothing.
+- The colon form does not have the paren form's problem, but still needs
+  a gate to avoid the same false-positive class: a candidate `:N-M` is
+  now collected only when the nearest preceding non-whitespace text is a
+  serial connective -- `,`, `;`, `(`, or the word `and`/`or` -- and, once
+  collected, binds unconditionally to the paragraph's last full citation
+  (the containment-or-adjacency check above is gone; a bound candidate is
+  simply checked, with no further gate on the two ranges' relationship).
+  Measured over the 137 markdown files in this repo: 37 bare `:N-M`
+  occurrences preceded by whitespace or punctuation, 29 of them
+  serial-connective-preceded, and all 29 are genuine citations (13
+  preceded by `(`, 12 by a comma, 4 by `and`) -- the comma is
+  load-bearing at 12 of 29, so the gate is not narrowed to `(` and `and`
+  only. The 8 non-serial occurrences the gate correctly excludes are this
+  package's own README quoting false-positive examples (now removed from
+  the README along with the plausibility-gate description they
+  illustrated), this rule's own test fixture, and `docs/okf/log.md`'s
+  "old :N-M -> new :X-Y" delta narration (a reserved file, already
+  skipped regardless of the gate). Documented residual, not fixed: a
+  prose shape where the serial connective happens to precede a bare range
+  that is still not a real citation (e.g. "the exposed ports, :80-443,
+  stayed open") still binds and can produce a false warning; not observed
+  anywhere in the 137-file corpus.
+- Net effect on this rule's own dogfood bundle
+  (`packages/orchestrator-workflow/docs/okf`): 49 findings / 16 warnings /
+  33 notices (previous round, containment-or-adjacency) -> 39 findings /
+  17 warnings / 22 notices (this round). The delta is exactly the 11 false
+  `short-form-unbound` notices the containment/adjacency gate was
+  producing disappearing, plus exactly one warning appearing:
+  `init.ts:538-569 (short-form)`, `closing-brace-start-line` -- see "Known
+  finding" below, this is a real, previously-suppressed finding, not a
+  new false positive. All findings present before this round's gate
+  change are unaffected.
 
 ### Known finding
 
 Dogfooding this change against `packages/orchestrator-workflow/docs/okf`
 surfaces citation drift beyond the single pre-existing one already known
 (`install-fence-mechanics.md`'s `init.ts:538-569`, a short-form landing on
-a lone closing brace): applying the block-boundary fix above to
-colon-form short forms surfaces 13 further findings (12 warnings, 1
-notice) in the same doc, all within one compound colon-form list citing
-`test/init.test.ts`'s `describe("tier variants (\`--tiers\`)")` block.
-Reading the citing prose against the real file shows a consistent pattern:
-every cited range's length exactly matches the length of the real
-`describe`/`it` block its prose describes, shifted by a constant offset
-(+33 lines for the first four citations in the list, +116 for the rest --
-consistent with roughly two rounds of content having been inserted earlier
-in the same block without the rest of the list being re-numbered). One
-further citation in the same list, `:1614-1626`, is drifted by the same
-+116 pattern but produces no finding at all: its cited start line
-coincidentally lands on a real (but different) `describe`/`it` head, and
-its cited end line coincidentally lands on a real (but unrelated, nested)
-closing `});`, so the mechanical check cannot distinguish it from a
-correct citation. This is a known, inherent blind spot of a mechanical,
-non-semantic checker, not a regression from this change. Fixing any of
-these citations is out of scope for this change (no content fixes to
-consumer-bundle citations); the full classified list, with cited vs. real
-ranges, is recorded against the citation-audit follow-up task.
+a lone closing brace, restored to a warning by this round's gate change --
+see "Fixed" above): a compound colon-form list in the same doc, citing
+`test/init.test.ts`'s `describe("tier variants (\`--tiers\`)")` block,
+names 15 short-form sub-ranges. 13 of them produce a citations-resolve
+finding (12 `test-range-start-not-head` warnings, 1
+`test-range-end-not-closing` notice on `:1229-1265`); 11 of those 13 are
+exact-length blocks shifted by a constant offset from their real
+`describe`/`it` block (+33 lines for three of them, +116 for the other
+eight -- consistent with roughly two rounds of content having been
+inserted earlier in the same block without the rest of the list being
+re-numbered). The other 2 of the 13 do not fit that pattern: `:1229-1265`
+is at offset 0 (its start line is the real block head) but cites a
+37-line span against a real 70-line block that grew; `:1636-1725` cites a
+90-line span against a real 91-line block. Of the 2 remaining
+citations that produce no finding at all: `:1170-1227` is genuinely
+correct (not drifted); `:1614-1626` is drifted by the same +116 pattern
+as the 8 above but produces no finding -- a known, inherent blind spot of
+this mechanical, non-semantic checker: its cited start line coincidentally
+lands on a real (but different) `describe`/`it` head, and its cited end
+line coincidentally lands on a real (but unrelated, nested) closing
+`});`, so the check cannot distinguish it from a correct citation. Fixing
+any of these citations is out of scope for this change (no content fixes
+to consumer-bundle citations).
+
+Separately, the reserved-file carve-out (see "Fixed" above) leaves
+genuine short-form citations in `index.md`/`log.md` completely unchecked.
+The current dogfood bundle has four such citations, around
+`log.md:362-370`.
 
 ## [0.5.0] - 2026-08-22
 

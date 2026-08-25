@@ -146,11 +146,13 @@ const CONT_DASH_RE = /[-–]`(\d+)`/g;
 const CONT_PAREN_RE = /\(`(\d+)`\)/g;
 const CLOSING_ONLY_EXTS = new Set(["ts", "js", "mjs", "yml", "yaml", "json"]);
 const CLOSING_BRACE_RE = /^[)\]}][;,]?$/;
-// Short-form (paragraph-bound) citation forms, see the "Short-form
-// citations" doc block below. Both require an explicit N-M range: a bare
-// single number (`(1)`, `:5`) is not matched -- see that doc block for why.
+// Short-form (paragraph-bound) citation form, see the "Short-form
+// citations" doc block below. Requires an explicit N-M range: a bare single
+// number (`:5`) is not matched -- see that doc block for why. Only the
+// colon form is collected; a bare `(N-M)` is never a short-form citation
+// candidate at all -- see the same doc block for why the paren form was
+// dropped rather than gated.
 const SHORT_FORM_COLON_RE = /:(\d+)-(\d+)/g;
-const SHORT_FORM_PAREN_RE = /\((\d+)-(\d+)\)/g;
 // Test-file block-boundary check (see checkRangeBoundary): a citation's
 // range into a `.test.ts`/`.spec.ts` (or `.js`/`.mjs` equivalent) target
 // must start on a describe(/it( head line and end on its matching closing
@@ -603,11 +605,9 @@ function isMatchingFenceClosingLine(
  * range alone), so the check is scoped to exactly that mechanism.
  *
  * Test-file targets (`.test.ts`/`.spec.ts`, and their `.js`/`.mjs`
- * equivalents), both short-form syntaxes alike (colon-form and paren-form
- * are no longer distinguished here -- see the "Short-form citations" doc
- * block for why the earlier paren-only gate was removed): the range must
- * start on a `describe(`/`it(` head line and end on a matching closing
- * `});` line. Severity split, by evidence strength: a wrong START line is a
+ * equivalents): the range must start on a `describe(`/`it(` head line and
+ * end on a matching closing `});` line. Severity split, by evidence
+ * strength: a wrong START line is a
  * *warning* (`test-range-start-not-head`) -- the range beginning somewhere
  * other than a block head is strong drift evidence. A range whose start IS
  * correct but whose END is not the matching `});` is only a *notice*
@@ -697,12 +697,12 @@ function checkRangeBoundary(
  * A short-form citation's full check: checkTarget's existing checks
  * (unreadable-target, inverted-range, range-exceeds-file, blank-start-line,
  * closing-brace-start-line), plus, only when those all pass, the
- * test-file/markdown block-boundary check above (applied to both short-form
- * syntaxes alike; see checkRangeBoundary). Reads the resolved target from
- * disk exactly once (a dogfood bundle can run this against the same target
- * file a dozen-plus times for one compound short-form list) and reuses the
- * same `lines` array for both checks, instead of checkTarget and
- * checkRangeBoundary each reading and re-splitting it independently.
+ * test-file/markdown block-boundary check above (see checkRangeBoundary).
+ * Reads the resolved target from disk exactly once (a dogfood bundle can
+ * run this against the same target file a dozen-plus times for one
+ * compound short-form list) and reuses the same `lines` array for both
+ * checks, instead of checkTarget and checkRangeBoundary each reading and
+ * re-splitting it independently.
  */
 function checkShortFormTarget(
   citedPath: string,
@@ -780,84 +780,110 @@ function collectContinuationAtoms(content: string): Atom[] {
 }
 
 /**
- * Short-form citations. Two additional forms, distinct from the backtick
- * continuations above: a BARE (no surrounding backtick) colon-range
- * `:N-M`, or a BARE parenthesized range `(N-M)`. Unlike a continuation,
- * which chains off `governing` -- the nearest PRECEDING citation anywhere
- * earlier in the doc, reset only on failure/ambiguity/skip -- a short-form
- * citation only ever CANDIDATES for binding to the last FULL `path:N[-M]`
- * citation named earlier in THE SAME PARAGRAPH (a paragraph boundary is a
- * blank -- empty or whitespace-only -- line); see the containment rule
- * below for when that candidate binding is actually accepted. A short-form
- * citation with no full citation earlier in its own paragraph, or whose
- * candidate binding fails the containment rule, is reported unresolved
+ * Short-form citations. A BARE (no surrounding backtick) colon-range
+ * `:N-M`, distinct from the backtick continuations above. Unlike a
+ * continuation, which chains off `governing` -- the nearest PRECEDING
+ * citation anywhere earlier in the doc, reset only on failure/ambiguity/
+ * skip -- a short-form citation only ever binds to the last FULL
+ * `path:N[-M]` citation named earlier in THE SAME PARAGRAPH (a paragraph
+ * boundary is a blank -- empty or whitespace-only -- line): once a
+ * candidate clears the serial-connective gate below, it binds
+ * unconditionally to that target, with no further check on the two
+ * ranges' relationship. A gate-cleared candidate with no full citation
+ * earlier in its own paragraph is reported unresolved
  * (`short-form-unbound`, a NOTICE, not a warning), never silently skipped:
  * unlike a continuation right after a rejected/ambiguous citation (which
  * has a real reason to skip -- that citation's resolution is known
  * unusable), a short-form's paragraph simply never named a usable target,
- * itself worth flagging.
+ * itself worth flagging. A candidate the gate rejects is not collected at
+ * all -- it produces no finding of any kind, not even short-form-unbound.
  *
- * Range only, no bare single number (`(1)`, `:5`): every real short-form
- * citation found while building this rule was a range (`(373-375)`,
- * `:580-588`), and a bare single number is far too likely to be an
- * unrelated enumeration marker (this rule's own dogfood target,
- * docs/okf/log.md, uses exactly that numbered-list convention throughout)
- * to detect mechanically without a large false-positive cost.
+ * Range only, no bare single number (`:5`): every real short-form citation
+ * found while building this rule was a range (`:580-588`), and a bare
+ * single number is far too likely to be an unrelated enumeration marker
+ * (this rule's own dogfood target, docs/okf/log.md, uses exactly that
+ * numbered-list convention throughout) to detect mechanically without a
+ * large false-positive cost.
  *
- * A candidate match is excluded (not even collected) when:
- *   - its `:`/`(` falls inside an already-matched full citation's own
- *     span (the tail of a real `path:N-M` citation, not a new short form),
- *     a fenced or indented code block, an inline code span, or a Markdown
+ * Only the colon form (`:N-M`) is collected. A bare parenthesized range
+ * `(N-M)` is NOT collected at all, deliberately: three earlier rounds each
+ * tried to separate a real short-form citation from ordinary prose that
+ * merely contains an N-M-shaped number pair ("the window (2026-2027)",
+ * "follow steps (2-4)", "three engineers (1-3)") by deciding from the
+ * range's VALUES -- an inverted-pair check, a span cap plus a year/port
+ * plausibility gate, then a containment-or-adjacency check against the
+ * paragraph's last full citation -- and all three were eventually defeated
+ * by the same class of false positive, because every real paren-form
+ * citation this rule was ever built against had the identical shape
+ * `<English word> (N-M)` as ordinary prose. There is no lexical signal
+ * that separates them; dropping paren-form collection measured zero cost
+ * against this rule's own dogfood corpus (39 findings / 17 warnings / 22
+ * notices, unchanged with and without it -- see the CHANGELOG). The colon
+ * form does not have this problem: prose essentially never writes a bare
+ * `:N-M` outside a citation-adjacent context, and the serial-connective
+ * gate below narrows it further.
+ *
+ * Serial-connective gate. A colon-form candidate is collected ONLY when
+ * the nearest preceding non-whitespace text, after trimming whitespace, is
+ * one of the characters `,`, `;`, `(`, or ends in the word `and` or `or`
+ * -- the shape a short-form citation takes in a serial list of sub-ranges
+ * ("the `TODO` cells, :72-74 (the ...), and :92-97 (the ...)", "review
+ * finding L1 (:1170-1227, ...)"). Measured over the 137 markdown files in
+ * this repo: 37 whitespace-or-punctuation-preceded bare `:N-M` occurrences,
+ * 29 of them serial-connective-preceded, and all 29 are genuine citations
+ * (13 preceded by `(`, 12 by a comma, 4 by `and`) -- the comma is
+ * load-bearing at 12 of 29, so the gate is not narrowed to `(` and `and`
+ * only. The 8 non-serial occurrences this gate correctly excludes are this
+ * package's own README quoting false-positive examples, this rule's own
+ * test fixture, and docs/okf/log.md's "old :93-94 -> new :150-151" delta
+ * narration (a reserved file, already skipped regardless -- see below). A
+ * candidate this gate rejects is dropped before any binding is attempted:
+ * it is not a citation, and produces nothing at all, not even
+ * short-form-unbound. See isSerialConnectivePreceded for the exact check.
+ *
+ * A candidate is excluded from even being considered against the gate when:
+ *   - its `:` falls inside an already-matched full citation's own span
+ *     (the tail of a real `path:N-M` citation, not a new short form), a
+ *     fenced or indented code block, an inline code span, or a Markdown
  *     table row (see computeExcludedSpans) -- a bare numeric range inside
  *     any of these is virtually never a citation
  *   - the character immediately before or after the match is a backtick
  *     (the backtick continuation forms above already own that syntax)
- *   - (colon form) the character immediately before the `:` is a
- *     path/word character (`[\w./-]`) -- a real filename character there
- *     means this is plausibly part of some other, unrecognised
- *     citation-like token, not a bare short form
- *   - (paren form) the character immediately before the `(` is a word
- *     character -- guards against an incidental `foo(123-456)`-shaped
- *     token that is not prose
  *
  * A resolved short-form citation is checked via checkShortFormTarget (see
  * above): checkTarget's existing checks, plus the test-file/Markdown
- * block-boundary check, applied to both short-form syntaxes alike (see
- * checkRangeBoundary; there is no longer a colon-form/paren-form split
- * there -- see that function's doc block for why the earlier split was
- * removed: sampling the drift it was hiding showed it was suppressing real
- * drift for the dominant colon-form syntax, not marking a legitimate
- * granularity convention).
+ * block-boundary check (see checkRangeBoundary).
  *
- * Containment rule (isContainedOrAdjacent). A bare `N-M` range carries no
- * syntactic marker distinguishing a real short-form citation from ordinary
- * prose that merely happens to contain an N-M-shaped number pair ("the
- * window (2026-2027)", "opens :80-443", "follow steps (2-4)") -- a matcher
- * over raw text cannot decide by the range's VALUES. Two earlier rounds
- * tried exactly that (an inverted-pair check, a span cap, a year-shape
- * check, a well-known-port-shape check) and both were defeated by the same
- * class of false positive: a small plain-English number range is
- * syntactically indistinguishable from a real citation's own range, no
- * matter how the values are shaped. The decision instead comes from
- * STRUCTURE: a short-form candidate's range is only accepted as a real
- * citation of the paragraph's last-named full citation when it lies
- * entirely inside that full citation's own range, or is DIRECTLY ADJACENT
- * to it -- starts exactly one line after the full citation's range ends,
- * or ends exactly one line before the full citation's range starts (a
- * zero-line-gap abutment). A range that merely overlaps the full
- * citation's range without being fully contained in it (e.g. "follow
- * steps (2-4)" after a `path:3-7` citation: lines 3-4 are shared, but line
- * 2 is not inside `3-7`, and `2-4` neither starts at `8` nor ends at `2`)
- * is neither "inside" nor "adjacent" and is rejected the same way an
- * unbound candidate is: reported `short-form-unbound`, a NOTICE. See
- * isContainedOrAdjacent for the exact check.
+ * Documented residual (not fixed): a prose shape where the serial
+ * connective happens to precede a bare range that is still not a real
+ * citation -- e.g. "the exposed ports, :80-443, stayed open" -- still
+ * binds to the paragraph's last full citation and can produce a false
+ * warning. This was not observed anywhere in the 137-file corpus this
+ * gate was measured against; see the README and CHANGELOG.
  */
 type ShortFormMatch = {
   index: number;
   startLine: number;
   endLine: number;
-  form: "colon" | "paren";
 };
+
+/**
+ * True when the nearest non-whitespace text before `matchIndex` in
+ * `content` is a serial connective: the single character `,`, `;`, or `(`,
+ * or the word `and`/`or` (case-insensitive, word-boundary-matched so it
+ * does not fire on the tail of a longer word like "brand"). See the
+ * "Short-form citations" doc block above for why this is the gate.
+ */
+function isSerialConnectivePreceded(
+  content: string,
+  matchIndex: number,
+): boolean {
+  const before = content.slice(0, matchIndex).trimEnd();
+  if (before === "") return false;
+  const lastChar = before[before.length - 1];
+  if (lastChar === "," || lastChar === ";" || lastChar === "(") return true;
+  return /\b(?:and|or)$/i.test(before);
+}
 
 function isWithinAnySpan(
   index: number,
@@ -876,25 +902,12 @@ function collectShortFormMatches(
   let m: RegExpExecArray | null;
   while ((m = colonRe.exec(content)) !== null) {
     if (isWithinAnySpan(m.index, excludedSpans)) continue;
-    const before = m.index > 0 ? content[m.index - 1] : undefined;
-    if (before === "`") continue;
-    if (before !== undefined && /[\w./-]/.test(before)) continue;
+    if (content[m.index - 1] === "`") continue;
     if (content[m.index + m[0].length] === "`") continue;
+    if (!isSerialConnectivePreceded(content, m.index)) continue;
     const startLine = Number(m[1]);
     const endLine = Number(m[2]);
-    out.push({ index: m.index, startLine, endLine, form: "colon" });
-  }
-
-  const parenRe = new RegExp(SHORT_FORM_PAREN_RE.source, "g");
-  while ((m = parenRe.exec(content)) !== null) {
-    if (isWithinAnySpan(m.index, excludedSpans)) continue;
-    const before = m.index > 0 ? content[m.index - 1] : undefined;
-    if (before === "`") continue;
-    if (before !== undefined && /\w/.test(before)) continue;
-    if (content[m.index + m[0].length] === "`") continue;
-    const startLine = Number(m[1]);
-    const endLine = Number(m[2]);
-    out.push({ index: m.index, startLine, endLine, form: "paren" });
+    out.push({ index: m.index, startLine, endLine });
   }
 
   return out.sort((a, b) => a.index - b.index);
@@ -1070,12 +1083,10 @@ function paragraphStartFor(starts: number[], index: number): number {
   return result;
 }
 
-/** A full citation named in a paragraph, carried alongside its own range for the containment rule (see isContainedOrAdjacent). */
+/** A full citation named in a paragraph, for short-form binding. */
 type NamedFullCitation = {
   index: number;
   citedPath: string;
-  startLine: number;
-  endLine: number;
 };
 
 /**
@@ -1095,35 +1106,6 @@ function findLastNamedTargetInParagraph(
     }
   }
   return best;
-}
-
-/**
- * True when a short-form range [`start`, `end`] lies entirely inside the
- * paragraph's last-named full citation's own range [`targetStart`,
- * `targetEnd`], or is DIRECTLY ADJACENT to it: `start` is exactly one line
- * after `targetEnd` (immediately follows the cited block), or `end` is
- * exactly one line before `targetStart` (immediately precedes it) -- a
- * zero-line-gap abutment, not merely nearby. This is the structural test
- * that replaces the value-shape plausibility gate two earlier rounds tried
- * (see the "Containment rule" doc block above): a range that partially
- * OVERLAPS the target without being fully contained in it (e.g. a range
- * shifted so it starts before the target and ends inside it) is neither
- * "inside" nor "adjacent" by this definition, and is rejected the same as
- * a range with no relationship to the target at all -- this is exactly
- * what tells a genuine "follow steps (2-4)" reading a nearby `path:3-7`
- * citation (rejected: `2` is outside `3-7`, and the pair touches neither
- * boundary with a zero-line gap) apart from a real short-form citation.
- */
-function isContainedOrAdjacent(
-  start: number,
-  end: number,
-  targetStart: number,
-  targetEnd: number,
-): boolean {
-  if (start >= targetStart && end <= targetEnd) return true;
-  if (start === targetEnd + 1) return true;
-  if (end === targetStart - 1) return true;
-  return false;
 }
 
 function pushDrift(
@@ -1399,8 +1381,6 @@ function scanDoc(
         namedFullAtoms.push({
           index: a.index,
           citedPath: a.citedPath,
-          startLine: a.startLine,
-          endLine: a.endLine ?? a.startLine,
         });
       }
     }
@@ -1421,26 +1401,6 @@ function scanDoc(
           `${rangeLabel} (short-form)`,
           "short-form-unbound",
           "no full `path:N` citation earlier in this paragraph to bind to",
-          undefined,
-          "notice",
-        );
-        continue;
-      }
-
-      if (
-        !isContainedOrAdjacent(
-          sf.startLine,
-          sf.endLine,
-          target.startLine,
-          target.endLine,
-        )
-      ) {
-        pushDrift(
-          findings,
-          doc.relPath,
-          `${rangeLabel} (short-form)`,
-          "short-form-unbound",
-          `range is neither inside nor directly adjacent to the paragraph's last full citation \`${target.citedPath}:${target.startLine}-${target.endLine}\``,
           undefined,
           "notice",
         );
