@@ -218,8 +218,10 @@ type Anchor = { kind: "heading" | "string"; text: string };
  * double-quoted raw value (`"..."`) is the string form, text taken verbatim
  * between the quotes; anything else is the heading form, with a single
  * wrapping `[...]` stripped (so `#[0.24.0]` and `#0.24.0` compare
- * identically against a heading's stripped text) -- see the "Anchored
- * citations" doc block above.
+ * identically) -- compared as a plain substring against the heading's own
+ * raw text (`findEnclosingHeading`'s `text`, itself never stripped of any
+ * brackets it happens to carry), not a stripped copy of it -- see the
+ * "Anchored citations" doc block above.
  */
 function parseAnchor(raw: string | undefined): Anchor | null {
   if (!raw) return null;
@@ -232,17 +234,59 @@ function parseAnchor(raw: string | undefined): Anchor | null {
 }
 
 /**
+ * 0-based line indices that fall inside a fenced code block (```` ``` ````
+ * or `~~~`, optionally with a trailing language tag), delimiters included --
+ * the target-side twin of `computeFencedSpans` above, which does the same
+ * job for the *citing* doc's short-form matching. Anchor heading-search
+ * needs its own copy because it works from an already-split `lines` array
+ * (see `checkFullTarget`), not the raw `content` string `computeFencedSpans`
+ * takes, and because it must ignore a target's `# not a heading` sitting
+ * inside a fenced example exactly the same way a citing doc's own fences
+ * are already ignored for short-form matching -- without this, a `#`-led
+ * comment line inside e.g. a fenced shell example in the target is
+ * indistinguishable from a real Markdown heading to `MD_HEADING_RE`, and
+ * both `findEnclosingHeading` (picks the wrong "nearest" heading) and the
+ * enclosure walk in `checkAnchor` (treats it as a section boundary) would
+ * misfire on it.
+ */
+function computeFencedLineIndices(lines: string[]): Set<number> {
+  const fenced = new Set<number>();
+  let fenceMarker: string | undefined;
+  let fenceStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = (lines[i] ?? "").trim();
+    if (!fenceMarker && MD_FENCE_DELIM_RE.test(trimmed)) {
+      fenceMarker = trimmed.slice(0, 3);
+      fenceStart = i;
+    } else if (fenceMarker && trimmed.startsWith(fenceMarker)) {
+      for (let j = fenceStart; j <= i; j++) fenced.add(j);
+      fenceMarker = undefined;
+      fenceStart = -1;
+    }
+  }
+  if (fenceMarker && fenceStart >= 0) {
+    for (let j = fenceStart; j < lines.length; j++) fenced.add(j);
+  }
+  return fenced;
+}
+
+/**
  * Nearest Markdown heading at or before `startLine` (1-based), considering
  * only heading levels up to `ANCHOR_HEADING_MAX_LEVEL` -- see the "Anchored
  * citations" doc block above for why subsection headings are transparent to
- * this search. Returns `null` when no such heading precedes `startLine` at
- * all (e.g. the citation lands above the target's first release heading).
+ * this search. `fencedLines` (see `computeFencedLineIndices`) excludes any
+ * line inside a fenced code block from matching, so a `#`-led comment
+ * inside a fenced example is never mistaken for a heading. Returns `null`
+ * when no such heading precedes `startLine` at all (e.g. the citation
+ * lands above the target's first release heading).
  */
 function findEnclosingHeading(
   lines: string[],
   startLine: number,
+  fencedLines: Set<number>,
 ): { level: number; text: string; lineNo: number } | null {
   for (let i = startLine - 1; i >= 0; i--) {
+    if (fencedLines.has(i)) continue;
     const m = (lines[i] ?? "").match(MD_HEADING_RE);
     if (m && m[1].length <= ANCHOR_HEADING_MAX_LEVEL) {
       return { level: m[1].length, text: m[2].trim(), lineNo: i + 1 };
@@ -273,11 +317,12 @@ function checkAnchor(
     };
   }
 
-  const heading = findEnclosingHeading(lines, startLine);
+  const fencedLines = computeFencedLineIndices(lines);
+  const heading = findEnclosingHeading(lines, startLine, fencedLines);
   if (!heading) {
     return {
       rule: "anchor-heading-not-found",
-      message: `no heading (level <= ${ANCHOR_HEADING_MAX_LEVEL}) precedes line ${startLine} to anchor against`,
+      message: `no heading (level <= ${ANCHOR_HEADING_MAX_LEVEL}) precedes line ${startLine} to anchor against; use a string anchor (#"...") instead against a target with no heading structure`,
     };
   }
   if (!heading.text.includes(anchor.text)) {
@@ -287,6 +332,7 @@ function checkAnchor(
     };
   }
   for (let i = heading.lineNo; i <= endLine - 1; i++) {
+    if (fencedLines.has(i)) continue;
     const m = (lines[i] ?? "").match(MD_HEADING_RE);
     if (m && m[1].length <= heading.level) {
       return {
@@ -299,7 +345,7 @@ function checkAnchor(
 }
 
 const CITATION_RE =
-  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?[\w.]+\]?|"[^"]*"))?/g;
+  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
 // Continuation citation forms (see the "Continuation citations" doc block
 // above). Each requires the backtick delimiter as part of the match so it
 // can never overlap a CITATION_RE match: a full citation's regex match
