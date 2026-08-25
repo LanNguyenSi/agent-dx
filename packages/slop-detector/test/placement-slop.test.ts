@@ -101,6 +101,246 @@ describe("placement-slop", () => {
     expect(orgMarkerHits).toHaveLength(1);
   });
 
+  describe("placement.allow is span-scoped, not line-wide (agent-dx #119 R2)", () => {
+    const withAllow = mergeConfig({
+      placement: {
+        markers: ["example-org"],
+        allow: ["github\\.com/example-org/"],
+      },
+    });
+    const scopedOpts = () => ({
+      packs: allPacks,
+      config: withAllow,
+      packFilter: ["placement-slop"],
+    });
+
+    it("an allowed URL suppresses org-marker but a home path on the same line still fires", () => {
+      const text =
+        "install from https://github.com/example-org/kit see /Users/example/project also";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeDefined();
+    });
+
+    it("an allowed URL suppresses org-marker but dated evidence on the same line still fires", () => {
+      const text =
+        "install from https://github.com/example-org/kit dated 2026-08-24";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/dated-evidence"),
+      ).toBeDefined();
+    });
+
+    it("an allowed URL suppresses org-marker but a tally phrase on the same line still fires", () => {
+      const text =
+        "install from https://github.com/example-org/kit worked so far";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/tally-phrase"),
+      ).toBeDefined();
+    });
+
+    it("semantics-preservation control: a line carrying only the allowed URL still reports nothing (passes with or without the span-scoping fix)", () => {
+      const text = "install from https://github.com/example-org/kit";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
+    });
+
+    it("an anchored allow pattern (^...) still matches on a non-first line, not just at file start", () => {
+      const anchoredAllow = mergeConfig({
+        placement: {
+          markers: ["example-org"],
+          allow: ["^install from https://github\\.com/example-org/"],
+        },
+      });
+      const text = [
+        "context line one",
+        "context line two",
+        "install from https://github.com/example-org/kit",
+      ].join("\n");
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: anchoredAllow,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+    });
+
+    it("an allow pattern that can cross a newline (e.g. start[\\s\\S]*end) does not excuse findings on adjacent lines", () => {
+      const crossLineAllow = mergeConfig({
+        placement: {
+          markers: ["example-org"],
+          allow: ["start[\\s\\S]*end"],
+        },
+      });
+      const text = [
+        "start example-org",
+        "/Users/lan/x/ and 2026-08-24",
+        "end",
+      ].join("\n");
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: crossLineAllow,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeDefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeDefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/dated-evidence"),
+      ).toBeDefined();
+    });
+
+    it("an allowed URL suppresses org-marker but an opaque id later on the same line still fires", () => {
+      const text =
+        "install from https://github.com/example-org/kit ref deadbeef";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/opaque-id"),
+      ).toBeDefined();
+    });
+
+    it("an allow span that only partially overlaps an org-marker match does not excuse it", () => {
+      const partialAllow = mergeConfig({
+        placement: {
+          markers: ["example-org"],
+          allow: ["org/kit"],
+        },
+      });
+      const text = "hit example-org/kit direct";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: partialAllow,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeDefined();
+    });
+
+    it("a CRLF instruction file with an allow span still reports a bare marker on a later line at the correct line:column", () => {
+      const text = [
+        "first line here",
+        "install from https://github.com/example-org/kit",
+        "example-org appears bare here",
+      ].join("\r\n");
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      const hit = v.find((x) => x.ruleId === "placement-slop/org-marker");
+      expect(hit).toBeDefined();
+      expect(hit?.line).toBe(3);
+      expect(hit?.column).toBe(1);
+    });
+
+    it("a $-anchored allow pattern still matches on a CRLF file (R3 #2)", () => {
+      const anchoredAllow = mergeConfig({
+        placement: {
+          markers: ["example-org"],
+          allow: ["example-org$"],
+        },
+      });
+      const text = "install example-org\r\nplain";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: anchoredAllow,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+    });
+
+    it("an allow span spanning the shared path suppresses home-path directly, not just via org-marker (R3 #1)", () => {
+      const allowHomePath = mergeConfig({
+        placement: { allow: ["~/git/pandora/\\.env"] },
+      });
+      const text = "see instructions in ~/git/pandora/.env for setup";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowHomePath,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeUndefined();
+    });
+
+    it("an allow span spanning a date suppresses dated-evidence directly (R3 #1)", () => {
+      const allowDate = mergeConfig({
+        placement: { allow: ["2026-08-24"] },
+      });
+      const text = "the run recorded on 2026-08-24 was the last one";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowDate,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/dated-evidence"),
+      ).toBeUndefined();
+    });
+
+    it("an allow span spanning a tally phrase suppresses tally-phrase directly (R3 #1)", () => {
+      const allowTally = mergeConfig({
+        placement: { allow: ["four so far"] },
+      });
+      const text = "the count stands at four so far, unresolved";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowTally,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/tally-phrase"),
+      ).toBeUndefined();
+    });
+
+    it("an allow span never crosses a line break, so a phrase wrapped across one is not excused (R3 #3)", () => {
+      const allowAcrossBreak = mergeConfig({
+        placement: { allow: ["recorded so far"] },
+      });
+      const cleanText = "recorded so far in the log";
+      const vClean = checkText(cleanText, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowAcrossBreak,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        vClean.find((x) => x.ruleId === "placement-slop/tally-phrase"),
+      ).toBeUndefined();
+
+      const wrappedText = "recorded so\nfar in the log";
+      const vWrapped = checkText(wrappedText, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowAcrossBreak,
+        packFilter: ["placement-slop"],
+      });
+      const hit = vWrapped.find(
+        (x) => x.ruleId === "placement-slop/tally-phrase",
+      );
+      expect(hit).toBeDefined();
+      expect(hit?.line).toBe(1);
+      expect(hit?.endLine).toBe(2);
+    });
+  });
+
   it("with no placement.markers configured, org-marker never fires", () => {
     const text = "anything at all, example-org included";
     const v = checkText(text, "x/SKILL.md", baseOpts());

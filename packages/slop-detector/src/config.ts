@@ -39,11 +39,13 @@ const EntrypointGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
 // A pattern that can't compile would otherwise fail silently way downstream
 // inside a rule's `check`, so reject it here, at config parse time, with a
 // message that names the bad pattern. A pattern that compiles but matches
-// the empty string (e.g. "a*") is rejected too: `org-marker` and the
-// `allow` line-scan run these patterns against every line of every
-// instruction file, and a zero-width match would either match at every
-// character position (unbounded, meaningless violations) or, for `allow`,
-// silently suppress every line in the file.
+// the empty string (e.g. "a*") is rejected too: `org-marker` runs these
+// patterns against every line of every instruction file, and a zero-width
+// match would match at every character position (unbounded, meaningless
+// violations). For `allow`, a zero-width match is simply useless: an allow
+// span only excuses the match it covers, and a zero-width span can never
+// cover (start < end of) anything, so it could never suppress a real
+// finding.
 const RegexPatternSchema = z
   .string()
   .refine(
