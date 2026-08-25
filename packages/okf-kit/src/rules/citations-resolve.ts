@@ -146,6 +146,28 @@ const CONT_DASH_RE = /[-–]`(\d+)`/g;
 const CONT_PAREN_RE = /\(`(\d+)`\)/g;
 const CLOSING_ONLY_EXTS = new Set(["ts", "js", "mjs", "yml", "yaml", "json"]);
 const CLOSING_BRACE_RE = /^[)\]}][;,]?$/;
+// Short-form (paragraph-bound) citation form, see the "Short-form
+// citations" doc block below. Requires an explicit N-M range: a bare single
+// number (`:5`) is not matched -- see that doc block for why. Only the
+// colon form is collected; a bare `(N-M)` is never a short-form citation
+// candidate at all -- see the same doc block for why the paren form was
+// dropped rather than gated.
+const SHORT_FORM_COLON_RE = /:(\d+)-(\d+)/g;
+// Test-file block-boundary check (see checkRangeBoundary): a citation's
+// range into a `.test.ts`/`.spec.ts` (or `.js`/`.mjs` equivalent) target
+// must start on a describe(/it( head line and end on its matching closing
+// `});` line.
+const TEST_FILE_RE = /\.(test|spec)\.(ts|js|mjs)$/i;
+const TEST_HEAD_LINE_RE = /^\s*(?:describe|it)\s*\(/;
+const TEST_CLOSING_LINE_RE = /^\s*\}\)\s*;\s*$/;
+// Markdown block-boundary check (see checkRangeBoundary): a range boundary
+// line that is nothing but a bracket (open or close), optionally with a
+// trailing `,`/`;`, is always a drift signal. A bare code-fence delimiter is
+// its own, separate signal (see MD_FENCE_DELIM_RE): unlike a bracket, a
+// fence line is sometimes the deliberately-correct start of a citation (see
+// checkRangeBoundary's markdown branch for the opening-fence exception).
+const MD_BARE_BRACKET_RE = /^(?:[)\]}][;,]?|[[({])$/;
+const MD_FENCE_DELIM_RE = /^(?:`{3,}\S*|~{3,}\S*)$/;
 const EXCLUDED_DIRS = new Set([
   "node_modules",
   ".git",
@@ -161,7 +183,16 @@ const EXCLUDED_DIRS = new Set([
   "okf-citations-resolve-fixtures",
 ]);
 
-type Problem = { rule: string; message: string; code?: string };
+// `severity`, when set, overrides pushDrift's default "warning" (currently
+// only "notice", used by the markdown block-boundary check -- see
+// checkRangeBoundary -- to keep that check advisory given the false-positive
+// risk mechanical prose verification carries).
+type Problem = {
+  rule: string;
+  message: string;
+  code?: string;
+  severity?: "notice";
+};
 
 /** Per-root basename index, see findByBasename. */
 type BasenameCache = Map<string, Map<string, string[]>>;
@@ -430,19 +461,20 @@ function readTarget(resolvedPath: string): { content: string } | Problem {
   }
 }
 
-function checkTarget(
+/**
+ * The non-I/O half of checkTarget: every check that only needs the
+ * target's already-read `lines`, not the filesystem. Split out so a caller
+ * that needs a second, different check against the same target (see
+ * checkShortFormTarget) can read the file once and reuse `lines` for both,
+ * instead of checkTarget re-reading it internally.
+ */
+function checkTargetLines(
   citedPath: string,
   startLine: number,
   endLine: number | null,
-  resolvedPath: string,
+  lines: string[],
 ): Problem | null {
-  const read = readTarget(resolvedPath);
-  if ("rule" in read) return read;
-  const content = read.content;
-  const lines = splitLines(content);
-  const lineCount = lines.length;
-
-  const bound = checkRangeBound(startLine, endLine, lineCount);
+  const bound = checkRangeBound(startLine, endLine, lines.length);
   if (bound) return bound;
 
   const startText = lines[startLine - 1] ?? "";
@@ -462,6 +494,22 @@ function checkTarget(
   return null;
 }
 
+function checkTarget(
+  citedPath: string,
+  startLine: number,
+  endLine: number | null,
+  resolvedPath: string,
+): Problem | null {
+  const read = readTarget(resolvedPath);
+  if ("rule" in read) return read;
+  return checkTargetLines(
+    citedPath,
+    startLine,
+    endLine,
+    splitLines(read.content),
+  );
+}
+
 // A cont-ext atom only ever extends the *end* of a range whose start line
 // was already fully checked (blank / closing-brace) when it was cited as
 // its own full citation or cont-fresh atom -- re-running checkTarget here
@@ -478,6 +526,196 @@ function checkRangeBoundOnly(
   if ("rule" in read) return read;
   const lineCount = splitLines(read.content).length;
   return checkRangeBound(startLine, endLine, lineCount);
+}
+
+function isTestFile(citedPath: string): boolean {
+  return TEST_FILE_RE.test(citedPath);
+}
+
+/**
+ * True when the line at `lines[lineIndex]` is a fence delimiter
+ * (```` ``` ```` or `~~~`, optionally with a trailing language tag) that
+ * *opens* a fenced code block, as opposed to closing one -- determined by
+ * replaying the same open/close state machine `stripFencedCode`-style
+ * scanners use from the top of the document, not by the line's own text
+ * (a bare closing fence and an untagged opening fence are lexically
+ * identical). Used by checkRangeBoundary's markdown branch: citing a
+ * fenced block starting at its own opening fence line is the natural,
+ * correct way to cite it, so that specific case is exempted from the
+ * fence-as-drift-signal check (see there).
+ */
+function isFenceOpeningLine(lines: string[], lineIndex: number): boolean {
+  let inFence = false;
+  let fenceMarker: string | undefined;
+  for (let i = 0; i <= lineIndex; i++) {
+    const trimmed = (lines[i] ?? "").trim();
+    if (!inFence && MD_FENCE_DELIM_RE.test(trimmed)) {
+      if (i === lineIndex) return true;
+      inFence = true;
+      fenceMarker = trimmed.slice(0, 3);
+    } else if (inFence && fenceMarker && trimmed.startsWith(fenceMarker)) {
+      if (i === lineIndex) return false;
+      inFence = false;
+      fenceMarker = undefined;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when `lines[endLineIndex]` is the closing delimiter that matches
+ * the *opening* fence at `lines[startLineIndex]` (the caller must already
+ * have confirmed the start line is a genuine opening fence, via
+ * isFenceOpeningLine, before calling this) -- the first line after the
+ * opener whose trimmed text starts with the same fence marker. Used by
+ * checkRangeBoundary's markdown branch to also exempt a range's END from
+ * the fence-as-drift-signal check when the range legitimately cites a
+ * whole fenced code block from its own opening delimiter to its own
+ * closing delimiter: the natural, correct way to cite such a block, not
+ * drift, the same reasoning the start-side exception already applies.
+ */
+function isMatchingFenceClosingLine(
+  lines: string[],
+  startLineIndex: number,
+  endLineIndex: number,
+): boolean {
+  const fenceMarker = (lines[startLineIndex] ?? "").trim().slice(0, 3);
+  for (let i = startLineIndex + 1; i < lines.length; i++) {
+    const trimmed = (lines[i] ?? "").trim();
+    if (trimmed.startsWith(fenceMarker)) {
+      return i === endLineIndex;
+    }
+  }
+  return false;
+}
+
+/**
+ * Additional block-boundary check for a short-form citation's range (see
+ * the "Short-form citations" doc block below), layered on top of
+ * checkTarget's existing per-start-line checks via checkShortFormTarget.
+ * Deliberately scoped to short-form citations only, not wired into
+ * checkTarget/checkRangeBoundOnly (the full/continuation citation paths):
+ * applying it there too was tried first and rejected -- the real bundle
+ * this rule was built against has legitimate full citations into test
+ * files that cite a couple of arbitrary lines (e.g. two lines of a shared
+ * regex definition), not a describe/it block, and flagging those as newly
+ * broken would have regressed the existing 0-warning baseline. Short-form
+ * citations are the demonstrated motivating case (a paragraph naming a
+ * test file once, then citing several of its describe/it blocks by bare
+ * range alone), so the check is scoped to exactly that mechanism.
+ *
+ * Test-file targets (`.test.ts`/`.spec.ts`, and their `.js`/`.mjs`
+ * equivalents): the range must start on a `describe(`/`it(` head line and
+ * end on a matching closing `});` line. Severity split, by evidence
+ * strength: a wrong START line is a
+ * *warning* (`test-range-start-not-head`) -- the range beginning somewhere
+ * other than a block head is strong drift evidence. A range whose start IS
+ * correct but whose END is not the matching `});` is only a *notice*
+ * (`test-range-end-not-closing`): this also matches a deliberate partial
+ * citation (citing from a block's head to partway through it), which is not
+ * drift. The start is checked first and returned alone, matching
+ * checkTarget's existing single-problem-per-citation pattern (never both at
+ * once).
+ *
+ * Markdown targets: mechanical verification of "is this still the same
+ * block" is far less reliable for prose than for TS/JS brace structure, so
+ * this is a notice, not a warning (see this rule's own risk note on
+ * markdown false positives). The range's start or end line landing on a
+ * bare bracket (MD_BARE_BRACKET_RE) is always a heads-up that the boundary
+ * likely drifted onto structural punctuation rather than real prose. A bare
+ * code-fence delimiter (MD_FENCE_DELIM_RE) is also always a drift signal at
+ * either boundary, with two exceptions carved out for the one legitimate
+ * way to cite a whole fenced code block by its own delimiters: the START is
+ * exempted when that line is itself a genuine *opening* fence (see
+ * isFenceOpeningLine), and, only when the start already qualified for that
+ * exemption, the END is exempted when it is that same fence's matching
+ * *closing* delimiter (see isMatchingFenceClosingLine) -- citing a fenced
+ * block from its own opening delimiter through its own closing delimiter is
+ * the natural, correct way to cite it, not drift.
+ */
+function checkRangeBoundary(
+  citedPath: string,
+  startLine: number,
+  endLine: number,
+  lines: string[],
+): Problem | null {
+  if (isTestFile(citedPath)) {
+    const startText = lines[startLine - 1] ?? "";
+    if (!TEST_HEAD_LINE_RE.test(startText)) {
+      return {
+        rule: "test-range-start-not-head",
+        message: `range start is not a "describe(" or "it(" head line ("${startText.trim()}")`,
+      };
+    }
+    const endText = lines[endLine - 1] ?? "";
+    if (!TEST_CLOSING_LINE_RE.test(endText)) {
+      return {
+        rule: "test-range-end-not-closing",
+        message: `range end is not a matching closing "});" line ("${endText.trim()}")`,
+        severity: "notice",
+      };
+    }
+    return null;
+  }
+
+  if (citedPath.toLowerCase().endsWith(".md")) {
+    const startTrim = (lines[startLine - 1] ?? "").trim();
+    const startIsFence = MD_FENCE_DELIM_RE.test(startTrim);
+    if (
+      MD_BARE_BRACKET_RE.test(startTrim) ||
+      (startIsFence && !isFenceOpeningLine(lines, startLine - 1))
+    ) {
+      return {
+        rule: "markdown-range-boundary-bracket-or-fence",
+        message: `range start is a bare bracket/fence line ("${startTrim}")`,
+        severity: "notice",
+      };
+    }
+    const endTrim = (lines[endLine - 1] ?? "").trim();
+    const endIsFence = MD_FENCE_DELIM_RE.test(endTrim);
+    const endIsMatchingClose =
+      startIsFence &&
+      endIsFence &&
+      isMatchingFenceClosingLine(lines, startLine - 1, endLine - 1);
+    if (
+      MD_BARE_BRACKET_RE.test(endTrim) ||
+      (endIsFence && !endIsMatchingClose)
+    ) {
+      return {
+        rule: "markdown-range-boundary-bracket-or-fence",
+        message: `range end is a bare bracket/fence line ("${endTrim}")`,
+        severity: "notice",
+      };
+    }
+    return null;
+  }
+
+  return null;
+}
+
+/**
+ * A short-form citation's full check: checkTarget's existing checks
+ * (unreadable-target, inverted-range, range-exceeds-file, blank-start-line,
+ * closing-brace-start-line), plus, only when those all pass, the
+ * test-file/markdown block-boundary check above (see checkRangeBoundary).
+ * Reads the resolved target from disk exactly once (a dogfood bundle can
+ * run this against the same target file a dozen-plus times for one
+ * compound short-form list) and reuses the same `lines` array for both
+ * checks, instead of checkTarget and checkRangeBoundary each reading and
+ * re-splitting it independently.
+ */
+function checkShortFormTarget(
+  citedPath: string,
+  startLine: number,
+  endLine: number,
+  resolvedPath: string,
+): Problem | null {
+  const read = readTarget(resolvedPath);
+  if ("rule" in read) return read;
+  const lines = splitLines(read.content);
+  const base = checkTargetLines(citedPath, startLine, endLine, lines);
+  if (base) return base;
+  return checkRangeBoundary(citedPath, startLine, endLine, lines);
 }
 
 /**
@@ -541,6 +779,335 @@ function collectContinuationAtoms(content: string): Atom[] {
   return atoms;
 }
 
+/**
+ * Short-form citations. A BARE (no surrounding backtick) colon-range
+ * `:N-M`, distinct from the backtick continuations above. Unlike a
+ * continuation, which chains off `governing` -- the nearest PRECEDING
+ * citation anywhere earlier in the doc, reset only on failure/ambiguity/
+ * skip -- a short-form citation only ever binds to the last FULL
+ * `path:N[-M]` citation named earlier in THE SAME PARAGRAPH (a paragraph
+ * boundary is a blank -- empty or whitespace-only -- line): once a
+ * candidate clears the serial-connective gate below, it binds
+ * unconditionally to that target, with no further check on the two
+ * ranges' relationship. A gate-cleared candidate with no full citation
+ * earlier in its own paragraph is reported unresolved
+ * (`short-form-unbound`, a NOTICE, not a warning), never silently skipped:
+ * unlike a continuation right after a rejected/ambiguous citation (which
+ * has a real reason to skip -- that citation's resolution is known
+ * unusable), a short-form's paragraph simply never named a usable target,
+ * itself worth flagging. A candidate the gate rejects is not collected at
+ * all -- it produces no finding of any kind, not even short-form-unbound.
+ *
+ * Range only, no bare single number (`:5`): every real short-form citation
+ * found while building this rule was a range (`:580-588`), and a bare
+ * single number is far too likely to be an unrelated enumeration marker
+ * (this rule's own dogfood target, docs/okf/log.md, uses exactly that
+ * numbered-list convention throughout) to detect mechanically without a
+ * large false-positive cost.
+ *
+ * Only the colon form (`:N-M`) is collected. A bare parenthesized range
+ * `(N-M)` is NOT collected at all, deliberately: three earlier rounds each
+ * tried to separate a real short-form citation from ordinary prose that
+ * merely contains an N-M-shaped number pair ("the window (2026-2027)",
+ * "follow steps (2-4)", "three engineers (1-3)") by deciding from the
+ * range's VALUES -- an inverted-pair check, a span cap plus a year/port
+ * plausibility gate, then a containment-or-adjacency check against the
+ * paragraph's last full citation -- and all three were eventually defeated
+ * by the same class of false positive, because every real paren-form
+ * citation this rule was ever built against had the identical shape
+ * `<English word> (N-M)` as ordinary prose. There is no lexical signal
+ * that separates them; dropping paren-form collection measured zero cost
+ * against this rule's own dogfood corpus (39 findings / 17 warnings / 22
+ * notices, unchanged with and without it -- see the CHANGELOG). The colon
+ * form does not have this problem: prose essentially never writes a bare
+ * `:N-M` outside a citation-adjacent context, and the serial-connective
+ * gate below narrows it further.
+ *
+ * Serial-connective gate. A colon-form candidate is collected ONLY when
+ * the nearest preceding non-whitespace text, after trimming whitespace, is
+ * one of the characters `,`, `;`, `(`, or ends in the word `and` or `or`
+ * -- the shape a short-form citation takes in a serial list of sub-ranges
+ * ("the `TODO` cells, :72-74 (the ...), and :92-97 (the ...)", "review
+ * finding L1 (:1170-1227, ...)"). Measured over the 137 markdown files in
+ * this repo: 37 whitespace-or-punctuation-preceded bare `:N-M` occurrences,
+ * 29 of them serial-connective-preceded, and all 29 are genuine citations
+ * (13 preceded by `(`, 12 by a comma, 4 by `and`) -- the comma is
+ * load-bearing at 12 of 29, so the gate is not narrowed to `(` and `and`
+ * only. The 8 non-serial occurrences this gate correctly excludes are this
+ * package's own README quoting false-positive examples, this rule's own
+ * test fixture, and docs/okf/log.md's "old :93-94 -> new :150-151" delta
+ * narration (a reserved file, already skipped regardless -- see below). A
+ * candidate this gate rejects is dropped before any binding is attempted:
+ * it is not a citation, and produces nothing at all, not even
+ * short-form-unbound. See isSerialConnectivePreceded for the exact check.
+ *
+ * A candidate is excluded from even being considered against the gate when:
+ *   - its `:` falls inside an already-matched full citation's own span
+ *     (the tail of a real `path:N-M` citation, not a new short form), a
+ *     fenced or indented code block, an inline code span, or a Markdown
+ *     table row (see computeExcludedSpans) -- a bare numeric range inside
+ *     any of these is virtually never a citation
+ *   - the character immediately before or after the match is a backtick
+ *     (the backtick continuation forms above already own that syntax)
+ *
+ * A resolved short-form citation is checked via checkShortFormTarget (see
+ * above): checkTarget's existing checks, plus the test-file/Markdown
+ * block-boundary check (see checkRangeBoundary).
+ *
+ * Documented residual (not fixed): a prose shape where the serial
+ * connective happens to precede a bare range that is still not a real
+ * citation -- e.g. "the exposed ports, :80-443, stayed open" -- still
+ * binds to the paragraph's last full citation and can produce a false
+ * warning. This was not observed anywhere in the 137-file corpus this
+ * gate was measured against; see the README and CHANGELOG.
+ */
+type ShortFormMatch = {
+  index: number;
+  startLine: number;
+  endLine: number;
+};
+
+/**
+ * True when the nearest non-whitespace text before `matchIndex` in
+ * `content` is a serial connective: the single character `,`, `;`, or `(`,
+ * or the word `and`/`or` (case-insensitive, word-boundary-matched so it
+ * does not fire on the tail of a longer word like "brand"). See the
+ * "Short-form citations" doc block above for why this is the gate.
+ */
+function isSerialConnectivePreceded(
+  content: string,
+  matchIndex: number,
+): boolean {
+  const before = content.slice(0, matchIndex).trimEnd();
+  if (before === "") return false;
+  const lastChar = before[before.length - 1];
+  if (lastChar === "," || lastChar === ";" || lastChar === "(") return true;
+  return /\b(?:and|or)$/i.test(before);
+}
+
+function isWithinAnySpan(
+  index: number,
+  spans: Array<[number, number]>,
+): boolean {
+  return spans.some(([start, end]) => index >= start && index < end);
+}
+
+function collectShortFormMatches(
+  content: string,
+  excludedSpans: Array<[number, number]>,
+): ShortFormMatch[] {
+  const out: ShortFormMatch[] = [];
+
+  const colonRe = new RegExp(SHORT_FORM_COLON_RE.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = colonRe.exec(content)) !== null) {
+    if (isWithinAnySpan(m.index, excludedSpans)) continue;
+    if (content[m.index - 1] === "`") continue;
+    if (content[m.index + m[0].length] === "`") continue;
+    if (!isSerialConnectivePreceded(content, m.index)) continue;
+    const startLine = Number(m[1]);
+    const endLine = Number(m[2]);
+    out.push({ index: m.index, startLine, endLine });
+  }
+
+  return out.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * Char spans of every fenced code block in `content` (```` ``` ```` or
+ * `~~~`, optionally with a trailing language tag), each span running from
+ * the start of the opening fence line to the end of the closing fence line
+ * inclusive. An unterminated fence (no matching close before end of doc) is
+ * treated as running to the end of the content -- conservative, since an
+ * unterminated fence is itself a doc problem outside this rule's scope, not
+ * a reason to scan its contents for short-form citations.
+ */
+function computeFencedSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const lines = content.split("\n");
+  let offset = 0;
+  let fenceMarker: string | undefined;
+  let fenceStart = -1;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const lineEnd = offset + line.length;
+    if (!fenceMarker && MD_FENCE_DELIM_RE.test(trimmed)) {
+      fenceMarker = trimmed.slice(0, 3);
+      fenceStart = offset;
+    } else if (fenceMarker && trimmed.startsWith(fenceMarker)) {
+      spans.push([fenceStart, lineEnd]);
+      fenceMarker = undefined;
+      fenceStart = -1;
+    }
+    offset = lineEnd + 1; // +1 for the newline joining this line to the next
+  }
+  if (fenceMarker && fenceStart >= 0) {
+    spans.push([fenceStart, content.length]);
+  }
+  return spans;
+}
+
+/**
+ * Char spans of every CommonMark-style indented code block in `content`: a
+ * maximal run of consecutive non-blank lines, each indented by at least
+ * four spaces or a leading tab, whose first line is preceded by a blank
+ * line or the start of the document (an indented code block cannot
+ * interrupt a paragraph). A blank line inside the run does not itself end
+ * it, matching CommonMark. Simplified relative to the full CommonMark
+ * spec (no list-item-context awareness); adequate for this mechanical,
+ * warn-only rule.
+ */
+function computeIndentedCodeSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const lines = content.split("\n");
+  let offset = 0;
+  let blockStart = -1;
+  let blockEnd = -1;
+  let prevBlank = true;
+  for (const line of lines) {
+    const lineStart = offset;
+    const lineEnd = offset + line.length;
+    const isBlank = line.trim() === "";
+    const isIndented = /^( {4,}|\t)/.test(line);
+    if (!isBlank && isIndented && (blockStart !== -1 || prevBlank)) {
+      if (blockStart === -1) blockStart = lineStart;
+      blockEnd = lineEnd;
+    } else if (isBlank && blockStart !== -1) {
+      // blank line inside an open block: keep it open, don't extend blockEnd
+    } else if (!isBlank) {
+      if (blockStart !== -1) spans.push([blockStart, blockEnd]);
+      blockStart = -1;
+      blockEnd = -1;
+    }
+    prevBlank = isBlank;
+    offset = lineEnd + 1;
+  }
+  if (blockStart !== -1) spans.push([blockStart, blockEnd]);
+  return spans;
+}
+
+/**
+ * Char spans of every inline code span in `content` (`` `...` ``, or a
+ * longer run of backticks as the delimiter). This is a superset of the
+ * narrower "immediately adjacent to a backtick" guard already applied in
+ * collectShortFormMatches: that guard only rejects a match directly
+ * touching a backtick, so a short form embedded further inside a longer
+ * inline code span (e.g. `` `ports (1-3)` ``) was previously matched and
+ * bound; this closes that gap.
+ *
+ * Confined to a single line (the pairing regex excludes `\n`): CommonMark
+ * inline code spans cannot themselves span multiple lines in the sense
+ * this rule cares about, but more importantly, an unmatched backtick run
+ * (a typo, or a literal backtick in prose) previously paired greedily with
+ * the *next* backtick run anywhere later in the whole document, silently
+ * treating everything in between -- potentially several unrelated
+ * sentences and any short-form citation among them -- as one giant inline
+ * code span. Confining the match to a single line means a backtick run
+ * with no partner on the same line produces no span at all, instead of
+ * reaching across a newline for one.
+ */
+function computeInlineCodeSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const re = /(`+)[^`\n]*?\1/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    spans.push([m.index, m.index + m[0].length]);
+  }
+  return spans;
+}
+
+/**
+ * Char spans of every Markdown table row in `content`: a line whose
+ * trimmed form starts and ends with `|`. Decision (documented in the
+ * README): a short-form citation inside a table cell is never recognised,
+ * the same way one inside a code span is not -- excluded here rather than
+ * left to the plausibility gate, since a table cell's content is prose-like
+ * and can otherwise carry a range shape the gate would not reject (e.g.
+ * `| col (5-9) |`).
+ */
+function computeTableRowSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const lines = content.split("\n");
+  let offset = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      trimmed.startsWith("|") &&
+      trimmed.endsWith("|") &&
+      trimmed.length > 1
+    ) {
+      spans.push([offset, offset + line.length]);
+    }
+    offset += line.length + 1;
+  }
+  return spans;
+}
+
+/**
+ * All char spans short-form matching must never fire inside: fenced code,
+ * indented code, inline code spans, and Markdown table rows. Computed once
+ * per doc and combined with fullSpans (see scanDoc) via the existing
+ * isWithinAnySpan helper -- the same mechanism a full citation's own span
+ * already uses, not a second one.
+ */
+function computeExcludedSpans(content: string): Array<[number, number]> {
+  return [
+    ...computeFencedSpans(content),
+    ...computeIndentedCodeSpans(content),
+    ...computeInlineCodeSpans(content),
+    ...computeTableRowSpans(content),
+  ];
+}
+
+/**
+ * Paragraph-start offsets in `content`, ascending, always including 0. A
+ * paragraph boundary is a blank (empty or whitespace-only) line.
+ */
+function computeParagraphStarts(content: string): number[] {
+  const starts = [0];
+  const re = /\n[ \t]*\n+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    starts.push(m.index + m[0].length);
+  }
+  return starts;
+}
+
+/** The start offset of the paragraph containing `index` (see computeParagraphStarts). */
+function paragraphStartFor(starts: number[], index: number): number {
+  let result = starts[0];
+  for (const s of starts) {
+    if (s > index) break;
+    result = s;
+  }
+  return result;
+}
+
+/** A full citation named in a paragraph, for short-form binding. */
+type NamedFullCitation = {
+  index: number;
+  citedPath: string;
+};
+
+/**
+ * The nearest full citation strictly before `beforeIndex` and at or after
+ * `paragraphStart` -- "the last target document named earlier in the same
+ * paragraph" -- or null when none exists.
+ */
+function findLastNamedTargetInParagraph(
+  fullAtoms: NamedFullCitation[],
+  paragraphStart: number,
+  beforeIndex: number,
+): NamedFullCitation | null {
+  let best: NamedFullCitation | null = null;
+  for (const a of fullAtoms) {
+    if (a.index >= paragraphStart && a.index < beforeIndex) {
+      if (!best || a.index > best.index) best = a;
+    }
+  }
+  return best;
+}
+
 function pushDrift(
   findings: Finding[],
   file: string,
@@ -548,10 +1115,11 @@ function pushDrift(
   rule: string,
   message: string,
   resolvedTo?: string,
+  severity: "warning" | "notice" = "warning",
 ): void {
   findings.push({
     ruleId: RULE_ID,
-    severity: "warning",
+    severity,
     file,
     message: `\`${citation}\`: ${message} [${rule}]`,
     ...(resolvedTo ? { detail: `resolvedTo: ${resolvedTo}` } : {}),
@@ -622,6 +1190,10 @@ function scanDoc(
   const docAbsPath = path.join(bundleDir, doc.relPath);
 
   const fullAtoms: Atom[] = [];
+  // Char spans of every matched full citation, used to keep short-form
+  // matching (see collectShortFormMatches) from re-matching the tail of a
+  // real `path:N-M` citation as a bare short form.
+  const fullSpans: Array<[number, number]> = [];
   const re = new RegExp(CITATION_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
@@ -633,6 +1205,7 @@ function scanDoc(
       startLine: Number(m[2]),
       endLine: m[3] ? Number(m[3]) : null,
     });
+    fullSpans.push([m.index, m.index + m[0].length]);
   }
 
   const atoms = [...fullAtoms, ...collectContinuationAtoms(content)].sort(
@@ -780,6 +1353,121 @@ function scanDoc(
     }
     governing = { citedPath, resolvedPath: resolution.path };
     lastStartLine = startLine;
+  }
+
+  // Short-form (paragraph-bound) citations -- see that doc block above.
+  // Deliberately independent of `governing`/`lastStartLine`: short-form
+  // binding is paragraph-scoped by design, not chained through the
+  // document-wide continuation state machine above. Reserved files
+  // (index.md, log.md, see doc.isReserved) are skipped entirely: they are
+  // append-only narrative journals, not `sources:`-driven reference docs,
+  // and routinely narrate historical "old N-M -> new X-Y" line-number
+  // deltas as prose data about past changes -- not live citations against
+  // current content -- which this rule's bare-range matching cannot tell
+  // apart from a real short-form citation. Full/continuation citations in
+  // reserved files are still scanned as before; this carve-out is scoped
+  // to short-form matching only.
+  const shortFormMatches = doc.isReserved
+    ? []
+    : collectShortFormMatches(content, [
+        ...fullSpans,
+        ...computeExcludedSpans(content),
+      ]);
+  if (shortFormMatches.length > 0) {
+    const paragraphStarts = computeParagraphStarts(content);
+    const namedFullAtoms: NamedFullCitation[] = [];
+    for (const a of fullAtoms) {
+      if (a.kind === "full") {
+        namedFullAtoms.push({
+          index: a.index,
+          citedPath: a.citedPath,
+        });
+      }
+    }
+
+    for (const sf of shortFormMatches) {
+      const paragraphStart = paragraphStartFor(paragraphStarts, sf.index);
+      const target = findLastNamedTargetInParagraph(
+        namedFullAtoms,
+        paragraphStart,
+        sf.index,
+      );
+      const rangeLabel = `${sf.startLine}-${sf.endLine}`;
+
+      if (!target) {
+        pushDrift(
+          findings,
+          doc.relPath,
+          `${rangeLabel} (short-form)`,
+          "short-form-unbound",
+          "no full `path:N` citation earlier in this paragraph to bind to",
+          undefined,
+          "notice",
+        );
+        continue;
+      }
+
+      const targetPath = target.citedPath;
+      const citation = `${targetPath}:${rangeLabel} (short-form)`;
+
+      if (hasParentSegment(targetPath)) {
+        // The full citation that named this target already reported
+        // path-traversal-rejected for itself; not re-flagged a second time.
+        continue;
+      }
+
+      const resolution = resolveCitation(
+        cache,
+        root,
+        docAbsPath,
+        content,
+        sources,
+        targetPath,
+        sf.index,
+      );
+
+      if (!resolution) {
+        pushDrift(
+          findings,
+          doc.relPath,
+          citation,
+          "missing-file",
+          `could not resolve ${targetPath}: tried doc sources, ancestor climb (bare filenames only), repo-root, doc-relative, nearest prior qualified mention, repo-wide search; no candidate file exists`,
+        );
+        continue;
+      }
+      if ("skip" in resolution) continue;
+      if ("ambiguous" in resolution) {
+        pushAmbiguous(findings, doc.relPath, citation, resolution.candidates);
+        continue;
+      }
+
+      const problem = checkShortFormTarget(
+        targetPath,
+        sf.startLine,
+        sf.endLine,
+        resolution.path,
+      );
+      if (problem?.rule === "unreadable-target") {
+        pushUnreadable(
+          findings,
+          doc.relPath,
+          citation,
+          path.relative(root, resolution.path),
+          problem.code ?? "UNKNOWN",
+        );
+      } else if (problem) {
+        pushDrift(
+          findings,
+          doc.relPath,
+          citation,
+          problem.rule,
+          problem.message,
+          path.relative(root, resolution.path),
+          problem.severity,
+        );
+      }
+    }
   }
 
   return findings;

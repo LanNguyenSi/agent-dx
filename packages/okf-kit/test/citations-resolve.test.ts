@@ -26,6 +26,7 @@ import { FIXTURES_DIR, loadFixture, runCli } from "./helpers.js";
 
 const MAIN_ROOT = path.join(FIXTURES_DIR, "citations-resolve-main");
 const CONT_ROOT = path.join(FIXTURES_DIR, "citations-resolve-continuations");
+const SHORT_FORM_ROOT = path.join(FIXTURES_DIR, "citations-resolve-short-form");
 
 function loadMain() {
   return loadFixture("citations-resolve-main/docs/okf", MAIN_ROOT);
@@ -33,6 +34,10 @@ function loadMain() {
 
 function loadCont() {
   return loadFixture("citations-resolve-continuations/docs/okf", CONT_ROOT);
+}
+
+function loadShortForm() {
+  return loadFixture("citations-resolve-short-form/docs/okf", SHORT_FORM_ROOT);
 }
 
 /** A finding's message always starts with `` `<citation>`: `` (see pushDrift/pushAmbiguous). */
@@ -340,7 +345,7 @@ describe("citations-resolve", () => {
     expect(citationsResolveRule.run(ctx)).toEqual([]);
   });
 
-  // -- unresolved-ambiguous coverage (review round 2, finding 1) -----------
+  // -- unresolved-ambiguous coverage ---------------------------------------
 
   it("unresolved-ambiguous: two same-basename candidates produce a notice tagged [unresolved-ambiguous] with candidates in detail, and --strict alone does not fail on it", () => {
     const tmpRoot = fs.mkdtempSync(
@@ -398,7 +403,7 @@ describe("citations-resolve", () => {
     }
   });
 
-  // -- unreadable target (review round 2, finding 2) -----------------------
+  // -- unreadable target -----------------------------------------------
 
   const isUnsupportedForChmod =
     process.platform === "win32" || process.getuid?.() === 0;
@@ -444,7 +449,7 @@ describe("citations-resolve", () => {
     },
   );
 
-  // -- root-README shadowing (review round 2, finding 3a) -------------------
+  // -- root-README shadowing ---------------------------------------------
 
   it("path resolution: a bare filename citation prefers the nearest ancestor directory over a same-named file at the repo root (shadowing)", () => {
     const tmpRoot = fs.mkdtempSync(
@@ -491,7 +496,7 @@ describe("citations-resolve", () => {
     }
   });
 
-  // -- hard-wrapped path in prose (review round 2, finding 3b) --------------
+  // -- hard-wrapped path in prose ----------------------------------------
 
   it("hard-wrapped prose: a filename split across a line break by the wrap does not produce a phantom missing-file citation for its tail", () => {
     const tmpRoot = fs.mkdtempSync(
@@ -525,6 +530,756 @@ describe("citations-resolve", () => {
       // and reports it as missing-file.
       expect(findingFor(findings, "markers.md:1")).toBeUndefined();
       expect(findings).toEqual([]);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Short-form (paragraph-bound) citations: a bare (no backtick) colon-range
+ * `:N-M`, collected only when serial-connective-gated (see
+ * isSerialConnectivePreceded), bound unconditionally to the last full
+ * `path:N-M` citation named earlier in the same paragraph (see
+ * citations-resolve.ts's "Short-form citations" doc block). The bare
+ * paren-form `(N-M)` is not collected at all -- see that doc block for
+ * why. Fixture: test/fixtures/citations-resolve-short-form/
+ * (docs/okf/short-form.md + src/target.test.ts, src/note.md).
+ */
+describe("citations-resolve: short-form citations", () => {
+  it("AC1: a comma-gated short-form citation binds to the last-named target and resolves cleanly on real content", () => {
+    const findings = citationsResolveRule.run(loadShortForm());
+    expect(
+      findingFor(findings, "src/target.test.ts:9-13 (short-form)"),
+    ).toBeUndefined();
+  });
+
+  it("AC2: a paren-gated short-form range into a test file starting on a non-describe/it line is flagged test-range-start-not-head", () => {
+    const findings = citationsResolveRule.run(loadShortForm());
+    const f = findingFor(findings, "src/target.test.ts:5-6 (short-form)");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[test-range-start-not-head]");
+  });
+
+  it('AC2: a paren-gated short-form range into a test file ending on a line that is not a matching "});" is flagged test-range-end-not-closing, as a NOTICE (correct start, plausibly a deliberate partial citation)', () => {
+    const findings = citationsResolveRule.run(loadShortForm());
+    const f = findingFor(findings, "src/target.test.ts:4-5 (short-form)");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("notice");
+    expect(f?.message).toContain("[test-range-end-not-closing]");
+  });
+
+  it("a comma-gated short-form citation with a bad start line IS held to the test-file describe/it boundary check", () => {
+    // `:11-11` cites a single content line inside the second describe/it
+    // block that is not itself a describe/it head -- sampling this rule's
+    // own dogfood corpus showed whole-block citations shifted by a
+    // constant offset, not a "detail location" convention -- a wrong
+    // start line is strong drift evidence, so it is a warning.
+    const findings = citationsResolveRule.run(loadShortForm());
+    const f = findingFor(findings, "src/target.test.ts:11-11 (short-form)");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[test-range-start-not-head]");
+  });
+
+  it("colon-form short-form range whose block-boundary drifted onto ordinary content is flagged (shape: a sub-block citation shifted by a constant offset, nested inside a wider compound-list citation)", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-colon-drift-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/target.test.ts"),
+        [
+          'import { describe, expect, it } from "vitest";',
+          "",
+          'describe("alpha", () => {',
+          '  it("does a", () => {',
+          "    expect(1).toBe(1);",
+          "  });",
+          "});",
+          "",
+          'describe("beta", () => {',
+          '  it("does b", () => {',
+          "    expect(2).toBe(2);",
+          "  });",
+          "});",
+          "",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/target.test.ts",
+          "---",
+          "",
+          "Names the target once: `src/target.test.ts:3-13`, covering both",
+          "blocks below in one compound list; the second block's own sub-",
+          "citation is shifted +2 by a formatter run, landing inside it",
+          "instead of on its head, :5-9.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      const f = findingFor(findings, "src/target.test.ts:5-9 (short-form)");
+      expect(f).toBeDefined();
+      expect(f?.severity).toBe("warning");
+      expect(f?.message).toContain("[test-range-start-not-head]");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("a short-form citation with no full citation earlier in its own paragraph is reported short-form-unbound, as a NOTICE, not silently skipped", () => {
+    const findings = citationsResolveRule.run(loadShortForm());
+    const f = findingFor(findings, "99-101 (short-form)");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("notice");
+    expect(f?.message).toContain(
+      "no full `path:N` citation earlier in this paragraph to bind to",
+    );
+    expect(f?.message).toContain("[short-form-unbound]");
+  });
+
+  it("markdown target: a short-form range whose boundary lines are real prose produces no notice", () => {
+    const findings = citationsResolveRule.run(loadShortForm());
+    expect(
+      findingFor(findings, "src/note.md:2-4 (short-form)"),
+    ).toBeUndefined();
+  });
+
+  it("markdown target: a short-form range starting on a bare bracket line is a NOTICE, not a warning", () => {
+    const findings = citationsResolveRule.run(loadShortForm());
+    const f = findingFor(findings, "src/note.md:1-3 (short-form)");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("notice");
+    expect(f?.message).toContain("[markdown-range-boundary-bracket-or-fence]");
+  });
+
+  it("the fixture doc produces exactly the five expected findings, no extras", () => {
+    // (5-6) test-range-start-not-head [warning], (4-5) test-range-end-not-closing
+    // [notice], :11-11 test-range-start-not-head [warning], (99-101)
+    // short-form-unbound [notice], note.md (1-3) markdown-range-boundary
+    // -bracket-or-fence [notice].
+    const findings = citationsResolveRule.run(loadShortForm());
+    expect(findings).toHaveLength(5);
+    expect(findings.filter((f) => f.severity === "warning")).toHaveLength(2);
+    expect(findings.filter((f) => f.severity === "notice")).toHaveLength(3);
+  });
+
+  it("paragraph boundary: a short-form citation in a LATER paragraph does not inherit an earlier paragraph's target", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-paragraph-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/target.ts"),
+        ["line one", "line two", "line three", ""].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/target.ts",
+          "---",
+          "",
+          "First paragraph names the target: `src/target.ts:1-2`.",
+          "",
+          "Second, later paragraph never names a target of its own: (:1-2).",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      const f = findingFor(findings, "1-2 (short-form)");
+      expect(f).toBeDefined();
+      expect(f?.message).toContain("[short-form-unbound]");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("AC1 negative control: a short-form citation shifted by +2 from its correct line lands on a closing brace and is flagged", () => {
+    // Simulates the shape this rule closes: a formatter run shifts
+    // a short-form citation's target lines with no file name attached to
+    // re-anchor it. The correct citation here would be `(:1-2)` (the
+    // function signature and its body); shifted +2 it now reads `(:3-4)`,
+    // landing on the closing brace and the following blank line.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-shift-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/target.ts"),
+        [
+          "export function foo() {",
+          "  return 1;",
+          "}",
+          "",
+          "export function bar() {",
+          "  return 2;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/target.ts",
+          "---",
+          "",
+          "Short-form binding demonstration: `src/target.ts:1-2` names the",
+          "target. Simulating a prettier-run shift of +2 lines, the same",
+          "short-form citation now reads (:3-4), landing on the function's",
+          "closing brace instead of its body.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      const f = findingFor(findings, "src/target.ts:3-4 (short-form)");
+      expect(f).toBeDefined();
+      expect(f?.severity).toBe("warning");
+      expect(f?.message).toContain("[closing-brace-start-line]");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reserved files (log.md): short-form matching is skipped entirely, even for a gate-passing range that would otherwise be flagged", () => {
+    // log.md narrates history with "old :N-M -> new :X-Y" prose (not
+    // serial-connective-gated in reality, so it would already be excluded
+    // by the gate alone); this test uses an "and"-gated range instead so
+    // it pins the reserved-file carve-out (doc.isReserved) as its own,
+    // separate mechanism, not merely a side effect of the gate.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-reserved-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/target.ts"),
+        ["line one", "", "line three", ""].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/log.md"),
+        [
+          "- 2026-01-01: moved a block from `src/target.ts:1-1`, and :2-2 to new position.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      expect(ctx.docs.find((d) => d.relPath === "log.md")?.isReserved).toBe(
+        true,
+      );
+      expect(findings.filter((f) => f.message.includes("short-form"))).toEqual(
+        [],
+      );
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("markdown target: an and-gated short-form range starting on a bracket line is a NOTICE", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-md-colon-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/note.md"),
+        ["]", "Second line of prose.", "Third line of prose.", ""].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/note.md",
+          "---",
+          "",
+          "Markdown target, colon-form bracket start: `src/note.md:1-3`",
+          "establishes the target, and :1-3 is the flagged sub-citation.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      const f = findingFor(findings, "src/note.md:1-3 (short-form)");
+      expect(f).toBeDefined();
+      expect(f?.severity).toBe("notice");
+      expect(f?.message).toContain(
+        "[markdown-range-boundary-bracket-or-fence]",
+      );
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  // -- Code-span / table exclusion, one independent test per exclusion -----
+  // (previously one combined fixture; splitting into four pins each
+  // exclusion in isolation. The combined fixture's own examples turned out
+  // not to exercise computeFencedSpans or computeInlineCodeSpans at all: its
+  // fenced block used a backtick fence, already redundantly covered by
+  // computeInlineCodeSpans's backtick-pairing regex (the two fence
+  // delimiters paired as one giant inline span), and its inline-code
+  // example's range sat directly against the closing backtick, already
+  // caught by collectShortFormMatches's own pre-existing adjacent-backtick
+  // guard. Deleting either computeFencedSpans or computeInlineCodeSpans left
+  // the full suite green. The fenced case below uses a tilde `~~~` fence
+  // (not backtick-shaped, so computeInlineCodeSpans cannot incidentally
+  // cover it) and the inline-code case uses a range with prose on both
+  // sides of it inside the span, not touching either backtick.)
+
+  it("a bare range inside a TILDE-fenced code block is never collected as a short-form citation", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-fenced-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "title: Tilde-fenced exclusion fixture",
+          "---",
+          "",
+          "~~~text",
+          "lines, :10-20 drifted",
+          "and :55-99 covers scores",
+          "~~~",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      expect(findings).toEqual([]);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("a bare range inside an indented code block is never collected as a short-form citation", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-indented-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "title: Indented code exclusion fixture",
+          "---",
+          "",
+          "Paragraph before.",
+          "",
+          "    ranges, :30-40 here",
+          "",
+          "Paragraph after.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      expect(findings).toEqual([]);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("a bare range inside a Markdown table cell is never collected as a short-form citation", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-table-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "title: Table row exclusion fixture",
+          "---",
+          "",
+          "| col | value |",
+          "| --- | --- |",
+          "| a, :5-9 | 1 |",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      expect(findings).toEqual([]);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("a bare range inside an inline code span, NOT directly touching either backtick, is never collected as a short-form citation", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-inline-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "title: Inline code exclusion fixture",
+          "---",
+          "",
+          "Inline code span with a bare range in the middle: `cols, :5-9 shown`.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      expect(findings).toEqual([]);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  // -- Fence-opening exception (start AND, per this round's fix, end) ------
+  // Neither branch of the exception had a fixture before this round:
+  // replacing `startIsFence && !isFenceOpeningLine(...)` with plain
+  // `startIsFence` also left the full suite green.
+
+  it("a short-form range spanning a whole fenced code block, from its own genuine opening delimiter to its own matching closing delimiter, produces no boundary notice at either end", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-fence-open-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/fenced.md"),
+        [
+          "Intro line.",
+          "",
+          "```ts",
+          "const x = 1;",
+          "```",
+          "",
+          "Outro line.",
+          "",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/fenced.md",
+          "---",
+          "",
+          "Fence-opening exception: `src/fenced.md:1-7` names the target, and",
+          "the sub-citation spanning the whole fenced block by its own",
+          "delimiters is (:3-5).",
+          "",
+          "Fence-closing-as-start: `src/fenced.md:1-7` names the target",
+          "again, and the sub-citation starting on the fence's closing",
+          "delimiter instead of its opening one is (:5-7).",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+
+      expect(
+        findingFor(findings, "src/fenced.md:3-5 (short-form)"),
+      ).toBeUndefined();
+
+      const f = findingFor(findings, "src/fenced.md:5-7 (short-form)");
+      expect(f).toBeDefined();
+      expect(f?.severity).toBe("notice");
+      expect(f?.message).toContain(
+        "[markdown-range-boundary-bracket-or-fence]",
+      );
+      expect(f?.message).toContain("range start is a bare bracket/fence line");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  // -- Serial-connective gate (structural, replaces the earlier value-shape
+  // -- and containment/adjacency gates -- see the "Short-form citations"
+  // -- doc block in citations-resolve.ts) ----------------------------------
+
+  it("comma-, paren-, and and-preceded siblings all bind, while a sibling with no serial connective before it is never collected at all", () => {
+    // One source file with two blank lines (3 and 4) so a bound candidate
+    // that lands on one produces a real blank-start-line warning -- proof
+    // the candidate was actually checked against real content, not merely
+    // that the gate silently let it through. Four paragraphs, one full
+    // citation each, one candidate each, only the connective preceding the
+    // candidate varies.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-connective-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/target.ts"),
+        ["line one", "line two", "", "", "line five", ""].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/target.ts",
+          "---",
+          "",
+          "Comma-preceded: `src/target.ts:1-5` names the target, :3-3 is",
+          "comma-preceded and binds.",
+          "",
+          "Paren-preceded: `src/target.ts:1-5` names the target again, and",
+          "this time the range (:4-4) is paren-preceded and binds.",
+          "",
+          "And-preceded: `src/target.ts:1-5` names the target once more,",
+          "and :3-4 is and-preceded and binds.",
+          "",
+          "No connective: `src/target.ts:1-5` names the target yet again",
+          "but :4-5 is not preceded by a serial connective and is never",
+          "collected.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+
+      const comma = findingFor(findings, "src/target.ts:3-3 (short-form)");
+      expect(comma).toBeDefined();
+      expect(comma?.severity).toBe("warning");
+      expect(comma?.message).toContain("[blank-start-line]");
+
+      const paren = findingFor(findings, "src/target.ts:4-4 (short-form)");
+      expect(paren).toBeDefined();
+      expect(paren?.severity).toBe("warning");
+      expect(paren?.message).toContain("[blank-start-line]");
+
+      const and = findingFor(findings, "src/target.ts:3-4 (short-form)");
+      expect(and).toBeDefined();
+      expect(and?.severity).toBe("warning");
+      expect(and?.message).toContain("[blank-start-line]");
+
+      // The no-connective candidate (:4-5) is dropped before binding is
+      // ever attempted: no finding at all, not even short-form-unbound.
+      expect(
+        findingFor(findings, "src/target.ts:4-5 (short-form)"),
+      ).toBeUndefined();
+      expect(findingFor(findings, "4-5 (short-form)")).toBeUndefined();
+      expect(findings).toHaveLength(3);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('advisor\'s measured probe: a real `path:3-7` citation followed by plain-English "covers phases (1-2), (2-4), and (5-6)" produces no finding, and --strict exits 0', () => {
+    // Bare `(N-M)` is never collected as a short-form citation candidate at
+    // all -- the regex requires a leading `:`. This is the exact false
+    // positive that defeated the previous round's containment/adjacency
+    // gate: a doc with `src/t.test.ts:3-7` followed by a compound
+    // paren-form list produced two false test-range-start-not-head
+    // warnings there ((1-2) bound as "adjacent", (5-6) bound as
+    // "contained"). Dropping paren-form collection removes the false
+    // positive without any gate to get wrong.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-advisor-probe-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/t.test.ts"),
+        [
+          'import { describe, expect, it } from "vitest";',
+          "",
+          'describe("group", () => {',
+          '  it("does x", () => {',
+          "    expect(1).toBe(1);",
+          "  });",
+          "});",
+          "",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/t.test.ts",
+          "---",
+          "",
+          "The `src/t.test.ts:3-7` block covers phases (1-2), (2-4), and",
+          "(5-6).",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      expect(findings).toEqual([]);
+
+      const strictRun = runCli([
+        "check",
+        path.join(tmpRoot, "docs/okf"),
+        "--repo-root",
+        tmpRoot,
+        "--strict",
+      ]);
+      expect(strictRun.status).toBe(0);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reviewer\'s original probe: a real `path:3-7` citation plus plain-English "Follow steps (2-4) to reproduce" produces no finding, and --strict exits 0', () => {
+    // (2-4) is a bare paren-form range, never a short-form candidate at
+    // all under this round's design -- not bound, not reported unbound,
+    // just never collected.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-reviewer-probe-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/t.test.ts"),
+        [
+          'import { describe, expect, it } from "vitest";',
+          "",
+          'describe("group", () => {',
+          '  it("does x", () => {',
+          "    expect(1).toBe(1);",
+          "  });",
+          "});",
+          "",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/t.test.ts",
+          "---",
+          "",
+          "The `src/t.test.ts:3-7` block is covered. Follow steps (2-4) to",
+          "reproduce.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      expect(findings).toEqual([]);
+
+      const strictRun = runCli([
+        "check",
+        path.join(tmpRoot, "docs/okf"),
+        "--repo-root",
+        tmpRoot,
+        "--strict",
+      ]);
+      expect(strictRun.status).toBe(0);
+      expect(strictRun.stdout).not.toContain("WARN");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  // -- Unmatched backtick (single-line inline-code confinement) ------------
+
+  it("an unmatched backtick earlier in the paragraph does not pair across a line break with an unrelated later backtick run, silently swallowing a short-form range in between", () => {
+    // Reviewer probe: a stray, unpartnered backtick on one line used to pair
+    // greedily with the *next* backtick run anywhere later in the document
+    // (computeInlineCodeSpans previously matched across newlines), treating
+    // everything between the two -- including an unrelated short-form range
+    // on a later line -- as one giant inline code span. Confining the
+    // pairing regex to a single line means a backtick with no partner on
+    // its own line produces no span at all.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-shortform-stray-backtick-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/a.ts"),
+        [
+          "export function foo() {",
+          "  return 1;",
+          "}",
+          "",
+          "",
+          "export function bar() {",
+          "  return 2;",
+          "}",
+          "// trailer",
+          "",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/a.ts",
+          "---",
+          "",
+          "Names `src/a.ts:1-4`. An unmatched ` backtick here, then, :5-9",
+          "drifted, then `code`.",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+      const f = findingFor(findings, "src/a.ts:5-9 (short-form)");
+      expect(f).toBeDefined();
+      expect(f?.severity).toBe("warning");
+      expect(f?.message).toContain("[blank-start-line]");
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
