@@ -146,6 +146,24 @@ const CONT_DASH_RE = /[-–]`(\d+)`/g;
 const CONT_PAREN_RE = /\(`(\d+)`\)/g;
 const CLOSING_ONLY_EXTS = new Set(["ts", "js", "mjs", "yml", "yaml", "json"]);
 const CLOSING_BRACE_RE = /^[)\]}][;,]?$/;
+// Short-form (paragraph-bound) citation forms, see the "Short-form
+// citations" doc block below. Both require an explicit N-M range: a bare
+// single number (`(1)`, `:5`) is not matched -- see that doc block for why.
+const SHORT_FORM_COLON_RE = /:(\d+)-(\d+)/g;
+const SHORT_FORM_PAREN_RE = /\((\d+)-(\d+)\)/g;
+// Test-file block-boundary check (see checkRangeBoundary): a citation's
+// range into a `.test.ts`/`.spec.ts` (or `.js`/`.mjs` equivalent) target
+// must start on a describe(/it( head line and end on its matching closing
+// `});` line.
+const TEST_FILE_RE = /\.(test|spec)\.(ts|js|mjs)$/i;
+const TEST_HEAD_LINE_RE = /^\s*(?:describe|it)\s*\(/;
+const TEST_CLOSING_LINE_RE = /^\s*\}\)\s*;\s*$/;
+// Markdown block-boundary check (see checkRangeBoundary): a range boundary
+// line that is nothing but a bracket (open or close) or a code-fence
+// delimiter, optionally with a language tag (fence) or trailing `,`/`;`
+// (closing bracket) -- a common signature of a boundary that drifted onto
+// structural punctuation rather than real prose content.
+const MD_PURE_BRACKET_OR_FENCE_RE = /^(?:[)\]}][;,]?|[[({]|`{3,}\S*|~{3,}\S*)$/;
 const EXCLUDED_DIRS = new Set([
   "node_modules",
   ".git",
@@ -161,7 +179,16 @@ const EXCLUDED_DIRS = new Set([
   "okf-citations-resolve-fixtures",
 ]);
 
-type Problem = { rule: string; message: string; code?: string };
+// `severity`, when set, overrides pushDrift's default "warning" (currently
+// only "notice", used by the markdown block-boundary check -- see
+// checkRangeBoundary -- to keep that check advisory given the false-positive
+// risk mechanical prose verification carries).
+type Problem = {
+  rule: string;
+  message: string;
+  code?: string;
+  severity?: "notice";
+};
 
 /** Per-root basename index, see findByBasename. */
 type BasenameCache = Map<string, Map<string, string[]>>;
@@ -480,6 +507,120 @@ function checkRangeBoundOnly(
   return checkRangeBound(startLine, endLine, lineCount);
 }
 
+function isTestFile(citedPath: string): boolean {
+  return TEST_FILE_RE.test(citedPath);
+}
+
+/**
+ * Additional block-boundary check for a short-form citation's range (see
+ * the "Short-form citations" doc block below), layered on top of
+ * checkTarget's existing per-start-line checks via checkShortFormTarget.
+ * Deliberately scoped to short-form citations only, not wired into
+ * checkTarget/checkRangeBoundOnly (the full/continuation citation paths):
+ * applying it there too was tried first and rejected -- the real bundle
+ * this rule was built against has legitimate full citations into test
+ * files that cite a couple of arbitrary lines (e.g. two lines of a shared
+ * regex definition), not a describe/it block, and flagging those as newly
+ * broken would have regressed the existing 0-warning baseline. Short-form
+ * citations are the demonstrated motivating case (a paragraph naming a
+ * test file once, then citing several of its describe/it blocks by bare
+ * range alone), so the check is scoped to exactly that mechanism.
+ *
+ * Test-file targets (`.test.ts`/`.spec.ts`, and their `.js`/`.mjs`
+ * equivalents), `applyTestBoundary` only (paren-form short forms, see the
+ * "Short-form citations" doc block for why colon-form is excluded): the
+ * range must start on a `describe(`/`it(` head line and end on a matching
+ * closing `});` line. Each mismatch is its own warning-severity rule
+ * (`test-range-start-not-head` / `test-range-end-not-closing`) so a
+ * fixture/mutation probe can target either independently; the start is
+ * checked first, matching checkTarget's existing single-problem-per-citation
+ * pattern (never both at once).
+ *
+ * Markdown targets: mechanical verification of "is this still the same
+ * block" is far less reliable for prose than for TS/JS brace structure, so
+ * this is a notice, not a warning (see this rule's own risk note on
+ * markdown false positives): the range's start or end line landing on a
+ * bare bracket or a bare code-fence delimiter (see MD_PURE_BRACKET_OR_FENCE_RE)
+ * is a heads-up that the boundary likely drifted onto structural
+ * punctuation rather than real prose, not an enforced error. Unlike the
+ * test-file check, this is NOT gated on `applyTestBoundary`/form: a false
+ * positive here is only a notice, not an enforced warning.
+ */
+function checkRangeBoundary(
+  citedPath: string,
+  startLine: number,
+  endLine: number,
+  lines: string[],
+  applyTestBoundary: boolean,
+): Problem | null {
+  if (applyTestBoundary && isTestFile(citedPath)) {
+    const startText = lines[startLine - 1] ?? "";
+    if (!TEST_HEAD_LINE_RE.test(startText)) {
+      return {
+        rule: "test-range-start-not-head",
+        message: `range start is not a "describe(" or "it(" head line ("${startText.trim()}")`,
+      };
+    }
+    const endText = lines[endLine - 1] ?? "";
+    if (!TEST_CLOSING_LINE_RE.test(endText)) {
+      return {
+        rule: "test-range-end-not-closing",
+        message: `range end is not a matching closing "});" line ("${endText.trim()}")`,
+      };
+    }
+    return null;
+  }
+
+  if (citedPath.toLowerCase().endsWith(".md")) {
+    const startTrim = (lines[startLine - 1] ?? "").trim();
+    if (MD_PURE_BRACKET_OR_FENCE_RE.test(startTrim)) {
+      return {
+        rule: "markdown-range-boundary-bracket-or-fence",
+        message: `range start is a bare bracket/fence line ("${startTrim}")`,
+        severity: "notice",
+      };
+    }
+    const endTrim = (lines[endLine - 1] ?? "").trim();
+    if (MD_PURE_BRACKET_OR_FENCE_RE.test(endTrim)) {
+      return {
+        rule: "markdown-range-boundary-bracket-or-fence",
+        message: `range end is a bare bracket/fence line ("${endTrim}")`,
+        severity: "notice",
+      };
+    }
+    return null;
+  }
+
+  return null;
+}
+
+/**
+ * A short-form citation's full check: checkTarget's existing checks
+ * (unreadable-target, inverted-range, range-exceeds-file, blank-start-line,
+ * closing-brace-start-line), plus, only when those all pass, the
+ * test-file/markdown block-boundary check above. `applyTestBoundary`: see
+ * checkRangeBoundary (true for paren-form short forms only).
+ */
+function checkShortFormTarget(
+  citedPath: string,
+  startLine: number,
+  endLine: number,
+  resolvedPath: string,
+  applyTestBoundary: boolean,
+): Problem | null {
+  const base = checkTarget(citedPath, startLine, endLine, resolvedPath);
+  if (base) return base;
+  const read = readTarget(resolvedPath);
+  if ("rule" in read) return read;
+  return checkRangeBoundary(
+    citedPath,
+    startLine,
+    endLine,
+    splitLines(read.content),
+    applyTestBoundary,
+  );
+}
+
 /**
  * Collects every continuation-citation atom (see the "Continuation
  * citations" doc block above) in `content`, sorted by document position.
@@ -541,6 +682,162 @@ function collectContinuationAtoms(content: string): Atom[] {
   return atoms;
 }
 
+/**
+ * Short-form citations. Two additional forms, distinct from the backtick
+ * continuations above: a BARE (no surrounding backtick) colon-range
+ * `:N-M`, or a BARE parenthesized range `(N-M)`. Unlike a continuation,
+ * which chains off `governing` -- the nearest PRECEDING citation anywhere
+ * earlier in the doc, reset only on failure/ambiguity/skip -- a short-form
+ * citation binds to the last FULL `path:N[-M]` citation named earlier in
+ * THE SAME PARAGRAPH (a paragraph boundary is a blank -- empty or
+ * whitespace-only -- line). A short-form citation with no full citation
+ * earlier in its own paragraph is reported unresolved
+ * (`short-form-unbound`, warning), never silently skipped: unlike a
+ * continuation right after a rejected/ambiguous citation (which has a real
+ * reason to skip -- that citation's resolution is known unusable), a
+ * short-form's paragraph simply never named a target, itself worth
+ * flagging.
+ *
+ * Range only, no bare single number (`(1)`, `:5`): every real short-form
+ * citation found while building this rule was a range (`(373-375)`,
+ * `:580-588`), and a bare single number is far too likely to be an
+ * unrelated enumeration marker (this rule's own dogfood target,
+ * docs/okf/log.md, uses exactly that numbered-list convention throughout)
+ * to detect mechanically without a large false-positive cost.
+ *
+ * A candidate match is excluded (not even collected) when:
+ *   - its `:`/`(` falls inside an already-matched full citation's own
+ *     span (the tail of a real `path:N-M` citation, not a new short form)
+ *   - the character immediately before or after the match is a backtick
+ *     (the backtick continuation forms above already own that syntax)
+ *   - (colon form) the character immediately before the `:` is a
+ *     path/word character (`[\w./-]`) -- a real filename character there
+ *     means this is plausibly part of some other, unrecognised
+ *     citation-like token, not a bare short form
+ *   - (paren form) the character immediately before the `(` is a word
+ *     character -- guards against an incidental `foo(123-456)`-shaped
+ *     token that is not prose
+ *
+ * A resolved short-form citation is checked via checkShortFormTarget (see
+ * above): checkTarget's existing checks, plus (paren form only -- see
+ * `form` below) the test-file block-boundary check.
+ *
+ * Colon-form vs. paren-form, and why only paren-form gets the test-file
+ * boundary check. Empirically (this rule's own dogfood target,
+ * packages/orchestrator-workflow/docs/okf), the two forms carry different
+ * author intent: a paren-form short form after a named clause
+ * (`detection signals named verbatim (374-379)`) reliably cites one whole
+ * describe/it block precisely -- every paren-form short form in that
+ * bundle does. A colon-form short form inside a `path:N-M, :X-Y, :Z-W`-style
+ * compound list instead conventionally marks an approximate detail
+ * location *within* an already-cited, much larger range (that bundle's own
+ * prose calls these "sub-citations not individually re-derived"), so most
+ * of them do not start on a describe/it head or end on a matching `});` at
+ * all -- not drift, just a different, legitimate citation granularity this
+ * mechanical checker cannot distinguish from real drift without author
+ * intent. Applying the boundary check to colon-form short forms too would
+ * therefore flag a large number of correct citations. The markdown
+ * bracket/fence check (also in checkRangeBoundary) is NOT restricted this
+ * way: it is notice-severity, so a false positive there is an advisory
+ * heads-up, not an enforced warning.
+ */
+type ShortFormMatch = {
+  index: number;
+  startLine: number;
+  endLine: number;
+  form: "colon" | "paren";
+};
+
+function isWithinAnySpan(
+  index: number,
+  spans: Array<[number, number]>,
+): boolean {
+  return spans.some(([start, end]) => index >= start && index < end);
+}
+
+function collectShortFormMatches(
+  content: string,
+  fullSpans: Array<[number, number]>,
+): ShortFormMatch[] {
+  const out: ShortFormMatch[] = [];
+
+  const colonRe = new RegExp(SHORT_FORM_COLON_RE.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = colonRe.exec(content)) !== null) {
+    if (isWithinAnySpan(m.index, fullSpans)) continue;
+    const before = m.index > 0 ? content[m.index - 1] : undefined;
+    if (before === "`") continue;
+    if (before !== undefined && /[\w./-]/.test(before)) continue;
+    if (content[m.index + m[0].length] === "`") continue;
+    out.push({
+      index: m.index,
+      startLine: Number(m[1]),
+      endLine: Number(m[2]),
+      form: "colon",
+    });
+  }
+
+  const parenRe = new RegExp(SHORT_FORM_PAREN_RE.source, "g");
+  while ((m = parenRe.exec(content)) !== null) {
+    if (isWithinAnySpan(m.index, fullSpans)) continue;
+    const before = m.index > 0 ? content[m.index - 1] : undefined;
+    if (before === "`") continue;
+    if (before !== undefined && /\w/.test(before)) continue;
+    if (content[m.index + m[0].length] === "`") continue;
+    out.push({
+      index: m.index,
+      startLine: Number(m[1]),
+      endLine: Number(m[2]),
+      form: "paren",
+    });
+  }
+
+  return out.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * Paragraph-start offsets in `content`, ascending, always including 0. A
+ * paragraph boundary is a blank (empty or whitespace-only) line.
+ */
+function computeParagraphStarts(content: string): number[] {
+  const starts = [0];
+  const re = /\n[ \t]*\n+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    starts.push(m.index + m[0].length);
+  }
+  return starts;
+}
+
+/** The start offset of the paragraph containing `index` (see computeParagraphStarts). */
+function paragraphStartFor(starts: number[], index: number): number {
+  let result = starts[0];
+  for (const s of starts) {
+    if (s > index) break;
+    result = s;
+  }
+  return result;
+}
+
+/**
+ * The citedPath of the nearest full citation strictly before `beforeIndex`
+ * and at or after `paragraphStart` -- "the last target document named
+ * earlier in the same paragraph" -- or null when none exists.
+ */
+function findLastNamedTargetInParagraph(
+  fullAtoms: Array<{ index: number; citedPath: string }>,
+  paragraphStart: number,
+  beforeIndex: number,
+): string | null {
+  let best: { index: number; citedPath: string } | null = null;
+  for (const a of fullAtoms) {
+    if (a.index >= paragraphStart && a.index < beforeIndex) {
+      if (!best || a.index > best.index) best = a;
+    }
+  }
+  return best ? best.citedPath : null;
+}
+
 function pushDrift(
   findings: Finding[],
   file: string,
@@ -548,10 +845,11 @@ function pushDrift(
   rule: string,
   message: string,
   resolvedTo?: string,
+  severity: "warning" | "notice" = "warning",
 ): void {
   findings.push({
     ruleId: RULE_ID,
-    severity: "warning",
+    severity,
     file,
     message: `\`${citation}\`: ${message} [${rule}]`,
     ...(resolvedTo ? { detail: `resolvedTo: ${resolvedTo}` } : {}),
@@ -622,6 +920,10 @@ function scanDoc(
   const docAbsPath = path.join(bundleDir, doc.relPath);
 
   const fullAtoms: Atom[] = [];
+  // Char spans of every matched full citation, used to keep short-form
+  // matching (see collectShortFormMatches) from re-matching the tail of a
+  // real `path:N-M` citation as a bare short form.
+  const fullSpans: Array<[number, number]> = [];
   const re = new RegExp(CITATION_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
@@ -633,6 +935,7 @@ function scanDoc(
       startLine: Number(m[2]),
       endLine: m[3] ? Number(m[3]) : null,
     });
+    fullSpans.push([m.index, m.index + m[0].length]);
   }
 
   const atoms = [...fullAtoms, ...collectContinuationAtoms(content)].sort(
@@ -780,6 +1083,112 @@ function scanDoc(
     }
     governing = { citedPath, resolvedPath: resolution.path };
     lastStartLine = startLine;
+  }
+
+  // Short-form (paragraph-bound) citations -- see that doc block above.
+  // Deliberately independent of `governing`/`lastStartLine`: short-form
+  // binding is paragraph-scoped by design, not chained through the
+  // document-wide continuation state machine above. Reserved files
+  // (index.md, log.md, see doc.isReserved) are skipped entirely: they are
+  // append-only narrative journals, not `sources:`-driven reference docs,
+  // and routinely narrate historical "old N-M -> new X-Y" line-number
+  // deltas as prose data about past changes -- not live citations against
+  // current content -- which this rule's bare-range matching cannot tell
+  // apart from a real short-form citation. Full/continuation citations in
+  // reserved files are still scanned as before; this carve-out is scoped
+  // to short-form matching only.
+  const shortFormMatches = doc.isReserved
+    ? []
+    : collectShortFormMatches(content, fullSpans);
+  if (shortFormMatches.length > 0) {
+    const paragraphStarts = computeParagraphStarts(content);
+    const namedFullAtoms: Array<{ index: number; citedPath: string }> = [];
+    for (const a of fullAtoms) {
+      if (a.kind === "full")
+        namedFullAtoms.push({ index: a.index, citedPath: a.citedPath });
+    }
+
+    for (const sf of shortFormMatches) {
+      const paragraphStart = paragraphStartFor(paragraphStarts, sf.index);
+      const targetPath = findLastNamedTargetInParagraph(
+        namedFullAtoms,
+        paragraphStart,
+        sf.index,
+      );
+      const rangeLabel = `${sf.startLine}-${sf.endLine}`;
+
+      if (!targetPath) {
+        pushDrift(
+          findings,
+          doc.relPath,
+          `${rangeLabel} (short-form)`,
+          "short-form-unbound",
+          "no target document named earlier in this paragraph",
+        );
+        continue;
+      }
+
+      const citation = `${targetPath}:${rangeLabel} (short-form)`;
+
+      if (hasParentSegment(targetPath)) {
+        // The full citation that named this target already reported
+        // path-traversal-rejected for itself; not re-flagged a second time.
+        continue;
+      }
+
+      const resolution = resolveCitation(
+        cache,
+        root,
+        docAbsPath,
+        content,
+        sources,
+        targetPath,
+        sf.index,
+      );
+
+      if (!resolution) {
+        pushDrift(
+          findings,
+          doc.relPath,
+          citation,
+          "missing-file",
+          `could not resolve ${targetPath}: tried doc sources, ancestor climb (bare filenames only), repo-root, doc-relative, nearest prior qualified mention, repo-wide search; no candidate file exists`,
+        );
+        continue;
+      }
+      if ("skip" in resolution) continue;
+      if ("ambiguous" in resolution) {
+        pushAmbiguous(findings, doc.relPath, citation, resolution.candidates);
+        continue;
+      }
+
+      const problem = checkShortFormTarget(
+        targetPath,
+        sf.startLine,
+        sf.endLine,
+        resolution.path,
+        sf.form === "paren",
+      );
+      if (problem?.rule === "unreadable-target") {
+        pushUnreadable(
+          findings,
+          doc.relPath,
+          citation,
+          path.relative(root, resolution.path),
+          problem.code ?? "UNKNOWN",
+        );
+      } else if (problem) {
+        pushDrift(
+          findings,
+          doc.relPath,
+          citation,
+          problem.rule,
+          problem.message,
+          path.relative(root, resolution.path),
+          problem.severity,
+        );
+      }
+    }
   }
 
   return findings;
