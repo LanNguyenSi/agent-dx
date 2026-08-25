@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-08-25T14:29:03.591Z
+timestamp: 2026-08-25T15:03:43.966Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -106,7 +106,7 @@ blank, `open`, `TODO`, "leaves the finding unresolved and ARMS the gate"
 until changed. The example row was narrowed to `accepted/defer` in 0.7.4
 after a prior `accepted/fix/defer/reject` example misled a run into an
 unexpectedly armed gate
-(`packages/orchestrator-workflow/CHANGELOG.md:716-726`).
+(`packages/orchestrator-workflow/CHANGELOG.md:738-748`).
 
 The two column headers are load-bearing for a second, independent reason:
 `05-review-findings.md:9` documents them as the anchor the grounding-mcp
@@ -116,7 +116,7 @@ dropping either header hides the table from the reader regardless of
 Decision values; the load-bearing comment (plus a one-sentence transfer
 rule in SKILL.md) was added in 0.7.3 after a live run drifted onto an
 unparseable `Severity | Finding | Resolution` convention, while the shipped
-header itself was already correct (`CHANGELOG.md:732-744`, the
+header itself was already correct (`CHANGELOG.md:754-766`, the
 already-correct-header statement within that entry).
 
 ## Fail-closed acceptance markers
@@ -152,7 +152,7 @@ findings-table header convention and the Decision-legend vocabulary above.
 
 Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 5 seconds with 0 tool uses, handing back harness boilerplate instead of the
-reviewer output contract (`CHANGELOG.md:630-647`). The Subagent misfire rule
+reviewer output contract (`CHANGELOG.md:652-669`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
 (`SKILL.md:463-464`), pinned by
@@ -183,7 +183,7 @@ field (`SKILL.md:328-332`, `reviewer.md:76-80`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
-Motivating incident (`CHANGELOG.md:544-569`): agent-dx run
+Motivating incident (`CHANGELOG.md:566-591`): agent-dx run
 `2026-07-18-harness-subprocess-test-deflake`, reviewer pass 1. The
 implementer's evidence read "8/8" full-suite runs green for a `maxWorkers`
 concurrency cap; the reviewer reran the suite independently (6 sequential
@@ -212,7 +212,7 @@ verdict.
 
 Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
-(`CHANGELOG.md:453-477`, agent-tasks task 16637a96): one reviewer round in
+(`CHANGELOG.md:475-499`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:950-968` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.

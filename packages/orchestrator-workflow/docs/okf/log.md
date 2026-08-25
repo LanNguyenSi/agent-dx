@@ -1896,7 +1896,126 @@
   waivers.md, run-state-lifecycle-and-markers.md) to the real verification
   instant (new Date().toISOString(), captured once and reused across all
   three so they share one recorded verification event), which also
-  cleared two new sources-fresh STALE warnings the CHANGELOG edit had
-  introduced for the two sibling docs in their pre-commit state (their own
-  last commit had not yet moved past the CHANGELOG.md commit that touched
-  them only by citation, not by content).
+  cleared three pre-existing sources-fresh STALE warnings, one per touched
+  doc (correction below: they were not new, and the bump did not clear
+  them).
+
+## 2026-08-25 (colon-shortform-citations fix round 2, implementer)
+
+- Review found one HIGH and four mediums on round 1's fix. HIGH N1: the
+  round-1 byte-comparison against base commit b80c346 was internally
+  consistent but the base itself was already adrift: PR #123
+  (`1d124ca`, 2026-08-25 13:09:32+0200) had inserted a 15-line
+  `## [Unreleased] / ### Corrections` entry into `CHANGELOG.md` before
+  `b80c346`, after the three bundle docs' own verification timestamps, and
+  nobody had re-pointed their citations for it. Round 1's own `+11`-then-
+  `+20` shift (for the "Changed" entry it added on top) was correct
+  relative to `b80c346`, but `b80c346` was itself +15 lines off from what
+  the docs' citations actually described, so the net-correct offset was
+  +35, not +20; all 16 landed one release section too new. Medium N2: the
+  CHANGELOG's own "+11 lines" claim was not reproducible from the shipped
+  state (an intermediate commit's number, not a squash-survivable one).
+  Medium N3: the CHANGELOG's before/after finding counts silently mixed in
+  three `sources-fresh` `STALE` warnings whose presence or absence is a
+  property of this round's commit shape (whether `CHANGELOG.md` is
+  co-committed with the docs that cite it), not of the citations'
+  correctness. Medium N4: round 1's log.md entry mischaracterized those
+  same three warnings as "two new" ones the CHANGELOG edit "introduced" and
+  the timestamp bump "cleared". Low N5: a README bullet carried two
+  "see below" pointers to the same section without quoting either
+  heading, and its bold lead-in phrase (`, :N-M`) undersold the full
+  connective list two lines below it.
+
+  This round: re-verified all 16 `CHANGELOG.md` citations across the three
+  touched docs (`subagent-contracts-superset.md`, `review-gate-and-
+  waivers.md`, `run-state-lifecycle-and-markers.md`) against the actual
+  section-header structure of `CHANGELOG.md`, not against a byte-diff of a
+  moving base: for each citation, located the `## [x.y.z]` header the
+  citation's own sentence names and confirmed the cited range falls inside
+  that section's body. Applied a uniform +15 shift for the PR #123 drift,
+  then rewrote the CHANGELOG's "Changed" entry to drop the unreproducible
+  "+11" number (N2) and to report only the citations-resolve-controlled
+  subset (N3, decision below), which itself grew the entry by 7 lines and
+  required a further uniform +7 shift on the same 16 citations (net +35
+  plus the entry's own new length delta from round 1's already-applied
+  +20, landing at the final values below). Confirmed with `okf-kit check`
+  (built from this repo, not the published package): 35 findings
+  (0 errors / 13 warnings / 22 notices) at this round's final state, all
+  13 warnings pre-existing `install-fence-mechanics.md` short-form
+  findings unrelated to this doc set; the three touched docs carry zero
+  `citations-resolve` or `sources-fresh` findings of their own. This
+  replaces round 1's reported 0/14/22: the 14th warning there was
+  `run-state-lifecycle-and-markers.md`'s still-incompletely-shifted (+20,
+  not +35) 0.7.0 citation landing on a blank line by coincidence, not the
+  pre-existing content drift (agent-tasks task 2e7680f6) round 1 attributed
+  it to; with the citation correctly shifted the full +35 it resolves
+  cleanly and the finding is gone, not "restored."
+
+  N3 decision: chose to report only the citations-resolve subset this
+  change actually controls in the CHANGELOG (0/13/22, three touched docs
+  clean) rather than folding the `sources-fresh` count into it, and to log
+  the fuller `sources-fresh` investigation here instead, because that
+  count is a property of this round's commit shape, not of citation
+  correctness. Measured directly: `okf-kit check` against base commit
+  `b80c346` (via `git worktree add`, this repo's own `okf-kit` build)
+  reports 39 findings (0/17/22): 13 pre-existing `install-fence-
+  mechanics.md` warnings, one `blank-start-line` warning
+  (`run-state-lifecycle-and-markers.md`, the un-shifted pre-round-1
+  `CHANGELOG.md:764-771` 0.7.0 citation), and three `sources-fresh`
+  `STALE` warnings, one per touched doc, all reading `` `packages/
+  orchestrator-workflow/CHANGELOG.md` changed 2026-08-25T11:09:32.000Z
+  after doc timestamp 2026-08-24T23:59:00.000Z `` -- `1d124ca`'s commit
+  time (13:09:32+0200 = 11:09:32Z) is after the three docs' pre-round-1
+  `timestamp` (2026-08-24T23:59:00Z). Verified these three warnings are
+  cleared by `sources-fresh`'s `docCommitEpoch` exception
+  (`packages/okf-kit/src/rules/sources-fresh.ts`: a doc whose own last
+  commit is not older than the cited source's last commit is not stale,
+  regardless of its frontmatter `timestamp`), not by the frontmatter bump:
+  reverted all three docs' `timestamp` back to the pre-round-1
+  `2026-08-24T23:59:00Z` value in the working tree with this round's other
+  content fixes still applied (uncommitted, so each doc's last git commit
+  was still round 1's `dda1f67`, which also touched `CHANGELOG.md`) and
+  re-ran `okf-kit check`: still 35 findings (0/13/22), zero `sources-fresh`
+  warnings, confirming the co-commit clears them independent of the
+  timestamp value. Restored the real timestamp
+  (`2026-08-25T15:03:43.966Z`, `new Date().toISOString()`, captured once
+  and reused across all three docs) afterward. Any future commit that
+  edits these docs without also touching `CHANGELOG.md` in the same commit
+  will re-surface the three `STALE` warnings; that is expected
+  `sources-fresh` behavior, not a regression, and is exactly why this
+  round does not fold that count into the CHANGELOG's headline number.
+
+  Also fixed: `okf-kit/README.md`'s short-form-citation bullet (N5) now
+  keeps a single pointer, quoting "Citation resolution (citations-resolve)"
+  verbatim (the actual `##` heading text, not the non-heading "Short-form
+  citations" lead-in it pointed to before), and its bold lead-in now says
+  "a connective-led `:N-M`" instead of implying only the comma form,
+  matching the fuller `,`/`;`/`(`/`and`/`or` list two lines below it.
+
+  Mutation probes (both applied, observed, and reverted; illustrative line
+  numbers below are written without a `file.ext:N` pattern on purpose, so
+  this log entry itself does not register as a citation under
+  `citations-resolve`'s bare `path.ext:N` regex, which needs no backticks):
+  (1) took the 0.14.0 motivation citation in `subagent-contracts-
+  superset.md` (correctly pointing at `CHANGELOG.md`, start line 566) and
+  reset it back 15 lines, to start line 551; direct read confirmed line 551
+  falls inside the `## [0.15.0]` section (`CHANGELOG.md` header at line
+  519), not `## [0.14.0]` (header at line 562) -- the wrong section, on a
+  non-blank line, exactly the case the review warned `okf-kit` stays silent
+  on. `okf-kit check` findings were unchanged by the mutation, confirming
+  it: the tool has no section-membership check, only structural ones
+  (target exists, range in file, start line non-blank/non-brace, test/
+  markdown block boundary). Reverted to start line 566 and re-confirmed it
+  falls inside `## [0.14.0]` again. (2) Regression probe for round 1's
+  paren-to-colon rewrite: took one of the 22 short-form colon citations in
+  `subagent-contracts-superset.md` and pointed it at a deliberately
+  out-of-range target (a test file with far fewer lines than the cited
+  start) while still in colon form -- `okf-kit check` correctly flagged a
+  `range-exceeds-file` warning (findings count rose by one). Wrapped the
+  same out-of-range target in parenthesized form instead of colon form --
+  the warning vanished entirely (findings count dropped back down), because
+  a bare parenthesized short-form is never collected at all, colon form or
+  not. Restored the citation to its original, correct colon-form target and
+  range, and re-confirmed `okf-kit check` back at 35 findings
+  (0 errors / 13 warnings / 22 notices), matching this round's final
+  reported state.
