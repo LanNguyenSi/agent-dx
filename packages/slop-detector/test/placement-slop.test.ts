@@ -248,6 +248,97 @@ describe("placement-slop", () => {
       expect(hit?.line).toBe(3);
       expect(hit?.column).toBe(1);
     });
+
+    it("a $-anchored allow pattern still matches on a CRLF file (R3 #2)", () => {
+      const anchoredAllow = mergeConfig({
+        placement: {
+          markers: ["example-org"],
+          allow: ["example-org$"],
+        },
+      });
+      const text = "install example-org\r\nplain";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: anchoredAllow,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+    });
+
+    it("an allow span spanning the shared path suppresses home-path directly, not just via org-marker (R3 #1)", () => {
+      const allowHomePath = mergeConfig({
+        placement: { allow: ["~/git/pandora/\\.env"] },
+      });
+      const text = "see instructions in ~/git/pandora/.env for setup";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowHomePath,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeUndefined();
+    });
+
+    it("an allow span spanning a date suppresses dated-evidence directly (R3 #1)", () => {
+      const allowDate = mergeConfig({
+        placement: { allow: ["2026-08-24"] },
+      });
+      const text = "the run recorded on 2026-08-24 was the last one";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowDate,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/dated-evidence"),
+      ).toBeUndefined();
+    });
+
+    it("an allow span spanning a tally phrase suppresses tally-phrase directly (R3 #1)", () => {
+      const allowTally = mergeConfig({
+        placement: { allow: ["four so far"] },
+      });
+      const text = "the count stands at four so far, unresolved";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowTally,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/tally-phrase"),
+      ).toBeUndefined();
+    });
+
+    it("an allow span never crosses a line break, so a phrase wrapped across one is not excused (R3 #3)", () => {
+      const allowAcrossBreak = mergeConfig({
+        placement: { allow: ["recorded so far"] },
+      });
+      const cleanText = "recorded so far in the log";
+      const vClean = checkText(cleanText, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowAcrossBreak,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        vClean.find((x) => x.ruleId === "placement-slop/tally-phrase"),
+      ).toBeUndefined();
+
+      const wrappedText = "recorded so\nfar in the log";
+      const vWrapped = checkText(wrappedText, "x/SKILL.md", {
+        packs: allPacks,
+        config: allowAcrossBreak,
+        packFilter: ["placement-slop"],
+      });
+      const hit = vWrapped.find(
+        (x) => x.ruleId === "placement-slop/tally-phrase",
+      );
+      expect(hit).toBeDefined();
+      expect(hit?.line).toBe(1);
+      expect(hit?.endLine).toBe(2);
+    });
   });
 
   it("with no placement.markers configured, org-marker never fires", () => {

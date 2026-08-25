@@ -71,6 +71,21 @@ function lineStartOffsets(text: string): number[] {
 }
 
 /**
+ * `text` split on `\n`, with a single trailing `\r` stripped from each line
+ * (a CRLF file's lines otherwise end in `\r`, which a `$`-anchored pattern
+ * never matches before). Only the line's own tail is trimmed, so an
+ * absolute offset derived from `lineStartOffsets(text)` (which indexes into
+ * the untouched `text`) stays correct, and a match can never extend into
+ * the stripped `\r` since it was never part of the line being matched
+ * against.
+ */
+function splitLinesForMatching(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+}
+
+/**
  * Spans of `text` matched by any `config.placement.allow` pattern. Matched
  * per line (like the pre-span-scoping code's `.test(line)` loop, so `^`/`$`
  * in a pattern still anchor to line boundaries, not file boundaries) rather
@@ -88,7 +103,7 @@ function computeAllowedSpans(
 ): Array<{ start: number; end: number }> {
   const patterns = config.placement?.allow ?? [];
   if (patterns.length === 0) return [];
-  const lines = text.split("\n");
+  const lines = splitLinesForMatching(text);
   const lineStarts = lineStartOffsets(text);
   const spans: Array<{ start: number; end: number }> = [];
   for (const pattern of patterns) {
@@ -353,7 +368,7 @@ const orgMarker: Rule = {
     const markers = config.placement?.markers ?? [];
     if (markers.length === 0) return [];
     const allowedSpans = computeAllowedSpans(file.text, config);
-    const lines = file.text.split("\n");
+    const lines = splitLinesForMatching(file.text);
     const lineStarts = lineStartOffsets(file.text);
     const violations: Violation[] = [];
     markerLoop: for (const pattern of markers) {

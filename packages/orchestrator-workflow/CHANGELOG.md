@@ -7,13 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+### Corrections
 
-- The 0.24.0 entry below noted a known limit of `placement-slop`: an
-  `allow` match suppressed every placement rule on the line it matched,
-  not just the marker span it was meant to excuse. This is now fixed in
-  `slop-detector` (`placement.allow` is span-scoped), so a home path or a
-  date sharing a line with an allowed repo URL is reported again.
+- Correction to the "Known limit of the pack" note in the 0.24.0 entry
+  below: this is not an `orchestrator-workflow` behavior change, it
+  documents a `slop-detector` fix. The 0.24.0 note described a known limit
+  of `placement-slop`, that an `allow` match suppressed every placement
+  rule on the line it matched, not just the marker span it was meant to
+  excuse. `slop-detector` has since fixed this (`placement.allow` is now
+  span-scoped, not line-wide). Consumer-visible effect: a config that
+  reported clean before can now report a `block`-severity finding (e.g.
+  `placement-slop/home-path`) when a home path, a date, or a tally phrase
+  shares a line with an allowed marker.
 
 ## [0.24.0] - 2026-08-24
 
