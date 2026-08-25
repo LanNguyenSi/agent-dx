@@ -61,17 +61,27 @@ function isInstructionFile(ctx: RuleContext): boolean {
   return extra.some((g) => globToRegex(g).test(relPath));
 }
 
-/** Line numbers (1-based) whose text matches one of `config.placement.allow`. */
-function allowedLineNumbers(text: string, config: ResolvedConfig): Set<number> {
+/**
+ * Spans of `text` matched by any `config.placement.allow` pattern. An
+ * allow match only excuses the span it actually covers (e.g. an install
+ * URL that carries an org handle), not the rest of the line it sits on:
+ * a home path, a date, or a tally phrase elsewhere on that same line is
+ * unrelated to what the allow pattern matched and must still be checked.
+ */
+function computeAllowedSpans(
+  text: string,
+  config: ResolvedConfig,
+): Array<{ start: number; end: number }> {
   const patterns = config.placement?.allow ?? [];
-  if (patterns.length === 0) return new Set();
-  const regexes = patterns.map((p) => new RegExp(p));
-  const out = new Set<number>();
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    if (regexes.some((re) => re.test(lines[i]))) out.add(i + 1);
+  if (patterns.length === 0) return [];
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const pattern of patterns) {
+    const re = new RegExp(pattern, "g");
+    for (const m of findAllRegex(text, re)) {
+      spans.push({ start: m.index, end: m.index + m.match.length });
+    }
   }
-  return out;
+  return spans;
 }
 
 /** Absolute offset (into `text`) each line starts at, indexed by 0-based line number. */
@@ -164,7 +174,7 @@ function scanInstructionFile(
 ): Violation[] {
   const { file, config } = ctx;
   if (!isInstructionFile(ctx)) return [];
-  const allowed = allowedLineNumbers(file.text, config);
+  const allowedSpans = computeAllowedSpans(file.text, config);
   const excluded = opts.skipExcludedSpans
     ? computeExcludedSpans(file.text)
     : [];
@@ -172,9 +182,12 @@ function scanInstructionFile(
   for (const m of findAllRegex(file.text, re)) {
     if (excluded.length > 0 && insideAnySpan(m.index, m.match.length, excluded))
       continue;
+    if (
+      allowedSpans.length > 0 &&
+      insideAnySpan(m.index, m.match.length, allowedSpans)
+    )
+      continue;
     if (opts.shouldSkip?.(m, file)) continue;
-    const { line } = offsetToLineCol(file.text, m.index);
-    if (allowed.has(line)) continue;
     violations.push(makeViolation(rule, file, m, describe(m.match)));
   }
   return violations;
@@ -329,27 +342,30 @@ const orgMarker: Rule = {
     if (!isInstructionFile(ctx)) return [];
     const markers = config.placement?.markers ?? [];
     if (markers.length === 0) return [];
-    const allowed = allowedLineNumbers(file.text, config);
+    const allowedSpans = computeAllowedSpans(file.text, config);
     const lines = file.text.split("\n");
     const lineStarts = lineStartOffsets(file.text);
     const violations: Violation[] = [];
     markerLoop: for (const pattern of markers) {
       // Matched per line, not over the whole file text: a pathological
       // pattern's cost is then bounded by line length rather than file
-      // size, and it keeps `allowedLineNumbers`' per-line granularity
-      // consistent with what actually gets matched.
+      // size.
       const re = new RegExp(pattern, "g");
       for (let i = 0; i < lines.length; i++) {
-        const lineNo = i + 1;
-        if (allowed.has(lineNo)) continue;
         for (const m of findAllRegex(lines[i], re)) {
+          const absIndex = lineStarts[i] + m.index;
+          if (
+            allowedSpans.length > 0 &&
+            insideAnySpan(absIndex, m.match.length, allowedSpans)
+          )
+            continue;
           if (violations.length >= MAX_MARKER_VIOLATIONS_PER_FILE)
             break markerLoop;
           violations.push(
             makeViolation(
               orgMarker,
               file,
-              { index: lineStarts[i] + m.index, match: m.match },
+              { index: absIndex, match: m.match },
               `Org-specific marker \`${m.match}\` (pattern \`${pattern}\`) in an instruction file: keep it organisation-neutral, or add a line to \`placement.allow\`.`,
             ),
           );

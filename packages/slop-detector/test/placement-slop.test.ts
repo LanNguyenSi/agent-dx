@@ -101,6 +101,62 @@ describe("placement-slop", () => {
     expect(orgMarkerHits).toHaveLength(1);
   });
 
+  describe("placement.allow is span-scoped, not line-wide (agent-dx #119 R2)", () => {
+    const withAllow = mergeConfig({
+      placement: {
+        markers: ["example-org"],
+        allow: ["github\\.com/example-org/"],
+      },
+    });
+    const scopedOpts = () => ({
+      packs: allPacks,
+      config: withAllow,
+      packFilter: ["placement-slop"],
+    });
+
+    it("an allowed URL suppresses org-marker but a home path on the same line still fires", () => {
+      const text =
+        "install from https://github.com/example-org/kit see /Users/example/project also";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeDefined();
+    });
+
+    it("an allowed URL suppresses org-marker but dated evidence on the same line still fires", () => {
+      const text =
+        "install from https://github.com/example-org/kit dated 2026-08-24";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/dated-evidence"),
+      ).toBeDefined();
+    });
+
+    it("an allowed URL suppresses org-marker but a tally phrase on the same line still fires", () => {
+      const text =
+        "install from https://github.com/example-org/kit worked so far";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/tally-phrase"),
+      ).toBeDefined();
+    });
+
+    it("a line carrying only the allowed URL still reports nothing", () => {
+      const text = "install from https://github.com/example-org/kit";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
+    });
+  });
+
   it("with no placement.markers configured, org-marker never fires", () => {
     const text = "anything at all, example-org included";
     const v = checkText(text, "x/SKILL.md", baseOpts());

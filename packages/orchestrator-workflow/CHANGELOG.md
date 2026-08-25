@@ -5,6 +5,16 @@ All notable changes to `orchestrator-workflow` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The 0.24.0 entry below noted a known limit of `placement-slop`: an
+  `allow` match suppressed every placement rule on the line it matched,
+  not just the marker span it was meant to excuse. This is now fixed in
+  `slop-detector` (`placement.allow` is span-scoped), so a home path or a
+  date sharing a line with an allowed repo URL is reported again.
+
 ## [0.24.0] - 2026-08-24
 
 ### Changed
