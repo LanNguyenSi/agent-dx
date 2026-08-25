@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/okf/subagent-contracts-superset.md`: rewrote its 22 sibling short-
+  form citations (21 initially, plus one missed and fixed this round) from
+  the parenthesized form (`(N-M)`) to the colon form (`, :N-M`) so
+  `citations-resolve` checks them again. Neither form was ever machine-
+  checked in a released `okf-kit`: the colon-form gate and the drop of
+  paren-form collection landed in the same `[Unreleased]` entry, so
+  "dropped" overstates it. Inserting this entry shifts every later line
+  number in this file, so any absolute-line `CHANGELOG.md` citation below
+  it breaks until re-pointed; this round re-points all sixteen such
+  citations across the three touched docs/okf siblings
+  (`subagent-contracts-superset.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`), each checked against the
+  `## [x.y.z]` section its own sentence names, not against a byte-diff of a
+  moving base. `okf-kit check` against a repo build (not the published
+  package) reports 0 errors / 13 warnings / 22 notices; all 13 are
+  pre-existing `install-fence-mechanics.md` short-form findings unrelated
+  to this change, so the three touched docs carry no citations-resolve or
+  sources-fresh finding of their own (log.md records the fuller
+  sources-fresh investigation, since that count depends on this round's
+  commit shape, not on the citations themselves). Coverage holds only
+  against a repo build: CI's `okf-staleness.yml` still pins the published
+  `okf-kit@0.5.0`, which predates short-form colon resolution, so it
+  reports 0 short-form findings until that release ships (agent-tasks task
+  2e3e5f4b).
+
 ### Corrections
 
 - Correction to the "Known limit of the pack" note in the 0.24.0 entry
