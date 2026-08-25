@@ -264,22 +264,22 @@ reviewer/model correlation as a standing evidence note now that neither
 lives in kit prose.
 
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:367-403` pins
-the 0.11.0 rule clause-by-clause: section heading present (370-372), both
-detection signals named verbatim (374-379), the scoping language that
-prevents false-positive misfires (381-386), the resume-or-respawn response
-plus the non-evidence rule (388-393), the `03-decisions.md` record
-requirement (395-397), and the review-gate consequence sentence (399-402).
+the 0.11.0 rule clause-by-clause: section heading present, :370-372, both
+detection signals named verbatim, :374-379, the scoping language that
+prevents false-positive misfires, :381-386, the resume-or-respawn response
+plus the non-evidence rule, :388-393, the `03-decisions.md` record
+requirement, :395-397, and the review-gate consequence sentence, :399-402.
 `test/docs-consistency.test.ts:421-485` pins the 0.18.0 extension, this
 fix-round's hardening, and the 0.24.0 evidence removal in one `describe`
-block: the resume-over-respawn preference (424-428), the
-repeat-the-assignment mechanic (430-434), why resume beats a fresh respawn
-(436-440), the parenthetical signal definition (442-446), the claim-binding
-to recorded outcomes (448-452), the conditional respawn fallback (454-458),
+block: the resume-over-respawn preference, :424-428, the
+repeat-the-assignment mechanic, :430-434, why resume beats a fresh respawn,
+:436-440, the parenthetical signal definition, :442-446, the claim-binding
+to recorded outcomes, :448-452, the conditional respawn fallback, :454-458,
 a negative-pin test that the incident tally and the model-correlation
 passage no longer appear (460-469, replacing the review-round-1 positive
 pins on that passage the 0.24.0 pass removed along with the prose), the
-watchdog scope carve-out (471-478), and its own resolution detail
-(480-484).
+watchdog scope carve-out, :471-478, and its own resolution detail,
+:480-484.
 
 ## Reproduction requirement (0.14.0)
 
@@ -344,13 +344,13 @@ evidence" (the installed prompt alone previously said "incomplete").
 
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:846-886` pins
 the original 0.16.0 shape: the installed prompt's instruction and field
-mention (850-856), the claim-only-what-was-measured rule (858-863), the
-misfire-rule sentence (865-870), and a byte-for-byte cross-copy equality
-check on the field block (872-885).
+mention, :850-856, the claim-only-what-was-measured rule, :858-863, the
+misfire-rule sentence, :865-870, and a byte-for-byte cross-copy equality
+check on the field block, :872-885.
 `test/docs-consistency.test.ts:904-940` pins the R2 additions: step 6's
-sentence and its claim-only-what-was-measured reference (908-919), the
-not-applicable clause in both copies (921-925), and two exact-string pins
-(927-939) that catch a rename applied identically to both copies — a mutant
+sentence and its claim-only-what-was-measured reference, :908-919, the
+not-applicable clause in both copies, :921-925, and two exact-string pins,
+:927-939 that catch a rename applied identically to both copies — a mutant
 the cross-copy equality check above cannot catch on its own, since it only
 proves the two copies match each other, not that either still uses the
 pinned sub-field names.

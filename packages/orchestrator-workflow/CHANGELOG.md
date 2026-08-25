@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/okf/subagent-contracts-superset.md`: rewrote its 21 sibling
+  short-form citations from the parenthesized form (`(N-M)`) to the
+  colon form (`, :N-M`). `okf-kit`'s `citations-resolve` rule dropped
+  paren-form short-form collection (see that package's own CHANGELOG);
+  the paren form was never invalid, just unchecked, so these 21 had gone
+  unverified since that change. `okf-kit check` on the bundle reports
+  the same 39 findings / 17 warnings / 22 notices before and after this
+  rewrite, and now covers all 21 (agent-tasks task 2e3e5f4b).
+
 ### Corrections
 
 - Correction to the "Known limit of the pack" note in the 0.24.0 entry
