@@ -128,7 +128,7 @@ exec(`github pr review \
 exec(`github pr comment \
   --repo owner/repo \
   --pr 43 \
-  --body "Comprehensive review complete! See full analysis: [REVIEW-2026-03-16.md](link).\n\n**Summary:**\n- Security: ✅ No issues\n- Type Safety: ✅ All strict\n- Error Handling: ⚠️ 2 minor improvements suggested\n\n**Overall:** 9/10 - Excellent work! 🔥"`);
+  --body "Comprehensive review complete! See full analysis: [REVIEW.md](link).\n\n**Summary:**\n- Security: ✅ No issues\n- Type Safety: ✅ All strict\n- Error Handling: ⚠️ 2 minor improvements suggested\n\n**Overall:** 9/10 - Excellent work! 🔥"`);
 ```
 
 ### 6. Auto-Assign Issue Based on Type
@@ -252,7 +252,7 @@ exec(`github pr review --repo ${repo} --pr ${prNumber} --event ${verdict} --body
 ```typescript
 // Log GitHub activity to memory
 const issues = JSON.parse(exec(`github issue list --repo owner/repo --json`).stdout);
-memory.write(`activity-log/2026-03-16.md`, `
+memory.write(`activity-log/${today}.md`, `
 ## GitHub Activity
 
 Created ${issues.filter(i => i.author === "octocat").length} issues today:

@@ -12,13 +12,6 @@ rules:
   placement-slop/opaque-id:
     severity: block
 
-# github-api-tool/SKILL.md carries two pre-existing dated examples
-# (~lines 131, 255) that the dated-evidence rule now blocks now that it's
-# severity: block above. That package is out of scope for this change; a
-# follow-up should clean those examples and drop this ignore.
-ignorePaths:
-  - "packages/github-api-tool/SKILL.md"
-
 placement:
   instructionGlobs:
     - "packages/orchestrator-workflow/assets/**/*.md"
