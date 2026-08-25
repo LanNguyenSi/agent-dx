@@ -27,6 +27,8 @@ import { FIXTURES_DIR, loadFixture, runCli } from "./helpers.js";
 const MAIN_ROOT = path.join(FIXTURES_DIR, "citations-resolve-main");
 const CONT_ROOT = path.join(FIXTURES_DIR, "citations-resolve-continuations");
 const SHORT_FORM_ROOT = path.join(FIXTURES_DIR, "citations-resolve-short-form");
+const ANCHOR_ROOT = path.join(FIXTURES_DIR, "citations-resolve-anchor");
+const ANCHOR2_ROOT = path.join(FIXTURES_DIR, "citations-resolve-anchor2");
 
 function loadMain() {
   return loadFixture("citations-resolve-main/docs/okf", MAIN_ROOT);
@@ -38,6 +40,14 @@ function loadCont() {
 
 function loadShortForm() {
   return loadFixture("citations-resolve-short-form/docs/okf", SHORT_FORM_ROOT);
+}
+
+function loadAnchor() {
+  return loadFixture("citations-resolve-anchor/docs/okf", ANCHOR_ROOT);
+}
+
+function loadAnchor2() {
+  return loadFixture("citations-resolve-anchor2/docs/okf", ANCHOR2_ROOT);
 }
 
 /** A finding's message always starts with `` `<citation>`: `` (see pushDrift/pushAmbiguous). */
@@ -1283,5 +1293,166 @@ describe("citations-resolve: short-form citations", () => {
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("citations-resolve: anchored citations", () => {
+  it("scans the fixture doc and returns exactly the four expected anchor findings", () => {
+    const ctx = loadAnchor();
+    const findings = citationsResolveRule.run(ctx);
+    const anchorRuleIds = [
+      "anchor-heading-does-not-enclose",
+      "anchor-heading-mismatch",
+      "anchor-heading-not-found",
+      "anchor-not-found-in-range",
+    ];
+    const anchorFindings = findings.filter((f) =>
+      anchorRuleIds.some((id) => f.message.includes(`[${id}]`)),
+    );
+    expect(anchorFindings).toHaveLength(4);
+    expect(anchorFindings.every((f) => f.severity === "warning")).toBe(true);
+  });
+
+  it("heading anchor that encloses the whole range produces no finding", () => {
+    const findings = citationsResolveRule.run(loadAnchor());
+    expect(findingFor(findings, "src/CHANGELOG.md:7-8")).toBeUndefined();
+  });
+
+  it("bracket-wrapped heading anchor (`#[2.0.0]`) is equivalent to the bare form", () => {
+    const findings = citationsResolveRule.run(loadAnchor());
+    expect(findingFor(findings, "src/CHANGELOG.md:8-9")).toBeUndefined();
+  });
+
+  it("heading anchor whose range crosses into the next release section is flagged anchor-heading-does-not-enclose", () => {
+    const findings = citationsResolveRule.run(loadAnchor());
+    const f = findingFor(findings, "src/CHANGELOG.md:9-19");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[anchor-heading-does-not-enclose]");
+    // Pins a concrete piece of the message text (offending line number and
+    // heading text), not just "a finding exists" -- so a mutation that
+    // removes the enclosure walk but keeps some other unrelated finding
+    // alive on this citation would still fail this assertion.
+    expect(f?.message).toContain(
+      'next heading "[1.0.0] - 2026-01-01" at line 15',
+    );
+  });
+
+  it("heading anchor naming the wrong release is flagged anchor-heading-mismatch", () => {
+    const findings = citationsResolveRule.run(loadAnchor());
+    const f = findingFor(findings, "src/CHANGELOG.md:13-13");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[anchor-heading-mismatch]");
+    expect(f?.message).toContain('does not contain anchor "1.0.0"');
+  });
+
+  it("heading anchor with no heading preceding the cited range is flagged anchor-heading-not-found", () => {
+    const findings = citationsResolveRule.run(loadAnchor());
+    const f = findingFor(findings, "src/CHANGELOG.md:1-1");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[anchor-heading-not-found]");
+  });
+
+  it("string anchor found inside the cited range produces no finding", () => {
+    const findings = citationsResolveRule.run(loadAnchor());
+    expect(findingFor(findings, "src/note.md:2-2")).toBeUndefined();
+  });
+
+  it("string anchor not found inside the cited range is flagged anchor-not-found-in-range", () => {
+    const findings = citationsResolveRule.run(loadAnchor());
+    const f = findingFor(findings, "src/note.md:2-3");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[anchor-not-found-in-range]");
+    expect(f?.message).toContain('anchor "nonexistent phrase"');
+  });
+
+  it("an ordinary anchorless citation is unaffected: same behavior as before anchors existed", () => {
+    const findings = citationsResolveRule.run(loadAnchor());
+    expect(findingFor(findings, "src/note.md:1")).toBeUndefined();
+  });
+});
+
+// Fixes from the first review round on anchored citations, exercised
+// against their own fixture bundle (citations-resolve-anchor2) rather than
+// growing the pinned fixture above, whose exact finding count and line
+// numbers several existing assertions already depend on.
+describe("citations-resolve: anchored citations (fence, charset, and quoting edge cases)", () => {
+  it("a fenced code block's `#`-led comment line in the target is not mistaken for a heading", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    expect(findingFor(findings, "src/fenced.md:1-10")).toBeUndefined();
+  });
+
+  it("a heading-anchored citation starting after a fenced `#`-led comment still finds the real heading above the fence", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    expect(findingFor(findings, "src/fenced.md:10-10")).toBeUndefined();
+  });
+
+  it("the same target content without fence markers really does end the section at the `#`-led line", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    const f = findingFor(findings, "src/fenced-plain.md:1-8");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-heading-does-not-enclose]");
+    expect(f?.message).toContain('next heading "not a heading" at line 5');
+  });
+
+  it("a heading anchor at the end of a sentence does not swallow the trailing period", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    expect(findingFor(findings, "src/CHANGELOG.md:5-6")).toBeUndefined();
+  });
+
+  it("a hyphenated heading anchor is captured whole, not truncated at the hyphen", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    const f = findingFor(findings, "src/CHANGELOG.md:5-7");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-heading-mismatch]");
+    expect(f?.message).toContain('anchor "2.0.0-rc1"');
+  });
+
+  it("a hyphenated, non-numeric heading anchor is also captured whole", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    const f = findingFor(findings, "src/CHANGELOG.md:6-7");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-heading-mismatch]");
+    expect(f?.message).toContain('anchor "some-anchor"');
+  });
+
+  it("a malformed (unterminated) quoted anchor does not swallow a later citation across a line break", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    const f = findingFor(findings, "src/note.md:10-11");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[range-exceeds-file]");
+  });
+
+  it("a bracket-wrapped anchor is stripped before comparison against a heading with no brackets of its own", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    expect(findingFor(findings, "src/CHANGELOG.md:11")).toBeUndefined();
+  });
+
+  it("a single-line heading-anchored citation (no dash range) resolves correctly", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    expect(findingFor(findings, "src/CHANGELOG.md:5")).toBeUndefined();
+  });
+
+  it("a string anchor against a non-Markdown target, found", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    expect(findingFor(findings, "src/code.ts:1")).toBeUndefined();
+  });
+
+  it("a string anchor against a non-Markdown target, not found", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    const f = findingFor(findings, "src/code.ts:2");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-not-found-in-range]");
+    expect(f?.message).toContain('anchor "verifyVerdict"');
+  });
+
+  it("an anchored full citation's short-form sibling in the same paragraph still binds and is checked", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    const f = findingFor(findings, "src/CHANGELOG.md:20-21 (short-form)");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[range-exceeds-file]");
   });
 });

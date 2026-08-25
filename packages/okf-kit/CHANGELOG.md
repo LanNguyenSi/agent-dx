@@ -49,6 +49,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   genuine *opening* fence line is exempted from the fence-as-drift-signal
   part of this check: citing a fenced block starting at its own opening
   delimiter is the natural, correct way to cite it.
+- `citations-resolve` now supports an optional **anchor** on a full
+  citation: `` `path:N-M#anchor` `` (e.g. `` `CHANGELOG.md:50-144#0.24.0` ``),
+  closing a gap the range/blank/closing-brace checks above cannot: a
+  CHANGELOG.md that grows by insertion at the top shifts every later
+  entry's absolute line numbers on every release, so a citation that lands
+  15 lines off in the wrong release section is exactly as green as before
+  the shift (the motivating case: 16 `docs/okf/*.md` -> `CHANGELOG.md`
+  citations in this repo's own `orchestrator-workflow` bundle, migrated to
+  this form as part of the same change -- see that package's CHANGELOG).
+  Two forms, told apart by the anchor text itself:
+  - **Heading form** (bare/unquoted, e.g. `#0.24.0` or `#[0.24.0]`): the
+    citation's nearest *enclosing* Markdown heading must contain the
+    anchor text, and no heading of the same or shallower level may start
+    before the range's end line -- i.e. the heading must enclose the
+    *whole* range, not merely precede its start. Deliberately capped at
+    heading level 2: a Keep-a-Changelog `CHANGELOG.md` nests `## [x.y.z]`
+    release headings around identically-named `### Added`/`### Changed`/
+    `### Fixed` subsections repeated in every release, so "nearest heading
+    of any level" would make this check nearly useless (it would match the
+    wrong release's own `### Changed` just as readily as the right one's);
+    deeper subsection headings are transparent to the search instead. The
+    anchor text itself matches word characters, `.`, and `-`, but never
+    starts or ends on a `.`/`-`, so a trailing sentence period or a
+    following `,`/`)` is never captured as part of it, and a hyphenated
+    token (`0.24.0-rc1`) is captured whole rather than truncated at the
+    first hyphen. A `#`-led comment line inside a fenced code block in the
+    *target* is excluded from the heading search on both ends of the
+    enclosure check, the same way a citing doc's own fences are already
+    excluded from short-form matching. Mismatch is reported as
+    `anchor-heading-mismatch` (wrong section) or
+    `anchor-heading-does-not-enclose` (right section, but the range runs
+    past its end); no heading at all precedes the citation is
+    `anchor-heading-not-found`. All three are **warnings**.
+  - **String form** (double-quoted, e.g. `#"reproduction requirement"`):
+    the anchor text must occur, verbatim, on at least one line of the
+    cited range itself -- "occurs inside it" rather than "encloses it", so
+    this form also works against a non-Markdown target where "enclosing
+    heading" has no meaning. The quoted text cannot cross a line break or
+    a backtick, so an unterminated opening quote fails to parse as an
+    anchor at all instead of greedily consuming everything up to some
+    unrelated later quote character in the document -- which would
+    otherwise silently hide every citation in between from this rule
+    entirely. Mismatch is `anchor-not-found-in-range`, a **warning**.
+  Anchors are full-citation-only (a continuation or short-form citation
+  never carries its own path to hang one on) and strictly additive: the
+  `#anchor` suffix is optional, so an existing anchorless citation matches
+  and is checked exactly as before. Three rejected alternatives: embedding
+  the literal heading markup (`` #"## [0.24.0]" ``) was rejected as reading
+  worse in prose for no additional precision over the shorter heading-form
+  token; a detached anchor elsewhere in the sentence was rejected as
+  needing a second, unparseable-without-a-new-grammar citation site that
+  is easy to leave behind when a sentence is edited later; a named-capture
+  slug matching `sources-fresh`'s YAML shape was rejected because it would
+  require a second citation site (frontmatter plus prose) to stay in sync,
+  the exact class of drift this rule exists to catch.
+  **Known limitations:** the heading form's containment check is a plain
+  substring match against the heading's raw text, not a token-boundary
+  match (an anchor `0.1` matches a heading containing `[0.10.0]`); this is
+  a deliberate mechanical simplification, not a semantic guarantee. The
+  heading form also runs against a target's raw lines regardless of file
+  type, so a `# comment` line in a `.yml`/`.json` target is matched as a
+  heading; restricting the heading form to `.md` targets is left as a
+  known limitation rather than implemented in this change.
+  **Measured** (this change; see the PR for the full mutation-probe log):
+  the migrated `orchestrator-workflow` bundle (3 docs, 16 anchored
+  citations) reports the same 0 errors / 13 warnings / 22 notices with the
+  anchors present as without them (0 true findings, since all 16 were
+  already correct; 0 false positives from the new check, in this corpus).
+  A read-only sample against `agent-grounding/docs/okf` (not migrated to
+  this form, out of scope for this change, and carrying no anchors at all)
+  serves as a backward-compatibility check rather than a false-positive
+  measurement of the anchor check itself: it reports 0 anchor findings,
+  confirming an anchorless corpus is unaffected, as expected from the
+  backward-compatible design. Two mutation probes against the
+  `orchestrator-workflow` bundle: shifting one migrated citation's range
+  into its neighbouring release section raised the warning count from 13
+  to 14 (`anchor-heading-mismatch`), reverted to 13 clean; inserting an
+  8-line dummy entry at the top of that package's `CHANGELOG.md`
+  (simulating a normal release-note insertion) raised the warning count
+  from 13 to 29, flagging all 16 migrated citations as
+  `anchor-heading-mismatch` (the historical failure mode this change
+  targets), reverted to 13 clean.
 
 ### Fixed
 
