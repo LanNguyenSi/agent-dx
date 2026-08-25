@@ -21,6 +21,10 @@ The same content without fence markers, where the hash-prefixed line
 really is a heading and correctly ends the enclosing section:
 src/fenced-plain.md:1-8#3.0.0.
 
+A heading-anchored citation whose START line already lies after the fenced
+comment, so the backward heading search must skip the fenced line on its
+way up: src/fenced.md:10-10#3.0.0.
+
 ## Anchor charset
 
 A heading anchor ending a sentence with a trailing period, which must not
