@@ -134,8 +134,172 @@ const RULE_ID = "citations-resolve";
  * "not inside a git work tree" posture.
  */
 
+/**
+ * Anchored citations. A full citation (never a continuation or short-form
+ * atom -- see below) may carry an anchor directly after its range,
+ * `path:N-M#anchor`, e.g. `` `CHANGELOG.md:50-144#0.24.0` ``. Motivation: a
+ * CHANGELOG.md grows by insertion at the TOP (newest entry first), so every
+ * later entry's absolute line numbers shift on every release; the checks
+ * above (missing-file, inverted-range, range-exceeds-file, blank-start-line,
+ * closing-brace-start-line) are structurally blind to a citation that
+ * shifted a whole release section over and now lands, still non-blank and
+ * in-bounds, inside the WRONG section -- a citation `CHANGELOG.md:738-748`
+ * meant for the "0.7.4" entry that quietly now points at "0.7.3" prose is
+ * exactly as green as before the shift. An anchor closes that gap by
+ * pinning the citation to a piece of the target's own structure/content that
+ * the line-shift does not preserve automatically.
+ *
+ * Two anchor kinds, told apart by the raw anchor text (group 4 of
+ * `CITATION_RE`, see `parseAnchor`):
+ *   - **Heading form** (bare, unquoted, e.g. `#0.24.0` or `#[0.24.0]`):
+ *     the target's nearest *enclosing* Markdown heading -- see
+ *     `findEnclosingHeading` -- must contain the anchor text, and no
+ *     heading of the same or shallower level may start before the range's
+ *     end line (i.e. the heading must actually enclose the whole range, not
+ *     merely precede its start -- see `checkAnchor`). Deliberately capped at
+ *     `ANCHOR_HEADING_MAX_LEVEL` (2): a Keep-a-Changelog CHANGELOG.md nests
+ *     `## [x.y.z]` release headings around identically-named `### Added` /
+ *     `### Changed` / `### Fixed` subsections repeated in every release;
+ *     treating "nearest heading of any level" as the anchor target would
+ *     make a heading anchor nearly useless here (matching the wrong
+ *     release's own "Changed" subsection just as readily as the right
+ *     one's), so subsection headings are transparent to this check and only
+ *     level-1/level-2 headings are ever considered.
+ *   - **String form** (double-quoted, e.g. `#"reproduction requirement"`):
+ *     the anchor text must occur, verbatim, on at least one line of the
+ *     cited range itself (`checkAnchor`'s string branch) -- "occurs inside
+ *     it" rather than "encloses it". No heading structure required, so this
+ *     form also works against a non-Markdown target (`.ts`/`.js`/...) where
+ *     "nearest enclosing heading" has no meaning.
+ * An anchor mismatch is its own drift finding (`anchor-heading-not-found`,
+ * `anchor-heading-mismatch`, `anchor-heading-does-not-enclose`,
+ * `anchor-not-found-in-range`), checked only once the base start/range
+ * checks (blank-start-line, closing-brace-start-line, inverted-range,
+ * range-exceeds-file) already came back clean -- same "one problem per
+ * citation, base checks first" pattern `checkShortFormTarget` already uses
+ * for the block-boundary check.
+ *
+ * Backward compatible by construction: the `#anchor` suffix is optional in
+ * `CITATION_RE`, so an existing anchorless citation matches exactly as
+ * before and is checked exactly as before (this section adds a new check
+ * gated on the anchor being present, it does not change any existing one).
+ * Deliberately scoped to full citations only: a continuation (`` `:M` ``
+ * etc.) or a short-form `:N-M` never carries its own path, so there is
+ * nowhere natural to hang an anchor on one without inventing a second,
+ * detached syntax; the migration this rule was built for (CHANGELOG.md
+ * citations) is written as full citations throughout the corpus it targets.
+ *
+ * Rejected alternatives (see the PR/CHANGELOG for the fuller writeup):
+ *   - Embedding the literal heading markup itself, e.g.
+ *     `` `CHANGELOG.md:50-144#"## [0.24.0]"` `` -- verbatim-correct but
+ *     `#`, `[`, `]`, and the space all need quoting/escaping right next to
+ *     the citation, which reads worse in prose than a bare version token
+ *     and gains nothing the structural heading-enclosure check does not
+ *     already provide from the shorter form.
+ *   - A detached anchor, e.g. a trailing parenthetical `(see "0.24.0")`
+ *     elsewhere in the sentence -- unparseable without a second, separate
+ *     grammar next to the existing continuation/short-form machinery, and
+ *     easy to leave behind (or attach to the wrong citation) when a
+ *     sentence is edited later.
+ *   - A named-capture-group slug matching `sources-fresh`'s YAML shape --
+ *     rejected because it would require a second citation site (frontmatter
+ *     plus prose) to stay in sync, the exact class of drift this rule
+ *     exists to catch.
+ */
+const ANCHOR_HEADING_MAX_LEVEL = 2;
+const MD_HEADING_RE = /^(#{1,6})\s+(.*)$/;
+
+type Anchor = { kind: "heading" | "string"; text: string };
+
+/**
+ * Parses `CITATION_RE`'s optional 4th capture group (the raw anchor text,
+ * including its surrounding quotes or brackets if any) into an `Anchor`, or
+ * `null` when the citation carried no `#anchor` suffix at all. A
+ * double-quoted raw value (`"..."`) is the string form, text taken verbatim
+ * between the quotes; anything else is the heading form, with a single
+ * wrapping `[...]` stripped (so `#[0.24.0]` and `#0.24.0` compare
+ * identically against a heading's stripped text) -- see the "Anchored
+ * citations" doc block above.
+ */
+function parseAnchor(raw: string | undefined): Anchor | null {
+  if (!raw) return null;
+  if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+    return { kind: "string", text: raw.slice(1, -1) };
+  }
+  const text =
+    raw.startsWith("[") && raw.endsWith("]") ? raw.slice(1, -1) : raw;
+  return { kind: "heading", text };
+}
+
+/**
+ * Nearest Markdown heading at or before `startLine` (1-based), considering
+ * only heading levels up to `ANCHOR_HEADING_MAX_LEVEL` -- see the "Anchored
+ * citations" doc block above for why subsection headings are transparent to
+ * this search. Returns `null` when no such heading precedes `startLine` at
+ * all (e.g. the citation lands above the target's first release heading).
+ */
+function findEnclosingHeading(
+  lines: string[],
+  startLine: number,
+): { level: number; text: string; lineNo: number } | null {
+  for (let i = startLine - 1; i >= 0; i--) {
+    const m = (lines[i] ?? "").match(MD_HEADING_RE);
+    if (m && m[1].length <= ANCHOR_HEADING_MAX_LEVEL) {
+      return { level: m[1].length, text: m[2].trim(), lineNo: i + 1 };
+    }
+  }
+  return null;
+}
+
+/**
+ * Checks an anchored full citation's anchor against its already-resolved,
+ * already-range-checked target -- see the "Anchored citations" doc block
+ * above for the two forms' semantics. `endLine` is the citation's end line,
+ * or its start line for a single-line citation (a size-1 range).
+ */
+function checkAnchor(
+  anchor: Anchor,
+  startLine: number,
+  endLine: number,
+  lines: string[],
+): Problem | null {
+  if (anchor.kind === "string") {
+    for (let i = startLine - 1; i <= endLine - 1 && i < lines.length; i++) {
+      if ((lines[i] ?? "").includes(anchor.text)) return null;
+    }
+    return {
+      rule: "anchor-not-found-in-range",
+      message: `anchor "${anchor.text}" does not occur in the cited range (${startLine}-${endLine})`,
+    };
+  }
+
+  const heading = findEnclosingHeading(lines, startLine);
+  if (!heading) {
+    return {
+      rule: "anchor-heading-not-found",
+      message: `no heading (level <= ${ANCHOR_HEADING_MAX_LEVEL}) precedes line ${startLine} to anchor against`,
+    };
+  }
+  if (!heading.text.includes(anchor.text)) {
+    return {
+      rule: "anchor-heading-mismatch",
+      message: `nearest enclosing heading ("${heading.text}") does not contain anchor "${anchor.text}"`,
+    };
+  }
+  for (let i = heading.lineNo; i <= endLine - 1; i++) {
+    const m = (lines[i] ?? "").match(MD_HEADING_RE);
+    if (m && m[1].length <= heading.level) {
+      return {
+        rule: "anchor-heading-does-not-enclose",
+        message: `range extends past its enclosing heading's section (next heading "${m[2].trim()}" at line ${i + 1})`,
+      };
+    }
+  }
+  return null;
+}
+
 const CITATION_RE =
-  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?/g;
+  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?[\w.]+\]?|"[^"]*"))?/g;
 // Continuation citation forms (see the "Continuation citations" doc block
 // above). Each requires the backtick delimiter as part of the match so it
 // can never overlap a CITATION_RE match: a full citation's regex match
@@ -204,6 +368,7 @@ type Atom =
       citedPath: string;
       startLine: number;
       endLine: number | null;
+      anchor: Anchor | null;
     }
   | {
       kind: "cont-fresh";
@@ -508,6 +673,32 @@ function checkTarget(
     endLine,
     splitLines(read.content),
   );
+}
+
+/**
+ * A full citation's complete check: `checkTargetLines`'s existing checks
+ * (unreadable-target, inverted-range, range-exceeds-file, blank-start-line,
+ * closing-brace-start-line), plus, only when those all pass and the
+ * citation carried an anchor, the anchor check above (see the "Anchored
+ * citations" doc block). Reads the resolved target once, mirroring
+ * `checkShortFormTarget`'s reasoning for the block-boundary check. Anchors
+ * are full-citation-only (see that doc block for why), so `checkTarget`
+ * itself is untouched and still used as-is for a cont-fresh atom.
+ */
+function checkFullTarget(
+  citedPath: string,
+  startLine: number,
+  endLine: number | null,
+  resolvedPath: string,
+  anchor: Anchor | null,
+): Problem | null {
+  const read = readTarget(resolvedPath);
+  if ("rule" in read) return read;
+  const lines = splitLines(read.content);
+  const base = checkTargetLines(citedPath, startLine, endLine, lines);
+  if (base) return base;
+  if (!anchor) return null;
+  return checkAnchor(anchor, startLine, endLine ?? startLine, lines);
 }
 
 // A cont-ext atom only ever extends the *end* of a range whose start line
@@ -1204,6 +1395,7 @@ function scanDoc(
       citedPath: m[1],
       startLine: Number(m[2]),
       endLine: m[3] ? Number(m[3]) : null,
+      anchor: parseAnchor(m[4]),
     });
     fullSpans.push([m.index, m.index + m[0].length]);
   }
@@ -1282,7 +1474,7 @@ function scanDoc(
       continue; // governing (same file) carries over unchanged
     }
 
-    const { citedPath, startLine, endLine } = atom;
+    const { citedPath, startLine, endLine, anchor } = atom;
     const citation = `${citedPath}:${startLine}${endLine ? "-" + endLine : ""}`;
 
     if (hasParentSegment(citedPath)) {
@@ -1332,7 +1524,13 @@ function scanDoc(
       continue;
     }
 
-    const problem = checkTarget(citedPath, startLine, endLine, resolution.path);
+    const problem = checkFullTarget(
+      citedPath,
+      startLine,
+      endLine,
+      resolution.path,
+      anchor,
+    );
     if (problem?.rule === "unreadable-target") {
       pushUnreadable(
         findings,
