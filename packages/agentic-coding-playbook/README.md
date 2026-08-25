@@ -40,7 +40,8 @@ These companion documents describe the difference between no review, normal revi
 
 For teams remediating dependency CVEs in an npm lockfile specifically:
 
-- [npm Lockfile CVE Remediation (English)](references/npm-lockfile-cve-remediation.md) (no German companion yet)
+- [npm Lockfile CVE Remediation (English)](references/npm-lockfile-cve-remediation.md)
+- [npm Lockfile CVE Remediation (Deutsch)](references/npm-lockfile-cve-remediation.de.md)
 
 ## Operational artifacts
 
