@@ -11,8 +11,8 @@ sources:
 Paragraph naming the target once, then citing four sub-ranges by short form
 alone: `src/target.test.ts:3-7` covers both blocks below. The second block on
 its own is pinned again by (9-13); a bad start-line sub-citation is (5-6); a
-bad end-line sub-citation is (4-5); and a colon-form sub-citation the
-boundary check does not apply to is :11-11.
+bad end-line sub-citation is (4-5); and a colon-form sub-citation with a bad
+start line, now checked the same way as the paren-form cases, is :11-11.
 
 A short-form citation with nothing named earlier in its own paragraph: (99-101).
 

@@ -159,11 +159,30 @@ const TEST_FILE_RE = /\.(test|spec)\.(ts|js|mjs)$/i;
 const TEST_HEAD_LINE_RE = /^\s*(?:describe|it)\s*\(/;
 const TEST_CLOSING_LINE_RE = /^\s*\}\)\s*;\s*$/;
 // Markdown block-boundary check (see checkRangeBoundary): a range boundary
-// line that is nothing but a bracket (open or close) or a code-fence
-// delimiter, optionally with a language tag (fence) or trailing `,`/`;`
-// (closing bracket) -- a common signature of a boundary that drifted onto
-// structural punctuation rather than real prose content.
-const MD_PURE_BRACKET_OR_FENCE_RE = /^(?:[)\]}][;,]?|[[({]|`{3,}\S*|~{3,}\S*)$/;
+// line that is nothing but a bracket (open or close), optionally with a
+// trailing `,`/`;`, is always a drift signal. A bare code-fence delimiter is
+// its own, separate signal (see MD_FENCE_DELIM_RE): unlike a bracket, a
+// fence line is sometimes the deliberately-correct start of a citation (see
+// checkRangeBoundary's markdown branch for the opening-fence exception).
+const MD_BARE_BRACKET_RE = /^(?:[)\]}][;,]?|[[({])$/;
+const MD_FENCE_DELIM_RE = /^(?:`{3,}\S*|~{3,}\S*)$/;
+// Short-form plausibility gate (see collectShortFormMatches): a bare N-M
+// range in running prose is syntactically indistinguishable from a real
+// short-form citation, so these are deliberately narrow, high-confidence
+// exclusions rather than an attempt at a full classifier -- see
+// collectShortFormMatches's doc block for what is and is not caught by
+// each of these.
+const SHORT_FORM_MAX_SPAN = 300; // generous upper bound on a plausible cited block size, in lines
+const YEAR_MIN = 1900;
+const YEAR_MAX = 2199;
+// A small, curated set of ports it is plausible for ordinary prose to name
+// together (not exhaustive -- a heuristic, not a full IANA port list).
+const WELL_KNOWN_PORTS = new Set([
+  20, 21, 22, 23, 25, 53, 80, 110, 119, 123, 143, 161, 194, 389, 443, 445, 465,
+  587, 636, 873, 993, 995, 1433, 1521, 1723, 3000, 3306, 3389, 5432, 5672, 5900,
+  5984, 6379, 6443, 7000, 8000, 8080, 8081, 8443, 8888, 9000, 9042, 9092, 9200,
+  9300, 11211, 15672, 27017,
+]);
 const EXCLUDED_DIRS = new Set([
   "node_modules",
   ".git",
@@ -512,6 +531,36 @@ function isTestFile(citedPath: string): boolean {
 }
 
 /**
+ * True when the line at `lines[lineIndex]` is a fence delimiter
+ * (```` ``` ```` or `~~~`, optionally with a trailing language tag) that
+ * *opens* a fenced code block, as opposed to closing one -- determined by
+ * replaying the same open/close state machine `stripFencedCode`-style
+ * scanners use from the top of the document, not by the line's own text
+ * (a bare closing fence and an untagged opening fence are lexically
+ * identical). Used by checkRangeBoundary's markdown branch: citing a
+ * fenced block starting at its own opening fence line is the natural,
+ * correct way to cite it, so that specific case is exempted from the
+ * fence-as-drift-signal check (see there).
+ */
+function isFenceOpeningLine(lines: string[], lineIndex: number): boolean {
+  let inFence = false;
+  let fenceMarker: string | undefined;
+  for (let i = 0; i <= lineIndex; i++) {
+    const trimmed = (lines[i] ?? "").trim();
+    if (!inFence && MD_FENCE_DELIM_RE.test(trimmed)) {
+      if (i === lineIndex) return true;
+      inFence = true;
+      fenceMarker = trimmed.slice(0, 3);
+    } else if (inFence && fenceMarker && trimmed.startsWith(fenceMarker)) {
+      if (i === lineIndex) return false;
+      inFence = false;
+      fenceMarker = undefined;
+    }
+  }
+  return false;
+}
+
+/**
  * Additional block-boundary check for a short-form citation's range (see
  * the "Short-form citations" doc block below), layered on top of
  * checkTarget's existing per-start-line checks via checkShortFormTarget.
@@ -527,33 +576,39 @@ function isTestFile(citedPath: string): boolean {
  * range alone), so the check is scoped to exactly that mechanism.
  *
  * Test-file targets (`.test.ts`/`.spec.ts`, and their `.js`/`.mjs`
- * equivalents), `applyTestBoundary` only (paren-form short forms, see the
- * "Short-form citations" doc block for why colon-form is excluded): the
- * range must start on a `describe(`/`it(` head line and end on a matching
- * closing `});` line. Each mismatch is its own warning-severity rule
- * (`test-range-start-not-head` / `test-range-end-not-closing`) so a
- * fixture/mutation probe can target either independently; the start is
- * checked first, matching checkTarget's existing single-problem-per-citation
- * pattern (never both at once).
+ * equivalents), both short-form syntaxes alike (colon-form and paren-form
+ * are no longer distinguished here -- see the "Short-form citations" doc
+ * block for why the earlier paren-only gate was removed): the range must
+ * start on a `describe(`/`it(` head line and end on a matching closing
+ * `});` line. Severity split, by evidence strength: a wrong START line is a
+ * *warning* (`test-range-start-not-head`) -- the range beginning somewhere
+ * other than a block head is strong drift evidence. A range whose start IS
+ * correct but whose END is not the matching `});` is only a *notice*
+ * (`test-range-end-not-closing`): this also matches a deliberate partial
+ * citation (citing from a block's head to partway through it), which is not
+ * drift. The start is checked first and returned alone, matching
+ * checkTarget's existing single-problem-per-citation pattern (never both at
+ * once).
  *
  * Markdown targets: mechanical verification of "is this still the same
  * block" is far less reliable for prose than for TS/JS brace structure, so
  * this is a notice, not a warning (see this rule's own risk note on
- * markdown false positives): the range's start or end line landing on a
- * bare bracket or a bare code-fence delimiter (see MD_PURE_BRACKET_OR_FENCE_RE)
- * is a heads-up that the boundary likely drifted onto structural
- * punctuation rather than real prose, not an enforced error. Unlike the
- * test-file check, this is NOT gated on `applyTestBoundary`/form: a false
- * positive here is only a notice, not an enforced warning.
+ * markdown false positives). The range's start or end line landing on a
+ * bare bracket (MD_BARE_BRACKET_RE) is always a heads-up that the boundary
+ * likely drifted onto structural punctuation rather than real prose. A bare
+ * code-fence delimiter (MD_FENCE_DELIM_RE) gets the same treatment at the
+ * END of a range, but NOT at the START when that start line is itself a
+ * genuine *opening* fence (see isFenceOpeningLine): citing a fenced code
+ * block starting at its own opening delimiter is the natural, correct way
+ * to cite it, not drift.
  */
 function checkRangeBoundary(
   citedPath: string,
   startLine: number,
   endLine: number,
   lines: string[],
-  applyTestBoundary: boolean,
 ): Problem | null {
-  if (applyTestBoundary && isTestFile(citedPath)) {
+  if (isTestFile(citedPath)) {
     const startText = lines[startLine - 1] ?? "";
     if (!TEST_HEAD_LINE_RE.test(startText)) {
       return {
@@ -566,6 +621,7 @@ function checkRangeBoundary(
       return {
         rule: "test-range-end-not-closing",
         message: `range end is not a matching closing "});" line ("${endText.trim()}")`,
+        severity: "notice",
       };
     }
     return null;
@@ -573,7 +629,11 @@ function checkRangeBoundary(
 
   if (citedPath.toLowerCase().endsWith(".md")) {
     const startTrim = (lines[startLine - 1] ?? "").trim();
-    if (MD_PURE_BRACKET_OR_FENCE_RE.test(startTrim)) {
+    const startIsFence = MD_FENCE_DELIM_RE.test(startTrim);
+    if (
+      MD_BARE_BRACKET_RE.test(startTrim) ||
+      (startIsFence && !isFenceOpeningLine(lines, startLine - 1))
+    ) {
       return {
         rule: "markdown-range-boundary-bracket-or-fence",
         message: `range start is a bare bracket/fence line ("${startTrim}")`,
@@ -581,7 +641,7 @@ function checkRangeBoundary(
       };
     }
     const endTrim = (lines[endLine - 1] ?? "").trim();
-    if (MD_PURE_BRACKET_OR_FENCE_RE.test(endTrim)) {
+    if (MD_BARE_BRACKET_RE.test(endTrim) || MD_FENCE_DELIM_RE.test(endTrim)) {
       return {
         rule: "markdown-range-boundary-bracket-or-fence",
         message: `range end is a bare bracket/fence line ("${endTrim}")`,
@@ -598,15 +658,14 @@ function checkRangeBoundary(
  * A short-form citation's full check: checkTarget's existing checks
  * (unreadable-target, inverted-range, range-exceeds-file, blank-start-line,
  * closing-brace-start-line), plus, only when those all pass, the
- * test-file/markdown block-boundary check above. `applyTestBoundary`: see
- * checkRangeBoundary (true for paren-form short forms only).
+ * test-file/markdown block-boundary check above (applied to both short-form
+ * syntaxes alike; see checkRangeBoundary).
  */
 function checkShortFormTarget(
   citedPath: string,
   startLine: number,
   endLine: number,
   resolvedPath: string,
-  applyTestBoundary: boolean,
 ): Problem | null {
   const base = checkTarget(citedPath, startLine, endLine, resolvedPath);
   if (base) return base;
@@ -617,7 +676,6 @@ function checkShortFormTarget(
     startLine,
     endLine,
     splitLines(read.content),
-    applyTestBoundary,
   );
 }
 
@@ -691,12 +749,12 @@ function collectContinuationAtoms(content: string): Atom[] {
  * citation binds to the last FULL `path:N[-M]` citation named earlier in
  * THE SAME PARAGRAPH (a paragraph boundary is a blank -- empty or
  * whitespace-only -- line). A short-form citation with no full citation
- * earlier in its own paragraph is reported unresolved
- * (`short-form-unbound`, warning), never silently skipped: unlike a
- * continuation right after a rejected/ambiguous citation (which has a real
- * reason to skip -- that citation's resolution is known unusable), a
- * short-form's paragraph simply never named a target, itself worth
- * flagging.
+ * earlier in its own paragraph is reported unresolved (`short-form-unbound`,
+ * a NOTICE, not a warning -- see the plausibility gate note below for why),
+ * never silently skipped: unlike a continuation right after a
+ * rejected/ambiguous citation (which has a real reason to skip -- that
+ * citation's resolution is known unusable), a short-form's paragraph simply
+ * never named a target, itself worth flagging.
  *
  * Range only, no bare single number (`(1)`, `:5`): every real short-form
  * citation found while building this rule was a range (`(373-375)`,
@@ -707,7 +765,10 @@ function collectContinuationAtoms(content: string): Atom[] {
  *
  * A candidate match is excluded (not even collected) when:
  *   - its `:`/`(` falls inside an already-matched full citation's own
- *     span (the tail of a real `path:N-M` citation, not a new short form)
+ *     span (the tail of a real `path:N-M` citation, not a new short form),
+ *     a fenced or indented code block, an inline code span, or a Markdown
+ *     table row (see computeExcludedSpans) -- a bare numeric range inside
+ *     any of these is virtually never a citation
  *   - the character immediately before or after the match is a backtick
  *     (the backtick continuation forms above already own that syntax)
  *   - (colon form) the character immediately before the `:` is a
@@ -717,30 +778,60 @@ function collectContinuationAtoms(content: string): Atom[] {
  *   - (paren form) the character immediately before the `(` is a word
  *     character -- guards against an incidental `foo(123-456)`-shaped
  *     token that is not prose
+ *   - it fails the plausibility gate (see isPlausibleShortFormRange): an
+ *     inverted pair, an implausibly large span, a year-range-shaped pair,
+ *     or (colon form) a well-known-port-pair-shaped pair
  *
  * A resolved short-form citation is checked via checkShortFormTarget (see
- * above): checkTarget's existing checks, plus (paren form only -- see
- * `form` below) the test-file block-boundary check.
+ * above): checkTarget's existing checks, plus the test-file/Markdown
+ * block-boundary check, applied to both short-form syntaxes alike (see
+ * checkRangeBoundary; there is no longer a colon-form/paren-form split
+ * there -- see that function's doc block for why the earlier split was
+ * removed: sampling the drift it was hiding showed it was suppressing real
+ * drift for the dominant colon-form syntax, not marking a legitimate
+ * granularity convention).
  *
- * Colon-form vs. paren-form, and why only paren-form gets the test-file
- * boundary check. Empirically (this rule's own dogfood target,
- * packages/orchestrator-workflow/docs/okf), the two forms carry different
- * author intent: a paren-form short form after a named clause
- * (`detection signals named verbatim (374-379)`) reliably cites one whole
- * describe/it block precisely -- every paren-form short form in that
- * bundle does. A colon-form short form inside a `path:N-M, :X-Y, :Z-W`-style
- * compound list instead conventionally marks an approximate detail
- * location *within* an already-cited, much larger range (that bundle's own
- * prose calls these "sub-citations not individually re-derived"), so most
- * of them do not start on a describe/it head or end on a matching `});` at
- * all -- not drift, just a different, legitimate citation granularity this
- * mechanical checker cannot distinguish from real drift without author
- * intent. Applying the boundary check to colon-form short forms too would
- * therefore flag a large number of correct citations. The markdown
- * bracket/fence check (also in checkRangeBoundary) is NOT restricted this
- * way: it is notice-severity, so a false positive there is an advisory
- * heads-up, not an enforced warning.
+ * Plausibility gate (isPlausibleShortFormRange). A bare `N-M` range in
+ * ordinary prose ("the window (2026-2027)", "opens :80-443") is
+ * syntactically indistinguishable from a real short-form citation, so
+ * these checks are narrow and high-confidence rather than an attempt at a
+ * full classifier: an inverted pair (`start > end`) or a span wider than
+ * SHORT_FORM_MAX_SPAN lines is rejected outright (no real citation in this
+ * rule's own dogfood corpus cites a block anywhere near that wide); a pair
+ * that both look like a year (four digits, 1900-2199) is rejected
+ * regardless of form; a colon-form pair that both look like a well-known
+ * port number (see WELL_KNOWN_PORTS) is rejected -- colon-form only,
+ * because `path:N-M`-shaped prose is what motivates the colon form's
+ * existence, while a bare `(80-443)` in prose is comparatively rare. A
+ * range that passes this gate but is not actually a citation (e.g. a small
+ * plain-English number range like "steps (2-4)") can still be collected
+ * and, if a real citation happens to be named earlier in the same
+ * paragraph, silently bound to it; this is a known, documented limitation
+ * (see the README) rather than a false positive this mechanical gate can
+ * close without either a semantic parser or rejecting genuine small-range
+ * citations (this rule's own short-form fixture cites ranges as narrow as
+ * one line).
  */
+function isPlausibleShortFormRange(
+  startLine: number,
+  endLine: number,
+  form: "colon" | "paren",
+): boolean {
+  if (startLine > endLine) return false;
+  if (endLine - startLine > SHORT_FORM_MAX_SPAN) return false;
+  const looksLikeYear = (n: number) =>
+    n >= YEAR_MIN && n <= YEAR_MAX && String(n).length === 4;
+  if (looksLikeYear(startLine) && looksLikeYear(endLine)) return false;
+  if (
+    form === "colon" &&
+    WELL_KNOWN_PORTS.has(startLine) &&
+    WELL_KNOWN_PORTS.has(endLine)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 type ShortFormMatch = {
   index: number;
   startLine: number;
@@ -757,42 +848,173 @@ function isWithinAnySpan(
 
 function collectShortFormMatches(
   content: string,
-  fullSpans: Array<[number, number]>,
+  excludedSpans: Array<[number, number]>,
 ): ShortFormMatch[] {
   const out: ShortFormMatch[] = [];
 
   const colonRe = new RegExp(SHORT_FORM_COLON_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = colonRe.exec(content)) !== null) {
-    if (isWithinAnySpan(m.index, fullSpans)) continue;
+    if (isWithinAnySpan(m.index, excludedSpans)) continue;
     const before = m.index > 0 ? content[m.index - 1] : undefined;
     if (before === "`") continue;
     if (before !== undefined && /[\w./-]/.test(before)) continue;
     if (content[m.index + m[0].length] === "`") continue;
-    out.push({
-      index: m.index,
-      startLine: Number(m[1]),
-      endLine: Number(m[2]),
-      form: "colon",
-    });
+    const startLine = Number(m[1]);
+    const endLine = Number(m[2]);
+    if (!isPlausibleShortFormRange(startLine, endLine, "colon")) continue;
+    out.push({ index: m.index, startLine, endLine, form: "colon" });
   }
 
   const parenRe = new RegExp(SHORT_FORM_PAREN_RE.source, "g");
   while ((m = parenRe.exec(content)) !== null) {
-    if (isWithinAnySpan(m.index, fullSpans)) continue;
+    if (isWithinAnySpan(m.index, excludedSpans)) continue;
     const before = m.index > 0 ? content[m.index - 1] : undefined;
     if (before === "`") continue;
     if (before !== undefined && /\w/.test(before)) continue;
     if (content[m.index + m[0].length] === "`") continue;
-    out.push({
-      index: m.index,
-      startLine: Number(m[1]),
-      endLine: Number(m[2]),
-      form: "paren",
-    });
+    const startLine = Number(m[1]);
+    const endLine = Number(m[2]);
+    if (!isPlausibleShortFormRange(startLine, endLine, "paren")) continue;
+    out.push({ index: m.index, startLine, endLine, form: "paren" });
   }
 
   return out.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * Char spans of every fenced code block in `content` (```` ``` ```` or
+ * `~~~`, optionally with a trailing language tag), each span running from
+ * the start of the opening fence line to the end of the closing fence line
+ * inclusive. An unterminated fence (no matching close before end of doc) is
+ * treated as running to the end of the content -- conservative, since an
+ * unterminated fence is itself a doc problem outside this rule's scope, not
+ * a reason to scan its contents for short-form citations.
+ */
+function computeFencedSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const lines = content.split("\n");
+  let offset = 0;
+  let fenceMarker: string | undefined;
+  let fenceStart = -1;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const lineEnd = offset + line.length;
+    if (!fenceMarker && MD_FENCE_DELIM_RE.test(trimmed)) {
+      fenceMarker = trimmed.slice(0, 3);
+      fenceStart = offset;
+    } else if (fenceMarker && trimmed.startsWith(fenceMarker)) {
+      spans.push([fenceStart, lineEnd]);
+      fenceMarker = undefined;
+      fenceStart = -1;
+    }
+    offset = lineEnd + 1; // +1 for the newline joining this line to the next
+  }
+  if (fenceMarker && fenceStart >= 0) {
+    spans.push([fenceStart, content.length]);
+  }
+  return spans;
+}
+
+/**
+ * Char spans of every CommonMark-style indented code block in `content`: a
+ * maximal run of consecutive non-blank lines, each indented by at least
+ * four spaces or a leading tab, whose first line is preceded by a blank
+ * line or the start of the document (an indented code block cannot
+ * interrupt a paragraph). A blank line inside the run does not itself end
+ * it, matching CommonMark. Simplified relative to the full CommonMark
+ * spec (no list-item-context awareness); adequate for this mechanical,
+ * warn-only rule.
+ */
+function computeIndentedCodeSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const lines = content.split("\n");
+  let offset = 0;
+  let blockStart = -1;
+  let blockEnd = -1;
+  let prevBlank = true;
+  for (const line of lines) {
+    const lineStart = offset;
+    const lineEnd = offset + line.length;
+    const isBlank = line.trim() === "";
+    const isIndented = /^( {4,}|\t)/.test(line);
+    if (!isBlank && isIndented && (blockStart !== -1 || prevBlank)) {
+      if (blockStart === -1) blockStart = lineStart;
+      blockEnd = lineEnd;
+    } else if (isBlank && blockStart !== -1) {
+      // blank line inside an open block: keep it open, don't extend blockEnd
+    } else if (!isBlank) {
+      if (blockStart !== -1) spans.push([blockStart, blockEnd]);
+      blockStart = -1;
+      blockEnd = -1;
+    }
+    prevBlank = isBlank;
+    offset = lineEnd + 1;
+  }
+  if (blockStart !== -1) spans.push([blockStart, blockEnd]);
+  return spans;
+}
+
+/**
+ * Char spans of every inline code span in `content` (`` `...` ``, or a
+ * longer run of backticks as the delimiter). This is a superset of the
+ * narrower "immediately adjacent to a backtick" guard already applied in
+ * collectShortFormMatches: that guard only rejects a match directly
+ * touching a backtick, so a short form embedded further inside a longer
+ * inline code span (e.g. `` `ports (1-3)` ``) was previously matched and
+ * bound; this closes that gap.
+ */
+function computeInlineCodeSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const re = /(`+)[^`]*?\1/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    spans.push([m.index, m.index + m[0].length]);
+  }
+  return spans;
+}
+
+/**
+ * Char spans of every Markdown table row in `content`: a line whose
+ * trimmed form starts and ends with `|`. Decision (documented in the
+ * README): a short-form citation inside a table cell is never recognised,
+ * the same way one inside a code span is not -- excluded here rather than
+ * left to the plausibility gate, since a table cell's content is prose-like
+ * and can otherwise carry a range shape the gate would not reject (e.g.
+ * `| col (5-9) |`).
+ */
+function computeTableRowSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const lines = content.split("\n");
+  let offset = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      trimmed.startsWith("|") &&
+      trimmed.endsWith("|") &&
+      trimmed.length > 1
+    ) {
+      spans.push([offset, offset + line.length]);
+    }
+    offset += line.length + 1;
+  }
+  return spans;
+}
+
+/**
+ * All char spans short-form matching must never fire inside: fenced code,
+ * indented code, inline code spans, and Markdown table rows. Computed once
+ * per doc and combined with fullSpans (see scanDoc) via the existing
+ * isWithinAnySpan helper -- the same mechanism a full citation's own span
+ * already uses, not a second one.
+ */
+function computeExcludedSpans(content: string): Array<[number, number]> {
+  return [
+    ...computeFencedSpans(content),
+    ...computeIndentedCodeSpans(content),
+    ...computeInlineCodeSpans(content),
+    ...computeTableRowSpans(content),
+  ];
 }
 
 /**
@@ -1099,7 +1321,10 @@ function scanDoc(
   // to short-form matching only.
   const shortFormMatches = doc.isReserved
     ? []
-    : collectShortFormMatches(content, fullSpans);
+    : collectShortFormMatches(content, [
+        ...fullSpans,
+        ...computeExcludedSpans(content),
+      ]);
   if (shortFormMatches.length > 0) {
     const paragraphStarts = computeParagraphStarts(content);
     const namedFullAtoms: Array<{ index: number; citedPath: string }> = [];
@@ -1123,7 +1348,9 @@ function scanDoc(
           doc.relPath,
           `${rangeLabel} (short-form)`,
           "short-form-unbound",
-          "no target document named earlier in this paragraph",
+          "no full `path:N` citation earlier in this paragraph to bind to",
+          undefined,
+          "notice",
         );
         continue;
       }
@@ -1167,7 +1394,6 @@ function scanDoc(
         sf.startLine,
         sf.endLine,
         resolution.path,
-        sf.form === "paren",
       );
       if (problem?.rule === "unreadable-target") {
         pushUnreadable(
