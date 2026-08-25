@@ -33,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `okf-kit@0.5.0`, which predates short-form colon resolution, so it
   reports 0 short-form findings until that release ships (agent-tasks task
   2e3e5f4b).
+- All sixteen `CHANGELOG.md` citations across the three `docs/okf` siblings
+  above now also carry a heading anchor (`` `CHANGELOG.md:N-M#x.y.z` ``, a
+  new `citations-resolve` form -- see okf-kit's own CHANGELOG for the
+  design), pinning each one to the release section its own sentence names
+  instead of only to a line range that a future top-of-file insertion can
+  silently shift into the wrong section. `okf-kit check` against a repo
+  build still reports the same 0 errors / 13 warnings / 22 notices as
+  above (all pre-existing, unrelated to this change); a mutation probe that
+  moved one migrated citation's range into its neighbouring release
+  section, and a second probe that inserted a dummy entry at the top of
+  this file (shifting every citation below it), were both caught by the
+  new anchor check and reverted (agent-tasks task 5c8013c0).
 
 ### Corrections
 
