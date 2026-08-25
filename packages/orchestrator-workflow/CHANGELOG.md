@@ -9,14 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `docs/okf/subagent-contracts-superset.md`: rewrote its 21 sibling
-  short-form citations from the parenthesized form (`(N-M)`) to the
-  colon form (`, :N-M`). `okf-kit`'s `citations-resolve` rule dropped
-  paren-form short-form collection (see that package's own CHANGELOG);
-  the paren form was never invalid, just unchecked, so these 21 had gone
-  unverified since that change. `okf-kit check` on the bundle reports
-  the same 39 findings / 17 warnings / 22 notices before and after this
-  rewrite, and now covers all 21 (agent-tasks task 2e3e5f4b).
+- `docs/okf/subagent-contracts-superset.md`: rewrote its 22 sibling short-
+  form citations (21 initially, plus one missed and fixed this round) from
+  the parenthesized form (`(N-M)`) to the colon form (`, :N-M`) so
+  `citations-resolve` checks them again. Neither form was ever machine-
+  checked in a released `okf-kit`: the colon-form gate and the drop of
+  paren-form collection landed in the same `[Unreleased]` entry, so
+  "dropped" overstates it. `okf-kit check` against a repo build (not the
+  published package) now reports 0 errors / 14 warnings / 22 notices,
+  against a base of 0/17/22: this entry's insertion shifted eleven
+  `CHANGELOG.md` citations in two sibling docs by +11 lines, silently
+  killing one `blank-start-line` warning; this round re-points those eleven
+  (restoring the warning, a pre-existing content drift tracked separately,
+  agent-tasks task 2e7680f6) and now covers all 22. Coverage holds only
+  against a repo build: CI's `okf-staleness.yml` still pins the published
+  `okf-kit@0.5.0`, which predates short-form colon resolution, so it
+  reports 0 short-form findings until that release ships (agent-tasks task
+  2e3e5f4b).
 
 ### Corrections
 

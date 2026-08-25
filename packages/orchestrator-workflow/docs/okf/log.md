@@ -1830,3 +1830,73 @@
   range). `npx okf-kit@0.5.0 check packages/orchestrator-workflow/docs/okf`
   stayed at 0 errors, 0 warnings, 21 notices after the fixes, matching the
   pre-round baseline.
+
+## 2026-08-25 (colon-shortform-citations fix round, implementer)
+
+- Review found two HIGH findings and four mediums on the colon-form
+  short-form citation rewrite. HIGH 1: the CHANGELOG's new "Changed" entry
+  inserted 11 lines above every later line, so the eleven CHANGELOG.md
+  citations in review-gate-and-waivers.md and run-state-lifecycle-and-
+  markers.md (siblings of the rewritten doc, untouched by the rewrite
+  commit) silently pointed at wrong content; one of them had been flagging
+  blank-start-line before the shift and stopped flagging anything after
+  it, destroying a real drift signal instead of fixing one. HIGH 2: the
+  CHANGELOG claimed okf-kit check reported the same 39 findings / 17
+  warnings / 22 notices before and after the rewrite; base was 39 (0/17/
+  22), but neither the intermediate commit nor HEAD had actually measured
+  39 again (38, then 37), and the number read as copied from okf-kit's own
+  CHANGELOG rather than measured against this bundle. Mediums: the CI
+  staleness job pins okf-kit 0.5.0 from npm, which predates short-form
+  colon resolution entirely, so the "now covers all 21" claim never
+  reaches CI; a 22nd sibling short-form citation (subagent-contracts-
+  superset.md, the negative-pin test citation) was missed by the initial
+  rewrite because its parenthesis wraps a line break; the sources-fresh
+  STALE warning for the rewritten doc was suppressed by that doc's own
+  fresh commit rather than an honest re-verification, with timestamp still
+  at a rounded 23:59 and no log.md line recording it; and three small
+  defects (a missing serial comma on one rewritten citation, a README
+  bullet placed under an "authoring guidance baked into the templates"
+  heading for a convention no template demonstrates, and undersold on
+  which connectives the gate accepts, and a CHANGELOG sentence implying
+  the paren form was once checked and later "dropped" when the colon-form
+  gate and the paren-form drop both landed in okf-kit's same [Unreleased]
+  change).
+
+  This round: byte-verified all eleven shifted CHANGELOG.md citations in
+  the two sibling docs against the pre-insertion base commit before
+  touching them (base range N-M equals shifted range (N+11)-(M+11)).
+  Rewrote the CHANGELOG's "Changed" entry to state only measured numbers
+  and the CI caveat; that rewrite itself grew the entry by 9 more lines,
+  so all sixteen CHANGELOG.md citations in the bundle (the eleven just
+  fixed, plus five in subagent-contracts-superset.md already corrected by
+  the prior commit) were re-verified and re-pointed against the same base
+  commit at the full +20 offset, each confirmed byte-for-byte before the
+  edit. okf-kit check (built from this repo, not the published package)
+  measures 0 errors / 17 warnings / 22 notices (39 total) against the base
+  commit and 0 errors / 14 warnings / 22 notices (36 total) against this
+  round's final state: 13 of those 14 warnings are pre-existing install-
+  fence-mechanics.md short-form findings, untouched and out of scope; the
+  fourteenth is the run-state-lifecycle-and-markers.md CHANGELOG.md
+  citation landing on blank-start-line again, the intentionally restored
+  pre-existing content drift tracked separately (agent-tasks task
+  2e7680f6), not a new problem. Rewrote the 22nd sibling short-form
+  citation from the paren form to the colon form, matching the README's
+  own bracket-form example; it binds to the same test/docs-consistency.
+  test.ts range as its ten sibling short-forms with no new finding. Fixed
+  the missing serial comma on one of the 21 originally rewritten
+  citations. Generalized the README heading from "Authoring guidance baked
+  into the templates" to "Authoring guidance" (three of its four bullets
+  remain template-baked; the short-form-citation bullet is a citations-
+  resolve authoring rule, not shown in any template) and named the
+  semicolon and open-paren connectives alongside comma/and/or, cross-
+  referencing the README's own bracket-form example. Reworded the
+  CHANGELOG's "dropped" framing to state the paren form was never
+  machine-checked in a released okf-kit. Bumped timestamp on all three
+  touched docs (subagent-contracts-superset.md, review-gate-and-
+  waivers.md, run-state-lifecycle-and-markers.md) to the real verification
+  instant (new Date().toISOString(), captured once and reused across all
+  three so they share one recorded verification event), which also
+  cleared two new sources-fresh STALE warnings the CHANGELOG edit had
+  introduced for the two sibling docs in their pre-commit state (their own
+  last commit had not yet moved past the CHANGELOG.md commit that touched
+  them only by citation, not by content).

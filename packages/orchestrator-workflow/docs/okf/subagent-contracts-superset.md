@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-08-24T23:59:00Z
+timestamp: 2026-08-25T14:29:03.591Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -140,7 +140,7 @@ Every field the subagent input contract requires must have a same-named
 counterpart in the task-slicer's per-task output, so the orchestrator copies
 task fields 1:1 into the implementer contract at delegation time instead of
 inventing values. This was not always true:
-`packages/orchestrator-workflow/CHANGELOG.md:644-667` (0.10.0) records that the
+`packages/orchestrator-workflow/CHANGELOG.md:653-676` (0.10.0) records that the
 slicer contract previously omitted `constraints`, `allowed_changes`,
 `forbidden_changes` even though the implementer input contract already
 required them, forcing the orchestrator to fabricate that content when
@@ -248,14 +248,14 @@ incident count is now evidence rather than rule text too. `SKILL.md:93-94`
 placement pass) similarly drops a pinned `grounding-mcp 0.6.0` version
 number in favor of "the consuming gate's documentation (grounding-mcp)".
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:621-638` (0.11.0): a
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:630-647` (0.11.0): a
 live incident where a reviewer subagent spawn returned in 5 seconds with 0
 tool uses, handing back harness hook-boilerplate instead of the reviewer
 output contract; a resume of the same spawn produced a correct full review.
 Before 0.11.0 the kit said nothing about malformed returns, leaving room to
 silently accept a non-review as a passed review gate. 0.18.0's
 resume-over-respawn extension has its own motivation
-(`packages/orchestrator-workflow/CHANGELOG.md:331-383`, agent-tasks task
+(`packages/orchestrator-workflow/CHANGELOG.md:340-392`, agent-tasks task
 a932b12a): two further sessions (2026-07-19, 2026-07-20) reproduced the
 identical signal; the 2026-07-19 session's resume outcome was never
 recorded, which is exactly the gap this fix-round's claim-binding closes.
@@ -276,7 +276,7 @@ repeat-the-assignment mechanic, :430-434, why resume beats a fresh respawn,
 :436-440, the parenthetical signal definition, :442-446, the claim-binding
 to recorded outcomes, :448-452, the conditional respawn fallback, :454-458,
 a negative-pin test that the incident tally and the model-correlation
-passage no longer appear (460-469, replacing the review-round-1 positive
+passage no longer appear (:460-469, replacing the review-round-1 positive
 pins on that passage the 0.24.0 pass removed along with the prose), the
 watchdog scope carve-out, :471-478, and its own resolution detail,
 :480-484.
@@ -300,7 +300,7 @@ accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:535-560` (0.14.0): the
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:544-569` (0.14.0): the
 agent-dx run `2026-07-18-harness-subprocess-test-deflake` accepted an
 implementer's "8/8 green" flake-rate claim on a `maxWorkers` cap fix, then
 the reviewer independently reran the suite and found 2/6 red on an
@@ -350,12 +350,12 @@ check on the field block, :872-885.
 `test/docs-consistency.test.ts:904-940` pins the R2 additions: step 6's
 sentence and its claim-only-what-was-measured reference, :908-919, the
 not-applicable clause in both copies, :921-925, and two exact-string pins,
-:927-939 that catch a rename applied identically to both copies — a mutant
+:927-939, that catch a rename applied identically to both copies — a mutant
 the cross-copy equality check above cannot catch on its own, since it only
 proves the two copies match each other, not that either still uses the
 pinned sub-field names.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:444-486` (0.16.0 plus
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:453-495` (0.16.0 plus
 its same-day R2 follow-up, agent-tasks task 16637a96): a 16-round dogfood
 where two implementer rounds dropped briefed-as-mandatory mutation probes
 from their return entirely; review of the resulting change then found the
