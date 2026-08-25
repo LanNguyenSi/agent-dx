@@ -150,10 +150,103 @@ describe("placement-slop", () => {
       ).toBeDefined();
     });
 
-    it("a line carrying only the allowed URL still reports nothing", () => {
+    it("semantics-preservation control: a line carrying only the allowed URL still reports nothing (passes with or without the span-scoping fix)", () => {
       const text = "install from https://github.com/example-org/kit";
       const v = checkText(text, "x/SKILL.md", scopedOpts());
       expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
+    });
+
+    it("an anchored allow pattern (^...) still matches on a non-first line, not just at file start", () => {
+      const anchoredAllow = mergeConfig({
+        placement: {
+          markers: ["example-org"],
+          allow: ["^install from https://github\\.com/example-org/"],
+        },
+      });
+      const text = [
+        "context line one",
+        "context line two",
+        "install from https://github.com/example-org/kit",
+      ].join("\n");
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: anchoredAllow,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+    });
+
+    it("an allow pattern that can cross a newline (e.g. start[\\s\\S]*end) does not excuse findings on adjacent lines", () => {
+      const crossLineAllow = mergeConfig({
+        placement: {
+          markers: ["example-org"],
+          allow: ["start[\\s\\S]*end"],
+        },
+      });
+      const text = [
+        "start example-org",
+        "/Users/lan/x/ and 2026-08-24",
+        "end",
+      ].join("\n");
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: crossLineAllow,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeDefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/home-path"),
+      ).toBeDefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/dated-evidence"),
+      ).toBeDefined();
+    });
+
+    it("an allowed URL suppresses org-marker but an opaque id later on the same line still fires", () => {
+      const text =
+        "install from https://github.com/example-org/kit ref deadbeef";
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeUndefined();
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/opaque-id"),
+      ).toBeDefined();
+    });
+
+    it("an allow span that only partially overlaps an org-marker match does not excuse it", () => {
+      const partialAllow = mergeConfig({
+        placement: {
+          markers: ["example-org"],
+          allow: ["org/kit"],
+        },
+      });
+      const text = "hit example-org/kit direct";
+      const v = checkText(text, "x/SKILL.md", {
+        packs: allPacks,
+        config: partialAllow,
+        packFilter: ["placement-slop"],
+      });
+      expect(
+        v.find((x) => x.ruleId === "placement-slop/org-marker"),
+      ).toBeDefined();
+    });
+
+    it("a CRLF instruction file with an allow span still reports a bare marker on a later line at the correct line:column", () => {
+      const text = [
+        "first line here",
+        "install from https://github.com/example-org/kit",
+        "example-org appears bare here",
+      ].join("\r\n");
+      const v = checkText(text, "x/SKILL.md", scopedOpts());
+      const hit = v.find((x) => x.ruleId === "placement-slop/org-marker");
+      expect(hit).toBeDefined();
+      expect(hit?.line).toBe(3);
+      expect(hit?.column).toBe(1);
     });
   });
 

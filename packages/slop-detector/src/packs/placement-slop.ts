@@ -61,29 +61,6 @@ function isInstructionFile(ctx: RuleContext): boolean {
   return extra.some((g) => globToRegex(g).test(relPath));
 }
 
-/**
- * Spans of `text` matched by any `config.placement.allow` pattern. An
- * allow match only excuses the span it actually covers (e.g. an install
- * URL that carries an org handle), not the rest of the line it sits on:
- * a home path, a date, or a tally phrase elsewhere on that same line is
- * unrelated to what the allow pattern matched and must still be checked.
- */
-function computeAllowedSpans(
-  text: string,
-  config: ResolvedConfig,
-): Array<{ start: number; end: number }> {
-  const patterns = config.placement?.allow ?? [];
-  if (patterns.length === 0) return [];
-  const spans: Array<{ start: number; end: number }> = [];
-  for (const pattern of patterns) {
-    const re = new RegExp(pattern, "g");
-    for (const m of findAllRegex(text, re)) {
-      spans.push({ start: m.index, end: m.index + m.match.length });
-    }
-  }
-  return spans;
-}
-
 /** Absolute offset (into `text`) each line starts at, indexed by 0-based line number. */
 function lineStartOffsets(text: string): number[] {
   const starts: number[] = [0];
@@ -91,6 +68,39 @@ function lineStartOffsets(text: string): number[] {
     if (text[i] === "\n") starts.push(i + 1);
   }
   return starts;
+}
+
+/**
+ * Spans of `text` matched by any `config.placement.allow` pattern. Matched
+ * per line (like the pre-span-scoping code's `.test(line)` loop, so `^`/`$`
+ * in a pattern still anchor to line boundaries, not file boundaries) rather
+ * than over the whole file text (which would also let a pattern that can
+ * cross a newline, e.g. `start[\s\S]*end`, excuse an arbitrary multi-line
+ * region). An allow match only excuses the span it actually covers (e.g.
+ * an install URL that carries an org handle), not the rest of the line it
+ * sits on: a home path, a date, or a tally phrase elsewhere on that same
+ * line is unrelated to what the allow pattern matched and must still be
+ * checked.
+ */
+function computeAllowedSpans(
+  text: string,
+  config: ResolvedConfig,
+): Array<{ start: number; end: number }> {
+  const patterns = config.placement?.allow ?? [];
+  if (patterns.length === 0) return [];
+  const lines = text.split("\n");
+  const lineStarts = lineStartOffsets(text);
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const pattern of patterns) {
+    const re = new RegExp(pattern, "g");
+    for (let i = 0; i < lines.length; i++) {
+      for (const m of findAllRegex(lines[i], re)) {
+        const start = lineStarts[i] + m.index;
+        spans.push({ start, end: start + m.match.length });
+      }
+    }
+  }
+  return spans;
 }
 
 /**
@@ -160,10 +170,10 @@ interface ScanOptions {
 }
 
 /**
- * Shared scan: only instruction files are considered, `placement.allow`
- * lines are skipped, and every remaining match of `re` (global), run over
- * the whole file text (so a phrase wrapped across a line break still
- * matches), is turned into a violation via `describe`.
+ * Shared scan: only instruction files are considered, matches inside a
+ * `placement.allow` span are skipped, and every remaining match of `re`
+ * (global), run over the whole file text (so a phrase wrapped across a
+ * line break still matches), is turned into a violation via `describe`.
  */
 function scanInstructionFile(
   rule: Rule,
