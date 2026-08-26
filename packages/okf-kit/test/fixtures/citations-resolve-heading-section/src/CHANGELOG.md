@@ -13,6 +13,12 @@
 - alpha (TODO: verify)
 - beta, with the important detail noted once here.
 - gamma (TODO: verify again)
+- cross-section marker phrase appears here too.
+
+```bash
+## fakeheading
+echo not a real section boundary
+```
 
 ### Fixed
 
@@ -23,6 +29,8 @@
 ### Added
 
 - epsilon
+- cross-section marker phrase appears here too.
+- outside-only phrase lives only in this section.
 
 ## [1.0.0] - 2026-02-01
 

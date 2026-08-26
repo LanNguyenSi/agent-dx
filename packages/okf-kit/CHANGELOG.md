@@ -9,35 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `citations-resolve`: a new backtick-delimited `` `path#heading` `` citation
-  form resolves to a whole Markdown section instead of a line range, so it
-  is immune to a line-number shift caused by an edit anywhere above the
-  cited section -- unlike even a heading-anchored `path:N-M#anchor`
-  citation, whose line range still drifts on every such edit even though
-  the anchor catches it landing in the wrong section. The heading text must
-  match exactly one level 1 or 2 heading in the target (`heading-section-not-found`
-  / `heading-section-ambiguous`, the latter never silently resolved to the
-  first match), and the resolved section must have at least one non-blank
-  line before the next heading of the same or shallower level
-  (`heading-section-empty`). An optional content anchor,
-  `` `path#heading#"text"` ``, must occur on exactly one line inside the
-  resolved section (`heading-section-content-anchor-not-found` /
-  `heading-section-content-anchor-ambiguous`), stricter than the
-  line-range string anchor's "at least one line" since a whole section is
-  a much larger haystack. Capped at heading level 2, reusing
-  `ANCHOR_HEADING_MAX_LEVEL` rather than a second constant, for the same
-  reason the line-range anchor's heading form already is: a
-  Keep-a-Changelog `CHANGELOG.md` repeats identically-named subsection
-  headings under every release, so a level-3+ heading name is essentially
-  never unique. Deliberately backtick-required (unlike the line-range
-  form, which does not require backticks): an ordinary Markdown link's
-  target commonly has the exact shape `path#heading`
-  (`[install](docs/README.md#install)`), and there is no other character
-  available to tell a real citation apart from a link's href the way a
-  line-range citation's `:N` already does. Zero new findings on the
-  orchestrator-workflow bundle (still 35 findings / 13 warnings / 22
-  notices, 0 anchor/heading-section findings) -- none of its existing
-  citations use the new form yet.
+- `citations-resolve`: a new backtick-delimited `` `path:#heading` `` citation
+  form (`.md` targets only) resolves to a whole Markdown section instead of
+  a line range, so it is immune to a line-number shift caused by an edit
+  anywhere above the cited section -- unlike even a heading-anchored
+  `path:N-M#anchor` citation, whose line range still drifts on every such
+  edit even though the anchor catches it landing in the wrong section. The
+  heading text must match exactly one level 1 or 2 heading in the target
+  (`heading-section-not-found` / `heading-section-ambiguous`), and the
+  resolved section must have at least one non-blank line before the next
+  heading of the same or shallower level (`heading-section-empty`). An
+  optional content anchor, `` `path:#heading#"text"` ``, must occur on
+  exactly one line inside the resolved section
+  (`heading-section-content-anchor-not-found` /
+  `-content-anchor-ambiguous`); a malformed attempt is reported rather than
+  silently dropped (`heading-section-malformed`). See the doc comment above
+  `HEADING_SECTION_CITATION_RE` in `src/rules/citations-resolve.ts` for the
+  full rationale, including why the grammar requires the `:#` colon-hash
+  rather than a bare `#`. Existing bundles that already use the older
+  `` `path#heading` `` shape in ordinary prose (a Markdown link's target
+  written in backticks) are unaffected: they no longer parse as a citation
+  at all, producing the same findings as before this form existed.
 
 ## [0.7.0] - 2026-08-26
 

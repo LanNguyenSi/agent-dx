@@ -418,7 +418,7 @@ const CITATION_RE =
  * every release, even with the heading anchor above closing the "wrong
  * section" gap -- the line RANGE itself still drifts on every insertion,
  * so the citation still needs editing, just not silently mis-validated.
- * `path#heading` sidesteps line numbers entirely: it names a heading
+ * `path:#heading` sidesteps line numbers entirely: it names a heading
  * (matched the same way the line-range anchor above already matches one,
  * `heading.text.includes(...)`, reused rather than re-invented -- see
  * `parseAnchor`/`findHeadingSection`) and resolves to that heading's own
@@ -440,7 +440,7 @@ const CITATION_RE =
  * form usable for exactly the case it exists for (a release section) and
  * behaves identically to the line-range anchor for the same reason.
  *
- * Optional content anchor: `path#heading#"text"`, always the quoted form
+ * Optional content anchor: `path:#heading#"text"`, always the quoted form
  * (a section's body is prose/content, not a second heading to look up) --
  * the text must occur on EXACTLY one line inside the resolved section
  * (`heading-section-content-anchor-not-found` / `-ambiguous`), stricter
@@ -449,22 +449,49 @@ const CITATION_RE =
  * caller-chosen line range, so "present somewhere" is far weaker evidence
  * the anchor still points at the intended spot, and "found on exactly one
  * line" is what the task this form was built for (pinning a citation to
- * one prose sentence inside a growing section) actually needs.
+ * one prose sentence inside a growing section) actually needs. The heading
+ * position itself keeps only the bare/bracketed form (`#heading`/
+ * `#[heading]`); the quoted alternative is reserved for the content anchor
+ * position so the two can never be confused by shape alone.
  *
  * Backtick-delimited, unlike the line-range form above (which does not
  * require backticks -- see the "Anchor syntax note" in the README). This
- * is a deliberate, narrower grammar for this form specifically: an ordinary
- * Markdown link's target commonly looks exactly like `path#heading`
- * (`[install](docs/README.md#install)`), and unlike the line-range form
- * (gated by a `:N` no ordinary link ever contains), there is no other
- * character available to tell a real citation apart from a relative link's
- * href. Requiring the whole citation inside one pair of backticks --
- * `` `path#heading` ``, matching this rule's own general recommendation
- * for the line-range form -- closes that gap without inventing a second
- * marker: a live Markdown link's target is never itself backtick-wrapped.
+ * is a deliberate, narrower grammar for this form specifically: a bare
+ * `path#heading` (the grammar this form used in an earlier round) is
+ * indistinguishable from an ordinary Markdown link's target, which
+ * commonly has exactly that shape (`[install](docs/README.md#install)`)
+ * -- unlike the line-range form (gated by a `:N` no ordinary link ever
+ * contains), there was no character available to tell a real citation
+ * apart from a relative link's href written in prose, and measuring
+ * against real bundles (agent-tasks, deploy-panel) showed the collision
+ * is not hypothetical: several existing docs write exactly
+ * `` `path#heading` `` as inline prose pointing at an unrelated anchor,
+ * each producing a spurious `heading-section-not-found`. The colon
+ * (`path:#heading`) reuses this rule's existing citation signature (a
+ * literal `:` no Markdown link fragment ever contains) instead of relying
+ * on backticks alone to do that job, and is additionally restricted to a
+ * `.md` target: a link fragment's target is always the Markdown doc it
+ * points into, never a source or config file, so a non-`.md` path with
+ * this shape is never a live citation. Requiring the whole citation
+ * inside one pair of backticks stays in place as well, matching this
+ * rule's own general recommendation for the line-range form.
  */
 const HEADING_SECTION_CITATION_RE =
-  /`([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json))#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*")(?:#("[^"\n`]*"))?`/g;
+  /`([\w./-]+\.md):#(\[?\w(?:[\w.-]*\w)?\]?)(?:#("[^"\n`]*"))?`/gi;
+/**
+ * Companion to `HEADING_SECTION_CITATION_RE`: matches the same
+ * backtick + path + `:#` opener but accepts anything up to the closing
+ * backtick, so a heading-section citation that fails to parse (an
+ * unterminated content-anchor quote, an unquoted third segment, or a
+ * non-`.md` target) is still recognised as an *attempt* rather than
+ * silently vanishing -- mirrors `anchor-malformed`'s
+ * "still-visible-as-a-notice" posture for the line-range anchor form (see
+ * `extractMalformedAnchorRaw`). Only used for a match whose span does not
+ * already overlap a successful `HEADING_SECTION_CITATION_RE` match (see
+ * `collectHeadingSectionMatches`); a well-formed citation never also
+ * produces a malformed notice.
+ */
+const HEADING_SECTION_MALFORMED_RE = /`([\w./-]+):#([^`\n]*)`/g;
 // Continuation citation forms (see the "Continuation citations" doc block
 // above). Each requires the backtick delimiter as part of the match so it
 // can never overlap a CITATION_RE match: a full citation's regex match
@@ -1040,6 +1067,73 @@ function checkHeadingSectionTarget(
   }
 
   return null;
+}
+
+/** One successful `HEADING_SECTION_CITATION_RE` match, char span included. */
+type HeadingSectionMatch = {
+  index: number;
+  end: number;
+  citedPath: string;
+  headingAnchor: Anchor;
+  contentAnchor: Anchor | null;
+};
+
+/** One `HEADING_SECTION_MALFORMED_RE` match not covered by a real citation. */
+type HeadingSectionMalformedMatch = {
+  index: number;
+  end: number;
+  raw: string;
+};
+
+/**
+ * Every well-formed heading-section citation in `content`, in document
+ * order. Collected once, up front (before `CITATION_RE`'s own scan in
+ * `scanDoc`), so its match spans can gate both `CITATION_RE` (a full
+ * citation never fires inside a heading-section citation's own quoted
+ * content anchor, see the "Heading-section citations" doc block above) and
+ * the malformed companion scan (see `collectHeadingSectionMalformedMatches`)
+ * without re-deriving the same spans twice.
+ */
+function collectHeadingSectionMatches(content: string): HeadingSectionMatch[] {
+  const out: HeadingSectionMatch[] = [];
+  const re = new RegExp(
+    HEADING_SECTION_CITATION_RE.source,
+    HEADING_SECTION_CITATION_RE.flags,
+  );
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    out.push({
+      index: m.index,
+      end: m.index + m[0].length,
+      citedPath: m[1],
+      headingAnchor: parseAnchor(m[2]) as Anchor, // group 2 is mandatory
+      contentAnchor: parseAnchor(m[3]),
+    });
+  }
+  return out;
+}
+
+/**
+ * Every backtick + path + `:#` opener in `content` that did NOT parse as a
+ * well-formed heading-section citation (see `HEADING_SECTION_MALFORMED_RE`'s
+ * doc comment) -- an unterminated content-anchor quote, an unquoted third
+ * segment, or a non-`.md` target. `wellFormedSpans` (from
+ * `collectHeadingSectionMatches`) gates out any match that is really just
+ * the successful citation seen from the outside; a well-formed citation
+ * never also produces a malformed notice.
+ */
+function collectHeadingSectionMalformedMatches(
+  content: string,
+  wellFormedSpans: Array<[number, number]>,
+): HeadingSectionMalformedMatch[] {
+  const out: HeadingSectionMalformedMatch[] = [];
+  const re = new RegExp(HEADING_SECTION_MALFORMED_RE.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    if (isWithinAnySpan(m.index, wellFormedSpans)) continue;
+    out.push({ index: m.index, end: m.index + m[0].length, raw: m[0] });
+  }
+  return out;
 }
 
 // A cont-ext atom only ever extends the *end* of a range whose start line
@@ -1750,6 +1844,24 @@ function scanDoc(
   const sources = getValidSources(doc.frontmatter.parsed) ?? [];
   const docAbsPath = path.join(bundleDir, doc.relPath);
 
+  // Heading-section citations (well-formed and malformed) are collected up
+  // front so their char spans can gate the `CITATION_RE` scan below: a
+  // `CITATION_RE` match landing inside a heading-section citation's own
+  // quoted content anchor (e.g. `` `x.md:#2.0.0#"see other.md:12 now"` ``)
+  // is not a second, independent citation -- it is text the heading-section
+  // citation already owns. Reused again lower down for the heading-section
+  // findings themselves, rather than re-scanning by regex a second time.
+  const headingSectionMatches = collectHeadingSectionMatches(content);
+  const headingSectionSpans: Array<[number, number]> =
+    headingSectionMatches.map((hs) => [hs.index, hs.end]);
+  const headingSectionMalformedMatches = collectHeadingSectionMalformedMatches(
+    content,
+    headingSectionSpans,
+  );
+  for (const hm of headingSectionMalformedMatches) {
+    headingSectionSpans.push([hm.index, hm.end]);
+  }
+
   const fullAtoms: Atom[] = [];
   // Char spans of every matched full citation, used to keep short-form
   // matching (see collectShortFormMatches) from re-matching the tail of a
@@ -1759,6 +1871,7 @@ function scanDoc(
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
     if (isWrappedPathContinuation(content, m.index)) continue;
+    if (isWithinAnySpan(m.index, headingSectionSpans)) continue;
     const matchEnd = m.index + m[0].length;
     // anchor-malformed detection (see the atom-processing loop below for
     // where the finding is actually pushed): a `#` immediately follows the
@@ -1970,14 +2083,14 @@ function scanDoc(
   // Heading-section citations -- see the "Heading-section citations" doc
   // block above. Independent of `governing`/`lastStartLine`/`fullAtoms`:
   // this form carries its own path on every citation (never a continuation
-  // or short form), so there is nothing to chain off.
-  const headingSectionRe = new RegExp(HEADING_SECTION_CITATION_RE.source, "g");
-  let hsMatch: RegExpExecArray | null;
-  while ((hsMatch = headingSectionRe.exec(content)) !== null) {
-    const citedPath = hsMatch[1];
-    const headingAnchor = parseAnchor(hsMatch[2]) as Anchor; // group 2 is mandatory
-    const contentAnchor = parseAnchor(hsMatch[3]);
-    const citation = `${citedPath}${formatAnchorForLabel(headingAnchor)}${
+  // or short form), so there is nothing to chain off. Iterates over
+  // `headingSectionMatches`, collected up front (see above), rather than
+  // re-scanning `content` with the regex a second time.
+  for (const hs of headingSectionMatches) {
+    const citedPath = hs.citedPath;
+    const headingAnchor = hs.headingAnchor;
+    const contentAnchor = hs.contentAnchor;
+    const citation = `${citedPath}:${formatAnchorForLabel(headingAnchor)}${
       contentAnchor ? formatAnchorForLabel(contentAnchor) : ""
     }`;
 
@@ -1999,7 +2112,7 @@ function scanDoc(
       content,
       sources,
       citedPath,
-      hsMatch.index,
+      hs.index,
     );
 
     if (!resolution) {
@@ -2041,6 +2154,28 @@ function scanDoc(
         path.relative(root, resolution.path),
       );
     }
+  }
+
+  // heading-section-malformed (notice): a backtick + path + `:#` opener
+  // that did not parse as a well-formed heading-section citation above --
+  // mirrors `anchor-malformed`'s posture for the line-range anchor form
+  // (see `extractMalformedAnchorRaw`'s doc comment): a typo should not
+  // silently vanish from the very check it was written to exercise.
+  for (const hm of headingSectionMalformedMatches) {
+    // `hm.raw` includes the delimiting backticks (the regex match itself);
+    // the citation label, like every other citation label in this file,
+    // does not repeat them -- pushDrift's message template already wraps
+    // the label in its own pair.
+    const inner = hm.raw.slice(1, -1);
+    pushDrift(
+      findings,
+      doc.relPath,
+      inner,
+      "heading-section-malformed",
+      `a backtick-delimited "path:#" heading-section citation opener does not parse as a well-formed citation (raw: "${inner}")`,
+      undefined,
+      "notice",
+    );
   }
 
   // Short-form (paragraph-bound) citations -- see that doc block above.
