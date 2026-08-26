@@ -1953,3 +1953,311 @@ describe("citations-resolve: anchor-malformed", () => {
     expect(f?.message).not.toContain("unrelated prose");
   });
 });
+
+// Fixture: test/fixtures/citations-resolve-require-anchors/ (docs/okf/
+// require-anchors.md + src/). Exercises the `--require-anchors` opt-in
+// (see the "Anchor strictness (opt-in)" doc block in
+// src/rules/citations-resolve.ts): anchor-required, anchor-not-on-last-line,
+// anchor-not-unique-in-range, and the test-file block-boundary check
+// applied to a full citation's own range.
+const REQUIRE_ANCHORS_ROOT = path.join(
+  FIXTURES_DIR,
+  "citations-resolve-require-anchors",
+);
+
+function loadRequireAnchors(allow: string[] = []) {
+  const ctx = loadFixture(
+    "citations-resolve-require-anchors/docs/okf",
+    REQUIRE_ANCHORS_ROOT,
+  );
+  return { ...ctx, requireAnchors: { allow } };
+}
+
+describe("citations-resolve: --require-anchors opt-in", () => {
+  it("without the opt-in, none of the four new checks fire even though every fixture condition is present", () => {
+    const ctx = loadFixture(
+      "citations-resolve-require-anchors/docs/okf",
+      REQUIRE_ANCHORS_ROOT,
+    );
+    const findings = citationsResolveRule.run(ctx);
+    // test-range-start-not-head/test-range-end-not-closing are not
+    // opt-in checks at all (see checkShortFormTarget) and this fixture
+    // has no short-form citation to trigger either one; they are omitted
+    // here rather than asserted as "never fires under the opt-in", which
+    // would not be testing anything this fixture can actually exercise.
+    const newRuleIds = [
+      "anchor-required",
+      "anchor-not-on-last-line",
+      "anchor-not-unique-in-range",
+      "test-range-straddles-block",
+    ];
+    const hits = findings.filter((f) =>
+      newRuleIds.some((id) => f.message.includes(`[${id}]`)),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("anchor-required: an unanchored full citation into an in-repo file is flagged once the opt-in is on", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const f = findingFor(findings, "src/target.ts:2");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-required]");
+    expect(f?.severity).toBe("warning");
+  });
+
+  it("anchor-required: an unanchored full citation into an allowlisted target is not flagged", () => {
+    const findings = citationsResolveRule.run(
+      loadRequireAnchors(["README.md"]),
+    );
+    const hit = findings.find((f) => f.message.startsWith("`README.md:1`"));
+    expect(hit).toBeUndefined();
+  });
+
+  it("anchor-required: without the target on the allowlist, the same citation is flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const hit = findings.find(
+      (f) =>
+        f.message.startsWith("`README.md:1`") &&
+        f.message.includes("[anchor-required]"),
+    );
+    expect(hit).toBeDefined();
+  });
+
+  it("anchor-required: an anchored full citation is never flagged, opt-in or not", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const hit = findings.find((f) =>
+      f.message.startsWith('`src/note.md:2#"Second line"`'),
+    );
+    expect(hit).toBeUndefined();
+  });
+
+  it("anchor-not-on-last-line: a string anchor found once, not on the range's last line, is flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const f = findingFor(findings, 'src/note.md:1-2#"First line"');
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-not-on-last-line]");
+    expect(f?.message).toContain("line 1");
+    expect(f?.message).toContain("(2)");
+    expect(f?.severity).toBe("warning");
+  });
+
+  it("anchor-not-unique-in-range: a string anchor occurring twice in its own range is flagged, not anchor-not-on-last-line", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith('`src/target.ts:1-4#"dup marker"`'),
+    );
+    expect(matches).toHaveLength(1);
+    expect(matches[0]?.message).toContain("[anchor-not-unique-in-range]");
+    expect(matches[0]?.message).toContain("occurs on 2 lines");
+    expect(matches[0]?.severity).toBe("warning");
+  });
+
+  it("test-range-straddles-block: a full citation's range crossing into a different block's head line is flagged, opt-in only", () => {
+    // This citation is also unanchored, so it separately gets an
+    // anchor-required finding (see the test above); findingFor only
+    // returns the first match for its citation prefix, so this asserts
+    // against the specific straddle finding by rule id instead.
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/target.test.ts:4-10`"),
+    );
+    const straddle = matches.find((f) =>
+      f.message.includes("[test-range-straddles-block]"),
+    );
+    expect(straddle).toBeDefined();
+    expect(straddle?.severity).toBe("warning");
+    expect(matches.some((f) => f.message.includes("[anchor-required]"))).toBe(
+      true,
+    );
+  });
+
+  it("test-range-straddles-block: a range ending on an it( head line is flagged", () => {
+    // Also unanchored (separately gets anchor-required); assert against
+    // the straddle finding by rule id, same reasoning as the test above.
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:6-8`"),
+    );
+    const straddle = matches.find((f) =>
+      f.message.includes("[test-range-straddles-block]"),
+    );
+    expect(straddle).toBeDefined();
+    expect(straddle?.message).toContain("line 8");
+    expect(straddle?.severity).toBe("warning");
+  });
+
+  it("test-range-straddles-block: a range containing an it( head line strictly inside (not the last line) is flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:6-9`"),
+    );
+    const straddle = matches.find((f) =>
+      f.message.includes("[test-range-straddles-block]"),
+    );
+    expect(straddle).toBeDefined();
+    expect(straddle?.message).toContain("line 8");
+  });
+
+  it("test-range-straddles-block: a range starting on a describe( head and staying inside its body is not flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:13-14`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(false);
+  });
+
+  it("test-range-straddles-block: a range entirely inside an it( body is not flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:21-22`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(false);
+  });
+
+  it("test-range-straddles-block: a non-test .ts target with a real top-level it( head inside the range is never checked", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle-plain.ts:1-5`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(false);
+  });
+
+  it("test-range-straddles-block: a range running into a top-level test.each( head is flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:31-36`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(true);
+  });
+
+  it("anchor-not-on-last-line: a trailing comment line is content, so an anchor above it is flagged and an anchor on it is not", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const above = findingFor(
+      findings,
+      'src/last-line.test.ts:11-14#"expect(marker).toBe(2)"',
+    );
+    expect(above).toBeDefined();
+    expect(above?.message).toContain("[anchor-not-on-last-line]");
+    expect(
+      findingFor(findings, 'src/last-line.test.ts:11-14#"// trailing note"'),
+    ).toBeUndefined();
+  });
+
+  it("anchor-required: a * glob allow pattern exempts a matching citedPath and nothing else", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors(["*note.md"]));
+    expect(findingFor(findings, "src/note.md:1-1")).toBeUndefined();
+    const readme = findings.find(
+      (f) =>
+        f.message.startsWith("`README.md:1`") &&
+        f.message.includes("[anchor-required]"),
+    );
+    expect(readme).toBeDefined();
+    const exact = citationsResolveRule.run(loadRequireAnchors(["note.md"]));
+    const stillFlagged = findingFor(exact, "src/note.md:1-1");
+    expect(stillFlagged?.message).toContain("[anchor-required]");
+  });
+
+  it("test-range-straddles-block: a whole describe block citation, including its own nested it( heads, is not flagged", () => {
+    // Guards against a false positive an AST-based reference check does
+    // not produce: citing a whole `describe` that contains nested `it(`s
+    // is not a straddle, the nested heads are exactly what the citation
+    // is about.
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:25-33`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(false);
+  });
+
+  it("test-range-straddles-block and anchor-not-found-in-range are both reported for the same citation when both problems are present", () => {
+    // Before this round's fix, checkFullTarget returned the straddle
+    // problem and never ran the anchor check at all, silently dropping
+    // the anchor-not-found-in-range finding for any citation that also
+    // straddled.
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith(
+        '`src/straddle.test.ts:6-9#"typo text not present"`',
+      ),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(true);
+    expect(
+      matches.some((f) => f.message.includes("[anchor-not-found-in-range]")),
+    ).toBe(true);
+  });
+
+  it("anchor-not-on-last-line: a whole it( block citation ending on a bare `});` line is not flagged when the anchor is on the last real content line before it", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith(
+        '`src/last-line.test.ts:4-7#"expect(value).toBe(1)"`',
+      ),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[anchor-not-on-last-line]")),
+    ).toBe(false);
+  });
+
+  it("anchor-not-on-last-line: the same whole it( block citation is flagged when the anchor is two content lines up instead of on the last content line", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const f = findingFor(
+      findings,
+      'src/last-line.test.ts:4-7#"const value = 1"',
+    );
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-not-on-last-line]");
+    expect(f?.message).toContain("last content line");
+  });
+
+  it("anchor-not-on-last-line: a range ending on a real content line still requires the anchor on that exact line (no boilerplate carve-out applies)", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const f = findingFor(
+      findings,
+      'src/last-line.test.ts:5-6#"const value = 1"',
+    );
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-not-on-last-line]");
+    expect(f?.message).toContain("(6)");
+  });
+
+  it("the opt-in checks are exempt for a reserved citing doc (log.md), the same carve-out already given to short-form matching", () => {
+    const ctx = loadRequireAnchors();
+    const logDoc = ctx.docs.find((d) => d.relPath.endsWith("log.md"));
+    expect(logDoc).toBeDefined();
+    expect(logDoc?.isReserved).toBe(true);
+    const findings = citationsResolveRule.run(ctx);
+    const logFindings = findings.filter((f) => f.file === logDoc?.relPath);
+    const optInRuleIds = [
+      "anchor-required",
+      "anchor-not-on-last-line",
+      "anchor-not-unique-in-range",
+      "test-range-straddles-block",
+    ];
+    const hits = logFindings.filter((f) =>
+      optInRuleIds.some((id) => f.message.includes(`[${id}]`)),
+    );
+    expect(hits).toEqual([]);
+    // Sanity check: the same two citations, cited from the non-reserved
+    // require-anchors.md doc, DO produce opt-in findings -- confirming
+    // this test's absence of findings is the reserved-doc exemption, not
+    // a fixture mistake that would silence them everywhere.
+    const nonReservedHits = findings.filter(
+      (f) =>
+        f.file !== logDoc?.relPath &&
+        optInRuleIds.some((id) => f.message.includes(`[${id}]`)),
+    );
+    expect(nonReservedHits.length).toBeGreaterThan(0);
+  });
+});

@@ -30,6 +30,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `` `path#heading` `` shape in ordinary prose (a Markdown link's target
   written in backticks) are unaffected: they no longer parse as a citation
   at all, producing the same findings as before this form existed.
+- `citations-resolve`: a new `--require-anchors` opt-in (and
+  `--require-anchors-allow <patterns...>` for exempting specific citedPath
+  globs/exact matches) adds four stricter, `warning`-severity checks, off
+  by default so an existing bundle's plain `check` findings are unaffected:
+  `anchor-required` (an in-repo full citation carries no `#anchor` at all,
+  except a reserved citing doc or an allowlisted target),
+  `anchor-not-on-last-line` (a string anchor was found in its cited range,
+  but not on the range's own last content line -- an anchor on the first
+  line survives a small insertion above the range, since the shifted
+  window still contains its original content just at a different offset;
+  the last content line falls out of the window on any insertion at all),
+  `anchor-not-unique-in-range` (a string anchor occurs on more than one
+  line of its cited range; a count of zero stays
+  `anchor-not-found-in-range` as before, unconditionally), and
+  `test-range-straddles-block` (a FULL citation's own range into a
+  `.test.`/`.spec.` target (`.ts`, `.js`, `.mjs`) contains a
+  `describe`/`it`/`test` block-head line, at the same or a shallower
+  indent than the range's own first line, on any line other than that
+  first line -- its own new rule, not a reuse of the existing
+  `test-range-start-not-head`/`test-range-end-not-closing` pair, which
+  stay short-form-only). See "Anchor strictness (opt-in,
+  `--require-anchors`)" in the README for the full rationale; verified
+  byte-identical findings on existing bundles before and after this
+  change, off by default and additive only.
+- `citations-resolve`: four details of the `--require-anchors` checks
+  added above, worth knowing when adopting them:
+  `test-range-straddles-block` no longer flags a block-head line nested
+  strictly deeper than the range's own start line, so citing a whole
+  `describe` in full (including every `it(` nested inside it) is no
+  longer misreported as straddling into another block; only a sibling or
+  outer block-head line still counts. `anchor-not-on-last-line` now
+  anchors against a range's last CONTENT line rather than its literal
+  last line, so a range that (correctly) ends on bare closing boilerplate
+  (`});`, `]);`, `}),`, and similar) can anchor on the real content line
+  before it instead of being forced onto the boilerplate itself. Both of
+  the opt-in's per-atom checks (`test-range-straddles-block` and the
+  string-anchor checks) are now also exempt for a reserved citing doc
+  (`index.md`/`log.md`), matching `anchor-required`'s existing exemption
+  rather than only that one check having it; and a citation that both
+  straddles a block boundary and carries a missing/misplaced anchor now
+  gets both findings instead of the anchor problem silently vanishing
+  behind the straddle one.
 
 ## [0.7.0] - 2026-08-26
 
