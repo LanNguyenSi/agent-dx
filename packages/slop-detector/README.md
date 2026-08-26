@@ -8,7 +8,7 @@ Part of [agent-dx](https://github.com/LanNguyenSi/agent-dx), playbooks and tooli
 
 Agents leave fingerprints. Some are objectively wrong, like leaked `</result>` artefacts from MCP serialisation. Others are stylistic tells the team has already decided to avoid: em-dashes in prose, `It is important to note` openers, empty marketing adjectives, doubled `## Summary` blocks. None are caught by tests, typecheck, or human reviewers under load. They accumulate.
 
-Concrete data point: when `slop-detector` ran for the first time against the bodies of the 20 most recent merged PRs across LanNguyenSi/, it found 38 real violations (27 em-dashes, 11 auto-appended Claude Code footers) across 13 of the 20 PRs. Zero false positives. Every one of those PRs had been written by an agent, reviewed, and merged before the linter existed. The tool's first run was a quiet receipt. <!-- slop-detector:disable-line=placement-slop -->
+Concrete data point: the first time `slop-detector` ran against a real org's recently merged PR bodies, it found real violations (mostly em-dashes and auto-appended agent-harness footers) across a majority of the sampled PRs, with zero false positives. Every one of those PRs had been written by an agent, reviewed, and merged before the linter existed. The tool's first run was a quiet receipt.
 
 This package turns those rules into a deterministic linter you can run in pre-commit, in CI, or against a directory tree: lint at commit time, not at "I noticed three months later."
 
@@ -115,21 +115,36 @@ Known v1 limitations (tracked as M3 follow-ups):
 
 ### `placement-slop` by example
 
-Opt in with `--pack placement-slop`. Every rule below only looks at instruction files: `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, and Markdown under `.claude/agents/`, `.opencode/agents/`, `.claude/skills/` (plus anything matched by `placement.instructionGlobs`). The same content in, say, `README.md` never fires.
+Opt in with `--pack placement-slop`. Every rule below only looks at
+instruction files: by default that means `SKILL.md`, `AGENTS.md`,
+`CLAUDE.md`, and Markdown under `.claude/agents/`, `.opencode/agents/`,
+`.claude/skills/`. The same content in, say, `README.md` never fires
+under the built-in defaults; a repo can widen the set with
+`placement.instructionGlobs` (below).
+
+A monorepo with many package READMEs is a common case worth widening
+for: a package README is exactly as reusable and exactly as
+leak-prone as a `SKILL.md`, and nothing in the built-in defaults
+covers it.
+
+```yaml
+placement:
+  instructionGlobs:
+    - "packages/*/README.md"
+```
 
 ```markdown
 <!-- placement-slop/home-path (block) -->
-
-Set `API_TOKEN` from `~/work/project/.env` before running the sweep.
+<!-- slop-detector:disable-next-line=placement-slop -->
+Set `API_TOKEN` from `/home/alice/work/project/.env` before running the sweep.
 
 <!-- placement-slop/dated-evidence + placement-slop/tally-phrase (warn) -->
-
-As of 2026-08-24 (n=8), the low tier reached accept a median 320 seconds <!-- slop-detector:disable-line=placement-slop -->
-slower, p=0.016, so prefer the default tier. <!-- slop-detector:disable-line=placement-slop -->
+<!-- slop-detector:disable-next-line=placement-slop -->
+As of 2026-08-24 (n=8), the low tier reached accept a median 320 seconds slower, p=0.016, so prefer the default tier.
 
 <!-- placement-slop/opaque-id (warn) -->
-
-See agent-tasks task 7f38899d for the write-up. <!-- slop-detector:disable-line=placement-slop -->
+<!-- slop-detector:disable-next-line=placement-slop -->
+See agent-tasks task 7f38899d for the write-up.
 
 <!-- placement-slop/org-marker (block), with placement.markers: ["example-org"] -->
 

@@ -30,6 +30,13 @@ placement:
     - "packages/*/README.md"
   markers:
     - "LanNguyenSi"
+    # Lowercase form: marker matching has no implicit "i" flag, and this
+    # org's own machine-path convention (Claude Code's directory-encoding
+    # scheme, e.g. "-Users-lannguyensi-git-pandora") writes the handle in
+    # lowercase, which the mixed-case marker above does not catch. A
+    # bare-substring match, so this alone also catches the hyphenated
+    # form; see CHANGELOG for the probe that confirmed it.
+    - "lannguyensi"
   allow:
     - "https://github\\.com/LanNguyenSi/"
     - "https://raw\\.githubusercontent\\.com/LanNguyenSi/"

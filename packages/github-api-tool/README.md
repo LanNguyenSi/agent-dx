@@ -109,7 +109,7 @@ github standup -o your-org
 github standup -o your-org -d 7
 
 # Specific repos only
-github standup -o your-org -r agent-dx codebase-oracle
+github standup -o your-org -r repo-a repo-b
 
 # Filter by author
 github standup -o your-org --author octocat

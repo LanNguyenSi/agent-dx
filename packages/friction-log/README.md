@@ -205,7 +205,7 @@ Two modes, both honest about what they do:
 sinks:
   agent-tasks:
     mode: rest
-    apiBase: https://agent-tasks.opentriologue.ai
+    apiBase: https://agent-tasks.example.com
     projectId: 00000000-0000-0000-0000-000000000000
     # token: # set AGENT_TASKS_TOKEN env var instead in production
 ```

@@ -868,3 +868,116 @@ describe("placement-slop: scan-root-relative instructionGlobs (via checkPath)", 
     }
   });
 });
+
+// ── monorepo package-README rollout regression (agent-tasks 80e4743d) ─────
+//
+// A `packages/*/README.md` instructionGlobs entry is meant to widen
+// coverage to every package's own README while leaving the monorepo's
+// own root README.md alone (it is the repo overview, not a package's
+// doc). Fixture-root test since the glob is scan-root-relative: a
+// `checkText` call has no real directory tree to relativize against.
+
+describe("placement-slop: packages/*/README.md rollout (agent-dx #80e4743d)", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-placement-readmes-"));
+    fs.mkdirSync(path.join(tmp, "packages", "x"), { recursive: true });
+    const evidenceLine =
+      "As of 2026-08-24 (n=8), the low tier reached accept a median 320 seconds slower.\n";
+    fs.writeFileSync(path.join(tmp, "packages", "x", "README.md"), evidenceLine);
+    fs.writeFileSync(path.join(tmp, "README.md"), evidenceLine);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("flags a package README but not the repo-root README under a packages/*/README.md glob", () => {
+    const cfg = mergeConfig({
+      packs: { "placement-slop": true },
+      placement: { instructionGlobs: ["packages/*/README.md"] },
+    });
+    const summary = checkPath(tmp, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["placement-slop"],
+    });
+
+    const packageReadmePath = path.join(tmp, "packages", "x", "README.md");
+    const rootReadmePath = path.join(tmp, "README.md");
+
+    expect(
+      summary.violations.some(
+        (v) =>
+          v.path === packageReadmePath &&
+          v.ruleId === "placement-slop/dated-evidence",
+      ),
+    ).toBe(true);
+    expect(
+      summary.violations.some((v) => v.path === rootReadmePath),
+    ).toBe(false);
+  });
+});
+
+// ── allow-narrowness: a bare "~/" allow must not excuse a real username ───
+//
+// `placement.allow: ["~/"]` is meant to excuse only the two literal
+// characters "~/" (a portable, generic idiom), never a path that also
+// carries a real machine-bound username. A single shared allow-span
+// computation feeds every rule in the pack, so this is a genuine risk: a
+// broad or careless allow pattern could silently widen past its intended
+// two characters. These lines pair the generic idiom with a
+// machine-bound form on the SAME line, so `home-path` must still fire on
+// the machine-bound span even though the "~/" span right next to it is
+// excused.
+
+describe("placement-slop: a bare '~/' allow entry stays narrow", () => {
+  const cfg = mergeConfig({
+    packs: { "placement-slop": true },
+    placement: { allow: ["~/"] },
+  });
+  const opts = {
+    packs: allPacks,
+    config: cfg,
+    packFilter: ["placement-slop"],
+  };
+
+  it("still fires on /Users/<name>/ sharing a line with a ~/ idiom", () => {
+    const v = checkText(
+      "Use ~/git for scratch clones; the real one lives at /Users/lannguyensi/git/pandora.",
+      "x/SKILL.md",
+      opts,
+    );
+    const hit = v.find((x) => x.ruleId === "placement-slop/home-path");
+    expect(hit).toBeDefined();
+    expect(hit?.matched).toBe("/Users/lannguyensi/");
+  });
+
+  it("still fires on /home/<name>/ sharing a line with a ~/ idiom", () => {
+    const v = checkText(
+      "Prefer ~/git over the container path /home/lannguyensi/git for this.",
+      "x/SKILL.md",
+      opts,
+    );
+    const hit = v.find((x) => x.ruleId === "placement-slop/home-path");
+    expect(hit).toBeDefined();
+    expect(hit?.matched).toBe("/home/lannguyensi/");
+  });
+
+  it("still fires on $HOME/ sharing a line with a ~/ idiom", () => {
+    const v = checkText(
+      "Either ~/git or $HOME/git works, but scripts should use $HOME/git.",
+      "x/SKILL.md",
+      opts,
+    );
+    const hit = v.find((x) => x.ruleId === "placement-slop/home-path");
+    expect(hit).toBeDefined();
+    expect(hit?.matched).toBe("$HOME/");
+  });
+
+  it("does not fire at all on a bare ~/ idiom alone", () => {
+    const v = checkText("Clone your work into ~/git before running the sweep.", "x/SKILL.md", opts);
+    expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
+  });
+});
