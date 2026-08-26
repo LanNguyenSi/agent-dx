@@ -2392,16 +2392,17 @@ more headroom than intended once the scope grew).
 
 Two citations needed re-pointing rather than a plain anchor, both
 verified by direct read against the current source, not assumed:
-`install-fence-mechanics.md`'s `init.ts:343` (cited for "`init.ts` uses
-[the manifest] as the upgrade baseline (`previous`, init.ts:343)") had
-drifted onto `composeOpencodeAgentVariant`'s signature close (`): string
-{`); the actual `const previous = readInstalledManifest(targetDir);`
-assignment is `init.ts:376`, re-pointed there. `model-preselection.md`'s
-`init.ts:513` (the Claude-side tier-skip `continue` guard) is
-byte-identical across four sites in the file (424, 448, 513, 545: `if
-(tier === DEFAULT_TIER[role]) continue;`), so no substring of that single
-line can be a <=3-occurrence anchor; widened to `513-516` to land on
-`composeClaudeAgentVariant(role, tier),`, the Claude-specific call two
+`install-fence-mechanics.md`'s citation at line 343 of `init.ts` (cited
+for "`init.ts` uses [the manifest] as the upgrade baseline (`previous`,
+[that same line])") had drifted onto `composeOpencodeAgentVariant`'s
+signature close (`): string {`); the actual
+`const previous = readInstalledManifest(targetDir);` assignment is at
+line 376 of `init.ts`, re-pointed there. `model-preselection.md`'s
+citation at line 513 of `init.ts` (the Claude-side tier-skip `continue`
+guard) is byte-identical across four sites in the file (424, 448, 513,
+545: `if (tier === DEFAULT_TIER[role]) continue;`), so no substring of
+that single line can be a <=3-occurrence anchor; widened to `513-516` to
+land on `composeClaudeAgentVariant(role, tier),`, the Claude-specific call two
 lines below it (unique in the file), consistent with the doc's own
 "Claude Code" annotation for that citation.
 

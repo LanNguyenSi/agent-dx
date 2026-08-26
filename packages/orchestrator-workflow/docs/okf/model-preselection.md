@@ -89,7 +89,7 @@ below.
    `readInstalledManifest` reads it back and re-validates every value with
    `assertValidModelId`; an invalid stored id is silently dropped (falling
    back to `DEFAULT_MODELS` for that role) rather than crashing
-   (`src/init.ts:115-181#"typeof candidate.installedAt ==="`, specifically `:133-145`).
+   (`src/init.ts:115-181#"typeof candidate.installedAt ==="`, specifically `:133-142`).
 4. **Per-harness frontmatter.** For each selected harness, `runInit` calls a
    `compose*Agent` function per role that turns the resolved model string
    into that harness's frontmatter shape (`src/init.ts:189-250#"permission:"`,
@@ -100,7 +100,7 @@ below.
    installs that role, see
    [install-fence-mechanics.md](install-fence-mechanics.md). Since 0.19.0 a
    second, sibling pair of `compose*AgentVariant` functions
-   (`src/init.ts:269-280#"disallowedTools: Edit, Write, NotebookEdit"` Claude Code, `:338-361` opencode) composes the
+   (`src/init.ts:269-280#"disallowedTools: Edit, Write, NotebookEdit"` Claude Code, `:338-357` opencode) composes the
    tier-variant files from the same `readAgentAsset` body; see "Effort
    tiers" below for what differs in their frontmatter.
 
@@ -296,7 +296,7 @@ that correction against regressing back to either stale claim.
 as it always has (now including its own pinned default effort, see "Pinned
 default effort (0.22.0)" below), then, only `if (tiers)`, loops
 `ROLE_TIERS[role]` skipping the role's `DEFAULT_TIER` and writes
-`<role>-<tier>.md` (`:506-514` Claude Code, `:539-569` opencode, the
+`<role>-<tier>.md` (`:506-516` Claude Code, `:539-569` opencode, the
 opencode loop now carrying the unresolved-class skip described above). The
 base file's own composition call takes no `tiers`-flag input at all, so a
 tiers-off install renders byte-identical output to a tiers-on install (not,
@@ -305,7 +305,7 @@ since 0.22.0, to pre-0.19.0: the base file's own content changed with the
 silent model downgrade (the reviewer's `opus` default in particular),
 pinned with a content assertion (not just a file-set check) on the
 legacy-manifest path since fix-round-1 (review finding L1,
-`test/init.test.ts:1170-1224#"effort: medium"`, five-line frontmatter including the 0.22.0
+`test/init.test.ts:1208-1224#"effort: medium"`, five-line frontmatter including the 0.22.0
 `effort: medium` line) plus, since 0.22.0, a dedicated two-target diff test
 (`test/init.test.ts:1229-1263#"tiers: false,"`) that installs into two separate targets,
 one with `tiers: true` and one with `tiers: false`, and asserts every
@@ -321,7 +321,7 @@ separate resolution pass keyed by `ModelClass` instead of `Role`
 (`InitOptions.opencodeClassModels`, `init.ts:62-70#"opencodeClassModels?: Record<ModelClass, string | undefined>;"`; resolved in `cli.ts` at
 `:291-322`, mirroring the existing per-role opencode resolution just above
 it at `cli.ts:286-294#"process.stderr.write("`). The Claude-family-`variant:` and Ollama-no-effort-field
-provider-branch outcomes are pinned at `test/init.test.ts:1504-1538#"expect(implementerLow).not.toContain(" and test/init.test.ts:1541-1559#"model: ollama/llama3"`; a
+provider-branch outcomes are pinned at `test/init.test.ts:1504-1537#"expect(implementerLow).not.toContain(" and test/init.test.ts:1541-1559#"model: ollama/llama3"`; a
 resolved class id with no provider prefix at all (no `/`) reaches the same
 no-effort-field outcome as Ollama but via `opencodeEffortLine`'s
 `provider === undefined` branch rather than its `provider === "ollama"`
@@ -415,12 +415,12 @@ explicit `--tiers` or `--no-tiers` always turns it on or off; a plain
 re-run (neither flag) keeps whatever the previous install had; a fresh
 install with no prior manifest defaults to off. A `tiers: true -> false`
 transition now leaves the same kind of leftover-file note a
-`full -> minimal` profile downgrade does (`init.ts:442-452#"${relativePath}: now untracked after tiers were turned off; run \"`, review finding
+`full -> minimal` profile downgrade does (`init.ts:442-452#"now untracked after tiers were turned off"`, review finding
 M2; before the fix this transition was silent, see
 [install-fence-mechanics.md](install-fence-mechanics.md)), and a
 `full -> minimal` downgrade that also had `tiers: true` now notes the
 dropped roles' tier-variant files too, not just their base files
-(`init.ts:417-428#"${variantPath}: now untracked after the full -> ${profile} profile downgrade; run \"`, review finding M3;
+(`init.ts:417-428#"now untracked after the full -> ${profile} profile downgrade; run"`, review finding M3;
 `test/init.test.ts:883-920#"The variant files themselves are untouched, only untracked, same as"` pins the note count, since 0.21.0 asserting 8
 notes rather than 6 for the base-plus-tiers case — advisor became a third
 dropped role, contributing 1 base-file note plus 1 non-default-tier note of
@@ -443,7 +443,7 @@ loop's ledger gate; review round 3 (R3-L1) added a sibling
 (`init.ts` ~423) the same way, after a mutant that always pushed that note
 (`if (true)` in place of the `previous.files` check) survived the full
 suite untested. Variant files themselves still flow through the same
-`installKitFile` hash ledger as every other kit-owned file (`init.ts:460-481#"installedFiles[relativePath] = sha256(content);"`,
+`installKitFile` hash ledger as every other kit-owned file (`init.ts:460-480#"installFile(report, path, content, { force });"`,
 unchanged by this feature), so idempotence, conflict detection, and
 `uninstall` (see [install-fence-mechanics.md](install-fence-mechanics.md))
 all cover them automatically with no tier-specific removal code.

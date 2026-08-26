@@ -79,7 +79,7 @@ final output, nothing else" block:
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below.
 - Task-slicer:
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:339-368#"T-001"`
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:339-368#"- T-001"`
   (`## Task slicer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/task-slicer.md:36-64#"open_questions:"`.
 - Advisor (since 0.21.0):
@@ -147,7 +147,7 @@ required them, forcing the orchestrator to fabricate that content when
 delegating.
 
 Current per-task slicer shape
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:339-368#"T-001"`): `id, title,
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:339-368#"- T-001"`): `id, title,
 goal, relevant_files, relevant_docs, acceptance_criteria, constraints,
 suggested_tests, allowed_changes, forbidden_changes, dependencies, risk`, in
 that order. The subagent input contract

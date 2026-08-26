@@ -735,7 +735,7 @@ describe("task slicer output schema is a superset of the implementer input contr
     }
   });
 
-  it("task-slicer.md frames allowed/forbidden changes as scope boundaries, not implementation instructions", () => {
+  it("task-slicer.md frames allowed/forbidden changes as scope boundaries, not direct implementation orders", () => {
     const unwrapped = unwrap(taskSlicerRaw);
     expect(unwrapped).toContain("scope boundaries for the task");
     expect(unwrapped).toContain("not implementation instructions");
@@ -2308,11 +2308,11 @@ describe("every okf-kit@<version> pin under .github/workflows/ matches package.j
 // categories (SKILL.md, agent templates, models.ts, test/*.test.ts) to
 // every src/*.ts module and every assets/templates/*.md plus
 // agents-md-section.md, closing the residual gap named in 578f5bfd round
-// 4 (D26) and measured in docs/okf/log.md's 2026-08-26 entry: 142
-// unanchored full citations into src/init.ts (68), src/cli.ts (19),
-// src/writers.ts (12), src/uninstall.ts (10), src/opencode.ts (4),
-// src/assets.ts (1), assets/templates/*.md (19), and
-// assets/agents-md-section.md (9).
+// 4 (D26). The per-category unanchored-citation counts this round found
+// and closed are not hand-duplicated here; see docs/okf/log.md's
+// 2026-08-26 entry for the measured breakdown (D31 convention: numbers
+// live in the log, not in this comment, so they cannot drift out of sync
+// with a later re-measurement).
 const ANCHOR_OKF_DOCS = readdirSync(`${PACKAGE_DIR}/docs/okf`)
   .filter((f) => f.endsWith(".md") && f !== "index.md" && f !== "log.md")
   .sort();
@@ -2489,6 +2489,36 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
     }
     expect(violations, violations.join("\n")).toEqual([]);
   });
+
+  // agent-tasks ca9d5048 review round 2 (HIGH 1): the last-line and
+  // file-wide-<=3 checks above do not rule out an anchor text that recurs
+  // MORE THAN ONCE inside its own cited range -- e.g. the same statement
+  // repeated at two indentation depths within one function, or a short
+  // literal reused across a handful of adjacent array entries. Such an
+  // anchor still passes both checks above (it sits on the last line, and
+  // 2-3 file-wide occurrences is within the cap) while failing the AC2
+  // requirement that the anchor be "eindeutig im Bereich" (unique within
+  // the cited range): a k-line insertion above the range can shift the
+  // window so the anchor is found at its OTHER in-range occurrence rather
+  // than genuinely surviving the shift. This asserts every string anchor's
+  // text occurs exactly once inside `[start, end]` of its own cited range,
+  // for every string-anchored citation in the bundle, not only newly added
+  // ones.
+  it("every string anchor's text occurs exactly once inside its own cited range", () => {
+    const violations: string[] = [];
+    for (const c of anchored) {
+      const lines = readRepoFile(c.real).split("\n");
+      const rangeText = lines.slice(c.start - 1, c.end).join("\n");
+      const count = rangeText.split(c.anchor).length - 1;
+      if (count !== 1) {
+        violations.push(
+          `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}#"${c.anchor}"\` -- ` +
+            `anchor text occurs ${count} times inside its own cited range of ${c.real} (must be exactly 1)`,
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
 });
 
 /**
@@ -2540,15 +2570,17 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
   // run test/docs-consistency.test.ts -t "in-scope citations (sanity"`
   // and read the count from the passing test's own name.
   //
-  // agent-tasks ca9d5048: raised from 150 to 300 when the scope grew from
-  // four kit-source categories to also cover every src/*.ts module and
-  // every assets/templates/*.md plus agents-md-section.md; the live count
-  // measured on this task's own committed tree is 313 (see docs/okf/log.md).
+  // agent-tasks ca9d5048: the floor is set to 200, roughly two thirds of
+  // the live count measured on this task's own committed tree (see
+  // docs/okf/log.md's 2026-08-26 entry for the exact figure), giving
+  // headroom for the count to move around without the sanity check itself
+  // needing a bump on every routine anchoring change, while still catching
+  // a collection-logic regression that empties or badly shrinks `RESOLVE`.
   it(`examined ${examined} in-scope citations (sanity: the brake itself did not go blind, more than a token number)`, () => {
-    expect(examined).toBeGreaterThan(300);
+    expect(examined).toBeGreaterThan(200);
   });
 
-  it("has zero unanchored citations into SKILL.md, an agent template, models.ts, or a test file", () => {
+  it("has zero unanchored citations into SKILL.md, an agent template, models.ts, src/*.ts, a test file, or an assets/templates/*.md or agents-md-section.md run template", () => {
     expect(missing, missing.join("\n")).toEqual([]);
   });
 });
