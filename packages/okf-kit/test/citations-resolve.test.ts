@@ -1533,22 +1533,61 @@ describe("citations-resolve: anchor-malformed", () => {
 
   it("negative control: a valid anchor produces no anchor-malformed finding", () => {
     const findings = citationsResolveRule.run(loadAnchorMalformed());
+    expect(findingFor(findings, 'src/short.md:1#"intro"')).toBeUndefined();
+  });
+
+  it("negative control: an ordinary anchorless citation (no `#` at all) produces no anchor-malformed finding", () => {
+    const findings = citationsResolveRule.run(loadAnchorMalformed());
+    expect(findingFor(findings, "src/note.md:1")).toBeUndefined();
+  });
+
+  it("negative control: a `#` in prose with no preceding citation range produces no citation-shaped finding at all", () => {
+    const findings = citationsResolveRule.run(loadAnchorMalformed());
+    // The prior test proves a *valid* anchor stays quiet; this one proves
+    // the rule does not fire just because *some* citation exists earlier
+    // in the doc either -- no finding of any kind should reference this
+    // stray, non-citation `#`, since CITATION_RE never matches it at all
+    // (there is no `path:N` immediately before it).
+    expect(findings.some((f) => f.message.includes("mark headings"))).toBe(
+      false,
+    );
+  });
+
+  it("exactly the three malformed citations in this fixture are flagged anchor-malformed, nothing else", () => {
+    const findings = citationsResolveRule.run(loadAnchorMalformed());
     const anchorMalformed = findings.filter((f) =>
       f.message.includes("[anchor-malformed]"),
     );
-    // Exactly the two malformed citations above (short.md:3-3, note.md:2);
-    // the valid string anchor (short.md:1#"intro") and the stray `#` in
-    // prose below both contribute nothing.
-    expect(anchorMalformed).toHaveLength(2);
-    expect(
-      findingFor(findings, 'src/short.md:1#"intro"'),
-    ).toBeUndefined();
+    const labels = anchorMalformed
+      .map((f) => f.message.match(/^`([^`]+)`/)?.[1])
+      .sort();
+    expect(labels).toEqual(
+      ["src/note.md:2", "src/short.md:2-2", "src/short.md:3-3"].sort(),
+    );
   });
 
-  it("negative control: a `#` in prose with no preceding citation range produces nothing", () => {
+  it("an out-of-scope absolute-path citation with a malformed anchor produces no anchor-malformed finding", () => {
     const findings = citationsResolveRule.run(loadAnchorMalformed());
     expect(
-      findings.some((f) => f.message.includes("this doc uses")),
+      findings.some((f) => f.message.startsWith("`/abs/path.md:1-2`")),
     ).toBe(false);
+  });
+
+  it("a `..`-segment citation with a malformed anchor is rejected as path-traversal only, not also flagged anchor-malformed", () => {
+    const findings = citationsResolveRule.run(loadAnchorMalformed());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`../outside.md:1-2`"),
+    );
+    expect(matches).toHaveLength(1);
+    expect(matches[0]?.message).toContain("[path-traversal-rejected]");
+  });
+
+  it("the raw fragment reported for a heading-form typo stops at the first whitespace, not at unrelated later prose", () => {
+    const findings = citationsResolveRule.run(loadAnchorMalformed());
+    const f = findingFor(findings, "src/short.md:2-2");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-malformed]");
+    expect(f?.message).toContain('raw: ":~:text=hello"');
+    expect(f?.message).not.toContain("unrelated prose");
   });
 });

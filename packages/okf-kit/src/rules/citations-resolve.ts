@@ -480,6 +480,14 @@ type Atom =
       startLine: number;
       endLine: number | null;
       anchor: Anchor | null;
+      // Non-null when a `#` immediately followed this citation's range but
+      // did not parse as either anchor form -- see `anchor-malformed` in
+      // the atom-processing loop below. Carried on the atom (computed at
+      // match time, from the raw regex scan) rather than pushed as a
+      // finding immediately, so the finding can be gated on the exact same
+      // out-of-scope/resolution posture every other check on this atom
+      // already gets (skip, path-traversal-rejected, missing-file, ambiguous).
+      malformedAnchorRaw: string | null;
     }
   | {
       kind: "cont-fresh";
@@ -1470,20 +1478,42 @@ function isWrappedPathContinuation(
 
 /**
  * Raw text following a malformed anchor's `#` (see `anchor-malformed` in
- * `scanDoc`'s main matching loop), used only to make that finding's message
- * concrete: from just after the `#` up to the next backtick or newline
- * (whichever comes first), or the end of `content` -- roughly as far as
- * `CITATION_RE`'s own anchor alternatives would have looked before giving
- * up, so the reported fragment matches what was actually typed rather than
- * running on into unrelated later prose.
+ * the atom-processing loop below), used only to make that finding's message
+ * concrete -- bounded so it reports roughly what was actually typed as the
+ * failed anchor attempt, not an unrelated run of later prose:
+ *   - a quoted-anchor attempt (the character right after `#` is `"`) stops
+ *     at the next `"` on the same line (the closing quote the author
+ *     presumably meant, embedded backticks and all -- that quote is exactly
+ *     what makes this a *quoted* anchor attempt rather than a heading one),
+ *     or at the end of the line when no such quote exists on it (matches
+ *     `CITATION_RE`'s own string alternative, which cannot cross a
+ *     newline either);
+ *   - any other character after `#` is a heading-anchor attempt, which
+ *     stops at the first whitespace (a heading anchor token, like
+ *     `CITATION_RE`'s own heading alternative, never contains whitespace)
+ *     or the end of the line, whichever comes first;
+ *   - either way, capped at `MAX_RAW_LEN` characters so a heading-form
+ *     attempt with no whitespace at all before the line ends (or a
+ *     pathological single long line) cannot make the message unbounded.
  */
+const MAX_MALFORMED_ANCHOR_RAW_LEN = 60;
 function extractMalformedAnchorRaw(content: string, hashIndex: number): string {
   const from = hashIndex + 1;
-  let end = content.length;
   const nl = content.indexOf("\n", from);
-  if (nl !== -1 && nl < end) end = nl;
-  const bt = content.indexOf("`", from);
-  if (bt !== -1 && bt < end) end = bt;
+  const lineEnd = nl === -1 ? content.length : nl;
+
+  let end: number;
+  if (content[from] === '"') {
+    const q = content.indexOf('"', from + 1);
+    end = q !== -1 && q < lineEnd ? q + 1 : lineEnd;
+  } else {
+    const rest = content.slice(from, lineEnd);
+    const ws = rest.search(/\s/);
+    end = ws === -1 ? lineEnd : from + ws;
+  }
+  if (end - from > MAX_MALFORMED_ANCHOR_RAW_LEN) {
+    end = from + MAX_MALFORMED_ANCHOR_RAW_LEN;
+  }
   return content.slice(from, end);
 }
 
@@ -1508,32 +1538,21 @@ function scanDoc(
   while ((m = re.exec(content)) !== null) {
     if (isWrappedPathContinuation(content, m.index)) continue;
     const matchEnd = m.index + m[0].length;
-    // anchor-malformed (notice): a `#` immediately follows the range but
-    // group 4 (the anchor) did not match -- unbalanced quotes, a backtick
-    // inside a quoted anchor, or nothing at all after the `#` (e.g.
-    // `path:N-M#` at end of line). The citation is still pushed as an
-    // ordinary anchorless atom below (backward compatible: checked exactly
-    // as it always was), this only ADDS a heads-up that a `#` sitting right
-    // there was silently not read as the anchor it looks like it was meant
-    // to be -- see the "Anchored citations" doc block above for why a typo
-    // here would otherwise silently disable the very check it was written
-    // for.
-    if (m[4] === undefined && content[matchEnd] === "#") {
-      const citedPath = m[1];
-      const startLine = Number(m[2]);
-      const endLine = m[3] ? Number(m[3]) : null;
-      const citation = `${citedPath}:${startLine}${endLine ? "-" + endLine : ""}`;
-      const raw = extractMalformedAnchorRaw(content, matchEnd);
-      pushDrift(
-        findings,
-        doc.relPath,
-        citation,
-        "anchor-malformed",
-        `a "#" follows the citation's range but does not parse as a heading or string anchor (raw: "${raw}")`,
-        undefined,
-        "notice",
-      );
-    }
+    // anchor-malformed detection (see the atom-processing loop below for
+    // where the finding is actually pushed): a `#` immediately follows the
+    // range but group 4 (the anchor) did not match -- unbalanced quotes, a
+    // backtick inside a quoted anchor, or nothing at all after the `#`
+    // (e.g. `path:N-M#` at end of line). Computed here, at match time,
+    // because it needs `content`/`matchEnd`; carried on the atom rather
+    // than pushed immediately so the citation's out-of-scope/resolution
+    // posture (path-traversal-rejected, skip, missing-file, ambiguous) can
+    // gate it exactly the same way every other check on this atom already
+    // is -- an out-of-scope or unresolved citation gets none of those
+    // checks either.
+    const malformedAnchorRaw =
+      m[4] === undefined && content[matchEnd] === "#"
+        ? extractMalformedAnchorRaw(content, matchEnd)
+        : null;
     fullAtoms.push({
       kind: "full",
       index: m.index,
@@ -1541,6 +1560,7 @@ function scanDoc(
       startLine: Number(m[2]),
       endLine: m[3] ? Number(m[3]) : null,
       anchor: parseAnchor(m[4]),
+      malformedAnchorRaw,
     });
     fullSpans.push([m.index, matchEnd]);
   }
@@ -1673,6 +1693,27 @@ function scanDoc(
       governing = null;
       lastStartLine = null;
       continue;
+    }
+
+    // anchor-malformed (notice): only reached for a citation that resolved
+    // to a real file -- see `malformedAnchorRaw`'s doc comment above for
+    // why this is gated the same way missing-file/skip/path-traversal are
+    // already gated for every other check on this atom. The citation is
+    // still checked below via checkFullTarget exactly as an ordinary
+    // anchorless citation would be (anchor is null here by construction --
+    // see parseAnchor); this only ADDS a heads-up that the `#` sitting
+    // right there was silently not read as the anchor it looks like it was
+    // meant to be.
+    if (atom.malformedAnchorRaw !== null) {
+      pushDrift(
+        findings,
+        doc.relPath,
+        citation,
+        "anchor-malformed",
+        `a "#" follows the citation's range but does not parse as a heading or string anchor (raw: "${atom.malformedAnchorRaw}")`,
+        undefined,
+        "notice",
+      );
     }
 
     const problem = checkFullTarget(
