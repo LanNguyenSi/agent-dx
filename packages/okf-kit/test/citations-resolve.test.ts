@@ -33,6 +33,10 @@ const ANCHOR_MALFORMED_ROOT = path.join(
   FIXTURES_DIR,
   "citations-resolve-anchor-malformed",
 );
+const HEADING_SECTION_ROOT = path.join(
+  FIXTURES_DIR,
+  "citations-resolve-heading-section",
+);
 
 function loadMain() {
   return loadFixture("citations-resolve-main/docs/okf", MAIN_ROOT);
@@ -58,6 +62,13 @@ function loadAnchorMalformed() {
   return loadFixture(
     "citations-resolve-anchor-malformed/docs/okf",
     ANCHOR_MALFORMED_ROOT,
+  );
+}
+
+function loadHeadingSection() {
+  return loadFixture(
+    "citations-resolve-heading-section/docs/okf",
+    HEADING_SECTION_ROOT,
   );
 }
 
@@ -1390,6 +1401,181 @@ describe("citations-resolve: anchored citations", () => {
   it("an ordinary anchorless citation is unaffected: same behavior as before anchors existed", () => {
     const findings = citationsResolveRule.run(loadAnchor());
     expect(findingFor(findings, "src/note.md:1")).toBeUndefined();
+  });
+});
+
+describe("citations-resolve: heading-section citations", () => {
+  it("a whole-section citation whose heading exists exactly once and whose section is non-empty produces no finding", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    expect(findingFor(findings, "src/CHANGELOG.md#2.0.0")).toBeUndefined();
+  });
+
+  it("a missing heading is flagged heading-section-not-found", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    const f = findingFor(findings, "src/CHANGELOG.md#9.9.9");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[heading-section-not-found]");
+    expect(f?.message).toContain('contains "9.9.9"');
+  });
+
+  it("a heading matching more than one heading in the target is flagged heading-section-ambiguous, not silently the first hit", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    const f = findingFor(findings, "src/CHANGELOG.md#1.0.0");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[heading-section-ambiguous]");
+    expect(f?.message).toContain('2 headings contain "1.0.0"');
+  });
+
+  it("a section with no non-blank content before the next heading is flagged heading-section-empty", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    const f = findingFor(findings, "src/CHANGELOG.md#0.9.0");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[heading-section-empty]");
+  });
+
+  it("a content anchor present on exactly one line of the section produces no finding", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    expect(
+      findingFor(
+        findings,
+        'src/CHANGELOG.md#2.0.0#"important detail noted once here"',
+      ),
+    ).toBeUndefined();
+  });
+
+  it("a content anchor absent from the section is flagged heading-section-content-anchor-not-found", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    const f = findingFor(
+      findings,
+      'src/CHANGELOG.md#2.0.0#"nonexistent phrase xyz"',
+    );
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[heading-section-content-anchor-not-found]");
+  });
+
+  it("a content anchor present on more than one line of the section is flagged heading-section-content-anchor-ambiguous", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    const f = findingFor(findings, 'src/CHANGELOG.md#2.0.0#"TODO"');
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[heading-section-content-anchor-ambiguous]");
+    expect(f?.message).toContain("occurs on 2 lines");
+  });
+
+  it("scans the fixture doc and returns exactly the five expected drift findings, no false positives", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    expect(findings).toHaveLength(5);
+    expect(findings.every((f) => f.severity === "warning")).toBe(true);
+  });
+
+  // Negative control (see the "Heading-section citations" doc block in
+  // citations-resolve.ts): a release entry inserted at the TOP of a
+  // CHANGELOG shifts every absolute line number below it. The existing
+  // line-range `#anchor` form still needs re-pointing when that happens (a
+  // citation that used to correctly enclose its section can end up
+  // enclosed by the newly-inserted section instead); the new heading-only
+  // form does not, because it never carries a line number at all.
+  it("inserting a release entry at the top of the CHANGELOG changes nothing for a heading-section citation, but still drifts a line-range #anchor citation into the wrong section", () => {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-heading-negctl-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+
+      const before = [
+        "# Changelog",
+        "",
+        "## [2.0.0] - 2026-01-02",
+        "",
+        "### Added",
+        "",
+        "- alpha",
+        "- beta",
+        "- gamma",
+        "",
+        "## [1.0.0] - 2026-01-01",
+        "",
+        "### Added",
+        "",
+        "- epsilon",
+        "",
+      ].join("\n");
+
+      const after = [
+        "# Changelog",
+        "",
+        "## [3.0.0] - 2026-02-01",
+        "",
+        "### Added",
+        "",
+        "- delta",
+        "- epsilon2",
+        "",
+        "## [2.0.0] - 2026-01-02",
+        "",
+        "### Added",
+        "",
+        "- alpha",
+        "- beta",
+        "- gamma",
+        "",
+        "## [1.0.0] - 2026-01-01",
+        "",
+        "### Added",
+        "",
+        "- epsilon",
+        "",
+      ].join("\n");
+
+      const doc = [
+        "---",
+        "type: reference",
+        "title: Negative control fixture",
+        "sources:",
+        "  - src/CHANGELOG.md",
+        "---",
+        "",
+        "# Negative control",
+        "",
+        "Line-range, heading-anchored: `src/CHANGELOG.md:7-9#2.0.0`.",
+        "",
+        "Whole-section, heading-only: `src/CHANGELOG.md#2.0.0`.",
+        "",
+      ].join("\n");
+      fs.writeFileSync(path.join(tmpRoot, "docs/okf/negctl.md"), doc);
+
+      fs.writeFileSync(path.join(tmpRoot, "src/CHANGELOG.md"), before);
+      const beforeFindings = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      expect(
+        findingFor(beforeFindings, "src/CHANGELOG.md:7-9#2.0.0"),
+      ).toBeUndefined();
+      expect(
+        findingFor(beforeFindings, "src/CHANGELOG.md#2.0.0"),
+      ).toBeUndefined();
+
+      fs.writeFileSync(path.join(tmpRoot, "src/CHANGELOG.md"), after);
+      const afterFindings = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      // Heading-section citation: unaffected by the insertion above it.
+      expect(
+        findingFor(afterFindings, "src/CHANGELOG.md#2.0.0"),
+      ).toBeUndefined();
+      // Line-range #anchor citation: now lands inside the newly-inserted
+      // 3.0.0 section instead, and is flagged.
+      const drifted = findingFor(afterFindings, "src/CHANGELOG.md:7-9#2.0.0");
+      expect(drifted).toBeDefined();
+      expect(drifted?.message).toContain("[anchor-heading-mismatch]");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 });
 

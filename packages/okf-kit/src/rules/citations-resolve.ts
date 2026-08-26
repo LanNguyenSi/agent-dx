@@ -411,6 +411,60 @@ function checkAnchor(
 
 const CITATION_RE =
   /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
+
+/**
+ * Heading-section citations. A CHANGELOG.md that grows by insertion at the
+ * top forces every later `path:N-M#anchor` citation to be re-pointed on
+ * every release, even with the heading anchor above closing the "wrong
+ * section" gap -- the line RANGE itself still drifts on every insertion,
+ * so the citation still needs editing, just not silently mis-validated.
+ * `path#heading` sidesteps line numbers entirely: it names a heading
+ * (matched the same way the line-range anchor above already matches one,
+ * `heading.text.includes(...)`, reused rather than re-invented -- see
+ * `parseAnchor`/`findHeadingSection`) and resolves to that heading's own
+ * section (from the line after the heading up to, but not including, the
+ * next heading of the same or shallower level, or EOF) -- see
+ * `findHeadingSection`. The section must exist (`heading-section-not-found`
+ * when no such heading is found), must be unambiguous (more than one
+ * matching heading is `heading-section-ambiguous`, never silently the
+ * first hit -- the same posture `unresolved-ambiguous` already takes for
+ * path resolution), and must not be empty (`heading-section-empty`).
+ *
+ * Deliberately reuses `ANCHOR_HEADING_MAX_LEVEL` (2), not a second cap: the
+ * same Keep-a-Changelog nesting that motivates the line-range anchor's cap
+ * (`## [x.y.z]` release headings around identically-named, per-release
+ * `### Added`/`### Changed`/`### Fixed` subsections) means a level-3+
+ * heading name is *never* unique across a real CHANGELOG anyway --
+ * matching it would just turn every such citation into a guaranteed
+ * `heading-section-ambiguous`. Capping the search at level 2 keeps this
+ * form usable for exactly the case it exists for (a release section) and
+ * behaves identically to the line-range anchor for the same reason.
+ *
+ * Optional content anchor: `path#heading#"text"`, always the quoted form
+ * (a section's body is prose/content, not a second heading to look up) --
+ * the text must occur on EXACTLY one line inside the resolved section
+ * (`heading-section-content-anchor-not-found` / `-ambiguous`), stricter
+ * than the line-range string anchor's "at least one line" (`checkAnchor`'s
+ * string branch): a whole section is a much larger haystack than a
+ * caller-chosen line range, so "present somewhere" is far weaker evidence
+ * the anchor still points at the intended spot, and "found on exactly one
+ * line" is what the task this form was built for (pinning a citation to
+ * one prose sentence inside a growing section) actually needs.
+ *
+ * Backtick-delimited, unlike the line-range form above (which does not
+ * require backticks -- see the "Anchor syntax note" in the README). This
+ * is a deliberate, narrower grammar for this form specifically: an ordinary
+ * Markdown link's target commonly looks exactly like `path#heading`
+ * (`[install](docs/README.md#install)`), and unlike the line-range form
+ * (gated by a `:N` no ordinary link ever contains), there is no other
+ * character available to tell a real citation apart from a relative link's
+ * href. Requiring the whole citation inside one pair of backticks --
+ * `` `path#heading` ``, matching this rule's own general recommendation
+ * for the line-range form -- closes that gap without inventing a second
+ * marker: a live Markdown link's target is never itself backtick-wrapped.
+ */
+const HEADING_SECTION_CITATION_RE =
+  /`([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json))#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*")(?:#("[^"\n`]*"))?`/g;
 // Continuation citation forms (see the "Continuation citations" doc block
 // above). Each requires the backtick delimiter as part of the match so it
 // can never overlap a CITATION_RE match: a full citation's regex match
@@ -818,6 +872,174 @@ function checkFullTarget(
   if (base) return base;
   if (!anchor) return null;
   return checkAnchor(anchor, startLine, endLine ?? startLine, lines);
+}
+
+/**
+ * Every Markdown heading in `lines` up to `ANCHOR_HEADING_MAX_LEVEL`, in
+ * document order -- the whole-document counterpart of `findEnclosingHeading`
+ * (which stops at the nearest heading at or before a given line): a
+ * heading-section citation has no start line to search backward from, it
+ * needs every candidate to test for a unique match. `fencedLines` (see
+ * `computeFencedLineIndices`) excludes a `#`-led line inside a fenced
+ * example, same as `findEnclosingHeading`.
+ */
+function collectHeadingsUpToLevel(
+  lines: string[],
+  fencedLines: Set<number>,
+): Array<{ level: number; text: string; lineNo: number }> {
+  const headings: Array<{ level: number; text: string; lineNo: number }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (fencedLines.has(i)) continue;
+    const m = (lines[i] ?? "").match(MD_HEADING_RE);
+    if (m && m[1].length <= ANCHOR_HEADING_MAX_LEVEL) {
+      headings.push({ level: m[1].length, text: m[2].trim(), lineNo: i + 1 });
+    }
+  }
+  return headings;
+}
+
+/** Result of looking a heading-section citation's heading text up against a target. */
+type SectionLookup =
+  | { kind: "not-found" }
+  | { kind: "ambiguous"; matches: Array<{ text: string; lineNo: number }> }
+  | {
+      kind: "found";
+      heading: { level: number; text: string; lineNo: number };
+      /** 0-based, inclusive: index of the first line of the section's body. */
+      bodyStart: number;
+      /** 0-based, exclusive: index one past the section's last body line. */
+      bodyEnd: number;
+    };
+
+/**
+ * Resolves a heading-section citation's heading text to a single section:
+ * every level <= `ANCHOR_HEADING_MAX_LEVEL` heading whose text contains
+ * `headingText` (same containment check `checkAnchor`'s heading branch
+ * already uses -- reused, not reinvented) is a candidate; zero is
+ * `not-found`, more than one is `ambiguous` (never silently the first
+ * match), exactly one resolves to the section running from the line right
+ * after the heading up to (not including) the next heading at or above the
+ * same level, or EOF -- the same enclosure boundary `checkAnchor`'s heading
+ * branch walks forward to check, just producing a body range here instead
+ * of a pass/fail against an already-known end line.
+ */
+function findHeadingSection(
+  lines: string[],
+  fencedLines: Set<number>,
+  headingText: string,
+): SectionLookup {
+  const headings = collectHeadingsUpToLevel(lines, fencedLines);
+  const matches = headings.filter((h) => h.text.includes(headingText));
+  if (matches.length === 0) return { kind: "not-found" };
+  if (matches.length > 1) return { kind: "ambiguous", matches };
+
+  const heading = matches[0];
+  let bodyEnd = lines.length;
+  for (let i = heading.lineNo; i < lines.length; i++) {
+    if (fencedLines.has(i)) continue;
+    const m = (lines[i] ?? "").match(MD_HEADING_RE);
+    if (m && m[1].length <= heading.level) {
+      bodyEnd = i;
+      break;
+    }
+  }
+  return { kind: "found", heading, bodyStart: heading.lineNo, bodyEnd };
+}
+
+/** True when every line in `[bodyStart, bodyEnd)` is empty or whitespace-only. */
+function isSectionEmpty(
+  lines: string[],
+  bodyStart: number,
+  bodyEnd: number,
+): boolean {
+  for (let i = bodyStart; i < bodyEnd; i++) {
+    if ((lines[i] ?? "").trim() !== "") return false;
+  }
+  return true;
+}
+
+/**
+ * Count of lines in `[bodyStart, bodyEnd)` containing `text` -- a heading
+ * section's content anchor must occur on exactly one such line (see the
+ * "Heading-section citations" doc block above for why this is stricter
+ * than the line-range string anchor's "at least one line").
+ */
+function countAnchorOccurrences(
+  lines: string[],
+  bodyStart: number,
+  bodyEnd: number,
+  text: string,
+): number {
+  let count = 0;
+  for (let i = bodyStart; i < bodyEnd; i++) {
+    if ((lines[i] ?? "").includes(text)) count++;
+  }
+  return count;
+}
+
+/**
+ * A heading-section citation's complete target check (see the
+ * "Heading-section citations" doc block above): the named heading must
+ * exist exactly once, its section must be non-empty, and, when a content
+ * anchor was given, it must occur on exactly one line inside that section.
+ * One problem per citation, checked in that order, matching every other
+ * check in this file's "base checks first" pattern.
+ */
+function checkHeadingSectionTarget(
+  headingAnchor: Anchor,
+  contentAnchor: Anchor | null,
+  resolvedPath: string,
+): Problem | null {
+  const read = readTarget(resolvedPath);
+  if ("rule" in read) return read;
+  const lines = splitLines(read.content);
+  const fencedLines = computeFencedLineIndices(lines);
+  const section = findHeadingSection(lines, fencedLines, headingAnchor.text);
+
+  if (section.kind === "not-found") {
+    return {
+      rule: "heading-section-not-found",
+      message: `no heading (level <= ${ANCHOR_HEADING_MAX_LEVEL}) contains "${headingAnchor.text}"`,
+    };
+  }
+  if (section.kind === "ambiguous") {
+    return {
+      rule: "heading-section-ambiguous",
+      message: `${section.matches.length} headings contain "${headingAnchor.text}" (lines ${section.matches
+        .map((m) => m.lineNo)
+        .join(", ")}); not evaluated`,
+    };
+  }
+
+  if (isSectionEmpty(lines, section.bodyStart, section.bodyEnd)) {
+    return {
+      rule: "heading-section-empty",
+      message: `section under heading "${section.heading.text}" (line ${section.heading.lineNo}) has no non-blank content before the next heading`,
+    };
+  }
+
+  if (contentAnchor) {
+    const count = countAnchorOccurrences(
+      lines,
+      section.bodyStart,
+      section.bodyEnd,
+      contentAnchor.text,
+    );
+    if (count === 0) {
+      return {
+        rule: "heading-section-content-anchor-not-found",
+        message: `content anchor "${contentAnchor.text}" does not occur in the section under heading "${section.heading.text}"`,
+      };
+    }
+    if (count > 1) {
+      return {
+        rule: "heading-section-content-anchor-ambiguous",
+        message: `content anchor "${contentAnchor.text}" occurs on ${count} lines in the section under heading "${section.heading.text}"; expected exactly one`,
+      };
+    }
+  }
+
+  return null;
 }
 
 // A cont-ext atom only ever extends the *end* of a range whose start line
@@ -1745,6 +1967,82 @@ function scanDoc(
     lastStartLine = startLine;
   }
 
+  // Heading-section citations -- see the "Heading-section citations" doc
+  // block above. Independent of `governing`/`lastStartLine`/`fullAtoms`:
+  // this form carries its own path on every citation (never a continuation
+  // or short form), so there is nothing to chain off.
+  const headingSectionRe = new RegExp(HEADING_SECTION_CITATION_RE.source, "g");
+  let hsMatch: RegExpExecArray | null;
+  while ((hsMatch = headingSectionRe.exec(content)) !== null) {
+    const citedPath = hsMatch[1];
+    const headingAnchor = parseAnchor(hsMatch[2]) as Anchor; // group 2 is mandatory
+    const contentAnchor = parseAnchor(hsMatch[3]);
+    const citation = `${citedPath}${formatAnchorForLabel(headingAnchor)}${
+      contentAnchor ? formatAnchorForLabel(contentAnchor) : ""
+    }`;
+
+    if (hasParentSegment(citedPath)) {
+      pushDrift(
+        findings,
+        doc.relPath,
+        citation,
+        "path-traversal-rejected",
+        `citedPath contains a ".." segment and was rejected without resolving: ${citedPath}`,
+      );
+      continue;
+    }
+
+    const resolution = resolveCitation(
+      cache,
+      root,
+      docAbsPath,
+      content,
+      sources,
+      citedPath,
+      hsMatch.index,
+    );
+
+    if (!resolution) {
+      pushDrift(
+        findings,
+        doc.relPath,
+        citation,
+        "missing-file",
+        `could not resolve ${citedPath}: tried doc sources, ancestor climb (bare filenames only), repo-root, doc-relative, nearest prior qualified mention, repo-wide search; no candidate file exists`,
+      );
+      continue;
+    }
+    if ("skip" in resolution) continue;
+    if ("ambiguous" in resolution) {
+      pushAmbiguous(findings, doc.relPath, citation, resolution.candidates);
+      continue;
+    }
+
+    const problem = checkHeadingSectionTarget(
+      headingAnchor,
+      contentAnchor,
+      resolution.path,
+    );
+    if (problem?.rule === "unreadable-target") {
+      pushUnreadable(
+        findings,
+        doc.relPath,
+        citation,
+        path.relative(root, resolution.path),
+        problem.code ?? "UNKNOWN",
+      );
+    } else if (problem) {
+      pushDrift(
+        findings,
+        doc.relPath,
+        citation,
+        problem.rule,
+        problem.message,
+        path.relative(root, resolution.path),
+      );
+    }
+  }
+
   // Short-form (paragraph-bound) citations -- see that doc block above.
   // Deliberately independent of `governing`/`lastStartLine`: short-form
   // binding is paragraph-scoped by design, not chained through the
@@ -1866,7 +2164,7 @@ function scanDoc(
 export const citationsResolveRule: Rule = {
   id: RULE_ID,
   description:
-    "`path:N`/`path:N-M` citations (and their `:N`, -`M`/–`M`, (`N`) continuations) must resolve to a real target file and land on real, non-blank content. Mechanical only: does not verify the cited line is semantically correct.",
+    "`path:N`/`path:N-M` citations (and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path#heading` `` heading-section citations, must resolve to a real target file and land on real, non-blank content. Mechanical only: does not verify the cited line is semantically correct.",
   run(ctx) {
     if (!ctx.repoRoot) {
       // Never silently skip: mirrors sources-fresh's posture so a "clean"
