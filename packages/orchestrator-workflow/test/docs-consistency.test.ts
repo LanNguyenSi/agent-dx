@@ -2575,8 +2575,8 @@ describe("every heading-anchored CHANGELOG.md citation's range stays inside its 
 
   const citations = collectChangelogHeadingCitations();
   const headingLines: Array<{ lineNo: number; version: string }> = [];
-  readRepoFile(CHANGELOG_PATH)
-    .split("\n")
+  const changelogLines = readRepoFile(CHANGELOG_PATH).split("\n");
+  changelogLines
     .forEach((line, idx) => {
       const m = line.match(HEADING_RE);
       if (m) headingLines.push({ lineNo: idx + 1, version: m[1] });
@@ -2597,6 +2597,20 @@ describe("every heading-anchored CHANGELOG.md citation's range stays inside its 
           `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
             `nearest enclosing heading at or before line ${c.start} is ` +
             `${enclosing ? `[${enclosing.version}] at line ${enclosing.lineNo}` : "none"}, not [${c.version}]`,
+        );
+        continue;
+      }
+      // The ranges cite the release's bullets, not the heading itself, so
+      // a small shift (an [Unreleased] entry above) lands the start line on
+      // a blank line or a `#` heading line before the enclosing-heading check
+      // above can notice; okf-kit reports the same drift as blank-start-line.
+      // Pin it here so a 1-, 2- or 3-line shift fails locally, not only in
+      // the okf-kit report.
+      const startText = (changelogLines[c.start - 1] ?? "").trim();
+      if (startText === "" || startText.startsWith("#")) {
+        violations.push(
+          `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
+            `start line ${c.start} is ${startText === "" ? "blank" : "a heading line"}, not release content (shifted?)`,
         );
         continue;
       }
