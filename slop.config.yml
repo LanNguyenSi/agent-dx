@@ -20,14 +20,13 @@ placement:
     # SKILL.md/AGENTS.md. "packages/*/README.md" covers every package's own
     # top-level README; the repo-root README.md is deliberately NOT
     # covered (it is the monorepo overview, not a single package's own
-    # doc, and was not the location this rule was written for).
+    # doc).
     #
     # OKF bundle docs (packages/*/docs/okf/**) are deliberately NOT
     # covered by this pack at all: those docs carry verification stamps,
-    # tallies, and task ids by design (the okf-kit sources-fresh /
-    # re-verify convention), and the bundle already has its own mechanical
-    # freshness guard (`okf-kit check` in CI). log.md is the bundle's own
-    # append-only log, the same reason CHANGELOG.md is never in this list.
+    # tallies, and task ids by design, and the bundle already has its own
+    # mechanical freshness guard. See packages/slop-detector/CHANGELOG.md
+    # for the rationale and the corpus measurements behind both decisions.
     - "packages/*/README.md"
   markers:
     - "LanNguyenSi"
@@ -36,18 +35,12 @@ placement:
     - "https://raw\\.githubusercontent\\.com/LanNguyenSi/"
     # A bare "~/" is portable by construction: unlike "/Users/<name>/" or
     # "/home/<name>/", it never bakes in a literal username, so it carries
-    # no machine-bound information to leak. Package READMEs use it
-    # constantly as the generic "your home directory" idiom in install/
-    # usage examples (agent-tasks 80e4743d, measured: ~45 of the 50
-    # pre-existing README findings before this allow, across
-    # mcp-token-audit, git-batch-cli, friction-log, orchestrator-workflow,
-    # and slop-detector's own README). Deliberately narrow: it matches
-    # only the two literal characters "~/", so it does not touch
-    # "/Users/<realname>/" or "/home/<realname>/", which still fire (see
-    # the mutation probe in the CHANGELOG entry for this change).
+    # no machine-bound information to leak. Deliberately narrow: matches
+    # only the two literal characters "~/", so "/Users/<realname>/" and
+    # "/home/<realname>/" still fire. See CHANGELOG for the measurement
+    # behind this entry.
     - "~/"
-    # Same reasoning, for the one README that spells the generic
-    # placeholder as the literal word "you" instead of an angle-bracket
-    # placeholder: "/Users/you/" (friction-log's sync_export example).
+    # Same reasoning, for a README that spells the generic placeholder as
+    # the literal word "you" instead of an angle-bracket placeholder.
     # Exact literal match, cannot match a real username.
     - "/Users/you/"
