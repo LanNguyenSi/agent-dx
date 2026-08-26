@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- README: moved the dated wire-probe measurement behind the Haiku 4.5
+  `effort:` drop claim into this CHANGELOG entry, per the placement-guard
+  extension to package READMEs (agent-tasks 80e4743d): a wire probe on
+  2026-08-19 confirmed the Claude Code CLI silently drops the `effort:`
+  frontmatter parameter for Haiku 4.5 rather than rejecting it (the value
+  is ignored, not an install-time or run-time error); not re-measured
+  since. The README now states the durable rule only.
 
 - `docs/okf/subagent-contracts-superset.md`: rewrote its 22 sibling short-
   form citations (21 initially, plus one missed and fixed this round) from

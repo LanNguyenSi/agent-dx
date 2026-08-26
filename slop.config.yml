@@ -17,29 +17,37 @@ placement:
     - "packages/orchestrator-workflow/assets/**/*.md"
     - "packages/agentic-coding-playbook/**/*.md"
     # Package READMEs: reusable per-package doc surface, same leak risk as
-    # SKILL.md/AGENTS.md. Listed explicitly (not a "packages/*/README.md"
-    # wildcard) and only for packages measured clean against this pack: a
-    # blanket wildcard immediately surfaces pre-existing findings in other
-    # packages' READMEs (mostly a generic "~/" install-path idiom this rule
-    # wasn't designed to flag, plus slop-detector's own README's
-    # self-documenting rule examples) whose fix is a separate, larger diff
-    # than this task's scope. See CHANGELOG for the measured count and the
-    # deferred file list.
-    - "packages/okf-kit/README.md"
-    - "packages/agent-dev-kit/README.md"
-    - "packages/agent-engineering-playbook/README.md"
-    # OKF bundle module docs: curated, reusable cross-file knowledge, same
-    # leak risk as an instruction file. Listed explicitly, one file at a
-    # time, rather than a recursive glob, for two reasons: the bundle's own
-    # log.md (a changelog-shaped doc meant to carry dates, tallies, and
-    # task ids, like CHANGELOG.md) must stay out of scope by design, and
-    # the other module docs currently carry pre-existing dated/tally/id
-    # content whose fix (editing bundle document content) is out of this
-    # task's scope; see CHANGELOG for the measured count and the deferred
-    # file list.
-    - "packages/orchestrator-workflow/docs/okf/install-fence-mechanics.md"
+    # SKILL.md/AGENTS.md. "packages/*/README.md" covers every package's own
+    # top-level README; the repo-root README.md is deliberately NOT
+    # covered (it is the monorepo overview, not a single package's own
+    # doc, and was not the location this rule was written for).
+    #
+    # OKF bundle docs (packages/*/docs/okf/**) are deliberately NOT
+    # covered by this pack at all: those docs carry verification stamps,
+    # tallies, and task ids by design (the okf-kit sources-fresh /
+    # re-verify convention), and the bundle already has its own mechanical
+    # freshness guard (`okf-kit check` in CI). log.md is the bundle's own
+    # append-only log, the same reason CHANGELOG.md is never in this list.
+    - "packages/*/README.md"
   markers:
     - "LanNguyenSi"
   allow:
     - "https://github\\.com/LanNguyenSi/"
     - "https://raw\\.githubusercontent\\.com/LanNguyenSi/"
+    # A bare "~/" is portable by construction: unlike "/Users/<name>/" or
+    # "/home/<name>/", it never bakes in a literal username, so it carries
+    # no machine-bound information to leak. Package READMEs use it
+    # constantly as the generic "your home directory" idiom in install/
+    # usage examples (agent-tasks 80e4743d, measured: ~45 of the 50
+    # pre-existing README findings before this allow, across
+    # mcp-token-audit, git-batch-cli, friction-log, orchestrator-workflow,
+    # and slop-detector's own README). Deliberately narrow: it matches
+    # only the two literal characters "~/", so it does not touch
+    # "/Users/<realname>/" or "/home/<realname>/", which still fire (see
+    # the mutation probe in the CHANGELOG entry for this change).
+    - "~/"
+    # Same reasoning, for the one README that spells the generic
+    # placeholder as the literal word "you" instead of an angle-bracket
+    # placeholder: "/Users/you/" (friction-log's sync_export example).
+    # Exact literal match, cannot match a real username.
+    - "/Users/you/"
