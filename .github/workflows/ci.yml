@@ -10,6 +10,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 # Only the npm packages are matrix entries. `agent-engineering-playbook`
 # and `agentic-coding-playbook` are pure documentation directories (no
 # package.json), and `scaffoldkit` is a Python sub-package (handled in its
@@ -37,6 +40,194 @@ jobs:
 
       - name: Check for org-, machine-, or point-in-time-bound evidence in instruction files
         run: node packages/slop-detector/dist/cli.js check . --pack placement-slop --config slop.config.yml
+
+  # Fails the build (not just a warning) on anchor-check drift in
+  # packages/orchestrator-workflow/docs/okf -- the warn-only
+  # okf-staleness.yml drift watch never blocks (see its own header
+  # comment) before okf-kit's anchored citations (0.6.0). See
+  # packages/orchestrator-workflow/docs/okf/log.md for the rule contract,
+  # the anchor count, and the residual gap this does not close. Note:
+  # master carries no required-status-check branch protection today, so
+  # "fails the build" means this job's own run goes red, not an enforced
+  # merge block; that is an orchestrator decision, not a branch-protection
+  # change. If packages/orchestrator-workflow/docs/okf is ever moved or
+  # renamed, update BUNDLE_PATH below in the same PR.
+  okf-anchor-guard:
+    name: OKF bundle anchor guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BUNDLE_PATH: packages/orchestrator-workflow/docs/okf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # citations-resolve's repo-root auto-detection runs `git
+          # rev-parse --show-toplevel`; it does not itself need commit
+          # history, but a full checkout keeps this job's checkout
+          # identical to okf-staleness.yml's rather than a second,
+          # subtly different recipe to keep in sync.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install okf-kit (exact pin)
+        # Keep this pin identical to okf-staleness.yml's; both are pinned
+        # against packages/okf-kit/package.json's version by
+        # test/docs-consistency.test.ts (globs every .github/workflows/
+        # file for an okf-kit@<version> pin, install or npx form).
+        run: npm install -g okf-kit@0.6.0
+
+      - name: Assert CLI is alive (output, not exit code)
+        shell: bash
+        run: |
+          v="$(okf-kit --version)"
+          test -n "$v"
+          echo "okf-kit ${v}"
+
+      - name: Self-test the anchor-finding filter against a deliberately drifted fixture
+        # Guards the jq pipeline below, not the bundle: builds a throwaway
+        # one-doc, one-source OKF bundle under $RUNNER_TEMP with a
+        # heading-anchored citation and a string-anchored one (the vast
+        # majority of this bundle's real anchors are string-form; the
+        # heading form covers only CHANGELOG.md's citations, see
+        # docs/okf/log.md for the live counts -- not hand-copied here
+        # since they drift as citations are added or re-pointed), then
+        # edits the source so both anchors' ranges no longer
+        # match. If the same jq filter used against the real bundle below
+        # does not report at least one anchor finding against this
+        # fixture, the filter itself is broken (a regex typo, a schema
+        # change upstream) and this step fails red before the real check
+        # ever gets a chance to pass green for the wrong reason. The
+        # clean (pre-drift) run's own report is also asserted at 0 anchor
+        # findings, so a fixture that is already broken before the drift
+        # cannot pass this self-test for the wrong reason either.
+        shell: bash
+        run: |
+          set -e
+          fixture="${RUNNER_TEMP}/okf-anchor-selftest"
+          rm -rf "${fixture}"
+          mkdir -p "${fixture}/src" "${fixture}/bundle"
+          # citations-resolve needs a real repo root (git rev-parse
+          # --show-toplevel); give the fixture its own tiny one rather
+          # than relying on this checkout's root, so the self-test is
+          # fully self-contained.
+          (cd "${fixture}" && git init -q && git config user.email t@t.co && git config user.name t)
+          printf '%s\n' \
+            '## Section A' \
+            '' \
+            'line a1' \
+            'line a2' \
+            '' \
+            '## Section B' \
+            '' \
+            'line b1' \
+            'line b2' \
+            > "${fixture}/src/target.md"
+          printf '%s\n' \
+            '---' \
+            'type: module' \
+            'timestamp: "2026-01-01T00:00:00Z"' \
+            'sources:' \
+            '  - src/target.md' \
+            '---' \
+            '' \
+            '# Fixture doc' \
+            '' \
+            'Cites `src/target.md:8-9#B` (Section B, correctly anchored for now)' \
+            'and `src/target.md:9#"line b2"` (string-anchored, also correct for now).' \
+            > "${fixture}/bundle/doc.md"
+          (cd "${fixture}" && git add -A && git commit -q -m init)
+          set +e
+          okf-kit check --json "${fixture}/bundle" > "${fixture}/selftest-clean-report.json"
+          set -e
+          clean_count=$(jq '[
+            .findings[] | select(.message | test("\\[anchor-[a-z-]+\\]$"))
+          ] | length' "${fixture}/selftest-clean-report.json")
+          if [ "${clean_count}" -ne 0 ]; then
+            echo "::error title=OKF anchor guard self-test failed::the clean, pre-drift fixture already reports ${clean_count} anchor finding(s) (expected 0); the fixture itself is broken, not just the drift"
+            cat "${fixture}/selftest-clean-report.json"
+            exit 1
+          fi
+          # Drift both citations: repoint each at Section A's lines while
+          # its anchor text still names Section B, without touching the
+          # doc's own citation text -- the same "range moved, anchor
+          # didn't" shape the real guard exists to catch.
+          python3 -c "
+          p = '${fixture}/bundle/doc.md'
+          c = open(p).read()
+          c = c.replace('src/target.md:8-9#B', 'src/target.md:3-4#B')
+          c = c.replace('src/target.md:9#\"line b2\"', 'src/target.md:4#\"line b2\"')
+          open(p, 'w').write(c)
+          "
+          set +e
+          okf-kit check --json "${fixture}/bundle" > "${fixture}/selftest-report.json"
+          set -e
+          heading_count=$(jq '[
+            .findings[] | select(.message | test("\\[anchor-heading-"))
+          ] | length' "${fixture}/selftest-report.json")
+          string_count=$(jq '[
+            .findings[] | select(.message | test("\\[anchor-not-found-in-range\\]$"))
+          ] | length' "${fixture}/selftest-report.json")
+          # Each anchor family (heading-form and string-form) is asserted
+          # separately, not just a combined total -- a filter or okf-kit
+          # regression that silently stopped catching one family could
+          # otherwise pass this gate on the other family's finding alone.
+          if [ "${heading_count}" -lt 1 ] || [ "${string_count}" -lt 1 ]; then
+            echo "::error title=OKF anchor guard self-test failed::the anchor-finding jq filter reported ${heading_count} heading-form and ${string_count} string-form findings against a fixture with one deliberately drifted citation of each (expected >= 1 each); the filter or okf-kit's finding shape changed under this job"
+            cat "${fixture}/selftest-report.json"
+            exit 1
+          fi
+          echo "Self-test OK: ${heading_count} heading-form and ${string_count} string-form anchor finding(s) against the drifted fixture."
+
+      - name: Anchor-citation guard
+        shell: bash
+        run: |
+          set +e
+          okf-kit check --json "${BUNDLE_PATH}" > okf-anchor-report.json
+          code=$?
+          set -e
+
+          if [ "${code}" -ne 0 ] && [ "${code}" -ne 1 ]; then
+            echo "::error title=OKF anchor guard::okf-kit check exited ${code} (tool/usage error, not bundle findings)"
+            cat okf-anchor-report.json || true
+            exit "${code}"
+          fi
+
+          jq -e . okf-anchor-report.json > /dev/null
+
+          # Anchor rule ids are embedded as a "[rule-id]" suffix on the
+          # citations-resolve finding's message (okf-kit's top-level
+          # ruleId is always "citations-resolve"); match any anchor-*
+          # rule id rather than a hardcoded list, so a future okf-kit
+          # release adding a fifth anchor rule is covered without an edit
+          # here (the self-test step above guards this same filter).
+          anchorFindings=$(jq '[
+            .findings[]
+            | select(.message | test("\\[anchor-[a-z-]+\\]$"))
+          ]' okf-anchor-report.json)
+          count=$(echo "${anchorFindings}" | jq 'length')
+
+          {
+            echo "## OKF bundle anchor guard (\`${BUNDLE_PATH}\`)"
+            echo ""
+            echo "anchor findings: ${count}"
+            if [ "${count}" -gt 0 ]; then
+              echo ""
+              echo '```'
+              echo "${anchorFindings}" | jq -r '.[] | "\(.file): \(.message)"'
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${count}" -gt 0 ]; then
+            echo "${anchorFindings}" | jq -r '.[] | "::error title=OKF anchor drift::\(.file): \(.message)"'
+            exit 1
+          fi
+
+          echo "Clean, 0 anchor findings."
+          exit 0
 
   lint-cli-flag-order:
     runs-on: ubuntu-latest

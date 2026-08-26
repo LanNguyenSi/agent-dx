@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -2233,5 +2233,445 @@ describe("the CHANGELOG 0.24.0 evidence note carries the four durable evidence f
     expect(section).toContain("watchdog");
     expect(section).toContain("three were on 2026-07-16");
     expect(section).toContain("one was on 2026-07-20");
+  });
+});
+
+/**
+ * agent-tasks 578f5bfd review round 2 (MEDIUM 3): the version-pin describe
+ * above only ever checked `.github/workflows/okf-staleness.yml`. Round 2
+ * added a second okf-kit install (`okf-anchor-guard` in `ci.yml`), which
+ * that check never covered, so `ci.yml`'s own pin could silently drift
+ * from `packages/okf-kit/package.json`'s real version with no test to
+ * catch it. This globs every file under `.github/workflows/` instead of
+ * naming one, so a third workflow adding its own `okf-kit@<version>` pin
+ * (install or `npx` form) is covered automatically too.
+ */
+describe("every okf-kit@<version> pin under .github/workflows/ matches package.json", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+
+  const okfKitPackageJson = JSON.parse(
+    readRepoFile("packages/okf-kit/package.json"),
+  ) as { version: string };
+  const version = okfKitPackageJson.version;
+
+  const workflowsDir = `${repoRoot}/.github/workflows`;
+  const workflowFiles = readdirSync(workflowsDir).filter(
+    (name) => name.endsWith(".yml") || name.endsWith(".yaml"),
+  );
+  const PIN_RE = /(?:npm install -g|npx) okf-kit@([\w.-]+)/g;
+
+  it("found at least one okf-kit@<version> pin to check (sanity: not vacuously true)", () => {
+    let total = 0;
+    for (const file of workflowFiles) {
+      total += [...readRepoFile(`.github/workflows/${file}`).matchAll(PIN_RE)]
+        .length;
+    }
+    expect(total).toBeGreaterThan(0);
+  });
+
+  it("every pin (npm install -g and npx forms) across every workflow file equals packages/okf-kit/package.json's version", () => {
+    const mismatches: string[] = [];
+    for (const file of workflowFiles) {
+      const content = readRepoFile(`.github/workflows/${file}`);
+      for (const m of content.matchAll(PIN_RE)) {
+        if (m[1] !== version) {
+          mismatches.push(
+            `.github/workflows/${file} pins okf-kit@${m[1]}, package.json is ${version}`,
+          );
+        }
+      }
+    }
+    expect(mismatches, mismatches.join("\n")).toEqual([]);
+  });
+});
+
+// Shared by the two anchor-integrity checks below: the docs/okf bundle's
+// own set of citable docs, and the kit-source basenames this round's
+// anchoring covers (SKILL.md, the five assets/agents/*.md templates,
+// src/models.ts, and test/*.test.ts). Deliberately excludes CHANGELOG.md
+// (its citations use okf-kit's own heading-form anchor, a different
+// mechanism, already checked by okf-kit's own anchor-heading-* rules) and
+// every other source category (init.ts, cli.ts, opencode.ts, README.md,
+// INSTALL-AGENT.md, agents-md-section.md, the assets/templates/*.md run
+// templates), which this round left out of scope on purpose.
+//
+// Review round 3 (MEDIUM 5): all three lists below are derived from their
+// own source of truth (`ROLES`, `test/`'s own directory listing,
+// `docs/okf/`'s own directory listing) rather than hand-maintained, so a
+// role/test-file/doc added later cannot silently drift out of sync with
+// what this file actually checks.
+const ANCHOR_OKF_DOCS = readdirSync(`${PACKAGE_DIR}/docs/okf`)
+  .filter((f) => f.endsWith(".md") && f !== "index.md" && f !== "log.md")
+  .sort();
+
+const ANCHOR_AGENT_NAMES: readonly Role[] = ROLES;
+
+const ANCHOR_TEST_NAMES = readdirSync(`${PACKAGE_DIR}/test`)
+  .filter((f) => f.endsWith(".test.ts"))
+  .map((f) => f.slice(0, -".test.ts".length))
+  .sort();
+
+function anchorScopeResolve(): Record<string, string> {
+  const map: Record<string, string> = {
+    "SKILL.md": "packages/orchestrator-workflow/assets/skill/SKILL.md",
+    "packages/orchestrator-workflow/assets/skill/SKILL.md":
+      "packages/orchestrator-workflow/assets/skill/SKILL.md",
+    "models.ts": "packages/orchestrator-workflow/src/models.ts",
+    "src/models.ts": "packages/orchestrator-workflow/src/models.ts",
+    "packages/orchestrator-workflow/src/models.ts":
+      "packages/orchestrator-workflow/src/models.ts",
+  };
+  for (const name of ANCHOR_AGENT_NAMES) {
+    const real = `packages/orchestrator-workflow/assets/agents/${name}.md`;
+    map[`${name}.md`] = real;
+    map[real] = real;
+  }
+  for (const name of ANCHOR_TEST_NAMES) {
+    const real = `packages/orchestrator-workflow/test/${name}.test.ts`;
+    map[`${name}.test.ts`] = real;
+    map[`test/${name}.test.ts`] = real;
+    map[real] = real;
+  }
+  return map;
+}
+
+// Same shape as okf-kit's own CITATION_RE (packages/okf-kit/src/rules/
+// citations-resolve.ts): a full citation is `path.ext:N` or `path.ext:N-M`,
+// optionally followed by `#anchor` (bare/bracketed heading form, or a
+// double-quoted string form). No backtick requirement: okf-kit checks a
+// bare `path:N` in running prose exactly the same as a backtick-wrapped
+// one, so this test does too.
+const ANCHOR_CITATION_RE =
+  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
+
+/**
+ * agent-tasks 578f5bfd review round 2 (HIGH 2): pins the two properties
+ * that make a string-form anchor actually load-bearing rather than
+ * decorative. An anchor sitting on the FIRST line of a wide range survives
+ * a k-line insertion above the range whenever k is smaller than the range
+ * itself, because the shifted window (the citation's own line numbers,
+ * read against the mutated file) still contains the original first line's
+ * content, just at a different offset inside the window -- measured this
+ * round: 107 of the 121 pre-fix anchors sat on the first line, and a
+ * 1-line insertion near the top of SKILL.md left 24 of the round-1
+ * bundle's 46 SKILL.md-targeting anchors silently green (corrected
+ * 2026-08-26, review round 4, D30: this comment previously said "21 of
+ * 61", copied from a mismeasured round-1 total; see docs/okf/log.md).
+ * Anchoring on the LAST line instead
+ * closes that: the original last line falls out of the shifted window on
+ * any k >= 1, not only large ones. Separately, an anchor text that recurs
+ * many times in its target can still coincidentally reappear inside a
+ * shifted window even with its own original line moved out of it, so (b)
+ * caps every anchor's file-wide occurrence count at 3. This test parses
+ * every string-anchored full citation in the five docs/okf siblings,
+ * resolves its target among the kit-source categories this bundle
+ * anchors, and asserts both properties against the real, current target
+ * file content -- not the doc's own claim. This test was red against the
+ * pre-round-2 anchors (see docs/okf/log.md for the failing counts) and is
+ * green after this round's anchor rewrite.
+ */
+describe("every string-anchored docs/okf citation's anchor is load-bearing (last line, low-collision)", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+  const RESOLVE = anchorScopeResolve();
+
+  interface AnchoredCitation {
+    doc: string;
+    citedPath: string;
+    real: string;
+    start: number;
+    end: number;
+    anchor: string;
+  }
+
+  function collectStringAnchoredCitations(): AnchoredCitation[] {
+    const out: AnchoredCitation[] = [];
+    for (const doc of ANCHOR_OKF_DOCS) {
+      const content = readRepoFile(
+        `packages/orchestrator-workflow/docs/okf/${doc}`,
+      );
+      for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
+        const citedPath = m[1];
+        const anchorRaw = m[4];
+        if (!anchorRaw || !anchorRaw.startsWith('"')) continue;
+        const real = RESOLVE[citedPath];
+        if (!real) continue;
+        const start = Number(m[2]);
+        const end = m[3] ? Number(m[3]) : start;
+        out.push({
+          doc,
+          citedPath,
+          real,
+          start,
+          end,
+          anchor: anchorRaw.slice(1, -1),
+        });
+      }
+    }
+    return out;
+  }
+
+  const anchored = collectStringAnchoredCitations();
+
+  it("found at least one string-anchored citation to check (sanity: not vacuously true)", () => {
+    expect(anchored.length).toBeGreaterThan(0);
+  });
+
+  it("every string anchor's text occurs on the last line of its own cited range", () => {
+    const violations: string[] = [];
+    for (const c of anchored) {
+      const lines = readRepoFile(c.real).split("\n");
+      const lastLine = lines[c.end - 1] ?? "";
+      if (!lastLine.includes(c.anchor)) {
+        violations.push(
+          `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}#"${c.anchor}"\` -- ` +
+            `anchor not found on last line ${c.end} of ${c.real}`,
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+
+  it("every string anchor's text occurs at most 3 times in its own target file", () => {
+    const violations: string[] = [];
+    for (const c of anchored) {
+      const text = readRepoFile(c.real);
+      const count = text.split(c.anchor).length - 1;
+      if (count > 3) {
+        violations.push(
+          `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}#"${c.anchor}"\` -- ` +
+            `anchor text occurs ${count} times in ${c.real} (must be <= 3)`,
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+});
+
+/**
+ * agent-tasks 578f5bfd review round 2 (MEDIUM 5), erosion brake: review
+ * round 1 (HIGH 1) found 44 citations into SKILL.md/agent-templates/
+ * models.ts/test files that this bundle's own citation-audit round
+ * (5c8013c0/578f5bfd round 1) had missed anchoring. This asserts the
+ * count stays at zero going forward: any future citation into one of
+ * those four kit-source categories that lands in docs/okf without an
+ * anchor fails here, listed by doc and citation, instead of silently
+ * reintroducing the gap.
+ */
+describe("every docs/okf citation into a kit-source category this bundle anchors carries an anchor", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+  const RESOLVE = anchorScopeResolve();
+
+  const missing: string[] = [];
+  let examined = 0;
+  for (const doc of ANCHOR_OKF_DOCS) {
+    const content = readRepoFile(
+      `packages/orchestrator-workflow/docs/okf/${doc}`,
+    );
+    for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
+      const citedPath = m[1];
+      const real = RESOLVE[citedPath];
+      if (!real) continue;
+      examined++;
+      if (!m[4]) {
+        const start = m[2];
+        const end = m[3] ? `-${m[3]}` : "";
+        missing.push(`${doc}: ${citedPath}:${start}${end}`);
+      }
+    }
+  }
+
+  // Review round 3 (LOW 6a): a brake that only checks "zero missing"
+  // would stay green if the collection logic itself broke and silently
+  // examined nothing (e.g. a target-resolution regression that emptied
+  // `RESOLVE`). 150 is a floor with headroom below the live count (review
+  // round 4, D31: the live count itself is not hand-written here or
+  // anywhere else in the bundle). Review round 5 (LOW-g): the count is
+  // in the test's own NAME, not only a stdout print -- `examined` is the
+  // same variable both the title template literal and the assertion
+  // below read, so the two can never diverge, and the count is visible
+  // in any reporter's pass/fail line (`--reporter=verbose` or the
+  // default) without needing to isolate stdout at all. Run `npx vitest
+  // run test/docs-consistency.test.ts -t "in-scope citations (sanity"`
+  // and read the count from the passing test's own name.
+  it(`examined ${examined} in-scope citations (sanity: the brake itself did not go blind, more than a token number)`, () => {
+    expect(examined).toBeGreaterThan(150);
+  });
+
+  it("has zero unanchored citations into SKILL.md, an agent template, models.ts, or a test file", () => {
+    expect(missing, missing.join("\n")).toEqual([]);
+  });
+});
+
+/**
+ * agent-tasks 578f5bfd review round 3 found five full citations into a
+ * `*.test.ts` target whose range either ended exactly on a DIFFERENT
+ * test's own head line or named an unrelated test outright (all five
+ * corrected that round). Review round 4 (D30) found the round-3 fix
+ * itself was under-scoped: an "end is a foreign head line" check only
+ * catches a citation that stops exactly AT a sibling's declaration; it
+ * misses a citation that starts inside one describe/it/test block and
+ * ends partway into a different one without landing exactly on that
+ * block's own head line. A structural scan of the round-3-corrected
+ * bundle found 14 such citations (plus more once single-line citations
+ * and non-head-line starts were included in the scan) that the round-3
+ * commit message and this file's own comment had called "legitimate
+ * deliberate partial citations, not drift" without individually checking
+ * each one -- three sampled by hand were citing the wrong test entirely
+ * (see docs/okf/log.md for the count found, the count fixed, and the
+ * three named examples).
+ *
+ * This test replaces the round-3 "end is a foreign head line" check with
+ * the general rule it was an incomplete approximation of: every full
+ * citation's range must lie entirely within ONE describe/it/test block --
+ * the block containing the start line must also contain the end line.
+ * Ending exactly on that block's own closing `});` is fine; ending inside
+ * a nested child block is fine too (a wide citation of an entire
+ * `describe` legitimately covers everything nested inside it, since the
+ * nested block's own span is still within the describe's span); ending
+ * past that block's own closing line -- in a sibling, a parent's trailing
+ * content, or outside any block at all -- is not. The start line does not
+ * have to be the block's own head line: a citation that begins partway
+ * through one test and stays inside that same test the whole way is a
+ * legitimate, deliberate sub-range, not drift; only crossing OUT of the
+ * block the start line belongs to is flagged. Block boundaries are
+ * computed with the TypeScript compiler API (`ts.createSourceFile` plus a
+ * `CallExpression` walk for `describe`/`it`/`test` calls), not
+ * brace-counting, so a brace inside a string, comment, or regex literal
+ * cannot desynchronize the boundary the way naive counting could.
+ *
+ * Single-line citations are included (the round-3 version skipped
+ * `start === end`); a single-line citation still has to resolve to some
+ * describe/it/test block to be meaningful.
+ */
+
+// Imported here (appended at file end), not moved to the top-of-file
+// import block, so adding it does not shift every existing citation into
+// this file -- see the ANCHOR_OKF_DOCS comment above for why this file
+// treats top-of-file insertion as unsafe.
+import ts from "typescript";
+
+describe("every full citation into a *.test.ts target stays inside one describe/it/test block (review round 4, D30)", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+  const RESOLVE = anchorScopeResolve();
+
+  interface TestBlock {
+    startLine: number;
+    endLine: number;
+  }
+
+  interface Checked {
+    doc: string;
+    citedPath: string;
+    real: string;
+    start: number;
+    end: number;
+  }
+
+  // Only bare `describe(`/`it(`/`test(` calls are matched (an Identifier
+  // callee); a property-access form like `describe.each(...)` or
+  // `it.skip(...)` has a PropertyAccessExpression callee instead and is
+  // silently not collected as a block. None of the five in-scope test
+  // files use such a form today (checked: zero `describe.`/`it.`/`test.`
+  // call sites across test/*.test.ts), so this is a latent gap, not a
+  // measured one.
+  function findTestBlocks(fileText: string, fileName: string): TestBlock[] {
+    const sf = ts.createSourceFile(
+      fileName,
+      fileText,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const blocks: TestBlock[] = [];
+    function visit(node: ts.Node): void {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        ["describe", "it", "test"].includes(node.expression.text)
+      ) {
+        blocks.push({
+          startLine:
+            sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          endLine: sf.getLineAndCharacterOfPosition(node.getEnd()).line + 1,
+        });
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sf);
+    return blocks;
+  }
+
+  function innermostBlock(
+    blocks: TestBlock[],
+    line: number,
+  ): TestBlock | undefined {
+    let best: TestBlock | undefined;
+    for (const b of blocks) {
+      if (b.startLine <= line && line <= b.endLine) {
+        if (!best || b.endLine - b.startLine < best.endLine - best.startLine) {
+          best = b;
+        }
+      }
+    }
+    return best;
+  }
+
+  function collectFullTestCitations(): Checked[] {
+    const out: Checked[] = [];
+    for (const doc of ANCHOR_OKF_DOCS) {
+      const content = readRepoFile(
+        `packages/orchestrator-workflow/docs/okf/${doc}`,
+      );
+      for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
+        const citedPath = m[1];
+        const real = RESOLVE[citedPath];
+        if (!real || !real.endsWith(".test.ts")) continue;
+        const start = Number(m[2]);
+        const end = m[3] ? Number(m[3]) : start;
+        out.push({ doc, citedPath, real, start, end });
+      }
+    }
+    return out;
+  }
+
+  const checked = collectFullTestCitations();
+  const blockCache = new Map<string, TestBlock[]>();
+  function getBlocks(real: string): TestBlock[] {
+    let blocks = blockCache.get(real);
+    if (!blocks) {
+      blocks = findTestBlocks(readRepoFile(real), real);
+      blockCache.set(real, blocks);
+    }
+    return blocks;
+  }
+
+  it("found at least one full citation into a *.test.ts target to check (sanity: not vacuously true)", () => {
+    expect(checked.length).toBeGreaterThan(0);
+  });
+
+  it("every citation's start and end line resolve to the same containing describe/it/test block", () => {
+    const violations: string[] = [];
+    for (const c of checked) {
+      const blocks = getBlocks(c.real);
+      const startBlock = innermostBlock(blocks, c.start);
+      if (!startBlock || c.end > startBlock.endLine) {
+        violations.push(
+          `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}\` -- start ` +
+            `line ${c.start} of ${c.real} is ` +
+            (startBlock
+              ? `inside a block ending at line ${startBlock.endLine}, but the citation's end (${c.end}) falls past it`
+              : `not inside any describe/it/test block at all`),
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
   });
 });

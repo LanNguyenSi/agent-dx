@@ -1719,9 +1719,20 @@
   list, spot-checked by direct read (each start line is an `it(` head,
   each end line its closing `});`). Also corrected: model-preselection.md
   `:1117-1174` -> `:1151-1208` (the 0.19.0 guard describe, pre-existing
-  drift widened by this change), run-state-lifecycle-and-markers.md
-  `CHANGELOG.md:568-570` -> `568-573` (range now covers the hex-guard and
-  date-heuristic clause). Consciously accepted, recorded in the run
+  drift widened by this change), run-state-lifecycle-and-markers.md's own
+  citation into `CHANGELOG.md` (numbered 568-570 -> 568-573 at the time,
+  covering the hex-guard and date-heuristic clause; both numbers have
+  since drifted off that content repeatedly as later rounds' own
+  CHANGELOG entries pushed it down -- corrected 2026-08-26 to
+  `CHANGELOG.md:779-784#0.9.0` (review round 4, D30/LOW-c: given the
+  heading anchor its sibling at `run-state-lifecycle-and-markers.md:55`
+  already carries, matching it here too rather than a bare line range, so
+  a future CHANGELOG insertion above `## [0.9.0]` fails this citation on
+  `anchor-heading-mismatch` instead of silently resolving to the wrong
+  section; re-verified against the committed tree a third time this same
+  task, see LOW-d below on why a heading-anchored `CHANGELOG.md` citation
+  still needs re-pointing on every edit above it regardless), see that
+  entry below). Consciously accepted, recorded in the run
   decisions: substring membership in the vocabulary pin (a yaml-key match
   was tried and reverted, see round 3), pre-existing
   `template-markers.test.ts` prettier drift, and the absence of a mechanical
@@ -2019,3 +2030,335 @@
   range, and re-confirmed `okf-kit check` back at 35 findings
   (0 errors / 13 warnings / 22 notices), matching this round's final
   reported state.
+- 2026-08-26: CI-wired okf-kit's anchor check to fail the build for this
+  bundle (agent-tasks task 578f5bfd, following on the anchored-citations
+  feature itself, task 5c8013c0, and its release, task c0effc67). A new
+  `okf-anchor-guard` job in `.github/workflows/ci.yml` runs the same
+  `okf-kit check --json` as the existing warn-only `okf-staleness.yml`
+  drift watch, then narrows to any `anchor-*`-tagged finding (matched by
+  rule-id pattern, not a hardcoded list of the four current rule ids, so a
+  future okf-kit release adding a fifth anchor rule is covered without an
+  edit here) and fails the build when any of them fire. `okf-staleness.yml`
+  itself was not touched: its own header comment already says it must
+  never be the one that fails the build. Note: master carries no required-status-check
+  branch protection today, so "fails the build" describes this job's own
+  run going red, not an enforced merge block; that is an orchestrator
+  decision recorded here, not a branch-protection change.
+
+  Round 2 (review findings against the first pass above): the first pass
+  claimed 122 anchored citations and a single 27-finding mutation-probe
+  number; both were wrong, and the anchors it wrote were not reliably
+  load-bearing. This entry replaces that draft with the corrected,
+  measured state.
+
+  HIGH 1 (44 in-scope citations the first pass missed): the first pass's
+  citation regex required a backtick delimiter around each citation; two
+  of the five docs/okf siblings, `run-state-lifecycle-and-markers.md` and
+  `install-fence-mechanics.md`, cite `SKILL.md` and `test/*.test.ts` in
+  running prose without backticks in several places (the same bare-form
+  shape the CHANGELOG.md heading-anchor citations in those same docs also
+  used), so those 44 citations were silently skipped. okf-kit's own
+  `CITATION_RE` has no backtick requirement; the anchoring pass was
+  redone against that exact citation shape (with or without backticks) to
+  close this gap. Every in-scope citation into the four kit-source
+  categories (`SKILL.md`, the five `assets/agents/*.md` templates,
+  `src/models.ts`, `test/*.test.ts`) now carries a string-form anchor,
+  plus the `CHANGELOG.md` heading anchors from task 5c8013c0 (that anchor
+  mechanism is unaffected by this round, but this round's own CHANGELOG
+  entries pushed every release section beneath them, so those citations'
+  line numbers were re-pointed -- confirmed via `git show 5c7a415 --
+  packages/orchestrator-workflow/docs/okf/review-gate-and-waivers.md
+  packages/orchestrator-workflow/docs/okf/run-state-lifecycle-and-markers.md
+  packages/orchestrator-workflow/docs/okf/subagent-contracts-superset.md
+  | grep -c '^[-+].*CHANGELOG.md:'`: 32 (16 removed, 16 added, a matched
+  pair; the same command against all five docs/okf/*.md siblings
+  including log.md returns 33/17/16, since log.md's own narrative prose
+  happens to carry one unrelated citation matching the same grep
+  pattern -- restricted to the three docs that actually cite
+  `CHANGELOG.md` this way to avoid that false match). Review round 4
+  (D31) removed the hand-counted
+  per-doc/per-round totals this paragraph used to carry here: they drift
+  every time a citation is added, split, or re-pointed (measured
+  twice already in this same task, see the 2026-08-26 entry below for
+  both), so log.md now carries exactly one live count instead, sourced
+  from a command, not typed by hand: `npx vitest run
+  test/docs-consistency.test.ts -t "in-scope citations (sanity"
+  --reporter=verbose` shows a passing test named "examined 171 in-scope
+  citations (sanity: the brake itself did not go blind, more than a
+  token number)" against the committed tree -- the count is read from
+  the test's own name (review round 5, LOW-g), not a stdout print a
+  reporter could suppress, so the number shown can never diverge from
+  the number the floor assertion actually checked (the erosion brake's
+  own count of citations into the four in-scope kit-source categories --
+  `SKILL.md`, the agent templates, `models.ts`, `test/*.test.ts` --
+  across the five docs/okf siblings; `CHANGELOG.md`'s 16 heading-anchored
+  citations are a separate mechanism, deliberately
+  excluded from this count, see the `anchorScopeResolve` comment in
+  `test/docs-consistency.test.ts`). Corrected 2026-08-26
+  (this fix round, after review round 2): the round-2 draft above (and
+  the CHANGELOG's own `[Unreleased]` copy) claimed the `CHANGELOG.md`
+  heading anchors were "untouched"/"unaffected" by round 2, which was
+  already false when written; this fix round's own edits to the
+  CHANGELOG then re-pointed all of them a second time, verified by
+  re-running `okf-kit check` (13 warnings / 22 notices / 0 errors,
+  unchanged) after the second re-point.
+
+  HIGH 2 (anchors not load-bearing): the first pass anchored each citation
+  on whichever line of the range happened to be non-blank and produced a
+  candidate string first, almost always the range's FIRST line. Measured
+  this round: 107 of 121 checkable first-pass anchors sat on the first line,
+  and (corrected 2026-08-26, see that entry: the round-2 draft wrote "21 of
+  61 ... 21 of 61 truly stayed green" here, but round 1 had only 46
+  SKILL.md-targeting anchors, not 61) a 1-line insertion near the top of
+  SKILL.md left 24 of 46 SKILL.md-targeting anchors silently green (22
+  fired: 5 directly via `anchor-not-found-in-range`, 17 via a `blank-start-
+  line` base-check finding that happens to fire first for those particular
+  ranges when shifted, 1 via `unresolved-ambiguous` -- more than one repo
+  carries a `SKILL.md`, so okf-kit itself declines to check a bare-filename
+  citation into it -- one citation hit two rules, so the counts sum to 23
+  against 22 unique fired citations; but 24 of 46 truly stayed green). Root
+  cause: the checker scans the *entire* cited window for the anchor text,
+  not just its recorded line; when the anchor sits on the window's first
+  line and the insertion is shorter than the range itself, the shifted
+  window (old-file coordinates `[start-k, end-k]`) still contains old line
+  `start`, just at a different offset inside the same window, so the text is
+  still "found somewhere in range" and the check stays green. Anchoring on
+  the range's LAST line instead closes this for any insertion size `k >= 1`
+  above the range (old line `end` falls outside `[start-k, end-k]` for every
+  `k >= 1`), so long as the anchor text does not also happen to reappear
+  elsewhere inside the shifted window by coincidence -- which is what the
+  second half of this fix guards against: capping every anchor's whole-file
+  occurrence count at 3 (23 first-pass anchors exceeded that, several using
+  generic tokens like `describe(` that recur dozens of times).
+
+  All 166 in-scope anchors, round 2's own count at the time (122 regenerated
+  from the first pass, 44 newly added for HIGH 1; the live count has since
+  moved, see the 2026-08-26 round-4 entry below for how to read it fresh
+  rather than trusting this number), were rewritten under both rules: (a)
+  walk the cited
+  range's end line backward past any blank/closing-brace/too-short line to
+  the nearest real content line, narrowing the range's end to that line
+  when needed, and anchor there; (b) pick a literal substring of that line
+  that occurs at most 3 times in the whole target file (trying
+  progressively different segments of the line, split around any
+  quote/backtick it contains, when the first candidate is too common).
+  Two anchors needed a manual, not mechanical, fix beyond this (review's
+  finding (c), the anchor must carry the claim the citing sentence makes):
+  `review-gate-and-waivers.md`'s two citations of `reviewer.md (lines 30-31)`
+  (each anchored `"Rules:"`, a section label carrying no claim at all)
+  cite the mandatory-`acceptance_recommendation` rule but landed on the
+  `Rules:` heading two lines above it; the range was widened to `30-36` to
+  reach the actual rule text (reviewer.md lines 35-36: "`
+  acceptance_recommendation` is mandatory: always set it in your output;
+  never leave it blank or omit it."), anchored on the widened range's own
+  last line, `"never leave it blank or omit it."` -- the trailing half of
+  the same two-line rule the citing sentence names, which keeps rules (a)
+  and (c) both satisfied rather than picking the review's suggested
+  phrase ("always set it in your output", on line 35, one line short of
+  the widened range's end) at the cost of rule (a); the two citations
+  behave identically since they cite the same target range. Similarly,
+  `review-gate-and-waivers.md (line 180)` and `subagent-contracts-superset.md (line 294)`
+  both cite `reviewer.md (lines 51-56)` (anchored on its own first line, the goal-
+  reviewing rule, not the reproduction-evidence rule the citing sentences
+  actually describe); widened to `51-61` to enclose the whole
+  reproduction rule through its "does not qualify"/"do not trigger this"
+  exception clause, anchored on the widened range's last line,
+  `"lint) do not trigger this."` -- the exception half of the same rule,
+  for the same rule-(a)-over-suggested-phrase reason as above.
+
+  Per-`k` differential probe (replaces the single 27-finding number from
+  the first pass): inserting `k` dummy lines near the top of
+  `assets/skill/SKILL.md` (before any cited content) and re-running
+  `okf-kit check`, counting how many of the 52 *unique* SKILL.md-targeting
+  cited ranges produce a finding of *any* kind (an anchor-* finding, or a
+  base check like `blank-start-line` that happens to catch the same
+  shifted range first and short-circuits the anchor check per okf-kit's
+  own "anchors checked only once the base checks already passed" rule) --
+  not just anchor-*-tagged findings, since a base-check catch is still a
+  correctly red build, just filed under a different rule id:
+  - `k=1`: 52/52 (100%) of SKILL.md-targeting ranges produce a finding.
+    This is the acceptance measure the review round asked for and it is
+    met.
+  - `k=2`: 51/52 (98%) produce a finding. The one exception:
+    `subagent-contracts-superset.md`'s `SKILL.md (lines 339-368, anchor "T-001")` (the
+    task-slicer `recommended_order` example). `T-001` occurs twice in
+    SKILL.md, once inside its own citation's range (line 347, "id: T-001")
+    and once on the range's own last line (368, the anchor's home). At
+    `k=2` the shifted window still contains old line 347 (the other
+    occurrence), so the check stays green; at `k=1` it happens to be
+    caught anyway, but via `blank-start-line` on the shifted start line,
+    not via the anchor. This is the same "occurrence <= 3 file-wide does
+    not guarantee no collision within the citation's own wide range"
+    residual gap the rule (b) cap narrows but cannot fully close for a
+    citation whose only short, meaningful last-line text is a token
+    (`T-001`) that also appears earlier in the same block; not fixed this
+    round, named here rather than silently left for the next drift
+    incident to rediscover.
+
+  New tests (`packages/orchestrator-workflow/test/docs-consistency.test.ts`,
+  appended at the file's own end, per this file's established convention
+  of never inserting above existing code so as to not shift the many
+  `path:N` citations into it from this same bundle):
+  - "every okf-kit@<version> pin under .github/workflows/ matches
+    package.json" globs every `.github/workflows/*.yml` file for an
+    `okf-kit@<version>` pin (`npm install -g` and `npx` forms) and asserts
+    each equals `packages/okf-kit/package.json`'s version, extending the
+    pre-existing okf-staleness.yml-only version-pin check to also cover
+    `ci.yml`'s own pin (added as a new, additional describe block rather
+    than edited in place, for the same append-only reason).
+  - "every string-anchored docs/okf citation's anchor is load-bearing
+    (last line, low-collision)" mechanically pins rules (a) and (b) above:
+    parses every string-anchored full citation in the five docs/okf
+    siblings (the same citation shape as okf-kit's own `CITATION_RE`, no
+    backtick requirement), resolves each target among the four in-scope
+    kit-source categories, and asserts the anchor text is found on the
+    target's actual last line of the cited range and occurs at most 3
+    times in the whole target file. Verified red against the first pass's
+    anchors (temporarily restoring the pre-round-2 docs/okf/*.md content
+    with the new test code in place): 2 of 3 sub-assertions failed, 116
+    last-line violations (112 unique messages, some citations sharing an
+    identical doc/target/range/anchor tuple) and 24 occurrence violations
+    (some anchors violate both). Corrected 2026-08-26: this entry
+    originally said "24 last-line violations", copied from the
+    occurrence-violations count by mistake; re-run against the same
+    restored pre-round-2 content confirms 116/112/24. Verified green
+    against this round's rewritten anchors: 3/3 passed. Both runs used
+    the real `vitest run` command, not a hand-rolled check.
+  - "every docs/okf citation into a kit-source category this bundle
+    anchors carries an anchor" (the erosion brake): asserts the count of
+    unanchored in-scope citations stays at zero going forward, by name.
+
+  `ci.yml` also gained, this round: a self-test step ahead of the real
+  check that builds a throwaway one-doc OKF bundle (its own tiny git repo)
+  under `$RUNNER_TEMP`, drifts one heading-anchored citation's range into
+  the wrong section without touching its anchor text, and requires the
+  same jq filter the real check uses to report at least one anchor
+  finding against it -- guards the filter itself (a regex typo, an
+  okf-kit finding-shape change) rather than the bundle, and fails red
+  before the real check gets a chance to pass green for the wrong reason;
+  the filter itself now matches any `anchor-*`-tagged finding by pattern
+  rather than the four current rule ids by name; `permissions:
+  {contents: read}` was added at the workflow's top level (it had none
+  before, for any job); and a one-line note was added to the job's own
+  comment that renaming or moving `packages/orchestrator-workflow/docs/okf`
+  requires updating `BUNDLE_PATH` in the same PR.
+
+  `okf-kit check` against a repo build reports 0 errors / 13 warnings / 22
+  notices both before and after this round's full anchor rewrite (0
+  anchor findings either way): the 13 pre-existing warnings are all
+  `install-fence-mechanics.md` short-form findings against `init.test.ts`
+  (12 `test-range-start-not-head`, plus 1 `closing-brace-start-line`
+  against `init.ts`), unrelated to this change and untouched by it.
+
+  Mutation probes, both applied, observed, and reverted (see above for
+  the per-`k` differential probe, which supersedes the single-number
+  version from the first pass). (1) Negative control: same shape as the
+  first pass, a 6-line dummy insertion into SKILL.md partway through the
+  file; findings rose from 13 warnings to 43 (27 new), reverted and
+  re-confirmed back to 13/22 clean. (2) False-positive probe: same shape,
+  a `package.json` patch-version bump touching no bundle doc or cited
+  source range; findings stayed at 13/22/0-anchor, unchanged; reverted.
+  (3) A third, unplanned confirmation happened live while authoring this
+  same entry's own CHANGELOG.md addition (26 inserted lines above the
+  release sections): 15 of the 16 anchored CHANGELOG.md citations
+  immediately flagged `anchor-heading-mismatch`; all 16 were re-pointed by
+  the same +26-line shift and spot-verified by direct read against the
+  actual, current release sections, back to 0 anchor findings.
+
+  Residual gaps this guard does not close, named here rather than
+  silently discovered later: (i) a content change inside a cited range
+  that neither shifts its line count nor disturbs the anchor text itself
+  stays invisible to this check -- purely mechanical (line/text
+  presence), never semantic, the same limit okf-kit's own README
+  documents; (ii) the specific `T-001` collision above, where the rule
+  (b) file-wide occurrence cap does not guarantee no collision within a
+  single wide citation's own range, so one SKILL.md-targeting citation is
+  not detected at `k=2` (it is at `k=1`, the measured acceptance bar).
+
+  Corrected 2026-08-26 (this fix round, orchestrator decision D26): a
+  third residual gap was missing from this list entirely. Full citations
+  into `src/init.ts`, `src/cli.ts`, `src/writers.ts`, `src/uninstall.ts`,
+  `src/opencode.ts`, `src/assets.ts`, `assets/templates/*.md`, and
+  `assets/agents-md-section.md` carry no anchor and sit outside this
+  guard, since the spec's four in-scope categories are only `SKILL.md`,
+  the agent templates, `models.ts`, and `test/*.test.ts`. Measured on the
+  committed tree (`node /tmp/measure_residual2.mjs`, a standalone script
+  reusing this file's own `ANCHOR_CITATION_RE` and reading
+  `assets/templates/`'s own directory listing to classify each citation's
+  basename): `src/init.ts` 68, `src/cli.ts` 19, `src/writers.ts` 12,
+  `src/uninstall.ts` 10, `src/opencode.ts` 4, `src/assets.ts` 1,
+  `assets/templates/*.md` 19, `assets/agents-md-section.md` 9 -- 142
+  unanchored full citations altogether, none of which this guard or its
+  erosion brake protects. (iii) A follow-up task will extend both the
+  anchoring pass and the erosion brake to `src/**` and `assets/**`; not
+  done in this task, D26 above.
+
+  Superseded 2026-08-26 (review round 4, D30). This paragraph originally
+  described a round-3 check ("no full citation into a `*.test.ts` target
+  ends on a foreign describe/it/test head line") narrower than the defect
+  it was meant to catch, and a round-3 claim that this paragraph's own
+  6-of-25 spot-check of "start is not a head line" citations found "all
+  legitimate ... not drift". Both were wrong, caught by review round 4's
+  own independent 8-of-25 sample, which found 3 mis-cited (named in the
+  2026-08-26 round-4 entry above: the citations formerly at
+  `init.test.ts` lines 1114-1121, 729-764, and 1138-1193, all now fixed)
+  -- and one of round 3's own "verified legitimate" six, the citation
+  formerly at `init.test.ts` lines 153-169, was independently confirmed
+  wrong by round 4's structural scan below, contradicting the
+  round-3 claim about that same citation. The round-3 check is replaced by
+  the broader STRADDLE check below, not merely extended: the round-3 symptom
+  (end is a foreign describe/it/test head line) is a special case of
+  straddling except when the end line is a NESTED CHILD block's own head
+  line still inside the start's own (wider) block -- round-3's check would
+  wrongly flag that as an error, straddle would not, since the child is
+  still within the parent's span. Checked at this commit (excluding the
+  degenerate single-line case of a citation whose start and end are both a
+  block's own head line, e.g. the single-line citation into `init.test.ts`
+  at line 1796, which is straddle-clean by construction and not what "nested
+  child" means here): 0 citations in the bundle have an end line that is a
+  head line of a nested child while still being straddle-clean, so this
+  round's fixes did not need to reconcile any such case; the exact scan is
+  not reproduced here. The STRADDLE check is also exhaustive rather than
+  sampled: every full citation into a `*.test.ts` target, checked, not a
+  subset. Measured on the round-3-corrected bundle before this round's
+  fixes: 16 unique ranges failed it -- 15 straddles (14 where start and end
+  land in two different `it()`/`test()` blocks, plus 1,
+  `docs-consistency.test.ts:1774-1921`, where start correctly resolved to a
+  `describe(` block but end escaped past its own close) and 1
+  (`subagent-contracts-superset.md`'s citation into
+  `docs-consistency.test.ts:513-519`) where the citation starts inside a
+  JSDoc comment immediately before a `describe(` rather than inside any
+  block at all, so it has no containing block to straddle from; all 16 were
+  re-pointed
+  to the test each citing sentence actually names (see the round-4 entry
+  above for the count-found/count-fixed detail and the "start need not be
+  the block's own head line" design note). A `start !==` the block's own
+  head line, by itself, is not re-flagged as an error going forward
+  (per-review design: a sub-range within the correct block is legitimate);
+  what round 3 got wrong was treating "not literally a head line" as
+  sufficient evidence of "legitimate", without checking whether start and
+  end even resolved to the same block. That gap is what the STRADDLE
+  check closes structurally. It does not close, and no round of this task
+  has closed, the narrower case a `start !==head` citation that
+  resolves to the *wrong* block in a way that still satisfies the
+  straddle rule (i.e. both start and end land inside one block, just not
+  the block the sentence actually names) -- catching that needs reading
+  the sentence against the target, which remains manual, sampled, and
+  named as an open residual gap rather than claimed closed.
+
+  Corrected 2026-08-26 (this fix round, review round 4, D30, LOW-d): a
+  fifth residual gap, named after paying its cost repeatedly across this
+  same task. okf-kit's `CITATION_RE` requires a literal `path:N[-M]`
+  pair; a heading-anchored `CHANGELOG.md` citation's line numbers are not
+  independent of the heading they name, and there is no line-independent
+  citation form today (`#0.9.0` alone, without `:N-M`, is not a valid
+  citation). So every CHANGELOG entry inserted above a cited release
+  section re-points every citation into it, mechanically, with no way to
+  express "just find `## [0.9.0]` wherever it is." This task
+  (578f5bfd) paid that cost four times against the same 16 (now
+  17, after this round added one) citations, once per round that touched
+  CHANGELOG.md: +26 (round 1's own entry), +32 (round 2's), +3 (round
+  3's), +1 (round 4's, this entry). A follow-up task to give okf-kit a
+  line-independent, heading-only citation form (`CHANGELOG.md#0.9.0`,
+  resolved by scanning for the heading rather than a fixed line number)
+  is the orchestrator's to size and schedule, not this task's.
