@@ -17,6 +17,20 @@ export { UsageError };
 export interface CheckOptions {
   repoRoot?: string;
   strict?: boolean;
+  /**
+   * Opt-in for `citations-resolve`'s stricter anchor checks
+   * (`anchor-required`, `anchor-not-on-last-line`,
+   * `anchor-not-unique-in-range`, and the test-file block-boundary check
+   * applied to a full citation's own range). See the "Anchor strictness
+   * (opt-in)" doc block in `src/rules/citations-resolve.ts`.
+   */
+  requireAnchors?: boolean;
+  /**
+   * Glob/exact-match patterns exempting a matching citedPath from
+   * `anchor-required` (see `RequireAnchorsOptions` in `src/types.ts`).
+   * Ignored when `requireAnchors` is not set.
+   */
+  requireAnchorsAllow?: string[];
   /** Test-only override for git access; production code shells out to the real `git` binary. */
   runGit?: RunGit;
 }
@@ -44,6 +58,9 @@ export function runCheck(
     ? path.resolve(options.repoRoot)
     : detectRepoRoot(resolvedBundleDir, options.runGit);
   const ctx = loadBundle(resolvedBundleDir, repoRoot, options.runGit);
+  if (options.requireAnchors) {
+    ctx.requireAnchors = { allow: options.requireAnchorsAllow ?? [] };
+  }
 
   const findings = allRules.flatMap((rule) => rule.run(ctx));
   const summary = summarize(findings);
@@ -79,16 +96,34 @@ program
   )
   .option("-j, --json", "Output findings as JSON")
   .option("-s, --strict", "Also fail (exit 1) when warnings are present")
+  .option(
+    "--require-anchors",
+    "citations-resolve: also require every in-repo full citation to carry a #anchor, and check " +
+      "a string anchor lands uniquely on the last line of its range (opt-in, see README)",
+  )
+  .option(
+    "--require-anchors-allow <patterns...>",
+    "citations-resolve: citedPath glob/exact patterns (e.g. README.md) exempt from " +
+      "--require-anchors' anchor-required check",
+  )
   .exitOverride()
   .action(
     (
       bundleDir: string,
-      opts: { repoRoot?: string; json?: boolean; strict?: boolean },
+      opts: {
+        repoRoot?: string;
+        json?: boolean;
+        strict?: boolean;
+        requireAnchors?: boolean;
+        requireAnchorsAllow?: string[];
+      },
     ) => {
       try {
         const result = runCheck(bundleDir, {
           repoRoot: opts.repoRoot,
           strict: opts.strict,
+          requireAnchors: opts.requireAnchors,
+          requireAnchorsAllow: opts.requireAnchorsAllow,
         });
         const output = opts.json
           ? renderJson(result.bundleDir, result.findings)

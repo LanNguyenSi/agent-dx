@@ -30,6 +30,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `` `path#heading` `` shape in ordinary prose (a Markdown link's target
   written in backticks) are unaffected: they no longer parse as a citation
   at all, producing the same findings as before this form existed.
+- `citations-resolve`: a new `--require-anchors` opt-in (and
+  `--require-anchors-allow <patterns...>` for exempting specific citedPath
+  globs/exact matches) adds three stricter, `warning`-severity checks, off
+  by default so an existing bundle's plain `check` findings are unaffected:
+  `anchor-required` (an in-repo full citation carries no `#anchor` at all,
+  except a reserved citing doc or an allowlisted target),
+  `anchor-not-on-last-line` (a string anchor was found in its cited range,
+  but not on the range's own last line -- an anchor on the first line
+  survives a small insertion above the range, since the shifted window
+  still contains its original content just at a different offset; the
+  last line falls out of the window on any insertion at all), and
+  `anchor-not-unique-in-range` (a string anchor occurs more than once
+  inside its cited range; a count of zero stays `anchor-not-found-in-range`
+  as before, unconditionally). The opt-in also extends the existing
+  test-file block-boundary check (`test-range-start-not-head`/
+  `test-range-end-not-closing`, previously short-form-only) to a full
+  citation's own range into a `.test.ts`/`.spec.ts` target, reusing
+  `checkRangeBoundary` rather than a second implementation; deliberately
+  scoped to test-file targets only, not the Markdown half of that same
+  check, for the same false-positive reason the Markdown half was already
+  scoped to short-form citations. See "Anchor strictness (opt-in,
+  `--require-anchors`)" in the README for the measured findings against
+  two real bundles' `docs/okf` and the full rationale.
 
 ## [0.7.0] - 2026-08-26
 

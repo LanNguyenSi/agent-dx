@@ -1953,3 +1953,116 @@ describe("citations-resolve: anchor-malformed", () => {
     expect(f?.message).not.toContain("unrelated prose");
   });
 });
+
+// Fixture: test/fixtures/citations-resolve-require-anchors/ (docs/okf/
+// require-anchors.md + src/). Exercises the `--require-anchors` opt-in
+// (see the "Anchor strictness (opt-in)" doc block in
+// src/rules/citations-resolve.ts): anchor-required, anchor-not-on-last-line,
+// anchor-not-unique-in-range, and the test-file block-boundary check
+// applied to a full citation's own range.
+const REQUIRE_ANCHORS_ROOT = path.join(
+  FIXTURES_DIR,
+  "citations-resolve-require-anchors",
+);
+
+function loadRequireAnchors(allow: string[] = []) {
+  const ctx = loadFixture(
+    "citations-resolve-require-anchors/docs/okf",
+    REQUIRE_ANCHORS_ROOT,
+  );
+  return { ...ctx, requireAnchors: { allow } };
+}
+
+describe("citations-resolve: --require-anchors opt-in", () => {
+  it("without the opt-in, none of the four new checks fire even though every fixture condition is present", () => {
+    const ctx = loadFixture(
+      "citations-resolve-require-anchors/docs/okf",
+      REQUIRE_ANCHORS_ROOT,
+    );
+    const findings = citationsResolveRule.run(ctx);
+    const newRuleIds = [
+      "anchor-required",
+      "anchor-not-on-last-line",
+      "anchor-not-unique-in-range",
+      "test-range-start-not-head",
+      "test-range-end-not-closing",
+    ];
+    const hits = findings.filter((f) =>
+      newRuleIds.some((id) => f.message.includes(`[${id}]`)),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("anchor-required: an unanchored full citation into an in-repo file is flagged once the opt-in is on", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const f = findingFor(findings, "src/target.ts:2");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-required]");
+    expect(f?.severity).toBe("warning");
+  });
+
+  it("anchor-required: an unanchored full citation into an allowlisted target is not flagged", () => {
+    const findings = citationsResolveRule.run(
+      loadRequireAnchors(["README.md"]),
+    );
+    const hit = findings.find((f) => f.message.startsWith("`README.md:1`"));
+    expect(hit).toBeUndefined();
+  });
+
+  it("anchor-required: without the target on the allowlist, the same citation is flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const hit = findings.find(
+      (f) =>
+        f.message.startsWith("`README.md:1`") &&
+        f.message.includes("[anchor-required]"),
+    );
+    expect(hit).toBeDefined();
+  });
+
+  it("anchor-required: an anchored full citation is never flagged, opt-in or not", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const hit = findings.find((f) =>
+      f.message.startsWith('`src/note.md:2#"Second line"`'),
+    );
+    expect(hit).toBeUndefined();
+  });
+
+  it("anchor-not-on-last-line: a string anchor found once, not on the range's last line, is flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const f = findingFor(findings, 'src/note.md:1-2#"First line"');
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-not-on-last-line]");
+    expect(f?.message).toContain("line 1");
+    expect(f?.message).toContain("(2)");
+    expect(f?.severity).toBe("warning");
+  });
+
+  it("anchor-not-unique-in-range: a string anchor occurring twice in its own range is flagged, not anchor-not-on-last-line", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith('`src/target.ts:1-4#"dup marker"`'),
+    );
+    expect(matches).toHaveLength(1);
+    expect(matches[0]?.message).toContain("[anchor-not-unique-in-range]");
+    expect(matches[0]?.message).toContain("occurs 2 times");
+    expect(matches[0]?.severity).toBe("warning");
+  });
+
+  it("test-file block-boundary: a full citation's range ending on a different block's own head line is flagged, opt-in only", () => {
+    // This citation is also unanchored, so it separately gets an
+    // anchor-required finding (see the test above); findingFor only
+    // returns the first match for its citation prefix, so this asserts
+    // against the specific boundary finding by rule id instead.
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/target.test.ts:4-10`"),
+    );
+    const boundary = matches.find((f) =>
+      f.message.includes("[test-range-end-not-closing]"),
+    );
+    expect(boundary).toBeDefined();
+    expect(matches.some((f) => f.message.includes("[anchor-required]"))).toBe(
+      true,
+    );
+  });
+});

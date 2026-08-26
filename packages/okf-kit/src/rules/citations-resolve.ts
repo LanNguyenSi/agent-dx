@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getValidSources } from "../util.js";
-import type { BundleDoc, Finding, Rule } from "../types.js";
+import type {
+  BundleDoc,
+  Finding,
+  RequireAnchorsOptions,
+  Rule,
+} from "../types.js";
 
 const RULE_ID = "citations-resolve";
 
@@ -220,6 +225,82 @@ const RULE_ID = "citations-resolve";
  *     plus prose) to stay in sync, the exact class of drift this rule
  *     exists to catch.
  */
+/**
+ * Anchor strictness (opt-in, `--require-anchors`, see `src/cli.ts`).
+ * Backward compatible by construction: every check in this section is
+ * gated on `ctx.requireAnchors` being present (`RequireAnchorsOptions`, see
+ * `src/types.ts`), so a consumer that never passes `--require-anchors`
+ * sees byte-identical findings to before this section existed. Three new
+ * rule ids, all `warning`-severity, mirroring this rule's own "a wrong
+ * start/target is strong drift evidence" posture rather than the `notice`
+ * posture reserved for the mechanical prose checks with a real
+ * false-positive risk (`markdown-range-boundary-bracket-or-fence` and
+ * friends):
+ *
+ *   - `anchor-required`: an in-repo full citation (`path:N`/`path:N-M`,
+ *     resolved to a real target -- an unresolved citation already gets its
+ *     own `missing-file`/`unresolved-ambiguous` finding, not this one)
+ *     carrying no `#anchor` at all. Exempted the same way this rule already
+ *     exempts short-form matching for a reserved citing doc
+ *     (`doc.isReserved`, e.g. `log.md`'s append-only line-number narration),
+ *     and additionally by `requireAnchors.allow`: a citedPath matching one
+ *     of its glob/exact patterns (matched against the citation's raw,
+ *     as-written `citedPath` text -- see `matchesAllowPattern`) is exempt,
+ *     for a doc category this check is not (yet) meant to cover, e.g. a
+ *     README or install guide whose prose is not line-anchored the way a
+ *     CHANGELOG or source citation is.
+ *   - `anchor-not-on-last-line`: layered on `checkAnchor`'s existing string
+ *     branch. An anchor sitting on the FIRST line of a wide range survives a
+ *     k-line insertion above the range whenever k is smaller than the range
+ *     itself, because the shifted window (the citation's own line numbers,
+ *     re-read after the insertion) still contains the original first
+ *     line's content, just at a different offset inside the window.
+ *     Anchoring on the LAST line instead closes that: the original last
+ *     line falls out of the shifted window on any insertion size >= 1, not
+ *     only large ones.
+ *   - `anchor-not-unique-in-range`: also layered on the string branch. An
+ *     anchor text occurring more than once inside its own cited range is
+ *     ambiguous evidence -- which occurrence is the one actually pinning
+ *     the citation? A count of zero is unaffected (already
+ *     `anchor-not-found-in-range`, unconditionally, not double-reported
+ *     here).
+ *
+ * Both of the last two are checked only once a match exists at all (count
+ * >= 1); uniqueness is checked before last-line placement, since a
+ * non-unique anchor is the more fundamental problem (which of the several
+ * matching lines "is" the anchor is undefined before asking whether the
+ * one occurrence is on the right line).
+ *
+ * A fourth existing check, the test-file block-boundary check
+ * (`checkRangeBoundary`, already applied to short-form citations via
+ * `checkShortFormTarget`), is also applied to a FULL citation's own range
+ * into a `.test.ts`/`.spec.ts` target under this same opt-in -- reusing the
+ * function rather than re-implementing it, per this rule's own "one
+ * mechanism, not two" convention (see `checkFullTarget`). Deliberately
+ * scoped to the same flag rather than a separate one: turning it on
+ * unconditionally would change existing, already-green full citations for
+ * every consumer bundle, not just one that opted in.
+ */
+
+/**
+ * True when `citedPath` (the citation's raw, as-written path text) matches
+ * one of `patterns`: an exact string match, or a glob with `*` (any run of
+ * characters) and `?` (any single character) as the only wildcards -- the
+ * minimal shape needed for `requireAnchors.allow`'s own documented example
+ * (`["README.md", "INSTALL-AGENT.md"]`), not a general-purpose glob engine.
+ */
+function matchesAllowPattern(citedPath: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => {
+    if (!pattern.includes("*") && !pattern.includes("?")) {
+      return pattern === citedPath;
+    }
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    const reSource =
+      "^" + escaped.replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+    return new RegExp(reSource).test(citedPath);
+  });
+}
+
 const ANCHOR_HEADING_MAX_LEVEL = 2;
 const MD_HEADING_RE = /^(#{1,6})\s+(.*)$/;
 
@@ -371,15 +452,38 @@ function checkAnchor(
   startLine: number,
   endLine: number,
   lines: string[],
+  requireAnchors?: RequireAnchorsOptions,
 ): Problem | null {
   if (anchor.kind === "string") {
+    let count = 0;
+    let lastMatchLine = -1;
     for (let i = startLine - 1; i <= endLine - 1 && i < lines.length; i++) {
-      if ((lines[i] ?? "").includes(anchor.text)) return null;
+      if ((lines[i] ?? "").includes(anchor.text)) {
+        count++;
+        lastMatchLine = i + 1;
+      }
     }
-    return {
-      rule: "anchor-not-found-in-range",
-      message: `anchor "${anchor.text}" does not occur in the cited range (${startLine}-${endLine})`,
-    };
+    if (count === 0) {
+      return {
+        rule: "anchor-not-found-in-range",
+        message: `anchor "${anchor.text}" does not occur in the cited range (${startLine}-${endLine})`,
+      };
+    }
+    if (requireAnchors) {
+      if (count > 1) {
+        return {
+          rule: "anchor-not-unique-in-range",
+          message: `anchor "${anchor.text}" occurs ${count} times in the cited range (${startLine}-${endLine}); expected exactly once`,
+        };
+      }
+      if (lastMatchLine !== endLine) {
+        return {
+          rule: "anchor-not-on-last-line",
+          message: `anchor "${anchor.text}" occurs on line ${lastMatchLine}, not the cited range's last line (${endLine})`,
+        };
+      }
+    }
+    return null;
   }
 
   const fencedLines = computeFencedLineIndices(lines);
@@ -892,14 +996,39 @@ function checkFullTarget(
   endLine: number | null,
   resolvedPath: string,
   anchor: Anchor | null,
+  requireAnchors?: RequireAnchorsOptions,
 ): Problem | null {
   const read = readTarget(resolvedPath);
   if ("rule" in read) return read;
   const lines = splitLines(read.content);
   const base = checkTargetLines(citedPath, startLine, endLine, lines);
   if (base) return base;
+  // Test-file block-boundary check, opt-in only (see "Anchor strictness
+  // (opt-in)" above): a full citation's own range into a .test.ts/.spec.ts
+  // target is checked the same way a short-form citation's already is
+  // (checkRangeBoundary), reused rather than reimplemented. Deliberately
+  // scoped to test-file targets only (isTestFile), not also the markdown
+  // branch checkRangeBoundary shares with short-form: a full citation into
+  // a markdown target legitimately cites a couple of arbitrary lines all
+  // the time (e.g. two lines of a code fence example), the exact reasoning
+  // checkShortFormTarget's own doc comment already gives for why this
+  // check was scoped to short-form in the first place -- extending only
+  // the test-file half here, not the markdown half, avoids reintroducing
+  // that false-positive risk for full citations. Only meaningful for an
+  // actual range (endLine !== null); a single-line citation trivially
+  // starts and ends on the same line and has nothing to straddle.
+  if (requireAnchors && endLine !== null && isTestFile(citedPath)) {
+    const boundary = checkRangeBoundary(citedPath, startLine, endLine, lines);
+    if (boundary) return boundary;
+  }
   if (!anchor) return null;
-  return checkAnchor(anchor, startLine, endLine ?? startLine, lines);
+  return checkAnchor(
+    anchor,
+    startLine,
+    endLine ?? startLine,
+    lines,
+    requireAnchors,
+  );
 }
 
 /**
@@ -1839,6 +1968,7 @@ function scanDoc(
   root: string,
   bundleDir: string,
   doc: BundleDoc,
+  requireAnchors?: RequireAnchorsOptions,
 ): Finding[] {
   const findings: Finding[] = [];
   const content = doc.raw;
@@ -2052,12 +2182,33 @@ function scanDoc(
       );
     }
 
+    // anchor-required (opt-in, warning): see the "Anchor strictness
+    // (opt-in)" doc block above. Gated on the same posture every other
+    // per-atom check already uses (only reached once the citation resolved
+    // to a real, unambiguous, non-skipped target), plus a reserved citing
+    // doc (e.g. log.md) and an allowlisted citedPath being exempt.
+    if (
+      requireAnchors &&
+      !anchor &&
+      !doc.isReserved &&
+      !matchesAllowPattern(citedPath, requireAnchors.allow)
+    ) {
+      pushDrift(
+        findings,
+        doc.relPath,
+        citation,
+        "anchor-required",
+        `full citation into an in-repo file carries no #anchor (--require-anchors is on)`,
+      );
+    }
+
     const problem = checkFullTarget(
       citedPath,
       startLine,
       endLine,
       resolution.path,
       anchor,
+      requireAnchors,
     );
     if (problem?.rule === "unreadable-target") {
       pushUnreadable(
@@ -2319,6 +2470,8 @@ export const citationsResolveRule: Rule = {
     // Fresh per invocation: see findByBasename's doc comment for why this
     // is not held at module scope.
     const cache: BasenameCache = new Map();
-    return ctx.docs.flatMap((doc) => scanDoc(cache, root, ctx.bundleDir, doc));
+    return ctx.docs.flatMap((doc) =>
+      scanDoc(cache, root, ctx.bundleDir, doc, ctx.requireAnchors),
+    );
   },
 };
