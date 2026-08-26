@@ -150,7 +150,7 @@ below.
   free, no test edit needed for the 0.21.0 role addition; an omitted `model:`
   also means `opencodeEffortLine` short-circuits to no effort line, so this
   case is unaffected by the 0.22.0 pin), and the disambiguation hint goes to
-  stderr, never stdout (`test/init.test.ts:1794-1797#"const result = run("`).
+  stderr, never stdout (`test/init.test.ts:1910-1916#"expect(result.stdout).not.toContain("`).
 - **Codex.** Codex gets no per-role subagent definition files at all: `init`
   installs only `.agents/skills/orchestrator-workflow/SKILL.md` for the
   `codex` harness (`src/init.ts:524-526`); there is no `model:` surface for
@@ -313,7 +313,7 @@ role's default file is byte-for-byte identical between them on both
 harnesses. With `--profile full` and tiers on, that is 5 base files plus 10
 variants since 0.21.0 (was 4 base files plus 9 variants: 13 total, before
 advisor added its own base file plus one `xhigh` variant): 15 total per
-harness (`test/init.test.ts:1267-1323#"expect(explorerLow).toContain("` pins the count and, as a dedicated
+harness (`test/init.test.ts:1300-1345#"advisor's only variant is xhigh"` pins the count and, as a dedicated
 anti-downgrade check, that `reviewer.md` and, since 0.21.0, `advisor.md`
 still carry `model: opus`, now with `effort: high` rather than no `effort:`
 line since 0.22.0). opencode's variant `model:` values come from a new,
@@ -321,7 +321,7 @@ separate resolution pass keyed by `ModelClass` instead of `Role`
 (`InitOptions.opencodeClassModels`, `init.ts:62-70`; resolved in `cli.ts` at
 `:291-322`, mirroring the existing per-role opencode resolution just above
 it at `cli.ts:286-295`). The Claude-family-`variant:` and Ollama-no-effort-field
-provider-branch outcomes are pinned at `test/init.test.ts:1388-1446#"model: openai/gpt-5"`; a
+provider-branch outcomes are pinned at `test/init.test.ts:1504-1538#"expect(implementerLow).not.toContain(" and test/init.test.ts:1541-1559#"model: ollama/llama3"`; a
 resolved class id with no provider prefix at all (no `/`) reaches the same
 no-effort-field outcome as Ollama but via `opencodeEffortLine`'s
 `provider === undefined` branch rather than its `provider === "ollama"`
@@ -369,7 +369,7 @@ effort field either way, identical to the tiers-off era's own output on
 that specific axis. `opencodeVariantEffortLine` was renamed to
 `opencodeEffortLine` in the same commit since the function is no longer
 variant-exclusive; its own dispatch logic is unchanged. Test coverage:
-`test/init.test.ts:1342-1381#"// no-effort-pin era output byte for byte on this axis."` (opencode default files: reviewer/advisor get
+`test/init.test.ts:1375-1381#"// no-effort-pin era output byte for byte on this axis."` (opencode default files: reviewer/advisor get
 `variant: high` on an anthropic-resolved model, the three medium-default
 roles get no effort field at all, matching the pre-0.22.0 byte shape on
 that axis) plus the legacy-frontmatter and two-target byte-identity tests
@@ -435,7 +435,7 @@ misreported as a leftover, and a real leftover under a harness this run
 happens to drop is still reported; see
 [install-fence-mechanics.md](install-fence-mechanics.md)'s "What `init`
 writes" section for the full mechanics, and
-`test/init.test.ts:896-979#"tiers: false,"`'s dedicated `describe` for both cases exercised
+`test/init.test.ts:941-1005#"The .opencode harness was only just added this run and was never"`'s dedicated `describe` for both cases exercised
 directly. That block's own mutation probe covered only the *tiers-off* note
 loop's ledger gate; review round 3 (R3-L1) added a sibling
 `test/init.test.ts:1029-1063#"note) => !note.includes("` `describe` proving the ledger gate inside the
@@ -476,7 +476,7 @@ override-vs-persist rule now also covers `--profile` (`src/cli.ts:242-252`)
 and, since 0.19.0, `--tiers`/`--no-tiers` (`src/cli.ts:267-277`, see
 "Effort tiers" above): a plain re-run keeps the previously installed value
 for each, an explicit flag overrides it. Test:
-`test/init.test.ts:1114-1121#"const result = spawnSync("` runs `init --models implementer=haiku`, then a
+`test/init.test.ts:1146-1165#"model: haiku"` runs `init --models implementer=haiku`, then a
 plain `init` re-run, and asserts the manifest and the installed
 `.claude/agents/implementer.md` both still carry `haiku`. A hand-edited or
 damaged manifest degrades gracefully per-field: a non-object `harnesses`
@@ -487,10 +487,10 @@ missing `profile` field degrades to `"full"` rather than `"minimal"`, and
 (`src/init.ts:115-183`; end-to-end proof at `test/init.test.ts:278-308#"expect(manifest.models.implementer).toBe("`,
 where a malformed `reviewer: 'opus: "x"'` is dropped to `opus` while a valid
 sibling `implementer: "haiku"` survives; the `profile`-fallback proof is
-`test/init.test.ts:729-764#"recursive: true });"`, see
+`test/init.test.ts:762-791#"should exist under the full-profile fallback"`, see
 [install-fence-mechanics.md](install-fence-mechanics.md) for why that test
 starts from a target with no prior `full` install; the `tiers`-fallback
-proof is `test/init.test.ts:1138-1193#"expect(agents).toEqual(["`, see "Effort tiers" above).
+proof is `test/init.test.ts:1170-1215#"explorer.md has no frontmatter block"`, see "Effort tiers" above).
 
 The manual/agent install path (`INSTALL-AGENT.md`) mirrors this contract by
 hand: step 2 tells the agent to *ask* the operator for harnesses, the role
@@ -579,7 +579,7 @@ claim fails a targeted assertion instead of only showing up as an
 unguarded prose diff.
 
 Since 0.22.0, a fourth, site-specific `describe`
-(`test/docs-consistency.test.ts:1774-1921#"* full-profile role enumeration."`) guards the pinned-default-effort
+(`test/docs-consistency.test.ts:1759-1904#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
 policy in `agents-md-section.md`'s Scaling delegation bullet list and
 `SKILL.md` step 6: a derivation-based check (not a hand-maintained role
 list, the same discipline the 0.20.0 tier-selection-policy guard above

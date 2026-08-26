@@ -89,10 +89,12 @@ jobs:
       - name: Self-test the anchor-finding filter against a deliberately drifted fixture
         # Guards the jq pipeline below, not the bundle: builds a throwaway
         # one-doc, one-source OKF bundle under $RUNNER_TEMP with a
-        # heading-anchored citation and a string-anchored one (all 166
-        # real anchors in this bundle are string-form; the heading form
-        # only covers CHANGELOG.md's 16, so the fixture drifts one of
-        # each), then edits the source so both anchors' ranges no longer
+        # heading-anchored citation and a string-anchored one (the vast
+        # majority of this bundle's real anchors are string-form; the
+        # heading form covers only CHANGELOG.md's citations, see
+        # docs/okf/log.md for the live counts -- not hand-copied here
+        # since they drift as citations are added or re-pointed), then
+        # edits the source so both anchors' ranges no longer
         # match. If the same jq filter used against the real bundle below
         # does not report at least one anchor finding against this
         # fixture, the filter itself is broken (a regex typo, a schema
@@ -138,14 +140,14 @@ jobs:
             > "${fixture}/bundle/doc.md"
           (cd "${fixture}" && git add -A && git commit -q -m init)
           set +e
-          okf-kit check --json "${fixture}/bundle" > selftest-clean-report.json
+          okf-kit check --json "${fixture}/bundle" > "${fixture}/selftest-clean-report.json"
           set -e
           clean_count=$(jq '[
             .findings[] | select(.message | test("\\[anchor-[a-z-]+\\]$"))
-          ] | length' selftest-clean-report.json)
+          ] | length' "${fixture}/selftest-clean-report.json")
           if [ "${clean_count}" -ne 0 ]; then
             echo "::error title=OKF anchor guard self-test failed::the clean, pre-drift fixture already reports ${clean_count} anchor finding(s) (expected 0); the fixture itself is broken, not just the drift"
-            cat selftest-clean-report.json
+            cat "${fixture}/selftest-clean-report.json"
             exit 1
           fi
           # Drift both citations: repoint each at Section A's lines while
@@ -160,14 +162,18 @@ jobs:
           open(p, 'w').write(c)
           "
           set +e
-          okf-kit check --json "${fixture}/bundle" > selftest-report.json
+          okf-kit check --json "${fixture}/bundle" > "${fixture}/selftest-report.json"
           set -e
           selftest_count=$(jq '[
             .findings[] | select(.message | test("\\[anchor-[a-z-]+\\]$"))
-          ] | length' selftest-report.json)
-          if [ "${selftest_count}" -lt 1 ]; then
-            echo "::error title=OKF anchor guard self-test failed::the anchor-finding jq filter reported ${selftest_count} findings against a fixture with two deliberately drifted anchored citations (expected >= 1); the filter or okf-kit's finding shape changed under this job"
-            cat selftest-report.json
+          ] | length' "${fixture}/selftest-report.json")
+          # Both anchor families (heading-form and string-form) must fire,
+          # not merely "at least one" -- a filter or okf-kit regression
+          # that silently stopped catching one family would otherwise pass
+          # this gate on the other family's finding alone.
+          if [ "${selftest_count}" -lt 2 ]; then
+            echo "::error title=OKF anchor guard self-test failed::the anchor-finding jq filter reported ${selftest_count} findings against a fixture with two deliberately drifted anchored citations, one heading-form and one string-form (expected >= 2, one per family); the filter or okf-kit's finding shape changed under this job"
+            cat "${fixture}/selftest-report.json"
             exit 1
           fi
           echo "Self-test OK: ${selftest_count} anchor finding(s) against the drifted fixture."

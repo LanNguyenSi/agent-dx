@@ -16,16 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/models.ts`, or a `test/*.test.ts` file shifts a cited range out of
   the section or text an anchored bundle citation names, instead of only
   the existing warn-only `okf-staleness.yml` drift watch (which never
-  blocks by design and stays untouched). All 166 in-scope bundle
-  citations into those four source categories now carry a string-form
-  anchor (up from a first-round draft of 122, which review round 2 found
-  had missed 44 bare, non-backtick-delimited citations in two of the five
-  docs/okf siblings; the citation parser was corrected to match okf-kit's
-  own backtick-optional shape); the 16 `CHANGELOG.md` citations still
-  carry heading anchors from the prior round (that mechanism is
-  untouched, but this round's own CHANGELOG entries shifted every
-  release section beneath them, so all 16 were re-pointed +32 lines, see
-  `docs/okf/log.md`) -- 182 anchored citations in the bundle altogether.
+  blocks by design and stays untouched). Every in-scope bundle citation
+  into those four source categories now carries a string-form anchor (up
+  from a first-round draft that review round 2 found had missed 44 bare,
+  non-backtick-delimited citations in two of the five docs/okf siblings;
+  the citation parser was corrected to match okf-kit's own
+  backtick-optional shape); the `CHANGELOG.md` citations still carry
+  heading anchors from the prior round (that mechanism is untouched, but
+  every CHANGELOG entry added above them, this one included, re-points
+  all of them -- see `docs/okf/log.md` for the live count and the
+  re-point history, not hand-copied here since it drifts with every
+  CHANGELOG edit).
 - Every anchor now satisfies two mechanically-checked properties review
   round 2 added (a first-round anchor sitting on a wide range's first line,
   as 107 of 121 did, survives an insertion shorter than the range itself --

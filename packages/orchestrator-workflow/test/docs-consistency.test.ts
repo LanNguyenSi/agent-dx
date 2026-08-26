@@ -2355,8 +2355,11 @@ const ANCHOR_CITATION_RE =
  * read against the mutated file) still contains the original first line's
  * content, just at a different offset inside the window -- measured this
  * round: 107 of the 121 pre-fix anchors sat on the first line, and a
- * 1-line insertion near the top of SKILL.md left 21 of 61 SKILL.md-
- * targeting anchors silently green. Anchoring on the LAST line instead
+ * 1-line insertion near the top of SKILL.md left 24 of the round-1
+ * bundle's 46 SKILL.md-targeting anchors silently green (corrected
+ * 2026-08-26, review round 4, D30: this comment previously said "21 of
+ * 61", copied from a mismeasured round-1 total; see docs/okf/log.md).
+ * Anchoring on the LAST line instead
  * closes that: the original last line falls out of the shifted window on
  * any k >= 1, not only large ones. Separately, an anchor text that recurs
  * many times in its target can still coincidentally reappear inside a
@@ -2486,10 +2489,18 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
   // Review round 3 (LOW 6a): a brake that only checks "zero missing"
   // would stay green if the collection logic itself broke and silently
   // examined nothing (e.g. a target-resolution regression that emptied
-  // `RESOLVE`). This bundle carries 166 in-scope citations today; 150 is
-  // a floor with headroom below that, not the live count, so a modest
-  // future doc trim does not make this brittle.
+  // `RESOLVE`). 150 is a floor with headroom below the live count (review
+  // round 4, D31: the live count itself is not hand-written here or
+  // anywhere else in the bundle -- read it from this test's own stdout
+  // line via `npx vitest run test/docs-consistency.test.ts -t "examined
+  // more than a token number"`), so a modest future doc trim does not
+  // make this brittle.
   it("examined more than a token number of in-scope citations (sanity: the brake itself did not go blind)", () => {
+    // Deliberate console.log, not a debug leftover: this is the one place
+    // the live in-scope citation count is printed, so log.md and
+    // CHANGELOG.md can point at "run this command" instead of a
+    // hand-typed number that silently rots as citations are added.
+    console.log(`examined: ${examined}`);
     expect(examined).toBeGreaterThan(150);
   });
 
@@ -2499,39 +2510,63 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
 });
 
 /**
- * agent-tasks 578f5bfd review round 3: review round 2 found five full
- * citations into a `*.test.ts` target whose range either ended exactly on
- * a DIFFERENT test's own `describe(`/`it(`/`test(` head line (excluding
- * the cited test's own body) or named an unrelated test outright (all
- * five corrected this round, see `docs/okf/log.md`). This mechanically
- * pins the structural half of that defect class going forward: a full
- * citation's range must never END on a describe/it/test head line, since
- * a citation can never legitimately mean to stop exactly where the NEXT
- * test begins -- that always means either the cited test's own body was
- * truncated out, or the citation points at the wrong block entirely.
+ * agent-tasks 578f5bfd review round 3 found five full citations into a
+ * `*.test.ts` target whose range either ended exactly on a DIFFERENT
+ * test's own head line or named an unrelated test outright (all five
+ * corrected that round). Review round 4 (D30) found the round-3 fix
+ * itself was under-scoped: an "end is a foreign head line" check only
+ * catches a citation that stops exactly AT a sibling's declaration; it
+ * misses a citation that starts inside one describe/it/test block and
+ * ends partway into a different one without landing exactly on that
+ * block's own head line. A structural scan of the round-3-corrected
+ * bundle found 14 such citations (plus more once single-line citations
+ * and non-head-line starts were included in the scan) that the round-3
+ * commit message and this file's own comment had called "legitimate
+ * deliberate partial citations, not drift" without individually checking
+ * each one -- three sampled by hand were citing the wrong test entirely
+ * (see docs/okf/log.md for the count found, the count fixed, and the
+ * three named examples).
  *
- * Deliberately narrower than okf-kit's own short-form pair
- * (`test-range-start-not-head`/`test-range-end-not-closing`, see
- * `citations-resolve.ts`'s own doc comment on `checkRangeBoundary`):
- * those are declared there for short-form citations only and explicitly
- * NOT extended to full citations upstream, because this bundle has
- * legitimate full citations into test files that cite an arbitrary
- * sub-range inside one test (not the whole describe/it block), and a
- * blanket "start must be a head line, end must be a closing `});`" rule
- * over every full test-file citation in this bundle would flag those as
- * newly broken. Measured this round on the corrected bundle: a blanket
- * version of that rule finds 25 "start is not a head line" citations that
- * are legitimate deliberate partial citations, not drift (out of scope,
- * not fixed here, named in `docs/okf/log.md`'s residual gaps); the
- * end-is-a-foreign-head-line check below carries zero such false
- * positives against the same, corrected bundle.
+ * This test replaces the round-3 "end is a foreign head line" check with
+ * the general rule it was an incomplete approximation of: every full
+ * citation's range must lie entirely within ONE describe/it/test block --
+ * the block containing the start line must also contain the end line.
+ * Ending exactly on that block's own closing `});` is fine; ending inside
+ * a nested child block is fine too (a wide citation of an entire
+ * `describe` legitimately covers everything nested inside it, since the
+ * nested block's own span is still within the describe's span); ending
+ * past that block's own closing line -- in a sibling, a parent's trailing
+ * content, or outside any block at all -- is not. The start line does not
+ * have to be the block's own head line: a citation that begins partway
+ * through one test and stays inside that same test the whole way is a
+ * legitimate, deliberate sub-range, not drift; only crossing OUT of the
+ * block the start line belongs to is flagged. Block boundaries are
+ * computed with the TypeScript compiler API (`ts.createSourceFile` plus a
+ * `CallExpression` walk for `describe`/`it`/`test` calls), not
+ * brace-counting, so a brace inside a string, comment, or regex literal
+ * cannot desynchronize the boundary the way naive counting could.
+ *
+ * Single-line citations are included (the round-3 version skipped
+ * `start === end`); a single-line citation still has to resolve to some
+ * describe/it/test block to be meaningful.
  */
-describe("no full citation into a *.test.ts target ends on a foreign describe/it/test head line (review round 3)", () => {
+
+// Imported here (appended at file end), not moved to the top-of-file
+// import block, so adding it does not shift every existing citation into
+// this file -- see the ANCHOR_OKF_DOCS comment above for why this file
+// treats top-of-file insertion as unsafe.
+import ts from "typescript";
+
+describe("every full citation into a *.test.ts target stays inside one describe/it/test block (review round 4, D30)", () => {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const readRepoFile = (relPath: string): string =>
     readFileSync(`${repoRoot}/${relPath}`, "utf8");
   const RESOLVE = anchorScopeResolve();
-  const TEST_HEAD_RE = /^\s*(?:describe|it|test)\s*\(/;
+
+  interface TestBlock {
+    startLine: number;
+    endLine: number;
+  }
 
   interface Checked {
     doc: string;
@@ -2539,6 +2574,51 @@ describe("no full citation into a *.test.ts target ends on a foreign describe/it
     real: string;
     start: number;
     end: number;
+  }
+
+  function findTestBlocks(fileText: string, fileName: string): TestBlock[] {
+    const sf = ts.createSourceFile(
+      fileName,
+      fileText,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const blocks: TestBlock[] = [];
+    function visit(node: ts.Node): void {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        ["describe", "it", "test"].includes(node.expression.text)
+      ) {
+        blocks.push({
+          startLine:
+            sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          endLine: sf.getLineAndCharacterOfPosition(node.getEnd()).line + 1,
+        });
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sf);
+    return blocks;
+  }
+
+  function innermostBlock(
+    blocks: TestBlock[],
+    line: number,
+  ): TestBlock | undefined {
+    let best: TestBlock | undefined;
+    for (const b of blocks) {
+      if (b.startLine <= line && line <= b.endLine) {
+        if (
+          !best ||
+          b.endLine - b.startLine < best.endLine - best.startLine
+        ) {
+          best = b;
+        }
+      }
+    }
+    return best;
   }
 
   function collectFullTestCitations(): Checked[] {
@@ -2553,7 +2633,6 @@ describe("no full citation into a *.test.ts target ends on a foreign describe/it
         if (!real || !real.endsWith(".test.ts")) continue;
         const start = Number(m[2]);
         const end = m[3] ? Number(m[3]) : start;
-        if (start === end) continue;
         out.push({ doc, citedPath, real, start, end });
       }
     }
@@ -2561,21 +2640,32 @@ describe("no full citation into a *.test.ts target ends on a foreign describe/it
   }
 
   const checked = collectFullTestCitations();
+  const blockCache = new Map<string, TestBlock[]>();
+  function getBlocks(real: string): TestBlock[] {
+    let blocks = blockCache.get(real);
+    if (!blocks) {
+      blocks = findTestBlocks(readRepoFile(real), real);
+      blockCache.set(real, blocks);
+    }
+    return blocks;
+  }
 
-  it("found at least one full range citation into a *.test.ts target to check (sanity: not vacuously true)", () => {
+  it("found at least one full citation into a *.test.ts target to check (sanity: not vacuously true)", () => {
     expect(checked.length).toBeGreaterThan(0);
   });
 
-  it("no citation's range end line is itself a describe/it/test head line", () => {
+  it("every citation's start and end line resolve to the same containing describe/it/test block", () => {
     const violations: string[] = [];
     for (const c of checked) {
-      const lines = readRepoFile(c.real).split("\n");
-      const endText = lines[c.end - 1] ?? "";
-      if (TEST_HEAD_RE.test(endText)) {
+      const blocks = getBlocks(c.real);
+      const startBlock = innermostBlock(blocks, c.start);
+      if (!startBlock || c.end > startBlock.endLine) {
         violations.push(
-          `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}\` -- range end ` +
-            `(line ${c.end} of ${c.real}) is itself a describe/it/test ` +
-            `head line ("${endText.trim()}")`,
+          `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}\` -- start ` +
+            `line ${c.start} of ${c.real} is ` +
+            (startBlock
+              ? `inside a block ending at line ${startBlock.endLine}, but the citation's end (${c.end}) falls past it`
+              : `not inside any describe/it/test block at all`),
         );
       }
     }

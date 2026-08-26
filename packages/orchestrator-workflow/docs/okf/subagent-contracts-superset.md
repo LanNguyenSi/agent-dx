@@ -42,7 +42,7 @@ exactly as `packages/orchestrator-workflow/test/docs-consistency.test.ts:205#"co
 computes it: `ROLES.filter((role) => !READ_ONLY_ROLES.has(role))` →
 `task-slicer, implementer`. That posture is tool-level only for
 Edit/Write/NotebookEdit; Bash mutation is guarded by prompt instruction alone,
-which `packages/orchestrator-workflow/test/docs-consistency.test.ts:513-519#"expect(readmeMd).toContain("`
+which `packages/orchestrator-workflow/test/docs-consistency.test.ts:515-519#"out of this kit's scope"`
 pins README.md to state honestly ("guarded by instruction only", "nothing
 technically prevents it") rather than claiming full closure — since 0.21.0
 the pinned phrase names `explorer, reviewer, and advisor` instead of just
@@ -124,13 +124,13 @@ but fails the exact-name pin. The explorer pair still has no dedicated
 automated drift guard today, protected only by direct read and review. The
 advisor pair started the same way — a 0.21.0
 `describe("advisor escalation policy ships in the AGENTS.md section and
-SKILL.md")` block (`test/docs-consistency.test.ts:1923-1996#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
+SKILL.md")` block (`test/docs-consistency.test.ts:1925-1996#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
 that `SKILL.md` carries an Advisor output contract block with the right
 top-level shape, a substring-presence pin, not byte-for-byte equality — but
 review round 1 (M2) closed that gap: a dedicated
 `describe("advisor output contract is byte-identical between SKILL.md and
 advisor.md (review round 1, M2)")` block
-(`test/docs-consistency.test.ts:2010-2024#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
+(`test/docs-consistency.test.ts:2012-2024#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
 both raw files and asserts equality, the same pattern the reviewer and
 implementer pairs use.
 
@@ -140,7 +140,7 @@ Every field the subagent input contract requires must have a same-named
 counterpart in the task-slicer's per-task output, so the orchestrator copies
 task fields 1:1 into the implementer contract at delegation time instead of
 inventing values. This was not always true:
-`packages/orchestrator-workflow/CHANGELOG.md:748-771#0.10.0` (0.10.0) records that the
+`packages/orchestrator-workflow/CHANGELOG.md:749-772#0.10.0` (0.10.0) records that the
 slicer contract previously omitted `constraints`, `allowed_changes`,
 `forbidden_changes` even though the implementer input contract already
 required them, forcing the orchestrator to fabricate that content when
@@ -168,7 +168,7 @@ contract (added 0.21.0) is not part of this superset relationship, since an
 advisor spawn is never assembled from a task-slicer's per-task output the
 way an implementer spawn is.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:536-741#"not implementation instructions"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:538-741#"not implementation instructions"`
 enforces this. The load-bearing check derives the *required* field set from
 the live subagent-input yaml block itself rather than hardcoding it
 (`test/docs-consistency.test.ts:596-632#"^ {4}${field}:"`): it regex-extracts top-level fields
@@ -248,14 +248,14 @@ incident count is now evidence rather than rule text too. `SKILL.md:93-94#"gate'
 placement pass) similarly drops a pinned `grounding-mcp 0.6.0` version
 number in favor of "the consuming gate's documentation (grounding-mcp)".
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:725-742#0.11.0` (0.11.0): a
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:726-743#0.11.0` (0.11.0): a
 live incident where a reviewer subagent spawn returned in 5 seconds with 0
 tool uses, handing back harness hook-boilerplate instead of the reviewer
 output contract; a resume of the same spawn produced a correct full review.
 Before 0.11.0 the kit said nothing about malformed returns, leaving room to
 silently accept a non-review as a passed review gate. 0.18.0's
 resume-over-respawn extension has its own motivation
-(`packages/orchestrator-workflow/CHANGELOG.md:435-487#0.18.0`, agent-tasks task
+(`packages/orchestrator-workflow/CHANGELOG.md:436-488#0.18.0`, agent-tasks task
 a932b12a): two further sessions (2026-07-19, 2026-07-20) reproduced the
 identical signal; the 2026-07-19 session's resume outcome was never
 recorded, which is exactly the gap this fix-round's claim-binding closes.
@@ -300,7 +300,7 @@ accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:639-664#0.14.0` (0.14.0): the
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:640-665#0.14.0` (0.14.0): the
 agent-dx run `2026-07-18-harness-subprocess-test-deflake` accepted an
 implementer's "8/8 green" flake-rate claim on a `maxWorkers` cap fix, then
 the reviewer independently reran the suite and found 2/6 red on an
@@ -342,12 +342,12 @@ the identical placeholder block. An output missing the field when probes
 identically in both copies since the R2 pass as "treated as a misfire, not
 evidence" (the installed prompt alone previously said "incomplete").
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:846-884#"expect(skillBlock).toBe(implementerBlock);"` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:848-884#"expect(skillBlock).toBe(implementerBlock);"` pins
 the original 0.16.0 shape: the installed prompt's instruction and field
 mention, :850-856, the claim-only-what-was-measured rule, :858-863, the
 misfire-rule sentence, :865-870, and a byte-for-byte cross-copy equality
 check on the field block, :872-885.
-`test/docs-consistency.test.ts:904-938#"expect(implementerMd).toContain(enumeration);"` pins the R2 additions: step 6's
+`test/docs-consistency.test.ts:906-938#"expect(implementerMd).toContain(enumeration);"` pins the R2 additions: step 6's
 sentence and its claim-only-what-was-measured reference, :908-919, the
 not-applicable clause in both copies, :921-925, and two exact-string pins,
 :927-939, that catch a rename applied identically to both copies — a mutant
@@ -355,7 +355,7 @@ the cross-copy equality check above cannot catch on its own, since it only
 proves the two copies match each other, not that either still uses the
 pinned sub-field names.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:548-590#0.16.0` (0.16.0 plus
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:549-591#0.16.0` (0.16.0 plus
 its same-day R2 follow-up, agent-tasks task 16637a96): a 16-round dogfood
 where two implementer rounds dropped briefed-as-mandatory mutation probes
 from their return entirely; review of the resulting change then found the
