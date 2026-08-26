@@ -8,6 +8,7 @@ sources:
   - src/target.test.ts
   - src/straddle.test.ts
   - src/straddle-plain.ts
+  - src/last-line.test.ts
 ---
 
 # Require-anchors opt-in
@@ -45,3 +46,24 @@ A full citation entirely inside an `it(` body: `src/straddle.test.ts:21-22`.
 A full citation into a non-test `.ts` file whose content happens to
 contain the text `it(`: never checked for straddling since the target is
 not a test file: `src/straddle-plain.ts:1-3`.
+
+A full citation citing a whole `describe` block, including its own nested
+`it(` heads: the nested heads are not a straddle, they are exactly what
+the citation is about: `src/straddle.test.ts:25-33`.
+
+A full citation whose range both straddles into a sibling block's head
+line AND carries a string anchor that is not found anywhere in the range
+-- both problems are reported, not just the first one found:
+`src/straddle.test.ts:6-9#"typo text not present"`.
+
+A whole `it` block citation ending on a bare `});` line, anchored on the
+last real content line before it (no finding):
+`src/last-line.test.ts:4-7#"expect(value).toBe(1)"`.
+
+The same whole `it` block citation, anchored two content lines up instead
+of on the last content line (flagged):
+`src/last-line.test.ts:4-7#"const value = 1"`.
+
+A range that itself ends on a real content line (no closing-boilerplate
+carve-out applies), anchored on the line before it (flagged, unchanged
+behaviour): `src/last-line.test.ts:5-6#"const value = 1"`.

@@ -272,8 +272,9 @@ const RULE_ID = "citations-resolve";
  * one occurrence is on the right line).
  *
  * A fourth check, `test-range-straddles-block` (warning), applies to a FULL
- * citation's own range into a `.test.ts`/`.spec.ts` target under this same
- * opt-in (see `checkTestRangeStraddle`, called from `checkFullTarget`): a
+ * citation's own range into a `.test.`/`.spec.` target (`.ts`, `.js`,
+ * `.mjs`) under this same opt-in (see `checkTestRangeStraddle`, called
+ * from `checkFullTarget`): a
  * full citation's range is expected to stay inside a single `describe`/
  * `it`/`test` block once it starts, so any block-head line
  * (`describe(`/`describe.only(`/`describe.skip(`/`describe.each(`/`it(`/
@@ -458,6 +459,41 @@ function findEnclosingHeading(
   return null;
 }
 
+// A trimmed line composed of nothing but closing brackets/braces/parens
+// plus an optional trailing `,`/`;` -- bare closing boilerplate like `}`,
+// `});`, `]);`, `}),`. Used only by `lastContentLineInRange` (opt-in
+// `anchor-not-on-last-line`, see there): a range that ends on such a line
+// (the common shape of a `});` that closes a whole cited `describe`/`it`
+// block) should not force the anchor onto that boilerplate line itself --
+// the last CONTENT line before it is the meaningful place for an anchor
+// to live.
+const CLOSING_BOILERPLATE_RE = /^[\]\)\};,]*$/;
+
+function isContentLine(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed !== "" && !CLOSING_BOILERPLATE_RE.test(trimmed);
+}
+
+/**
+ * The last line number (1-based, within `[startLine, endLine]`) whose text
+ * is a "content" line -- see `isContentLine`. Walks backward from `endLine`
+ * so a range ending on one or more bare closing-boilerplate lines (`});`,
+ * `]);`, `}),`, a lone `}`) resolves to the real content line before them
+ * instead of the boilerplate itself. Falls back to `endLine` unchanged when
+ * every line in the range is boilerplate or blank (nothing better to
+ * anchor against).
+ */
+function lastContentLineInRange(
+  lines: string[],
+  startLine: number,
+  endLine: number,
+): number {
+  for (let ln = endLine; ln >= startLine; ln--) {
+    if (isContentLine(lines[ln - 1] ?? "")) return ln;
+  }
+  return endLine;
+}
+
 /**
  * Checks an anchored full citation's anchor against its already-resolved,
  * already-range-checked target -- see the "Anchored citations" doc block
@@ -490,13 +526,14 @@ function checkAnchor(
       if (count > 1) {
         return {
           rule: "anchor-not-unique-in-range",
-          message: `anchor "${anchor.text}" occurs ${count} times in the cited range (${startLine}-${endLine}); expected exactly once`,
+          message: `anchor "${anchor.text}" occurs on ${count} lines of the cited range (${startLine}-${endLine}); expected exactly one`,
         };
       }
-      if (lastMatchLine !== endLine) {
+      const lastContentLine = lastContentLineInRange(lines, startLine, endLine);
+      if (lastMatchLine !== lastContentLine) {
         return {
           rule: "anchor-not-on-last-line",
-          message: `anchor "${anchor.text}" occurs on line ${lastMatchLine}, not the cited range's last line (${endLine})`,
+          message: `anchor "${anchor.text}" occurs on line ${lastMatchLine}, not the cited range's last content line (${lastContentLine})`,
         };
       }
     }
@@ -1023,17 +1060,19 @@ function checkFullTarget(
   resolvedPath: string,
   anchor: Anchor | null,
   requireAnchors?: RequireAnchorsOptions,
-): Problem | null {
+): Problem[] {
   const read = readTarget(resolvedPath);
-  if ("rule" in read) return read;
+  if ("rule" in read) return [read];
   const lines = splitLines(read.content);
   const base = checkTargetLines(citedPath, startLine, endLine, lines);
-  if (base) return base;
+  if (base) return [base];
+  const problems: Problem[] = [];
   // test-range-straddles-block, opt-in only (see "Anchor strictness
   // (opt-in)" above and checkTestRangeStraddle): a full citation's own
-  // range into a .test.ts/.spec.ts target must not cross into another
-  // block's head after its own first line. Deliberately scoped to
-  // test-file targets only (isTestFile), not also a markdown branch: a
+  // range into a .test./.spec. target (.ts, .js, .mjs) must not cross
+  // into another block's head after its own first line. Deliberately
+  // scoped to test-file targets only (isTestFile), not also a markdown
+  // branch: a
   // full citation into a markdown target legitimately cites a couple of
   // arbitrary lines all the time (e.g. two lines of a code fence example),
   // the exact reasoning checkShortFormTarget's own doc comment already
@@ -1043,16 +1082,24 @@ function checkFullTarget(
   // on the same line and has nothing to straddle.
   if (requireAnchors && endLine !== null && isTestFile(citedPath)) {
     const straddle = checkTestRangeStraddle(startLine, endLine, lines);
-    if (straddle) return straddle;
+    if (straddle) problems.push(straddle);
   }
-  if (!anchor) return null;
-  return checkAnchor(
-    anchor,
-    startLine,
-    endLine ?? startLine,
-    lines,
-    requireAnchors,
-  );
+  // The anchor check is run independently of the straddle check above
+  // (not gated on it having come back clean): a straddling range and a
+  // missing/misplaced anchor are two independent problems with the same
+  // citation, and reporting only the first one found would silently drop
+  // the other from the output every time both happen to co-occur.
+  if (anchor) {
+    const anchorProblem = checkAnchor(
+      anchor,
+      startLine,
+      endLine ?? startLine,
+      lines,
+      requireAnchors,
+    );
+    if (anchorProblem) problems.push(anchorProblem);
+  }
+  return problems;
 }
 
 /**
@@ -1463,27 +1510,52 @@ function checkRangeBoundary(
 }
 
 /**
+ * Width (in characters) of `text`'s leading run of spaces/tabs -- used by
+ * `checkTestRangeStraddle` to tell a NESTED block head (indented deeper
+ * than the range's own start line) apart from a SIBLING or OUTER one
+ * (indented the same or shallower): citing a whole `describe` block
+ * necessarily contains every `it(`/nested-`describe(` head inside its own
+ * body, and those are not straddling anywhere, they are exactly what the
+ * citation is about.
+ */
+function leadingWhitespaceWidth(text: string): number {
+  return (text.match(/^[ \t]*/) ?? [""])[0].length;
+}
+
+/**
  * `test-range-straddles-block` (opt-in, warning): a FULL citation's own
- * range into a `.test.ts`/`.spec.ts` target, see the "Anchor strictness
- * (opt-in)" doc block above for the full rule text. Checks every line of
- * `[startLine, endLine]` EXCEPT the range's own first line (`startLine`
+ * range into a `.test.`/`.spec.` target (`.ts`, `.js`, `.mjs`), see the
+ * "Anchor strictness (opt-in)" doc block above for the full rule text.
+ * Checks every line of `[startLine, endLine]` EXCEPT the range's own
+ * first line (`startLine`
  * itself is never checked -- see that doc block for why) against
  * `TEST_BLOCK_HEAD_RE`; the first hit (in document order) is reported,
- * matching this file's "one problem per citation" pattern.
+ * matching this file's "one problem per citation" pattern. A block-head
+ * line indented STRICTLY DEEPER than the range's own start line is a
+ * NESTED block (e.g. the `it(`s inside a `describe(` the range cites in
+ * full) and is skipped, not reported: a citation covering a whole block is
+ * expected to contain every head line nested inside it. A block-head line
+ * at the same or a shallower indent is a SIBLING or OUTER block and is
+ * still reported -- this is an approximation of "which block scope is
+ * this line lexically in" using indentation instead of a real AST, chosen
+ * because it reproduces the AST-based reference verdict on every straddle
+ * finding this rule has been measured against; a file that mixes tabs and
+ * spaces, or that does not indent nested blocks at all, can defeat it.
  */
 function checkTestRangeStraddle(
   startLine: number,
   endLine: number,
   lines: string[],
 ): Problem | null {
+  const startIndent = leadingWhitespaceWidth(lines[startLine - 1] ?? "");
   for (let i = startLine; i <= endLine - 1 && i < lines.length; i++) {
     const text = lines[i] ?? "";
-    if (TEST_BLOCK_HEAD_RE.test(text)) {
-      return {
-        rule: "test-range-straddles-block",
-        message: `range straddles into another block's head at line ${i + 1} ("${text.trim()}")`,
-      };
-    }
+    if (!TEST_BLOCK_HEAD_RE.test(text)) continue;
+    if (leadingWhitespaceWidth(text) > startIndent) continue; // nested block
+    return {
+      rule: "test-range-straddles-block",
+      message: `range straddles into another block's head at line ${i + 1} ("${text.trim()}")`,
+    };
   }
   return null;
 }
@@ -2024,6 +2096,18 @@ function scanDoc(
   const content = doc.raw;
   const sources = getValidSources(doc.frontmatter.parsed) ?? [];
   const docAbsPath = path.join(bundleDir, doc.relPath);
+  // The four `--require-anchors` opt-in checks (anchor-required,
+  // anchor-not-on-last-line, anchor-not-unique-in-range,
+  // test-range-straddles-block) are all exempt for a reserved citing doc
+  // (index.md/log.md, see doc.isReserved), the same carve-out this rule
+  // already gives reserved docs for short-form matching: an append-only
+  // narrative journal routinely narrates historical line-number deltas as
+  // prose about the past, not live citations against current content.
+  // Threaded as `undefined` here (rather than a second boolean everywhere
+  // `requireAnchors` is read) so every opt-in check downstream stays gated
+  // on the exact same "is this option object present" test it already
+  // uses for the non-reserved case.
+  const requireAnchorsForDoc = doc.isReserved ? undefined : requireAnchors;
 
   // Heading-section citations (well-formed and malformed) are collected up
   // front so their char spans can gate the `CITATION_RE` scan below: a
@@ -2236,12 +2320,12 @@ function scanDoc(
     // (opt-in)" doc block above. Gated on the same posture every other
     // per-atom check already uses (only reached once the citation resolved
     // to a real, unambiguous, non-skipped target), plus a reserved citing
-    // doc (e.g. log.md) and an allowlisted citedPath being exempt.
+    // doc (e.g. log.md, folded into requireAnchorsForDoc above) and an
+    // allowlisted citedPath being exempt.
     if (
-      requireAnchors &&
+      requireAnchorsForDoc &&
       !anchor &&
-      !doc.isReserved &&
-      !matchesAllowPattern(citedPath, requireAnchors.allow)
+      !matchesAllowPattern(citedPath, requireAnchorsForDoc.allow)
     ) {
       pushDrift(
         findings,
@@ -2249,34 +2333,37 @@ function scanDoc(
         citation,
         "anchor-required",
         `full citation into an in-repo file carries no #anchor (--require-anchors is on)`,
+        path.relative(root, resolution.path),
       );
     }
 
-    const problem = checkFullTarget(
+    const problems = checkFullTarget(
       citedPath,
       startLine,
       endLine,
       resolution.path,
       anchor,
-      requireAnchors,
+      requireAnchorsForDoc,
     );
-    if (problem?.rule === "unreadable-target") {
-      pushUnreadable(
-        findings,
-        doc.relPath,
-        citation,
-        path.relative(root, resolution.path),
-        problem.code ?? "UNKNOWN",
-      );
-    } else if (problem) {
-      pushDrift(
-        findings,
-        doc.relPath,
-        citation,
-        problem.rule,
-        problem.message,
-        path.relative(root, resolution.path),
-      );
+    for (const problem of problems) {
+      if (problem.rule === "unreadable-target") {
+        pushUnreadable(
+          findings,
+          doc.relPath,
+          citation,
+          path.relative(root, resolution.path),
+          problem.code ?? "UNKNOWN",
+        );
+      } else {
+        pushDrift(
+          findings,
+          doc.relPath,
+          citation,
+          problem.rule,
+          problem.message,
+          path.relative(root, resolution.path),
+        );
+      }
     }
     governing = { citedPath, resolvedPath: resolution.path };
     lastStartLine = startLine;

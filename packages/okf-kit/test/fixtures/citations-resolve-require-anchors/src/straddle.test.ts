@@ -21,3 +21,13 @@ it("solo", () => {
   console.log("prelude for solo");
   expect(true).toBe(true);
 });
+
+describe("group", () => {
+  it("one", () => {
+    expect(1).toBe(1);
+  });
+
+  it("two", () => {
+    expect(2).toBe(2);
+  });
+});
