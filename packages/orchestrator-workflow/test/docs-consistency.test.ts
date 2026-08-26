@@ -2529,7 +2529,7 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
   // Review round 3 (LOW 6a): a brake that only checks "zero missing"
   // would stay green if the collection logic itself broke and silently
   // examined nothing (e.g. a target-resolution regression that emptied
-  // `RESOLVE`). 150 is a floor with headroom below the live count (review
+  // `RESOLVE`). The floor sits with headroom below the live count (review
   // round 4, D31: the live count itself is not hand-written here or
   // anywhere else in the bundle). Review round 5 (LOW-g): the count is
   // in the test's own NAME, not only a stdout print -- `examined` is the
@@ -2539,8 +2539,13 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
   // default) without needing to isolate stdout at all. Run `npx vitest
   // run test/docs-consistency.test.ts -t "in-scope citations (sanity"`
   // and read the count from the passing test's own name.
+  //
+  // agent-tasks ca9d5048: raised from 150 to 300 when the scope grew from
+  // four kit-source categories to also cover every src/*.ts module and
+  // every assets/templates/*.md plus agents-md-section.md; the live count
+  // measured on this task's own committed tree is 313 (see docs/okf/log.md).
   it(`examined ${examined} in-scope citations (sanity: the brake itself did not go blind, more than a token number)`, () => {
-    expect(examined).toBeGreaterThan(150);
+    expect(examined).toBeGreaterThan(300);
   });
 
   it("has zero unanchored citations into SKILL.md, an agent template, models.ts, or a test file", () => {
