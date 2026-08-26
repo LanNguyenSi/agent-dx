@@ -2019,3 +2019,76 @@
   range, and re-confirmed `okf-kit check` back at 35 findings
   (0 errors / 13 warnings / 22 notices), matching this round's final
   reported state.
+- 2026-08-26: CI-wired okf-kit's anchor check as a blocking gate for this
+  bundle (agent-tasks task 578f5bfd, following on the anchored-citations
+  feature itself, task 5c8013c0, and its release, task c0effc67). A new
+  `okf-anchor-guard` job in `.github/workflows/ci.yml` runs the same
+  `okf-kit check --json` as the existing warn-only `okf-staleness.yml`
+  drift watch, then narrows to only the four anchor-check rule ids
+  (`anchor-heading-mismatch`, `anchor-heading-does-not-enclose`,
+  `anchor-heading-not-found`, `anchor-not-found-in-range`) and fails the
+  build (exit 1) when any of them fire; every other citations-resolve /
+  sources-fresh finding stays under `okf-staleness.yml`'s existing
+  warn-only posture, unchanged by this round. `okf-staleness.yml` itself
+  was not touched: its own header comment already says it must never be
+  the blocking one.
+
+  All 122 previously-unanchored bundle citations into kit sources in scope
+  for this round (`SKILL.md`, the five `assets/agents/*.md` templates,
+  `src/models.ts`, and the `test/*.test.ts` files) now carry a string-form
+  anchor (`` `path:N-M#"literal text on a line inside the range"` ``),
+  spread across `install-fence-mechanics.md`, `model-preselection.md`,
+  `review-gate-and-waivers.md`, and `subagent-contracts-superset.md`; the
+  16 `CHANGELOG.md` citations already carried heading-form anchors from
+  task 5c8013c0 and were left untouched. Each anchor's literal text was
+  read directly off the current source at the citation's own start-of-
+  range line (occasionally a later line in the range when the first was
+  too short or contained a quote/backtick that the string-anchor grammar
+  cannot carry), truncated at a word boundary rather than mid-token; not a
+  re-verification that every citation's range is still the semantically
+  right one to begin with (that full read-only audit is task 2e7680f6,
+  scheduled to run after this guard as its first full pass) -- only that
+  the anchor text chosen is itself currently, verifiably present in the
+  range it is meant to pin. `okf-kit check` against a repo build reports
+  the same 0 errors / 13 warnings / 22 notices before and after adding all
+  122 anchors: 0 anchor findings, confirming every anchor is correct
+  against the current source, and the 13 pre-existing short-form warnings
+  in `install-fence-mechanics.md` (unrelated to this change, all
+  `test-range-start-not-head` against `init.test.ts`) are untouched.
+
+  Two mutation probes, both applied, observed, and reverted. (1) Negative
+  control for the blocking job itself: inserted six dummy lines into
+  `SKILL.md` partway through the file (simulating a procedure edit that
+  shifts everything below it, without touching the docs/okf bundle) --
+  `okf-kit check` findings rose from 13 warnings to 43, 27 of them new
+  `anchor-not-found-in-range` findings (every anchored `SKILL.md` citation
+  whose range moved past the point the dummy lines were inserted; several
+  `subagent-contracts-superset.md` `SKILL.md` citations sit after the
+  later-in-file ones and were also caught). Reverted the insertion
+  (byte-identical `diff` against the pre-mutation copy) and re-confirmed
+  0 anchor findings, back to the 13/22 baseline: red on the drift case,
+  green once corrected, as the guard is meant to do. (2) False-positive
+  probe: bumped `packages/orchestrator-workflow/package.json`'s patch
+  version only, touching no bundle doc and no cited source range --
+  `okf-kit check` findings stayed at exactly 13 warnings / 22 notices / 0
+  anchor findings, unchanged. Reverted the version bump.
+
+  A third, unplanned confirmation happened live during this same round:
+  writing this task's own `CHANGELOG.md` `[Unreleased]` entry inserted 26
+  lines above the file's release sections, exactly the top-of-file-growth
+  case the anchor feature exists for. `okf-kit check` immediately flagged
+  15 of the 16 anchored `CHANGELOG.md` citations as `anchor-heading-
+  mismatch` (findings rose from 13 to 29 warnings). All 16 were re-pointed
+  by the same +26-line shift and re-verified against the actual, current
+  release sections (spot-checked by direct read, not just tool-green);
+  `okf-kit check` returned to the 13/22 baseline with 0 anchor findings.
+
+  Residual gap this guard does not close: an edit that replaces the
+  *content* inside a cited range without shifting its line count and
+  without disturbing the anchor text itself (e.g. a code line inside the
+  same range swapped for a different one that happens to keep the same
+  first line, or a heading whose text still contains the anchor even
+  though the section beneath it changed completely) stays invisible to
+  this check; it is purely mechanical (line/text presence), never
+  semantic. The same limit applies to okf-kit itself (see its own README,
+  "Known limitations").

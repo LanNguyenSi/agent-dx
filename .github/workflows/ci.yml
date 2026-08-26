@@ -38,6 +38,102 @@ jobs:
       - name: Check for org-, machine-, or point-in-time-bound evidence in instruction files
         run: node packages/slop-detector/dist/cli.js check . --pack placement-slop --config slop.config.yml
 
+  # Blocking counterpart to the warn-only `okf-staleness.yml` drift watch:
+  # that workflow never fails a build (see its own header comment), so a
+  # SKILL.md/agent-template/models.ts/test edit that shifts an anchored
+  # bundle citation's cited range out of the section or text it names went
+  # unnoticed twice in a row (0.17.0-R1, 0.18.0) before okf-kit's anchored
+  # citations (0.6.0) gave this a mechanical check. This job runs the same
+  # bundle check but narrows to only the anchor-check findings
+  # (anchor-heading-mismatch, anchor-heading-does-not-enclose,
+  # anchor-heading-not-found, anchor-not-found-in-range) and fails the
+  # build on any of them; every other citations-resolve/sources-fresh
+  # finding (pre-existing short-form test-range warnings, STALE, etc.)
+  # stays under okf-staleness.yml's warn-only posture and never blocks
+  # here. Residual gap this does not close: a content change inside a
+  # cited range that neither moves the range's lines nor breaks the anchor
+  # (heading text intact, string anchor's line untouched) stays invisible
+  # to both checks -- see docs/okf/log.md in orchestrator-workflow.
+  okf-anchor-guard:
+    name: OKF bundle anchor guard (blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BUNDLE_PATH: packages/orchestrator-workflow/docs/okf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # citations-resolve's repo-root auto-detection runs `git
+          # rev-parse --show-toplevel`; it does not itself need commit
+          # history, but a full checkout keeps this job's checkout
+          # identical to okf-staleness.yml's rather than a second,
+          # subtly different recipe to keep in sync.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install okf-kit (exact pin)
+        # Keep this pin identical to okf-staleness.yml's; both are pinned
+        # against packages/okf-kit/package.json's version by
+        # test/docs-consistency.test.ts (okf-staleness.yml only, per that
+        # test's own scope) and by hand for this job.
+        run: npm install -g okf-kit@0.6.0
+
+      - name: Assert CLI is alive (output, not exit code)
+        shell: bash
+        run: |
+          v="$(okf-kit --version)"
+          test -n "$v"
+          echo "okf-kit ${v}"
+
+      - name: Anchor-citation guard (blocking)
+        shell: bash
+        run: |
+          set +e
+          okf-kit check --json "${BUNDLE_PATH}" > okf-anchor-report.json
+          code=$?
+          set -e
+
+          if [ "${code}" -ne 0 ] && [ "${code}" -ne 1 ]; then
+            echo "::error title=OKF anchor guard::okf-kit check exited ${code} (tool/usage error, not bundle findings)"
+            cat okf-anchor-report.json || true
+            exit "${code}"
+          fi
+
+          jq -e . okf-anchor-report.json > /dev/null
+
+          # Anchor rule ids are embedded as a "[rule-id]" suffix on the
+          # citations-resolve finding's message (okf-kit's top-level
+          # ruleId is always "citations-resolve"); narrow to just those
+          # four rule ids.
+          anchorFindings=$(jq '[
+            .findings[]
+            | select(.message | test("\\[anchor-(heading-mismatch|heading-does-not-enclose|heading-not-found|not-found-in-range)\\]$"))
+          ]' okf-anchor-report.json)
+          count=$(echo "${anchorFindings}" | jq 'length')
+
+          {
+            echo "## OKF bundle anchor guard (\`${BUNDLE_PATH}\`), blocking"
+            echo ""
+            echo "anchor findings: ${count}"
+            if [ "${count}" -gt 0 ]; then
+              echo ""
+              echo '```'
+              echo "${anchorFindings}" | jq -r '.[] | "\(.file): \(.message)"'
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${count}" -gt 0 ]; then
+            echo "${anchorFindings}" | jq -r '.[] | "::error title=OKF anchor drift::\(.file): \(.message)"'
+            exit 1
+          fi
+
+          echo "Clean, 0 anchor findings."
+          exit 0
+
   lint-cli-flag-order:
     runs-on: ubuntu-latest
     timeout-minutes: 2

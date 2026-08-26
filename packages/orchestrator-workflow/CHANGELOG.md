@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A new `okf-anchor-guard` job in `.github/workflows/ci.yml` (this repo)
+  runs okf-kit's anchor check against `docs/okf` as a blocking gate: an
+  edit to `SKILL.md`, an agent template under `assets/agents/`,
+  `src/models.ts`, or a `test/*.test.ts` file that shifts a cited range
+  out of the section or text an anchored bundle citation names now fails
+  CI, instead of only the existing warn-only `okf-staleness.yml` drift
+  watch (which never blocks by design and stays untouched). All 122
+  previously-unanchored bundle citations into those four source
+  categories now carry a string-form anchor; the 16 `CHANGELOG.md`
+  citations already carried heading anchors from the prior round.
+  `okf-kit check` reports the same 0 errors / 13 warnings / 22 notices
+  before and after (0 anchor findings either way, all 13 pre-existing
+  warnings unrelated). Two mutation probes (both applied and reverted): a
+  `SKILL.md` line-shift raised anchor findings from 0 to 27 and the guard
+  reported it as a build failure; reverting it returned to 0. A
+  `package.json` patch-version bump (a non-procedure change) left the
+  anchor-finding count at 0, confirming no false positive. Residual gap
+  named in `docs/okf/log.md`: a content change inside a cited range that
+  neither shifts its line count nor disturbs the anchor text itself is
+  still invisible to this check, the same mechanical (non-semantic) limit
+  okf-kit's own README documents (agent-tasks task 578f5bfd, following the
+  anchored-citations feature itself, task 5c8013c0, and its release, task
+  c0effc67).
+
 ### Changed
 
 - `docs/okf/subagent-contracts-superset.md`: rewrote its 22 sibling short-
