@@ -2288,20 +2288,31 @@ describe("every okf-kit@<version> pin under .github/workflows/ matches package.j
 });
 
 // Shared by the two anchor-integrity checks below: the docs/okf bundle's
-// own set of citable docs, and the kit-source basenames this round's
+// own set of citable docs, and the kit-source basenames this bundle's
 // anchoring covers (SKILL.md, the five assets/agents/*.md templates,
-// src/models.ts, and test/*.test.ts). Deliberately excludes CHANGELOG.md
-// (its citations use okf-kit's own heading-form anchor, a different
-// mechanism, already checked by okf-kit's own anchor-heading-* rules) and
-// every other source category (init.ts, cli.ts, opencode.ts, README.md,
-// INSTALL-AGENT.md, agents-md-section.md, the assets/templates/*.md run
-// templates), which this round left out of scope on purpose.
+// every src/*.ts module, test/*.test.ts, the seven assets/templates/*.md
+// run templates, and assets/agents-md-section.md). Deliberately excludes
+// CHANGELOG.md (its citations use okf-kit's own heading-form anchor, a
+// different mechanism, already checked by okf-kit's own anchor-heading-*
+// rules) and README.md/INSTALL-AGENT.md (neither is a kit-source file;
+// both stay out of scope).
 //
-// Review round 3 (MEDIUM 5): all three lists below are derived from their
-// own source of truth (`ROLES`, `test/`'s own directory listing,
+// Review round 3 (MEDIUM 5): all lists below are derived from their own
+// source of truth (`ROLES`, `test/`'s own directory listing, `src/`'s own
+// directory listing, `assets/templates/`'s own directory listing,
 // `docs/okf/`'s own directory listing) rather than hand-maintained, so a
-// role/test-file/doc added later cannot silently drift out of sync with
-// what this file actually checks.
+// role/test-file/source-module/template/doc added later cannot silently
+// drift out of sync with what this file actually checks.
+//
+// agent-tasks ca9d5048: extended from the original four kit-source
+// categories (SKILL.md, agent templates, models.ts, test/*.test.ts) to
+// every src/*.ts module and every assets/templates/*.md plus
+// agents-md-section.md, closing the residual gap named in 578f5bfd round
+// 4 (D26) and measured in docs/okf/log.md's 2026-08-26 entry: 142
+// unanchored full citations into src/init.ts (68), src/cli.ts (19),
+// src/writers.ts (12), src/uninstall.ts (10), src/opencode.ts (4),
+// src/assets.ts (1), assets/templates/*.md (19), and
+// assets/agents-md-section.md (9).
 const ANCHOR_OKF_DOCS = readdirSync(`${PACKAGE_DIR}/docs/okf`)
   .filter((f) => f.endsWith(".md") && f !== "index.md" && f !== "log.md")
   .sort();
@@ -2313,6 +2324,17 @@ const ANCHOR_TEST_NAMES = readdirSync(`${PACKAGE_DIR}/test`)
   .map((f) => f.slice(0, -".test.ts".length))
   .sort();
 
+// Every src/*.ts module except models.ts, which the original map already
+// carries under its own dedicated entries below.
+const ANCHOR_SRC_NAMES = readdirSync(`${PACKAGE_DIR}/src`)
+  .filter((f) => f.endsWith(".ts") && f !== "models.ts")
+  .map((f) => f.slice(0, -".ts".length))
+  .sort();
+
+const ANCHOR_TEMPLATE_NAMES = readdirSync(`${PACKAGE_DIR}/assets/templates`)
+  .filter((f) => f.endsWith(".md"))
+  .sort();
+
 function anchorScopeResolve(): Record<string, string> {
   const map: Record<string, string> = {
     "SKILL.md": "packages/orchestrator-workflow/assets/skill/SKILL.md",
@@ -2322,6 +2344,12 @@ function anchorScopeResolve(): Record<string, string> {
     "src/models.ts": "packages/orchestrator-workflow/src/models.ts",
     "packages/orchestrator-workflow/src/models.ts":
       "packages/orchestrator-workflow/src/models.ts",
+    "agents-md-section.md":
+      "packages/orchestrator-workflow/assets/agents-md-section.md",
+    "assets/agents-md-section.md":
+      "packages/orchestrator-workflow/assets/agents-md-section.md",
+    "packages/orchestrator-workflow/assets/agents-md-section.md":
+      "packages/orchestrator-workflow/assets/agents-md-section.md",
   };
   for (const name of ANCHOR_AGENT_NAMES) {
     const real = `packages/orchestrator-workflow/assets/agents/${name}.md`;
@@ -2332,6 +2360,18 @@ function anchorScopeResolve(): Record<string, string> {
     const real = `packages/orchestrator-workflow/test/${name}.test.ts`;
     map[`${name}.test.ts`] = real;
     map[`test/${name}.test.ts`] = real;
+    map[real] = real;
+  }
+  for (const name of ANCHOR_SRC_NAMES) {
+    const real = `packages/orchestrator-workflow/src/${name}.ts`;
+    map[`${name}.ts`] = real;
+    map[`src/${name}.ts`] = real;
+    map[real] = real;
+  }
+  for (const name of ANCHOR_TEMPLATE_NAMES) {
+    const real = `packages/orchestrator-workflow/assets/templates/${name}`;
+    map[name] = real;
+    map[`assets/templates/${name}`] = real;
     map[real] = real;
   }
   return map;
