@@ -6,3 +6,11 @@ describe("whole", () => {
     expect(value).toBe(1);
   });
 });
+
+describe("comment end", () => {
+  it("ends with a comment line", () => {
+    const marker = 2;
+    expect(marker).toBe(2);
+    // trailing note
+  });
+});

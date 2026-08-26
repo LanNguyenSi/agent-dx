@@ -54,8 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--require-anchors`)" in the README for the full rationale; verified
   byte-identical findings on existing bundles before and after this
   change, off by default and additive only.
-- `citations-resolve`: three correctness fixes to the `--require-anchors`
-  checks added above, found by review before this round shipped.
+- `citations-resolve`: four details of the `--require-anchors` checks
+  added above, worth knowing when adopting them:
   `test-range-straddles-block` no longer flags a block-head line nested
   strictly deeper than the range's own start line, so citing a whole
   `describe` in full (including every `it(` nested inside it) is no

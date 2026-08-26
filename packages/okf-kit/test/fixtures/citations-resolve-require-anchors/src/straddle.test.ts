@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 
 describe("outer", () => {
   it("a", () => {
@@ -30,4 +30,8 @@ describe("group", () => {
   it("two", () => {
     expect(2).toBe(2);
   });
+});
+
+test.each([[1]])("each %i", (n: number) => {
+  expect(n).toBe(1);
 });

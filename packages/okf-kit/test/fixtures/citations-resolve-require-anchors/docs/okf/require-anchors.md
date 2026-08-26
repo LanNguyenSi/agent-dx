@@ -45,7 +45,7 @@ A full citation entirely inside an `it(` body: `src/straddle.test.ts:21-22`.
 
 A full citation into a non-test `.ts` file whose content happens to
 contain the text `it(`: never checked for straddling since the target is
-not a test file: `src/straddle-plain.ts:1-3`.
+not a test file, even though line 3 is a real top-level `it(` call after the range's start: `src/straddle-plain.ts:1-5`.
 
 A full citation citing a whole `describe` block, including its own nested
 `it(` heads: the nested heads are not a straddle, they are exactly what
@@ -67,3 +67,17 @@ of on the last content line (flagged):
 A range that itself ends on a real content line (no closing-boilerplate
 carve-out applies), anchored on the line before it (flagged, unchanged
 behaviour): `src/last-line.test.ts:5-6#"const value = 1"`.
+
+A full citation starting inside one `it` body and running into a top-level
+`test.each(` head (the only block head inside the range), a straddle:
+`src/straddle.test.ts:31-36`.
+
+A range whose last content line is a comment: the anchor must sit on that
+comment line, so an anchor on the expect line above it is flagged:
+`src/last-line.test.ts:11-14#"expect(marker).toBe(2)"`.
+
+The same range anchored on the trailing comment line (no finding):
+`src/last-line.test.ts:11-14#"// trailing note"`.
+
+An unanchored citation into a note file, used by the glob allowlist tests:
+`src/note.md:1-1`.

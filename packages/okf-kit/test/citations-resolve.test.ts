@@ -2118,14 +2118,51 @@ describe("citations-resolve: --require-anchors opt-in", () => {
     ).toBe(false);
   });
 
-  it('test-range-straddles-block: a non-test .ts target containing the text "it(" is never checked', () => {
+  it("test-range-straddles-block: a non-test .ts target with a real top-level it( head inside the range is never checked", () => {
     const findings = citationsResolveRule.run(loadRequireAnchors());
     const matches = findings.filter((f) =>
-      f.message.startsWith("`src/straddle-plain.ts:1-3`"),
+      f.message.startsWith("`src/straddle-plain.ts:1-5`"),
     );
     expect(
       matches.some((f) => f.message.includes("[test-range-straddles-block]")),
     ).toBe(false);
+  });
+
+  it("test-range-straddles-block: a range running into a top-level test.each( head is flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:31-36`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(true);
+  });
+
+  it("anchor-not-on-last-line: a trailing comment line is content, so an anchor above it is flagged and an anchor on it is not", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const above = findingFor(
+      findings,
+      'src/last-line.test.ts:11-14#"expect(marker).toBe(2)"',
+    );
+    expect(above).toBeDefined();
+    expect(above?.message).toContain("[anchor-not-on-last-line]");
+    expect(
+      findingFor(findings, 'src/last-line.test.ts:11-14#"// trailing note"'),
+    ).toBeUndefined();
+  });
+
+  it("anchor-required: a * glob allow pattern exempts a matching citedPath and nothing else", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors(["*note.md"]));
+    expect(findingFor(findings, "src/note.md:1-1")).toBeUndefined();
+    const readme = findings.find(
+      (f) =>
+        f.message.startsWith("`README.md:1`") &&
+        f.message.includes("[anchor-required]"),
+    );
+    expect(readme).toBeDefined();
+    const exact = citationsResolveRule.run(loadRequireAnchors(["note.md"]));
+    const stillFlagged = findingFor(exact, "src/note.md:1-1");
+    expect(stillFlagged?.message).toContain("[anchor-required]");
   });
 
   it("test-range-straddles-block: a whole describe block citation, including its own nested it( heads, is not flagged", () => {

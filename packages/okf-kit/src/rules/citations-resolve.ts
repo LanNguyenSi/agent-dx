@@ -280,8 +280,10 @@ const RULE_ID = "citations-resolve";
  * (`describe(`/`describe.only(`/`describe.skip(`/`describe.each(`/`it(`/
  * `it.only(`/`it.skip(`/`it.each(`/`test(`/`test.only(`/`test.skip(`/
  * `test.each(`, see `TEST_BLOCK_HEAD_RE`) found on any line of the range
- * OTHER than its own first line means the citation straddled out of the
- * block it started in (or never really started on one). The range's start
+ * OTHER than its own first line means the citation ran into a sibling or
+ * outer block (or never really started on one). A range that leaves its
+ * block without a later head line inside it (ending on an outer block's
+ * closing line) is not detected by this line-based check. The range's start
  * line is never itself checked here: it is either a legitimate block head
  * (the range correctly starts a block) or legitimately inside a block's
  * body (a partial citation into the middle of a block), and both are fine
