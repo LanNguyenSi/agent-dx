@@ -177,7 +177,21 @@ const RULE_ID = "citations-resolve";
  * checks (blank-start-line, closing-brace-start-line, inverted-range,
  * range-exceeds-file) already came back clean -- same "one problem per
  * citation, base checks first" pattern `checkShortFormTarget` already uses
- * for the block-boundary check.
+ * for the block-boundary check. Every one of these four messages names the
+ * anchor text itself, and an anchored full citation's own finding label
+ * (`path:N-M#anchor`, see `formatAnchorForLabel`) carries the anchor too --
+ * without both, two citations to the identical range with different
+ * anchors would be indistinguishable in the output.
+ *
+ * A `#` that immediately follows a citation's range but does not parse as
+ * either anchor form at all (unbalanced quotes, a backtick inside a quoted
+ * anchor, or nothing after the `#`) is its own separate, `notice`-severity
+ * finding, `anchor-malformed` (see `scanDoc`'s main matching loop): the
+ * citation is still checked exactly as an anchorless one would be
+ * (backward compatible, see below), but silently checking it anchorless
+ * when the `#` right there looks like a typo'd anchor attempt would defeat
+ * the entire point of writing one -- a single misplaced character would
+ * quietly turn the very check the anchor was written for back off.
  *
  * Backward compatible by construction: the `#anchor` suffix is optional in
  * `CITATION_RE`, so an existing anchorless citation matches exactly as
@@ -212,6 +226,18 @@ const MD_HEADING_RE = /^(#{1,6})\s+(.*)$/;
 type Anchor = { kind: "heading" | "string"; text: string };
 
 /**
+ * Renders a parsed `Anchor` back to the short form used to disambiguate a
+ * finding's citation label (see the `citation` variable in `scanDoc`'s main
+ * loop): `#text` for a heading anchor (already bracket-stripped by
+ * `parseAnchor`), `#"text"` for a string anchor. Two citations to the same
+ * range with different anchors would otherwise be indistinguishable in the
+ * output -- see the "Anchored citations" doc block above.
+ */
+function formatAnchorForLabel(anchor: Anchor): string {
+  return anchor.kind === "string" ? `#"${anchor.text}"` : `#${anchor.text}`;
+}
+
+/**
  * Parses `CITATION_RE`'s optional 4th capture group (the raw anchor text,
  * including its surrounding quotes or brackets if any) into an `Anchor`, or
  * `null` when the citation carried no `#anchor` suffix at all. A
@@ -233,13 +259,65 @@ function parseAnchor(raw: string | undefined): Anchor | null {
   return { kind: "heading", text };
 }
 
+/** Per-line fence state, see `scanFenceLines`. */
+type FenceLineState = {
+  /** True when this line lies inside a fenced code block, delimiters included. */
+  fenced: boolean;
+  /** True when this line is the delimiter that opens a fenced code block. */
+  opensFence: boolean;
+  /**
+   * True when this line is the closing delimiter that matches the fence it
+   * closes (i.e. the *same* marker, `` ``` `` or `~~~`, that opened it).
+   */
+  closesFence: boolean;
+};
+
+/**
+ * The single fence state machine every fence-aware consumer in this file
+ * derives from: one forward pass over `lines`, replaying the same
+ * open/close logic (a line matching `MD_FENCE_DELIM_RE` opens a fence when
+ * none is open, a line starting with the *same* marker closes it) that
+ * `computeFencedSpans`, `computeFencedLineIndices`, and `isFenceOpeningLine`
+ * each used to implement as their own, independently-maintained copy --
+ * nothing enforced the three staying in agreement with each other. An
+ * unterminated fence (no matching close before the end of `lines`) is
+ * reflected by every remaining line coming back `fenced: true` -- each line
+ * is marked while the scan is still inside the open fence, so no separate
+ * post-loop fixup is needed the way the three original copies each had.
+ * State at line `i` never depends on any line after `i`, so a caller that
+ * only needs one line's state (see `isFenceOpeningLine`) can safely ignore
+ * the rest of the array without re-deriving the logic itself.
+ */
+function scanFenceLines(lines: string[]): FenceLineState[] {
+  const states: FenceLineState[] = [];
+  let fenceMarker: string | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = (lines[i] ?? "").trim();
+    if (!fenceMarker && MD_FENCE_DELIM_RE.test(trimmed)) {
+      fenceMarker = trimmed.slice(0, 3);
+      states.push({ fenced: true, opensFence: true, closesFence: false });
+    } else if (fenceMarker && trimmed.startsWith(fenceMarker)) {
+      states.push({ fenced: true, opensFence: false, closesFence: true });
+      fenceMarker = undefined;
+    } else {
+      states.push({
+        fenced: fenceMarker !== undefined,
+        opensFence: false,
+        closesFence: false,
+      });
+    }
+  }
+  return states;
+}
+
 /**
  * 0-based line indices that fall inside a fenced code block (```` ``` ````
  * or `~~~`, optionally with a trailing language tag), delimiters included --
  * the target-side twin of `computeFencedSpans` above, which does the same
- * job for the *citing* doc's short-form matching. Anchor heading-search
- * needs its own copy because it works from an already-split `lines` array
- * (see `checkFullTarget`), not the raw `content` string `computeFencedSpans`
+ * job for the *citing* doc's short-form matching. Derived from
+ * `scanFenceLines` (see there). Anchor heading-search needs its own copy
+ * because it works from an already-split `lines` array (see
+ * `checkFullTarget`), not the raw `content` string `computeFencedSpans`
  * takes, and because it must ignore a target's `# not a heading` sitting
  * inside a fenced example exactly the same way a citing doc's own fences
  * are already ignored for short-form matching -- without this, a `#`-led
@@ -251,22 +329,9 @@ function parseAnchor(raw: string | undefined): Anchor | null {
  */
 function computeFencedLineIndices(lines: string[]): Set<number> {
   const fenced = new Set<number>();
-  let fenceMarker: string | undefined;
-  let fenceStart = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = (lines[i] ?? "").trim();
-    if (!fenceMarker && MD_FENCE_DELIM_RE.test(trimmed)) {
-      fenceMarker = trimmed.slice(0, 3);
-      fenceStart = i;
-    } else if (fenceMarker && trimmed.startsWith(fenceMarker)) {
-      for (let j = fenceStart; j <= i; j++) fenced.add(j);
-      fenceMarker = undefined;
-      fenceStart = -1;
-    }
-  }
-  if (fenceMarker && fenceStart >= 0) {
-    for (let j = fenceStart; j < lines.length; j++) fenced.add(j);
-  }
+  scanFenceLines(lines).forEach((state, i) => {
+    if (state.fenced) fenced.add(i);
+  });
   return fenced;
 }
 
@@ -322,7 +387,7 @@ function checkAnchor(
   if (!heading) {
     return {
       rule: "anchor-heading-not-found",
-      message: `no heading (level <= ${ANCHOR_HEADING_MAX_LEVEL}) precedes line ${startLine} to anchor against; use a string anchor (#"...") instead against a target with no heading structure`,
+      message: `no heading (level <= ${ANCHOR_HEADING_MAX_LEVEL}) precedes line ${startLine} to anchor "${anchor.text}" against; use a string anchor (#"...") instead against a target with no heading structure`,
     };
   }
   if (!heading.text.includes(anchor.text)) {
@@ -337,7 +402,7 @@ function checkAnchor(
     if (m && m[1].length <= heading.level) {
       return {
         rule: "anchor-heading-does-not-enclose",
-        message: `range extends past its enclosing heading's section (next heading "${m[2].trim()}" at line ${i + 1})`,
+        message: `range extends past the section enclosing anchor "${anchor.text}" (next heading "${m[2].trim()}" at line ${i + 1})`,
       };
     }
   }
@@ -415,6 +480,14 @@ type Atom =
       startLine: number;
       endLine: number | null;
       anchor: Anchor | null;
+      // Non-null when a `#` immediately followed this citation's range but
+      // did not parse as either anchor form -- see `anchor-malformed` in
+      // the atom-processing loop below. Carried on the atom (computed at
+      // match time, from the raw regex scan) rather than pushed as a
+      // finding immediately, so the finding can be gated on the exact same
+      // out-of-scope/resolution posture every other check on this atom
+      // already gets (skip, path-traversal-rejected, missing-file, ambiguous).
+      malformedAnchorRaw: string | null;
     }
   | {
       kind: "cont-fresh";
@@ -779,24 +852,13 @@ function isTestFile(citedPath: string): boolean {
  * identical). Used by checkRangeBoundary's markdown branch: citing a
  * fenced block starting at its own opening fence line is the natural,
  * correct way to cite it, so that specific case is exempted from the
- * fence-as-drift-signal check (see there).
+ * fence-as-drift-signal check (see there). Derived from `scanFenceLines`
+ * (see there); state at `lineIndex` never depends on any line after it, so
+ * scanning the whole array and reading one index back is equivalent to (and
+ * replaces) the original's own up-to-`lineIndex`-only replay.
  */
 function isFenceOpeningLine(lines: string[], lineIndex: number): boolean {
-  let inFence = false;
-  let fenceMarker: string | undefined;
-  for (let i = 0; i <= lineIndex; i++) {
-    const trimmed = (lines[i] ?? "").trim();
-    if (!inFence && MD_FENCE_DELIM_RE.test(trimmed)) {
-      if (i === lineIndex) return true;
-      inFence = true;
-      fenceMarker = trimmed.slice(0, 3);
-    } else if (inFence && fenceMarker && trimmed.startsWith(fenceMarker)) {
-      if (i === lineIndex) return false;
-      inFence = false;
-      fenceMarker = undefined;
-    }
-  }
-  return false;
+  return scanFenceLines(lines)[lineIndex]?.opensFence ?? false;
 }
 
 /**
@@ -1157,29 +1219,28 @@ function collectShortFormMatches(
  * inclusive. An unterminated fence (no matching close before end of doc) is
  * treated as running to the end of the content -- conservative, since an
  * unterminated fence is itself a doc problem outside this rule's scope, not
- * a reason to scan its contents for short-form citations.
+ * a reason to scan its contents for short-form citations. Derived from
+ * `scanFenceLines` (see there): per-line fenced/opens/closes state is
+ * converted to char-offset spans by tracking each line's `[start, end)`
+ * offset in `content` alongside it.
  */
 function computeFencedSpans(content: string): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
   const lines = content.split("\n");
+  const states = scanFenceLines(lines);
   let offset = 0;
-  let fenceMarker: string | undefined;
-  let fenceStart = -1;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    const lineEnd = offset + line.length;
-    if (!fenceMarker && MD_FENCE_DELIM_RE.test(trimmed)) {
-      fenceMarker = trimmed.slice(0, 3);
-      fenceStart = offset;
-    } else if (fenceMarker && trimmed.startsWith(fenceMarker)) {
-      spans.push([fenceStart, lineEnd]);
-      fenceMarker = undefined;
-      fenceStart = -1;
+  let spanStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const lineEnd = offset + lines[i].length;
+    if (states[i].opensFence) spanStart = offset;
+    if (states[i].closesFence && spanStart >= 0) {
+      spans.push([spanStart, lineEnd]);
+      spanStart = -1;
     }
     offset = lineEnd + 1; // +1 for the newline joining this line to the next
   }
-  if (fenceMarker && fenceStart >= 0) {
-    spans.push([fenceStart, content.length]);
+  if (spanStart >= 0) {
+    spans.push([spanStart, content.length]);
   }
   return spans;
 }
@@ -1415,6 +1476,47 @@ function isWrappedPathContinuation(
   return /[-–]$/.test(prevLine);
 }
 
+/**
+ * Raw text following a malformed anchor's `#` (see `anchor-malformed` in
+ * the atom-processing loop below), used only to make that finding's message
+ * concrete -- bounded so it reports roughly what was actually typed as the
+ * failed anchor attempt, not an unrelated run of later prose:
+ *   - a quoted-anchor attempt (the character right after `#` is `"`) stops
+ *     at the next `"` on the same line (the closing quote the author
+ *     presumably meant, embedded backticks and all -- that quote is exactly
+ *     what makes this a *quoted* anchor attempt rather than a heading one),
+ *     or at the end of the line when no such quote exists on it (matches
+ *     `CITATION_RE`'s own string alternative, which cannot cross a
+ *     newline either);
+ *   - any other character after `#` is a heading-anchor attempt, which
+ *     stops at the first whitespace (a heading anchor token, like
+ *     `CITATION_RE`'s own heading alternative, never contains whitespace)
+ *     or the end of the line, whichever comes first;
+ *   - either way, capped at `MAX_RAW_LEN` characters so a heading-form
+ *     attempt with no whitespace at all before the line ends (or a
+ *     pathological single long line) cannot make the message unbounded.
+ */
+const MAX_MALFORMED_ANCHOR_RAW_LEN = 60;
+function extractMalformedAnchorRaw(content: string, hashIndex: number): string {
+  const from = hashIndex + 1;
+  const nl = content.indexOf("\n", from);
+  const lineEnd = nl === -1 ? content.length : nl;
+
+  let end: number;
+  if (content[from] === '"') {
+    const q = content.indexOf('"', from + 1);
+    end = q !== -1 && q < lineEnd ? q + 1 : lineEnd;
+  } else {
+    const rest = content.slice(from, lineEnd);
+    const ws = rest.search(/\s/);
+    end = ws === -1 ? lineEnd : from + ws;
+  }
+  if (end - from > MAX_MALFORMED_ANCHOR_RAW_LEN) {
+    end = from + MAX_MALFORMED_ANCHOR_RAW_LEN;
+  }
+  return content.slice(from, end);
+}
+
 function scanDoc(
   cache: BasenameCache,
   root: string,
@@ -1435,6 +1537,22 @@ function scanDoc(
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
     if (isWrappedPathContinuation(content, m.index)) continue;
+    const matchEnd = m.index + m[0].length;
+    // anchor-malformed detection (see the atom-processing loop below for
+    // where the finding is actually pushed): a `#` immediately follows the
+    // range but group 4 (the anchor) did not match -- unbalanced quotes, a
+    // backtick inside a quoted anchor, or nothing at all after the `#`
+    // (e.g. `path:N-M#` at end of line). Computed here, at match time,
+    // because it needs `content`/`matchEnd`; carried on the atom rather
+    // than pushed immediately so the citation's out-of-scope/resolution
+    // posture (path-traversal-rejected, skip, missing-file, ambiguous) can
+    // gate it exactly the same way every other check on this atom already
+    // is -- an out-of-scope or unresolved citation gets none of those
+    // checks either.
+    const malformedAnchorRaw =
+      m[4] === undefined && content[matchEnd] === "#"
+        ? extractMalformedAnchorRaw(content, matchEnd)
+        : null;
     fullAtoms.push({
       kind: "full",
       index: m.index,
@@ -1442,8 +1560,9 @@ function scanDoc(
       startLine: Number(m[2]),
       endLine: m[3] ? Number(m[3]) : null,
       anchor: parseAnchor(m[4]),
+      malformedAnchorRaw,
     });
-    fullSpans.push([m.index, m.index + m[0].length]);
+    fullSpans.push([m.index, matchEnd]);
   }
 
   const atoms = [...fullAtoms, ...collectContinuationAtoms(content)].sort(
@@ -1521,7 +1640,13 @@ function scanDoc(
     }
 
     const { citedPath, startLine, endLine, anchor } = atom;
-    const citation = `${citedPath}:${startLine}${endLine ? "-" + endLine : ""}`;
+    // The anchor, when present, is carried in the citation label itself
+    // (not just the anchor-check finding's own message) so two citations to
+    // the same range with different anchors are distinguishable in the
+    // output -- see formatAnchorForLabel and the "Anchored citations" doc
+    // block above. Continuations and short-form citations never carry an
+    // anchor (see there), so their own citation labels are unaffected.
+    const citation = `${citedPath}:${startLine}${endLine ? "-" + endLine : ""}${anchor ? formatAnchorForLabel(anchor) : ""}`;
 
     if (hasParentSegment(citedPath)) {
       pushDrift(
@@ -1568,6 +1693,27 @@ function scanDoc(
       governing = null;
       lastStartLine = null;
       continue;
+    }
+
+    // anchor-malformed (notice): only reached for a citation that resolved
+    // to a real file -- see `malformedAnchorRaw`'s doc comment above for
+    // why this is gated the same way missing-file/skip/path-traversal are
+    // already gated for every other check on this atom. The citation is
+    // still checked below via checkFullTarget exactly as an ordinary
+    // anchorless citation would be (anchor is null here by construction --
+    // see parseAnchor); this only ADDS a heads-up that the `#` sitting
+    // right there was silently not read as the anchor it looks like it was
+    // meant to be.
+    if (atom.malformedAnchorRaw !== null) {
+      pushDrift(
+        findings,
+        doc.relPath,
+        citation,
+        "anchor-malformed",
+        `a "#" follows the citation's range but does not parse as a heading or string anchor (raw: "${atom.malformedAnchorRaw}")`,
+        undefined,
+        "notice",
+      );
     }
 
     const problem = checkFullTarget(
