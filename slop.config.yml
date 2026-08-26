@@ -16,6 +16,28 @@ placement:
   instructionGlobs:
     - "packages/orchestrator-workflow/assets/**/*.md"
     - "packages/agentic-coding-playbook/**/*.md"
+    # Package READMEs: reusable per-package doc surface, same leak risk as
+    # SKILL.md/AGENTS.md. Listed explicitly (not a "packages/*/README.md"
+    # wildcard) and only for packages measured clean against this pack: a
+    # blanket wildcard immediately surfaces pre-existing findings in other
+    # packages' READMEs (mostly a generic "~/" install-path idiom this rule
+    # wasn't designed to flag, plus slop-detector's own README's
+    # self-documenting rule examples) whose fix is a separate, larger diff
+    # than this task's scope. See CHANGELOG for the measured count and the
+    # deferred file list.
+    - "packages/okf-kit/README.md"
+    - "packages/agent-dev-kit/README.md"
+    - "packages/agent-engineering-playbook/README.md"
+    # OKF bundle module docs: curated, reusable cross-file knowledge, same
+    # leak risk as an instruction file. Listed explicitly, one file at a
+    # time, rather than a recursive glob, for two reasons: the bundle's own
+    # log.md (a changelog-shaped doc meant to carry dates, tallies, and
+    # task ids, like CHANGELOG.md) must stay out of scope by design, and
+    # the other module docs currently carry pre-existing dated/tally/id
+    # content whose fix (editing bundle document content) is out of this
+    # task's scope; see CHANGELOG for the measured count and the deferred
+    # file list.
+    - "packages/orchestrator-workflow/docs/okf/install-fence-mechanics.md"
   markers:
     - "LanNguyenSi"
   allow:
