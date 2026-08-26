@@ -2452,3 +2452,59 @@ message lists). `placement-guard`
 is on that config's own exclusion list already (package READMEs and the
 two named instruction globs are the only covered paths), unaffected by
 this task's docs/okf-only edits.
+
+Corrected 2026-08-26 (agent-tasks ca9d5048 review round 2). This entry's
+own "35" total was measured against a tree where three of this same
+entry's prose paragraphs above wrote bare `path.ext:N`-shaped references
+(no leading `packages/orchestrator-workflow/` path) to lines 343, 376,
+and 513 of `init.ts` as if citing directly, which `okf-kit check` itself
+parses as citation attempts into `docs/okf/log.md` and reports as
+`unresolved-ambiguous` (the line-343 one used twice) -- four extra
+findings the round-1 author did not account for, so the true base on
+that round's committed tree was 39, not 35. Fixed by rewriting those
+three references in prose form ("line 343 of `init.ts`") in this entry's
+own text above, so the entry no longer adds findings about itself.
+Re-measured on the current commit (after
+this round's re-pointing and cleanup fixes, `npx vitest run`, `okf-kit
+check --json packages/orchestrator-workflow/docs/okf`, `git status
+--short` clean before and after): `npx vitest run` is 291/291 green
+(one test added, the in-range-uniqueness assertion); the erosion brake's
+sanity floor (`examined ${n} in-scope citations`) reads 314 (two rmSync
+citations split from one, see the HIGH-1 fix above); `okf-kit check`
+reports 0 `anchor-*` findings, 50 total.
+
+The differential probe's "init-family" total above (baseline 26 -> 90
+k=1 / 87 k=2) did not name the filter that produced it, so it does not
+reproduce under a plain re-run of the same command. Re-measured this
+round with an explicit, stated filter -- `jq '[.findings[] | select(.detail
+| test("init\\.(ts|test\\.ts)$"))] | length'` against `okf-kit check
+--json`'s output, matching on the finding's `resolvedTo` (`.detail`)
+ending in `init.ts` or `init.test.ts`, the two files this task's own
+"init-family" phrase means -- against the current commit: baseline
+(unmutated) 27; k=1 (one dummy line at the top of `src/init.ts`,
+uncommitted, reverted after) 99; k=2 (two dummy lines) 96. Different
+absolute numbers than round 1's 26/90/87 are expected: this round
+re-pointed and widened several `init.ts` citations, changing which and
+how many findings a top-of-file shift produces against them; the filter
+is now stated so the next re-measurement does not have to guess it again.
+
+The bundle carries unanchored citations into two files deliberately kept
+out of the anchoring scope: `README.md` and `INSTALL-AGENT.md` are the
+package's own published, human-facing docs, not kit-source files the
+installer writes into a target repo, so they do not belong in
+`anchorScopeResolve()` alongside `SKILL.md`/agent templates/`models.ts`/
+`test/*.test.ts`/`src/*.ts`/`assets/templates/*.md`/
+`agents-md-section.md` (all of which ARE installer output or its direct
+source). This is an explicit allowlist, not an oversight: measured this
+round (`grep -ohE '\bREADME\.md:[0-9]+(-[0-9]+|,[0-9]+(-[0-9]+)?)*'` and
+the same pattern for `INSTALL-AGENT\.md`, across the five docs/okf
+siblings excluding `log.md`), the bundle carries 8 unanchored `README.md`
+citations and 11 unanchored `INSTALL-AGENT.md` citations, none flagged
+by the erosion brake (`RESOLVE[citedPath]` returns `undefined` for
+both, so the loop `continue`s before counting them as examined or
+missing) and none intended to be: both files are covered instead by the
+existing warn-only `okf-staleness.yml` drift watch and by
+`test/docs-consistency.test.ts`'s own dedicated README/INSTALL-AGENT
+content checks (role-enumeration, brace-list, and manifest-example
+assertions elsewhere in this file), not by the anchor mechanism this
+bundle adds.
