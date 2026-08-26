@@ -38,7 +38,7 @@ YAML contracts referenced below live in
 ## The run-base marker: change-binding, fails OPEN
 
 `00-goal.md` ships with `<!-- solution-acceptance: run-base = TODO -->`
-(packages/orchestrator-workflow/assets/templates/00-goal.md:3, pinned
+(packages/orchestrator-workflow/assets/templates/00-goal.md:3#"<!-- solution-acceptance: run-base = TODO -->", pinned
 byte-exact by packages/orchestrator-workflow/test/template-markers.test.ts:39-41#"<!-- solution-acceptance: run-base = TODO -->").
 At run creation the orchestrator replaces `TODO` with the pre-change repo
 HEAD (`git rev-parse HEAD`), recorded before the run's first implementation
@@ -52,14 +52,14 @@ lie behind the fork point of the change (the merge-base with the remote
 default branch) (SKILL.md:91-93#"change (the merge-base with the remote default branch);"). The in-repo changelog entry adds the
 consumer's malformed-value behavior: a valid sha gets an exact binding, a
 malformed value blocks explicitly via a 7-40 hex guard, and only a bare
-`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:779-784#0.9.0,
+`TODO` falls back to the date heuristic (packages/orchestrator-workflow/CHANGELOG.md:782-787#0.9.0,
 "grounding-mcp 0.6.0 reads this marker"; SKILL.md:94#"gate's documentation (grounding-mcp) for the full" points to "the
 consuming gate's documentation (grounding-mcp) for the full consumer
 semantics" (0.24.0 placement pass dropped the pinned `0.6.0` version
 number from this pointer; the CHANGELOG's 0.9.0 entry above still carries
 the version-specific historical claim), so external reader internals are
 not verified from this repo). Introduced in 0.9.0
-(CHANGELOG.md:778-791#0.9.0). Pinned by template-markers.test.ts:19#"const runBaseRe = /solution-acceptance:\s*run-base\s*=\s",33-37 (exactly
+(CHANGELOG.md:781-794#0.9.0). Pinned by template-markers.test.ts:19#"const runBaseRe = /solution-acceptance:\s*run-base\s*=\s",33-37 (exactly
 one `run-base` marker, defaulting to `TODO`) and :39-43 (the literal line,
 wrapper included).
 
@@ -68,12 +68,12 @@ wrapper included).
 `05-review-findings.md` and `06-handoff.md` each carry one verdict marker,
 opposite in posture to run-base:
 
-- `05-review-findings.md:28`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
+- `05-review-findings.md:28#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
   filled from the Acceptance Recommendation enum `accept | accept_with_notes
-  | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:24-26).
-- `06-handoff.md:43`: `<!-- solution-acceptance: final-status = TODO -->`,
+  | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:24-26#"accept | accept_with_notes | fix_required | reject").
+- `06-handoff.md:43#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
   filled from the Final Status enum `accepted | accepted_with_notes |
-  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:39-41).
+  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:39-41#"accepted | accepted_with_notes | needs_followup | blocked").
 
 SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
@@ -81,7 +81,7 @@ value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
 non-accepting (fail-closed)" (SKILL.md:219-223#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
-(CHANGELOG.md:880-887#0.7.0). Consumer is "the harness solution-acceptance
+(CHANGELOG.md:883-890#0.7.0). Consumer is "the harness solution-acceptance
 run-gate" per SKILL.md:220-221#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and :21-31 (one marker per
@@ -95,19 +95,19 @@ load-bearing comment above the table declares the Severity and Decision
 headers load-bearing: "the orchestrator-workflow completeness reader
 locates this table by its header row and verifies unresolved findings from
 those two columns. Do not rename or drop them."
-(05-review-findings.md:9; line 10 and the 0.7.3 changelog entry attribute
+(05-review-findings.md:9#"<!-- The Severity and Decision column headers below are load-bearing: the orchestrator-workflow completeness reader locates this table by its header row and verifies unresolved findings from those two columns. Do not rename or drop them. -->"; line 10 and the 0.7.3 changelog entry attribute
 that reader to grounding-mcp). This was a reactive fix (0.7.3,
-CHANGELOG.md:828-840#0.7.3): a live run had drifted onto
+CHANGELOG.md:831-843#0.7.3): a live run had drifted onto
 `| Severity | Finding | Resolution |` (no Decision column), and the reader
 failed closed with an explicit "not in the expected table format" blocker
 rather than silently passing. The Decision legend defines
 `RESOLVED_DECISIONS = {accepted, defer}`: a high/critical finding counts as
 resolved only when its Decision is `accepted` or `defer`; every other value
 (`fix`, `reject`, blank, `open`, `TODO`) leaves it unresolved and **arms**
-the completeness gate (05-review-findings.md:10). The template's example row
+the completeness gate (05-review-findings.md:10#"<!-- Decision legend: a high/critical finding counts as RESOLVED (the completeness gate passes) only when its Decision is"). The template's example row
 was deliberately narrowed to `accepted/defer` only (0.7.4,
-CHANGELOG.md:812-822#0.7.4) so the template itself never invites `fix`/`reject`
-as if they were resolutions. Pinned by template-markers.test.ts:59-69#"expect(cells).toContain("
+CHANGELOG.md:815-825#0.7.4) so the template itself never invites `fix`/`reject`
+as if they were resolutions. Pinned by template-markers.test.ts:59-69#"decision"
 (header row carries both `severity` and `decision` cells), :72-74 (the
 load-bearing comment exists), :76-90 (example row's Decision cell is
 exactly `accepted/defer`, mutation-checked), and :92-97 (the
@@ -116,7 +116,7 @@ wording are both present verbatim).
 
 ## The findings-table placeholder row (0.13.0): closing the mixed-state bypass
 
-The example/legend row itself (05-review-findings.md:13,
+The example/legend row itself (05-review-findings.md:13#"| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |",
 `| low/medium/high/critical | ... | accepted/defer |`) is the shipped
 template's untouched-state signature, and prior to 0.13.0 the contract said
 nothing about what to do with it. grounding-mcp's completeness reader
@@ -127,7 +127,7 @@ a finding — a run that fills the acceptance-recommendation marker with
 `complete: true` with zero findings, indistinguishable from a genuine
 zero-findings review (the "mixed-state bypass"). 0.13.0 documents the fix's
 contract half in this repo: a comment directly below the placeholder row
-(05-review-findings.md:14) states the rule the orchestrator must follow —
+(05-review-findings.md:14#"marker does. During findings transfer (step 7), replace this row with each reviewer finding. For a genuine zero-findings review, delete this row instead — a header row with no data rows is a valid, complete table; leaving this row next to real finding rows is also fine. This mirrors grounding-mcp's placeholder-row detection; keep the two in sync. -->") states the rule the orchestrator must follow —
 replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and
@@ -163,7 +163,7 @@ construction.
 ## The Knowledge Bundle handoff section (0.12.0): the loop-closer
 
 `06-handoff.md` gained an optional `## Knowledge Bundle` section
-(06-handoff.md:27-33): "only applies when the repo carries a curated
+(06-handoff.md:27-33#"- <!-- outcome and brief note, or omit this section when the repo carries no bundle -->"): "only applies when the repo carries a curated
 knowledge bundle (for example a `docs/okf/` directory)... Outcome: updated |
 not affected | follow-up filed." SKILL.md's step 9 (Hand off) instructs
 applying this guidance before filling the file: check whether the change
@@ -184,7 +184,7 @@ discovery-side rule (the Discover step already checks `docs/okf/` before
 hand-mapping terrain, SKILL.md:108-109#"with an index) before mapping terrain by hand, treating"); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
-(CHANGELOG.md:702-720#0.12.0). Pinned by
+(CHANGELOG.md:705-723#0.12.0). Pinned by
 docs-consistency.test.ts:300-305#"apply this optional guidance: when the repo carries a" (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
 "docs/okf/" also occur in the Discover-step test), :309-313 (source-overlap

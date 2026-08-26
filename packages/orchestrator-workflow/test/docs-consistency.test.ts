@@ -2288,20 +2288,31 @@ describe("every okf-kit@<version> pin under .github/workflows/ matches package.j
 });
 
 // Shared by the two anchor-integrity checks below: the docs/okf bundle's
-// own set of citable docs, and the kit-source basenames this round's
+// own set of citable docs, and the kit-source basenames this bundle's
 // anchoring covers (SKILL.md, the five assets/agents/*.md templates,
-// src/models.ts, and test/*.test.ts). Deliberately excludes CHANGELOG.md
-// (its citations use okf-kit's own heading-form anchor, a different
-// mechanism, already checked by okf-kit's own anchor-heading-* rules) and
-// every other source category (init.ts, cli.ts, opencode.ts, README.md,
-// INSTALL-AGENT.md, agents-md-section.md, the assets/templates/*.md run
-// templates), which this round left out of scope on purpose.
+// every src/*.ts module, test/*.test.ts, the seven assets/templates/*.md
+// run templates, and assets/agents-md-section.md). Deliberately excludes
+// CHANGELOG.md (its citations use okf-kit's own heading-form anchor, a
+// different mechanism, already checked by okf-kit's own anchor-heading-*
+// rules) and README.md/INSTALL-AGENT.md (neither is a kit-source file;
+// both stay out of scope).
 //
-// Review round 3 (MEDIUM 5): all three lists below are derived from their
-// own source of truth (`ROLES`, `test/`'s own directory listing,
+// Review round 3 (MEDIUM 5): all lists below are derived from their own
+// source of truth (`ROLES`, `test/`'s own directory listing, `src/`'s own
+// directory listing, `assets/templates/`'s own directory listing,
 // `docs/okf/`'s own directory listing) rather than hand-maintained, so a
-// role/test-file/doc added later cannot silently drift out of sync with
-// what this file actually checks.
+// role/test-file/source-module/template/doc added later cannot silently
+// drift out of sync with what this file actually checks.
+//
+// agent-tasks ca9d5048: extended from the original four kit-source
+// categories (SKILL.md, agent templates, models.ts, test/*.test.ts) to
+// every src/*.ts module and every assets/templates/*.md plus
+// agents-md-section.md, closing the residual gap named in 578f5bfd round
+// 4 (D26). The per-category unanchored-citation counts this round found
+// and closed are not hand-duplicated here; see docs/okf/log.md's
+// 2026-08-26 entry for the measured breakdown (D31 convention: numbers
+// live in the log, not in this comment, so they cannot drift out of sync
+// with a later re-measurement).
 const ANCHOR_OKF_DOCS = readdirSync(`${PACKAGE_DIR}/docs/okf`)
   .filter((f) => f.endsWith(".md") && f !== "index.md" && f !== "log.md")
   .sort();
@@ -2313,6 +2324,17 @@ const ANCHOR_TEST_NAMES = readdirSync(`${PACKAGE_DIR}/test`)
   .map((f) => f.slice(0, -".test.ts".length))
   .sort();
 
+// Every src/*.ts module except models.ts, which the original map already
+// carries under its own dedicated entries below.
+const ANCHOR_SRC_NAMES = readdirSync(`${PACKAGE_DIR}/src`)
+  .filter((f) => f.endsWith(".ts") && f !== "models.ts")
+  .map((f) => f.slice(0, -".ts".length))
+  .sort();
+
+const ANCHOR_TEMPLATE_NAMES = readdirSync(`${PACKAGE_DIR}/assets/templates`)
+  .filter((f) => f.endsWith(".md"))
+  .sort();
+
 function anchorScopeResolve(): Record<string, string> {
   const map: Record<string, string> = {
     "SKILL.md": "packages/orchestrator-workflow/assets/skill/SKILL.md",
@@ -2322,6 +2344,12 @@ function anchorScopeResolve(): Record<string, string> {
     "src/models.ts": "packages/orchestrator-workflow/src/models.ts",
     "packages/orchestrator-workflow/src/models.ts":
       "packages/orchestrator-workflow/src/models.ts",
+    "agents-md-section.md":
+      "packages/orchestrator-workflow/assets/agents-md-section.md",
+    "assets/agents-md-section.md":
+      "packages/orchestrator-workflow/assets/agents-md-section.md",
+    "packages/orchestrator-workflow/assets/agents-md-section.md":
+      "packages/orchestrator-workflow/assets/agents-md-section.md",
   };
   for (const name of ANCHOR_AGENT_NAMES) {
     const real = `packages/orchestrator-workflow/assets/agents/${name}.md`;
@@ -2332,6 +2360,18 @@ function anchorScopeResolve(): Record<string, string> {
     const real = `packages/orchestrator-workflow/test/${name}.test.ts`;
     map[`${name}.test.ts`] = real;
     map[`test/${name}.test.ts`] = real;
+    map[real] = real;
+  }
+  for (const name of ANCHOR_SRC_NAMES) {
+    const real = `packages/orchestrator-workflow/src/${name}.ts`;
+    map[`${name}.ts`] = real;
+    map[`src/${name}.ts`] = real;
+    map[real] = real;
+  }
+  for (const name of ANCHOR_TEMPLATE_NAMES) {
+    const real = `packages/orchestrator-workflow/assets/templates/${name}`;
+    map[name] = real;
+    map[`assets/templates/${name}`] = real;
     map[real] = real;
   }
   return map;
@@ -2449,6 +2489,141 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
     }
     expect(violations, violations.join("\n")).toEqual([]);
   });
+
+  // agent-tasks ca9d5048 review round 2 (HIGH 1): the last-line and
+  // file-wide-<=3 checks above do not rule out an anchor text that recurs
+  // MORE THAN ONCE inside its own cited range -- e.g. the same statement
+  // repeated at two indentation depths within one function, or a short
+  // literal reused across a handful of adjacent array entries. Such an
+  // anchor still passes both checks above (it sits on the last line, and
+  // 2-3 file-wide occurrences is within the cap) while failing the AC2
+  // requirement that the anchor be "eindeutig im Bereich" (unique within
+  // the cited range): a k-line insertion above the range can shift the
+  // window so the anchor is found at its OTHER in-range occurrence rather
+  // than genuinely surviving the shift. This asserts every string anchor's
+  // text occurs exactly once inside `[start, end]` of its own cited range,
+  // for every string-anchored citation in the bundle, not only newly added
+  // ones.
+  it("every string anchor's text occurs exactly once inside its own cited range", () => {
+    const violations: string[] = [];
+    for (const c of anchored) {
+      const lines = readRepoFile(c.real).split("\n");
+      const rangeText = lines.slice(c.start - 1, c.end).join("\n");
+      const count = rangeText.split(c.anchor).length - 1;
+      if (count !== 1) {
+        violations.push(
+          `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}#"${c.anchor}"\` -- ` +
+            `anchor text occurs ${count} times inside its own cited range of ${c.real} (must be exactly 1)`,
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+});
+
+/**
+ * agent-tasks ca9d5048 review round 3 (MEDIUM 1): the docs/okf bundle's
+ * OTHER anchor family -- heading-form citations into CHANGELOG.md, e.g.
+ * `` `CHANGELOG.md:552-576#0.16.0` `` -- was unguarded by any local test
+ * (anchorScopeResolve deliberately excludes CHANGELOG.md, and the string
+ * anchor assertions above skip a non-string anchor). Only okf-kit's own CI
+ * job caught review round 2's HIGH 1: a 3-line edit to the CHANGELOG's
+ * `[Unreleased]` bullet shifted every release heading below it by 3 lines,
+ * and none of the 16 heading-anchored citations across the five docs/okf
+ * siblings were re-pointed, yet every test in this file stayed green
+ * because none of them ever reads CHANGELOG.md as an anchor target. This
+ * mirrors okf-kit's own anchor-heading-* resolution
+ * (`packages/okf-kit/src/rules/citations-resolve.ts`'s
+ * `findEnclosingHeading`): the nearest `## [` heading at or before the
+ * range's start line must be the cited version's own heading, and no
+ * `## [` heading may start before the range's end line -- the range may
+ * end anywhere inside that release's section but must never cross into
+ * the next one.
+ */
+describe("every heading-anchored CHANGELOG.md citation's range stays inside its own release section", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+  const CHANGELOG_PATH = "packages/orchestrator-workflow/CHANGELOG.md";
+  const HEADING_RE = /^## \[([^\]]+)\]/;
+
+  interface ChangelogHeadingCitation {
+    doc: string;
+    start: number;
+    end: number;
+    version: string;
+  }
+
+  function collectChangelogHeadingCitations(): ChangelogHeadingCitation[] {
+    const out: ChangelogHeadingCitation[] = [];
+    for (const doc of ANCHOR_OKF_DOCS) {
+      const content = readRepoFile(
+        `packages/orchestrator-workflow/docs/okf/${doc}`,
+      );
+      for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
+        if (!m[1].endsWith("CHANGELOG.md")) continue;
+        const anchorRaw = m[4];
+        if (!anchorRaw || anchorRaw.startsWith('"')) continue;
+        const version = anchorRaw.replace(/^\[|\]$/g, "");
+        const start = Number(m[2]);
+        const end = m[3] ? Number(m[3]) : start;
+        out.push({ doc, start, end, version });
+      }
+    }
+    return out;
+  }
+
+  const citations = collectChangelogHeadingCitations();
+  const headingLines: Array<{ lineNo: number; version: string }> = [];
+  const changelogLines = readRepoFile(CHANGELOG_PATH).split("\n");
+  changelogLines
+    .forEach((line, idx) => {
+      const m = line.match(HEADING_RE);
+      if (m) headingLines.push({ lineNo: idx + 1, version: m[1] });
+    });
+
+  it("found at least one heading-anchored CHANGELOG.md citation to check (sanity: not vacuously true)", () => {
+    expect(citations.length).toBeGreaterThan(0);
+  });
+
+  it("every heading-anchored CHANGELOG.md citation's range starts inside its cited version's section and does not cross into the next", () => {
+    const violations: string[] = [];
+    for (const c of citations) {
+      const enclosing = [...headingLines]
+        .reverse()
+        .find((h) => h.lineNo <= c.start);
+      if (!enclosing || enclosing.version !== c.version) {
+        violations.push(
+          `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
+            `nearest enclosing heading at or before line ${c.start} is ` +
+            `${enclosing ? `[${enclosing.version}] at line ${enclosing.lineNo}` : "none"}, not [${c.version}]`,
+        );
+        continue;
+      }
+      // The ranges cite the release's bullets, not the heading itself, so
+      // a small shift (an [Unreleased] entry above) lands the start line on
+      // a blank line or a `#` heading line before the enclosing-heading check
+      // above can notice; okf-kit reports the same drift as blank-start-line.
+      // Pin it here so a 1-, 2- or 3-line shift fails locally, not only in
+      // the okf-kit report.
+      const startText = (changelogLines[c.start - 1] ?? "").trim();
+      if (startText === "" || startText.startsWith("#")) {
+        violations.push(
+          `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
+            `start line ${c.start} is ${startText === "" ? "blank" : "a heading line"}, not release content (shifted?)`,
+        );
+        continue;
+      }
+      const next = headingLines.find((h) => h.lineNo > enclosing.lineNo);
+      if (next && next.lineNo <= c.end) {
+        violations.push(
+          `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
+            `range crosses into the next release's heading [${next.version}] at line ${next.lineNo}`,
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
 });
 
 /**
@@ -2489,7 +2664,7 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
   // Review round 3 (LOW 6a): a brake that only checks "zero missing"
   // would stay green if the collection logic itself broke and silently
   // examined nothing (e.g. a target-resolution regression that emptied
-  // `RESOLVE`). 150 is a floor with headroom below the live count (review
+  // `RESOLVE`). The floor sits with headroom below the live count (review
   // round 4, D31: the live count itself is not hand-written here or
   // anywhere else in the bundle). Review round 5 (LOW-g): the count is
   // in the test's own NAME, not only a stdout print -- `examined` is the
@@ -2499,11 +2674,18 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
   // default) without needing to isolate stdout at all. Run `npx vitest
   // run test/docs-consistency.test.ts -t "in-scope citations (sanity"`
   // and read the count from the passing test's own name.
+  //
+  // agent-tasks ca9d5048: the floor is set to 200, roughly two thirds of
+  // the live count measured on this task's own committed tree (see
+  // docs/okf/log.md's 2026-08-26 entry for the exact figure), giving
+  // headroom for the count to move around without the sanity check itself
+  // needing a bump on every routine anchoring change, while still catching
+  // a collection-logic regression that empties or badly shrinks `RESOLVE`.
   it(`examined ${examined} in-scope citations (sanity: the brake itself did not go blind, more than a token number)`, () => {
-    expect(examined).toBeGreaterThan(150);
+    expect(examined).toBeGreaterThan(200);
   });
 
-  it("has zero unanchored citations into SKILL.md, an agent template, models.ts, or a test file", () => {
+  it("has zero unanchored citations into SKILL.md, an agent template, models.ts, src/*.ts, a test file, or an assets/templates/*.md or agents-md-section.md run template", () => {
     expect(missing, missing.join("\n")).toEqual([]);
   });
 });

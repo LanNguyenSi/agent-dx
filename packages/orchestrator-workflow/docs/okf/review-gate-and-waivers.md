@@ -20,10 +20,10 @@ sources:
 Review is never skipped. Core rule: "Non-trivial review goes to a separate
 reviewer subagent... Review itself is never skipped, not even for docs or
 batch changes"
-(`packages/orchestrator-workflow/assets/agents-md-section.md:26-28`). Scaling
+(`packages/orchestrator-workflow/assets/agents-md-section.md:26-28#"changes."`). Scaling
 delegation lets a trivial change be reviewed by the orchestrator itself
 instead of a spawned reviewer subagent, but restates the same floor: "Either
-way, review is never skipped" (`agents-md-section.md:48-51`).
+way, review is never skipped" (`agents-md-section.md:48-51#"way, review is never skipped."`).
 `packages/orchestrator-workflow/assets/skill/SKILL.md:18-22#"the apparatus changes. When tier variants are"` carries the
 identical invariant for ceremony-scaling: "Review judgment still applies to
 every change; only the size of the apparatus changes."
@@ -35,8 +35,8 @@ Reviewer findings carry `severity: low | medium | high | critical`
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
-(`agents-md-section.md:93-96`). Medium and low are "addressed or consciously
-accepted at the orchestrator's judgment" (`agents-md-section.md:104-105`); no
+(`agents-md-section.md:93-96#"trivial change."`). Medium and low are "addressed or consciously
+accepted at the orchestrator's judgment" (`agents-md-section.md:104-105#"orchestrator's judgment."`); no
 waiver bookkeeping applies to them.
 
 Do not conflate two distinct vocabularies attached to the same review: the
@@ -44,7 +44,7 @@ per-finding `Decision` column (below) and the whole-review
 `acceptance_recommendation: accept | accept_with_notes | fix_required |
 reject` (`SKILL.md:323#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
 Recommendation section,
-`packages/orchestrator-workflow/assets/templates/05-review-findings.md:26`).
+`packages/orchestrator-workflow/assets/templates/05-review-findings.md:26#"accept | accept_with_notes | fix_required | reject"`).
 A review can recommend `fix_required` overall while individual low findings
 carry Decision `accepted`; the gate only inspects Decision on high/critical
 rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
@@ -59,13 +59,13 @@ below.
 ## Waiver rules
 
 - Critical: "waived by the operator. The orchestrator never waives a
-  critical finding on its own" (`agents-md-section.md:98-99`); SKILL.md
+  critical finding on its own" (`agents-md-section.md:98-99#"never waives a critical finding on its own."`); SKILL.md
   step 8 echoes "critical findings require operator sign-off"
   (`SKILL.md:191#"explicitly waived: critical findings require operator"`).
 - High: "waived by the orchestrator with a recorded rationale"
-  (`agents-md-section.md:100-101`; `SKILL.md:191-192#"findings require the orchestrator to record a"`).
+  (`agents-md-section.md:100-101#"rationale."`; `SKILL.md:191-192#"findings require the orchestrator to record a"`).
 - Deferring counts as waiving, for both severities: "Deferring such a
-  finding counts as a waiver" (`agents-md-section.md:94`). SKILL.md makes
+  finding counts as a waiver" (`agents-md-section.md:94#"explicitly waived. Deferring such a finding counts as a waiver, and the gate"`). SKILL.md makes
   the symmetry explicit: "Deferring a high or critical finding counts as a
   waiver and follows the same rules" (`SKILL.md:192-193#"or critical finding counts as a waiver and follows the"`). A deferred
   critical still needs operator sign-off; a deferred high still needs an
@@ -73,14 +73,14 @@ below.
 - Recorded in
   `packages/orchestrator-workflow/assets/templates/03-decisions.md`, whose
   only structure is a `Date | Decision | Reason | Consequences` table
-  (`03-decisions.md:3`); the Reason cell is where the sign-off or rationale
+  (`03-decisions.md:3#"| Date | Decision | Reason | Consequences |"`); the Reason cell is where the sign-off or rationale
   text lives, there is no separate waiver schema.
 - Summarized in `06-handoff.md`'s Accepted Waivers section
-  (`agents-md-section.md:102-103`; `SKILL.md:194-195#"the Accepted Waivers section of"`), instructed to "Mirror
+  (`agents-md-section.md:102-103#"the Accepted Waivers section of"`; `SKILL.md:194-195#"the Accepted Waivers section of"`), instructed to "Mirror
   03-decisions.md"
-  (`packages/orchestrator-workflow/assets/templates/06-handoff.md:21`) via a
+  (`packages/orchestrator-workflow/assets/templates/06-handoff.md:21#"<!-- Waived high/critical reviewer findings, or none. Mirror 03-decisions.md. -->"`) via a
   `Finding | Severity | Rationale | Approved By` table
-  (`06-handoff.md:19-25`).
+  (`06-handoff.md:19-25#"| <!-- finding --> | high/critical | <!-- rationale --> | operator/orchestrator |"`).
 
 ## The Decision legend in 05-review-findings.md
 
@@ -98,33 +98,33 @@ Immediately after the placeholder-row rule, step 7 also carries the 0.14.0
 reproduction requirement (`SKILL.md:181-188#"lint): only claims that could vary run to run trigger"`); full treatment is out of scope
 here, see [Reproduction requirement](#reproduction-requirement-0140) below.
 The table header is `Severity | Category | Description | Suggested Fix |
-Decision` (`05-review-findings.md:11`). Its Decision legend comment
-(`05-review-findings.md:10`) states `RESOLVED_DECISIONS = {accepted,
+Decision` (`05-review-findings.md:11#"| Severity | Category | Description | Suggested Fix | Decision |"`). Its Decision legend comment
+(`05-review-findings.md:10#"<!-- Decision legend: a high/critical finding counts as RESOLVED (the completeness gate passes) only when its Decision is"`) states `RESOLVED_DECISIONS = {accepted,
 defer}`: a high/critical finding counts as RESOLVED (gate passes) only when
 Decision is `accepted` or `defer`; every other value, `fix`, `reject`,
 blank, `open`, `TODO`, "leaves the finding unresolved and ARMS the gate"
 until changed. The example row was narrowed to `accepted/defer` in 0.7.4
 after a prior `accepted/fix/defer/reject` example misled a run into an
 unexpectedly armed gate
-(`packages/orchestrator-workflow/CHANGELOG.md:812-822#0.7.4`).
+(`packages/orchestrator-workflow/CHANGELOG.md:815-825#0.7.4`).
 
 The two column headers are load-bearing for a second, independent reason:
-`05-review-findings.md:9` documents them as the anchor the grounding-mcp
+`05-review-findings.md:9#"<!-- The Severity and Decision column headers below are load-bearing: the orchestrator-workflow completeness reader locates this table by its header row and verifies unresolved findings from those two columns. Do not rename or drop them. -->"` documents them as the anchor the grounding-mcp
 completeness reader uses to locate the table at all (a header row whose
 cells include both `Severity` and `Decision`, case-insensitive). Renaming or
 dropping either header hides the table from the reader regardless of
 Decision values; the load-bearing comment (plus a one-sentence transfer
 rule in SKILL.md) was added in 0.7.3 after a live run drifted onto an
 unparseable `Severity | Finding | Resolution` convention, while the shipped
-header itself was already correct (`CHANGELOG.md:828-840#0.7.3`, the
+header itself was already correct (`CHANGELOG.md:831-843#0.7.3`, the
 already-correct-header statement within that entry).
 
 ## Fail-closed acceptance markers
 
 Two machine-readable markers sit next to the prose gate: `<!--
 solution-acceptance: acceptance-recommendation = TODO -->`
-(`05-review-findings.md:28`) and `<!-- solution-acceptance: final-status =
-TODO -->` (`06-handoff.md:43`). SKILL.md instructs replacing `TODO` with the
+(`05-review-findings.md:28#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`) and `<!-- solution-acceptance: final-status =
+TODO -->` (`06-handoff.md:43#"<!-- solution-acceptance: final-status = TODO -->"`). SKILL.md instructs replacing `TODO` with the
 chosen enum value when finalizing each file (`SKILL.md:219-223#"non-accepting (fail-closed)."`). Left as
 `TODO`, the harness solution-acceptance gate reads the run as non-accepting.
 `packages/orchestrator-workflow/test/template-markers.test.ts:11-41#"<!-- solution-acceptance: run-base = TODO -->"` pins
@@ -152,7 +152,7 @@ findings-table header convention and the Decision-legend vocabulary above.
 
 Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 5 seconds with 0 tool uses, handing back harness boilerplate instead of the
-reviewer output contract (`CHANGELOG.md:726-743#0.11.0`). The Subagent misfire rule
+reviewer output contract (`CHANGELOG.md:729-746#0.11.0`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
 (`SKILL.md:463-464#"review and never satisfies the review gate, since"`), pinned by
@@ -183,7 +183,7 @@ field (`SKILL.md:328-332#"matches_implementer_claim: matched | mismatched |"`, `
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
-Motivating incident (`CHANGELOG.md:640-665#0.14.0`): agent-dx run
+Motivating incident (`CHANGELOG.md:643-668#0.14.0`): agent-dx run
 `2026-07-18-harness-subprocess-test-deflake`, reviewer pass 1. The
 implementer's evidence read "8/8" full-suite runs green for a `maxWorkers`
 concurrency cap; the reviewer reran the suite independently (6 sequential
@@ -212,7 +212,7 @@ verdict.
 
 Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
-(`CHANGELOG.md:549-573#0.16.0`, agent-tasks task 16637a96): one reviewer round in
+(`CHANGELOG.md:552-576#0.16.0`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:950-965#"the orchestrator asks the reviewer to resupply it"` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.

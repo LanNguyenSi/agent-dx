@@ -79,7 +79,7 @@ final output, nothing else" block:
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below.
 - Task-slicer:
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:339-368#"T-001"`
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:339-368#"- T-001"`
   (`## Task slicer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/task-slicer.md:36-64#"open_questions:"`.
 - Advisor (since 0.21.0):
@@ -140,14 +140,14 @@ Every field the subagent input contract requires must have a same-named
 counterpart in the task-slicer's per-task output, so the orchestrator copies
 task fields 1:1 into the implementer contract at delegation time instead of
 inventing values. This was not always true:
-`packages/orchestrator-workflow/CHANGELOG.md:749-772#0.10.0` (0.10.0) records that the
+`packages/orchestrator-workflow/CHANGELOG.md:752-775#0.10.0` (0.10.0) records that the
 slicer contract previously omitted `constraints`, `allowed_changes`,
 `forbidden_changes` even though the implementer input contract already
 required them, forcing the orchestrator to fabricate that content when
 delegating.
 
 Current per-task slicer shape
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:339-368#"T-001"`): `id, title,
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:339-368#"- T-001"`): `id, title,
 goal, relevant_files, relevant_docs, acceptance_criteria, constraints,
 suggested_tests, allowed_changes, forbidden_changes, dependencies, risk`, in
 that order. The subagent input contract
@@ -168,8 +168,9 @@ contract (added 0.21.0) is not part of this superset relationship, since an
 advisor spawn is never assembled from a task-slicer's per-task output the
 way an implementer spawn is.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:536-741#"not implementation instructions"`
-enforces this. The load-bearing check derives the *required* field set from
+The load-bearing check enforces this, and its assertion pins the wording
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:739-741#"not implementation instructions"`).
+The check derives the *required* field set from
 the live subagent-input yaml block itself rather than hardcoding it
 (`test/docs-consistency.test.ts:596-632#"^ {4}${field}:"`): it regex-extracts top-level fields
 plus `context.*` children, subtracts pure delegation mechanics (`role,
@@ -185,7 +186,7 @@ sections map 1:1 to the fields in order
 (`test/docs-consistency.test.ts:681-698#"cursor = idx;"`); and `task-slicer.md` must frame
 `allowed_changes`/`forbidden_changes` as scope boundaries for the
 implementer, not implementation instructions
-(`test/docs-consistency.test.ts:738-741#"not implementation instructions"`, prompt text at
+(`test/docs-consistency.test.ts:739-741#"not implementation instructions"`, prompt text at
 `packages/orchestrator-workflow/assets/agents/task-slicer.md:27-29#"and must not touch — not implementation instructions."`).
 
 ## Subagent misfire rule (0.11.0, evidence relocated 0.24.0)
@@ -248,14 +249,14 @@ incident count is now evidence rather than rule text too. `SKILL.md:93-94#"gate'
 placement pass) similarly drops a pinned `grounding-mcp 0.6.0` version
 number in favor of "the consuming gate's documentation (grounding-mcp)".
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:726-743#0.11.0` (0.11.0): a
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:729-746#0.11.0` (0.11.0): a
 live incident where a reviewer subagent spawn returned in 5 seconds with 0
 tool uses, handing back harness hook-boilerplate instead of the reviewer
 output contract; a resume of the same spawn produced a correct full review.
 Before 0.11.0 the kit said nothing about malformed returns, leaving room to
 silently accept a non-review as a passed review gate. 0.18.0's
 resume-over-respawn extension has its own motivation
-(`packages/orchestrator-workflow/CHANGELOG.md:436-488#0.18.0`, agent-tasks task
+(`packages/orchestrator-workflow/CHANGELOG.md:439-491#0.18.0`, agent-tasks task
 a932b12a): two further sessions (2026-07-19, 2026-07-20) reproduced the
 identical signal; the 2026-07-19 session's resume outcome was never
 recorded, which is exactly the gap this fix-round's claim-binding closes.
@@ -300,7 +301,7 @@ accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:640-665#0.14.0` (0.14.0): the
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:643-668#0.14.0` (0.14.0): the
 agent-dx run `2026-07-18-harness-subprocess-test-deflake` accepted an
 implementer's "8/8 green" flake-rate claim on a `maxWorkers` cap fix, then
 the reviewer independently reran the suite and found 2/6 red on an
@@ -355,7 +356,7 @@ the cross-copy equality check above cannot catch on its own, since it only
 proves the two copies match each other, not that either still uses the
 pinned sub-field names.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:549-591#0.16.0` (0.16.0 plus
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:552-594#0.16.0` (0.16.0 plus
 its same-day R2 follow-up, agent-tasks task 16637a96): a 16-round dogfood
 where two implementer rounds dropped briefed-as-mandatory mutation probes
 from their return entirely; review of the resulting change then found the

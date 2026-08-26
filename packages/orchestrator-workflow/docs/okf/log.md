@@ -2362,3 +2362,303 @@
   line-independent, heading-only citation form (`CHANGELOG.md#0.9.0`,
   resolved by scanning for the heading rather than a fixed line number)
   is the orchestrator's to size and schedule, not this task's.
+
+## 2026-08-26 (agent-tasks ca9d5048, implementer)
+
+Closes the residual gap named in 578f5bfd round 4 (D26, see the
+2026-08-26 entry above): full citations into `src/init.ts`, `src/cli.ts`,
+`src/writers.ts`, `src/uninstall.ts`, `src/opencode.ts`, `src/assets.ts`,
+`assets/templates/*.md`, and `assets/agents-md-section.md` carried no
+anchor and sat outside the erosion brake. `test/docs-consistency.test.ts`'s
+`anchorScopeResolve()` now derives its `src/*.ts` and
+`assets/templates/*.md` lists from `readdirSync` (matching the existing
+pattern for roles/test files/docs) instead of a hand-maintained category
+list, so the two describe blocks below it (the last-line/low-collision
+anchor-rule check and the "carries an anchor" erosion brake) now cover
+every module in both directories automatically.
+
+Before/after, measured on the working tree with the extended `RESOLVE`
+map but before any doc edit (`npx vitest run test/docs-consistency.test.ts
+-t "kit-source category"`): 142 unanchored full citations into the eight
+newly-covered categories (`src/init.ts` 68, `src/cli.ts` 19, `src/writers.ts`
+12, `src/uninstall.ts` 10, `src/opencode.ts` 4, `src/assets.ts` 1,
+`assets/templates/*.md` 19, `assets/agents-md-section.md` 9), matching
+the count log.md's prior entry named. All 142 anchored; the same command
+against the anchored, committed tree reports 0 missing. The full suite
+(`npx vitest run`, committed tree) is 290/290 green (superseded below by
+291/291, then 293/293 -- see the review round 3 correction at the end of
+this entry); the erosion brake's
+own sanity floor (`examined ${n} in-scope citations`) reads 313 on this
+tree (raised from 150 to 300 in a follow-up commit, since 150 gave far
+more headroom than intended once the scope grew; the 300 figure was
+itself superseded two commits later by a 200 floor -- see the review
+round 3 correction at the end of this entry for why and for the
+committed value).
+
+Two citations needed re-pointing rather than a plain anchor, both
+verified by direct read against the current source, not assumed:
+`install-fence-mechanics.md`'s citation at line 343 of `init.ts` (cited
+for "`init.ts` uses [the manifest] as the upgrade baseline (`previous`,
+[that same line])") had drifted onto `composeOpencodeAgentVariant`'s
+signature close (`): string {`); the actual
+`const previous = readInstalledManifest(targetDir);` assignment is at
+line 376 of `init.ts`, re-pointed there. `model-preselection.md`'s
+citation at line 513 of `init.ts` (the Claude-side tier-skip `continue`
+guard) is byte-identical across four sites in the file (424, 448, 513,
+545: `if (tier === DEFAULT_TIER[role]) continue;`), so no substring of
+that single line can be a <=3-occurrence anchor; widened to `513-516` to
+land on `composeClaudeAgentVariant(role, tier),`, the Claude-specific call two
+lines below it (unique in the file), consistent with the doc's own
+"Claude Code" annotation for that citation.
+
+Differential probe (k-line insertion at the top of `src/init.ts`,
+uncommitted, reverted after each measurement; `git status --short`
+confirmed clean before and after):
+
+- This bundle's own load-bearing test (`every string anchor's text
+  occurs on the last line of its own cited range`, last-line rule):
+  k=1 fires all 68/68 of the newly anchored `src/init.ts` citations red;
+  k=2 also fires (checked, not separately counted, since k=1 already
+  saturates at 68/68). Confirms the design intent this round inherited
+  from 578f5bfd round 2 (last-line anchoring defeats any k>=1 shift)
+  holds for the newly anchored categories, not only the original four.
+- `okf-kit check --json docs/okf` (v0.7.0, the same pin CI installs),
+  filtered by the CI gate's own jq rule (message matches
+  `\[anchor-[a-z-]+\]$`): baseline (unmutated, committed tree) is 0
+  anchor findings, 35 total findings (all pre-existing, unrelated --
+  `unresolved-ambiguous` on bare basenames the doc never disambiguates
+  with a full path first, plus `*.test.ts`-target quality findings; byte-
+  identical before and after this task's own doc edits). At k=1: 41/68
+  `src/init.ts` citations fire an `anchor-*` rule specifically. At k=2:
+  49/68. The remaining 27 (k=1) / 19 (k=2) are not silently missed by
+  okf-kit: `checkAnchor` (`citations-resolve.ts`) does detect the same
+  drift, but `checkTarget` reports only the first structural problem it
+  finds per citation, and a 1-2 line top-of-file shift frequently lands a
+  citation's *start* line on blank or `}`/`);`-only content first,
+  producing `blank-start-line` or `closing-brace-start-line` instead of
+  reaching the anchor check at all. Those two rule ids are not matched by
+  the CI gate's `anchor-*` filter, so they do not fail the
+  `okf-anchor-guard` job -- but the drift is not invisible to okf-kit
+  overall: total findings naming an `init`-family target rose from 26
+  (baseline) to 90 (k=1) / 87 (k=2). This is a real, measured gap between
+  "this bundle's own erosion brake" (100% k>=1 coverage, verified above)
+  and "the specific CI gate filter" (partial coverage, bounded by
+  okf-kit's own per-citation first-problem-wins reporting) -- out of
+  scope for this task per its own brief (native anchor-discipline
+  changes belong to okf-kit itself, agent-tasks 1616974f), named here so
+  it is not silently rediscovered.
+
+`okf-kit check --json` against the anchored, committed bundle (no
+mutation): 0 `anchor-*` findings, 35 total (identical set to the
+unmodified-scope baseline above, confirmed by diffing the two reports'
+message lists). `placement-guard`
+(`node packages/slop-detector/dist/cli.js check . --pack placement-slop
+--config slop.config.yml`, root `slop.config.yml`) is clean; `docs/okf/**`
+is on that config's own exclusion list already (package READMEs and the
+two named instruction globs are the only covered paths), unaffected by
+this task's docs/okf-only edits.
+
+Corrected 2026-08-26 (agent-tasks ca9d5048 review round 2). This entry's
+own "35" total was measured against a tree where three of this same
+entry's prose paragraphs above wrote bare `path.ext:N`-shaped references
+(no leading `packages/orchestrator-workflow/` path) to lines 343, 376,
+and 513 of `init.ts` as if citing directly, which `okf-kit check` itself
+parses as citation attempts into `docs/okf/log.md` and reports as
+`unresolved-ambiguous` (the line-343 one used twice) -- four extra
+findings the round-1 author did not account for, so the true base on
+that round's committed tree was 39, not 35. Fixed by rewriting those
+three references in prose form ("line 343 of `init.ts`") in this entry's
+own text above, so the entry no longer adds findings about itself.
+Re-measured on the current commit (after
+this round's re-pointing and cleanup fixes, `npx vitest run`, `okf-kit
+check --json packages/orchestrator-workflow/docs/okf`, `git status
+--short` clean before and after): `npx vitest run` is 291/291 green
+(one test added, the in-range-uniqueness assertion); the erosion brake's
+sanity floor (`examined ${n} in-scope citations`) reads 314 (the
+`uninstall.test.ts` PRUNE_CANDIDATES-adjacent citation into the
+"never deletes an escaping path" traversal tests was split from one wide
+citation into two narrower ones during the in-range-uniqueness fix,
+adding one to the examined count); `okf-kit check`
+reports 0 `anchor-*` findings, 50 total.
+
+The differential probe's "init-family" total above (baseline 26 -> 90
+k=1 / 87 k=2) did not name the filter that produced it, so it does not
+reproduce under a plain re-run of the same command. Re-measured this
+round with an explicit, stated filter -- `jq '[.findings[] | select(.detail
+| test("init\\.(ts|test\\.ts)$"))] | length'` against `okf-kit check
+--json`'s output, matching on the finding's `resolvedTo` (`.detail`)
+ending in `init.ts` or `init.test.ts`, the two files this task's own
+"init-family" phrase means -- against the current commit: baseline
+(unmutated) 27; k=1 (one dummy line at the top of `src/init.ts`,
+uncommitted, reverted after) 99; k=2 (two dummy lines) 96. Different
+absolute numbers than round 1's 26/90/87 are expected: this round
+re-pointed and widened several `init.ts` citations, changing which and
+how many findings a top-of-file shift produces against them; the filter
+is now stated so the next re-measurement does not have to guess it again.
+
+The bundle carries unanchored citations into two files deliberately kept
+out of the anchoring scope: `README.md` and `INSTALL-AGENT.md` are the
+package's own published, human-facing docs, not kit-source files the
+installer writes into a target repo, so they do not belong in
+`anchorScopeResolve()` alongside `SKILL.md`/agent templates/`models.ts`/
+`test/*.test.ts`/`src/*.ts`/`assets/templates/*.md`/
+`agents-md-section.md` (all of which ARE installer output or its direct
+source). This is an explicit allowlist, not an oversight: measured this
+round (`grep -ohE '\bREADME\.md:[0-9]+(-[0-9]+|,[0-9]+(-[0-9]+)?)*'` and
+the same pattern for `INSTALL-AGENT\.md`, across the five docs/okf
+siblings excluding `log.md`), the bundle carries 8 unanchored `README.md`
+citations and 11 unanchored `INSTALL-AGENT.md` citations, none flagged
+by the erosion brake (`RESOLVE[citedPath]` returns `undefined` for
+both, so the loop `continue`s before counting them as examined or
+missing) and none intended to be: both files are covered instead by the
+existing warn-only `okf-staleness.yml` drift watch and by
+`test/docs-consistency.test.ts`'s own dedicated README/INSTALL-AGENT
+content checks (role-enumeration, brace-list, and manifest-example
+assertions elsewhere in this file), not by the anchor mechanism this
+bundle adds.
+
+Corrected 2026-08-26 (agent-tasks ca9d5048 review round 3). The round-2
+correction above (`291/291`, sanity floor `314`, base `50`) is itself
+now superseded on the committed tree: this round's CHANGELOG fix and its
+own new test add two more, `npx vitest run` is 293/293 green (`examined
+${n} in-scope citations` reads 315: the `uninstall.test.ts` "never
+deletes a file outside the target, even with a matching hash" case
+gained its own citation, this round's MEDIUM 4 below).
+
+The erosion brake's own sanity-floor comment, corrected above to say
+"raised from 150 to 300", was itself stale: the actual asserted floor on
+the committed tree (`expect(examined).toBeGreaterThan(200)`,
+`test/docs-consistency.test.ts`) is 200, not 300. 300 was the value
+`6dff6f0` set; a later commit in the same round (`dffe2bd`) lowered the
+assertion to 200 (its own commit message: "raises the erosion-brake
+sanity floor's comment to match a 200 floor") without the log entry
+above being updated to match. 200 still holds comfortably below the
+live count of 315.
+
+Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
+traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
+naming this round's own widened `src/**`/`assets/templates/**` scope
+(`packages/orchestrator-workflow/CHANGELOG.md:13-35`) grew by a net 3
+lines relative to the pre-round-2 base commit (`5a33adb`, `git diff
+--stat 5a33adb -- CHANGELOG.md`: 17 insertions, 14 deletions), shifting
+every `## [x.y.z]` heading below it by exactly 3 lines uniformly (
+verified against every heading in the file, not only the ones the 16
+citations target). None of the 16 heading-anchored citations into
+`CHANGELOG.md` across `subagent-contracts-superset.md`,
+`review-gate-and-waivers.md` and `run-state-lifecycle-and-markers.md`
+were re-pointed at the time: `okf-kit check --json` on that committed
+tree reports 50 findings (35 pre-existing plus 15 new
+`blank-start-line` ones -- one of the 16 citations' start line still
+landed on real content after the shift, so it did not trip this
+particular rule id, consistent with `citations-resolve.ts` reporting
+only the first structural problem per citation). Fixed this round by
+shifting all 16 citations by the same uniform +3 (every base-tree
+heading line was confirmed to shift by exactly +3, so the brief's
+literal shifted values applied directly); re-measured on the committed
+tree, `okf-kit check --json packages/orchestrator-workflow/docs/okf`
+reports exactly 35 findings again, and the sorted finding-message list
+is byte-identical to the one from a clean checkout of the `5a33adb` base
+tree (`git archive 5a33adb`, extracted and `git init`-ed into a scratch
+directory so okf-kit's own repo-root detection resolves correctly, then
+diffed against the committed tree's report -- empty diff).
+
+This round also re-points several `src/**`-targeting citations that
+`dffe2bd` (the prior round's in-range-uniqueness fix) already
+re-pointed on the committed tree before this round started; they are
+not this round's own work, but are recorded here since the prior
+2026-08-26 entries above did not enumerate them and later readers
+diffing against those entries would otherwise wrongly attribute the
+drift to this round. Confirmed present and well-formed on the committed
+tree (spot-checked by direct read against `init.ts`/`cli.ts`, not
+assumed from the commit message alone): line 376 of `init.ts`
+(`readInstalledManifest(targetDir)`, the upgrade-baseline citation),
+line 393 (`previousHarnessDirs`), lines 404-405
+(`droppedRoles`'s filter), lines 470-473 and 474-476
+(the unedited/conflicted branches of `installKitFile`), line 563
+(`opencodeEffortLine`'s post-guard call site), and lines 229-230 of
+`cli.ts` ("Found existing install"). A full re-derivation of "how many of the
+142 `src/**`/`assets/templates/**` citations `2ba4a09` originally
+anchored were later re-pointed by `dffe2bd`" was attempted this round
+(a script mirroring `anchorScopeResolve`'s category list and
+`ANCHOR_CITATION_RE` against both commits' `docs/okf/*.md`) but did not
+reproduce a clean, independently-verified total: the script's own
+citation count (130) did not match the 142 the original anchoring round
+measured, so a derived change-count from it is not reported here as a
+verified number. What is verified, by direct `git show dffe2bd --
+docs/okf/` inspection: at least 24 prose lines across the five
+docs/okf siblings each carry one or more re-pointed citation ranges (a
+line-level count, not a per-citation one, since several lines each pack
+multiple citations); a fuller per-citation total is left unmeasured
+rather than asserted.
+
+MEDIUM 1 (this round): added a test guarding the CHANGELOG.md
+heading-anchor family directly (`test/docs-consistency.test.ts`, describe
+"every heading-anchored CHANGELOG.md citation's range stays inside its
+own release section"), mirroring `citations-resolve.ts`'s
+`findEnclosingHeading`/`anchor-heading-does-not-enclose` resolution: a
+citation's nearest enclosing `## [` heading at or before its start line
+must match the cited version, and no `## [` heading may start before the
+range's end line. Verified red against the HIGH 1 bug class and green
+after the fix; a 1-3 line top-of-file insertion does not turn it red (by
+design -- this mirrors okf-kit's own tolerance for small in-section
+drift, matching why round 2's own HIGH 1 bug tripped only 15 of 16
+citations rather than all 16 under a 3-line shift), a 20-line insertion
+does (all 16, measured directly, reverted after).
+
+MEDIUM 2 (this round): the prior round's `test/docs-consistency.test.ts`
+it-title read "...not direct implementation orders" instead of "...not
+implementation instructions", changed to dodge an anchor collision
+rather than fix the docs (source must not be edited to satisfy an
+anchor). Reverted the title. The two `subagent-contracts-superset.md`
+citations that had collided on it (originally `536-741` and `738-741`,
+both anchored on `"not implementation instructions"`) could not be
+re-anchored on the brief's suggested full assertion line
+(`expect(unwrapped).toContain("not implementation instructions");`) as
+literal anchor text: the citation grammar's quoted string form
+(`#"[^"\n\`]*"`) cannot itself contain a double-quote character, and
+that line contains one around its string argument. Narrowed both
+citations' start line to 739 instead (past the it-title line, which
+also contains the phrase and was the actual source of the two
+in-range occurrences), keeping the same anchor text and the same end
+line (741, already the section's true last line). Verified: `every
+string anchor's text occurs exactly once inside its own cited range`
+passes for both.
+
+MEDIUM 4 (this round): `install-fence-mechanics.md`'s uninstall-loop
+citation named only two of the three path-traversal test cases
+(`test/uninstall.test.ts:162-170` and `:173-185`) while the prose
+claimed all three were covered. Added the missing third
+(`test/uninstall.test.ts:147-159#"rmSync(victim, { force: true });"`,
+the "never deletes a file outside the target, even with a matching
+hash" case); the anchor occurs at lines 159, 170 and 185 file-wide (3,
+at the cap) and exactly once inside 147-159.
+
+LOW 6a (this round, attempted, reverted): the brief suggested narrowing
+`install-fence-mechanics.md`'s `PRUNE_CANDIDATES` citation
+(`uninstall.ts:99-117#"export function runUninstall(options: {"`,
+spanning two declarations) to end at 113 on
+`join(".opencode", "agents"),`. That anchor text is unique in the file
+(1 occurrence) but, like MEDIUM 2 above, contains embedded double
+quotes and cannot be expressed in the citation grammar's quoted-string
+form; attempted and confirmed broken (`anchor text occurs 0 times
+inside its own cited range`, since the parser truncates at the first
+embedded quote) before being reverted. Kept as `99-117`, matching
+`dffe2bd`'s own prior restoration of this same wide range (that round's
+commit message: "restores a PRUNE_CANDIDATES ... range that had been
+narrowed past the code the doc actually describes").
+
+Final accounting on the committed tree after all of this round's fixes
+(`npx vitest run`, `npm run typecheck`, `npm run typecheck:test`, `npm
+run format:check`, `okf-kit check --json
+packages/orchestrator-workflow/docs/okf`, `node
+packages/slop-detector/dist/cli.js check . --pack placement-slop
+--config slop.config.yml`, `git status --short` clean before and after
+each measurement): 293/293 tests green; typecheck and typecheck:test
+clean; format:check reports the same 2 pre-existing warnings named in
+this task's own brief (`test/docs-consistency.test.ts`,
+`test/template-markers.test.ts` -- both pre-date this round, confirmed
+by checking a fresh `git show HEAD:.../docs-consistency.test.ts` copy
+still fails `prettier --check` before this round's own edits are
+applied); `okf-kit check` reports exactly 35 findings, byte-identical
+(sorted message list) to the `5a33adb` base tree; `placement-guard`
+clean (395 files scanned).

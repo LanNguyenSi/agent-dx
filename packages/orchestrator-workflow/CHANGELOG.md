@@ -13,20 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs okf-kit's anchor check against `docs/okf` and fails the build (no
   branch-protection change; master has no required checks today) when an
   edit to `SKILL.md`, an agent template under `assets/agents/`,
-  `src/models.ts`, or a `test/*.test.ts` file shifts a cited range out of
-  the section or text an anchored bundle citation names, instead of only
-  the existing warn-only `okf-staleness.yml` drift watch (which never
-  blocks by design and stays untouched). Every in-scope bundle citation
-  into those four source categories now carries a string-form anchor (up
-  from a first-round draft that review round 2 found had missed 44 bare,
-  non-backtick-delimited citations in two of the five docs/okf siblings;
-  the citation parser was corrected to match okf-kit's own
-  backtick-optional shape); the `CHANGELOG.md` citations still carry
-  heading anchors from the prior round (that mechanism is untouched, but
-  every CHANGELOG entry added above them, this one included, re-points
-  all of them -- see `docs/okf/log.md` for the live count and the
-  re-point history, not hand-copied here since it drifts with every
-  CHANGELOG edit).
+  `src/models.ts`, a `test/*.test.ts` file, any other `src/*.ts` module,
+  a run template under `assets/templates/`, or `assets/agents-md-section.md`
+  shifts a cited range out of the section or text an anchored bundle
+  citation names, instead of only the existing warn-only `okf-staleness.yml`
+  drift watch (which never blocks by design and stays untouched). Every
+  in-scope bundle citation into those source categories now carries a
+  string-form anchor (up from a first-round draft that review round 2
+  found had missed 44 bare, non-backtick-delimited citations in two of the
+  five docs/okf siblings; the citation parser was corrected to match
+  okf-kit's own backtick-optional shape; scope later widened from the
+  original four categories to every `src/*.ts` module and every
+  `assets/templates/*.md` plus `assets/agents-md-section.md`, agent-tasks
+  ca9d5048); the `CHANGELOG.md` citations still carry heading anchors from
+  the prior round (that mechanism is untouched, but every CHANGELOG entry
+  added above them, this one included, re-points all of them -- see
+  `docs/okf/log.md` for the live count and the re-point history, not
+  hand-copied here since it drifts with every CHANGELOG edit).
 - Every anchor now satisfies two mechanically-checked properties review
   round 2 added (a first-round anchor sitting on a wide range's first line,
   as 107 of 121 did, survives an insertion shorter than the range itself --
