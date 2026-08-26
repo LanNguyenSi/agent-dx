@@ -183,7 +183,7 @@ Spawns `gh issue create` under the hood, so authentication, retries, and proxy c
 # config.yml
 sinks:
   github-issues:
-    repo: LanNguyenSi/agent-dx
+    repo: your-org/your-repo
     labels: [bug, friction]
     assignee: octocat
 ```
@@ -205,8 +205,8 @@ Two modes, both honest about what they do:
 sinks:
   agent-tasks:
     mode: rest
-    apiBase: https://agent-tasks.opentriologue.ai
-    projectId: 8238805d-8185-4ad8-9f2b-36677ac4521d
+    apiBase: https://agent-tasks.example.com
+    projectId: 00000000-0000-0000-0000-000000000000
     # token: # set AGENT_TASKS_TOKEN env var instead in production
 ```
 
@@ -257,7 +257,7 @@ The v1 surface is complete. Future ideas (no scheduled milestone): web dashboard
 
 ## Design notes
 
-Public-tool framing: zero LanNguyenSi-stack assumptions in the core. The default sink is plain markdown files so the tool works without any external infrastructure, and integrations are configurable adapters that load only when used.
+Public-tool framing: zero org-specific-stack assumptions in the core. The default sink is plain markdown files so the tool works without any external infrastructure, and integrations are configurable adapters that load only when used.
 
 Local SQLite, single-user, single-machine at the core. Still no live sync, no server, no cloud: the database itself is never shared or written to remotely. The one opt-in exception is [sync-export](#sync-export-optional-multi-machine-file-merge): a deterministic, config-gated file dump of the local db, plus a read-only merge of other machines' dumps into `digest`. Both are exact no-ops until configured, and transport between machines is left to something else (Dropbox, iCloud, `agent-memory-sync`, ...); this package produces and consumes a file, it does not move it. Friction records are personal observation data, the smallest store that lets queries answer questions is the right one.
 

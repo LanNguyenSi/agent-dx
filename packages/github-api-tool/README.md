@@ -103,19 +103,19 @@ Show all commits across repos for a given time range, ideal for daily standups o
 
 ```bash
 # All repos for the last day (default)
-github standup -o LanNguyenSi
+github standup -o your-org
 
 # Last 7 days
-github standup -o LanNguyenSi -d 7
+github standup -o your-org -d 7
 
 # Specific repos only
-github standup -o LanNguyenSi -r agent-dx codebase-oracle
+github standup -o your-org -r repo-a repo-b
 
 # Filter by author
-github standup -o LanNguyenSi --author octocat
+github standup -o your-org --author octocat
 
 # JSON output for scripting
-github standup -o LanNguyenSi -d 3 --json
+github standup -o your-org -d 3 --json
 ```
 
 ### JSON Output Mode

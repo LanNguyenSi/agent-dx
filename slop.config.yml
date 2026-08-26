@@ -16,8 +16,47 @@ placement:
   instructionGlobs:
     - "packages/orchestrator-workflow/assets/**/*.md"
     - "packages/agentic-coding-playbook/**/*.md"
+    # Package READMEs: reusable per-package doc surface, same leak risk as
+    # SKILL.md/AGENTS.md. "packages/*/README.md" covers every package's own
+    # top-level README; the repo-root README.md is deliberately NOT
+    # covered (it is the monorepo overview, not a single package's own
+    # doc).
+    #
+    # OKF bundle docs (packages/*/docs/okf/**) are deliberately NOT
+    # covered by this pack at all: those docs carry verification stamps,
+    # tallies, and task ids by design, and the bundle already has its own
+    # mechanical freshness guard. See packages/slop-detector/CHANGELOG.md
+    # for the rationale and the corpus measurements behind both decisions.
+    - "packages/*/README.md"
   markers:
     - "LanNguyenSi"
+    # Lowercase form: marker matching has no implicit "i" flag, and this
+    # org's own machine-path convention (Claude Code's directory-encoding
+    # scheme, e.g. "-Users-lannguyensi-git-pandora") writes the handle in
+    # lowercase, which the mixed-case marker above does not catch. A
+    # bare-substring match, so this alone also catches the hyphenated
+    # form; see CHANGELOG for the probe that confirmed it.
+    - "lannguyensi"
   allow:
     - "https://github\\.com/LanNguyenSi/"
     - "https://raw\\.githubusercontent\\.com/LanNguyenSi/"
+    # Same two URLs, lowercase org-path form: marker matching has no
+    # implicit "i" flag (see the lowercase "lannguyensi" marker above),
+    # so a real, legitimate lowercase GitHub URL
+    # (https://github.com/lannguyensi/...) is not excused by the
+    # mixed-case allow entries above it and would otherwise fire
+    # org-marker on a URL that is not a leak, just a different case
+    # convention for the same handle.
+    - "https://github\\.com/lannguyensi/"
+    - "https://raw\\.githubusercontent\\.com/lannguyensi/"
+    # A bare "~/" is portable by construction: unlike "/Users/<name>/" or
+    # "/home/<name>/", it never bakes in a literal username, so it carries
+    # no machine-bound information to leak. Deliberately narrow: matches
+    # only the two literal characters "~/", so "/Users/<realname>/" and
+    # "/home/<realname>/" still fire. See CHANGELOG for the measurement
+    # behind this entry.
+    - "~/"
+    # Same reasoning, for a README that spells the generic placeholder as
+    # the literal word "you" instead of an angle-bracket placeholder.
+    # Exact literal match, cannot match a real username.
+    - "/Users/you/"
