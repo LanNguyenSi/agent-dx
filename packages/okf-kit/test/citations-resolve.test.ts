@@ -1545,11 +1545,39 @@ describe("citations-resolve: heading-section citations", () => {
     expect(f?.message).toContain("[heading-section-malformed]");
   });
 
+  it("a bare path#heading without the colon is not a citation (an ordinary link target written in prose)", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    // The slug matches no heading on purpose: a grammar that accepted the
+    // bare form would report heading-section-not-found here.
+    expect(
+      findingFor(findings, "src/CHANGELOG.md#app-secrets"),
+    ).toBeUndefined();
+    expect(
+      findings.filter((f) => f.message.includes("app-secrets")),
+    ).toHaveLength(0);
+  });
+
+  it("a non-lowercase .MD extension is reported as heading-section-malformed, not resolved", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    const f = findingFor(findings, "src/CHANGELOG.MD:#2.0.0");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("notice");
+    expect(f?.message).toContain("[heading-section-malformed]");
+  });
+
+  it("an empty content anchor is reported as heading-section-malformed, not matched against every line", () => {
+    const findings = citationsResolveRule.run(loadHeadingSection());
+    const f = findingFor(findings, 'src/CHANGELOG.md:#2.0.0#""');
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("notice");
+    expect(f?.message).toContain("[heading-section-malformed]");
+  });
+
   it("scans the fixture doc and returns exactly the expected drift findings, no false positives", () => {
     const findings = citationsResolveRule.run(loadHeadingSection());
-    expect(findings).toHaveLength(11);
+    expect(findings).toHaveLength(13);
     expect(findings.filter((f) => f.severity === "warning")).toHaveLength(8);
-    expect(findings.filter((f) => f.severity === "notice")).toHaveLength(3);
+    expect(findings.filter((f) => f.severity === "notice")).toHaveLength(5);
   });
 
   // Negative control (see the "Heading-section citations" doc block in

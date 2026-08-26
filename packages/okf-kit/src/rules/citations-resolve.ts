@@ -463,8 +463,8 @@ const CITATION_RE =
  * -- unlike the line-range form (gated by a `:N` no ordinary link ever
  * contains), there was no character available to tell a real citation
  * apart from a relative link's href written in prose, and measuring
- * against real bundles (agent-tasks, deploy-panel) showed the collision
- * is not hypothetical: several existing docs write exactly
+ * against real bundles (see the CHANGELOG entry that introduced the
+ * `:#` form) showed the collision is not hypothetical: existing docs write
  * `` `path#heading` `` as inline prose pointing at an unrelated anchor,
  * each producing a spurious `heading-section-not-found`. The colon
  * (`path:#heading`) reuses this rule's existing citation signature (a
@@ -477,13 +477,14 @@ const CITATION_RE =
  * rule's own general recommendation for the line-range form.
  */
 const HEADING_SECTION_CITATION_RE =
-  /`([\w./-]+\.md):#(\[?\w(?:[\w.-]*\w)?\]?)(?:#("[^"\n`]*"))?`/gi;
+  /`([\w./-]+\.md):#(\[?\w(?:[\w.-]*\w)?\]?)(?:#("[^"\n`]+"))?`/g;
 /**
  * Companion to `HEADING_SECTION_CITATION_RE`: matches the same
  * backtick + path + `:#` opener but accepts anything up to the closing
  * backtick, so a heading-section citation that fails to parse (an
- * unterminated content-anchor quote, an unquoted third segment, or a
- * non-`.md` target) is still recognised as an *attempt* rather than
+ * unterminated or empty content-anchor quote, an unquoted third segment,
+ * or a non-`.md` target, which includes a non-lowercase `.MD` extension) is
+ * still recognised as an *attempt* rather than
  * silently vanishing -- mirrors `anchor-malformed`'s
  * "still-visible-as-a-notice" posture for the line-range anchor form (see
  * `extractMalformedAnchorRaw`). Only used for a match whose span does not
@@ -2299,7 +2300,7 @@ function scanDoc(
 export const citationsResolveRule: Rule = {
   id: RULE_ID,
   description:
-    "`path:N`/`path:N-M` citations (and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path#heading` `` heading-section citations, must resolve to a real target file and land on real, non-blank content. Mechanical only: does not verify the cited line is semantically correct.",
+    "`path:N`/`path:N-M` citations (and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. Mechanical only: does not verify the cited line is semantically correct.",
   run(ctx) {
     if (!ctx.repoRoot) {
       // Never silently skip: mirrors sources-fresh's posture so a "clean"

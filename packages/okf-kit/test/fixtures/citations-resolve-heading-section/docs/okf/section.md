@@ -57,3 +57,12 @@ A malformed heading-section citation attempt, an unquoted third segment:
 A malformed heading-section citation attempt, a non-`.md` target (the strict
 form never matches a non-Markdown path at all):
 `package.json:#version`.
+
+An ordinary Markdown link target written in prose, without the colon, is
+not a citation at all, even when the slug matches no heading: `src/CHANGELOG.md#app-secrets`.
+
+A non-lowercase `.MD` extension is not a well-formed target either and is
+reported as malformed rather than resolved: `src/CHANGELOG.MD:#2.0.0`.
+
+An empty content anchor is malformed, not a check that matches every line:
+`src/CHANGELOG.md:#2.0.0#""`.
