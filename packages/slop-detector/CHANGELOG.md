@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-26
+
 ### Changed
 
 - `placement.instructionGlobs` in the agent-dx root `slop.config.yml` now
