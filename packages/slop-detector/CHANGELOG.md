@@ -76,15 +76,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       first real run found real violations, mostly em-dashes and
       auto-appended agent-harness footers, across a majority of the
       sampled PRs, zero false positives). One real measurement,
-      `orchestrator-workflow/README.md`'s Haiku 4.5 `effort:`-drop claim
-      (1 `dated-evidence`), was reworded to the durable rule with the
-      dated wire-probe measurement anchored to that package's own
-      CHANGELOG (`0.23.0`, which already recorded the same underlying
-      fact from an unrelated A/B write-up) rather than duplicated into a
-      new entry there, since inserting a new `[Unreleased]` entry above
-      versioned sections shifts every citation into that CHANGELOG by
-      line count and would have re-broken 16 already-fixed anchored
-      citations in the OW OKF bundle.
+      `orchestrator-workflow/README.md`'s Haiku 4.5 `effort:`-drop
+      paragraph (1 `dated-evidence`), was reworded to what that
+      package's own CHANGELOG `0.23.0` entry actually documents (the
+      harness ignores the pinned `effort:` value on Haiku 4.5 rather
+      than rejecting it) and anchored there, instead of duplicating a
+      new `[Unreleased]` entry, since inserting one above versioned
+      sections shifts every citation into that CHANGELOG by line count
+      and would have re-broken 16 already-fixed anchored citations in
+      the OW OKF bundle. A separate, more specific wire-probe claim
+      (the Claude Code CLI itself silently drops the `effort:`
+      parameter for Haiku 4.5 rather than rejecting it, dated
+      2026-08-19) is not what `0.23.0` records, so the README no longer
+      makes that exact claim; the orchestrator has that sentence and its
+      date for the run files, since it is not duplicated in this
+      CHANGELOG either (same reason).
   - `placement-slop/README.md` also gained a short recommendation (rule
     only, no counts, no task ids) pointing a monorepo at
     `packages/*/README.md` as a `placement.instructionGlobs` value, and

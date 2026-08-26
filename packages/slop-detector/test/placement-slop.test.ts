@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { checkText, checkPath } from "../src/engine.js";
-import { defaultConfig, mergeConfig } from "../src/config.js";
+import { defaultConfig, mergeConfig, loadConfig } from "../src/config.js";
 import { allPacks } from "../src/packs/registry.js";
 import type { PackDefinition, Rule, RuleContext } from "../src/types.js";
 
@@ -979,5 +980,91 @@ describe("placement-slop: a bare '~/' allow entry stays narrow", () => {
   it("does not fire at all on a bare ~/ idiom alone", () => {
     const v = checkText("Clone your work into ~/git before running the sweep.", "x/SKILL.md", opts);
     expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
+  });
+});
+
+// ── lowercase org-marker vs. a legitimate lowercase GitHub URL ────────────
+//
+// The lowercase "lannguyensi" placement.markers entry (added to catch this
+// org's lowercase machine-path convention, see the fixture above) is a
+// bare-substring, case-sensitive match with no automatic URL exclusion:
+// org-marker does not run computeExcludedSpans the way home-path/
+// dated-evidence/tally-phrase/opaque-id do (see README's `allow` section),
+// so a real, legitimate lowercase GitHub URL for this same org
+// (https://github.com/lannguyensi/...) would otherwise fire org-marker
+// unless a matching lowercase allow entry excuses it explicitly.
+
+describe("placement-slop: lowercase org-marker vs. a lowercase GitHub URL allow", () => {
+  const cfg = mergeConfig({
+    packs: { "placement-slop": true },
+    placement: {
+      markers: ["LanNguyenSi", "lannguyensi"],
+      allow: [
+        "https://github\\.com/LanNguyenSi/",
+        "https://raw\\.githubusercontent\\.com/LanNguyenSi/",
+        "https://github\\.com/lannguyensi/",
+        "https://raw\\.githubusercontent\\.com/lannguyensi/",
+      ],
+    },
+  });
+  const opts = {
+    packs: allPacks,
+    config: cfg,
+    packFilter: ["placement-slop"],
+  };
+
+  it("does not fire org-marker on a lowercase github.com URL for this org", () => {
+    const v = checkText(
+      "See https://github.com/lannguyensi/somerepo for details.",
+      "x/SKILL.md",
+      opts,
+    );
+    expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
+  });
+
+  it("still fires org-marker on a lowercase non-URL occurrence", () => {
+    const v = checkText("Clone via ~/../lannguyensi/x before running.", "x/SKILL.md", opts);
+    const hit = v.find((x) => x.ruleId === "placement-slop/org-marker");
+    expect(hit).toBeDefined();
+    expect(hit?.matched).toBe("lannguyensi");
+  });
+});
+
+// ── real repo-root slop.config.yml, loaded and parsed for real ────────────
+//
+// Every other test in this file exercises the pack's mechanics against an
+// inline `mergeConfig` fixture; none of them read the actual root
+// `slop.config.yml` this repo's `placement-guard` CI job runs against, so
+// a typo or an accidental revert to that file could pass every other test
+// here while leaving the CI job's real coverage silently narrower (or
+// wider) than intended. Loads and parses the real file with the pack's
+// own `loadConfig`, resolved relative to this test file rather than to
+// `process.cwd()` (which vitest may or may not set to the repo root).
+
+describe("placement-slop: the actual repo-root slop.config.yml (agent-dx #80e4743d)", () => {
+  const repoRootConfigPath = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "..",
+    "slop.config.yml",
+  );
+
+  it("covers packages/*/README.md and keeps '~/' as the only bare home-idiom allow entry", () => {
+    const cfg = loadConfig(repoRootConfigPath);
+
+    expect(cfg.placement?.instructionGlobs).toContain("packages/*/README.md");
+
+    // "Bare" here means the tilde form on its own, with no username or
+    // placeholder attached, as opposed to e.g. "/Users/you/", which is
+    // also a home-idiom allow entry but names a specific placeholder, not
+    // a bare shorthand. Only one entry should start with "~" at all, and
+    // it should be the exact narrow "~/" this rollout was measured
+    // against, not some wider variant (a bare "~", a "~.*" pattern, ...)
+    // that would silently widen what the allow excuses.
+    const tildeEntries = (cfg.placement?.allow ?? []).filter((p) =>
+      p.startsWith("~"),
+    );
+    expect(tildeEntries).toEqual(["~/"]);
   });
 });

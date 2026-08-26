@@ -329,10 +329,9 @@ effort actually taking effect.
 The pin is also emitted unconditionally regardless of which model the role
 resolves to via `--models`, including a model with no effort support at all
 (e.g. `--models reviewer=haiku` still renders `model: haiku` followed by
-`effort: high`). Current Claude Code releases silently drop the `effort:`
-parameter for Haiku 4.5 rather than rejecting it: the value is ignored, not
-an install-time or run-time error (anchored by a measurement, see CHANGELOG
-0.23.0).
+`effort: high`). On Haiku 4.5, which does not support the `effort`
+parameter, the harness ignores the pinned value rather than rejecting it
+(anchored by a measurement, see CHANGELOG 0.23.0).
 
 ## Ownership and re-runs
 
