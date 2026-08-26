@@ -2082,12 +2082,17 @@
   twice already in this same task, see the 2026-08-26 entry below for
   both), so log.md now carries exactly one live count instead, sourced
   from a command, not typed by hand: `npx vitest run
-  test/docs-consistency.test.ts -t "examined more than a token number"
-  --reporter=default` prints `examined: 171` against the committed tree
-  (the erosion brake's own count of citations into the four in-scope
-  kit-source categories -- `SKILL.md`, the agent templates, `models.ts`,
-  `test/*.test.ts` -- across the five docs/okf siblings; `CHANGELOG.md`'s
-  16 heading-anchored citations are a separate mechanism, deliberately
+  test/docs-consistency.test.ts -t "in-scope citations (sanity"
+  --reporter=verbose` shows a passing test named "examined 171 in-scope
+  citations (sanity: the brake itself did not go blind, more than a
+  token number)" against the committed tree -- the count is read from
+  the test's own name (review round 5, LOW-g), not a stdout print a
+  reporter could suppress, so the number shown can never diverge from
+  the number the floor assertion actually checked (the erosion brake's
+  own count of citations into the four in-scope kit-source categories --
+  `SKILL.md`, the agent templates, `models.ts`, `test/*.test.ts` --
+  across the five docs/okf siblings; `CHANGELOG.md`'s 16 heading-anchored
+  citations are a separate mechanism, deliberately
   excluded from this count, see the `anchorScopeResolve` comment in
   `test/docs-consistency.test.ts`). Corrected 2026-08-26
   (this fix round, after review round 2): the round-2 draft above (and
@@ -2126,8 +2131,11 @@
   occurrence count at 3 (23 first-pass anchors exceeded that, several using
   generic tokens like `describe(` that recur dozens of times).
 
-  All 166 in-scope anchors (122 regenerated from the first pass, 44 newly
-  added for HIGH 1) were rewritten under both rules: (a) walk the cited
+  All 166 in-scope anchors, round 2's own count at the time (122 regenerated
+  from the first pass, 44 newly added for HIGH 1; the live count has since
+  moved, see the 2026-08-26 round-4 entry below for how to read it fresh
+  rather than trusting this number), were rewritten under both rules: (a)
+  walk the cited
   range's end line backward past any blank/closing-brace/too-short line to
   the nearest real content line, narrowing the range's end to that line
   when needed, and anchor there; (b) pick a literal substring of that line
@@ -2297,14 +2305,31 @@
   -- and one of round 3's own "verified legitimate" six, the citation
   formerly at `init.test.ts` lines 153-169, was independently confirmed
   wrong by round 4's structural scan below, contradicting the
-  round-3 claim about that same citation. The round-3 check is retired
-  (superseded, not merely extended) by the STRADDLE check below, which is
-  exhaustive rather than sampled: every full citation into a `*.test.ts`
-  target, checked, not a subset. Measured on the round-3-corrected bundle
-  before this round's fixes: 16 unique ranges failed it (14 where start
-  and end land in two different `it()`/`test()` blocks, plus 2 where the
-  citation starts inside the JSDoc comment immediately before a
-  `describe(` rather than inside any block at all); all 16 were re-pointed
+  round-3 claim about that same citation. The round-3 check is replaced by
+  the broader STRADDLE check below, not merely extended: the round-3 symptom
+  (end is a foreign describe/it/test head line) is a special case of
+  straddling except when the end line is a NESTED CHILD block's own head
+  line still inside the start's own (wider) block -- round-3's check would
+  wrongly flag that as an error, straddle would not, since the child is
+  still within the parent's span. Checked at this commit (excluding the
+  degenerate single-line case of a citation whose start and end are both a
+  block's own head line, e.g. the single-line citation into `init.test.ts`
+  at line 1796, which is straddle-clean by construction and not what "nested
+  child" means here): 0 citations in the bundle have an end line that is a
+  head line of a nested child while still being straddle-clean, so this
+  round's fixes did not need to reconcile any such case; the exact scan is
+  not reproduced here. The STRADDLE check is also exhaustive rather than
+  sampled: every full citation into a `*.test.ts` target, checked, not a
+  subset. Measured on the round-3-corrected bundle before this round's
+  fixes: 16 unique ranges failed it -- 15 straddles (14 where start and end
+  land in two different `it()`/`test()` blocks, plus 1,
+  `docs-consistency.test.ts:1774-1921`, where start correctly resolved to a
+  `describe(` block but end escaped past its own close) and 1
+  (`subagent-contracts-superset.md`'s citation into
+  `docs-consistency.test.ts:513-519`) where the citation starts inside a
+  JSDoc comment immediately before a `describe(` rather than inside any
+  block at all, so it has no containing block to straddle from; all 16 were
+  re-pointed
   to the test each citing sentence actually names (see the round-4 entry
   above for the count-found/count-fixed detail and the "start need not be
   the block's own head line" design note). A `start !==` the block's own

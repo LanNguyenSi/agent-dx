@@ -124,13 +124,13 @@ but fails the exact-name pin. The explorer pair still has no dedicated
 automated drift guard today, protected only by direct read and review. The
 advisor pair started the same way — a 0.21.0
 `describe("advisor escalation policy ships in the AGENTS.md section and
-SKILL.md")` block (`test/docs-consistency.test.ts:1925-1996#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
+SKILL.md")` block (`test/docs-consistency.test.ts:1923-1996#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
 that `SKILL.md` carries an Advisor output contract block with the right
 top-level shape, a substring-presence pin, not byte-for-byte equality — but
 review round 1 (M2) closed that gap: a dedicated
 `describe("advisor output contract is byte-identical between SKILL.md and
 advisor.md (review round 1, M2)")` block
-(`test/docs-consistency.test.ts:2012-2024#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
+(`test/docs-consistency.test.ts:2010-2024#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
 both raw files and asserts equality, the same pattern the reviewer and
 implementer pairs use.
 
@@ -168,7 +168,7 @@ contract (added 0.21.0) is not part of this superset relationship, since an
 advisor spawn is never assembled from a task-slicer's per-task output the
 way an implementer spawn is.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:538-741#"not implementation instructions"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:536-741#"not implementation instructions"`
 enforces this. The load-bearing check derives the *required* field set from
 the live subagent-input yaml block itself rather than hardcoding it
 (`test/docs-consistency.test.ts:596-632#"^ {4}${field}:"`): it regex-extracts top-level fields
@@ -342,12 +342,12 @@ the identical placeholder block. An output missing the field when probes
 identically in both copies since the R2 pass as "treated as a misfire, not
 evidence" (the installed prompt alone previously said "incomplete").
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:848-884#"expect(skillBlock).toBe(implementerBlock);"` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:846-884#"expect(skillBlock).toBe(implementerBlock);"` pins
 the original 0.16.0 shape: the installed prompt's instruction and field
 mention, :850-856, the claim-only-what-was-measured rule, :858-863, the
 misfire-rule sentence, :865-870, and a byte-for-byte cross-copy equality
 check on the field block, :872-885.
-`test/docs-consistency.test.ts:906-938#"expect(implementerMd).toContain(enumeration);"` pins the R2 additions: step 6's
+`test/docs-consistency.test.ts:904-938#"expect(implementerMd).toContain(enumeration);"` pins the R2 additions: step 6's
 sentence and its claim-only-what-was-measured reference, :908-919, the
 not-applicable clause in both copies, :921-925, and two exact-string pins,
 :927-939, that catch a rename applied identically to both copies — a mutant

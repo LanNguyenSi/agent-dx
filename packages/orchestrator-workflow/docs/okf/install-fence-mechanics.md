@@ -158,7 +158,7 @@ Net contract: content between the markers is kit-owned and overwritten on every 
 Claude Code reads `CLAUDE.md`, not `AGENTS.md` (writers.ts:119-122). `ensureClaudeImport` (writers.ts:123-147), called only for the `claude` harness (init.ts:521):
 
 - No `CLAUDE.md`: created verbatim as `CLAUDE_MD_BOILERPLATE`, a heading plus "Project agent instructions live in AGENTS.md." plus the `@AGENTS.md` import line (writers.ts:117).
-- `CLAUDE.md` exists: if any line's whitespace-split tokens already include the literal `@AGENTS.md` (writers.ts:130-134), nothing is written, an inline mention like `"Rules: see @AGENTS.md first."` already counts (init.test.ts:240-244#"expect(importCount).toBe(1);"). Otherwise a blank line plus `@AGENTS.md` is appended once (writers.ts:139-146); a second `init` run does not duplicate it (init.test.ts:234-239#"const claudeMd = readFileSync(join(target,").
+- `CLAUDE.md` exists: if any line's whitespace-split tokens already include the literal `@AGENTS.md` (writers.ts:130-134), nothing is written, an inline mention like `"Rules: see @AGENTS.md first."` already counts (init.test.ts:247-251#"expect(claudeMd).toBe("). Otherwise a blank line plus `@AGENTS.md` is appended once (writers.ts:139-146); a second `init` run does not duplicate it (init.test.ts:234-244#"expect(importCount).toBe(1);").
 
 Codex and opencode need no such import, both read `AGENTS.md` natively (README.md:105-106).
 

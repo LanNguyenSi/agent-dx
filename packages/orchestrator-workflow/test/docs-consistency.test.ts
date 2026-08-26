@@ -2491,16 +2491,15 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
   // examined nothing (e.g. a target-resolution regression that emptied
   // `RESOLVE`). 150 is a floor with headroom below the live count (review
   // round 4, D31: the live count itself is not hand-written here or
-  // anywhere else in the bundle -- read it from this test's own stdout
-  // line via `npx vitest run test/docs-consistency.test.ts -t "examined
-  // more than a token number"`), so a modest future doc trim does not
-  // make this brittle.
-  it("examined more than a token number of in-scope citations (sanity: the brake itself did not go blind)", () => {
-    // Deliberate console.log, not a debug leftover: this is the one place
-    // the live in-scope citation count is printed, so log.md and
-    // CHANGELOG.md can point at "run this command" instead of a
-    // hand-typed number that silently rots as citations are added.
-    console.log(`examined: ${examined}`);
+  // anywhere else in the bundle). Review round 5 (LOW-g): the count is
+  // in the test's own NAME, not only a stdout print -- `examined` is the
+  // same variable both the title template literal and the assertion
+  // below read, so the two can never diverge, and the count is visible
+  // in any reporter's pass/fail line (`--reporter=verbose` or the
+  // default) without needing to isolate stdout at all. Run `npx vitest
+  // run test/docs-consistency.test.ts -t "in-scope citations (sanity"`
+  // and read the count from the passing test's own name.
+  it(`examined ${examined} in-scope citations (sanity: the brake itself did not go blind, more than a token number)`, () => {
     expect(examined).toBeGreaterThan(150);
   });
 
@@ -2576,6 +2575,13 @@ describe("every full citation into a *.test.ts target stays inside one describe/
     end: number;
   }
 
+  // Only bare `describe(`/`it(`/`test(` calls are matched (an Identifier
+  // callee); a property-access form like `describe.each(...)` or
+  // `it.skip(...)` has a PropertyAccessExpression callee instead and is
+  // silently not collected as a block. None of the five in-scope test
+  // files use such a form today (checked: zero `describe.`/`it.`/`test.`
+  // call sites across test/*.test.ts), so this is a latent gap, not a
+  // measured one.
   function findTestBlocks(fileText: string, fileName: string): TestBlock[] {
     const sf = ts.createSourceFile(
       fileName,
@@ -2610,10 +2616,7 @@ describe("every full citation into a *.test.ts target stays inside one describe/
     let best: TestBlock | undefined;
     for (const b of blocks) {
       if (b.startLine <= line && line <= b.endLine) {
-        if (
-          !best ||
-          b.endLine - b.startLine < best.endLine - best.startLine
-        ) {
+        if (!best || b.endLine - b.startLine < best.endLine - best.startLine) {
           best = b;
         }
       }

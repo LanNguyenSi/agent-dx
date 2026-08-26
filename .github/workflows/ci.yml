@@ -164,19 +164,22 @@ jobs:
           set +e
           okf-kit check --json "${fixture}/bundle" > "${fixture}/selftest-report.json"
           set -e
-          selftest_count=$(jq '[
-            .findings[] | select(.message | test("\\[anchor-[a-z-]+\\]$"))
+          heading_count=$(jq '[
+            .findings[] | select(.message | test("\\[anchor-heading-"))
           ] | length' "${fixture}/selftest-report.json")
-          # Both anchor families (heading-form and string-form) must fire,
-          # not merely "at least one" -- a filter or okf-kit regression
-          # that silently stopped catching one family would otherwise pass
-          # this gate on the other family's finding alone.
-          if [ "${selftest_count}" -lt 2 ]; then
-            echo "::error title=OKF anchor guard self-test failed::the anchor-finding jq filter reported ${selftest_count} findings against a fixture with two deliberately drifted anchored citations, one heading-form and one string-form (expected >= 2, one per family); the filter or okf-kit's finding shape changed under this job"
+          string_count=$(jq '[
+            .findings[] | select(.message | test("\\[anchor-not-found-in-range\\]$"))
+          ] | length' "${fixture}/selftest-report.json")
+          # Each anchor family (heading-form and string-form) is asserted
+          # separately, not just a combined total -- a filter or okf-kit
+          # regression that silently stopped catching one family could
+          # otherwise pass this gate on the other family's finding alone.
+          if [ "${heading_count}" -lt 1 ] || [ "${string_count}" -lt 1 ]; then
+            echo "::error title=OKF anchor guard self-test failed::the anchor-finding jq filter reported ${heading_count} heading-form and ${string_count} string-form findings against a fixture with one deliberately drifted citation of each (expected >= 1 each); the filter or okf-kit's finding shape changed under this job"
             cat "${fixture}/selftest-report.json"
             exit 1
           fi
-          echo "Self-test OK: ${selftest_count} anchor finding(s) against the drifted fixture."
+          echo "Self-test OK: ${heading_count} heading-form and ${string_count} string-form anchor finding(s) against the drifted fixture."
 
       - name: Anchor-citation guard
         shell: bash
