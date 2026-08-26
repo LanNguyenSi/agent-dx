@@ -10,26 +10,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A new `okf-anchor-guard` job in `.github/workflows/ci.yml` (this repo)
-  runs okf-kit's anchor check against `docs/okf` as a blocking gate: an
+  runs okf-kit's anchor check against `docs/okf` and fails the build (no
+  branch-protection change; master has no required checks today) when an
   edit to `SKILL.md`, an agent template under `assets/agents/`,
-  `src/models.ts`, or a `test/*.test.ts` file that shifts a cited range
-  out of the section or text an anchored bundle citation names now fails
-  CI, instead of only the existing warn-only `okf-staleness.yml` drift
-  watch (which never blocks by design and stays untouched). All 122
-  previously-unanchored bundle citations into those four source
-  categories now carry a string-form anchor; the 16 `CHANGELOG.md`
-  citations already carried heading anchors from the prior round.
+  `src/models.ts`, or a `test/*.test.ts` file shifts a cited range out of
+  the section or text an anchored bundle citation names, instead of only
+  the existing warn-only `okf-staleness.yml` drift watch (which never
+  blocks by design and stays untouched). All 166 in-scope bundle
+  citations into those four source categories now carry a string-form
+  anchor (up from a first-round draft of 122, which review round 2 found
+  had missed 44 bare, non-backtick-delimited citations in two of the five
+  docs/okf siblings; the citation parser was corrected to match okf-kit's
+  own backtick-optional shape); the 16 `CHANGELOG.md` citations still
+  carry heading anchors from the prior round, untouched -- 182 anchored
+  citations in the bundle altogether.
+- Every anchor now satisfies two mechanically-checked properties review
+  round 2 added (a first-round anchor sitting on a wide range's first
+  line, as 107 of 121 did, survives an insertion shorter than the range
+  itself -- measured: a 1-line insertion near the top of SKILL.md left
+  21 of 61 SKILL.md-targeting anchors silently green): (a) the anchor
+  text occurs on the LAST line of its cited range (ranges were narrowed
+  where needed to end on real content rather than a blank/closing-brace
+  line), and (b) it occurs at most 3 times in the whole target file (23
+  first-round anchors used a too-common token, e.g. `describe(`, and were
+  replaced). Two anchors were additionally re-pointed because the text
+  they carried did not match the claim their citing sentence made, not
+  just its mechanical position; see `docs/okf/log.md` for both. Pinned by
+  three new tests in `test/docs-consistency.test.ts` (version-pin
+  coverage extended to every `.github/workflows/*.yml` file, not just
+  `okf-staleness.yml`; the last-line/occurrence-cap rule, verified red
+  against the first-round anchors and green against this round's; and an
+  erosion brake asserting zero unanchored in-scope citations going
+  forward). `ci.yml`'s anchor-finding jq filter now matches any
+  `anchor-*`-tagged finding by pattern instead of four hardcoded rule
+  ids, guarded by a new self-test step that builds a throwaway fixture
+  bundle with one deliberately drifted anchored citation and requires the
+  filter to catch it before the real check runs.
   `okf-kit check` reports the same 0 errors / 13 warnings / 22 notices
-  before and after (0 anchor findings either way, all 13 pre-existing
-  warnings unrelated). Two mutation probes (both applied and reverted): a
-  `SKILL.md` line-shift raised anchor findings from 0 to 27 and the guard
-  reported it as a build failure; reverting it returned to 0. A
-  `package.json` patch-version bump (a non-procedure change) left the
-  anchor-finding count at 0, confirming no false positive. Residual gap
-  named in `docs/okf/log.md`: a content change inside a cited range that
-  neither shifts its line count nor disturbs the anchor text itself is
-  still invisible to this check, the same mechanical (non-semantic) limit
-  okf-kit's own README documents (agent-tasks task 578f5bfd, following the
+  before and after this round's full anchor rewrite (0 anchor findings
+  either way; the 13 pre-existing warnings are unrelated
+  `install-fence-mechanics.md` short-form findings against `init.test.ts`
+  and `init.ts`). Differential mutation probe, replacing the first
+  round's single 27-finding number: inserting `k` dummy lines near the
+  top of SKILL.md, 52/52 (100%) of its unique cited ranges now produce a
+  finding at `k=1`; 51/52 (98%) at `k=2`, one named exception (a
+  same-block token collision, see `docs/okf/log.md`). A `package.json`
+  patch-version bump still leaves the anchor-finding count at 0,
+  confirming no false positive. Residual gaps named in `docs/okf/log.md`:
+  a content change inside a cited range that neither shifts its line
+  count nor disturbs the anchor text stays invisible to this check
+  (mechanical, never semantic, the same limit okf-kit's own README
+  documents), plus the one named same-block token collision above
+  (agent-tasks task 578f5bfd, review round 2; following the
   anchored-citations feature itself, task 5c8013c0, and its release, task
   c0effc67).
 
