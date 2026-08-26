@@ -271,15 +271,32 @@ const RULE_ID = "citations-resolve";
  * matching lines "is" the anchor is undefined before asking whether the
  * one occurrence is on the right line).
  *
- * A fourth existing check, the test-file block-boundary check
- * (`checkRangeBoundary`, already applied to short-form citations via
- * `checkShortFormTarget`), is also applied to a FULL citation's own range
- * into a `.test.ts`/`.spec.ts` target under this same opt-in -- reusing the
- * function rather than re-implementing it, per this rule's own "one
- * mechanism, not two" convention (see `checkFullTarget`). Deliberately
- * scoped to the same flag rather than a separate one: turning it on
- * unconditionally would change existing, already-green full citations for
- * every consumer bundle, not just one that opted in.
+ * A fourth check, `test-range-straddles-block` (warning), applies to a FULL
+ * citation's own range into a `.test.ts`/`.spec.ts` target under this same
+ * opt-in (see `checkTestRangeStraddle`, called from `checkFullTarget`): a
+ * full citation's range is expected to stay inside a single `describe`/
+ * `it`/`test` block once it starts, so any block-head line
+ * (`describe(`/`describe.only(`/`describe.skip(`/`describe.each(`/`it(`/
+ * `it.only(`/`it.skip(`/`it.each(`/`test(`/`test.only(`/`test.skip(`/
+ * `test.each(`, see `TEST_BLOCK_HEAD_RE`) found on any line of the range
+ * OTHER than its own first line means the citation straddled out of the
+ * block it started in (or never really started on one). The range's start
+ * line is never itself checked here: it is either a legitimate block head
+ * (the range correctly starts a block) or legitimately inside a block's
+ * body (a partial citation into the middle of a block), and both are fine
+ * -- only a head line reappearing *after* the start is evidence of drift.
+ * Deliberately its own rule id rather than reusing `checkRangeBoundary`'s
+ * `test-range-start-not-head`/`test-range-end-not-closing` (which stay
+ * short-form-only, see `checkShortFormTarget`): those two require the range
+ * to start exactly on a head line and end exactly on the matching closing
+ * `});`, which is far stricter than a full citation's legitimate use
+ * (citing an arbitrary sub-range once a paragraph has already named the
+ * file) needs -- the straddle check only cares whether the range crossed a
+ * block boundary, not whether it captured a whole block precisely.
+ * Deliberately scoped to test-file targets only, same reasoning
+ * `checkShortFormTarget`'s own doc comment already gives for the Markdown
+ * half of the block-boundary check: a full citation into a Markdown target
+ * legitimately cites a couple of arbitrary lines all the time.
  */
 
 /**
@@ -621,6 +638,15 @@ const SHORT_FORM_COLON_RE = /:(\d+)-(\d+)/g;
 const TEST_FILE_RE = /\.(test|spec)\.(ts|js|mjs)$/i;
 const TEST_HEAD_LINE_RE = /^\s*(?:describe|it)\s*\(/;
 const TEST_CLOSING_LINE_RE = /^\s*\}\)\s*;\s*$/;
+// Block-head detection for test-range-straddles-block (see the doc block
+// above and checkTestRangeStraddle below): a wider set of head shapes than
+// TEST_HEAD_LINE_RE (which stays short-form-only, unchanged, via
+// checkRangeBoundary/checkShortFormTarget) -- describe/it/test, each with
+// an optional .only/.skip/.each modifier. A leading `export `/`async ` is
+// deliberately not handled: not needed for any bundle this rule has been
+// measured against.
+const TEST_BLOCK_HEAD_RE =
+  /^\s*(?:describe|it|test)(?:\.(?:only|skip|each))?\s*\(/;
 // Markdown block-boundary check (see checkRangeBoundary): a range boundary
 // line that is nothing but a bracket (open or close), optionally with a
 // trailing `,`/`;`, is always a drift signal. A bare code-fence delimiter is
@@ -1003,23 +1029,21 @@ function checkFullTarget(
   const lines = splitLines(read.content);
   const base = checkTargetLines(citedPath, startLine, endLine, lines);
   if (base) return base;
-  // Test-file block-boundary check, opt-in only (see "Anchor strictness
-  // (opt-in)" above): a full citation's own range into a .test.ts/.spec.ts
-  // target is checked the same way a short-form citation's already is
-  // (checkRangeBoundary), reused rather than reimplemented. Deliberately
-  // scoped to test-file targets only (isTestFile), not also the markdown
-  // branch checkRangeBoundary shares with short-form: a full citation into
-  // a markdown target legitimately cites a couple of arbitrary lines all
-  // the time (e.g. two lines of a code fence example), the exact reasoning
-  // checkShortFormTarget's own doc comment already gives for why this
-  // check was scoped to short-form in the first place -- extending only
-  // the test-file half here, not the markdown half, avoids reintroducing
-  // that false-positive risk for full citations. Only meaningful for an
-  // actual range (endLine !== null); a single-line citation trivially
-  // starts and ends on the same line and has nothing to straddle.
+  // test-range-straddles-block, opt-in only (see "Anchor strictness
+  // (opt-in)" above and checkTestRangeStraddle): a full citation's own
+  // range into a .test.ts/.spec.ts target must not cross into another
+  // block's head after its own first line. Deliberately scoped to
+  // test-file targets only (isTestFile), not also a markdown branch: a
+  // full citation into a markdown target legitimately cites a couple of
+  // arbitrary lines all the time (e.g. two lines of a code fence example),
+  // the exact reasoning checkShortFormTarget's own doc comment already
+  // gives for why the sibling block-boundary check was scoped to
+  // short-form in the first place. Only meaningful for an actual range
+  // (endLine !== null); a single-line citation trivially starts and ends
+  // on the same line and has nothing to straddle.
   if (requireAnchors && endLine !== null && isTestFile(citedPath)) {
-    const boundary = checkRangeBoundary(citedPath, startLine, endLine, lines);
-    if (boundary) return boundary;
+    const straddle = checkTestRangeStraddle(startLine, endLine, lines);
+    if (straddle) return straddle;
   }
   if (!anchor) return null;
   return checkAnchor(
@@ -1435,6 +1459,32 @@ function checkRangeBoundary(
     return null;
   }
 
+  return null;
+}
+
+/**
+ * `test-range-straddles-block` (opt-in, warning): a FULL citation's own
+ * range into a `.test.ts`/`.spec.ts` target, see the "Anchor strictness
+ * (opt-in)" doc block above for the full rule text. Checks every line of
+ * `[startLine, endLine]` EXCEPT the range's own first line (`startLine`
+ * itself is never checked -- see that doc block for why) against
+ * `TEST_BLOCK_HEAD_RE`; the first hit (in document order) is reported,
+ * matching this file's "one problem per citation" pattern.
+ */
+function checkTestRangeStraddle(
+  startLine: number,
+  endLine: number,
+  lines: string[],
+): Problem | null {
+  for (let i = startLine; i <= endLine - 1 && i < lines.length; i++) {
+    const text = lines[i] ?? "";
+    if (TEST_BLOCK_HEAD_RE.test(text)) {
+      return {
+        rule: "test-range-straddles-block",
+        message: `range straddles into another block's head at line ${i + 1} ("${text.trim()}")`,
+      };
+    }
+  }
   return null;
 }
 

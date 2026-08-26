@@ -1986,6 +1986,7 @@ describe("citations-resolve: --require-anchors opt-in", () => {
       "anchor-not-unique-in-range",
       "test-range-start-not-head",
       "test-range-end-not-closing",
+      "test-range-straddles-block",
     ];
     const hits = findings.filter((f) =>
       newRuleIds.some((id) => f.message.includes(`[${id}]`)),
@@ -2048,21 +2049,79 @@ describe("citations-resolve: --require-anchors opt-in", () => {
     expect(matches[0]?.severity).toBe("warning");
   });
 
-  it("test-file block-boundary: a full citation's range ending on a different block's own head line is flagged, opt-in only", () => {
+  it("test-range-straddles-block: a full citation's range crossing into a different block's head line is flagged, opt-in only", () => {
     // This citation is also unanchored, so it separately gets an
     // anchor-required finding (see the test above); findingFor only
     // returns the first match for its citation prefix, so this asserts
-    // against the specific boundary finding by rule id instead.
+    // against the specific straddle finding by rule id instead.
     const findings = citationsResolveRule.run(loadRequireAnchors());
     const matches = findings.filter((f) =>
       f.message.startsWith("`src/target.test.ts:4-10`"),
     );
-    const boundary = matches.find((f) =>
-      f.message.includes("[test-range-end-not-closing]"),
+    const straddle = matches.find((f) =>
+      f.message.includes("[test-range-straddles-block]"),
     );
-    expect(boundary).toBeDefined();
+    expect(straddle).toBeDefined();
+    expect(straddle?.severity).toBe("warning");
     expect(matches.some((f) => f.message.includes("[anchor-required]"))).toBe(
       true,
     );
+  });
+
+  it("test-range-straddles-block: a range ending on an it( head line is flagged", () => {
+    // Also unanchored (separately gets anchor-required); assert against
+    // the straddle finding by rule id, same reasoning as the test above.
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:6-8`"),
+    );
+    const straddle = matches.find((f) =>
+      f.message.includes("[test-range-straddles-block]"),
+    );
+    expect(straddle).toBeDefined();
+    expect(straddle?.message).toContain("line 8");
+    expect(straddle?.severity).toBe("warning");
+  });
+
+  it("test-range-straddles-block: a range containing an it( head line strictly inside (not the last line) is flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:6-9`"),
+    );
+    const straddle = matches.find((f) =>
+      f.message.includes("[test-range-straddles-block]"),
+    );
+    expect(straddle).toBeDefined();
+    expect(straddle?.message).toContain("line 8");
+  });
+
+  it("test-range-straddles-block: a range starting on a describe( head and staying inside its body is not flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:13-14`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(false);
+  });
+
+  it("test-range-straddles-block: a range entirely inside an it( body is not flagged", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle.test.ts:21-22`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(false);
+  });
+
+  it('test-range-straddles-block: a non-test .ts target containing the text "it(" is never checked', () => {
+    const findings = citationsResolveRule.run(loadRequireAnchors());
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/straddle-plain.ts:1-3`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[test-range-straddles-block]")),
+    ).toBe(false);
   });
 });

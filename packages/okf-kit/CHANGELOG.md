@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at all, producing the same findings as before this form existed.
 - `citations-resolve`: a new `--require-anchors` opt-in (and
   `--require-anchors-allow <patterns...>` for exempting specific citedPath
-  globs/exact matches) adds three stricter, `warning`-severity checks, off
+  globs/exact matches) adds four stricter, `warning`-severity checks, off
   by default so an existing bundle's plain `check` findings are unaffected:
   `anchor-required` (an in-repo full citation carries no `#anchor` at all,
   except a reserved citing doc or an allowlisted target),
@@ -40,19 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but not on the range's own last line -- an anchor on the first line
   survives a small insertion above the range, since the shifted window
   still contains its original content just at a different offset; the
-  last line falls out of the window on any insertion at all), and
+  last line falls out of the window on any insertion at all),
   `anchor-not-unique-in-range` (a string anchor occurs more than once
   inside its cited range; a count of zero stays `anchor-not-found-in-range`
-  as before, unconditionally). The opt-in also extends the existing
-  test-file block-boundary check (`test-range-start-not-head`/
-  `test-range-end-not-closing`, previously short-form-only) to a full
-  citation's own range into a `.test.ts`/`.spec.ts` target, reusing
-  `checkRangeBoundary` rather than a second implementation; deliberately
-  scoped to test-file targets only, not the Markdown half of that same
-  check, for the same false-positive reason the Markdown half was already
-  scoped to short-form citations. See "Anchor strictness (opt-in,
-  `--require-anchors`)" in the README for the measured findings against
-  two real bundles' `docs/okf` and the full rationale.
+  as before, unconditionally), and `test-range-straddles-block` (a FULL
+  citation's own range into a `.test.ts`/`.spec.ts` target contains a
+  `describe`/`it`/`test` block-head line on any line other than the
+  range's own first line -- its own new rule, not a reuse of the existing
+  `test-range-start-not-head`/`test-range-end-not-closing` pair, which
+  stay short-form-only). See "Anchor strictness (opt-in,
+  `--require-anchors`)" in the README for the full rationale; measured
+  against existing bundles, off by default and additive only.
 
 ## [0.7.0] - 2026-08-26
 
