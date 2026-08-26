@@ -735,7 +735,7 @@ describe("task slicer output schema is a superset of the implementer input contr
     }
   });
 
-  it("task-slicer.md frames allowed/forbidden changes as scope boundaries, not direct implementation orders", () => {
+  it("task-slicer.md frames allowed/forbidden changes as scope boundaries, not implementation instructions", () => {
     const unwrapped = unwrap(taskSlicerRaw);
     expect(unwrapped).toContain("scope boundaries for the task");
     expect(unwrapped).toContain("not implementation instructions");
@@ -2514,6 +2514,97 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
         violations.push(
           `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}#"${c.anchor}"\` -- ` +
             `anchor text occurs ${count} times inside its own cited range of ${c.real} (must be exactly 1)`,
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+});
+
+/**
+ * agent-tasks ca9d5048 review round 3 (MEDIUM 1): the docs/okf bundle's
+ * OTHER anchor family -- heading-form citations into CHANGELOG.md, e.g.
+ * `` `CHANGELOG.md:552-576#0.16.0` `` -- was unguarded by any local test
+ * (anchorScopeResolve deliberately excludes CHANGELOG.md, and the string
+ * anchor assertions above skip a non-string anchor). Only okf-kit's own CI
+ * job caught review round 2's HIGH 1: a 3-line edit to the CHANGELOG's
+ * `[Unreleased]` bullet shifted every release heading below it by 3 lines,
+ * and none of the 16 heading-anchored citations across the five docs/okf
+ * siblings were re-pointed, yet every test in this file stayed green
+ * because none of them ever reads CHANGELOG.md as an anchor target. This
+ * mirrors okf-kit's own anchor-heading-* resolution
+ * (`packages/okf-kit/src/rules/citations-resolve.ts`'s
+ * `findEnclosingHeading`): the nearest `## [` heading at or before the
+ * range's start line must be the cited version's own heading, and no
+ * `## [` heading may start before the range's end line -- the range may
+ * end anywhere inside that release's section but must never cross into
+ * the next one.
+ */
+describe("every heading-anchored CHANGELOG.md citation's range stays inside its own release section", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+  const CHANGELOG_PATH = "packages/orchestrator-workflow/CHANGELOG.md";
+  const HEADING_RE = /^## \[([^\]]+)\]/;
+
+  interface ChangelogHeadingCitation {
+    doc: string;
+    start: number;
+    end: number;
+    version: string;
+  }
+
+  function collectChangelogHeadingCitations(): ChangelogHeadingCitation[] {
+    const out: ChangelogHeadingCitation[] = [];
+    for (const doc of ANCHOR_OKF_DOCS) {
+      const content = readRepoFile(
+        `packages/orchestrator-workflow/docs/okf/${doc}`,
+      );
+      for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
+        if (!m[1].endsWith("CHANGELOG.md")) continue;
+        const anchorRaw = m[4];
+        if (!anchorRaw || anchorRaw.startsWith('"')) continue;
+        const version = anchorRaw.replace(/^\[|\]$/g, "");
+        const start = Number(m[2]);
+        const end = m[3] ? Number(m[3]) : start;
+        out.push({ doc, start, end, version });
+      }
+    }
+    return out;
+  }
+
+  const citations = collectChangelogHeadingCitations();
+  const headingLines: Array<{ lineNo: number; version: string }> = [];
+  readRepoFile(CHANGELOG_PATH)
+    .split("\n")
+    .forEach((line, idx) => {
+      const m = line.match(HEADING_RE);
+      if (m) headingLines.push({ lineNo: idx + 1, version: m[1] });
+    });
+
+  it("found at least one heading-anchored CHANGELOG.md citation to check (sanity: not vacuously true)", () => {
+    expect(citations.length).toBeGreaterThan(0);
+  });
+
+  it("every heading-anchored CHANGELOG.md citation's range starts inside its cited version's section and does not cross into the next", () => {
+    const violations: string[] = [];
+    for (const c of citations) {
+      const enclosing = [...headingLines]
+        .reverse()
+        .find((h) => h.lineNo <= c.start);
+      if (!enclosing || enclosing.version !== c.version) {
+        violations.push(
+          `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
+            `nearest enclosing heading at or before line ${c.start} is ` +
+            `${enclosing ? `[${enclosing.version}] at line ${enclosing.lineNo}` : "none"}, not [${c.version}]`,
+        );
+        continue;
+      }
+      const next = headingLines.find((h) => h.lineNo > enclosing.lineNo);
+      if (next && next.lineNo <= c.end) {
+        violations.push(
+          `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
+            `range crosses into the next release's heading [${next.version}] at line ${next.lineNo}`,
         );
       }
     }
