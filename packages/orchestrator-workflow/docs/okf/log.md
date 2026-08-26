@@ -2362,3 +2362,92 @@
   line-independent, heading-only citation form (`CHANGELOG.md#0.9.0`,
   resolved by scanning for the heading rather than a fixed line number)
   is the orchestrator's to size and schedule, not this task's.
+
+## 2026-08-26 (agent-tasks ca9d5048, implementer)
+
+Closes the residual gap named in 578f5bfd round 4 (D26, see the
+2026-08-26 entry above): full citations into `src/init.ts`, `src/cli.ts`,
+`src/writers.ts`, `src/uninstall.ts`, `src/opencode.ts`, `src/assets.ts`,
+`assets/templates/*.md`, and `assets/agents-md-section.md` carried no
+anchor and sat outside the erosion brake. `test/docs-consistency.test.ts`'s
+`anchorScopeResolve()` now derives its `src/*.ts` and
+`assets/templates/*.md` lists from `readdirSync` (matching the existing
+pattern for roles/test files/docs) instead of a hand-maintained category
+list, so the two describe blocks below it (the last-line/low-collision
+anchor-rule check and the "carries an anchor" erosion brake) now cover
+every module in both directories automatically.
+
+Before/after, measured on the working tree with the extended `RESOLVE`
+map but before any doc edit (`npx vitest run test/docs-consistency.test.ts
+-t "kit-source category"`): 142 unanchored full citations into the eight
+newly-covered categories (`src/init.ts` 68, `src/cli.ts` 19, `src/writers.ts`
+12, `src/uninstall.ts` 10, `src/opencode.ts` 4, `src/assets.ts` 1,
+`assets/templates/*.md` 19, `assets/agents-md-section.md` 9), matching
+the count log.md's prior entry named. All 142 anchored; the same command
+against the anchored, committed tree reports 0 missing. The full suite
+(`npx vitest run`, committed tree) is 290/290 green; the erosion brake's
+own sanity floor (`examined ${n} in-scope citations`) reads 313 on this
+tree (raised from 150 to 300 in a follow-up commit, since 150 gave far
+more headroom than intended once the scope grew).
+
+Two citations needed re-pointing rather than a plain anchor, both
+verified by direct read against the current source, not assumed:
+`install-fence-mechanics.md`'s `init.ts:343` (cited for "`init.ts` uses
+[the manifest] as the upgrade baseline (`previous`, init.ts:343)") had
+drifted onto `composeOpencodeAgentVariant`'s signature close (`): string
+{`); the actual `const previous = readInstalledManifest(targetDir);`
+assignment is `init.ts:376`, re-pointed there. `model-preselection.md`'s
+`init.ts:513` (the Claude-side tier-skip `continue` guard) is
+byte-identical across four sites in the file (424, 448, 513, 545: `if
+(tier === DEFAULT_TIER[role]) continue;`), so no substring of that single
+line can be a <=3-occurrence anchor; widened to `513-516` to land on
+`composeClaudeAgentVariant(role, tier),`, the Claude-specific call two
+lines below it (unique in the file), consistent with the doc's own
+"Claude Code" annotation for that citation.
+
+Differential probe (k-line insertion at the top of `src/init.ts`,
+uncommitted, reverted after each measurement; `git status --short`
+confirmed clean before and after):
+
+- This bundle's own load-bearing test (`every string anchor's text
+  occurs on the last line of its own cited range`, last-line rule):
+  k=1 fires all 68/68 of the newly anchored `src/init.ts` citations red;
+  k=2 also fires (checked, not separately counted, since k=1 already
+  saturates at 68/68). Confirms the design intent this round inherited
+  from 578f5bfd round 2 (last-line anchoring defeats any k>=1 shift)
+  holds for the newly anchored categories, not only the original four.
+- `okf-kit check --json docs/okf` (v0.7.0, the same pin CI installs),
+  filtered by the CI gate's own jq rule (message matches
+  `\[anchor-[a-z-]+\]$`): baseline (unmutated, committed tree) is 0
+  anchor findings, 35 total findings (all pre-existing, unrelated --
+  `unresolved-ambiguous` on bare basenames the doc never disambiguates
+  with a full path first, plus `*.test.ts`-target quality findings; byte-
+  identical before and after this task's own doc edits). At k=1: 41/68
+  `src/init.ts` citations fire an `anchor-*` rule specifically. At k=2:
+  49/68. The remaining 27 (k=1) / 19 (k=2) are not silently missed by
+  okf-kit: `checkAnchor` (`citations-resolve.ts`) does detect the same
+  drift, but `checkTarget` reports only the first structural problem it
+  finds per citation, and a 1-2 line top-of-file shift frequently lands a
+  citation's *start* line on blank or `}`/`);`-only content first,
+  producing `blank-start-line` or `closing-brace-start-line` instead of
+  reaching the anchor check at all. Those two rule ids are not matched by
+  the CI gate's `anchor-*` filter, so they do not fail the
+  `okf-anchor-guard` job -- but the drift is not invisible to okf-kit
+  overall: total findings naming an `init`-family target rose from 26
+  (baseline) to 90 (k=1) / 87 (k=2). This is a real, measured gap between
+  "this bundle's own erosion brake" (100% k>=1 coverage, verified above)
+  and "the specific CI gate filter" (partial coverage, bounded by
+  okf-kit's own per-citation first-problem-wins reporting) -- out of
+  scope for this task per its own brief (native anchor-discipline
+  changes belong to okf-kit itself, agent-tasks 1616974f), named here so
+  it is not silently rediscovered.
+
+`okf-kit check --json` against the anchored, committed bundle (no
+mutation): 0 `anchor-*` findings, 35 total (identical set to the
+unmodified-scope baseline above, confirmed by diffing the two reports'
+message lists). `placement-guard`
+(`node packages/slop-detector/dist/cli.js check . --pack placement-slop
+--config slop.config.yml`, root `slop.config.yml`) is clean; `docs/okf/**`
+is on that config's own exclusion list already (package READMEs and the
+two named instruction globs are the only covered paths), unaffected by
+this task's docs/okf-only edits.
