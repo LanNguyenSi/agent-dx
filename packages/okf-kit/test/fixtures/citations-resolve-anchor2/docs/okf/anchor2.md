@@ -6,6 +6,8 @@ sources:
   - src/note.md
   - src/fenced.md
   - src/fenced-plain.md
+  - src/fenced-tilde.md
+  - src/fenced-unterminated.md
   - src/code.ts
 ---
 
@@ -61,3 +63,16 @@ paragraph, which still binds and is checked: src/CHANGELOG.md:5-8#2.0.0,
 A malformed quoted anchor with no immediate closing quote: src/note.md:1#"unterminated
 anchor text that keeps going across this line break and swallows what
 comes next: src/note.md:10-11 until it finally reaches a real quote "here.
+
+## Fence scanner unification (target side)
+
+A heading-anchored citation whose target uses a TILDE fence (`~~~`) around
+a hash-prefixed comment line, starting right after the fence: the tilde
+fence must be recognised exactly like a backtick fence by the shared fence
+scanner: src/fenced-tilde.md:10-10#5.0.0.
+
+A heading-anchored citation whose target has an UNTERMINATED fence (no
+matching close before end of file), citing a line deep inside it: every
+line from the opening fence to the end of the file must still be treated
+as fenced, so the hash-prefixed comment inside it is not mistaken for the
+real heading above the fence: src/fenced-unterminated.md:7-8#6.0.0.

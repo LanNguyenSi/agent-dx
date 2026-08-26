@@ -29,6 +29,10 @@ const CONT_ROOT = path.join(FIXTURES_DIR, "citations-resolve-continuations");
 const SHORT_FORM_ROOT = path.join(FIXTURES_DIR, "citations-resolve-short-form");
 const ANCHOR_ROOT = path.join(FIXTURES_DIR, "citations-resolve-anchor");
 const ANCHOR2_ROOT = path.join(FIXTURES_DIR, "citations-resolve-anchor2");
+const ANCHOR_MALFORMED_ROOT = path.join(
+  FIXTURES_DIR,
+  "citations-resolve-anchor-malformed",
+);
 
 function loadMain() {
   return loadFixture("citations-resolve-main/docs/okf", MAIN_ROOT);
@@ -48,6 +52,13 @@ function loadAnchor() {
 
 function loadAnchor2() {
   return loadFixture("citations-resolve-anchor2/docs/okf", ANCHOR2_ROOT);
+}
+
+function loadAnchorMalformed() {
+  return loadFixture(
+    "citations-resolve-anchor-malformed/docs/okf",
+    ANCHOR_MALFORMED_ROOT,
+  );
 }
 
 /** A finding's message always starts with `` `<citation>`: `` (see pushDrift/pushAmbiguous). */
@@ -1315,24 +1326,28 @@ describe("citations-resolve: anchored citations", () => {
 
   it("heading anchor that encloses the whole range produces no finding", () => {
     const findings = citationsResolveRule.run(loadAnchor());
-    expect(findingFor(findings, "src/CHANGELOG.md:7-8")).toBeUndefined();
+    expect(findingFor(findings, "src/CHANGELOG.md:7-8#2.0.0")).toBeUndefined();
   });
 
   it("bracket-wrapped heading anchor (`#[2.0.0]`) is equivalent to the bare form", () => {
     const findings = citationsResolveRule.run(loadAnchor());
-    expect(findingFor(findings, "src/CHANGELOG.md:8-9")).toBeUndefined();
+    expect(findingFor(findings, "src/CHANGELOG.md:8-9#2.0.0")).toBeUndefined();
   });
 
   it("heading anchor whose range crosses into the next release section is flagged anchor-heading-does-not-enclose", () => {
     const findings = citationsResolveRule.run(loadAnchor());
-    const f = findingFor(findings, "src/CHANGELOG.md:9-19");
+    const f = findingFor(findings, "src/CHANGELOG.md:9-19#2.0.0");
     expect(f).toBeDefined();
     expect(f?.severity).toBe("warning");
     expect(f?.message).toContain("[anchor-heading-does-not-enclose]");
     // Pins a concrete piece of the message text (offending line number and
     // heading text), not just "a finding exists" -- so a mutation that
     // removes the enclosure walk but keeps some other unrelated finding
-    // alive on this citation would still fail this assertion.
+    // alive on this citation would still fail this assertion. The message
+    // also names the anchor itself now, so a mutation that drops the anchor
+    // text from this specific message (while leaving the label alone) is
+    // caught too.
+    expect(f?.message).toContain('anchor "2.0.0"');
     expect(f?.message).toContain(
       'next heading "[1.0.0] - 2026-01-01" at line 15',
     );
@@ -1340,7 +1355,7 @@ describe("citations-resolve: anchored citations", () => {
 
   it("heading anchor naming the wrong release is flagged anchor-heading-mismatch", () => {
     const findings = citationsResolveRule.run(loadAnchor());
-    const f = findingFor(findings, "src/CHANGELOG.md:13-13");
+    const f = findingFor(findings, "src/CHANGELOG.md:13-13#1.0.0");
     expect(f).toBeDefined();
     expect(f?.severity).toBe("warning");
     expect(f?.message).toContain("[anchor-heading-mismatch]");
@@ -1349,20 +1364,23 @@ describe("citations-resolve: anchored citations", () => {
 
   it("heading anchor with no heading preceding the cited range is flagged anchor-heading-not-found", () => {
     const findings = citationsResolveRule.run(loadAnchor());
-    const f = findingFor(findings, "src/CHANGELOG.md:1-1");
+    const f = findingFor(findings, "src/CHANGELOG.md:1-1#2.0.0");
     expect(f).toBeDefined();
     expect(f?.severity).toBe("warning");
     expect(f?.message).toContain("[anchor-heading-not-found]");
+    expect(f?.message).toContain('anchor "2.0.0"');
   });
 
   it("string anchor found inside the cited range produces no finding", () => {
     const findings = citationsResolveRule.run(loadAnchor());
-    expect(findingFor(findings, "src/note.md:2-2")).toBeUndefined();
+    expect(
+      findingFor(findings, 'src/note.md:2-2#"Second line"'),
+    ).toBeUndefined();
   });
 
   it("string anchor not found inside the cited range is flagged anchor-not-found-in-range", () => {
     const findings = citationsResolveRule.run(loadAnchor());
-    const f = findingFor(findings, "src/note.md:2-3");
+    const f = findingFor(findings, 'src/note.md:2-3#"nonexistent phrase"');
     expect(f).toBeDefined();
     expect(f?.severity).toBe("warning");
     expect(f?.message).toContain("[anchor-not-found-in-range]");
@@ -1382,30 +1400,31 @@ describe("citations-resolve: anchored citations", () => {
 describe("citations-resolve: anchored citations (fence, charset, and quoting edge cases)", () => {
   it("a fenced code block's `#`-led comment line in the target is not mistaken for a heading", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    expect(findingFor(findings, "src/fenced.md:1-10")).toBeUndefined();
+    expect(findingFor(findings, "src/fenced.md:1-10#3.0.0")).toBeUndefined();
   });
 
   it("a heading-anchored citation starting after a fenced `#`-led comment still finds the real heading above the fence", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    expect(findingFor(findings, "src/fenced.md:10-10")).toBeUndefined();
+    expect(findingFor(findings, "src/fenced.md:10-10#3.0.0")).toBeUndefined();
   });
 
   it("the same target content without fence markers really does end the section at the `#`-led line", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    const f = findingFor(findings, "src/fenced-plain.md:1-8");
+    const f = findingFor(findings, "src/fenced-plain.md:1-8#3.0.0");
     expect(f).toBeDefined();
     expect(f?.message).toContain("[anchor-heading-does-not-enclose]");
+    expect(f?.message).toContain('anchor "3.0.0"');
     expect(f?.message).toContain('next heading "not a heading" at line 5');
   });
 
   it("a heading anchor at the end of a sentence does not swallow the trailing period", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    expect(findingFor(findings, "src/CHANGELOG.md:5-6")).toBeUndefined();
+    expect(findingFor(findings, "src/CHANGELOG.md:5-6#2.0.0")).toBeUndefined();
   });
 
   it("a hyphenated heading anchor is captured whole, not truncated at the hyphen", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    const f = findingFor(findings, "src/CHANGELOG.md:5-7");
+    const f = findingFor(findings, "src/CHANGELOG.md:5-7#2.0.0-rc1");
     expect(f).toBeDefined();
     expect(f?.message).toContain("[anchor-heading-mismatch]");
     expect(f?.message).toContain('anchor "2.0.0-rc1"');
@@ -1413,7 +1432,7 @@ describe("citations-resolve: anchored citations (fence, charset, and quoting edg
 
   it("a hyphenated, non-numeric heading anchor is also captured whole", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    const f = findingFor(findings, "src/CHANGELOG.md:6-7");
+    const f = findingFor(findings, "src/CHANGELOG.md:6-7#some-anchor");
     expect(f).toBeDefined();
     expect(f?.message).toContain("[anchor-heading-mismatch]");
     expect(f?.message).toContain('anchor "some-anchor"');
@@ -1428,22 +1447,24 @@ describe("citations-resolve: anchored citations (fence, charset, and quoting edg
 
   it("a bracket-wrapped anchor is stripped before comparison against a heading with no brackets of its own", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    expect(findingFor(findings, "src/CHANGELOG.md:11")).toBeUndefined();
+    expect(findingFor(findings, "src/CHANGELOG.md:11#3.0.0")).toBeUndefined();
   });
 
   it("a single-line heading-anchored citation (no dash range) resolves correctly", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    expect(findingFor(findings, "src/CHANGELOG.md:5")).toBeUndefined();
+    expect(findingFor(findings, "src/CHANGELOG.md:5#2.0.0")).toBeUndefined();
   });
 
   it("a string anchor against a non-Markdown target, found", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    expect(findingFor(findings, "src/code.ts:1")).toBeUndefined();
+    expect(
+      findingFor(findings, 'src/code.ts:1#"verifyVerdict"'),
+    ).toBeUndefined();
   });
 
   it("a string anchor against a non-Markdown target, not found", () => {
     const findings = citationsResolveRule.run(loadAnchor2());
-    const f = findingFor(findings, "src/code.ts:2");
+    const f = findingFor(findings, 'src/code.ts:2#"verifyVerdict"');
     expect(f).toBeDefined();
     expect(f?.message).toContain("[anchor-not-found-in-range]");
     expect(f?.message).toContain('anchor "verifyVerdict"');
@@ -1454,5 +1475,80 @@ describe("citations-resolve: anchored citations (fence, charset, and quoting edg
     const f = findingFor(findings, "src/CHANGELOG.md:20-21 (short-form)");
     expect(f).toBeDefined();
     expect(f?.message).toContain("[range-exceeds-file]");
+  });
+
+  // The fence scanner every fence-aware check here (computeFencedSpans,
+  // computeFencedLineIndices, isFenceOpeningLine) draws from is a single
+  // shared state machine (see scanFenceLines in the source); these two
+  // cases exercise the target-side twin (computeFencedLineIndices, via the
+  // anchor heading search) against a TILDE fence and an UNTERMINATED fence
+  // respectively -- both already covered for the backtick, terminated case
+  // above (`src/fenced.md`). A mutation that broke the tilde or
+  // "till end of file" derivation specifically (while leaving the backtick
+  // case intact) would turn either of these two red without touching any
+  // other test in this file.
+  it("a heading-anchored citation past a TILDE-fenced `#`-led comment still finds the real heading above the fence", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    expect(
+      findingFor(findings, "src/fenced-tilde.md:10-10#5.0.0"),
+    ).toBeUndefined();
+  });
+
+  it("a heading-anchored citation landing deep inside an UNTERMINATED fence still finds the real heading above it", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    expect(
+      findingFor(findings, "src/fenced-unterminated.md:7-8#6.0.0"),
+    ).toBeUndefined();
+  });
+});
+
+// anchor-malformed: a `#` immediately follows a citation's range but the
+// text after it does not parse as either anchor form (unbalanced quotes, a
+// backtick inside a quoted anchor, or nothing at all after the `#`). See
+// the "Anchored citations" doc block above `parseAnchor` in the source.
+describe("citations-resolve: anchor-malformed", () => {
+  it("a backtick inside a quoted anchor is flagged anchor-malformed (notice), citation still checked anchorless", () => {
+    const findings = citationsResolveRule.run(loadAnchorMalformed());
+    const f = findingFor(findings, "src/short.md:3-3");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("notice");
+    expect(f?.message).toContain("[anchor-malformed]");
+  });
+
+  it("nothing after the `#` at the end of a line is flagged anchor-malformed too", () => {
+    const findings = citationsResolveRule.run(loadAnchorMalformed());
+    const f = findingFor(findings, "src/note.md:2");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("notice");
+    expect(f?.message).toContain("[anchor-malformed]");
+  });
+
+  it("an unterminated quoted anchor (elsewhere in this suite, citations-resolve-anchor2) is flagged anchor-malformed too", () => {
+    const findings = citationsResolveRule.run(loadAnchor2());
+    const f = findingFor(findings, "src/note.md:1");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("notice");
+    expect(f?.message).toContain("[anchor-malformed]");
+  });
+
+  it("negative control: a valid anchor produces no anchor-malformed finding", () => {
+    const findings = citationsResolveRule.run(loadAnchorMalformed());
+    const anchorMalformed = findings.filter((f) =>
+      f.message.includes("[anchor-malformed]"),
+    );
+    // Exactly the two malformed citations above (short.md:3-3, note.md:2);
+    // the valid string anchor (short.md:1#"intro") and the stray `#` in
+    // prose below both contribute nothing.
+    expect(anchorMalformed).toHaveLength(2);
+    expect(
+      findingFor(findings, 'src/short.md:1#"intro"'),
+    ).toBeUndefined();
+  });
+
+  it("negative control: a `#` in prose with no preceding citation range produces nothing", () => {
+    const findings = citationsResolveRule.run(loadAnchorMalformed());
+    expect(
+      findings.some((f) => f.message.includes("this doc uses")),
+    ).toBe(false);
   });
 });

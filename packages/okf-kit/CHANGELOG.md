@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `citations-resolve`: a new `anchor-malformed` notice fires when a `#`
+  immediately follows a full citation's range but the text after it does
+  not parse as either anchor form (unbalanced quotes, a backtick inside a
+  quoted anchor, or nothing at all after the `#`, e.g. `path:N-M#` at end
+  of a line). The citation is still checked exactly as an ordinary
+  anchorless citation would be (backward compatible, no new error); without
+  this, a typo in an anchor silently disabled the very drift check it was
+  written for. A valid anchor, or a `#` in prose not immediately following
+  a citation's range, produces nothing. Zero new findings on the
+  orchestrator-workflow bundle (still 35 findings / 13 warnings / 22
+  notices, 0 anchor findings).
+
+### Changed
+
+- `citations-resolve`: an anchored full citation's finding label now
+  carries the anchor (`path:N-M#anchor`, or `path:N-M#"text"` for a string
+  anchor), and the `anchor-heading-does-not-enclose` /
+  `anchor-heading-not-found` messages now name the anchor text, matching
+  `anchor-heading-mismatch` and `anchor-not-found-in-range`, which already
+  did. Previously, two citations to the identical range with different
+  anchors were indistinguishable in the output.
+
+### Internal
+
+- `citations-resolve`: the three independent fence-state scanners
+  (`computeFencedSpans` for the citing doc, `computeFencedLineIndices` for
+  the target, `isFenceOpeningLine`) now all derive from one shared
+  `scanFenceLines` state machine instead of each replaying the same
+  open/close fence logic on its own; behavior is unchanged (existing fence
+  tests, including the citing-side tilde-fence and fence-opening-exception
+  cases, stay green), plus two new target-side tests (a tilde fence and an
+  unterminated fence reaching end of file) added as a regression net for
+  the derivation itself.
+- Review-round follow-up on the anchor heading form's known limitations
+  (substring rather than token-boundary matching, and running the heading
+  search against non-Markdown targets too): both revisited and kept as
+  documented known limitations rather than implemented, given this round's
+  deliberately small, non-speculative scope; see the README's "Known
+  limitations" note.
+
 ## [0.6.0] - 2026-08-25
 
 ### Added
