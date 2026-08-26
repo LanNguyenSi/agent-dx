@@ -168,8 +168,9 @@ contract (added 0.21.0) is not part of this superset relationship, since an
 advisor spawn is never assembled from a task-slicer's per-task output the
 way an implementer spawn is.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:739-741#"not implementation instructions"`
-enforces this. The load-bearing check derives the *required* field set from
+The load-bearing check enforces this, and its assertion pins the wording
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:739-741#"not implementation instructions"`).
+The check derives the *required* field set from
 the live subagent-input yaml block itself rather than hardcoding it
 (`test/docs-consistency.test.ts:596-632#"^ {4}${field}:"`): it regex-extracts top-level fields
 plus `context.*` children, subtracts pure delegation mechanics (`role,
