@@ -405,10 +405,12 @@ manifest, since commander only ever set `opts.tiers` to `true` or left it
 negatable-option pairing (`--tiers` / `--no-tiers` declared under the same
 `"tiers"` option name, `cli.ts:180-187`) resolves `opts.tiers` to `true`
 when `--tiers` is passed, `false` when `--no-tiers` is passed, and
-`undefined` when neither is passed; `test/init.test.ts:1560-1592#"opencode: a non-anthropic, non-ollama resolved class id"` verifies
-this end-to-end against the installed commander version (`--no-tiers` on a
-fresh install with no previous manifest to persist, and the true->false
-transition on a re-run) rather than assuming the pairing behavior. An
+`undefined` when neither is passed; verified end-to-end against the
+installed commander version rather than assuming the pairing behavior:
+`test/init.test.ts:1796#"no previous manifest to persist"` (`--no-tiers`
+on a fresh install with no previous manifest to persist) and
+`test/init.test.ts:1808-1825#"now untracked after tiers were turned off"`
+(the true->false transition on a re-run). An
 explicit `--tiers` or `--no-tiers` always turns it on or off; a plain
 re-run (neither flag) keeps whatever the previous install had; a fresh
 install with no prior manifest defaults to off. A `tiers: true -> false`
@@ -419,7 +421,7 @@ M2; before the fix this transition was silent, see
 `full -> minimal` downgrade that also had `tiers: true` now notes the
 dropped roles' tier-variant files too, not just their base files
 (`init.ts:417-432`, review finding M3;
-`test/init.test.ts:851-883#"with tiers on, the downgrade note also covers the"` pins the note count, since 0.21.0 asserting 8
+`test/init.test.ts:883-920#"The variant files themselves are untouched, only untracked, same as"` pins the note count, since 0.21.0 asserting 8
 notes rather than 6 for the base-plus-tiers case — advisor became a third
 dropped role, contributing 1 base-file note plus 1 non-default-tier note of
 its own, purely from `ROLES` growing by one in `src/models.ts`, no code

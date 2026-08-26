@@ -1719,9 +1719,15 @@
   list, spot-checked by direct read (each start line is an `it(` head,
   each end line its closing `});`). Also corrected: model-preselection.md
   `:1117-1174` -> `:1151-1208` (the 0.19.0 guard describe, pre-existing
-  drift widened by this change), run-state-lifecycle-and-markers.md
-  CHANGELOG.md (lines 568-570) -> (lines 568-573) (range now covers the hex-guard and
-  date-heuristic clause). Consciously accepted, recorded in the run
+  drift widened by this change), run-state-lifecycle-and-markers.md's own
+  citation into `CHANGELOG.md` (numbered 568-570 -> 568-573 at the time,
+  covering the hex-guard and date-heuristic clause; both numbers have
+  since drifted off that content as later rounds' own CHANGELOG entries
+  pushed it down -- corrected 2026-08-26 to `CHANGELOG.md:778-783` (this
+  fix round's own CHANGELOG edits added 3 more lines above it after the
+  first re-point, so the citation was re-verified against the committed
+  tree a second time before this entry was written), see
+  that entry below). Consciously accepted, recorded in the run
   decisions: substring membership in the vocabulary pin (a yaml-key match
   was tried and reverted, see round 3), pre-existing
   `template-markers.test.ts` prettier drift, and the absence of a mechanical
@@ -2055,33 +2061,49 @@
   `install-fence-mechanics.md` 26, `model-preselection.md` 32,
   `review-gate-and-waivers.md` 24, `run-state-lifecycle-and-markers.md`
   22, `subagent-contracts-superset.md` 62 -- 166 total, plus the 16
-  `CHANGELOG.md` heading anchors from task 5c8013c0, unaffected by this
-  round: 182 anchored citations in the bundle altogether.
+  `CHANGELOG.md` heading anchors from task 5c8013c0 (that anchor
+  mechanism is unaffected by this round, but this round's own CHANGELOG
+  entries pushed every release section beneath them, so the citations'
+  line numbers were re-pointed +32 each -- confirmed via `git show
+  5c7a415 -- docs/okf/*.md | grep -c '^[-+].*CHANGELOG.md:'`, 16 removed
+  and 16 added, each +32): 182 anchored citations in the bundle
+  altogether. Corrected 2026-08-26 (this fix round, after review round 2):
+  the round-2 draft above (and the CHANGELOG's own `[Unreleased]` copy)
+  claimed these 16 were "untouched"/"unaffected", which was already false
+  when written; this fix round's own edits to the CHANGELOG then added a
+  further net +3 lines above these same release sections (7 insertions,
+  4 deletions, `git diff --stat -- CHANGELOG.md`), so all 16 were
+  re-pointed a second time, +3 more each, verified by re-running
+  `okf-kit check` (13 warnings / 22 notices / 0 errors, unchanged) after
+  the second re-point.
 
   HIGH 2 (anchors not load-bearing): the first pass anchored each citation
   on whichever line of the range happened to be non-blank and produced a
   candidate string first, almost always the range's FIRST line. Measured
-  this round: 107 of 121 checkable first-pass anchors sat on the first
-  line, and a 1-line insertion near the top of SKILL.md left 21 of 61
-  SKILL.md-targeting anchors silently green (40 fired via an
-  `anchor-not-found-in-range` finding directly; a further check by
-  citation range, not just by rule id, showed the other 12 still went red
-  via a `blank-start-line` base-check finding that happens to fire first
-  for those particular ranges when shifted -- but 21 of 61 truly stayed
-  green). Root cause: the checker scans the *entire* cited window for the
-  anchor text, not just its recorded line; when the anchor sits on the
-  window's first line and the insertion is shorter than the range itself,
-  the shifted window (old-file coordinates `[start-k, end-k]`) still
-  contains old line `start`, just at a different offset inside the same
-  window, so the text is still "found somewhere in range" and the check
-  stays green. Anchoring on the range's LAST line instead closes this for
-  any insertion size `k >= 1` above the range (old line `end` falls
-  outside `[start-k, end-k]` for every `k >= 1`), so long as the anchor
-  text does not also happen to reappear elsewhere inside the shifted
-  window by coincidence -- which is what the second half of this fix
-  guards against: capping every anchor's whole-file occurrence count at 3
-  (23 first-pass anchors exceeded that, several using generic tokens like
-  `describe(` that recur dozens of times).
+  this round: 107 of 121 checkable first-pass anchors sat on the first line,
+  and (corrected 2026-08-26, see that entry: the round-2 draft wrote "21 of
+  61 ... 21 of 61 truly stayed green" here, but round 1 had only 46
+  SKILL.md-targeting anchors, not 61) a 1-line insertion near the top of
+  SKILL.md left 24 of 46 SKILL.md-targeting anchors silently green (22
+  fired: 5 directly via `anchor-not-found-in-range`, 17 via a `blank-start-
+  line` base-check finding that happens to fire first for those particular
+  ranges when shifted, 1 via `unresolved-ambiguous` -- more than one repo
+  carries a `SKILL.md`, so okf-kit itself declines to check a bare-filename
+  citation into it -- one citation hit two rules, so the counts sum to 23
+  against 22 unique fired citations; but 24 of 46 truly stayed green). Root
+  cause: the checker scans the *entire* cited window for the anchor text,
+  not just its recorded line; when the anchor sits on the window's first
+  line and the insertion is shorter than the range itself, the shifted
+  window (old-file coordinates `[start-k, end-k]`) still contains old line
+  `start`, just at a different offset inside the same window, so the text is
+  still "found somewhere in range" and the check stays green. Anchoring on
+  the range's LAST line instead closes this for any insertion size `k >= 1`
+  above the range (old line `end` falls outside `[start-k, end-k]` for every
+  `k >= 1`), so long as the anchor text does not also happen to reappear
+  elsewhere inside the shifted window by coincidence -- which is what the
+  second half of this fix guards against: capping every anchor's whole-file
+  occurrence count at 3 (23 first-pass anchors exceeded that, several using
+  generic tokens like `describe(` that recur dozens of times).
 
   All 166 in-scope anchors (122 regenerated from the first pass, 44 newly
   added for HIGH 1) were rewritten under both rules: (a) walk the cited
@@ -2164,11 +2186,15 @@
     target's actual last line of the cited range and occurs at most 3
     times in the whole target file. Verified red against the first pass's
     anchors (temporarily restoring the pre-round-2 docs/okf/*.md content
-    with the new test code in place): 2 of 3 sub-assertions failed, 24
-    last-line violations and 24 occurrence violations (some anchors
-    violate both). Verified green against this round's rewritten anchors:
-    3/3 passed. Both runs used the real `vitest run` command, not a
-    hand-rolled check.
+    with the new test code in place): 2 of 3 sub-assertions failed, 116
+    last-line violations (112 unique messages, some citations sharing an
+    identical doc/target/range/anchor tuple) and 24 occurrence violations
+    (some anchors violate both). Corrected 2026-08-26: this entry
+    originally said "24 last-line violations", copied from the
+    occurrence-violations count by mistake; re-run against the same
+    restored pre-round-2 content confirms 116/112/24. Verified green
+    against this round's rewritten anchors: 3/3 passed. Both runs used
+    the real `vitest run` command, not a hand-rolled check.
   - "every docs/okf citation into a kit-source category this bundle
     anchors carries an anchor" (the erosion brake): asserts the count of
     unanchored in-scope citations stays at zero going forward, by name.
@@ -2219,3 +2245,43 @@
   (b) file-wide occurrence cap does not guarantee no collision within a
   single wide citation's own range, so one citation (out of 166) is not
   detected at `k=2` (it is at `k=1`, the measured acceptance bar).
+
+  Corrected 2026-08-26 (this fix round, orchestrator decision D26): a
+  third residual gap was missing from this list entirely. Full citations
+  into `src/init.ts`, `src/cli.ts`, `src/writers.ts`, `src/uninstall.ts`,
+  `src/opencode.ts`, `src/assets.ts`, `assets/templates/*.md`, and
+  `assets/agents-md-section.md` carry no anchor and sit outside this
+  guard, since the spec's four in-scope categories are only `SKILL.md`,
+  the agent templates, `models.ts`, and `test/*.test.ts`. Measured on the
+  committed tree (`node /tmp/measure_residual2.mjs`, a standalone script
+  reusing this file's own `ANCHOR_CITATION_RE` and reading
+  `assets/templates/`'s own directory listing to classify each citation's
+  basename): `src/init.ts` 68, `src/cli.ts` 19, `src/writers.ts` 12,
+  `src/uninstall.ts` 10, `src/opencode.ts` 4, `src/assets.ts` 1,
+  `assets/templates/*.md` 19, `assets/agents-md-section.md` 9 -- 142
+  unanchored full citations altogether, none of which this guard or its
+  erosion brake protects. (iii) A follow-up task will extend both the
+  anchoring pass and the erosion brake to `src/**` and `assets/**`; not
+  done in this task, D26 above.
+
+  Corrected 2026-08-26 (this fix round, review round 3): a fourth, narrower
+  residual gap. The new "no full citation into a `*.test.ts` target ends on
+  a foreign describe/it/test head line" check (`test/docs-
+  consistency.test.ts`) is deliberately scoped to just that one structural
+  symptom, not okf-kit's full short-form pair (see that test's own doc
+  comment and `citations-resolve.ts`'s `checkRangeBoundary` for why: a
+  blanket "start must be a head line" rule over every full test-file
+  citation in this bundle would flag legitimate deliberate partial
+  citations, not drift). Measured on the committed tree (same collection
+  logic, `TEST_HEAD_RE` against the start line instead of the end line): 25
+  of the bundle's 73 full range citations into a `*.test.ts` target do not
+  start on a describe/it/test head line, listed by doc and citation in the
+  round's own scratch output (not reproduced here). Six were spot-read by
+  hand (in `init.test.ts` around line 153, around line 1594, and in `docs-
+  consistency.test.ts` around line 1774, plus three more) and are all
+  legitimate arbitrary-sub-range citations into a wider block, not drift;
+  the remaining 19 were not individually read this round, so this is a
+  sample, not an exhaustive confirmation -- none of the 25 were changed.
+  (iv) Whether any of the 25 merit a narrower, purpose-built check of their
+  own (distinct from the blanket rule this round explicitly declined) is
+  left for a follow-up task, along with reading the remaining 19 by hand.

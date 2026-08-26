@@ -22,17 +22,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   had missed 44 bare, non-backtick-delimited citations in two of the five
   docs/okf siblings; the citation parser was corrected to match okf-kit's
   own backtick-optional shape); the 16 `CHANGELOG.md` citations still
-  carry heading anchors from the prior round, untouched -- 182 anchored
-  citations in the bundle altogether.
+  carry heading anchors from the prior round (that mechanism is
+  untouched, but this round's own CHANGELOG entries shifted every
+  release section beneath them, so all 16 were re-pointed +32 lines, see
+  `docs/okf/log.md`) -- 182 anchored citations in the bundle altogether.
 - Every anchor now satisfies two mechanically-checked properties review
-  round 2 added (a first-round anchor sitting on a wide range's first
-  line, as 107 of 121 did, survives an insertion shorter than the range
-  itself -- measured: a 1-line insertion near the top of SKILL.md left
-  21 of 61 SKILL.md-targeting anchors silently green): (a) the anchor
-  text occurs on the LAST line of its cited range (ranges were narrowed
-  where needed to end on real content rather than a blank/closing-brace
-  line), and (b) it occurs at most 3 times in the whole target file (23
-  first-round anchors used a too-common token, e.g. `describe(`, and were
+  round 2 added (a first-round anchor sitting on a wide range's first line,
+  as 107 of 121 did, survives an insertion shorter than the range itself --
+  measured: round 1 had 46 SKILL.md-targeting anchors, and a 1-line
+  insertion near the top of SKILL.md left 24 of them silently green): (a)
+  the anchor text occurs on the LAST line of its cited range (ranges were
+  narrowed where needed to end on real content rather than a
+  blank/closing-brace line), and (b) it occurs at most 3 times in the
+  whole target file (23 first-round anchors used a too-common token, e.g.
+  `describe(`, and were
   replaced). Two anchors were additionally re-pointed because the text
   they carried did not match the claim their citing sentence made, not
   just its mechanical position; see `docs/okf/log.md` for both. Pinned by

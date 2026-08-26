@@ -2296,29 +2296,22 @@ describe("every okf-kit@<version> pin under .github/workflows/ matches package.j
 // every other source category (init.ts, cli.ts, opencode.ts, README.md,
 // INSTALL-AGENT.md, agents-md-section.md, the assets/templates/*.md run
 // templates), which this round left out of scope on purpose.
-const ANCHOR_OKF_DOCS = [
-  "install-fence-mechanics.md",
-  "model-preselection.md",
-  "review-gate-and-waivers.md",
-  "run-state-lifecycle-and-markers.md",
-  "subagent-contracts-superset.md",
-];
+//
+// Review round 3 (MEDIUM 5): all three lists below are derived from their
+// own source of truth (`ROLES`, `test/`'s own directory listing,
+// `docs/okf/`'s own directory listing) rather than hand-maintained, so a
+// role/test-file/doc added later cannot silently drift out of sync with
+// what this file actually checks.
+const ANCHOR_OKF_DOCS = readdirSync(`${PACKAGE_DIR}/docs/okf`)
+  .filter((f) => f.endsWith(".md") && f !== "index.md" && f !== "log.md")
+  .sort();
 
-const ANCHOR_AGENT_NAMES = [
-  "advisor",
-  "explorer",
-  "implementer",
-  "reviewer",
-  "task-slicer",
-];
+const ANCHOR_AGENT_NAMES: readonly Role[] = ROLES;
 
-const ANCHOR_TEST_NAMES = [
-  "docs-consistency",
-  "template-markers",
-  "init",
-  "opencode",
-  "uninstall",
-];
+const ANCHOR_TEST_NAMES = readdirSync(`${PACKAGE_DIR}/test`)
+  .filter((f) => f.endsWith(".test.ts"))
+  .map((f) => f.slice(0, -".test.ts".length))
+  .sort();
 
 function anchorScopeResolve(): Record<string, string> {
   const map: Record<string, string> = {
@@ -2472,6 +2465,7 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
   const RESOLVE = anchorScopeResolve();
 
   const missing: string[] = [];
+  let examined = 0;
   for (const doc of ANCHOR_OKF_DOCS) {
     const content = readRepoFile(
       `packages/orchestrator-workflow/docs/okf/${doc}`,
@@ -2480,6 +2474,7 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
       const citedPath = m[1];
       const real = RESOLVE[citedPath];
       if (!real) continue;
+      examined++;
       if (!m[4]) {
         const start = m[2];
         const end = m[3] ? `-${m[3]}` : "";
@@ -2488,7 +2483,102 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
     }
   }
 
+  // Review round 3 (LOW 6a): a brake that only checks "zero missing"
+  // would stay green if the collection logic itself broke and silently
+  // examined nothing (e.g. a target-resolution regression that emptied
+  // `RESOLVE`). This bundle carries 166 in-scope citations today; 150 is
+  // a floor with headroom below that, not the live count, so a modest
+  // future doc trim does not make this brittle.
+  it("examined more than a token number of in-scope citations (sanity: the brake itself did not go blind)", () => {
+    expect(examined).toBeGreaterThan(150);
+  });
+
   it("has zero unanchored citations into SKILL.md, an agent template, models.ts, or a test file", () => {
     expect(missing, missing.join("\n")).toEqual([]);
+  });
+});
+
+/**
+ * agent-tasks 578f5bfd review round 3: review round 2 found five full
+ * citations into a `*.test.ts` target whose range either ended exactly on
+ * a DIFFERENT test's own `describe(`/`it(`/`test(` head line (excluding
+ * the cited test's own body) or named an unrelated test outright (all
+ * five corrected this round, see `docs/okf/log.md`). This mechanically
+ * pins the structural half of that defect class going forward: a full
+ * citation's range must never END on a describe/it/test head line, since
+ * a citation can never legitimately mean to stop exactly where the NEXT
+ * test begins -- that always means either the cited test's own body was
+ * truncated out, or the citation points at the wrong block entirely.
+ *
+ * Deliberately narrower than okf-kit's own short-form pair
+ * (`test-range-start-not-head`/`test-range-end-not-closing`, see
+ * `citations-resolve.ts`'s own doc comment on `checkRangeBoundary`):
+ * those are declared there for short-form citations only and explicitly
+ * NOT extended to full citations upstream, because this bundle has
+ * legitimate full citations into test files that cite an arbitrary
+ * sub-range inside one test (not the whole describe/it block), and a
+ * blanket "start must be a head line, end must be a closing `});`" rule
+ * over every full test-file citation in this bundle would flag those as
+ * newly broken. Measured this round on the corrected bundle: a blanket
+ * version of that rule finds 25 "start is not a head line" citations that
+ * are legitimate deliberate partial citations, not drift (out of scope,
+ * not fixed here, named in `docs/okf/log.md`'s residual gaps); the
+ * end-is-a-foreign-head-line check below carries zero such false
+ * positives against the same, corrected bundle.
+ */
+describe("no full citation into a *.test.ts target ends on a foreign describe/it/test head line (review round 3)", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+  const RESOLVE = anchorScopeResolve();
+  const TEST_HEAD_RE = /^\s*(?:describe|it|test)\s*\(/;
+
+  interface Checked {
+    doc: string;
+    citedPath: string;
+    real: string;
+    start: number;
+    end: number;
+  }
+
+  function collectFullTestCitations(): Checked[] {
+    const out: Checked[] = [];
+    for (const doc of ANCHOR_OKF_DOCS) {
+      const content = readRepoFile(
+        `packages/orchestrator-workflow/docs/okf/${doc}`,
+      );
+      for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
+        const citedPath = m[1];
+        const real = RESOLVE[citedPath];
+        if (!real || !real.endsWith(".test.ts")) continue;
+        const start = Number(m[2]);
+        const end = m[3] ? Number(m[3]) : start;
+        if (start === end) continue;
+        out.push({ doc, citedPath, real, start, end });
+      }
+    }
+    return out;
+  }
+
+  const checked = collectFullTestCitations();
+
+  it("found at least one full range citation into a *.test.ts target to check (sanity: not vacuously true)", () => {
+    expect(checked.length).toBeGreaterThan(0);
+  });
+
+  it("no citation's range end line is itself a describe/it/test head line", () => {
+    const violations: string[] = [];
+    for (const c of checked) {
+      const lines = readRepoFile(c.real).split("\n");
+      const endText = lines[c.end - 1] ?? "";
+      if (TEST_HEAD_RE.test(endText)) {
+        violations.push(
+          `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}\` -- range end ` +
+            `(line ${c.end} of ${c.real}) is itself a describe/it/test ` +
+            `head line ("${endText.trim()}")`,
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
   });
 });
