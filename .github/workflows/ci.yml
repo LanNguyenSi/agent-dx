@@ -77,7 +77,7 @@ jobs:
         # against packages/okf-kit/package.json's version by
         # test/docs-consistency.test.ts (globs every .github/workflows/
         # file for an okf-kit@<version> pin, install or npx form).
-        run: npm install -g okf-kit@0.6.0
+        run: npm install -g okf-kit@0.7.0
 
       - name: Assert CLI is alive (output, not exit code)
         shell: bash
