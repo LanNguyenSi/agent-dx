@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `citations-resolve`: a new backtick-delimited `` `path:#heading` `` citation
+  form (`.md` targets only) resolves to a whole Markdown section instead of
+  a line range, so it is immune to a line-number shift caused by an edit
+  anywhere above the cited section -- unlike even a heading-anchored
+  `path:N-M#anchor` citation, whose line range still drifts on every such
+  edit even though the anchor catches it landing in the wrong section. The
+  heading text must match exactly one level 1 or 2 heading in the target
+  (`heading-section-not-found` / `heading-section-ambiguous`), and the
+  resolved section must have at least one non-blank line before the next
+  heading of the same or shallower level (`heading-section-empty`). An
+  optional content anchor, `` `path:#heading#"text"` ``, must occur on
+  exactly one line inside the resolved section
+  (`heading-section-content-anchor-not-found` /
+  `-content-anchor-ambiguous`); a malformed attempt is reported rather than
+  silently dropped (`heading-section-malformed`). See the doc comment above
+  `HEADING_SECTION_CITATION_RE` in `src/rules/citations-resolve.ts` for the
+  full rationale, including why the grammar requires the `:#` colon-hash
+  rather than a bare `#`. Existing bundles that already use the older
+  `` `path#heading` `` shape in ordinary prose (a Markdown link's target
+  written in backticks) are unaffected: they no longer parse as a citation
+  at all, producing the same findings as before this form existed.
+
 ## [0.7.0] - 2026-08-26
 
 ### Added
