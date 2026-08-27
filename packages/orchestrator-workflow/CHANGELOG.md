@@ -34,20 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Evidence: agent-tasks d03af8f6 (pandora run
   `.ai/runs/2026-08-26-open-pool-batch30`, a harness risk-gate deletion
-  arm) ran five implementer rounds on the same effort tier before this
-  rule existed; each reviewer round found one new HIGH on the permissive
-  side of the same detection layer (first-segment matching, wrapper
-  flags, xargs flags, a find-root premise twice, xargs `-i`/append), and
-  the Round-2 halt rule's split-or-redesign response was applied three
-  times (D-014, D-019, D-022/D-023) without ever escalating tier, model,
-  or to the advisor, and without a merge-hold. Only after round 5 did the
-  operator suggest a stronger model (D-024); round 6 on that model, run
-  at the implementer's highest installed tier, found and closed twelve
-  further fail-open classes in one round by its own 248-probe audit, and
-  the following review found only one remaining, a documentation-only
-  medium. A same-run comparison task, agent-tasks da823721, needed three
-  rounds with one round-2 halt and was accepted after it, well inside
-  this budget. This is the first data point relating implementer model
+  arm) ran five implementer rounds on the same effort tier (rounds 1-5, the
+  default-tier implementer, Sonnet) before this rule existed; each reviewer
+  round found one new HIGH on the permissive side of the same detection layer
+  (first-segment matching, wrapper flags, xargs flags, a find-root premise
+  twice, xargs `-i`/append), and the Round-2 halt rule's split-or-redesign
+  response was applied three times (D-014, D-019, D-022/D-023) without ever
+  escalating tier, model, or to the advisor, and without a merge-hold. Only
+  after round 5 did the operator suggest a stronger model (D-024); round 6, on
+  Fable with the `-xhigh` variant, found and closed twelve further fail-open
+  classes in one round by its own 248-probe audit, and the following review
+  found only one remaining, a documentation-only medium. A same-run comparison
+  task, agent-tasks da823721, needed three rounds with one round-2 halt and
+  was accepted after it, well inside this budget. This is the first data point
+  relating implementer model
   strength to round count on a permissive-security-parser class of task;
   the 2026-08-24 tier A/B (see `[0.23.0]` below) measured only
   `implementer-low` against the default tier on a different task shape,

@@ -519,7 +519,7 @@ ever explained the opencode half of the omission
 ## Orchestrator-runs-on-session-model policy
 
 The installed `AGENTS.md` policy section carries a `### Models` subsection
-verbatim (`assets/agents-md-section.md:153-157#"harness supports per-agent models, in the subagent definitions themselves."`): "The orchestrator runs on
+verbatim (`assets/agents-md-section.md:159-163#"harness supports per-agent models, in the subagent definitions themselves."`): "The orchestrator runs on
 the session's main model. Use the strongest reasoning model available,"
 plus "Per-role model preferences ... are recorded in
 `.ai/workflow/manifest.json` and, where the harness supports per-agent
@@ -579,7 +579,7 @@ claim fails a targeted assertion instead of only showing up as an
 unguarded prose diff.
 
 Since 0.22.0, a fourth, site-specific `describe`
-(`test/docs-consistency.test.ts:1876-2021#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
+(`test/docs-consistency.test.ts:1952-2097#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
 policy in `agents-md-section.md`'s Scaling delegation bullet list and
 `SKILL.md` step 6: a derivation-based check (not a hand-maintained role
 list, the same discipline the 0.20.0 tier-selection-policy guard above

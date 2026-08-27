@@ -78,8 +78,8 @@ final output, nothing else" block:
   vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:65-87#"reproduction:"`. Both
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below. Both
-  also gained a per-finding `recurrence` field in this change; see
-  [Recurrence field](#recurrence-field-this-change) below.
+  also gained a per-finding `recurrence` field; see
+  [Recurrence field](#recurrence-field) below.
 - Task-slicer:
   `packages/orchestrator-workflow/assets/skill/SKILL.md:354-383#"- T-001"`
   (`## Task slicer output contract`) vs.
@@ -126,13 +126,13 @@ but fails the exact-name pin. The explorer pair still has no dedicated
 automated drift guard today, protected only by direct read and review. The
 advisor pair started the same way — a 0.21.0
 `describe("advisor escalation policy ships in the AGENTS.md section and
-SKILL.md")` block (`test/docs-consistency.test.ts:2040-2113#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
+SKILL.md")` block (`test/docs-consistency.test.ts:2116-2189#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
 that `SKILL.md` carries an Advisor output contract block with the right
 top-level shape, a substring-presence pin, not byte-for-byte equality — but
 review round 1 (M2) closed that gap: a dedicated
 `describe("advisor output contract is byte-identical between SKILL.md and
 advisor.md (review round 1, M2)")` block
-(`test/docs-consistency.test.ts:2127-2141#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
+(`test/docs-consistency.test.ts:2203-2217#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
 both raw files and asserts equality, the same pattern the reviewer and
 implementer pairs use.
 
@@ -365,7 +365,7 @@ from their return entirely; review of the resulting change then found the
 shipped contract had no trigger the kit itself ever produced and no
 not-applicable signal, both closed in the R2 pass documented here.
 
-## Recurrence field (this change)
+## Recurrence field
 
 The reviewer output contract gained a per-finding `recurrence: new |
 repeated` field, added to both copies identically
@@ -384,7 +384,7 @@ This field feeds the review-round escalation budget's trigger; full
 treatment of that budget (the second-halt-or-third-round trigger, the
 three named escalations, the `03-decisions.md` marker) is out of this
 doc's lane; see
-[review-gate-and-waivers.md](review-gate-and-waivers.md#review-round-escalation-budget-this-change).
+[review-gate-and-waivers.md](review-gate-and-waivers.md#review-round-escalation-budget).
 No dedicated byte-for-byte drift guard existed for the findings block
 before this change (unlike the `reproduction` and `mutation_probes`
 fields above); one now does, extracting the `findings:` block from both

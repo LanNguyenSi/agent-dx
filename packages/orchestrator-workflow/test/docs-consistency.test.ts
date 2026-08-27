@@ -1138,6 +1138,18 @@ describe("review-round escalation budget ships in the skill and the AGENTS.md se
     expect(skillMd).toContain("**Merge-hold**");
   });
 
+  it("SKILL.md pins each escalation option's body, not just its bold label (a body rewritten into its opposite must fail this)", () => {
+    expect(skillMd).toContain(
+      "raise the implementer to at least `-xhigh` where that variant is installed, or to the strongest model available in this environment. When it already runs at both, this option is exhausted and the choice falls to the advisor spawn or the merge-hold.",
+    );
+    expect(skillMd).toContain(
+      '"redesign, split, or hold?" and weigh its recommendation before deciding.',
+    );
+    expect(skillMd).toContain(
+      "hold the change unmerged and hand the decision to the operator.",
+    );
+  });
+
   it("SKILL.md states the choice is mandatory but which one is judgment, and that escalating never replaces a review round", () => {
     expect(skillMd).toContain(
       "Judgment governs which of the three to pick; only that one is chosen and recorded is mandatory.",
@@ -1157,8 +1169,61 @@ describe("review-round escalation budget ships in the skill and the AGENTS.md se
       "Review-round escalation budget: by the second round-2 halt signal on a task, or its third `fix_required` review round, whichever comes first,",
     );
     expect(agentsMdSection).toContain(
-      "Escalating never substitutes for a review round.",
+      "Escalating never substitutes for a review round",
     );
+  });
+
+  it("SKILL.md and agents-md-section.md both define what counts as a round (a misfired review is not one)", () => {
+    expect(skillMd).toContain(
+      "A counted round is a completed reviewer return whose `acceptance_recommendation` is `fix_required` or `reject`; a misfired review is not a round",
+    );
+    expect(agentsMdSection).toContain(
+      "A counted round is a completed reviewer return recommending `fix_required` or `reject`; a misfired review is not a round.",
+    );
+  });
+
+  it("SKILL.md and agents-md-section.md both state the escalation is additional to, not a substitute for, the halt rule's response", () => {
+    expect(skillMd).toContain(
+      "The escalation is chosen in addition to the halt rule's split-or-redesign response, not instead of it.",
+    );
+    expect(agentsMdSection).toContain(
+      "Escalating never substitutes for a review round and comes in addition to the halt rule's split-or-redesign response, not instead of it.",
+    );
+  });
+
+  it("SKILL.md does not cite the CHANGELOG's [Unreleased] heading by name (assets are installed verbatim and outlive the heading)", () => {
+    expect(skillMd).toContain(
+      "Anchored by a measurement; see the entry for this rule in the orchestrator-workflow CHANGELOG.",
+    );
+    expect(skillMd).not.toContain("[Unreleased]");
+  });
+});
+
+/**
+ * Installed assets are copied verbatim into a consuming repo and can outlive
+ * a release; a literal `[Unreleased]` heading reference in one goes stale
+ * the moment the referenced entry ships under a version number. Guards the
+ * whole assets/ tree, not just SKILL.md, so a future asset can't reintroduce
+ * the same staleness. Mutation probe: insert the literal string into any
+ * file under assets/ and this test goes red.
+ */
+describe("no installed asset cites the CHANGELOG's [Unreleased] heading by name", () => {
+  it("scans every file under assets/ for a literal [Unreleased] reference", () => {
+    const assetsDir = `${PACKAGE_DIR}/assets`;
+    const entries = readdirSync(assetsDir, {
+      recursive: true,
+      withFileTypes: true,
+    });
+    const offenders: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const full = `${entry.parentPath ?? entry.path}/${entry.name}`;
+      const contents = readFileSync(full, "utf8");
+      if (contents.includes("[Unreleased]")) {
+        offenders.push(full.replace(`${assetsDir}/`, ""));
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
 
@@ -1178,6 +1243,17 @@ describe("03-decisions.md template carries the review-round-escalation marker", 
     expect(decisionsTemplate).toContain("## Review-round escalation");
     expect(decisionsTemplate).toContain(
       "<!-- review-round-escalation: choice = n/a -->",
+    );
+  });
+
+  it("carries a Task/Choice/Reason table so one run can record the choice per task, not just once for the whole run", () => {
+    expect(decisionsTemplate).toContain("| Task | Choice | Reason |");
+    expect(decisionsTemplate).toContain("| n/a | n/a | n/a |");
+  });
+
+  it("pins the Choice column's enum values (a changed enum value must fail this)", () => {
+    expect(decisionsTemplate).toContain(
+      "<!-- Choice is one of: n/a | tier_escalation | advisor | merge_hold -->",
     );
   });
 });

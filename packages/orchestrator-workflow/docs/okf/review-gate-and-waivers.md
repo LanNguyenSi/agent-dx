@@ -145,7 +145,7 @@ Accepted Waivers` heading and its `Finding | Severity | Rationale` header
 (test lines 132-135). A negative pin (test lines 137-141) guards against a
 superseded softer wording, "addressed or consciously accepted by the
 orchestrator", reappearing in `agents-md-section.md`. A second suite,
-`test/template-markers.test.ts:56-96#"expect(reviewTemplate).toMatch(/arms? the"`, independently pins the
+`test/template-markers.test.ts:62-102#"expect(reviewTemplate).toMatch(/arms? the"`, independently pins the
 findings-table header convention and the Decision-legend vocabulary above.
 
 ## Misfire rule's review-gate consequence (0.11.0)
@@ -217,31 +217,40 @@ that dogfood omitted `acceptance_recommendation` entirely.
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:950-965#"the orchestrator asks the reviewer to resupply it"` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.
 
-## Review-round escalation budget (this change)
+## Review-round escalation budget
 
 The Round-2 halt rule (full treatment out of scope here; see
 [subagent-contracts-superset.md](subagent-contracts-superset.md)) stops a
 single defect-class recurrence within one task, but nothing previously
 forced a choice once that stopping, or `fix_required` review rounds, kept
-recurring on the same task. This change adds a budget:
+recurring on the same task. This budget applies in addition to the halt
+rule's split-or-redesign response, not instead of it:
 `SKILL.md:496#"## Review-round escalation budget"` triggers "by the second
 round-2 halt signal on the same task, or by the third `fix_required`
 review round on the same task, whichever comes first", at which point the
 orchestrator picks one of three named escalations
-(`SKILL.md:506#"**Tier or model escalation**"`,
-`SKILL.md:509#"**Advisor spawn**"`, `SKILL.md:511#"**Merge-hold**"`:
-next-higher implementer tier or the strongest available model, an advisor
-spawn asked "redesign, split, or hold?", or an operator merge-hold). Which
-of the three is picked is judgment; that one is picked and recorded is not
-(`SKILL.md:514#"Judgment governs which of the three to pick; only that one is chosen and"`).
-`agents-md-section.md:106-110#"marker)."`
+(`SKILL.md:511#"**Tier or model escalation**"`,
+`SKILL.md:516#"**Advisor spawn**"`, `SKILL.md:518#"**Merge-hold**"`: raise
+the implementer to at least `-xhigh` where installed or to the strongest
+available model, an advisor spawn asked "redesign, split, or hold?", or an
+operator merge-hold). A counted round is a completed reviewer return whose
+`acceptance_recommendation` is `fix_required` or `reject`; a misfired
+review is not a round. Which of the three is picked is judgment; that one
+is picked and recorded is not
+(`SKILL.md:521#"Judgment governs which of the three to pick; only that one is chosen and"`).
+`agents-md-section.md:106-117#"the halt rule's split-or-redesign response, not instead of"`
 carries the same rule in short form for repos without the full skill text
 loaded.
 
 The choice is recorded in `03-decisions.md`'s new named section
-(`03-decisions.md:7#"## Review-round escalation"`), a
-`review-round-escalation` marker defaulting to `n/a`
-(`03-decisions.md:11#"<!-- review-round-escalation: choice = n/a -->"`).
+(`03-decisions.md:7#"## Review-round escalation"`), a one-row-per-task
+table (`03-decisions.md:11#"| Task | Choice | Reason |"`) whose
+`Choice` column is the enum `n/a | tier_escalation | advisor |
+merge_hold`, because one run carries multiple tasks and each can trigger
+the budget independently. A `review-round-escalation` marker defaulting
+to `n/a` is kept alongside the table as a reader shortcut to the most
+recent choice
+(`03-decisions.md:17#"<!-- review-round-escalation: choice = n/a -->"`).
 Unlike the two `solution-acceptance:` verdict markers in
 [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md),
 this marker is a documented convention only: no reader in this package or
@@ -254,7 +263,7 @@ The reviewer output contract also gained a per-finding `recurrence: new |
 repeated` field so the orchestrator can read the trigger off the
 reviewer's own return; full field-duplication mechanics are out of scope
 here, see
-[subagent-contracts-superset.md](subagent-contracts-superset.md#recurrence-field-this-change).
+[subagent-contracts-superset.md](subagent-contracts-superset.md#recurrence-field).
 
 ## See also
 

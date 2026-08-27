@@ -2740,3 +2740,75 @@ prior round's entry (`test/docs-consistency.test.ts`,
 `test/template-markers.test.ts`), confirmed unchanged by running it
 against `48f809d` directly (`git stash` / `git stash pop`) before
 touching either file in this round.
+
+## 2026-08-27 (agent-tasks 68faae5f, implementer, review round 2 fixes)
+
+Fixes ten review findings against the prior entry's change (F1-F10, all
+medium/low, all addressed): re-verifies `install-fence-mechanics.md`
+against its `agents-md-section.md` source edit and re-stamps its
+timestamp (F1); pins the body text of all three escalation options, not
+just their bold labels, in `test/docs-consistency.test.ts` (F2); drops
+the `[Unreleased]` heading name from the `SKILL.md` citation and adds an
+`assets/`-wide scan test guarding every installed asset against that
+string (F3); adds a one-sentence definition of a counted round (a
+completed reviewer return recommending `fix_required` or `reject`; a
+misfired review does not count) to `SKILL.md` and
+`agents-md-section.md`, pinned by a new test (F4); reshapes
+`03-decisions.md`'s Review-round escalation section into a
+Task/Choice/Reason table (placeholder row `n/a | n/a | n/a`, `Choice`
+enum `n/a | tier_escalation | advisor | merge_hold`) so one run can
+record the escalation choice per task instead of once for the whole
+run, keeping the existing marker as a reader shortcut alongside it, both
+pinned by new tests (F5); adds a Recurrence note to
+`05-review-findings.md` next to the existing Reproduction note, pointing
+at the reviewer contract's `recurrence` field and the escalation
+budget, without touching the load-bearing Severity/Decision header row
+(F6); names the models in the CHANGELOG evidence paragraph only (rounds
+1-5 the default-tier implementer, Sonnet; round 6 Fable on `-xhigh`)
+(F7); drops the "(this change)" suffix from both bundle section
+headings and re-points their cross-link anchors (F8); rewords the tier-
+escalation option to state the exhaustion condition explicitly (raise to
+at least `-xhigh` where installed or the strongest available model; once
+both are exhausted the choice falls to the advisor spawn or the
+merge-hold) in both `SKILL.md` and `agents-md-section.md` (F9); and adds
+the explicit "in addition to, not instead of" sentence tying the budget
+to the halt rule's split-or-redesign response, in both copies (F10).
+
+Re-pointing: the `SKILL.md` and `agents-md-section.md` edits (F4, F9,
+F10) and the `test/docs-consistency.test.ts` / `test/template-markers.test.ts`
+new tests (F2, F3, F5, F6) shifted line numbers under existing bundle
+citations again. Measured the same way as the prior round (matching
+each citation's `(target, anchor)` pair between the pre-round tree
+(5700777) and the committed tree): 16 line-numbered citations
+re-pointed (2 into `agents-md-section.md`, 6 into `SKILL.md`, 4 into
+`test/template-markers.test.ts`, 3 into `test/docs-consistency.test.ts`,
+1 into `03-decisions.md`'s narrowed single-line anchor) plus 2
+heading-anchor renames (`review-round-escalation-budget-this-change` to
+`review-round-escalation-budget`, `recurrence-field-this-change` to
+`recurrence-field`, both cross-links between `review-gate-and-
+waivers.md` and `subagent-contracts-superset.md`), 18 total. The
+`CHANGELOG.md` evidence paragraph (F7) was rewrapped to keep the same
+14-line span its content occupied before the edit (checked by diffing
+line count against the pre-edit paragraph, not assumed), so none of the
+heading-anchored `CHANGELOG.md` citations elsewhere in the bundle needed
+re-pointing this round.
+
+Correction to the prior entry: it reported 35 findings (errors 0,
+warnings 13, notices 22) on the committed tree, but measuring the
+actual 5700777 commit directly (a worktree checked out at that commit,
+not the pre-commit working tree the prior entry was drafted against)
+shows 36 (errors 0, warnings 14, notices 22), one more than claimed,
+including a `sources-fresh` STALE finding on
+`install-fence-mechanics.md` against its `agents-md-section.md` source
+that F1 above now resolves.
+
+Final accounting on the committed tree after this round (`npx vitest
+run`, `npm run typecheck`, `npm run typecheck:test`, `node
+packages/okf-kit/dist/cli.js check packages/orchestrator-workflow/docs/okf`,
+`node packages/okf-kit/dist/cli.js check packages/orchestrator-workflow/docs/okf --json`
+piped through the CI anchor-finding jq filter, `node
+packages/slop-detector/dist/cli.js check . --pack placement-slop
+--config slop.config.yml`): 311/311 tests green (up from 303/303 before
+this round's 8 new tests); typecheck and typecheck:test clean;
+`okf-kit check` reports 35 findings (errors 0, warnings 13, notices 22);
+the anchor-finding jq filter returns 0; placement-guard clean.

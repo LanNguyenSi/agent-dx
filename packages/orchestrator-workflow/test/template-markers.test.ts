@@ -41,6 +41,12 @@ describe("solution-acceptance markers in run templates", () => {
       "<!-- solution-acceptance: run-base = TODO -->",
     );
   });
+
+  it("05-review-findings.md carries a recurrence note pointing at the reviewer contract's recurrence field and the review-round escalation budget", () => {
+    expect(reviewTemplate).toContain(
+      "<!-- Recurrence note: each finding in the reviewer output contract also carries a `recurrence` field (new or repeated), letting the orchestrator read the Review-round escalation budget's trigger (SKILL.md, Review-round escalation budget) off the reviewer's own return instead of reconstructing it by hand. A repeated finding here is what feeds that budget's round count. -->",
+    );
+  });
 });
 
 /**

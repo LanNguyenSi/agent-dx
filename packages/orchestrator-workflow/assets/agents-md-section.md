@@ -105,11 +105,17 @@ trivial change.
   orchestrator's judgment.
 - Review-round escalation budget: by the second round-2 halt signal on a
   task, or its third `fix_required` review round, whichever comes first,
-  the orchestrator picks one of tier/model escalation, an advisor spawn, or
-  an operator merge-hold, and records the choice in `03-decisions.md`'s
+  the orchestrator picks one of tier/model escalation (raise the
+  implementer to at least `-xhigh` where installed, or to the strongest
+  model available, until that is exhausted), an advisor spawn, or an
+  operator merge-hold, and records the choice in `03-decisions.md`'s
   Review-round escalation section (the `review-round-escalation` marker).
-  Which of the three is picked is judgment; that one is picked and
-  recorded is not. Escalating never substitutes for a review round.
+  A counted round is a completed reviewer return recommending
+  `fix_required` or `reject`; a misfired review is not a round. Which of
+  the three is picked is judgment; that one is picked and recorded is
+  not. Escalating never substitutes for a review round and comes in
+  addition to the halt rule's split-or-redesign response, not instead of
+  it.
 
 ### Instruction trust boundary
 

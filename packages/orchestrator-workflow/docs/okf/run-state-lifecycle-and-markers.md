@@ -107,10 +107,10 @@ resolved only when its Decision is `accepted` or `defer`; every other value
 the completeness gate (05-review-findings.md:10#"<!-- Decision legend: a high/critical finding counts as RESOLVED (the completeness gate passes) only when its Decision is"). The template's example row
 was deliberately narrowed to `accepted/defer` only (0.7.4,
 CHANGELOG.md:859-869#0.7.4) so the template itself never invites `fix`/`reject`
-as if they were resolutions. Pinned by template-markers.test.ts:59-69#"decision"
-(header row carries both `severity` and `decision` cells), :72-74 (the
-load-bearing comment exists), :76-90 (example row's Decision cell is
-exactly `accepted/defer`, mutation-checked), and :92-97 (the
+as if they were resolutions. Pinned by template-markers.test.ts:65-75#"decision"
+(header row carries both `severity` and `decision` cells), :78-80 (the
+load-bearing comment exists), :82-96 (example row's Decision cell is
+exactly `accepted/defer`, mutation-checked), and :98-103 (the
 `RESOLVED_DECISIONS = {accepted, defer}` string and "arms the ... gate"
 wording are both present verbatim).
 

@@ -501,11 +501,18 @@ and across repeated review rounds, so effort does not keep accumulating
 unaided: by the second round-2 halt signal on the same task, or by the
 third `fix_required` review round on the same task, whichever comes
 first, choose one of three escalations instead of running another round
-the same way:
+the same way. A counted round is a completed reviewer return whose
+`acceptance_recommendation` is `fix_required` or `reject`; a misfired
+review is not a round (see Subagent misfire rule); the escalation is
+chosen once the third such round has returned, before the next attempt
+starts. The escalation is chosen in addition to the halt rule's
+split-or-redesign response, not instead of it.
 
-- **Tier or model escalation**: move the implementer to its next higher
-  effort tier where installed, at minimum `-xhigh`, or to the strongest
-  model available in this environment.
+- **Tier or model escalation**: raise the implementer to at least
+  `-xhigh` where that variant is installed, or to the strongest model
+  available in this environment. When it already runs at both, this
+  option is exhausted and the choice falls to the advisor spawn or the
+  merge-hold.
 - **Advisor spawn**: send the advisor subagent the question "redesign,
   split, or hold?" and weigh its recommendation before deciding.
 - **Merge-hold**: hold the change unmerged and hand the decision to the
@@ -518,8 +525,8 @@ recorded is mandatory. Record the choice and the reason in
 merge_hold`). Escalating does not replace a review round: whichever option
 is chosen, the next attempt still goes through the reviewer subagent in
 full; this budget forces a change in approach, not a shortcut past the
-review gate. Anchored by a measurement; see the orchestrator-workflow
-CHANGELOG's `[Unreleased]` entry.
+review gate. Anchored by a measurement; see the entry for this rule in the
+orchestrator-workflow CHANGELOG.
 
 ## Final acceptance rule
 
