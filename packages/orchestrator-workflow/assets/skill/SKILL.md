@@ -511,22 +511,25 @@ split-or-redesign response, not instead of it.
 - **Tier or model escalation**: raise the implementer to at least
   `-xhigh` where that variant is installed, or to the strongest model
   available in this environment. When it already runs at both, this
-  option is exhausted and the choice falls to the advisor spawn or the
-  merge-hold.
-- **Advisor spawn**: send the advisor subagent the question "redesign,
-  split, or hold?" and weigh its recommendation before deciding.
+  option is exhausted; under a `full` profile the choice falls to the
+  advisor spawn or the merge-hold, under a `minimal` profile (no advisor
+  subagent to spawn) it falls straight to the merge-hold.
+- **Advisor spawn** (where the advisor is installed, `full` profile):
+  send the advisor subagent the question "redesign, split, or hold?" and
+  weigh its recommendation before deciding.
 - **Merge-hold**: hold the change unmerged and hand the decision to the
   operator.
 
 Judgment governs which of the three to pick; only that one is chosen and
-recorded is mandatory. Record the choice and the reason in
-`03-decisions.md`'s Review-round escalation section (the
-`review-round-escalation` marker, one of `n/a | tier_escalation | advisor |
-merge_hold`). Escalating does not replace a review round: whichever option
-is chosen, the next attempt still goes through the reviewer subagent in
-full; this budget forces a change in approach, not a shortcut past the
-review gate. Anchored by a measurement; see the entry for this rule in the
-orchestrator-workflow CHANGELOG.
+recorded is mandatory. Add a row (task, choice, reason) to
+`03-decisions.md`'s Review-round escalation table, the record of the
+decision, and set the `review-round-escalation` marker to the most recent
+choice (a reader shortcut derived from that table, one of `n/a |
+tier_escalation | advisor | merge_hold`). Escalating does not replace a
+review round: whichever option is chosen, the next attempt still goes
+through the reviewer subagent in full; this budget forces a change in
+approach, not a shortcut past the review gate. Anchored by a measurement;
+see the entry for this rule in the orchestrator-workflow CHANGELOG.
 
 ## Final acceptance rule
 

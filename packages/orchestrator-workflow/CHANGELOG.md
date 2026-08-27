@@ -17,20 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   running another round unaided, and records the choice in
   `03-decisions.md`'s new Review-round escalation section (the
   `review-round-escalation` marker: `n/a | tier_escalation | advisor |
-  merge_hold`). Which of the three is picked stays a judgment call; only
-  that one is picked and recorded is now mandatory, and escalating never
-  substitutes for a review round. `agents-md-section.md` carries the same
-  rule in short form. The reviewer output contract (`SKILL.md` and
-  `reviewer.md`) gained a `recurrence: new | repeated` field per finding,
-  and step 7 now has the orchestrator name the review round number in the
-  briefing when it is not the task's first, so the reviewer can classify
-  each finding against the rounds it was told about instead of the
-  orchestrator re-deriving recurrence by hand. `03-decisions.md`'s new
-  marker is a documented convention only: nothing in this package's own
-  code reads it today (unlike the fail-open/fail-closed
-  `solution-acceptance:` markers, which grounding-mcp's run-completeness
-  reader does parse); wiring it into that reader, if wanted, is a
-  follow-up in the consuming project, not part of this change.
+  merge_hold`, `n/a` a deliberately fail-open default since most runs
+  never trigger the budget at all, unlike the `TODO` fail-closed sentinel
+  the `solution-acceptance:` marker family uses). Which of the three is
+  picked stays a judgment call; only that one is picked and recorded is
+  now mandatory, and escalating never substitutes for a review round.
+  `agents-md-section.md` carries the same rule in short form. The
+  reviewer output contract (`SKILL.md` and `reviewer.md`) gained a
+  `recurrence: new | repeated` field per finding, and step 7 now has the
+  orchestrator name the review round number in the briefing when it is
+  not the task's first, so the reviewer can classify each finding against
+  the rounds it was told about instead of the orchestrator re-deriving
+  recurrence by hand. `03-decisions.md`'s new marker is a documented
+  convention only: nothing in this package's own code reads it today
+  (unlike the `solution-acceptance:` markers, which grounding-mcp's
+  run-completeness reader does parse); wiring it into that reader, if
+  wanted, is a follow-up in the consuming project, not part of this
+  change.
 
   Evidence: agent-tasks d03af8f6 (pandora run
   `.ai/runs/2026-08-26-open-pool-batch30`, a harness risk-gate deletion
@@ -46,10 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   classes in one round by its own 248-probe audit, and the following review
   found only one remaining, a documentation-only medium. A same-run comparison
   task, agent-tasks da823721, needed three rounds with one round-2 halt and
-  was accepted after it, well inside this budget. This is the first data point
-  relating implementer model
-  strength to round count on a permissive-security-parser class of task;
-  the 2026-08-24 tier A/B (see `[0.23.0]` below) measured only
+  was accepted after it, well inside this budget. This is the first data
+  point relating implementer model strength to round count on a
+  permissive-security-parser class of task; the 2026-08-24 tier A/B (see
+  `[0.23.0]` below) measured only
   `implementer-low` against the default tier on a different task shape,
   not model strength, so whether a stronger model generally shortens
   these rounds remains open.

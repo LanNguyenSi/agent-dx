@@ -230,15 +230,15 @@ round-2 halt signal on the same task, or by the third `fix_required`
 review round on the same task, whichever comes first", at which point the
 orchestrator picks one of three named escalations
 (`SKILL.md:511#"**Tier or model escalation**"`,
-`SKILL.md:516#"**Advisor spawn**"`, `SKILL.md:518#"**Merge-hold**"`: raise
+`SKILL.md:517#"**Advisor spawn**"`, `SKILL.md:520#"**Merge-hold**"`: raise
 the implementer to at least `-xhigh` where installed or to the strongest
 available model, an advisor spawn asked "redesign, split, or hold?", or an
 operator merge-hold). A counted round is a completed reviewer return whose
 `acceptance_recommendation` is `fix_required` or `reject`; a misfired
 review is not a round. Which of the three is picked is judgment; that one
 is picked and recorded is not
-(`SKILL.md:521#"Judgment governs which of the three to pick; only that one is chosen and"`).
-`agents-md-section.md:106-117#"the halt rule's split-or-redesign response, not instead of"`
+(`SKILL.md:523#"Judgment governs which of the three to pick; only that one is chosen and"`).
+`agents-md-section.md:106-120#"rule's split-or-redesign response, not instead of it."`
 carries the same rule in short form for repos without the full skill text
 loaded.
 
@@ -253,11 +253,17 @@ recent choice
 (`03-decisions.md:17#"<!-- review-round-escalation: choice = n/a -->"`).
 Unlike the two `solution-acceptance:` verdict markers in
 [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md),
-this marker is a documented convention only: no reader in this package or
-in grounding-mcp parses it today (see the CHANGELOG's `[Unreleased]`
-entry). Escalating never substitutes for a review round: whichever option
-is chosen, the next attempt still goes through the reviewer subagent in
-full, the same review-never-skipped floor stated at the top of this doc.
+whose `TODO` default is a fail-closed sentinel that blocks acceptance
+until replaced, this marker's `n/a` default is a valid enum member, not a
+sentinel: it is deliberately fail-open, because most runs never trigger
+the budget at all, and a future reader must not read a marker still
+showing `n/a` as "escalation was needed but not recorded" -- it means the
+budget was never hit. This marker is a documented convention only: no
+reader in this package or in grounding-mcp parses it today (see the
+CHANGELOG's `[Unreleased]` entry). Escalating never substitutes for a
+review round: whichever option is chosen, the next attempt still goes
+through the reviewer subagent in full, the same review-never-skipped
+floor stated at the top of this doc.
 
 The reviewer output contract also gained a per-finding `recurrence: new |
 repeated` field so the orchestrator can read the trigger off the

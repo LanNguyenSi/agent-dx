@@ -1129,6 +1129,15 @@ describe("review-round escalation budget ships in the skill and the AGENTS.md se
     );
   });
 
+  it("step 8's trigger reference and the budget section's own trigger name the same 'second'/'third' thresholds (a drifted count in either place must fail this)", () => {
+    const stepEight =
+      "By the second round-2 halt signal or the third `fix_required` review round on the same task, apply the Review-round escalation budget";
+    const sectionTrigger =
+      "by the second round-2 halt signal on the same task, or by the third `fix_required` review round on the same task, whichever comes first, choose one of three escalations";
+    expect(skillMd).toContain(stepEight);
+    expect(skillMd).toContain(sectionTrigger);
+  });
+
   it("SKILL.md states the trigger and all three named escalations", () => {
     expect(skillMd).toContain(
       "by the second round-2 halt signal on the same task, or by the third `fix_required` review round on the same task, whichever comes first, choose one of three escalations",
@@ -1140,7 +1149,7 @@ describe("review-round escalation budget ships in the skill and the AGENTS.md se
 
   it("SKILL.md pins each escalation option's body, not just its bold label (a body rewritten into its opposite must fail this)", () => {
     expect(skillMd).toContain(
-      "raise the implementer to at least `-xhigh` where that variant is installed, or to the strongest model available in this environment. When it already runs at both, this option is exhausted and the choice falls to the advisor spawn or the merge-hold.",
+      "raise the implementer to at least `-xhigh` where that variant is installed, or to the strongest model available in this environment. When it already runs at both, this option is exhausted; under a `full` profile the choice falls to the advisor spawn or the merge-hold, under a `minimal` profile (no advisor subagent to spawn) it falls straight to the merge-hold.",
     );
     expect(skillMd).toContain(
       '"redesign, split, or hold?" and weigh its recommendation before deciding.',
@@ -1150,18 +1159,34 @@ describe("review-round escalation budget ships in the skill and the AGENTS.md se
     );
   });
 
+  it("SKILL.md guards the advisor spawn option with its install/profile condition (F2: no advisor spawn implied under a minimal profile)", () => {
+    expect(skillMd).toContain(
+      "**Advisor spawn** (where the advisor is installed, `full` profile):",
+    );
+    expect(skillMd).toContain(
+      "under a `minimal` profile (no advisor subagent to spawn) it falls straight to the merge-hold.",
+    );
+  });
+
   it("SKILL.md states the choice is mandatory but which one is judgment, and that escalating never replaces a review round", () => {
     expect(skillMd).toContain(
       "Judgment governs which of the three to pick; only that one is chosen and recorded is mandatory.",
     );
-    expect(skillMd).toContain(
-      "Escalating does not replace a review round",
-    );
+    expect(skillMd).toContain("Escalating does not replace a review round");
   });
 
   it("SKILL.md and agents-md-section.md both name the 03-decisions.md marker by name", () => {
     expect(skillMd).toContain("`review-round-escalation` marker");
     expect(agentsMdSection).toContain("`review-round-escalation` marker");
+  });
+
+  it("SKILL.md and agents-md-section.md both record the table row as the data, the marker as its derived shortcut (F1: not just the marker)", () => {
+    expect(skillMd).toContain(
+      "Add a row (task, choice, reason) to `03-decisions.md`'s Review-round escalation table, the record of the decision, and set the `review-round-escalation` marker to the most recent choice (a reader shortcut derived from that table,",
+    );
+    expect(agentsMdSection).toContain(
+      "adds a row (task, choice, reason) to `03-decisions.md`'s Review-round escalation table, then sets the `review-round-escalation` marker to the most recent choice.",
+    );
   });
 
   it("agents-md-section.md's Review gate section carries the budget rule in short form", () => {

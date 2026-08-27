@@ -16,5 +16,3 @@
 
 <!-- review-round-escalation: choice = n/a -->
 <!-- Reader marker: the most recent choice recorded in this run's table above, kept for readers that scan for a single marker rather than the table. One of: n/a | tier_escalation | advisor | merge_hold -->
-<!-- reason: TODO -->
-
