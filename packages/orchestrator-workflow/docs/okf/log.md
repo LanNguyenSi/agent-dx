@@ -2822,3 +2822,14 @@ the two pre-existing historical/stale line-range references already
 excluded above, are not. `okf-kit check` on the unperturbed committed tree
 is unaffected (still 35 findings, 0 naming `CHANGELOG.md`, measured
 directly).
+
+F3's new `describe` block landed in `test/docs-consistency.test.ts`, one of
+`review-gate-and-waivers.md`'s listed sources; that doc's three citations
+into the same file (the review-gate-ships-in-policy block near line 110,
+the review-gate-consequence check near line 399, and the
+acceptance_recommendation-mandatory block near line 950) all sit well
+before F3's append-only addition at the file's end, so none of their cited
+ranges moved. Re-verified directly, then re-stamped
+review-gate-and-waivers.md's own frontmatter timestamp to 2026-08-27 to
+clear the resulting `sources-fresh` `STALE` warning (36 findings with the
+warning present, back to 35 after the re-stamp).
