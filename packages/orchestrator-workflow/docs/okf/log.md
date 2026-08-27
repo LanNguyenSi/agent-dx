@@ -1724,15 +1724,18 @@
   covering the hex-guard and date-heuristic clause; both numbers have
   since drifted off that content repeatedly as later rounds' own
   CHANGELOG entries pushed it down -- corrected 2026-08-26 to
-  `CHANGELOG.md:779-784#0.9.0` (review round 4, D30/LOW-c: given the
-  heading anchor its sibling at `run-state-lifecycle-and-markers.md:55`
-  already carries, matching it here too rather than a bare line range, so
-  a future CHANGELOG insertion above `## [0.9.0]` fails this citation on
-  `anchor-heading-mismatch` instead of silently resolving to the wrong
-  section; re-verified against the committed tree a third time this same
-  task, see LOW-d below on why a heading-anchored `CHANGELOG.md` citation
-  still needs re-pointing on every edit above it regardless), see that
-  entry below). Consciously accepted, recorded in the run
+  a heading-anchored line-range citation of the `## [0.9.0]` section
+  (review round 4, D30/LOW-c: given the heading anchor its sibling at
+  `run-state-lifecycle-and-markers.md:55` already carried, matching it
+  here too rather than a bare line range, so a future CHANGELOG insertion
+  above `## [0.9.0]` would fail the citation on `anchor-heading-mismatch`
+  instead of silently resolving to the wrong section; re-verified against
+  the committed tree a third time this same task, see LOW-d below on why a
+  heading-anchored `CHANGELOG.md` citation still needed re-pointing on
+  every edit above it regardless), and migrated on 2026-08-27 to the
+  line-independent heading-section form
+  `CHANGELOG.md:#[0.9.0]#"grounding-mcp 0.6.0 reads this marker"` (see the
+  2026-08-27 entry), see that entry below). Consciously accepted, recorded in the run
   decisions: substring membership in the vocabulary pin (a yaml-key match
   was tried and reverted, see round 3), pre-existing
   `template-markers.test.ts` prettier drift, and the absence of a mechanical
@@ -2805,21 +2808,21 @@ findings, 0 naming CHANGELOG.md or model-preselection.md, matching the
 pre-round baseline exactly.
 
 Fix-round-2 follow-up (review findings F1, F2, F3, F4, F5, F6, F7, F8):
-re-ran the M1 negative control (the same 3-line `[Unreleased]` insertion
-above) against the tree after this round's fixes, including F5's revert of
-this entry's own `CHANGELOG.md:779-784#0.9.0` citation back to line-range
-form. Result: 36 findings (1 new), the reverted citation's own
-`blank-start-line` warning; reverted after measurement (`git diff` clean).
-This is a genuine, expected regression against the "0 new" figure recorded
-above, not a bug in this round's own edits: that citation resolves by line
-range, not by heading section, so it was never immune to a line-count
-shift above it, the same as before round 1 touched it at all; F5 chose
-historical accuracy (describing the pre-0.8.0 grammar decision correctly)
-over preserving the shift-immunity a heading-section citation would have
-carried instead. Sixteen of the seventeen citations originally reported as
-migrated remain migrated and immune; this one line-range citation, plus
-the two pre-existing historical/stale line-range references already
-excluded above, are not. `okf-kit check` on the unperturbed committed tree
+F5 was first resolved by reverting this entry's own historical
+`CHANGELOG.md` citation of the `## [0.9.0]` section back to line-range
+form; under that state the M1 negative control (the same 3-line
+`[Unreleased]` insertion above) measured 36 findings (1 new), the reverted
+citation's own `blank-start-line` warning, because a line-range citation
+is never immune to a line-count shift above it. The orchestrator then
+chose the other option named in the review: keep the heading-section form
+and rewrite the sentence so it reads as history (corrected 2026-08-26 to a
+heading-anchored line-range citation, migrated 2026-08-27 to
+`CHANGELOG.md:#[0.9.0]` with a content anchor). With that edit all
+seventeen citations originally reported as migrated are migrated and
+immune again; only the two pre-existing historical/stale line-range
+references already excluded above are not. M1 re-measured after the edit: 35
+findings, 0 new, 0 naming `CHANGELOG.md` (the insertion reverted, `git
+status` clean). `okf-kit check` on the unperturbed committed tree
 is unaffected (still 35 findings, 0 naming `CHANGELOG.md`, measured
 directly).
 
