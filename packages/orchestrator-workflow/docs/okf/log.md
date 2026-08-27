@@ -1975,7 +1975,7 @@
   reports 39 findings (0/17/22): 13 pre-existing `install-fence-
   mechanics.md` warnings, one `blank-start-line` warning
   (`run-state-lifecycle-and-markers.md`, the un-shifted pre-round-1
-  `CHANGELOG.md:764-771` 0.7.0 citation), and three `sources-fresh`
+  `CHANGELOG.md:808-815` 0.7.0 citation), and three `sources-fresh`
   `STALE` warnings, one per touched doc, all reading `` `packages/
   orchestrator-workflow/CHANGELOG.md` changed 2026-08-25T11:09:32.000Z
   after doc timestamp 2026-08-24T23:59:00.000Z `` -- `1d124ca`'s commit
@@ -2326,7 +2326,7 @@
   subset. Measured on the round-3-corrected bundle before this round's
   fixes: 16 unique ranges failed it -- 15 straddles (14 where start and end
   land in two different `it()`/`test()` blocks, plus 1,
-  `docs-consistency.test.ts:1774-1921`, where start correctly resolved to a
+  `docs-consistency.test.ts:1891-2038`, where start correctly resolved to a
   `describe(` block but end escaped past its own close) and 1
   (`subagent-contracts-superset.md`'s citation into
   `docs-consistency.test.ts:513-519`) where the citation starts inside a
@@ -2541,7 +2541,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`packages/orchestrator-workflow/CHANGELOG.md:13-35`) grew by a net 3
+(`packages/orchestrator-workflow/CHANGELOG.md:57-79`) grew by a net 3
 lines relative to the pre-round-2 base commit (`5a33adb`, `git diff
 --stat 5a33adb -- CHANGELOG.md`: 17 insertions, 14 deletions), shifting
 every `## [x.y.z]` heading below it by exactly 3 lines uniformly (
@@ -2831,3 +2831,184 @@ ranges moved. Re-verified directly, then re-stamped
 review-gate-and-waivers.md's own frontmatter timestamp to 2026-08-27 to
 clear the resulting `sources-fresh` `STALE` warning (36 findings with the
 warning present, back to 35 after the re-stamp).
+
+## 2026-08-27 (agent-tasks 68faae5f, implementer)
+
+Adds the "Review-round escalation budget" (`SKILL.md`, new section after
+Round-2 halt rule; `agents-md-section.md` short form; `03-decisions.md`
+new `review-round-escalation` marker) and a per-finding `recurrence: new
+| repeated` field on the reviewer output contract (`SKILL.md` and
+`reviewer.md`, byte-identical `findings:` block, new dedicated test).
+Full rule content lives in the CHANGELOG's `[Unreleased]` entry and this
+bundle's `review-gate-and-waivers.md` and `subagent-contracts-superset.md`
+(new "Review-round escalation budget (this change)" and "Recurrence field
+(this change)" sections); not repeated here.
+
+Re-pointing: five source edits (`SKILL.md`, `reviewer.md`,
+`agents-md-section.md`, `CHANGELOG.md`'s `[Unreleased]` insertion, and
+this package's own `test/docs-consistency.test.ts` gaining three new
+`describe` blocks) shifted line numbers under existing bundle citations.
+Measured by matching each citation's `(target, anchor)` pair between the
+pre-round tree (`48f809d`) and the committed tree and counting where the
+`start`/`end` line numbers differ (a script comparison, not a hand
+count): 71 citations were re-pointed total, 19 into `CHANGELOG.md` (a
+uniform +44 shift, confirmed by the CHANGELOG's own `[0.24.0]` heading
+citation test moving from line 127 to 171), 40 into `SKILL.md`, 7 into
+`reviewer.md`, 4 into this file's own `test/docs-consistency.test.ts`
+self-citations (a uniform +117 shift for citations at or past the
+insertion point, verified against the file's own
+`describe("round-2 halt rule ships in the skill", ...)` block's start
+line staying put at 1071 while every line after the new blocks shifted),
+and 1 into `agents-md-section.md`. Plus one bare non-anchored
+`,211-212)` cross-reference inside a `run-state-lifecycle-and-
+markers.md` citation's trailing prose, re-pointed the same way by hand
+since it carries no machine-checked anchor. 15 further citations in the
+new "Review-round escalation budget (this change)" and "Recurrence field
+(this change)" sections are brand new (no pre-round counterpart), not
+re-points.
+
+Two re-point bugs found and fixed by a differential check, not assumed:
+a pure per-anchor width-preservation script (new end line found by
+search, new start = new end minus old width) mis-set two citation start
+lines wrong by exactly the width of a mid-range insertion, both caught
+by the same `okf-kit check` / docs-consistency last-line and
+occurs-once-in-range tests this bundle already runs (not a new check):
+`subagent-contracts-superset.md`'s Reviewer contract-location citation
+(`SKILL.md` lines 319 to 341 computed, landed one line into a blank line
+before the fence; correct is `318-341`, the `## Reviewer output contract`
+heading, confirmed by direct read and by the `blank-start-line` okf-kit
+warning that fired only on the wrong value) and its reproduction-field
+citation (`reviewer.md:66-87` computed; correct is `65-87`, confirmed by
+direct read against the pre-edit file, matching text "the implementer's
+claim in the `reproduction` field. Deterministic checks" now sitting on
+line 65). Both crossed exactly one insertion inside their own range,
+which the plain end-anchor-search-plus-width-preservation approach
+cannot detect on its own; every other re-pointed citation in this round
+had both endpoints on the same side of every insertion it crossed and
+needed no manual correction. Also found by the anchor-grammar check
+(pre-existing, not new): two freshly-added citations used anchor text
+containing embedded backticks (an `agents-md-section.md` citation
+quoting `` `review-round-escalation` `` and a `reviewer.md` citation
+quoting `` `new` `` / `` `repeated` ``), which the citation grammar's
+quoted-string form cannot express (same limitation MEDIUM 2 and LOW 6a
+in an earlier entry above hit); both narrowed to a backtick-free
+substring on the same last line instead of reverting to a wider range.
+
+Final accounting on the committed tree after this round (`npx vitest
+run`, `npm run typecheck`, `npm run typecheck:test`, `node
+packages/okf-kit/dist/cli.js check packages/orchestrator-workflow/docs/okf`,
+`node packages/slop-detector/dist/cli.js check . --pack placement-slop
+--config slop.config.yml`): 303/303 tests green (up from 293/293 before
+this round's 10 new tests); typecheck and typecheck:test clean;
+`okf-kit check` reports 35 findings (errors 0, warnings 13, notices 22),
+byte-identical in count and composition to the pre-round baseline
+measured on `48f809d` before any edit in this round; `placement-guard`
+clean (406 files scanned, same as the pre-round baseline). `npm run
+format:check` reports the same two pre-existing warnings named in the
+prior round's entry (`test/docs-consistency.test.ts`,
+`test/template-markers.test.ts`), confirmed unchanged by running it
+against `48f809d` directly (`git stash` / `git stash pop`) before
+touching either file in this round.
+
+## 2026-08-27 (agent-tasks 68faae5f, implementer, review round 2 fixes)
+
+Fixes ten review findings against the prior entry's change (F1-F10, all
+medium/low, all addressed): re-verifies `install-fence-mechanics.md`
+against its `agents-md-section.md` source edit and re-stamps its
+timestamp (F1); pins the body text of all three escalation options, not
+just their bold labels, in `test/docs-consistency.test.ts` (F2); drops
+the `[Unreleased]` heading name from the `SKILL.md` citation and adds an
+`assets/`-wide scan test guarding every installed asset against that
+string (F3); adds a one-sentence definition of a counted round (a
+completed reviewer return recommending `fix_required` or `reject`; a
+misfired review does not count) to `SKILL.md` and
+`agents-md-section.md`, pinned by a new test (F4); reshapes
+`03-decisions.md`'s Review-round escalation section into a
+Task/Choice/Reason table (placeholder row `n/a | n/a | n/a`, `Choice`
+enum `n/a | tier_escalation | advisor | merge_hold`) so one run can
+record the escalation choice per task instead of once for the whole
+run, keeping the existing marker as a reader shortcut alongside it, both
+pinned by new tests (F5); adds a Recurrence note to
+`05-review-findings.md` next to the existing Reproduction note, pointing
+at the reviewer contract's `recurrence` field and the escalation
+budget, without touching the load-bearing Severity/Decision header row
+(F6); names the models in the CHANGELOG evidence paragraph only (rounds
+1-5 the default-tier implementer, Sonnet; round 6 Fable on `-xhigh`)
+(F7); drops the "(this change)" suffix from both bundle section
+headings and re-points their cross-link anchors (F8); rewords the tier-
+escalation option to state the exhaustion condition explicitly (raise to
+at least `-xhigh` where installed or the strongest available model; once
+both are exhausted the choice falls to the advisor spawn or the
+merge-hold) in both `SKILL.md` and `agents-md-section.md` (F9); and adds
+the explicit "in addition to, not instead of" sentence tying the budget
+to the halt rule's split-or-redesign response, in both copies (F10).
+
+Re-pointing: the `SKILL.md` and `agents-md-section.md` edits (F4, F9,
+F10) and the `test/docs-consistency.test.ts` / `test/template-markers.test.ts`
+new tests (F2, F3, F5, F6) shifted line numbers under existing bundle
+citations again. Measured the same way as the prior round (matching
+each citation's `(target, anchor)` pair between the pre-round tree
+(5700777) and the committed tree): 16 line-numbered citations
+re-pointed (2 into `agents-md-section.md`, 6 into `SKILL.md`, 4 into
+`test/template-markers.test.ts`, 3 into `test/docs-consistency.test.ts`,
+1 into `03-decisions.md`'s narrowed single-line anchor) plus 2
+heading-anchor renames (`review-round-escalation-budget-this-change` to
+`review-round-escalation-budget`, `recurrence-field-this-change` to
+`recurrence-field`, both cross-links between `review-gate-and-
+waivers.md` and `subagent-contracts-superset.md`), 18 total. The
+`CHANGELOG.md` evidence paragraph (F7) was rewrapped to keep the same
+14-line span its content occupied before the edit (checked by diffing
+line count against the pre-edit paragraph, not assumed), so none of the
+heading-anchored `CHANGELOG.md` citations elsewhere in the bundle needed
+re-pointing this round.
+
+Correction to the prior entry: it reported 35 findings (errors 0,
+warnings 13, notices 22) on the committed tree, but measuring the
+actual 5700777 commit directly (a worktree checked out at that commit,
+not the pre-commit working tree the prior entry was drafted against)
+shows 36 (errors 0, warnings 14, notices 22), one more than claimed,
+including a `sources-fresh` STALE finding on
+`install-fence-mechanics.md` against its `agents-md-section.md` source
+that F1 above now resolves.
+
+Final accounting on the committed tree after this round (`npx vitest
+run`, `npm run typecheck`, `npm run typecheck:test`, `node
+packages/okf-kit/dist/cli.js check packages/orchestrator-workflow/docs/okf`,
+`node packages/okf-kit/dist/cli.js check packages/orchestrator-workflow/docs/okf --json`
+piped through the CI anchor-finding jq filter, `node
+packages/slop-detector/dist/cli.js check . --pack placement-slop
+--config slop.config.yml`): 311/311 tests green (up from 303/303 before
+this round's 8 new tests); typecheck and typecheck:test clean;
+`okf-kit check` reports 35 findings (errors 0, warnings 13, notices 22);
+the anchor-finding jq filter returns 0; placement-guard clean.
+
+## 2026-08-27 (agent-tasks 68faae5f, orchestrator, review round 3 fixes)
+
+Review round 3 (after merging master, which carried the okf-kit 0.8.0
+release and the heading-section migration of this bundle's CHANGELOG
+citations) closed six findings in the fix commit d12d892: the recording
+instruction in SKILL.md and agents-md-section.md now names the
+03-decisions.md table row as the record and the review-round-escalation
+marker as the derived shortcut; the advisor-spawn escalation carries its
+install condition (full profile) and names the minimal-profile fallback
+to the merge-hold; review-gate-and-waivers.md and the CHANGELOG state
+that the marker's n/a default is deliberately fail-open; the orphaned
+reason marker line left the 03-decisions.md template; a prettier
+three-liner in the docs-consistency test became one line; a short
+CHANGELOG line break was rewrapped; and a new test pins that SKILL.md
+step 8 and the budget section name the same second-halt and third-round
+thresholds. Thirteen citations into SKILL.md, agents-md-section.md and
+the docs-consistency test were re-pointed for the line shifts.
+
+The round-3 review found the same class as round 2's first finding once
+more: the fix commit edited agents-md-section.md, a declared source of
+install-fence-mechanics.md, without re-stamping that doc, so the
+committed tree reported one sources-fresh warning (36 findings, 14
+warnings). install-fence-mechanics.md was re-read against the current
+agents-md-section.md (it describes the fence mechanics, not the section's
+rules, and nothing it states drifted) and re-stamped in this commit.
+Measured on the committed tree after this commit: `okf-kit check` 35
+findings (errors 0, warnings 13, notices 22), 0 sources-fresh; the CI
+anchor filter (anchor-* and heading-section-*) 0; the --require-anchors
+run with the four allowlisted doc spellings 0; vitest 314/314; typecheck
+and typecheck:test clean; placement-guard clean.

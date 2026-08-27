@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A "Review-round escalation budget" (`SKILL.md`, new section right after
+  the existing Round-2 halt rule): by the second round-2 halt signal on a
+  task, or its third `fix_required` review round, whichever comes first,
+  the orchestrator now picks one of three escalations, tier/model
+  escalation, an advisor spawn, or an operator merge-hold, instead of
+  running another round unaided, and records the choice in
+  `03-decisions.md`'s new Review-round escalation section (the
+  `review-round-escalation` marker: `n/a | tier_escalation | advisor |
+  merge_hold`, `n/a` a deliberately fail-open default since most runs
+  never trigger the budget at all, unlike the `TODO` fail-closed sentinel
+  the `solution-acceptance:` marker family uses). Which of the three is
+  picked stays a judgment call; only that one is picked and recorded is
+  now mandatory, and escalating never substitutes for a review round.
+  `agents-md-section.md` carries the same rule in short form. The
+  reviewer output contract (`SKILL.md` and `reviewer.md`) gained a
+  `recurrence: new | repeated` field per finding, and step 7 now has the
+  orchestrator name the review round number in the briefing when it is
+  not the task's first, so the reviewer can classify each finding against
+  the rounds it was told about instead of the orchestrator re-deriving
+  recurrence by hand. `03-decisions.md`'s new marker is a documented
+  convention only: nothing in this package's own code reads it today
+  (unlike the `solution-acceptance:` markers, which grounding-mcp's
+  run-completeness reader does parse); wiring it into that reader, if
+  wanted, is a follow-up in the consuming project, not part of this
+  change.
+
+  Evidence: agent-tasks d03af8f6 (pandora run
+  `.ai/runs/2026-08-26-open-pool-batch30`, a harness risk-gate deletion
+  arm) ran five implementer rounds on the same effort tier (rounds 1-5, the
+  default-tier implementer, Sonnet) before this rule existed; each reviewer
+  round found one new HIGH on the permissive side of the same detection layer
+  (first-segment matching, wrapper flags, xargs flags, a find-root premise
+  twice, xargs `-i`/append), and the Round-2 halt rule's split-or-redesign
+  response was applied three times (D-014, D-019, D-022/D-023) without ever
+  escalating tier, model, or to the advisor, and without a merge-hold. Only
+  after round 5 did the operator suggest a stronger model (D-024); round 6, on
+  Fable with the `-xhigh` variant, found and closed twelve further fail-open
+  classes in one round by its own 248-probe audit, and the following review
+  found only one remaining, a documentation-only medium. A same-run comparison
+  task, agent-tasks da823721, needed three rounds with one round-2 halt and
+  was accepted after it, well inside this budget. This is the first data
+  point relating implementer model strength to round count on a
+  permissive-security-parser class of task; the 2026-08-24 tier A/B (see
+  `[0.23.0]` below) measured only
+  `implementer-low` against the default tier on a different task shape,
+  not model strength, so whether a stronger model generally shortens
+  these rounds remains open.
 - A new `okf-anchor-guard` job in `.github/workflows/ci.yml` (this repo)
   runs okf-kit's anchor check against `docs/okf` and fails the build (no
   branch-protection change; master has no required checks today) when an

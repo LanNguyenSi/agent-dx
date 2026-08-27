@@ -1109,6 +1109,224 @@ describe("round-2 halt rule ships in the skill", () => {
 });
 
 /**
+ * The Round-2 halt rule above stops a single task's defect-class recurrence
+ * but never forced a choice once that stopping kept happening on the same
+ * task, or once fix_required review rounds kept piling up. This pins the
+ * "Review-round escalation budget" that closes that gap: the trigger (the
+ * second round-2 halt signal or the third fix_required round), the three
+ * named escalations, the mandatory-choice-not-mandatory-pick framing, the
+ * 03-decisions.md marker both SKILL.md and agents-md-section.md name, and
+ * the guard that escalating never substitutes for a review round.
+ */
+describe("review-round escalation budget ships in the skill and the AGENTS.md section", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+
+  it("SKILL.md carries the section heading and step 8's trigger reference", () => {
+    expect(skillMd).toContain("## Review-round escalation budget");
+    expect(skillMd).toContain(
+      "By the second round-2 halt signal or the third `fix_required` review round on the same task, apply the Review-round escalation budget",
+    );
+  });
+
+  it("step 8's trigger reference and the budget section's own trigger name the same 'second'/'third' thresholds (a drifted count in either place must fail this)", () => {
+    const stepEight =
+      "By the second round-2 halt signal or the third `fix_required` review round on the same task, apply the Review-round escalation budget";
+    const sectionTrigger =
+      "by the second round-2 halt signal on the same task, or by the third `fix_required` review round on the same task, whichever comes first, choose one of three escalations";
+    expect(skillMd).toContain(stepEight);
+    expect(skillMd).toContain(sectionTrigger);
+  });
+
+  it("SKILL.md states the trigger and all three named escalations", () => {
+    expect(skillMd).toContain(
+      "by the second round-2 halt signal on the same task, or by the third `fix_required` review round on the same task, whichever comes first, choose one of three escalations",
+    );
+    expect(skillMd).toContain("**Tier or model escalation**");
+    expect(skillMd).toContain("**Advisor spawn**");
+    expect(skillMd).toContain("**Merge-hold**");
+  });
+
+  it("SKILL.md pins each escalation option's body, not just its bold label (a body rewritten into its opposite must fail this)", () => {
+    expect(skillMd).toContain(
+      "raise the implementer to at least `-xhigh` where that variant is installed, or to the strongest model available in this environment. When it already runs at both, this option is exhausted; under a `full` profile the choice falls to the advisor spawn or the merge-hold, under a `minimal` profile (no advisor subagent to spawn) it falls straight to the merge-hold.",
+    );
+    expect(skillMd).toContain(
+      '"redesign, split, or hold?" and weigh its recommendation before deciding.',
+    );
+    expect(skillMd).toContain(
+      "hold the change unmerged and hand the decision to the operator.",
+    );
+  });
+
+  it("SKILL.md guards the advisor spawn option with its install/profile condition (F2: no advisor spawn implied under a minimal profile)", () => {
+    expect(skillMd).toContain(
+      "**Advisor spawn** (where the advisor is installed, `full` profile):",
+    );
+    expect(skillMd).toContain(
+      "under a `minimal` profile (no advisor subagent to spawn) it falls straight to the merge-hold.",
+    );
+  });
+
+  it("SKILL.md states the choice is mandatory but which one is judgment, and that escalating never replaces a review round", () => {
+    expect(skillMd).toContain(
+      "Judgment governs which of the three to pick; only that one is chosen and recorded is mandatory.",
+    );
+    expect(skillMd).toContain("Escalating does not replace a review round");
+  });
+
+  it("SKILL.md and agents-md-section.md both name the 03-decisions.md marker by name", () => {
+    expect(skillMd).toContain("`review-round-escalation` marker");
+    expect(agentsMdSection).toContain("`review-round-escalation` marker");
+  });
+
+  it("SKILL.md and agents-md-section.md both record the table row as the data, the marker as its derived shortcut (F1: not just the marker)", () => {
+    expect(skillMd).toContain(
+      "Add a row (task, choice, reason) to `03-decisions.md`'s Review-round escalation table, the record of the decision, and set the `review-round-escalation` marker to the most recent choice (a reader shortcut derived from that table,",
+    );
+    expect(agentsMdSection).toContain(
+      "adds a row (task, choice, reason) to `03-decisions.md`'s Review-round escalation table, then sets the `review-round-escalation` marker to the most recent choice.",
+    );
+  });
+
+  it("agents-md-section.md's Review gate section carries the budget rule in short form", () => {
+    expect(agentsMdSection).toContain(
+      "Review-round escalation budget: by the second round-2 halt signal on a task, or its third `fix_required` review round, whichever comes first,",
+    );
+    expect(agentsMdSection).toContain(
+      "Escalating never substitutes for a review round",
+    );
+  });
+
+  it("SKILL.md and agents-md-section.md both define what counts as a round (a misfired review is not one)", () => {
+    expect(skillMd).toContain(
+      "A counted round is a completed reviewer return whose `acceptance_recommendation` is `fix_required` or `reject`; a misfired review is not a round",
+    );
+    expect(agentsMdSection).toContain(
+      "A counted round is a completed reviewer return recommending `fix_required` or `reject`; a misfired review is not a round.",
+    );
+  });
+
+  it("SKILL.md and agents-md-section.md both state the escalation is additional to, not a substitute for, the halt rule's response", () => {
+    expect(skillMd).toContain(
+      "The escalation is chosen in addition to the halt rule's split-or-redesign response, not instead of it.",
+    );
+    expect(agentsMdSection).toContain(
+      "Escalating never substitutes for a review round and comes in addition to the halt rule's split-or-redesign response, not instead of it.",
+    );
+  });
+
+  it("SKILL.md does not cite the CHANGELOG's [Unreleased] heading by name (assets are installed verbatim and outlive the heading)", () => {
+    expect(skillMd).toContain(
+      "Anchored by a measurement; see the entry for this rule in the orchestrator-workflow CHANGELOG.",
+    );
+    expect(skillMd).not.toContain("[Unreleased]");
+  });
+});
+
+/**
+ * Installed assets are copied verbatim into a consuming repo and can outlive
+ * a release; a literal `[Unreleased]` heading reference in one goes stale
+ * the moment the referenced entry ships under a version number. Guards the
+ * whole assets/ tree, not just SKILL.md, so a future asset can't reintroduce
+ * the same staleness. Mutation probe: insert the literal string into any
+ * file under assets/ and this test goes red.
+ */
+describe("no installed asset cites the CHANGELOG's [Unreleased] heading by name", () => {
+  it("scans every file under assets/ for a literal [Unreleased] reference", () => {
+    const assetsDir = `${PACKAGE_DIR}/assets`;
+    const entries = readdirSync(assetsDir, {
+      recursive: true,
+      withFileTypes: true,
+    });
+    const offenders: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const full = `${entry.parentPath ?? entry.path}/${entry.name}`;
+      const contents = readFileSync(full, "utf8");
+      if (contents.includes("[Unreleased]")) {
+        offenders.push(full.replace(`${assetsDir}/`, ""));
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * AC2's marker check: 03-decisions.md carries the named
+ * `review-round-escalation` marker so an orchestrator or reader can find
+ * where the escalation choice is recorded, and both SKILL.md and
+ * agents-md-section.md name that exact marker (checked above). Wiring a
+ * machine reader to this marker is a follow-up, not part of this change
+ * (see the CHANGELOG's `[Unreleased]` entry); this test only pins the
+ * template's own named place existing.
+ */
+describe("03-decisions.md template carries the review-round-escalation marker", () => {
+  const decisionsTemplate = readAsset("templates/03-decisions.md");
+
+  it("has the Review-round escalation section and marker, defaulting to n/a", () => {
+    expect(decisionsTemplate).toContain("## Review-round escalation");
+    expect(decisionsTemplate).toContain(
+      "<!-- review-round-escalation: choice = n/a -->",
+    );
+  });
+
+  it("carries a Task/Choice/Reason table so one run can record the choice per task, not just once for the whole run", () => {
+    expect(decisionsTemplate).toContain("| Task | Choice | Reason |");
+    expect(decisionsTemplate).toContain("| n/a | n/a | n/a |");
+  });
+
+  it("pins the Choice column's enum values (a changed enum value must fail this)", () => {
+    expect(decisionsTemplate).toContain(
+      "<!-- Choice is one of: n/a | tier_escalation | advisor | merge_hold -->",
+    );
+  });
+});
+
+/**
+ * The reviewer output contract gained a per-finding `recurrence` field so
+ * the orchestrator can detect the review-round escalation budget's trigger
+ * from the reviewer's own return instead of re-deriving it by hand. Pins
+ * the field in both output-contract copies (byte-identical, the same
+ * rigor applied to `reproduction` and `mutation_probes` above) and the
+ * installed reviewer.md prompt's classification instruction.
+ */
+describe("reviewer finding recurrence field ships in both output contracts and the installed prompt", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("both copies carry the recurrence field on the findings item", () => {
+    const field = "recurrence: new | repeated";
+    expect(skillMd).toContain(field);
+    expect(reviewerMd).toContain(field);
+  });
+
+  it("the installed reviewer.md prompt instructs classifying each finding's recurrence", () => {
+    expect(reviewerMd).toContain(
+      "classify each finding as `new` or `repeated` against the",
+    );
+  });
+
+  it("SKILL.md step 7 has the orchestrator name the review round so the reviewer can classify recurrence", () => {
+    expect(skillMd).toContain(
+      "When this is not the task's first review round, name the round number in the briefing;",
+    );
+  });
+
+  it("the findings block is byte-for-byte identical between SKILL.md and reviewer.md (raw, not line-unwrapped)", () => {
+    const extractFindingsBlock = (raw: string): string => {
+      const match = raw.match(/^findings:\n(?: {2}.+\n)*/m);
+      expect(match, "findings block not found").toBeTruthy();
+      return (match as RegExpMatchArray)[0];
+    };
+    const skillBlock = extractFindingsBlock(readAsset("skill/SKILL.md"));
+    const reviewerBlock = extractFindingsBlock(readAsset("agents/reviewer.md"));
+    expect(skillBlock.length).toBeGreaterThan(20);
+    expect(skillBlock).toBe(reviewerBlock);
+  });
+});
+
+/**
  * 0.19.0 adds `--tiers`: `models.ts` gains `ROLE_TIERS` (which effort tiers
  * each role gets a variant file for) and `DEFAULT_TIER` (the tier a role's
  * plain, unsuffixed file already corresponds to, so no variant is ever

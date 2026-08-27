@@ -31,7 +31,7 @@ every change; only the size of the apparatus changes."
 ## Severity ladder and what blocks
 
 Reviewer findings carry `severity: low | medium | high | critical`
-(`SKILL.md:319#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
+(`SKILL.md:327#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
@@ -42,7 +42,7 @@ waiver bookkeeping applies to them.
 Do not conflate two distinct vocabularies attached to the same review: the
 per-finding `Decision` column (below) and the whole-review
 `acceptance_recommendation: accept | accept_with_notes | fix_required |
-reject` (`SKILL.md:323#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
+reject` (`SKILL.md:332#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
 Recommendation section,
 `packages/orchestrator-workflow/assets/templates/05-review-findings.md:26#"accept | accept_with_notes | fix_required | reject"`).
 A review can recommend `fix_required` overall while individual low findings
@@ -51,7 +51,7 @@ rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
 resupply it instead of inferring one from the findings list" (`SKILL.md:
-335-337`; the installed `reviewer.md:30-36#"never leave it blank or omit it."` prompt carries the mirrored
+335-337`; the installed `reviewer.md:35-41#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.
@@ -61,13 +61,13 @@ below.
 - Critical: "waived by the operator. The orchestrator never waives a
   critical finding on its own" (`agents-md-section.md:98-99#"never waives a critical finding on its own."`); SKILL.md
   step 8 echoes "critical findings require operator sign-off"
-  (`SKILL.md:191#"explicitly waived: critical findings require operator"`).
+  (`SKILL.md:196#"explicitly waived: critical findings require operator"`).
 - High: "waived by the orchestrator with a recorded rationale"
-  (`agents-md-section.md:100-101#"rationale."`; `SKILL.md:191-192#"findings require the orchestrator to record a"`).
+  (`agents-md-section.md:100-101#"rationale."`; `SKILL.md:196-197#"findings require the orchestrator to record a"`).
 - Deferring counts as waiving, for both severities: "Deferring such a
   finding counts as a waiver" (`agents-md-section.md:94#"explicitly waived. Deferring such a finding counts as a waiver, and the gate"`). SKILL.md makes
   the symmetry explicit: "Deferring a high or critical finding counts as a
-  waiver and follows the same rules" (`SKILL.md:192-193#"or critical finding counts as a waiver and follows the"`). A deferred
+  waiver and follows the same rules" (`SKILL.md:197-198#"or critical finding counts as a waiver and follows the"`). A deferred
   critical still needs operator sign-off; a deferred high still needs an
   orchestrator-recorded rationale.
 - Recorded in
@@ -76,7 +76,7 @@ below.
   (`03-decisions.md:3#"| Date | Decision | Reason | Consequences |"`); the Reason cell is where the sign-off or rationale
   text lives, there is no separate waiver schema.
 - Summarized in `06-handoff.md`'s Accepted Waivers section
-  (`agents-md-section.md:102-103#"the Accepted Waivers section of"`; `SKILL.md:194-195#"the Accepted Waivers section of"`), instructed to "Mirror
+  (`agents-md-section.md:102-103#"the Accepted Waivers section of"`; `SKILL.md:199-200#"the Accepted Waivers section of"`), instructed to "Mirror
   03-decisions.md"
   (`packages/orchestrator-workflow/assets/templates/06-handoff.md:21#"<!-- Waived high/critical reviewer findings, or none. Mirror 03-decisions.md. -->"`) via a
   `Finding | Severity | Rationale | Approved By` table
@@ -125,7 +125,7 @@ Two machine-readable markers sit next to the prose gate: `<!--
 solution-acceptance: acceptance-recommendation = TODO -->`
 (`05-review-findings.md:28#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`) and `<!-- solution-acceptance: final-status =
 TODO -->` (`06-handoff.md:43#"<!-- solution-acceptance: final-status = TODO -->"`). SKILL.md instructs replacing `TODO` with the
-chosen enum value when finalizing each file (`SKILL.md:219-223#"non-accepting (fail-closed)."`). Left as
+chosen enum value when finalizing each file (`SKILL.md:227-231#"non-accepting (fail-closed)."`). Left as
 `TODO`, the harness solution-acceptance gate reads the run as non-accepting.
 `packages/orchestrator-workflow/test/template-markers.test.ts:11-41#"<!-- solution-acceptance: run-base = TODO -->"` pins
 exactly one marker per template, each defaulting to `TODO`. This is a
@@ -145,7 +145,7 @@ Accepted Waivers` heading and its `Finding | Severity | Rationale` header
 (test lines 132-135). A negative pin (test lines 137-141) guards against a
 superseded softer wording, "addressed or consciously accepted by the
 orchestrator", reappearing in `agents-md-section.md`. A second suite,
-`test/template-markers.test.ts:56-96#"expect(reviewTemplate).toMatch(/arms? the"`, independently pins the
+`test/template-markers.test.ts:62-102#"expect(reviewTemplate).toMatch(/arms? the"`, independently pins the
 findings-table header convention and the Decision-legend vocabulary above.
 
 ## Misfire rule's review-gate consequence (0.11.0)
@@ -155,7 +155,7 @@ Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 reviewer output contract (`CHANGELOG.md:#[0.11.0]`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
-(`SKILL.md:463-464#"review and never satisfies the review gate, since"`), pinned by
+(`SKILL.md:478-479#"review and never satisfies the review gate, since"`), pinned by
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:399-401#"never satisfies the review gate"`. Since
 0.18.0 the rule also names resume over a fresh respawn as the preferred
 response for the near-instant, no-tool-activity signal specifically (scoped
@@ -177,9 +177,9 @@ evidence, the reviewer must reproduce it independently — its own runs or
 measurements — and record method, sample size, and result against the
 implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
-same rule (`reviewer.md:51-61#"lint) do not trigger this."`), and both output contracts gained a matching
+same rule (`reviewer.md:56-66#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`SKILL.md:328-332#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:76-79#"residual_risks:"`); `matches_implementer_claim`
+field (`SKILL.md:337-341#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:82-85#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -201,9 +201,9 @@ live, the misfire rule) are out of scope here; see
 previously forced a reviewer return to set `acceptance_recommendation` at
 all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
-`SKILL.md:335-337#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
+`SKILL.md:344-346#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing — ask the reviewer to resupply it, rather than infer one from the
-findings — and the installed `reviewer.md:30-36#"never leave it blank or omit it."` prompt carries the mirrored
+findings — and the installed `reviewer.md:35-41#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part
@@ -216,6 +216,60 @@ Motivated by the same 16-round dogfood as the mutation-probes hardening in
 that dogfood omitted `acceptance_recommendation` entirely.
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:950-965#"the orchestrator asks the reviewer to resupply it"` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.
+
+## Review-round escalation budget
+
+The Round-2 halt rule (full treatment out of scope here; see
+[subagent-contracts-superset.md](subagent-contracts-superset.md)) stops a
+single defect-class recurrence within one task, but nothing previously
+forced a choice once that stopping, or `fix_required` review rounds, kept
+recurring on the same task. This budget applies in addition to the halt
+rule's split-or-redesign response, not instead of it:
+`SKILL.md:496#"## Review-round escalation budget"` triggers "by the second
+round-2 halt signal on the same task, or by the third `fix_required`
+review round on the same task, whichever comes first", at which point the
+orchestrator picks one of three named escalations
+(`SKILL.md:511#"**Tier or model escalation**"`,
+`SKILL.md:517#"**Advisor spawn**"`, `SKILL.md:520#"**Merge-hold**"`: raise
+the implementer to at least `-xhigh` where installed or to the strongest
+available model, an advisor spawn asked "redesign, split, or hold?", or an
+operator merge-hold). A counted round is a completed reviewer return whose
+`acceptance_recommendation` is `fix_required` or `reject`; a misfired
+review is not a round. Which of the three is picked is judgment; that one
+is picked and recorded is not
+(`SKILL.md:523#"Judgment governs which of the three to pick; only that one is chosen and"`).
+`agents-md-section.md:106-120#"rule's split-or-redesign response, not instead of it."`
+carries the same rule in short form for repos without the full skill text
+loaded.
+
+The choice is recorded in `03-decisions.md`'s new named section
+(`03-decisions.md:7#"## Review-round escalation"`), a one-row-per-task
+table (`03-decisions.md:11#"| Task | Choice | Reason |"`) whose
+`Choice` column is the enum `n/a | tier_escalation | advisor |
+merge_hold`, because one run carries multiple tasks and each can trigger
+the budget independently. A `review-round-escalation` marker defaulting
+to `n/a` is kept alongside the table as a reader shortcut to the most
+recent choice
+(`03-decisions.md:17#"<!-- review-round-escalation: choice = n/a -->"`).
+Unlike the two `solution-acceptance:` verdict markers in
+[run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md),
+whose `TODO` default is a fail-closed sentinel that blocks acceptance
+until replaced, this marker's `n/a` default is a valid enum member, not a
+sentinel: it is deliberately fail-open, because most runs never trigger
+the budget at all, and a future reader must not read a marker still
+showing `n/a` as "escalation was needed but not recorded" -- it means the
+budget was never hit. This marker is a documented convention only: no
+reader in this package or in grounding-mcp parses it today (see the
+CHANGELOG's `[Unreleased]` entry). Escalating never substitutes for a
+review round: whichever option is chosen, the next attempt still goes
+through the reviewer subagent in full, the same review-never-skipped
+floor stated at the top of this doc.
+
+The reviewer output contract also gained a per-finding `recurrence: new |
+repeated` field so the orchestrator can read the trigger off the
+reviewer's own return; full field-duplication mechanics are out of scope
+here, see
+[subagent-contracts-superset.md](subagent-contracts-superset.md#recurrence-field).
 
 ## See also
 
