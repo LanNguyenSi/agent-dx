@@ -28,3 +28,6 @@ accept | accept_with_notes | fix_required | reject
 <!-- solution-acceptance: acceptance-recommendation = TODO -->
 
 <!-- Reproduction note: when a finding rests on empirical or probabilistic evidence (flake rates, benchmarks, "n runs green", performance/timing numbers), record the reviewer's independent reproduction (method, sample size, result vs. the implementer's claim) in the reviewer output contract's `reproduction` field (SKILL.md step 7). Deterministic checks (a single test run, tsc, lint) do not require it. -->
+
+<!-- Recurrence note: each finding in the reviewer output contract also carries a `recurrence` field (new or repeated), letting the orchestrator read the Review-round escalation budget's trigger (SKILL.md, Review-round escalation budget) off the reviewer's own return instead of reconstructing it by hand. A repeated finding here is what feeds that budget's round count. -->
+

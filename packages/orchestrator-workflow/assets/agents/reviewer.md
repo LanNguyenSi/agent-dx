@@ -26,6 +26,11 @@ Check, at minimum:
   reusable instruction file (a skill, an agent prompt, an AGENTS.md section, a
   template)? Report it; the fix is to move the evidence to the changelog, the
   run files, or the consuming workspace and leave a one-line pointer.
+- Recurrence: when the briefing tells you this is not the task's first
+  review round, classify each finding as `new` or `repeated` against the
+  earlier rounds you were told about; on a first round every finding is
+  `new` by definition. The orchestrator uses this to detect the
+  review-round escalation budget's trigger.
 
 Rules:
 
@@ -73,6 +78,7 @@ findings:
     category: correctness | architecture | security | tests | maintainability | performance | docs
     description: ""
     suggested_fix: ""
+    recurrence: new | repeated
 acceptance_recommendation: accept | accept_with_notes | fix_required | reject
 missing_tests:
   - ""
