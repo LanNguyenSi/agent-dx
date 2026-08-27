@@ -2604,6 +2604,107 @@ function anchorScopeResolve(): Record<string, string> {
 const ANCHOR_CITATION_RE =
   /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
 
+// agent-tasks 8c89aa12: same "last content line" semantics as okf-kit's
+// own opt-in `anchor-not-on-last-line` check
+// (packages/okf-kit/src/rules/citations-resolve.ts's
+// CLOSING_BOILERPLATE_RE/isContentLine/lastContentLineInRange), mirrored
+// here rather than imported so this test's assertion is self-contained
+// and does not take a runtime dependency on okf-kit's own source tree
+// layout. Referenced by symbol name, not a line range: a line-number
+// reference here rotted once already (it said "464-494" while the real
+// span had already drifted to 472-497, round 3, F4) and would rot again
+// on the next unrelated edit to citations-resolve.ts above this span.
+// The "mirror stays in sync" assertion right below this block is what
+// actually catches drift now, not this comment.
+const CLOSING_BOILERPLATE_RE = /^[\]\)\};,]*$/;
+
+function isContentLine(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed !== "" && !CLOSING_BOILERPLATE_RE.test(trimmed);
+}
+
+function lastContentLineInRange(
+  lines: string[],
+  startLine: number,
+  endLine: number,
+): number {
+  for (let ln = endLine; ln >= startLine; ln--) {
+    if (isContentLine(lines[ln - 1] ?? "")) return ln;
+  }
+  return endLine;
+}
+
+/**
+ * agent-tasks 8c89aa12 fix round 3 (F4): the CLOSING_BOILERPLATE_RE/
+ * isContentLine/lastContentLineInRange block just above is a hand-copied
+ * mirror of okf-kit's own citations-resolve.ts, not an import (see the
+ * comment above for why); nothing enforced that the mirror stayed in sync
+ * with its source, so a change to okf-kit's logic could silently diverge
+ * from what this file actually asserts. This test reads both spans by
+ * symbol name (`const CLOSING_BOILERPLATE_RE` through the end of
+ * `function lastContentLineInRange`), strips comments and blank lines
+ * from each (matching modulo docstring/whitespace, not modulo logic), and
+ * asserts the remaining code is byte-identical. Mutation probe: changing
+ * one character in either copy fails this test (verified manually this
+ * round, not re-run on every CI pass).
+ */
+describe("the local anchor-not-on-last-line mirror stays in sync with okf-kit's own copy", () => {
+  const OKF_KIT_CITATIONS_RESOLVE_PATH = `${PACKAGE_DIR}/../okf-kit/src/rules/citations-resolve.ts`;
+
+  function stripCommentsAndBlankLines(code: string): string {
+    return code
+      .replace(/\/\*[\s\S]*?\*\//g, "") // block comments, incl. JSDoc
+      .replace(/^[ \t]*\/\/.*$/gm, "") // whole-line `//` comments
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .join("\n");
+  }
+
+  function extractMirroredSpan(source: string): string {
+    const lines = source.split("\n");
+    const startIdx = lines.findIndex((l) =>
+      l.includes("const CLOSING_BOILERPLATE_RE"),
+    );
+    const funcIdx = lines.findIndex(
+      (l, i) => i > startIdx && l.startsWith("function lastContentLineInRange"),
+    );
+    if (startIdx === -1 || funcIdx === -1) {
+      throw new Error(
+        "could not locate CLOSING_BOILERPLATE_RE / lastContentLineInRange in the given source",
+      );
+    }
+    let endIdx = -1;
+    for (let i = funcIdx; i < lines.length; i++) {
+      if (lines[i].trim() === "}") {
+        endIdx = i;
+        break;
+      }
+    }
+    if (endIdx === -1) {
+      throw new Error(
+        "could not find the closing brace of lastContentLineInRange",
+      );
+    }
+    return lines.slice(startIdx, endIdx + 1).join("\n");
+  }
+
+  it("the mirrored CLOSING_BOILERPLATE_RE/isContentLine/lastContentLineInRange block matches okf-kit's own copy, modulo comments and whitespace", () => {
+    const okfKitSource = readFileSync(OKF_KIT_CITATIONS_RESOLVE_PATH, "utf8");
+    const localSource = readFileSync(
+      fileURLToPath(new URL("docs-consistency.test.ts", import.meta.url)),
+      "utf8",
+    );
+    const okfKitSpan = stripCommentsAndBlankLines(
+      extractMirroredSpan(okfKitSource),
+    );
+    const localSpan = stripCommentsAndBlankLines(
+      extractMirroredSpan(localSource),
+    );
+    expect(localSpan).toEqual(okfKitSpan);
+  });
+});
+
 /**
  * agent-tasks 578f5bfd review round 2 (HIGH 2): pins the two properties
  * that make a string-form anchor actually load-bearing rather than
@@ -2678,15 +2779,35 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
     expect(anchored.length).toBeGreaterThan(0);
   });
 
-  it("every string anchor's text occurs on the last line of its own cited range", () => {
+  // agent-tasks 8c89aa12: aligned with okf-kit's own `--require-anchors`
+  // `anchor-not-on-last-line` last-CONTENT-line semantics
+  // (packages/okf-kit/src/rules/citations-resolve.ts's
+  // CLOSING_BOILERPLATE_RE/isContentLine/lastContentLineInRange,
+  // mirrored above -- see the "mirror stays in sync" test right after
+  // that mirror for the coupling check, round 3 F4): a range
+  // ending on bare closing boilerplate (`});`, `]);`, a lone `}`, ...)
+  // is not forced to anchor on that boilerplate line itself, only on the
+  // real content line before it. This check previously required the
+  // range's literal last line unconditionally, which is unreconcilable
+  // with okf-kit's rule for a range ending in such boilerplate: a
+  // citation anchored on the real content line just before a closing
+  // `});` (e.g. init.test.ts:122-126, whose last line 126 is bare
+  // `});`) passes okf-kit but failed this local check, and the reverse
+  // (anchored literally on the `});` line) would pass this local check
+  // while failing okf-kit's. Kept as a variant only for the strictness
+  // this file's other checks still add beyond okf-kit (substring
+  // uniqueness below, the TS-AST straddle check further down), not for a
+  // different last-line definition.
+  it("every string anchor's text occurs on the last content line of its own cited range", () => {
     const violations: string[] = [];
     for (const c of anchored) {
       const lines = readRepoFile(c.real).split("\n");
-      const lastLine = lines[c.end - 1] ?? "";
-      if (!lastLine.includes(c.anchor)) {
+      const lastContentLine = lastContentLineInRange(lines, c.start, c.end);
+      const anchorLine = lines[lastContentLine - 1] ?? "";
+      if (!anchorLine.includes(c.anchor)) {
         violations.push(
           `${c.doc}: \`${c.citedPath}:${c.start}-${c.end}#"${c.anchor}"\` -- ` +
-            `anchor not found on last line ${c.end} of ${c.real}`,
+            `anchor not found on last content line ${lastContentLine} of ${c.real}`,
         );
       }
     }
@@ -2722,6 +2843,16 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
   // text occurs exactly once inside `[start, end]` of its own cited range,
   // for every string-anchored citation in the bundle, not only newly added
   // ones.
+  //
+  // agent-tasks 8c89aa12: kept as a deliberately stricter local variant
+  // of okf-kit's own `--require-anchors` `anchor-not-unique-in-range`
+  // rather than dropped. okf-kit counts LINE occurrences of the anchor
+  // text within the range; this local check counts SUBSTRING occurrences
+  // (`rangeText.split(c.anchor).length - 1`), so an anchor text that
+  // occurs twice on the same line (e.g. two calls to the same short
+  // helper in one statement) is unique-per-line to okf-kit but not
+  // unique-per-substring here, and is reported as a local finding
+  // instead of silently relying on the looser native rule.
   it("every string anchor's text occurs exactly once inside its own cited range", () => {
     const violations: string[] = [];
     for (const c of anchored) {
@@ -2748,6 +2879,32 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
  * those four kit-source categories that lands in docs/okf without an
  * anchor fails here, listed by doc and citation, instead of silently
  * reintroducing the gap.
+ *
+ * agent-tasks 8c89aa12: kept as a deliberately STRICTER local variant of
+ * okf-kit's own `--require-anchors` `anchor-required` check, not a
+ * redundant duplicate of it (round 1 of this same task dropped this
+ * assertion on the mistaken premise that okf-kit's native rule was a
+ * strict superset of it; that premise does not hold and this restores
+ * the assertion -- see docs/okf/log.md for the correction). okf-kit
+ * resolves a bare basename citation (e.g. `SKILL.md:10`) via the citing
+ * doc's own frontmatter `sources` list first (packages/okf-kit/src/
+ * rules/citations-resolve.ts's path-resolution doc comment, step 1:
+ * exact-suffix match, only when exactly one `sources` entry matches),
+ * and when that doesn't disambiguate it falls through to a repo-wide
+ * basename search; if THAT is ambiguous too (more than one file in the
+ * repo shares the basename), okf-kit reports `unresolved-ambiguous` and
+ * skips every other check for that citation, `anchor-required` included
+ * -- the citation is silently exempt from the native guard, not covered
+ * by it. `anchorScopeResolve()` above has no such escape hatch: it binds
+ * every bare kit-source basename unconditionally to its one real file
+ * under packages/orchestrator-workflow, so this local check still covers
+ * a citation okf-kit skips as ambiguous. Demonstrated by mutation probe,
+ * not hypothetical: an unanchored `SKILL.md:10` injected into
+ * install-fence-mechanics.md (whose own frontmatter `sources` does not
+ * list SKILL.md) trips this local assertion while okf-kit's own filter
+ * stays at 0, because repo-wide `SKILL.md` is ambiguous between
+ * packages/github-api-tool/SKILL.md and this package's own (see
+ * docs/okf/log.md for the measured run).
  */
 describe("every docs/okf citation into a kit-source category this bundle anchors carries an anchor", () => {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -2843,6 +3000,18 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
  * Single-line citations are included (the round-3 version skipped
  * `start === end`); a single-line citation still has to resolve to some
  * describe/it/test block to be meaningful.
+ *
+ * agent-tasks 8c89aa12: kept as a deliberately stricter local variant of
+ * okf-kit's own `--require-anchors` `test-range-straddles-block` rather
+ * than dropped. okf-kit's rule is a line-based heuristic (a
+ * block-head line at the same or a shallower indent than the range's
+ * start line, anywhere in the range other than the start line itself)
+ * and documents its own gap: a range that leaves its block without a
+ * later block-head line inside it -- ending on an outer block's own
+ * closing line -- is not detected. This test computes real block
+ * boundaries with the TypeScript compiler API instead, so it also
+ * catches that gap; both checks run in CI (this test locally,
+ * okf-anchor-guard natively).
  */
 
 // Imported here (appended at file end), not moved to the top-of-file
