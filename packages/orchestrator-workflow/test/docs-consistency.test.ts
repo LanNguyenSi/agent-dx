@@ -1109,6 +1109,123 @@ describe("round-2 halt rule ships in the skill", () => {
 });
 
 /**
+ * The Round-2 halt rule above stops a single task's defect-class recurrence
+ * but never forced a choice once that stopping kept happening on the same
+ * task, or once fix_required review rounds kept piling up. This pins the
+ * "Review-round escalation budget" that closes that gap: the trigger (the
+ * second round-2 halt signal or the third fix_required round), the three
+ * named escalations, the mandatory-choice-not-mandatory-pick framing, the
+ * 03-decisions.md marker both SKILL.md and agents-md-section.md name, and
+ * the guard that escalating never substitutes for a review round.
+ */
+describe("review-round escalation budget ships in the skill and the AGENTS.md section", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+
+  it("SKILL.md carries the section heading and step 8's trigger reference", () => {
+    expect(skillMd).toContain("## Review-round escalation budget");
+    expect(skillMd).toContain(
+      "By the second round-2 halt signal or the third `fix_required` review round on the same task, apply the Review-round escalation budget",
+    );
+  });
+
+  it("SKILL.md states the trigger and all three named escalations", () => {
+    expect(skillMd).toContain(
+      "by the second round-2 halt signal on the same task, or by the third `fix_required` review round on the same task, whichever comes first, choose one of three escalations",
+    );
+    expect(skillMd).toContain("**Tier or model escalation**");
+    expect(skillMd).toContain("**Advisor spawn**");
+    expect(skillMd).toContain("**Merge-hold**");
+  });
+
+  it("SKILL.md states the choice is mandatory but which one is judgment, and that escalating never replaces a review round", () => {
+    expect(skillMd).toContain(
+      "Judgment governs which of the three to pick; only that one is chosen and recorded is mandatory.",
+    );
+    expect(skillMd).toContain(
+      "Escalating does not replace a review round",
+    );
+  });
+
+  it("SKILL.md and agents-md-section.md both name the 03-decisions.md marker by name", () => {
+    expect(skillMd).toContain("`review-round-escalation` marker");
+    expect(agentsMdSection).toContain("`review-round-escalation` marker");
+  });
+
+  it("agents-md-section.md's Review gate section carries the budget rule in short form", () => {
+    expect(agentsMdSection).toContain(
+      "Review-round escalation budget: by the second round-2 halt signal on a task, or its third `fix_required` review round, whichever comes first,",
+    );
+    expect(agentsMdSection).toContain(
+      "Escalating never substitutes for a review round.",
+    );
+  });
+});
+
+/**
+ * AC2's marker check: 03-decisions.md carries the named
+ * `review-round-escalation` marker so an orchestrator or reader can find
+ * where the escalation choice is recorded, and both SKILL.md and
+ * agents-md-section.md name that exact marker (checked above). Wiring a
+ * machine reader to this marker is a follow-up, not part of this change
+ * (see the CHANGELOG's `[Unreleased]` entry); this test only pins the
+ * template's own named place existing.
+ */
+describe("03-decisions.md template carries the review-round-escalation marker", () => {
+  const decisionsTemplate = readAsset("templates/03-decisions.md");
+
+  it("has the Review-round escalation section and marker, defaulting to n/a", () => {
+    expect(decisionsTemplate).toContain("## Review-round escalation");
+    expect(decisionsTemplate).toContain(
+      "<!-- review-round-escalation: choice = n/a -->",
+    );
+  });
+});
+
+/**
+ * The reviewer output contract gained a per-finding `recurrence` field so
+ * the orchestrator can detect the review-round escalation budget's trigger
+ * from the reviewer's own return instead of re-deriving it by hand. Pins
+ * the field in both output-contract copies (byte-identical, the same
+ * rigor applied to `reproduction` and `mutation_probes` above) and the
+ * installed reviewer.md prompt's classification instruction.
+ */
+describe("reviewer finding recurrence field ships in both output contracts and the installed prompt", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("both copies carry the recurrence field on the findings item", () => {
+    const field = "recurrence: new | repeated";
+    expect(skillMd).toContain(field);
+    expect(reviewerMd).toContain(field);
+  });
+
+  it("the installed reviewer.md prompt instructs classifying each finding's recurrence", () => {
+    expect(reviewerMd).toContain(
+      "classify each finding as `new` or `repeated` against the",
+    );
+  });
+
+  it("SKILL.md step 7 has the orchestrator name the review round so the reviewer can classify recurrence", () => {
+    expect(skillMd).toContain(
+      "When this is not the task's first review round, name the round number in the briefing;",
+    );
+  });
+
+  it("the findings block is byte-for-byte identical between SKILL.md and reviewer.md (raw, not line-unwrapped)", () => {
+    const extractFindingsBlock = (raw: string): string => {
+      const match = raw.match(/^findings:\n(?: {2}.+\n)*/m);
+      expect(match, "findings block not found").toBeTruthy();
+      return (match as RegExpMatchArray)[0];
+    };
+    const skillBlock = extractFindingsBlock(readAsset("skill/SKILL.md"));
+    const reviewerBlock = extractFindingsBlock(readAsset("agents/reviewer.md"));
+    expect(skillBlock.length).toBeGreaterThan(20);
+    expect(skillBlock).toBe(reviewerBlock);
+  });
+});
+
+/**
  * 0.19.0 adds `--tiers`: `models.ts` gains `ROLE_TIERS` (which effort tiers
  * each role gets a variant file for) and `DEFAULT_TIER` (the tier a role's
  * plain, unsuffixed file already corresponds to, so no variant is ever

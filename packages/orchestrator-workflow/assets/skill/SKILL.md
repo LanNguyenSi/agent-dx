@@ -185,7 +185,12 @@ directory and the subagents.
    implementer's log — and record the method, sample size, and result against
    the implementer's claim in the reviewer output contract's `reproduction`
    field. This does not apply to deterministic checks (a single test run,
-   `tsc`, lint): only claims that could vary run to run trigger it.
+   `tsc`, lint): only claims that could vary run to run trigger it. When
+   this is not the task's first review round, name the round number in the
+   briefing; the reviewer marks each finding's `recurrence` as `new` or
+   `repeated` against the earlier rounds it was told about, which is what
+   lets the orchestrator detect the Review-round escalation budget's
+   trigger (see below) without re-deriving it by hand.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high
@@ -194,7 +199,10 @@ directory and the subagents.
    all decisions and waivers in `03-decisions.md` and summarize waivers in
    the Accepted Waivers section of `06-handoff.md`. Watch for the round-2
    halt signal across repeated review-fix cycles (see Round-2 halt rule
-   below). At an advisor trigger (architectural uncertainty, conflicting
+   below). By the second round-2 halt signal or the third `fix_required`
+   review round on the same task, apply the Review-round escalation budget
+   (see below) instead of running another round unaided. At an advisor
+   trigger (architectural uncertainty, conflicting
    requirements, a high-commitment fork among valid options, repeated
    implementation failures, a review deadlock, a high-risk decision), the
    orchestrator may spawn the advisor subagent before deciding; the advisor
@@ -320,6 +328,7 @@ findings:
     category: correctness | architecture | security | tests | maintainability | performance | docs
     description: ""
     suggested_fix: ""
+    recurrence: new | repeated
 acceptance_recommendation: accept | accept_with_notes | fix_required | reject
 missing_tests:
   - ""
@@ -335,6 +344,12 @@ reproduction:
 `acceptance_recommendation` is mandatory: every reviewer return must set it.
 When it is missing, the orchestrator asks the reviewer to resupply it
 instead of inferring one from the findings list.
+
+`recurrence` classifies each finding against earlier rounds on the same
+task: `new` for a defect class not previously found here, `repeated` for
+one that already appeared in an earlier round. On a task's first review
+round every finding is `new` by definition. This is what feeds the
+Review-round escalation budget's trigger.
 
 ## Task slicer output contract
 
@@ -477,6 +492,34 @@ removed half as its own task carrying the measurement history that led to
 the split. Acceptance criteria that cannot be satisfied this way go to the
 operator as a merge-hold (hold the change unmerged and hand the decision to
 the operator).
+
+## Review-round escalation budget
+
+The Round-2 halt rule above stops the first time a defect class recurs
+within one task. This rule puts a budget on the whole task, across halts
+and across repeated review rounds, so effort does not keep accumulating
+unaided: by the second round-2 halt signal on the same task, or by the
+third `fix_required` review round on the same task, whichever comes
+first, choose one of three escalations instead of running another round
+the same way:
+
+- **Tier or model escalation**: move the implementer to its next higher
+  effort tier where installed, at minimum `-xhigh`, or to the strongest
+  model available in this environment.
+- **Advisor spawn**: send the advisor subagent the question "redesign,
+  split, or hold?" and weigh its recommendation before deciding.
+- **Merge-hold**: hold the change unmerged and hand the decision to the
+  operator.
+
+Judgment governs which of the three to pick; only that one is chosen and
+recorded is mandatory. Record the choice and the reason in
+`03-decisions.md`'s Review-round escalation section (the
+`review-round-escalation` marker, one of `n/a | tier_escalation | advisor |
+merge_hold`). Escalating does not replace a review round: whichever option
+is chosen, the next attempt still goes through the reviewer subagent in
+full; this budget forces a change in approach, not a shortcut past the
+review gate. Anchored by a measurement; see the orchestrator-workflow
+CHANGELOG's `[Unreleased]` entry.
 
 ## Final acceptance rule
 

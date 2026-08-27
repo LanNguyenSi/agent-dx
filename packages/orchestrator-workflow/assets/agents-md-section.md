@@ -103,6 +103,13 @@ trivial change.
   the Accepted Waivers section of `06-handoff.md`.
 - Medium and low findings are addressed or consciously accepted at the
   orchestrator's judgment.
+- Review-round escalation budget: by the second round-2 halt signal on a
+  task, or its third `fix_required` review round, whichever comes first,
+  the orchestrator picks one of tier/model escalation, an advisor spawn, or
+  an operator merge-hold, and records the choice in `03-decisions.md`'s
+  Review-round escalation section (the `review-round-escalation` marker).
+  Which of the three is picked is judgment; that one is picked and
+  recorded is not. Escalating never substitutes for a review round.
 
 ### Instruction trust boundary
 
