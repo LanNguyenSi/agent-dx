@@ -2575,111 +2575,6 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
 });
 
 /**
- * agent-tasks ca9d5048 review round 3 (MEDIUM 1): the docs/okf bundle's
- * OTHER anchor family -- heading-form citations into CHANGELOG.md, e.g.
- * `` `CHANGELOG.md:552-576#0.16.0` `` -- was unguarded by any local test
- * (anchorScopeResolve deliberately excludes CHANGELOG.md, and the string
- * anchor assertions above skip a non-string anchor). Only okf-kit's own CI
- * job caught review round 2's HIGH 1: a 3-line edit to the CHANGELOG's
- * `[Unreleased]` bullet shifted every release heading below it by 3 lines,
- * and none of the 16 heading-anchored citations across the five docs/okf
- * siblings were re-pointed, yet every test in this file stayed green
- * because none of them ever reads CHANGELOG.md as an anchor target. This
- * mirrors okf-kit's own anchor-heading-* resolution
- * (`packages/okf-kit/src/rules/citations-resolve.ts`'s
- * `findEnclosingHeading`): the nearest `## [` heading at or before the
- * range's start line must be the cited version's own heading, and no
- * `## [` heading may start before the range's end line -- the range may
- * end anywhere inside that release's section but must never cross into
- * the next one.
- */
-describe("every heading-anchored CHANGELOG.md citation's range stays inside its own release section", () => {
-  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
-  const readRepoFile = (relPath: string): string =>
-    readFileSync(`${repoRoot}/${relPath}`, "utf8");
-  const CHANGELOG_PATH = "packages/orchestrator-workflow/CHANGELOG.md";
-  const HEADING_RE = /^## \[([^\]]+)\]/;
-
-  interface ChangelogHeadingCitation {
-    doc: string;
-    start: number;
-    end: number;
-    version: string;
-  }
-
-  function collectChangelogHeadingCitations(): ChangelogHeadingCitation[] {
-    const out: ChangelogHeadingCitation[] = [];
-    for (const doc of ANCHOR_OKF_DOCS) {
-      const content = readRepoFile(
-        `packages/orchestrator-workflow/docs/okf/${doc}`,
-      );
-      for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
-        if (!m[1].endsWith("CHANGELOG.md")) continue;
-        const anchorRaw = m[4];
-        if (!anchorRaw || anchorRaw.startsWith('"')) continue;
-        const version = anchorRaw.replace(/^\[|\]$/g, "");
-        const start = Number(m[2]);
-        const end = m[3] ? Number(m[3]) : start;
-        out.push({ doc, start, end, version });
-      }
-    }
-    return out;
-  }
-
-  const citations = collectChangelogHeadingCitations();
-  const headingLines: Array<{ lineNo: number; version: string }> = [];
-  const changelogLines = readRepoFile(CHANGELOG_PATH).split("\n");
-  changelogLines
-    .forEach((line, idx) => {
-      const m = line.match(HEADING_RE);
-      if (m) headingLines.push({ lineNo: idx + 1, version: m[1] });
-    });
-
-  it("found at least one heading-anchored CHANGELOG.md citation to check (sanity: not vacuously true)", () => {
-    expect(citations.length).toBeGreaterThan(0);
-  });
-
-  it("every heading-anchored CHANGELOG.md citation's range starts inside its cited version's section and does not cross into the next", () => {
-    const violations: string[] = [];
-    for (const c of citations) {
-      const enclosing = [...headingLines]
-        .reverse()
-        .find((h) => h.lineNo <= c.start);
-      if (!enclosing || enclosing.version !== c.version) {
-        violations.push(
-          `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
-            `nearest enclosing heading at or before line ${c.start} is ` +
-            `${enclosing ? `[${enclosing.version}] at line ${enclosing.lineNo}` : "none"}, not [${c.version}]`,
-        );
-        continue;
-      }
-      // The ranges cite the release's bullets, not the heading itself, so
-      // a small shift (an [Unreleased] entry above) lands the start line on
-      // a blank line or a `#` heading line before the enclosing-heading check
-      // above can notice; okf-kit reports the same drift as blank-start-line.
-      // Pin it here so a 1-, 2- or 3-line shift fails locally, not only in
-      // the okf-kit report.
-      const startText = (changelogLines[c.start - 1] ?? "").trim();
-      if (startText === "" || startText.startsWith("#")) {
-        violations.push(
-          `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
-            `start line ${c.start} is ${startText === "" ? "blank" : "a heading line"}, not release content (shifted?)`,
-        );
-        continue;
-      }
-      const next = headingLines.find((h) => h.lineNo > enclosing.lineNo);
-      if (next && next.lineNo <= c.end) {
-        violations.push(
-          `${c.doc}: \`CHANGELOG.md:${c.start}-${c.end}#${c.version}\` -- ` +
-            `range crosses into the next release's heading [${next.version}] at line ${next.lineNo}`,
-        );
-      }
-    }
-    expect(violations, violations.join("\n")).toEqual([]);
-  });
-});
-
-/**
  * agent-tasks 578f5bfd review round 2 (MEDIUM 5), erosion brake: review
  * round 1 (HIGH 1) found 44 citations into SKILL.md/agent-templates/
  * models.ts/test files that this bundle's own citation-audit round
@@ -2942,6 +2837,88 @@ describe("every full citation into a *.test.ts target stays inside one describe/
             (startBlock
               ? `inside a block ending at line ${startBlock.endLine}, but the citation's end (${c.end}) falls past it`
               : `not inside any describe/it/test block at all`),
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+});
+
+/**
+ * Fix-round-2 regression guard (agent-tasks 05b372d6, review finding F1):
+ * a migrated `CHANGELOG.md:#[version]` heading-section citation written
+ * without its surrounding backticks is not a citation at all to okf-kit's
+ * `HEADING_SECTION_CITATION_RE`/`HEADING_SECTION_MALFORMED_RE` (both
+ * require the backtick delimiter), so it silently stops being checked
+ * rather than failing loudly. This is a plain string scan for the literal
+ * `CHANGELOG.md:#`, not a re-implementation of `findHeadingSection` or
+ * the heading-section grammar itself: it only pins the one property that
+ * regressed (every occurrence must sit inside a backtick pair, opened
+ * immediately before it and closed before the next newline), leaving
+ * actual resolution to okf-kit's own `citations-resolve` rule.
+ */
+describe("every CHANGELOG.md:# heading-section citation is backtick-delimited (review round 2, F1)", () => {
+  const LITERAL = "CHANGELOG.md:#";
+
+  interface Candidate {
+    doc: string;
+    index: number;
+  }
+
+  // This block deliberately widens ANCHOR_OKF_DOCS by log.md: the anchor
+  // checks skip log.md as append-only history, but a heading-section
+  // citation there is still a live citation to okf-kit, and losing its
+  // backticks would silently stop it from being one (review round 2).
+  const BACKTICK_GUARD_DOCS = [...ANCHOR_OKF_DOCS, "log.md"];
+
+  function collectCandidates(): Candidate[] {
+    const out: Candidate[] = [];
+    for (const doc of BACKTICK_GUARD_DOCS) {
+      const content = readDoc(`docs/okf/${doc}`);
+      let index = content.indexOf(LITERAL);
+      while (index !== -1) {
+        out.push({ doc, index });
+        index = content.indexOf(LITERAL, index + LITERAL.length);
+      }
+    }
+    return out;
+  }
+
+  const candidates = collectCandidates();
+
+  it("found at least 16 CHANGELOG.md:# candidates to check (sanity: not vacuously true)", () => {
+    expect(candidates.length).toBeGreaterThanOrEqual(17);
+  });
+
+  // A citation's path prefix (e.g. `packages/orchestrator-workflow/`) may
+  // sit between the opening backtick and the "CHANGELOG.md:#" literal
+  // itself, so the opener is found by walking backward over path
+  // characters (word chars, `.`, `/`, `-`), not by checking the character
+  // immediately before the literal.
+  const PATH_CHAR_RE = /[\w./-]/;
+
+  it("every candidate is opened by a backtick before its path prefix and closed by a backtick before the next newline", () => {
+    const violations: string[] = [];
+    for (const { doc, index } of candidates) {
+      const content = readDoc(`docs/okf/${doc}`);
+      let openerIndex = index - 1;
+      while (openerIndex >= 0 && PATH_CHAR_RE.test(content[openerIndex])) {
+        openerIndex -= 1;
+      }
+      const opener = openerIndex >= 0 ? content[openerIndex] : undefined;
+      if (opener !== "`") {
+        violations.push(
+          `${doc}: "${LITERAL}" at offset ${index} is not opened by a ` +
+            `backtick before its path prefix (found ${JSON.stringify(opener ?? null)})`,
+        );
+        continue;
+      }
+      const closeIndex = content.indexOf("`", index);
+      const newlineIndex = content.indexOf("\n", index);
+      if (closeIndex === -1 || (newlineIndex !== -1 && closeIndex > newlineIndex)) {
+        violations.push(
+          `${doc}: "${LITERAL}" citation at offset ${index} has no closing ` +
+            `backtick before the next newline`,
         );
       }
     }

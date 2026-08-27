@@ -1724,15 +1724,18 @@
   covering the hex-guard and date-heuristic clause; both numbers have
   since drifted off that content repeatedly as later rounds' own
   CHANGELOG entries pushed it down -- corrected 2026-08-26 to
-  `CHANGELOG.md:779-784#0.9.0` (review round 4, D30/LOW-c: given the
-  heading anchor its sibling at `run-state-lifecycle-and-markers.md:55`
-  already carries, matching it here too rather than a bare line range, so
-  a future CHANGELOG insertion above `## [0.9.0]` fails this citation on
-  `anchor-heading-mismatch` instead of silently resolving to the wrong
-  section; re-verified against the committed tree a third time this same
-  task, see LOW-d below on why a heading-anchored `CHANGELOG.md` citation
-  still needs re-pointing on every edit above it regardless), see that
-  entry below). Consciously accepted, recorded in the run
+  a heading-anchored line-range citation of the `## [0.9.0]` section
+  (review round 4, D30/LOW-c: given the heading anchor its sibling at
+  `run-state-lifecycle-and-markers.md:55` already carried, matching it
+  here too rather than a bare line range, so a future CHANGELOG insertion
+  above `## [0.9.0]` would fail the citation on `anchor-heading-mismatch`
+  instead of silently resolving to the wrong section; re-verified against
+  the committed tree a third time this same task, see LOW-d below on why a
+  heading-anchored `CHANGELOG.md` citation still needed re-pointing on
+  every edit above it regardless), and migrated on 2026-08-27 to the
+  line-independent heading-section form
+  `CHANGELOG.md:#[0.9.0]#"grounding-mcp 0.6.0 reads this marker"` (see the
+  2026-08-27 entry), see that entry below). Consciously accepted, recorded in the run
   decisions: substring membership in the vocabulary pin (a yaml-key match
   was tried and reverted, see round 3), pre-existing
   `template-markers.test.ts` prettier drift, and the absence of a mechanical
@@ -2975,3 +2978,169 @@ clean (395 files scanned).
   scripts were extracted verbatim from the committed YAML via a small
   PyYAML script and executed standalone against the same built okf-kit
   CLI, with the results reported above.
+
+## 2026-08-27 (agent-tasks 05b372d6, implementer)
+
+Migrated the bundle's line-anchored, colon-hash-version-anchored CHANGELOG.md
+citations (a path ending in .md, a colon, a line range, and a hash-prefixed
+version anchor, e.g. lines 815 through 825 anchored to 0.7.4) to okf-kit
+0.8.0's line-independent heading-section form (path.md:#[version], no line
+range at all), alongside the okf-kit 0.8.0 release and its CI pin bump.
+Grep for the literal string "CHANGELOG.md:" followed by a digit under
+docs/okf/*.md found 19 occurrences on commit 48f809d (not the 16 an earlier
+task text estimated); 17 were live navigational citations (5 in
+review-gate-and-waivers.md, 6 in run-state-lifecycle-and-markers.md, 5 in
+subagent-contracts-superset.md, and the 2026-08-24 entry's own citation
+into the 0.9.0 section here in log.md, the last of these settled in the
+fix-round-2 follow-up below) and were migrated. The remaining 2, both in
+log.md (one near line 1975 quoting the old, already-superseded 0.7.0 line
+range as "the un-shifted pre-round-1 ... citation", and one near line 2541
+describing a diff by its old line range "grew by a net 3 lines"), quote a
+specific historical/stale line range as prose data about a past diff, not
+a live "read this section" pointer; converting either would misrepresent
+what the entry is describing, so both were left as line-form by design.
+Neither produces an okf-kit finding against the committed tree before or
+after this round's edits (measured directly, see below).
+
+review-gate-and-waivers.md's migrated 0.16.0 citation (the
+acceptance_recommendation-specific one, formerly lines 552 through 576
+anchored to 0.16.0)
+gained a content anchor, quoting the phrase "as a hard-mandatory" (occurs
+once in the 0.16.0 section), to keep pointing at that specific bullet
+rather than the whole multi-bullet 0.16.0 entry now that the line-range
+distinction from subagent-contracts-superset.md's sibling citation
+(formerly lines 552 through 594 anchored to 0.16.0, covering the same section plus its
+same-day R2 follow-up) no longer exists in heading-section form; the
+sibling citation was left without a content anchor since it already meant
+the whole section. The other 9 migrated headings (0.7.0, 0.7.3, 0.7.4,
+0.9.0, 0.10.0, 0.11.0, 0.12.0, 0.14.0, 0.18.0) resolve to a single bullet
+or a short, unambiguous section, so no content anchor was added for their
+citations by default. Bracket form (heading text "[0.7.4]" rather than
+bare "0.7.4") was used throughout, matching the form the task brief
+suggested; it is a readability convention rather than a mechanism that
+narrows the match, since `parseAnchor` strips the wrapping brackets before
+`findHeadingSection` compares the anchor text against the heading's raw
+text as a plain substring (confirmed by inserting a temporary
+`## [10.7.4]` heading into the CHANGELOG: the bracketed `[0.7.4]` citation
+reported `heading-section-ambiguous` too, identically to what a genuine
+duplicate `## [0.7.4]` heading would produce; reverted after the
+measurement). The actual protection against a superstring collision
+(`10.7.4` swallowing `0.7.4`) is that okf-kit fails loudly on the
+ambiguity rather than silently resolving to the first match.
+
+Fix-round follow-up (review, F7): two migrated citations meant a narrower
+part of their section than the whole thing and gained a content anchor to
+say so. run-state-lifecycle-and-markers.md:55's `[0.9.0]` citation now
+quotes "grounding-mcp 0.6.0 reads this marker" (occurs once in the 0.9.0
+section); subagent-contracts-superset.md:259's `[0.18.0]` citation now
+quotes "Concrete resume-over-respawn workaround" (occurs once in the
+0.18.0 section). Both phrases were verified unique in their section by
+direct grep before being added. Their sibling citations elsewhere in the
+bundle (e.g. run-state-lifecycle-and-markers.md:62's own `[0.9.0]`
+citation) still mean the section as a whole and were left without a
+content anchor.
+
+test/docs-consistency.test.ts's describe block asserting that every
+heading-anchored CHANGELOG.md citation's range stays inside its own
+release section (added agent-tasks ca9d5048 review round 3 MEDIUM 1, as a
+local backstop for exactly the line-drift class this migration eliminates
+by construction) was removed rather than extended: ANCHOR_CITATION_RE, the
+local regex it shares with the string-anchor tests above it, requires a
+digit right after the citation's colon, so it cannot match the new
+colon-hash heading-form citations at all; after this round's migration it
+would find zero
+CHANGELOG.md candidates among the five `ANCHOR_OKF_DOCS` (which excludes
+`log.md`), making its own "found at least one ... (sanity: not vacuously
+true)" check fail. Extending it to also parse and validate the heading form
+would just re-implement okf-kit's own `findHeadingSection`/
+`checkHeadingSectionTarget` a second time for a class of drift the
+heading-section citation is immune to by construction (no line range to
+walk out of its own release section), so removal was chosen over a
+same-shaped rewrite.
+
+Measured directly (this repo's own `okf-kit` build, `node
+packages/okf-kit/dist/cli.js check packages/orchestrator-workflow/docs/okf`):
+35 findings (0 errors, 13 warnings, 22 notices) against the committed tree
+both before and after the citation migration, 0 of them naming
+`CHANGELOG.md`, matching the pre-round baseline recorded in the okf-kit
+0.7.0 CHANGELOG entry. M1 negative control: inserting a temporary 3-line
+bullet at the top of `orchestrator-workflow/CHANGELOG.md`'s `[Unreleased]`
+section (shifting every `## [x.y.z]` heading below it down by exactly 3
+lines) produced 51 findings (16 new `blank-start-line` warnings, one per
+still-line-anchored citation at the time) against the pre-migration tree,
+and 35 findings (0 new) against the post-migration tree with the same
+insertion; reverted after each measurement (`git diff` clean). M2:
+retargeting one migrated citation's heading to a non-existent
+`[0.7.99]` produced `heading-section-not-found`, reverted, back to 35. M3:
+reverting `.github/workflows/ci.yml`'s `okf-kit@0.8.0` pin to `0.7.0`
+failed `test/docs-consistency.test.ts`'s pin-sync test (1 failure), reverted,
+back to 166/166 green. `npx vitest run` in `packages/orchestrator-workflow`:
+291/291 green. `npm test`/`npm run build`/`npm run format:check` in
+`packages/okf-kit`: 220/220 green, build clean, format:check reports the
+same pre-existing `test/cli-symlink-invocation.test.ts` warning present on
+`48f809d` before this round's own edits (confirmed via `git stash`), not
+introduced by this round. `node packages/slop-detector/dist/cli.js check .
+--pack placement-slop --config slop.config.yml` (the actual CI command for
+this guard, not the generic `--explain` invocation): clean, 406 files
+scanned, exit 0.
+
+Follow-up on this same entry: the earlier okf-kit check count above (35,
+unchanged) predates two fix-up passes over this very entry's own prose.
+The first pass wrote several illustrative citation-shaped examples, a path
+ending in dot-md, a colon, digits, and a hash-prefixed anchor, meant only
+as generic prose, not as live citations; citations-resolve does not
+require backticks to recognise a full citation, so those examples were
+themselves parsed as citations, producing new findings (a nonexistent
+target file, a malformed heading-section attempt, and misattributed
+continuation citations from bare colon-number references to this entry's
+own line numbers). Rewritten to avoid the path-dot-extension-colon-digits
+shape and the backtick-delimited colon-hash shape entirely, using
+spelled-out line numbers and plain prose instead; re-measured after the
+rewrite: 36 findings, one new sources-fresh STALE warning on
+model-preselection.md (it lists test/docs-consistency.test.ts under its
+sources list, which this round's own guard-removal commit changed). This
+warning appeared while the guard-removal edit sat uncommitted, ahead of
+`sources-fresh`'s own `docCommitEpoch` exception (a doc is not flagged
+STALE against a source that last changed no later than the doc's own last
+commit); it would have cleared on its own once both landed in the same
+commit, so the re-stamp below was precautionary rather than required.
+Re-verified model-preselection.md's own two citations into that test file
+(the README-table-row check near the top of the file, and the
+pinned-default-effort guard describe block far past line 1700) still
+resolve to the same content after the guard removal, since the removed
+block sat well after both cited ranges; then re-stamped
+model-preselection.md's frontmatter timestamp to 2026-08-27. Back to 35
+findings, 0 naming CHANGELOG.md or model-preselection.md, matching the
+pre-round baseline exactly.
+
+Fix-round-2 follow-up (review findings F1, F2, F3, F4, F5, F6, F7, F8):
+F5 was first resolved by reverting this entry's own historical
+`CHANGELOG.md` citation of the `## [0.9.0]` section back to line-range
+form; under that state the M1 negative control (the same 3-line
+`[Unreleased]` insertion above) measured 36 findings (1 new), the reverted
+citation's own `blank-start-line` warning, because a line-range citation
+is never immune to a line-count shift above it. The orchestrator then
+chose the other option named in the review: keep the heading-section form
+and rewrite the sentence so it reads as history (corrected 2026-08-26 to a
+heading-anchored line-range citation, migrated 2026-08-27 to the
+line-independent heading-section form of the 0.9.0 section, with a content
+anchor on the grounding-mcp sentence). With that edit all seventeen
+navigational citations are migrated and immune; only the two historical
+line-range quotes excluded above are not, and the count paragraph above
+was corrected to say so (it briefly described the reverted intermediate
+state). M1 re-measured after the edit: 35
+findings, 0 new, 0 naming `CHANGELOG.md` (the insertion reverted, `git
+status` clean). `okf-kit check` on the unperturbed committed tree
+is unaffected (still 35 findings, 0 naming `CHANGELOG.md`, measured
+directly).
+
+F3's new `describe` block landed in `test/docs-consistency.test.ts`, one of
+`review-gate-and-waivers.md`'s listed sources; that doc's three citations
+into the same file (the review-gate-ships-in-policy block near line 110,
+the review-gate-consequence check near line 399, and the
+acceptance_recommendation-mandatory block near line 950) all sit well
+before F3's append-only addition at the file's end, so none of their cited
+ranges moved. Re-verified directly, then re-stamped
+review-gate-and-waivers.md's own frontmatter timestamp to 2026-08-27 to
+clear the resulting `sources-fresh` `STALE` warning (36 findings with the
+warning present, back to 35 after the re-stamp).
