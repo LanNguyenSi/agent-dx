@@ -77,7 +77,7 @@ jobs:
         # against packages/okf-kit/package.json's version by
         # test/docs-consistency.test.ts (globs every .github/workflows/
         # file for an okf-kit@<version> pin, install or npx form).
-        run: npm install -g okf-kit@0.7.0
+        run: npm install -g okf-kit@0.8.0
 
       - name: Assert CLI is alive (output, not exit code)
         shell: bash
@@ -89,11 +89,13 @@ jobs:
       - name: Self-test the anchor-finding filter against a deliberately drifted fixture
         # Guards the jq pipeline below, not the bundle: builds a throwaway
         # one-doc, one-source OKF bundle under $RUNNER_TEMP with a
-        # heading-anchored citation and a string-anchored one (the vast
-        # majority of this bundle's real anchors are string-form; the
-        # heading form covers only CHANGELOG.md's citations, see
+        # heading-anchored citation and a string-anchored one (the bundle
+        # itself now uses okf-kit 0.8.0's heading-section form,
+        # `path.md:#heading`, for its CHANGELOG.md citations; see
         # docs/okf/log.md for the live counts -- not hand-copied here
-        # since they drift as citations are added or re-pointed), then
+        # since they drift as citations are added or re-pointed; this
+        # fixture keeps a line-range heading anchor, `path:N-M#heading`,
+        # for the legacy half of the anchor-finding filter below), then
         # edits the source so both anchors' ranges no longer
         # match. If the same jq filter used against the real bundle below
         # does not report at least one anchor finding against this
@@ -102,7 +104,11 @@ jobs:
         # ever gets a chance to pass green for the wrong reason. The
         # clean (pre-drift) run's own report is also asserted at 0 anchor
         # findings, so a fixture that is already broken before the drift
-        # cannot pass this self-test for the wrong reason either.
+        # cannot pass this self-test for the wrong reason either. A third
+        # citation, in heading-section form and pointed at a heading that
+        # never exists, checks the filter's separate `heading-section-*`
+        # branch (added alongside okf-kit 0.8.0's new rule ids) the same
+        # way.
         shell: bash
         run: |
           set -e
@@ -135,30 +141,36 @@ jobs:
             '' \
             '# Fixture doc' \
             '' \
-            'Cites `src/target.md:8-9#B` (Section B, correctly anchored for now)' \
-            'and `src/target.md:9#"line b2"` (string-anchored, also correct for now).' \
+            'Cites `src/target.md:8-9#B` (Section B, correctly anchored for now),' \
+            '`src/target.md:9#"line b2"` (string-anchored, also correct for now),' \
+            'and `src/target.md:#B` (heading-section form, also correct for now).' \
             > "${fixture}/bundle/doc.md"
           (cd "${fixture}" && git add -A && git commit -q -m init)
           set +e
           okf-kit check --json "${fixture}/bundle" > "${fixture}/selftest-clean-report.json"
           set -e
           clean_count=$(jq '[
-            .findings[] | select(.message | test("\\[anchor-[a-z-]+\\]$"))
+            .findings[] | select(.message | test("\\[(anchor-[a-z-]+|heading-section-[a-z-]+)\\]$"))
           ] | length' "${fixture}/selftest-clean-report.json")
           if [ "${clean_count}" -ne 0 ]; then
             echo "::error title=OKF anchor guard self-test failed::the clean, pre-drift fixture already reports ${clean_count} anchor finding(s) (expected 0); the fixture itself is broken, not just the drift"
             cat "${fixture}/selftest-clean-report.json"
             exit 1
           fi
-          # Drift both citations: repoint each at Section A's lines while
-          # its anchor text still names Section B, without touching the
-          # doc's own citation text -- the same "range moved, anchor
-          # didn't" shape the real guard exists to catch.
+          # Drift all three citations: repoint the first two at Section
+          # A's lines while their anchor text still names Section B,
+          # without touching the doc's own citation text -- the same
+          # "range moved, anchor didn't" shape the real guard exists to
+          # catch. The third, heading-section citation has no line range
+          # to drift, so it is instead repointed at a heading that never
+          # exists (`Z`) -- the shape a heading-section citation actually
+          # breaks in.
           python3 -c "
           p = '${fixture}/bundle/doc.md'
           c = open(p).read()
           c = c.replace('src/target.md:8-9#B', 'src/target.md:3-4#B')
           c = c.replace('src/target.md:9#\"line b2\"', 'src/target.md:4#\"line b2\"')
+          c = c.replace('src/target.md:#B', 'src/target.md:#Z')
           open(p, 'w').write(c)
           "
           set +e
@@ -170,16 +182,20 @@ jobs:
           string_count=$(jq '[
             .findings[] | select(.message | test("\\[anchor-not-found-in-range\\]$"))
           ] | length' "${fixture}/selftest-report.json")
-          # Each anchor family (heading-form and string-form) is asserted
-          # separately, not just a combined total -- a filter or okf-kit
-          # regression that silently stopped catching one family could
-          # otherwise pass this gate on the other family's finding alone.
-          if [ "${heading_count}" -lt 1 ] || [ "${string_count}" -lt 1 ]; then
-            echo "::error title=OKF anchor guard self-test failed::the anchor-finding jq filter reported ${heading_count} heading-form and ${string_count} string-form findings against a fixture with one deliberately drifted citation of each (expected >= 1 each); the filter or okf-kit's finding shape changed under this job"
+          heading_section_count=$(jq '[
+            .findings[] | select(.message | test("\\[heading-section-[a-z-]+\\]$"))
+          ] | length' "${fixture}/selftest-report.json")
+          # Each anchor family (heading-form, string-form, and
+          # heading-section-form) is asserted separately, not just a
+          # combined total -- a filter or okf-kit regression that
+          # silently stopped catching one family could otherwise pass
+          # this gate on another family's finding alone.
+          if [ "${heading_count}" -lt 1 ] || [ "${string_count}" -lt 1 ] || [ "${heading_section_count}" -lt 1 ]; then
+            echo "::error title=OKF anchor guard self-test failed::the anchor-finding jq filter reported ${heading_count} heading-form, ${string_count} string-form, and ${heading_section_count} heading-section-form findings against a fixture with one deliberately drifted citation of each (expected >= 1 each); the filter or okf-kit's finding shape changed under this job"
             cat "${fixture}/selftest-report.json"
             exit 1
           fi
-          echo "Self-test OK: ${heading_count} heading-form and ${string_count} string-form anchor finding(s) against the drifted fixture."
+          echo "Self-test OK: ${heading_count} heading-form, ${string_count} string-form, and ${heading_section_count} heading-section-form anchor finding(s) against the drifted fixture."
 
       - name: Anchor-citation guard
         shell: bash
@@ -199,13 +215,20 @@ jobs:
 
           # Anchor rule ids are embedded as a "[rule-id]" suffix on the
           # citations-resolve finding's message (okf-kit's top-level
-          # ruleId is always "citations-resolve"); match any anchor-*
-          # rule id rather than a hardcoded list, so a future okf-kit
-          # release adding a fifth anchor rule is covered without an edit
-          # here (the self-test step above guards this same filter).
+          # ruleId is always "citations-resolve"); match any anchor-* or
+          # heading-section-* rule id rather than a hardcoded list, so a
+          # future okf-kit release adding another anchor rule in either
+          # family is covered without an edit here (the self-test step
+          # above guards a copy of this filter, kept in sync by hand: an
+          # edit here is not exercised by the self-test). heading-section-* covers
+          # okf-kit 0.8.0's line-independent `path.md:#heading` citation
+          # form (heading-section-not-found/-ambiguous/-empty and its
+          # content-anchor and malformed-attempt variants), which the
+          # bundle's CHANGELOG.md citations were migrated to; without this
+          # branch the filter silently stopped seeing drift in that form.
           anchorFindings=$(jq '[
             .findings[]
-            | select(.message | test("\\[anchor-[a-z-]+\\]$"))
+            | select(.message | test("\\[(anchor-[a-z-]+|heading-section-[a-z-]+)\\]$"))
           ]' okf-anchor-report.json)
           count=$(echo "${anchorFindings}" | jq 'length')
 
