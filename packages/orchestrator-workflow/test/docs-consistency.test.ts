@@ -2752,3 +2752,79 @@ describe("every full citation into a *.test.ts target stays inside one describe/
     expect(violations, violations.join("\n")).toEqual([]);
   });
 });
+
+/**
+ * Fix-round-2 regression guard (agent-tasks 05b372d6, review finding F1):
+ * a migrated `CHANGELOG.md:#[version]` heading-section citation written
+ * without its surrounding backticks is not a citation at all to okf-kit's
+ * `HEADING_SECTION_CITATION_RE`/`HEADING_SECTION_MALFORMED_RE` (both
+ * require the backtick delimiter), so it silently stops being checked
+ * rather than failing loudly. This is a plain string scan for the literal
+ * `CHANGELOG.md:#`, not a re-implementation of `findHeadingSection` or
+ * the heading-section grammar itself: it only pins the one property that
+ * regressed (every occurrence must sit inside a backtick pair, opened
+ * immediately before it and closed before the next newline), leaving
+ * actual resolution to okf-kit's own `citations-resolve` rule.
+ */
+describe("every CHANGELOG.md:# heading-section citation is backtick-delimited (review round 2, F1)", () => {
+  const LITERAL = "CHANGELOG.md:#";
+
+  interface Candidate {
+    doc: string;
+    index: number;
+  }
+
+  function collectCandidates(): Candidate[] {
+    const out: Candidate[] = [];
+    for (const doc of ANCHOR_OKF_DOCS) {
+      const content = readDoc(`docs/okf/${doc}`);
+      let index = content.indexOf(LITERAL);
+      while (index !== -1) {
+        out.push({ doc, index });
+        index = content.indexOf(LITERAL, index + LITERAL.length);
+      }
+    }
+    return out;
+  }
+
+  const candidates = collectCandidates();
+
+  it("found at least 16 CHANGELOG.md:# candidates to check (sanity: not vacuously true)", () => {
+    expect(candidates.length).toBeGreaterThanOrEqual(16);
+  });
+
+  // A citation's path prefix (e.g. `packages/orchestrator-workflow/`) may
+  // sit between the opening backtick and the "CHANGELOG.md:#" literal
+  // itself, so the opener is found by walking backward over path
+  // characters (word chars, `.`, `/`, `-`), not by checking the character
+  // immediately before the literal.
+  const PATH_CHAR_RE = /[\w./-]/;
+
+  it("every candidate is opened by a backtick before its path prefix and closed by a backtick before the next newline", () => {
+    const violations: string[] = [];
+    for (const { doc, index } of candidates) {
+      const content = readDoc(`docs/okf/${doc}`);
+      let openerIndex = index - 1;
+      while (openerIndex >= 0 && PATH_CHAR_RE.test(content[openerIndex])) {
+        openerIndex -= 1;
+      }
+      const opener = openerIndex >= 0 ? content[openerIndex] : undefined;
+      if (opener !== "`") {
+        violations.push(
+          `${doc}: "${LITERAL}" at offset ${index} is not opened by a ` +
+            `backtick before its path prefix (found ${JSON.stringify(opener ?? null)})`,
+        );
+        continue;
+      }
+      const closeIndex = content.indexOf("`", index);
+      const newlineIndex = content.indexOf("\n", index);
+      if (closeIndex === -1 || (newlineIndex !== -1 && closeIndex > newlineIndex)) {
+        violations.push(
+          `${doc}: "${LITERAL}" citation at offset ${index} has no closing ` +
+            `backtick before the next newline`,
+        );
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+});
