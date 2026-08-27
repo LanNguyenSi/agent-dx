@@ -1724,7 +1724,7 @@
   covering the hex-guard and date-heuristic clause; both numbers have
   since drifted off that content repeatedly as later rounds' own
   CHANGELOG entries pushed it down -- corrected 2026-08-26 to
-  `CHANGELOG.md:779-784#0.9.0` (review round 4, D30/LOW-c: given the
+  `CHANGELOG.md:#[0.9.0]` (review round 4, D30/LOW-c: given the
   heading anchor its sibling at `run-state-lifecycle-and-markers.md:55`
   already carries, matching it here too rather than a bare line range, so
   a future CHANGELOG insertion above `## [0.9.0]` fails this citation on
@@ -2662,3 +2662,84 @@ still fails `prettier --check` before this round's own edits are
 applied); `okf-kit check` reports exactly 35 findings, byte-identical
 (sorted message list) to the `5a33adb` base tree; `placement-guard`
 clean (395 files scanned).
+
+## 2026-08-27 (agent-tasks 05b372d6, implementer)
+
+Migrated the bundle's line-anchored `CHANGELOG.md:N-M#version` citations to
+okf-kit 0.8.0's line-independent `` `CHANGELOG.md:#[version]` `` heading-section
+form, alongside the okf-kit 0.8.0 release and its CI pin bump. Grep for
+`CHANGELOG.md:[0-9]` under `docs/okf/*.md` found 19 occurrences on
+`48f809d` (not the 16 an earlier task text estimated); 17 were live
+navigational citations (5 in `review-gate-and-waivers.md`, 6 in
+`run-state-lifecycle-and-markers.md`, 5 in `subagent-contracts-superset.md`,
+1 in `log.md`) and were migrated. The remaining 2, both in `log.md`
+(`:1975`'s "the un-shifted pre-round-1 `CHANGELOG.md:764-771` 0.7.0
+citation" and `:2541`'s "`CHANGELOG.md:13-35` grew by a net 3 lines"), quote
+a specific historical/stale line range as prose data about a past diff, not
+a live "read this section" pointer; converting them would misrepresent what
+the entry is describing, so both were left as line-form by design. Neither
+produces an okf-kit finding before or after this round's edits (measured
+directly, see below), so this decision does not affect the finding-count
+acceptance criteria.
+
+`review-gate-and-waivers.md`'s `` `CHANGELOG.md:#[0.16.0]` `` citation
+(the acceptance_recommendation-specific one, formerly `:552-576`) gained a
+content anchor, `#"as a hard-mandatory"` (occurs once in the 0.16.0
+section), to keep pointing at that specific bullet rather than the whole
+multi-bullet 0.16.0 entry now that the line-range distinction from
+`subagent-contracts-superset.md`'s sibling citation (formerly `:552-594`,
+covering the same section plus its same-day R2 follow-up) no longer exists
+in heading-section form; the sibling citation was left without a content
+anchor since it already meant the whole section. The other 9 migrated
+headings ([0.7.0], [0.7.3], [0.7.4], [0.9.0], [0.10.0], [0.11.0], [0.12.0],
+[0.14.0], [0.18.0]) resolve to a single bullet or a short, unambiguous
+section, so no content anchor was added for them. Bracket form (`[0.7.4]`
+rather than bare `0.7.4`) was used throughout: `findHeadingSection`'s
+containment check means a bare `0.7.0` would also match inside a
+hypothetical `10.7.0` heading (none exist in this CHANGELOG today, but the
+bracket form removes the risk outright and was the form the task brief
+itself suggested).
+
+`test/docs-consistency.test.ts`'s `describe("every heading-anchored
+CHANGELOG.md citation's range stays inside its own release section", ...)`
+(added agent-tasks ca9d5048 review round 3 MEDIUM 1, as a local backstop for
+exactly the line-drift class this migration eliminates by construction) was
+removed rather than extended: `ANCHOR_CITATION_RE`, the local regex it
+shares with the string-anchor tests above it, requires a digit right after
+the citation's `:`, so it cannot match the new `path:#[version]` heading-form
+citations at all; after this round's migration it would find zero
+CHANGELOG.md candidates among the five `ANCHOR_OKF_DOCS` (which excludes
+`log.md`), making its own "found at least one ... (sanity: not vacuously
+true)" check fail. Extending it to also parse and validate the heading form
+would just re-implement okf-kit's own `findHeadingSection`/
+`checkHeadingSectionTarget` a second time for a class of drift the
+heading-section citation is immune to by construction (no line range to
+walk out of its own release section), so removal was chosen over a
+same-shaped rewrite.
+
+Measured directly (this repo's own `okf-kit` build, `node
+packages/okf-kit/dist/cli.js check packages/orchestrator-workflow/docs/okf`):
+35 findings (0 errors, 13 warnings, 22 notices) against the committed tree
+both before and after the citation migration, 0 of them naming
+`CHANGELOG.md`, matching the pre-round baseline recorded in the okf-kit
+0.7.0 CHANGELOG entry. M1 negative control: inserting a temporary 3-line
+bullet at the top of `orchestrator-workflow/CHANGELOG.md`'s `[Unreleased]`
+section (shifting every `## [x.y.z]` heading below it down by exactly 3
+lines) produced 51 findings (16 new `blank-start-line` warnings, one per
+still-line-anchored citation at the time) against the pre-migration tree,
+and 35 findings (0 new) against the post-migration tree with the same
+insertion; reverted after each measurement (`git diff` clean). M2:
+retargeting one migrated citation's heading to a non-existent
+`[0.7.99]` produced `heading-section-not-found`, reverted, back to 35. M3:
+reverting `.github/workflows/ci.yml`'s `okf-kit@0.8.0` pin to `0.7.0`
+failed `test/docs-consistency.test.ts`'s pin-sync test (1 failure), reverted,
+back to 166/166 green. `npx vitest run` in `packages/orchestrator-workflow`:
+291/291 green. `npm test`/`npm run build`/`npm run format:check` in
+`packages/okf-kit`: 220/220 green, build clean, format:check reports the
+same pre-existing `test/cli-symlink-invocation.test.ts` warning present on
+`48f809d` before this round's own edits (confirmed via `git stash`), not
+introduced by this round. `node packages/slop-detector/dist/cli.js check .
+--explain`: 406 files scanned, 203 violations (block 27, warn 176), all in
+`packages/slop-detector`'s own test fixtures for the agent-tics pack rules;
+byte-identical to the `48f809d` baseline (confirmed via `git stash`), so
+unaffected by this round.
