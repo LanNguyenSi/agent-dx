@@ -126,6 +126,21 @@ jobs:
         shell: bash
         run: |
           set -e
+          # Rejects a non-numeric (usually empty) count before it reaches a
+          # `[ "${x}" -ne 0 ]`/`-lt` comparison below: an empty string there
+          # is a shell usage error inside an `if` condition, which `set -e`
+          # does not catch (condition commands are exempt), so the step
+          # would silently fall through to "Self-test OK" instead of
+          # failing. This is the guard that turns a truncated or malformed
+          # okf-kit report into a hard failure instead of a false green.
+          assert_numeric() {
+            case "$2" in
+              ''|*[!0-9]*)
+                echo "::error title=OKF anchor guard self-test failed::${1} is not a numeric finding count (got \"${2}\"); the jq pipeline produced no usable output, most likely from an okf-kit CLI failure with empty or malformed stdout"
+                exit 1
+                ;;
+            esac
+          }
           fixture="${RUNNER_TEMP}/okf-anchor-selftest"
           rm -rf "${fixture}"
           mkdir -p "${fixture}/src" "${fixture}/bundle"
@@ -184,10 +199,18 @@ jobs:
           (cd "${fixture}" && git add -A && git commit -q -m init)
           set +e
           okf-kit check --json "${fixture}/bundle" --require-anchors > "${fixture}/selftest-clean-report.json"
+          clean_code=$?
           set -e
+          if [ "${clean_code}" -ne 0 ] && [ "${clean_code}" -ne 1 ]; then
+            echo "::error title=OKF anchor guard self-test failed::okf-kit check (clean fixture) exited ${clean_code} (tool/usage error, not bundle findings)"
+            cat "${fixture}/selftest-clean-report.json" || true
+            exit "${clean_code}"
+          fi
+          jq -e . "${fixture}/selftest-clean-report.json" > /dev/null
           clean_count=$(jq '[
             .findings[] | select(.message | test("\\[(anchor-[a-z-]+|heading-section-[a-z-]+|test-range-straddles-block)\\]$"))
           ] | length' "${fixture}/selftest-clean-report.json")
+          assert_numeric clean_count "${clean_count}"
           if [ "${clean_count}" -ne 0 ]; then
             echo "::error title=OKF anchor guard self-test failed::the clean, pre-drift fixture already reports ${clean_count} anchor finding(s) (expected 0); the fixture itself is broken, not just the drift"
             cat "${fixture}/selftest-clean-report.json"
@@ -226,28 +249,42 @@ jobs:
           "
           set +e
           okf-kit check --json "${fixture}/bundle" --require-anchors > "${fixture}/selftest-report.json"
+          drift_code=$?
           set -e
+          if [ "${drift_code}" -ne 0 ] && [ "${drift_code}" -ne 1 ]; then
+            echo "::error title=OKF anchor guard self-test failed::okf-kit check (drifted fixture) exited ${drift_code} (tool/usage error, not bundle findings)"
+            cat "${fixture}/selftest-report.json" || true
+            exit "${drift_code}"
+          fi
+          jq -e . "${fixture}/selftest-report.json" > /dev/null
           heading_count=$(jq '[
             .findings[] | select(.message | test("\\[anchor-heading-"))
           ] | length' "${fixture}/selftest-report.json")
+          assert_numeric heading_count "${heading_count}"
           string_count=$(jq '[
             .findings[] | select(.message | test("\\[anchor-not-found-in-range\\]$"))
           ] | length' "${fixture}/selftest-report.json")
+          assert_numeric string_count "${string_count}"
           required_count=$(jq '[
             .findings[] | select(.message | test("\\[anchor-required\\]$"))
           ] | length' "${fixture}/selftest-report.json")
+          assert_numeric required_count "${required_count}"
           last_line_count=$(jq '[
             .findings[] | select(.message | test("\\[anchor-not-on-last-line\\]$"))
           ] | length' "${fixture}/selftest-report.json")
+          assert_numeric last_line_count "${last_line_count}"
           unique_count=$(jq '[
             .findings[] | select(.message | test("\\[anchor-not-unique-in-range\\]$"))
           ] | length' "${fixture}/selftest-report.json")
+          assert_numeric unique_count "${unique_count}"
           straddle_count=$(jq '[
             .findings[] | select(.message | test("\\[test-range-straddles-block\\]$"))
           ] | length' "${fixture}/selftest-report.json")
+          assert_numeric straddle_count "${straddle_count}"
           heading_section_count=$(jq '[
             .findings[] | select(.message | test("\\[heading-section-[a-z-]+\\]$"))
           ] | length' "${fixture}/selftest-report.json")
+          assert_numeric heading_section_count "${heading_section_count}"
           # Each of the seven anchor families is asserted separately, not
           # just a combined total -- a filter or okf-kit regression that
           # silently stopped catching one family could otherwise pass this

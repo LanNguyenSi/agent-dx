@@ -2387,11 +2387,17 @@ const ANCHOR_CITATION_RE =
   /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
 
 // agent-tasks 8c89aa12: same "last content line" semantics as okf-kit's
-// own opt-in `anchor-not-on-last-line` check (packages/okf-kit/src/
-// rules/citations-resolve.ts:464-494's CLOSING_BOILERPLATE_RE/
-// isContentLine/lastContentLineInRange), mirrored here rather than
-// imported so this test's assertion is self-contained and does not take
-// a runtime dependency on okf-kit's own source tree layout.
+// own opt-in `anchor-not-on-last-line` check
+// (packages/okf-kit/src/rules/citations-resolve.ts's
+// CLOSING_BOILERPLATE_RE/isContentLine/lastContentLineInRange), mirrored
+// here rather than imported so this test's assertion is self-contained
+// and does not take a runtime dependency on okf-kit's own source tree
+// layout. Referenced by symbol name, not a line range: a line-number
+// reference here rotted once already (it said "464-494" while the real
+// span had already drifted to 472-497, round 3, F4) and would rot again
+// on the next unrelated edit to citations-resolve.ts above this span.
+// The "mirror stays in sync" assertion right below this block is what
+// actually catches drift now, not this comment.
 const CLOSING_BOILERPLATE_RE = /^[\]\)\};,]*$/;
 
 function isContentLine(text: string): boolean {
@@ -2409,6 +2415,77 @@ function lastContentLineInRange(
   }
   return endLine;
 }
+
+/**
+ * agent-tasks 8c89aa12 fix round 3 (F4): the CLOSING_BOILERPLATE_RE/
+ * isContentLine/lastContentLineInRange block just above is a hand-copied
+ * mirror of okf-kit's own citations-resolve.ts, not an import (see the
+ * comment above for why); nothing enforced that the mirror stayed in sync
+ * with its source, so a change to okf-kit's logic could silently diverge
+ * from what this file actually asserts. This test reads both spans by
+ * symbol name (`const CLOSING_BOILERPLATE_RE` through the end of
+ * `function lastContentLineInRange`), strips comments and blank lines
+ * from each (matching modulo docstring/whitespace, not modulo logic), and
+ * asserts the remaining code is byte-identical. Mutation probe: changing
+ * one character in either copy fails this test (verified manually this
+ * round, not re-run on every CI pass).
+ */
+describe("the local anchor-not-on-last-line mirror stays in sync with okf-kit's own copy", () => {
+  const OKF_KIT_CITATIONS_RESOLVE_PATH = `${PACKAGE_DIR}/../okf-kit/src/rules/citations-resolve.ts`;
+
+  function stripCommentsAndBlankLines(code: string): string {
+    return code
+      .replace(/\/\*[\s\S]*?\*\//g, "") // block comments, incl. JSDoc
+      .replace(/^[ \t]*\/\/.*$/gm, "") // whole-line `//` comments
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .join("\n");
+  }
+
+  function extractMirroredSpan(source: string): string {
+    const lines = source.split("\n");
+    const startIdx = lines.findIndex((l) =>
+      l.includes("const CLOSING_BOILERPLATE_RE"),
+    );
+    const funcIdx = lines.findIndex(
+      (l, i) => i > startIdx && l.startsWith("function lastContentLineInRange"),
+    );
+    if (startIdx === -1 || funcIdx === -1) {
+      throw new Error(
+        "could not locate CLOSING_BOILERPLATE_RE / lastContentLineInRange in the given source",
+      );
+    }
+    let endIdx = -1;
+    for (let i = funcIdx; i < lines.length; i++) {
+      if (lines[i].trim() === "}") {
+        endIdx = i;
+        break;
+      }
+    }
+    if (endIdx === -1) {
+      throw new Error(
+        "could not find the closing brace of lastContentLineInRange",
+      );
+    }
+    return lines.slice(startIdx, endIdx + 1).join("\n");
+  }
+
+  it("the mirrored CLOSING_BOILERPLATE_RE/isContentLine/lastContentLineInRange block matches okf-kit's own copy, modulo comments and whitespace", () => {
+    const okfKitSource = readFileSync(OKF_KIT_CITATIONS_RESOLVE_PATH, "utf8");
+    const localSource = readFileSync(
+      fileURLToPath(new URL("docs-consistency.test.ts", import.meta.url)),
+      "utf8",
+    );
+    const okfKitSpan = stripCommentsAndBlankLines(
+      extractMirroredSpan(okfKitSource),
+    );
+    const localSpan = stripCommentsAndBlankLines(
+      extractMirroredSpan(localSource),
+    );
+    expect(localSpan).toEqual(okfKitSpan);
+  });
+});
 
 /**
  * agent-tasks 578f5bfd review round 2 (HIGH 2): pins the two properties
@@ -2486,9 +2563,10 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
 
   // agent-tasks 8c89aa12: aligned with okf-kit's own `--require-anchors`
   // `anchor-not-on-last-line` last-CONTENT-line semantics
-  // (packages/okf-kit/src/rules/citations-resolve.ts:464-494's
-  // CLOSING_BOILERPLATE_RE/isContentLine/lastContentLineInRange, mirrored
-  // below as isBoilerplateOnlyLine/lastContentLineInRange): a range
+  // (packages/okf-kit/src/rules/citations-resolve.ts's
+  // CLOSING_BOILERPLATE_RE/isContentLine/lastContentLineInRange,
+  // mirrored above -- see the "mirror stays in sync" test right after
+  // that mirror for the coupling check, round 3 F4): a range
   // ending on bare closing boilerplate (`});`, `]);`, a lone `}`, ...)
   // is not forced to anchor on that boilerplate line itself, only on the
   // real content line before it. This check previously required the

@@ -2722,7 +2722,8 @@ clean (395 files scanned).
   `src/init.ts` shifted 40 previously-anchored citations' ranges and the
   filter reported 40 findings (0 after revert); stripping the `#"typeof
   candidate.installedAt ==="` anchor from
-  `install-fence-mechanics.md`'s `init.ts:115-181` citation produced 1
+  `install-fence-mechanics.md`'s citation into `init.ts` (lines 115
+  through 181) produced 1
   `anchor-required` finding (0 after revert); re-anchoring that same
   citation on `"readInstalledManifest"` (its range's first line, not its
   last) produced 1 `anchor-not-on-last-line` finding (0 after revert).
@@ -2970,9 +2971,21 @@ clean (395 files scanned).
   packages/orchestrator-workflow/docs/okf` (no flag): 36 findings, all
   `citations-resolve`, 0 `sources-fresh` (down from the corrected head
   figure of 40: -4 STALE cleared by the re-stamp, citations-resolve
-  unchanged at 36). With `--require-anchors` and the exact four-spelling
-  allowlist: also 36 findings total, 0 of them in the anchor-family
-  filter -- matching the guard step's own "Clean, 0 anchor findings."
+  unchanged at 36 [correction, round 3: this "36" and "unchanged at 36"
+  were themselves off by 1 -- this entry's own mutation-probe prose a
+  few paragraphs above still quoted install-fence-mechanics.md's
+  citation into init.ts (lines 115 through 181) in the same backtick
+  `path:N-M` citation grammar okf-kit's own scanner matches, which
+  okf-kit's citation scan picked up as a real, unresolvable citation
+  (`unresolved-ambiguous`) the same way the two examples the next
+  commit (945ecdd) reworded were; that third offender was missed by
+  945ecdd and reworded only in round 3 (see the round-3 entry below),
+  which is when the true, self-consistent count of 35 -- matching the
+  35-finding base this round started from -- was first measured]).
+  With `--require-anchors` and the exact four-spelling allowlist: also
+  36 findings total [same correction applies: 35], 0 of them in the
+  anchor-family filter -- matching the guard step's own "Clean, 0
+  anchor findings."
   The real CI workflow YAML was not run under `act`; both the "Self-test
   the anchor-finding filter" and "Anchor-citation guard" steps' `run:`
   scripts were extracted verbatim from the committed YAML via a small
@@ -3144,3 +3157,123 @@ ranges moved. Re-verified directly, then re-stamped
 review-gate-and-waivers.md's own frontmatter timestamp to 2026-08-27 to
 clear the resulting `sources-fresh` `STALE` warning (36 findings with the
 warning present, back to 35 after the re-stamp).
+
+## 2026-08-27 (agent-tasks 8c89aa12, merge + fix round 3, implementer)
+
+Merged origin/master (agent-tasks 05b372d6, okf-kit 0.8.0 release plus the
+CHANGELOG.md heading-section migration, PR #136, `e26594b`) into this
+branch, then closed the round-2 review's five remaining findings (F1-F5)
+in a second commit.
+
+Merge: the anchor-finding jq filter's regex now unions all seven rule
+families (this branch's four `--require-anchors` opt-in rules plus
+master's new `heading-section-*` family); the self-test fixture exercises
+all seven with one deliberate violation each, asserted separately; the
+pin moved to `okf-kit@0.8.0`; the four docs/okf/*.md frontmatter
+timestamps took the younger value per file (model-preselection.md:
+master's `23:59:00Z`; review-gate-and-waivers.md,
+run-state-lifecycle-and-markers.md, subagent-contracts-superset.md: this
+branch's `09:00:00Z` -- both still well ahead of every commit made in
+this round, measured below); log.md kept both append-only entry blocks
+in their original order (this branch's two 8c89aa12 entries, committed
+08:25 and 08:27 CEST, before master's 05b372d6 entry, committed 08:40
+CEST).
+
+F1 (HIGH, tests): the self-test step's two `okf-kit check` calls (clean
+and drifted fixture) were fail-open on an empty or malformed report:
+neither checked the CLI's own exit code, and `jq '[...] | length'` on a
+0-byte file returns an empty string with exit 0 rather than erroring,
+which then turns `[ "${count}" -ne 0 ]`/`-lt 1` into a shell usage error
+inside an `if` condition -- exempt from `set -e` -- so the step fell
+through to "Self-test OK" with every count variable interpolated as an
+empty string. Fixed by mirroring the real guard step's own pattern on
+both calls: capture `code=$?`, fail unless it is 0 or 1, `jq -e .` the
+report before any count extraction, and reject a non-numeric count
+explicitly via a shared `assert_numeric` shell function before it ever
+reaches a `-ne`/`-lt` comparison. Mutation probes (self-test script
+extracted verbatim from the committed ci.yml via the same PyYAML
+approach the prior round used, run against swapped-in `okf-kit` shims on
+PATH, ci.yml itself untouched by any of them): M1, a shim reproducing
+okf-kit@0.7.0's exit-2-empty-stdout behavior on an unrecognized flag --
+step now fails red (`exited 2`) instead of the old silent green; M2, a
+shim returning exit 0 and valid JSON with no `findings` array -- step
+now fails red (`jq: error ... Cannot iterate over null`) instead of
+silent green; M3, removing the fixture's `anchor-required` violation
+line -- step fails red and reports `0 anchor-required` specifically, the
+other six counts unaffected, confirming per-family discrimination
+survived the fix.
+
+F2 (MEDIUM, docs): this branch's own prior fix-round entry (immediately
+above) introduced a third citation-shaped backtick `path:N-M` phrase,
+install-fence-mechanics.md's citation into init.ts (lines 115 through
+181), inside its own mutation-probe prose; commit 945ecdd reworded the
+other two offenders (the three repeated SKILL.md line-10
+mutation-probe examples and the init.test.ts example spanning lines 122
+through 126) but missed this third one, so the bundle's
+own `okf-kit check` count stayed at 36 instead of the true 35, and the
+prior entry's "Final accounting" section (its own "36 findings"/
+"unchanged at 36" claims) was itself off by one the whole time --
+corrected in place above, in brackets, pointing back to this entry.
+Fixed by rewording the phrase to prose that does not match the citation
+grammar (no `path:N-M` in backticks; while writing this correction, the
+same mistake was made a second time by quoting the old phrase directly
+and caught by re-running the check before this entry was finalized, so
+this paragraph names the file and line range only in plain prose too).
+Measured directly on this round's committed tree: `okf-kit check --json
+packages/orchestrator-workflow/docs/okf` reports 35 findings (0 errors,
+13 warnings, 22 notices), zero of them naming any init.ts range, matching
+the pre-round base of 35 findings on `48f809d` this branch started from.
+Also measured the new post-merge baseline this branch now inherits:
+`okf-kit check --json packages/orchestrator-workflow/docs/okf` against a
+throwaway worktree of master's own tip, `e26594b` (before this branch's
+merge), also reports 35 findings (0 errors, 13 warnings, 22 notices) --
+the two baselines coincide at 35 by chance, not because master's and
+this branch's pre-merge bundles were byte-identical (master migrated the
+CHANGELOG.md citations to heading-section form; this branch did not
+touch bundle content at all before the merge).
+
+F3 (MEDIUM, maintainability): closed during the merge itself (see
+above) by taking master's pin comment, which never carried the
+transient "this job is expected to go red" sentence tied to the
+now-obsolete okf-kit@0.7.0 pin.
+
+F4 (MEDIUM, maintainability): `test/docs-consistency.test.ts`'s
+CLOSING_BOILERPLATE_RE/isContentLine/lastContentLineInRange mirror of
+okf-kit's citations-resolve.ts had no coupling check and referenced the
+source by a hardcoded line range ("464-494") that had already rotted to
+472-497 by this round (an unrelated earlier edit shifted the source, and
+nothing caught it). Replaced the line-range reference with a
+symbol-name reference in both of the file's own comments, and added a
+new test that extracts both copies by symbol name (`const
+CLOSING_BOILERPLATE_RE` through the end of `function
+lastContentLineInRange`), strips comments and blank lines from each, and
+asserts byte-for-byte equality. Mutation probe M4: changing one
+character in the local mirror's regex (`]*$` to `]*X$`) fails the new
+test with a clear diff; reverted, full suite re-run green after revert
+(`git status --short` clean before and after).
+
+F5 (LOW): closed during the merge itself (see above); the union filter
+now covers all seven families and the "wildcard covers future rules"
+comment on the real guard step now says the anchor-* wildcard covers
+only future anchor-* ids, with test-range-straddles-block and
+heading-section-* matched by name.
+
+Final accounting on the committed tree, after both the merge commit and
+this fix commit (`npm test`, `npm run typecheck`, `npm run
+typecheck:test` in packages/orchestrator-workflow; `npm test` in
+packages/okf-kit; `node packages/slop-detector/dist/cli.js check . --pack
+placement-slop --config slop.config.yml` from the repo root; the
+self-test and Anchor-citation guard steps' `run:` scripts extracted
+verbatim from the committed ci.yml via PyYAML and executed against the
+locally built okf-kit CLI; `git status --short` clean before and after
+each measurement): orchestrator-workflow 294/294 tests green (293 from
+the merge, +1 for F4's new coupling test); typecheck and typecheck:test
+clean; okf-kit 220/220 tests green (unaffected by this round);
+placement-guard clean (406 files scanned, same count as the merge
+commit); self-test reports 1 finding per family, 7/7 families green;
+real guard reports 0 anchor findings, exit 0; `okf-kit check --json
+packages/orchestrator-workflow/docs/okf` (no flag): 35 findings (0
+errors, 13 warnings, 22 notices), matching both this branch's pre-merge
+base (35 on `48f809d`) and master's post-merge baseline (35 on
+`e26594b`, measured via a throwaway worktree of that commit, deleted
+after).
