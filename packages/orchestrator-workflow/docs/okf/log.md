@@ -2836,19 +2836,20 @@ clean (395 files scanned).
   verbatim (the `missing` array and its `it(...)`), with the comment
   above the `describe` block corrected to explain the real (narrower)
   strictness gap instead of the false superset claim. Mutation probe M1
-  (an unanchored `SKILL.md:10` appended to `install-fence-mechanics.md`,
-  whose own frontmatter `sources` does not list SKILL.md; reverted
-  after): the restored local assertion fails --
-  `AssertionError: install-fence-mechanics.md: SKILL.md:10: expected [
-  Array(1) ] to deeply equal []` -- while `okf-kit check --json
-  packages/orchestrator-workflow/docs/okf --require-anchors
-  --require-anchors-allow README.md
+  (an unanchored full citation into SKILL.md's line 10, no anchor,
+  appended to `install-fence-mechanics.md`, whose own frontmatter
+  `sources` does not list SKILL.md; reverted after): the restored local
+  assertion fails -- the `missing` array's one entry names
+  `install-fence-mechanics.md` and the injected SKILL.md-line-10
+  citation -- while
+  `okf-kit check --json packages/orchestrator-workflow/docs/okf
+  --require-anchors --require-anchors-allow README.md
   packages/orchestrator-workflow/README.md INSTALL-AGENT.md
-  packages/orchestrator-workflow/INSTALL-AGENT.md` reports the citation
-  as `` `SKILL.md:10`: ambiguous target, not evaluated
-  [unresolved-ambiguous] `` (candidates: `packages/github-api-tool/
-  SKILL.md`, `packages/orchestrator-workflow/assets/skill/SKILL.md`) and
-  0 anchor-family findings for it -- exactly the "silently exempt, not
+  packages/orchestrator-workflow/INSTALL-AGENT.md` reports that same
+  citation as ambiguous, not evaluated (`unresolved-ambiguous`,
+  candidates: `packages/github-api-tool/SKILL.md`,
+  `packages/orchestrator-workflow/assets/skill/SKILL.md`) and 0
+  anchor-family findings for it -- exactly the "silently exempt, not
   covered" gap the restored assertion exists to close. `git status
   --short` clean before and after.
 
@@ -2860,9 +2861,9 @@ clean (395 files scanned).
   `packages/okf-kit/src/rules/citations-resolve.ts:464-494`). For a
   range ending on such boilerplate the two definitions actively
   disagree (a citation anchored correctly per one fails the other, and
-  vice versa) -- e.g. `test/init.test.ts:122-126` (`  });` on line 126),
-  not a citation this bundle currently carries but illustrative of the
-  shape. Fixed by porting okf-kit's own
+  vice versa) -- e.g. `test/init.test.ts`'s lines 122 through 126, which
+  end on a bare `});`; not a citation this bundle currently carries but
+  illustrative of the shape. Fixed by porting okf-kit's own
   `CLOSING_BOILERPLATE_RE`/`isContentLine`/`lastContentLineInRange`
   logic into the test file (mirrored, not imported, so the test stays
   free of a runtime dependency on okf-kit's source layout) and using it
