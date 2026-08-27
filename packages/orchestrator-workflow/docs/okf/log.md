@@ -2662,3 +2662,85 @@ still fails `prettier --check` before this round's own edits are
 applied); `okf-kit check` reports exactly 35 findings, byte-identical
 (sorted message list) to the `5a33adb` base tree; `placement-guard`
 clean (395 files scanned).
+
+- 2026-08-27 (agent-tasks 8c89aa12): the `okf-anchor-guard` CI job's
+  "Anchor-citation guard" step now runs `okf-kit check --json
+  "${BUNDLE_PATH}" --require-anchors --require-anchors-allow '*README.md'
+  '*INSTALL-AGENT.md'` instead of a plain `check`, adopting the four
+  opt-in `--require-anchors` rules (`anchor-required`,
+  `anchor-not-on-last-line`, `anchor-not-unique-in-range`,
+  `test-range-straddles-block`) landed on this tree's `[Unreleased]`
+  okf-kit source (still version-labeled 0.7.0 in `package.json`; not yet
+  published under any version, so the job's own `npm install -g
+  okf-kit@0.7.0` pin is left unchanged rather than bumped to a
+  not-yet-existing 0.8.0, which would desync it from
+  `packages/okf-kit/package.json`'s real version and fail "every
+  okf-kit@<version> pin under .github/workflows/ matches package.json";
+  `okf-anchor-guard` is expected to go red at its real "Anchor-citation
+  guard" step once it runs against the actually-installed published
+  okf-kit, until an okf-kit release ships `--require-anchors` under
+  whatever version this pin is bumped to). The job's `anchorFindings` jq
+  filter (both the self-test step and the real guard step) was widened
+  from `\[anchor-[a-z-]+\]$` to `\[(anchor-[a-z-]+|test-range-straddles-
+  block)\]$`, since `test-range-straddles-block`'s rule id does not start
+  with `anchor-`. The `--require-anchors-allow` allowlist uses
+  `*README.md`/`*INSTALL-AGENT.md` globs rather than the bare exact
+  strings: this bundle cites both docs under two different spellings
+  (bare `README.md:105` and the fully-qualified
+  `packages/orchestrator-workflow/README.md:91-96`/`INSTALL-AGENT.md:46-
+  47`), and the exact-string form left the two fully-qualified citations
+  reporting `anchor-required` (measured: `okf-kit check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md INSTALL-AGENT.md` reports 2
+  `anchor-required` findings; the glob form reports 0). Locally measured
+  against the committed tree (built `packages/okf-kit/dist/cli.js`,
+  `node packages/okf-kit/dist/cli.js check
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow '*README.md' '*INSTALL-AGENT.md' --json`):
+  exit 0, 35 total findings, 0 of the widened anchor-rule filter's
+  findings (matching the pre-existing `okf-kit check` baseline of 35).
+  Mutation probes (each applied then reverted, `git status --short`
+  clean before and after): a one-line insertion at the top of
+  `src/init.ts` shifted 40 previously-anchored citations' ranges and the
+  filter reported 40 findings (0 after revert); stripping the `#"typeof
+  candidate.installedAt ==="` anchor from
+  `install-fence-mechanics.md`'s `init.ts:115-181` citation produced 1
+  `anchor-required` finding (0 after revert); re-anchoring that same
+  citation on `"readInstalledManifest"` (its range's first line, not its
+  last) produced 1 `anchor-not-on-last-line` finding (0 after revert).
+
+  `test/docs-consistency.test.ts`'s local anchor assertions: the
+  "has zero unanchored citations into SKILL.md, an agent template,
+  models.ts, src/*.ts, a test file, or an assets/templates/*.md or
+  agents-md-section.md run template" test (the review-round-2 MEDIUM 5
+  erosion brake for `anchor-required`) is dropped as a redundant double
+  guard: okf-kit's native `anchor-required` (now running in CI) checks a
+  strict superset of the same ground. Its sibling "examined N in-scope
+  citations" sanity test is kept (it guards this file's own citation-
+  collection machinery, not anchor-required itself). Three local checks
+  are kept as deliberately stricter variants rather than dropped, each
+  now commented in place with the specific gap it closes beyond okf-kit's
+  native rule: "every string anchor's text occurs on the last line of its
+  own cited range" (local: the range's actual last line; okf-kit's
+  `anchor-not-on-last-line`: the last CONTENT line, skipping trailing
+  `});`-style boilerplate), "every string anchor's text occurs exactly
+  once inside its own cited range" (local: counts substring occurrences;
+  okf-kit's `anchor-not-unique-in-range`: counts matching lines), and
+  "every full citation into a *.test.ts target stays inside one
+  describe/it/test block" (local: real TypeScript-compiler-API block
+  boundaries; okf-kit's `test-range-straddles-block`: a line-based
+  heuristic that documents its own gap on a range ending on an outer
+  block's closing line with no further block-head line inside it).
+
+  Verification on the committed tree after these edits: `npm test`
+  (packages/orchestrator-workflow) 292/292 tests green (one fewer than
+  the prior 293, the dropped assertion); `npm run typecheck` and
+  `npm run typecheck:test` clean; `npm run format:check` reports the
+  same 2 pre-existing warnings as the prior round
+  (`test/docs-consistency.test.ts`, `test/template-markers.test.ts`);
+  `node packages/slop-detector/dist/cli.js check . --pack placement-slop
+  --config slop.config.yml` clean (406 files scanned). The real CI
+  workflow YAML was not run under `act`; the "Self-test the anchor-
+  finding filter" and "Anchor-citation guard" steps' shell logic was
+  reproduced locally instead, against the same built okf-kit CLI, with
+  the same clean/drifted-fixture and real-bundle results reported above.

@@ -2460,6 +2460,16 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
     expect(anchored.length).toBeGreaterThan(0);
   });
 
+  // agent-tasks 8c89aa12: kept as a deliberately stricter local variant
+  // of okf-kit 0.8.0's own `anchor-not-on-last-line` (--require-anchors)
+  // rather than dropped. okf-kit's rule accepts the range's last CONTENT
+  // line (it skips trailing boilerplate lines made only of closing
+  // brackets/braces/parens, e.g. `});`); this local check requires the
+  // range's own actual LAST line, boilerplate or not. Both checks now
+  // run in CI (this test locally, okf-anchor-guard natively): a citation
+  // anchored on a real content line just before such boilerplate passes
+  // okf-kit but fails here, and is reported as a local finding instead
+  // of silently relying on the looser native rule.
   it("every string anchor's text occurs on the last line of its own cited range", () => {
     const violations: string[] = [];
     for (const c of anchored) {
@@ -2504,6 +2514,16 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
   // text occurs exactly once inside `[start, end]` of its own cited range,
   // for every string-anchored citation in the bundle, not only newly added
   // ones.
+  //
+  // agent-tasks 8c89aa12: kept as a deliberately stricter local variant
+  // of okf-kit 0.8.0's own `anchor-not-unique-in-range` (--require-anchors)
+  // rather than dropped. okf-kit counts LINE occurrences of the anchor
+  // text within the range; this local check counts SUBSTRING occurrences
+  // (`rangeText.split(c.anchor).length - 1`), so an anchor text that
+  // occurs twice on the same line (e.g. two calls to the same short
+  // helper in one statement) is unique-per-line to okf-kit but not
+  // unique-per-substring here, and is reported as a local finding
+  // instead of silently relying on the looser native rule.
   it("every string anchor's text occurs exactly once inside its own cited range", () => {
     const violations: string[] = [];
     for (const c of anchored) {
@@ -2630,11 +2650,27 @@ describe("every heading-anchored CHANGELOG.md citation's range stays inside its 
  * agent-tasks 578f5bfd review round 2 (MEDIUM 5), erosion brake: review
  * round 1 (HIGH 1) found 44 citations into SKILL.md/agent-templates/
  * models.ts/test files that this bundle's own citation-audit round
- * (5c8013c0/578f5bfd round 1) had missed anchoring. This asserts the
- * count stays at zero going forward: any future citation into one of
- * those four kit-source categories that lands in docs/okf without an
- * anchor fails here, listed by doc and citation, instead of silently
- * reintroducing the gap.
+ * (5c8013c0/578f5bfd round 1) had missed anchoring. This originally
+ * asserted the count of such unanchored citations stayed at zero going
+ * forward.
+ *
+ * agent-tasks 8c89aa12: that "zero unanchored" assertion is dropped. The
+ * CI `okf-anchor-guard` job now runs okf-kit 0.8.0's own
+ * `--require-anchors` (`anchor-required` rule), which checks every
+ * in-repo full citation in the bundle for a missing `#anchor` except the
+ * `--require-anchors-allow`-listed README.md/INSTALL-AGENT.md
+ * citations -- a strict superset of this local check's four kit-source
+ * categories (SKILL.md, agent templates, models.ts, src/*.ts, test
+ * files, assets/templates/*.md, agents-md-section.md): every citation
+ * this local check covered, okf-kit's native rule covers too, plus every
+ * other in-repo citation this bundle carries. Keeping both would be a
+ * double guard over identical ground with no local strictness this
+ * local variant added beyond okf-kit's own. The `examined` sanity check
+ * below is kept: it is not an anchor-required duplicate, it is a
+ * collection-integrity brake on this file's OWN `ANCHOR_CITATION_RE`/
+ * `anchorScopeResolve()` machinery (shared by the load-bearing-anchor and
+ * describe/it/test-straddle checks further down), which okf-kit's own
+ * CLI cannot see or guard.
  */
 describe("every docs/okf citation into a kit-source category this bundle anchors carries an anchor", () => {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -2642,7 +2678,6 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
     readFileSync(`${repoRoot}/${relPath}`, "utf8");
   const RESOLVE = anchorScopeResolve();
 
-  const missing: string[] = [];
   let examined = 0;
   for (const doc of ANCHOR_OKF_DOCS) {
     const content = readRepoFile(
@@ -2653,11 +2688,6 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
       const real = RESOLVE[citedPath];
       if (!real) continue;
       examined++;
-      if (!m[4]) {
-        const start = m[2];
-        const end = m[3] ? `-${m[3]}` : "";
-        missing.push(`${doc}: ${citedPath}:${start}${end}`);
-      }
     }
   }
 
@@ -2683,10 +2713,6 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
   // a collection-logic regression that empties or badly shrinks `RESOLVE`.
   it(`examined ${examined} in-scope citations (sanity: the brake itself did not go blind, more than a token number)`, () => {
     expect(examined).toBeGreaterThan(200);
-  });
-
-  it("has zero unanchored citations into SKILL.md, an agent template, models.ts, src/*.ts, a test file, or an assets/templates/*.md or agents-md-section.md run template", () => {
-    expect(missing, missing.join("\n")).toEqual([]);
   });
 });
 
@@ -2730,6 +2756,18 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
  * Single-line citations are included (the round-3 version skipped
  * `start === end`); a single-line citation still has to resolve to some
  * describe/it/test block to be meaningful.
+ *
+ * agent-tasks 8c89aa12: kept as a deliberately stricter local variant of
+ * okf-kit 0.8.0's own `test-range-straddles-block` (--require-anchors)
+ * rather than dropped. okf-kit's rule is a line-based heuristic (a
+ * block-head line at the same or a shallower indent than the range's
+ * start line, anywhere in the range other than the start line itself)
+ * and documents its own gap: a range that leaves its block without a
+ * later block-head line inside it -- ending on an outer block's own
+ * closing line -- is not detected. This test computes real block
+ * boundaries with the TypeScript compiler API instead, so it also
+ * catches that gap; both checks run in CI (this test locally,
+ * okf-anchor-guard natively).
  */
 
 // Imported here (appended at file end), not moved to the top-of-file

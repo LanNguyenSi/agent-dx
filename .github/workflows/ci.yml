@@ -76,7 +76,16 @@ jobs:
         # Keep this pin identical to okf-staleness.yml's; both are pinned
         # against packages/okf-kit/package.json's version by
         # test/docs-consistency.test.ts (globs every .github/workflows/
-        # file for an okf-kit@<version> pin, install or npx form).
+        # file for an okf-kit@<version> pin, install or npx form). The
+        # --require-anchors flag used below (and its four opt-in rules)
+        # is unreleased [Unreleased] code on this tree; the pin stays at
+        # the currently published version rather than a not-yet-existing
+        # one, since bumping it here alone (without also bumping
+        # packages/okf-kit/package.json, which is out of this change's
+        # scope) would desync it from that pin-consistency test. This
+        # job is expected to go red once it reaches the real "Anchor-
+        # citation guard" step below, until an okf-kit release actually
+        # ships --require-anchors under this pin.
         run: npm install -g okf-kit@0.7.0
 
       - name: Assert CLI is alive (output, not exit code)
@@ -143,7 +152,7 @@ jobs:
           okf-kit check --json "${fixture}/bundle" > "${fixture}/selftest-clean-report.json"
           set -e
           clean_count=$(jq '[
-            .findings[] | select(.message | test("\\[anchor-[a-z-]+\\]$"))
+            .findings[] | select(.message | test("\\[(anchor-[a-z-]+|test-range-straddles-block)\\]$"))
           ] | length' "${fixture}/selftest-clean-report.json")
           if [ "${clean_count}" -ne 0 ]; then
             echo "::error title=OKF anchor guard self-test failed::the clean, pre-drift fixture already reports ${clean_count} anchor finding(s) (expected 0); the fixture itself is broken, not just the drift"
@@ -185,7 +194,18 @@ jobs:
         shell: bash
         run: |
           set +e
-          okf-kit check --json "${BUNDLE_PATH}" > okf-anchor-report.json
+          # --require-anchors turns on the four opt-in checks named
+          # above; --require-anchors-allow exempts README.md and
+          # INSTALL-AGENT.md (documentation-category citations, not
+          # kit-source), matching both their bare and their
+          # `packages/orchestrator-workflow/`-prefixed spellings in this
+          # bundle's own citation text (README.md's "several different
+          # spellings" note: a `*basename` glob covers every spelling
+          # with one pattern instead of one exact pattern per spelling).
+          okf-kit check --json "${BUNDLE_PATH}" \
+            --require-anchors \
+            --require-anchors-allow '*README.md' '*INSTALL-AGENT.md' \
+            > okf-anchor-report.json
           code=$?
           set -e
 
@@ -202,10 +222,14 @@ jobs:
           # ruleId is always "citations-resolve"); match any anchor-*
           # rule id rather than a hardcoded list, so a future okf-kit
           # release adding a fifth anchor rule is covered without an edit
-          # here (the self-test step above guards this same filter).
+          # here (the self-test step above guards this same filter). Also
+          # matches test-range-straddles-block by name: one of
+          # --require-anchors' own four opt-in rules (see the Install
+          # step below), but its id does not start with "anchor-" so the
+          # wildcard above does not already cover it.
           anchorFindings=$(jq '[
             .findings[]
-            | select(.message | test("\\[anchor-[a-z-]+\\]$"))
+            | select(.message | test("\\[(anchor-[a-z-]+|test-range-straddles-block)\\]$"))
           ]' okf-anchor-report.json)
           count=$(echo "${anchorFindings}" | jq 'length')
 
