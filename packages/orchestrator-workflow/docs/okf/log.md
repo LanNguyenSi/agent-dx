@@ -2665,49 +2665,54 @@ clean (395 files scanned).
 
 ## 2026-08-27 (agent-tasks 05b372d6, implementer)
 
-Migrated the bundle's line-anchored `CHANGELOG.md:N-M#version` citations to
-okf-kit 0.8.0's line-independent `` `CHANGELOG.md:#[version]` `` heading-section
-form, alongside the okf-kit 0.8.0 release and its CI pin bump. Grep for
-`CHANGELOG.md:[0-9]` under `docs/okf/*.md` found 19 occurrences on
-`48f809d` (not the 16 an earlier task text estimated); 17 were live
-navigational citations (5 in `review-gate-and-waivers.md`, 6 in
-`run-state-lifecycle-and-markers.md`, 5 in `subagent-contracts-superset.md`,
-1 in `log.md`) and were migrated. The remaining 2, both in `log.md`
-(`:1975`'s "the un-shifted pre-round-1 `CHANGELOG.md:764-771` 0.7.0
-citation" and `:2541`'s "`CHANGELOG.md:13-35` grew by a net 3 lines"), quote
-a specific historical/stale line range as prose data about a past diff, not
-a live "read this section" pointer; converting them would misrepresent what
-the entry is describing, so both were left as line-form by design. Neither
-produces an okf-kit finding before or after this round's edits (measured
-directly, see below), so this decision does not affect the finding-count
-acceptance criteria.
+Migrated the bundle's line-anchored, colon-hash-version-anchored CHANGELOG.md
+citations (a path ending in .md, a colon, a line range, and a hash-prefixed
+version anchor, e.g. lines 815 through 825 anchored to 0.7.4) to okf-kit
+0.8.0's line-independent heading-section form (path.md:#[version], no line
+range at all), alongside the okf-kit 0.8.0 release and its CI pin bump.
+Grep for the literal string "CHANGELOG.md:" followed by a digit under
+docs/okf/*.md found 19 occurrences on commit 48f809d (not the 16 an earlier
+task text estimated); 17 were live navigational citations (5 in
+review-gate-and-waivers.md, 6 in run-state-lifecycle-and-markers.md, 5 in
+subagent-contracts-superset.md, 1 in log.md) and were migrated. The
+remaining 2, both in log.md (one near line 1975, quoting the old,
+already-superseded 0.7.0 line range as "the un-shifted pre-round-1 ...
+citation"; one near line 2541, describing a diff by its old line range
+"grew by a net 3 lines"), quote a specific historical/stale line range as
+prose data about a past diff, not a live "read this section" pointer;
+converting them would misrepresent what the entry is describing, so both
+were left as line-form by design. Neither produces an okf-kit finding
+before or after this round's edits (measured directly, see below), so this
+decision does not affect the finding-count acceptance criteria.
 
-`review-gate-and-waivers.md`'s `` `CHANGELOG.md:#[0.16.0]` `` citation
-(the acceptance_recommendation-specific one, formerly `:552-576`) gained a
-content anchor, `#"as a hard-mandatory"` (occurs once in the 0.16.0
-section), to keep pointing at that specific bullet rather than the whole
-multi-bullet 0.16.0 entry now that the line-range distinction from
-`subagent-contracts-superset.md`'s sibling citation (formerly `:552-594`,
-covering the same section plus its same-day R2 follow-up) no longer exists
-in heading-section form; the sibling citation was left without a content
-anchor since it already meant the whole section. The other 9 migrated
-headings ([0.7.0], [0.7.3], [0.7.4], [0.9.0], [0.10.0], [0.11.0], [0.12.0],
-[0.14.0], [0.18.0]) resolve to a single bullet or a short, unambiguous
-section, so no content anchor was added for them. Bracket form (`[0.7.4]`
-rather than bare `0.7.4`) was used throughout: `findHeadingSection`'s
-containment check means a bare `0.7.0` would also match inside a
-hypothetical `10.7.0` heading (none exist in this CHANGELOG today, but the
-bracket form removes the risk outright and was the form the task brief
-itself suggested).
+review-gate-and-waivers.md's migrated 0.16.0 citation (the
+acceptance_recommendation-specific one, formerly lines 552 through 576
+anchored to 0.16.0)
+gained a content anchor, quoting the phrase "as a hard-mandatory" (occurs
+once in the 0.16.0 section), to keep pointing at that specific bullet
+rather than the whole multi-bullet 0.16.0 entry now that the line-range
+distinction from subagent-contracts-superset.md's sibling citation
+(formerly lines 552 through 594 anchored to 0.16.0, covering the same section plus its
+same-day R2 follow-up) no longer exists in heading-section form; the
+sibling citation was left without a content anchor since it already meant
+the whole section. The other 9 migrated headings (0.7.0, 0.7.3, 0.7.4,
+0.9.0, 0.10.0, 0.11.0, 0.12.0, 0.14.0, 0.18.0) resolve to a single bullet
+or a short, unambiguous section, so no content anchor was added for them.
+Bracket form (heading text "[0.7.4]" rather than bare "0.7.4") was used
+throughout: findHeadingSection's containment check means a bare "0.7.0"
+would also match inside a hypothetical "10.7.0" heading (none exist in
+this CHANGELOG today, but the bracket form removes the risk outright and
+was the form the task brief itself suggested).
 
-`test/docs-consistency.test.ts`'s `describe("every heading-anchored
-CHANGELOG.md citation's range stays inside its own release section", ...)`
-(added agent-tasks ca9d5048 review round 3 MEDIUM 1, as a local backstop for
-exactly the line-drift class this migration eliminates by construction) was
-removed rather than extended: `ANCHOR_CITATION_RE`, the local regex it
-shares with the string-anchor tests above it, requires a digit right after
-the citation's `:`, so it cannot match the new `path:#[version]` heading-form
-citations at all; after this round's migration it would find zero
+test/docs-consistency.test.ts's describe block asserting that every
+heading-anchored CHANGELOG.md citation's range stays inside its own
+release section (added agent-tasks ca9d5048 review round 3 MEDIUM 1, as a
+local backstop for exactly the line-drift class this migration eliminates
+by construction) was removed rather than extended: ANCHOR_CITATION_RE, the
+local regex it shares with the string-anchor tests above it, requires a
+digit right after the citation's colon, so it cannot match the new
+colon-hash heading-form citations at all; after this round's migration it
+would find zero
 CHANGELOG.md candidates among the five `ANCHOR_OKF_DOCS` (which excludes
 `log.md`), making its own "found at least one ... (sanity: not vacuously
 true)" check fail. Extending it to also parse and validate the heading form
@@ -2743,3 +2748,27 @@ introduced by this round. `node packages/slop-detector/dist/cli.js check .
 `packages/slop-detector`'s own test fixtures for the agent-tics pack rules;
 byte-identical to the `48f809d` baseline (confirmed via `git stash`), so
 unaffected by this round.
+
+Follow-up on this same entry: the earlier okf-kit check count above (35,
+unchanged) predates two fix-up passes over this very entry's own prose.
+The first pass wrote several illustrative citation-shaped examples, a path
+ending in dot-md, a colon, digits, and a hash-prefixed anchor, meant only
+as generic prose, not as live citations; citations-resolve does not
+require backticks to recognise a full citation, so those examples were
+themselves parsed as citations, producing new findings (a nonexistent
+target file, a malformed heading-section attempt, and misattributed
+continuation citations from bare colon-number references to this entry's
+own line numbers). Rewritten to avoid the path-dot-extension-colon-digits
+shape and the backtick-delimited colon-hash shape entirely, using
+spelled-out line numbers and plain prose instead; re-measured after the
+rewrite: 36 findings, one new sources-fresh STALE warning on
+model-preselection.md (it lists test/docs-consistency.test.ts under its
+sources list, which this round's own guard-removal commit changed).
+Re-verified model-preselection.md's own two citations into that test file
+(the README-table-row check near the top of the file, and the
+pinned-default-effort guard describe block far past line 1700) still
+resolve to the same content after the guard removal, since the removed
+block sat well after both cited ranges; then re-stamped
+model-preselection.md's frontmatter timestamp to 2026-08-27. Back to 35
+findings, 0 naming CHANGELOG.md or model-preselection.md, matching the
+pre-round baseline exactly.
