@@ -2981,3 +2981,34 @@ packages/slop-detector/dist/cli.js check . --pack placement-slop
 this round's 8 new tests); typecheck and typecheck:test clean;
 `okf-kit check` reports 35 findings (errors 0, warnings 13, notices 22);
 the anchor-finding jq filter returns 0; placement-guard clean.
+
+## 2026-08-27 (agent-tasks 68faae5f, orchestrator, review round 3 fixes)
+
+Review round 3 (after merging master, which carried the okf-kit 0.8.0
+release and the heading-section migration of this bundle's CHANGELOG
+citations) closed six findings in the fix commit d12d892: the recording
+instruction in SKILL.md and agents-md-section.md now names the
+03-decisions.md table row as the record and the review-round-escalation
+marker as the derived shortcut; the advisor-spawn escalation carries its
+install condition (full profile) and names the minimal-profile fallback
+to the merge-hold; review-gate-and-waivers.md and the CHANGELOG state
+that the marker's n/a default is deliberately fail-open; the orphaned
+reason marker line left the 03-decisions.md template; a prettier
+three-liner in the docs-consistency test became one line; a short
+CHANGELOG line break was rewrapped; and a new test pins that SKILL.md
+step 8 and the budget section name the same second-halt and third-round
+thresholds. Thirteen citations into SKILL.md, agents-md-section.md and
+the docs-consistency test were re-pointed for the line shifts.
+
+The round-3 review found the same class as round 2's first finding once
+more: the fix commit edited agents-md-section.md, a declared source of
+install-fence-mechanics.md, without re-stamping that doc, so the
+committed tree reported one sources-fresh warning (36 findings, 14
+warnings). install-fence-mechanics.md was re-read against the current
+agents-md-section.md (it describes the fence mechanics, not the section's
+rules, and nothing it states drifted) and re-stamped in this commit.
+Measured on the committed tree after this commit: `okf-kit check` 35
+findings (errors 0, warnings 13, notices 22), 0 sources-fresh; the CI
+anchor filter (anchor-* and heading-section-*) 0; the --require-anchors
+run with the four allowlisted doc spellings 0; vitest 314/314; typecheck
+and typecheck:test clean; placement-guard clean.
