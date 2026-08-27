@@ -219,7 +219,8 @@ jobs:
           # heading-section-* rule id rather than a hardcoded list, so a
           # future okf-kit release adding another anchor rule in either
           # family is covered without an edit here (the self-test step
-          # above guards this same filter). heading-section-* covers
+          # above guards a copy of this filter, kept in sync by hand: an
+          # edit here is not exercised by the self-test). heading-section-* covers
           # okf-kit 0.8.0's line-independent `path.md:#heading` citation
           # form (heading-section-not-found/-ambiguous/-empty and its
           # content-anchor and malformed-attempt variants), which the

@@ -2675,26 +2675,19 @@ version anchor, e.g. lines 815 through 825 anchored to 0.7.4) to okf-kit
 range at all), alongside the okf-kit 0.8.0 release and its CI pin bump.
 Grep for the literal string "CHANGELOG.md:" followed by a digit under
 docs/okf/*.md found 19 occurrences on commit 48f809d (not the 16 an earlier
-task text estimated); 16 were live navigational citations (5 in
+task text estimated); 17 were live navigational citations (5 in
 review-gate-and-waivers.md, 6 in run-state-lifecycle-and-markers.md, 5 in
-subagent-contracts-superset.md) and were migrated. The remaining 3, all in
-log.md (the 2026-08-24 entry's own citation into the 0.9.0 section, plus one
-near line 1975 quoting the old, already-superseded 0.7.0 line range as "the
-un-shifted pre-round-1 ... citation", and one near line 2541 describing a
-diff by its old line range "grew by a net 3 lines"), quote a specific
-historical/stale line range as prose data about a past diff or decision,
-not a live "read this section" pointer; converting any of them would
-misrepresent what the entry is describing (a fix-round-2 fix first
-corrected the 2026-08-24 entry's citation to the heading-form syntax this
-same round introduced, which was itself wrong: that citation describes a
-decision made against the pre-0.8.0 line-anchored grammar, so it was
-reverted back to the original line-and-heading form), so all three were
-left as line-form by design. None produces an okf-kit finding against the
-committed tree before or after this round's edits (measured directly, see
-below); unlike the sixteen migrated citations, this one is not immune to a
-line-count shift above it, since it still resolves by line range rather
-than by heading section, but that is unchanged from its pre-round-2 state
-and is not part of this round's finding-count acceptance criteria.
+subagent-contracts-superset.md, and the 2026-08-24 entry's own citation
+into the 0.9.0 section here in log.md, the last of these settled in the
+fix-round-2 follow-up below) and were migrated. The remaining 2, both in
+log.md (one near line 1975 quoting the old, already-superseded 0.7.0 line
+range as "the un-shifted pre-round-1 ... citation", and one near line 2541
+describing a diff by its old line range "grew by a net 3 lines"), quote a
+specific historical/stale line range as prose data about a past diff, not
+a live "read this section" pointer; converting either would misrepresent
+what the entry is describing, so both were left as line-form by design.
+Neither produces an okf-kit finding against the committed tree before or
+after this round's edits (measured directly, see below).
 
 review-gate-and-waivers.md's migrated 0.16.0 citation (the
 acceptance_recommendation-specific one, formerly lines 552 through 576
@@ -2816,11 +2809,13 @@ citation's own `blank-start-line` warning, because a line-range citation
 is never immune to a line-count shift above it. The orchestrator then
 chose the other option named in the review: keep the heading-section form
 and rewrite the sentence so it reads as history (corrected 2026-08-26 to a
-heading-anchored line-range citation, migrated 2026-08-27 to
-`CHANGELOG.md:#[0.9.0]` with a content anchor). With that edit all
-seventeen citations originally reported as migrated are migrated and
-immune again; only the two pre-existing historical/stale line-range
-references already excluded above are not. M1 re-measured after the edit: 35
+heading-anchored line-range citation, migrated 2026-08-27 to the
+line-independent heading-section form of the 0.9.0 section, with a content
+anchor on the grounding-mcp sentence). With that edit all seventeen
+navigational citations are migrated and immune; only the two historical
+line-range quotes excluded above are not, and the count paragraph above
+was corrected to say so (it briefly described the reverted intermediate
+state). M1 re-measured after the edit: 35
 findings, 0 new, 0 naming `CHANGELOG.md` (the insertion reverted, `git
 status` clean). `okf-kit check` on the unperturbed committed tree
 is unaffected (still 35 findings, 0 naming `CHANGELOG.md`, measured

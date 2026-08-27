@@ -2774,9 +2774,15 @@ describe("every CHANGELOG.md:# heading-section citation is backtick-delimited (r
     index: number;
   }
 
+  // This block deliberately widens ANCHOR_OKF_DOCS by log.md: the anchor
+  // checks skip log.md as append-only history, but a heading-section
+  // citation there is still a live citation to okf-kit, and losing its
+  // backticks would silently stop it from being one (review round 2).
+  const BACKTICK_GUARD_DOCS = [...ANCHOR_OKF_DOCS, "log.md"];
+
   function collectCandidates(): Candidate[] {
     const out: Candidate[] = [];
-    for (const doc of ANCHOR_OKF_DOCS) {
+    for (const doc of BACKTICK_GUARD_DOCS) {
       const content = readDoc(`docs/okf/${doc}`);
       let index = content.indexOf(LITERAL);
       while (index !== -1) {
@@ -2790,7 +2796,7 @@ describe("every CHANGELOG.md:# heading-section citation is backtick-delimited (r
   const candidates = collectCandidates();
 
   it("found at least 16 CHANGELOG.md:# candidates to check (sanity: not vacuously true)", () => {
-    expect(candidates.length).toBeGreaterThanOrEqual(16);
+    expect(candidates.length).toBeGreaterThanOrEqual(17);
   });
 
   // A citation's path prefix (e.g. `packages/orchestrator-workflow/`) may
