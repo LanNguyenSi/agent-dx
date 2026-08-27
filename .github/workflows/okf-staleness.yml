@@ -53,7 +53,7 @@ jobs:
         # (exit 0, no output). The output assertion below exists to catch
         # any regression of that failure mode: never assert on exit code
         # alone here.
-        run: npm install -g okf-kit@0.7.0
+        run: npm install -g okf-kit@0.8.0
 
       - name: Assert CLI is alive (output, not exit code)
         shell: bash
