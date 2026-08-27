@@ -2699,6 +2699,21 @@ clean (395 files scanned).
   --require-anchors-allow '*README.md' '*INSTALL-AGENT.md' --json`):
   exit 0, 35 total findings, 0 of the widened anchor-rule filter's
   findings (matching the pre-existing `okf-kit check` baseline of 35).
+
+  [Round-2 correction, agent-tasks 8c89aa12 fix round]: "35 total
+  findings" above was measured before this round's own commit landed;
+  `git log`-based `sources-fresh` staleness only starts counting once
+  `test/docs-consistency.test.ts`'s edit is actually committed, so the
+  pre-commit measurement above did not yet see it. Measured fresh on
+  this commit (`node packages/okf-kit/dist/cli.js check --json
+  packages/orchestrator-workflow/docs/okf`): 40 total findings (36
+  `citations-resolve`, delta +1 from the 35 base; 4 `sources-fresh`
+  STALE, delta +4 from 0), all 4 STALE on `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  and `subagent-contracts-superset.md` against `test/docs-consistency
+  .test.ts`. See this round's own entry below for the re-verification,
+  re-stamp, and the count after the fix.
+
   Mutation probes (each applied then reverted, `git status --short`
   clean before and after): a one-line insertion at the top of
   `src/init.ts` shifted 40 previously-anchored citations' ranges and the
@@ -2732,6 +2747,21 @@ clean (395 files scanned).
   heuristic that documents its own gap on a range ending on an outer
   block's closing line with no further block-head line inside it).
 
+  [Round-2 correction, agent-tasks 8c89aa12 fix round]: the "strict
+  superset" premise two paragraphs up is wrong and this task's round 2
+  reverses the drop it justified. okf-kit resolves a bare basename
+  citation via the citing doc's own frontmatter `sources` list first,
+  and only falls through to a repo-wide basename search when that
+  doesn't disambiguate; when the repo-wide search is ALSO ambiguous
+  (more than one file shares the basename), okf-kit reports
+  `unresolved-ambiguous` and skips every other check for that citation,
+  `anchor-required` included -- it is exempt from the native guard, not
+  covered by it. The local "has zero unanchored citations..." assertion
+  has no such escape hatch (`anchorScopeResolve()` binds every kit-source
+  basename unconditionally), so it is not redundant. See this round's own
+  entry below for the restoration and the mutation probe (M1) that
+  demonstrates the gap.
+
   Verification on the committed tree after these edits: `npm test`
   (packages/orchestrator-workflow) 292/292 tests green (one fewer than
   the prior 293, the dropped assertion); `npm run typecheck` and
@@ -2744,3 +2774,203 @@ clean (395 files scanned).
   finding filter" and "Anchor-citation guard" steps' shell logic was
   reproduced locally instead, against the same built okf-kit CLI, with
   the same clean/drifted-fixture and real-bundle results reported above.
+
+- 2026-08-27 (agent-tasks 8c89aa12 fix round, implementer): review found
+  10 findings (3 HIGH, 4 MEDIUM, 3 LOW) against the prior entry's
+  `okf-anchor-guard` adoption. This round addresses all 10.
+
+  HIGH (self-test coverage): the self-test fixture only exercised the
+  two pre-existing anchor forms (heading, string) and never proved the
+  jq filter's widened `test-range-straddles-block` match actually fires,
+  despite a comment claiming it did. The fixture now also carries one
+  deliberate violation of each of the four opt-in rules
+  (`anchor-required`, `anchor-not-on-last-line`,
+  `anchor-not-unique-in-range`, `test-range-straddles-block`), each
+  asserted with its own `>= 1` count so no rule can pass by riding
+  another's finding. The two pre-existing violations are still produced
+  by drifting the same two citations' ranges (as before); the four new
+  ones are appended fresh rather than derived by drift, since "carries
+  no `#anchor` at all" has no valid form to drift from. Both self-test
+  `okf-kit check` calls now also pass `--require-anchors` (they did not
+  before, which meant the opt-in rules could never have fired in the
+  self-test regardless of the fixture). Verified by extracting the
+  step's actual `run:` script from the committed YAML via `python3 -c
+  "import yaml; ...; s['run']"` (not hand-copied) and executing it
+  standalone against the built `packages/okf-kit/dist/cli.js`: "Self-test
+  OK: 1 heading-form, 1 string-form, 1 anchor-required, 1
+  anchor-not-on-last-line, 1 anchor-not-unique-in-range, 1
+  test-range-straddles-block finding(s) against the drifted fixture."
+  (exit 0); the pre-drift, pre-append run reports 0 (exit 0). Mutation
+  probe M3 (removing the `anchor-not-unique-in-range` violation from the
+  fixture's append step, reverted after): the self-test fails
+  (`title=OKF anchor guard self-test failed`) with `anchor-not-unique-
+  in-range` at 0 and every other count still 1 -- confirms the six
+  counts are independent, not one rule silently riding another's
+  finding. A second probe removing the `test-range-straddles-block`
+  violation instead shows the same isolation (that count alone drops to
+  0, the other five stay at 1).
+
+  HIGH (sequencing comment, placement): the "Install okf-kit (exact
+  pin)" step comment carried the full sequencing rationale (why the pin
+  stays at 0.7.0, why the job is expected to go red) inline; per this
+  bundle's own placement convention (rule in the workflow file, evidence
+  in the log), that comment is trimmed to the rule plus a one-line
+  pointer to this file. The `docs-consistency.test.ts` comments that
+  named a specific `okf-kit 0.8.0` version (4 places: the
+  `anchor-not-on-last-line` variant, the `anchor-not-unique-in-range`
+  variant, this entry's own erosion-brake comment, and the
+  `test-range-straddles-block` variant) now say "okf-kit's
+  `--require-anchors`" instead, since the actual release this pin ends
+  up bumped to is an orchestrator decision made outside this task (a
+  merge conflict on the pin line, resolved toward the release branch
+  that ships the feature), not necessarily 0.8.0.
+
+  HIGH (false "strict superset" premise, tests): see the round-2
+  correction inserted directly above this entry for the full technical
+  reason (okf-kit's frontmatter-`sources`-based basename disambiguation
+  falls through to `unresolved-ambiguous`, which skips `anchor-required`
+  entirely, when a repo-wide basename search is itself ambiguous). The
+  dropped "has zero unanchored citations into SKILL.md, an agent
+  template, models.ts, src/*.ts, a test file, or an assets/templates/
+  *.md or agents-md-section.md run template" assertion is restored
+  verbatim (the `missing` array and its `it(...)`), with the comment
+  above the `describe` block corrected to explain the real (narrower)
+  strictness gap instead of the false superset claim. Mutation probe M1
+  (an unanchored `SKILL.md:10` appended to `install-fence-mechanics.md`,
+  whose own frontmatter `sources` does not list SKILL.md; reverted
+  after): the restored local assertion fails --
+  `AssertionError: install-fence-mechanics.md: SKILL.md:10: expected [
+  Array(1) ] to deeply equal []` -- while `okf-kit check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md
+  packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+  packages/orchestrator-workflow/INSTALL-AGENT.md` reports the citation
+  as `` `SKILL.md:10`: ambiguous target, not evaluated
+  [unresolved-ambiguous] `` (candidates: `packages/github-api-tool/
+  SKILL.md`, `packages/orchestrator-workflow/assets/skill/SKILL.md`) and
+  0 anchor-family findings for it -- exactly the "silently exempt, not
+  covered" gap the restored assertion exists to close. `git status
+  --short` clean before and after.
+
+  MEDIUM (last-line vs last-content-line, correctness): the local
+  "every string anchor's text occurs on the last line of its own cited
+  range" check used the range's literal last line, while okf-kit's own
+  `anchor-not-on-last-line` uses the last CONTENT line (skipping
+  trailing closing-boilerplate lines like `});`,
+  `packages/okf-kit/src/rules/citations-resolve.ts:464-494`). For a
+  range ending on such boilerplate the two definitions actively
+  disagree (a citation anchored correctly per one fails the other, and
+  vice versa) -- e.g. `test/init.test.ts:122-126` (`  });` on line 126),
+  not a citation this bundle currently carries but illustrative of the
+  shape. Fixed by porting okf-kit's own
+  `CLOSING_BOILERPLATE_RE`/`isContentLine`/`lastContentLineInRange`
+  logic into the test file (mirrored, not imported, so the test stays
+  free of a runtime dependency on okf-kit's source layout) and using it
+  in place of the literal last line; the test's own name and comment
+  updated to say "last content line". `npx vitest run
+  test/docs-consistency.test.ts -t "last content line"` passes against
+  the real bundle unchanged (no citation needed re-pointing: every
+  existing string anchor already sits on its true last content line).
+  The two checks this file's other assertions still add beyond okf-kit
+  (substring-not-line uniqueness, TS-AST-based straddle detection) are
+  untouched.
+
+  MEDIUM (sources-fresh STALE, correctness): `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  and `subagent-contracts-superset.md` all list
+  `test/docs-consistency.test.ts` as a frontmatter source and went STALE
+  once the prior entry's own commit changed that file without
+  re-stamping them. Each doc's citations into
+  `test/docs-consistency.test.ts` were re-verified against this round's
+  edited file: every one resolves at or before line 2386 (where this
+  round's first insertion, the ported last-content-line helper
+  functions, lands), so none of this round's edits shift any of their
+  cited line ranges -- confirmed both by this bound (no edit in this
+  round touches a line at or below the highest citation, 2024, before
+  reaching that insertion point) and by `npm test` passing 293/293 with
+  these citations' own load-bearing-anchor assertions included. No
+  re-pointing was needed; each doc's frontmatter `timestamp` was bumped
+  from `2026-08-26T23:59:00Z` to `2026-08-27T09:00:00Z` (after this
+  round's own commit time) to clear the staleness.
+
+  MEDIUM (finding-count correction): see the round-2 correction inserted
+  into the prior entry above for the base/head numbers and why the
+  prior entry's own "35" measurement missed the sources-fresh staleness
+  it had just introduced.
+
+  MEDIUM (mutation-probe discrimination, tests): the prior entry's
+  `src/init.ts` insertion probe (M2, re-run this round for the record)
+  reports the SAME count with and without `--require-anchors` --
+  `node packages/okf-kit/dist/cli.js check --json
+  packages/orchestrator-workflow/docs/okf` and the same command with
+  `--require-anchors --require-anchors-allow README.md
+  packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+  packages/orchestrator-workflow/INSTALL-AGENT.md` both report 40
+  anchor-family findings, all `anchor-not-found-in-range` (a
+  pre-existing, always-on rule, not one of the four opt-in ones) --
+  so this probe alone does not discriminate the flag's own opt-in
+  contribution. `git status --short` clean after revert. Probes for the
+  two rules that specific probe missed
+  (`anchor-not-unique-in-range`, `test-range-straddles-block`) are now
+  permanent, not one-off: the self-test fixture (HIGH above) exercises
+  both on every CI run, and mutation probe M3 above (plus the
+  straddle-only variant) confirms each is independently discriminating.
+
+  LOW (allowlist exactness, security): `--require-anchors-allow`'s
+  `matchesAllowPattern` (citations-resolve.ts) does a plain
+  `pattern === citedPath` string comparison whenever a pattern carries
+  no `*`/`?`; the prior entry's `'*README.md' '*INSTALL-AGENT.md'` globs
+  therefore also exempted any other file merely ending in those
+  basenames. Replaced with the four exact spellings this bundle's own
+  citation text actually uses: `README.md`,
+  `packages/orchestrator-workflow/README.md`, `INSTALL-AGENT.md`,
+  `packages/orchestrator-workflow/INSTALL-AGENT.md`. Measured
+  (`node packages/okf-kit/dist/cli.js check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md
+  packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+  packages/orchestrator-workflow/INSTALL-AGENT.md`): 0 `anchor-required`
+  findings (same as the glob form -- the prior entry's own "the
+  exact-string form left the two fully-qualified citations reporting
+  `anchor-required`" measurement used only `README.md INSTALL-AGENT.md`,
+  missing the two `packages/orchestrator-workflow/`-prefixed spellings,
+  not the two bare-vs-glob spellings it attributed the gap to).
+
+  LOW (maintainability, follow-up named): the allowlist still exempts
+  19 unanchored README.md/INSTALL-AGENT.md citations (measured:
+  `okf-kit check --json packages/orchestrator-workflow/docs/okf
+  --require-anchors` with no allowlist at all reports exactly 19
+  `anchor-required` findings, all on those two basenames). Named as a
+  staged follow-up in the guard step's own comment ("anchoring the 19
+  citations this allowlist currently exempts, then dropping the
+  allowlist entirely") rather than actioned here; the orchestrator
+  tracks the follow-up task.
+
+  LOW (doc direction, docs): the guard step's own comment said "see the
+  Install step below" while the Install step is the very first step in
+  this job, above the guard step -- fixed to "above". The four opt-in
+  rule names are now spelled out once, in the Install step's own
+  (trimmed) comment, so both the guard step's "named above" and the
+  Install-step backward-reference are literally correct rather than
+  pointing at a place that never actually enumerated them.
+
+  Final accounting on the committed tree after this round's fixes
+  (`npm test`, `npm run typecheck`, `npm run typecheck:test` in
+  packages/orchestrator-workflow; `node
+  packages/slop-detector/dist/cli.js check . --pack placement-slop
+  --config slop.config.yml` from the repo root; `git status --short`
+  clean before and after each measurement): 293/293 tests green (292
+  from the prior entry's drop, +1 for this round's restoration);
+  typecheck and typecheck:test clean; placement-guard clean (406 files
+  scanned, same count as the prior entry). `okf-kit check --json
+  packages/orchestrator-workflow/docs/okf` (no flag): 36 findings, all
+  `citations-resolve`, 0 `sources-fresh` (down from the corrected head
+  figure of 40: -4 STALE cleared by the re-stamp, citations-resolve
+  unchanged at 36). With `--require-anchors` and the exact four-spelling
+  allowlist: also 36 findings total, 0 of them in the anchor-family
+  filter -- matching the guard step's own "Clean, 0 anchor findings."
+  The real CI workflow YAML was not run under `act`; both the "Self-test
+  the anchor-finding filter" and "Anchor-citation guard" steps' `run:`
+  scripts were extracted verbatim from the committed YAML via a small
+  PyYAML script and executed standalone against the same built okf-kit
+  CLI, with the results reported above.
