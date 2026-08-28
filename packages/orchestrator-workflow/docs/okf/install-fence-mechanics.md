@@ -3,7 +3,7 @@ type: module
 title: Install fence mechanics
 description: How orchestrator-workflow's installer writes, fences, updates, and removes its surface in a target repo.
 tags: [installer, marker-fence, manifest, agents-md, harness-adapters, uninstall]
-timestamp: 2026-08-27T07:00:44Z
+timestamp: 2026-08-28T13:54:33Z
 sources:
   - packages/orchestrator-workflow/src/init.ts
   - packages/orchestrator-workflow/src/uninstall.ts
@@ -30,7 +30,7 @@ sources:
 - The marker-fenced `## Agentic Coding Workflow` section in `AGENTS.md`, installed unconditionally regardless of harness selection (init.ts:487-495#"// fenced section and the import line are ever touched."): Codex and opencode read `AGENTS.md` natively, Claude Code gets it via an import, so the section is always written.
 - Per selected harness (`options.harnesses`), and per role `rolesForProfile(profile)` selects for that harness (0.15.0: `full` installs `{explorer,task-slicer,implementer,reviewer}`, `minimal` installs only `{implementer,reviewer}`; since 0.21.0 `full` also installs `advisor` (`{explorer,task-slicer,implementer,reviewer,advisor}`), the fifth role added purely by extending `ROLES`/`MINIMAL_PROFILE_ROLES` in `src/models.ts`, `rolesForProfile` itself unchanged, `minimal` still filters against the same two-role `MINIMAL_PROFILE_ROLES` set, so advisor is dropped from `minimal` for free, the same way explorer/task-slicer already are; see [model-preselection.md](model-preselection.md) and the manifest's `profile` field below):
   - **claude**: `.claude/skills/orchestrator-workflow/SKILL.md` and `.claude/agents/{role}.md` for each installed role (init.ts:504-509#"composeClaudeAgent(role, options.models[role]),"), plus the `CLAUDE.md` import (init.ts:521#"ensureClaudeImport(report, join(targetDir,").
-  - **codex**: only `.agents/skills/orchestrator-workflow/SKILL.md` (init.ts:524-525#", SKILL_NAME,"). No per-role agent files are written regardless of profile; README.md:105 states Codex has no standardized project-level subagent definition, the skill instructs running the roles inline instead.
+  - **codex**: only `.agents/skills/orchestrator-workflow/SKILL.md` (init.ts:524-525#", SKILL_NAME,"). No per-role agent files are written regardless of profile; README.md:109 states Codex has no standardized project-level subagent definition, the skill instructs running the roles inline instead.
   - **opencode**: `.opencode/skills/orchestrator-workflow/SKILL.md` and `.opencode/agents/{role}.md` for each installed role (init.ts:525-537#"modelValue,").
 - `.ai/workflow/manifest.json`, written last, only when the computed desired state differs from what is recorded (init.ts:578-611#"${JSON.stringify(manifest, null, 2)}\n").
 
@@ -140,7 +140,7 @@ unexplained leftover: the note itself now says so, whenever the ledger
 confirms the file is a real leftover, though uninstall remains available
 for a fully clean removal, same as the profile-downgrade case.
 
-INSTALL-AGENT.md:46-58 documents this identical write-surface enumeration for the agent-driven manual-fallback path (used when npx/the registry is unavailable), extended since 0.19.0 with a paragraph (INSTALL-AGENT.md:60-82, since fix-round-1 also naming `--no-tiers`) stating both the tier-variant naming scheme and that the manual fallback never renders those files at all. INSTALL-AGENT.md:60-63 notes it is the `full`-profile shape, with `minimal` writing only the `implementer`/`reviewer` files, and states the install is "fully reversible" via uninstall (INSTALL-AGENT.md:77-79).
+INSTALL-AGENT.md:46-61 documents this identical write-surface enumeration for the agent-driven manual-fallback path (used when npx/the registry is unavailable), extended since 0.19.0 with a paragraph (INSTALL-AGENT.md:63-85, since fix-round-1 also naming `--no-tiers`) stating both the tier-variant naming scheme and that the manual fallback never renders those files at all. INSTALL-AGENT.md:63-66 notes it is the `full`-profile shape, with `minimal` writing only the `implementer`/`reviewer` files, and states the install is "fully reversible" via uninstall (INSTALL-AGENT.md:80-82).
 
 ## The AGENTS.md fence contract
 
@@ -160,7 +160,7 @@ Claude Code reads `CLAUDE.md`, not `AGENTS.md` (writers.ts:119-121#"* imports AG
 - No `CLAUDE.md`: created verbatim as `CLAUDE_MD_BOILERPLATE`, a heading plus "Project agent instructions live in AGENTS.md." plus the `@AGENTS.md` import line (writers.ts:117#"# CLAUDE.md\n\nProject agent instructions live in AGENTS.md.\n\n${CLAUDE_IMPORT_LINE}\n").
 - `CLAUDE.md` exists: if any line's whitespace-split tokens already include the literal `@AGENTS.md` (writers.ts:130-134#".some((line) => line.split(/\s+/).includes(CLAUDE_IMPORT_LINE));"), nothing is written, an inline mention like `"Rules: see @AGENTS.md first."` already counts (init.test.ts:247-251#"expect(claudeMd).toBe("). Otherwise a blank line plus `@AGENTS.md` is appended once (writers.ts:139-144#"${base}\n\n${CLAUDE_IMPORT_LINE}\n"); a second `init` run does not duplicate it (init.test.ts:234-244#"expect(importCount).toBe(1);").
 
-Codex and opencode need no such import, both read `AGENTS.md` natively (README.md:105-106).
+Codex and opencode need no such import, both read `AGENTS.md` natively (README.md:109-110).
 
 ## manifest.json: shape and consumers
 

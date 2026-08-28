@@ -3457,3 +3457,98 @@ findings (errors 0, warnings 13, notices 22), 0 sources-fresh; the CI
 anchor filter (anchor-* and heading-section-*) 0; the --require-anchors
 run with the four allowlisted doc spellings 0; vitest 314/314; typecheck
 and typecheck:test clean; placement-guard clean.
+
+## 2026-08-28 (agent-tasks 2c3d141c, implementer, re-point pass for the .ai/run pointer commit)
+
+Commit a2d5f85 (`design/ow-run-pointer-binding`, agent-grounding task
+43a7ef58) added the per-worktree `.ai/run` pointer and the keyed
+`run-base[<repo-basename>]` marker: SKILL.md's Run state gained a pointer
+paragraph (84-92) and an extended run-base paragraph (94 -> 104-113),
+step 1 gained a pointer sentence (123-124), and all three Harness notes
+bullets gained a trailing pointer sentence (466-467, 469-470, 473-474);
+agents-md-section.md's Run state gained one bullet (158-160); 00-goal.md
+gained the keyed placeholder line at line 4; README.md and INSTALL-AGENT.md
+each gained a `.gitignore` paragraph; and both test/template-markers.test.ts
+(a new describe-internal block, 4 new `it`s) and test/docs-consistency.test.ts
+(a new `describe` block, 8 `it`s) gained coverage. The CHANGELOG's own
+[Unreleased] entry for that commit said re-pointing `docs/okf/*.md` anchors
+was left to a follow-up; this task does that re-pointing in the same PR
+instead, rather than shipping a second commit's worth of drift.
+
+Re-pointing method: `git diff 9740c71..a2d5f85 -- <file>` per changed
+source plus a `difflib.SequenceMatcher` line-mapping script (old line ->
+new line, keyed by "equal" vs "replace"/"insert" opcodes) gave the exact
+old-line -> new-line map for SKILL.md, agents-md-section.md, 00-goal.md,
+README.md, INSTALL-AGENT.md, template-markers.test.ts, and
+docs-consistency.test.ts; every re-pointed citation's new range was then
+read back and diffed against the old range's content to confirm the cited
+text itself did not change (only shifted), before the anchor text was kept
+verbatim. Citations into files a2d5f85 did not touch (05-review-findings.md,
+06-handoff.md, agents/*.md, src/**, CHANGELOG.md) were left alone.
+
+Re-pointed citation lines by doc (counted mechanically as the number of
+removed diff lines carrying an old `<file>:<range>` for a changed source,
+so one line touching two sub-ranges of the same source counts once here):
+subagent-contracts-superset.md 48 (32 SKILL.md-prefixed + 16
+docs-consistency.test.ts-prefixed), review-gate-and-waivers.md 22 (19
+SKILL.md, 2 docs-consistency.test.ts, 1 template-markers.test.ts;
+agents-md-section.md citations in this doc all sat below a2d5f85's
+insertion point and needed no change), model-preselection.md 13 (5
+README.md, 6 INSTALL-AGENT.md, 1 agents-md-section.md, 1
+docs-consistency.test.ts), install-fence-mechanics.md 6 (2 README.md, 4
+INSTALL-AGENT.md), run-state-lifecycle-and-markers.md at least 14 (12
+SKILL.md-prefixed lines across the run-base and Knowledge Bundle sections,
+plus the template-markers.test.ts and INSTALL-AGENT.md combined-range
+lines), plus the "Gotcha" and "Where the shapes are pinned" wording fixes
+and the new pointer/keyed-marker section's own citations (12 new ones, all
+into the changed sources). Citations whose cited range sat entirely before
+a2d5f85's first insertion point in a given source (for example most
+SKILL.md citations under old line 84, or any docs-consistency.test.ts
+citation under old line 360) needed no change and were left untouched,
+confirmed per-citation by the line-mapping script rather than assumed from
+proximity.
+
+A new section, "The `.ai/run` pointer and keyed `run-base[<repo-basename>]`
+markers (0.26.0-unreleased)", was added to run-state-lifecycle-and-markers.md
+between the existing run-base section and the verdict-markers section: the
+pointer's location and fail-closed resolution order, the keyed marker's
+grammar and its placeholder-line convention, that the unkeyed marker stays
+the single-repo path and fallback, and which of the new
+template-markers.test.ts/docs-consistency.test.ts tests pin what, each with
+a string-anchored citation chosen to avoid the anchor-collision and
+test-block-straddle guards (an anchor inside a repeated `expect(...)`
+pattern, or a citation range crossing an `it()` boundary from outside any
+enclosing block, both fail those guards; several draft anchors were
+rejected this way before landing on ones unique to their own cited range
+and to the target file as a whole). The doc's "Gotcha for anyone grepping
+`solution-acceptance:`" section and its "Where the shapes are pinned"
+section were both updated to state precisely that there are still three
+`solution-acceptance:` marker KEYS, with the new keyed line being a fourth
+LINE in the `run-base` key's family, not a fourth key. The frontmatter
+gained `agents-md-section.md` as a source (already cited, previously
+missing from the list) and the description/tags were extended to mention
+the pointer and the keyed marker. `docs/okf/index.md`'s one-line summary of
+the run-state module was extended with the same since-0.26.0-unreleased
+note.
+
+`npx vitest run test/docs-consistency.test.ts` was red before any doc edit
+(3 failing tests: last-content-line anchor, anchor-occurs-once-in-range,
+and the *.test.ts block-straddle check) and green (197/197) after all
+re-points above; `npm test` 327/327; `npm run typecheck:test` clean.
+
+`CHANGELOG.md`'s [Unreleased] entry for a2d5f85 had its trailing
+"re-pointing... is left to a follow-up task" sentence replaced with a
+sentence stating the re-point happened in the same PR and naming the new
+run-state-lifecycle-and-markers.md section; nothing else in that entry
+changed.
+
+Measured on the committed tree after this commit (`packages/okf-kit`
+0.8.0 `--require-anchors` with the CI allowlist for README.md/
+INSTALL-AGENT.md bare ranges, mirroring the `okf-anchor-guard` CI job):
+anchor findings 0, sources-fresh 0, errors 0. Baseline on the committed
+tree immediately before this task (parent commit a2d5f85, before any doc
+edit) was also anchor 0 / sources-fresh 0 / errors 0 / warnings 13 /
+notices 22 (that baseline predates the re-point and does not reflect the
+tests that were red at the time; okf-kit's own check does not run the
+in-repo vitest guards). Post-commit totals and any warnings/notices delta
+are recorded in the operator handoff for this task.

@@ -39,9 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   individually, the agents-md-section bullet, and the README/INSTALL-AGENT
   gitignore notes). Anchors in `docs/okf/*.md` that cite line ranges in
   `SKILL.md`, `test/docs-consistency.test.ts`, and
-  `test/template-markers.test.ts` now drift out of range because of the
-  line shifts this change introduces; re-pointing those anchors is left to
-  a follow-up task.
+  `test/template-markers.test.ts` drifted out of range because of the line
+  shifts this change introduces; those anchors were re-pointed in the same
+  PR, and `run-state-lifecycle-and-markers.md` gained a section documenting
+  the pointer and the keyed marker.
 
 ## [0.25.0] - 2026-08-27
 

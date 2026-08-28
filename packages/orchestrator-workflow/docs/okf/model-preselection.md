@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-08-27T23:59:00Z
+timestamp: 2026-08-28T13:54:33Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -35,7 +35,7 @@ for how `--profile` scopes which roles get an actual subagent file — since
 (`src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
 
 Defaults (`src/models.ts:80-85#"advisor:"`, documented in
-`README.md:182-188`):
+`README.md:186-192`):
 
 | Role | Default | Rationale (README) |
 |---|---|---|
@@ -142,7 +142,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`README.md:206-209`,
+  must be passed as fully-qualified `--models` entries (`README.md:210-213`,
   confirmed by `test/init.test.ts:514-537#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:1896-1904#"${role}.md must not contain model:"`,
@@ -156,7 +156,7 @@ below.
   `codex` harness (`src/init.ts:524-525#", SKILL_NAME,"`); there is no `model:` surface for
   Codex because "there is no standardized project-level subagent
   definition" and the skill instructs running roles inline instead
-  (`README.md:105`), regardless of `--profile` — Codex has no per-role
+  (`README.md:109`), regardless of `--profile` — Codex has no per-role
   files to select from either way. `--tiers`/`--no-tiers` follow the same
   rule for the same reason: Codex gets no tier-variant files either, since
   it never gets a per-role file to render a variant of.
@@ -375,7 +375,7 @@ roles get no effort field at all, matching the pre-0.22.0 byte shape on
 that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `README.md`'s "Effort tiers" section gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`README.md:220-235`), and the CHANGELOG
+paragraph stating the same rule (`README.md:224-239`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. `agents-md-section.md`'s
 Scaling delegation bullet list gained a dedicated bullet (deliberately
@@ -497,15 +497,15 @@ hand: step 2 tells the agent to *ask* the operator for harnesses, the role
 profile, per-role models, and (since 0.19.0) whether to render tier
 variants, rather than guess, suggesting the same defaults and skipping the
 model question for a role the chosen profile does not install
-(`INSTALL-AGENT.md:23-30, 94-108`); step 4's manual fallback spells out
+(`INSTALL-AGENT.md:23-30, 97-111`); step 4's manual fallback spells out
 byte-precise placement (`model:` line directly after `description:` for
 Claude Code, scoped to `.claude/agents/<role>.md` for each role in the
-chosen profile, `INSTALL-AGENT.md:144-153`; conditional `model:` line only
-for fully-qualified opencode ids, `INSTALL-AGENT.md:155-181`) and an example
+chosen profile, `INSTALL-AGENT.md:150-159`; conditional `model:` line only
+for fully-qualified opencode ids, `INSTALL-AGENT.md:161-187`) and an example
 `manifest.json` shape carrying the `profile` and (since 0.19.0) `tiers`
 fields and keyed by all five roles under `full` since 0.21.0 (was four)
-(`INSTALL-AGENT.md:199-221`; under `minimal`, `models` only needs the
-`implementer` and `reviewer` keys, `INSTALL-AGENT.md:223-227`). That same
+(`INSTALL-AGENT.md:205-227`; under `minimal`, `models` only needs the
+`implementer` and `reviewer` keys, `INSTALL-AGENT.md:229-233`). That same
 step 4 states explicitly that the manual path never renders tier-variant
 files regardless of what the operator asked for. Since fix-round-1 (review
 finding L3) this is framed as an installer-scope decision — composing
@@ -514,17 +514,17 @@ implement — rather than attributed to the missing live `opencode models`
 catalog: the original wording blamed the catalog, but Claude Code's
 tier-variant composition needs no catalog at all, so the catalog gap only
 ever explained the opencode half of the omission
-(`INSTALL-AGENT.md:129-134`).
+(`INSTALL-AGENT.md:132-137`).
 
 ## Orchestrator-runs-on-session-model policy
 
 The installed `AGENTS.md` policy section carries a `### Models` subsection
-verbatim (`assets/agents-md-section.md:163-165#"harness supports per-agent models, in the subagent definitions themselves."`): "The orchestrator runs on
+verbatim (`assets/agents-md-section.md:166-168#"harness supports per-agent models, in the subagent definitions themselves."`): "The orchestrator runs on
 the session's main model. Use the strongest reasoning model available,"
 plus "Per-role model preferences ... are recorded in
 `.ai/workflow/manifest.json` and, where the harness supports per-agent
 models, in the subagent definitions themselves." README states the same
-rule at `README.md:172-174`.
+rule at `README.md:176-178`.
 
 ## Docs-consistency pins (model-specific)
 
@@ -579,7 +579,7 @@ claim fails a targeted assertion instead of only showing up as an
 unguarded prose diff.
 
 Since 0.22.0, a fourth, site-specific `describe`
-(`test/docs-consistency.test.ts:1977-2122#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
+(`test/docs-consistency.test.ts:2080-2225#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
 policy in `agents-md-section.md`'s Scaling delegation bullet list and
 `SKILL.md` step 6: a derivation-based check (not a hand-maintained role
 list, the same discipline the 0.20.0 tier-selection-policy guard above
