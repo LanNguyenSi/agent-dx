@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { runInit } from "../src/init.js";
+import { runInit, readInstalledManifest } from "../src/init.js";
 import {
   DEFAULT_MODELS,
   DEFAULT_TIER,
@@ -1998,7 +1998,7 @@ describe("repo kit-version pin (operator apply support)", () => {
   const sha256Of = (content: string): string =>
     createHash("sha256").update(content, "utf8").digest("hex");
 
-  it("a caller that never sets options.pin (fresh install) records no pin key, byte-identical to today", () => {
+  it("a caller that never sets options.pin (fresh install) records no pin key", () => {
     const report = runInit(defaultOptions());
     const manifest = JSON.parse(
       readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
@@ -2065,6 +2065,90 @@ describe("repo kit-version pin (operator apply support)", () => {
     manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     expect("pin" in manifest).toBe(false);
     expect(fifthReport.updated).toContain(manifestPath);
+
+    // A sixth call with pin: null again is a byte-for-byte no-op: there is
+    // no pin to clear, so nothing about the manifest (or any other file)
+    // should change, and it stays in `report.skipped`.
+    const sixthBefore = snapshot(target);
+    const sixthReport = runInit({ ...defaultOptions(), pin: null });
+    const sixthAfter = snapshot(target);
+    expect([...sixthAfter.keys()].sort()).toEqual(
+      [...sixthBefore.keys()].sort(),
+    );
+    for (const [path, content] of sixthAfter) {
+      expect(content, path).toBe(sixthBefore.get(path));
+    }
+    expect(sixthReport.updated).toEqual([]);
+    expect(sixthReport.skipped).toContain(manifestPath);
+
+    // A seventh call omitting `pin` entirely must not resurrect a `pin` key:
+    // there is no previous pin to carry forward (it was cleared above), so
+    // the manifest stays exactly as it is, another byte-for-byte no-op.
+    const seventhReport = runInit(defaultOptions());
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect("pin" in manifest).toBe(false);
+    expect(seventhReport.updated).toEqual([]);
+    expect(seventhReport.skipped).toContain(manifestPath);
+  });
+
+  it("normalizes an empty or whitespace-only pin to a clear, the same as null", () => {
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+
+    runInit({ ...defaultOptions(), pin: "0.24.0" });
+    let manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.pin).toBe("0.24.0");
+
+    // An empty string clears the pin, the same as `pin: null`.
+    const emptyReport = runInit({ ...defaultOptions(), pin: "" });
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect("pin" in manifest).toBe(false);
+    expect(emptyReport.updated).toContain(manifestPath);
+
+    // Re-set it, then clear it again with a whitespace-only string.
+    runInit({ ...defaultOptions(), pin: "0.24.0" });
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.pin).toBe("0.24.0");
+
+    const whitespaceReport = runInit({ ...defaultOptions(), pin: "   " });
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect("pin" in manifest).toBe(false);
+    expect(whitespaceReport.updated).toContain(manifestPath);
+  });
+
+  it("trims surrounding whitespace off a pin on write and on read", () => {
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    runInit({ ...defaultOptions(), pin: " 0.24.0 " });
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.pin).toBe("0.24.0");
+
+    // A padded value written by hand is read back trimmed, so a consumer
+    // that goes through readInstalledManifest sees the clean value (the raw
+    // file keeps the padded bytes until the next rewrite).
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify({ ...manifest, pin: "  0.25.0\t" }, null, 2)}\n`,
+    );
+    expect(readInstalledManifest(target)?.pin).toBe("0.25.0");
+  });
+
+  it("keeps a padded on-disk pin stable across an omitted-pin re-run and treats an identical re-set as a no-op", () => {
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    runInit({ ...defaultOptions(), pin: "0.24.0" });
+    // Re-setting the same pin is a byte-for-byte no-op.
+    const same = runInit({ ...defaultOptions(), pin: "0.24.0" });
+    expect(same.skipped).toContain(manifestPath);
+    expect(same.updated).toEqual([]);
+
+    // A padded value written by hand reads back trimmed and an
+    // omitted-pin run neither rewrites nor resurrects anything.
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify({ ...manifest, pin: " 0.24.0 " }, null, 2)}\n`,
+    );
+    const omitted = runInit(defaultOptions());
+    expect(omitted.skipped).toContain(manifestPath);
+    expect(readInstalledManifest(target)?.pin).toBe("0.24.0");
   });
 
   it("degrades a hand-written manifest with a non-string pin to no recorded pin, without crashing", () => {
@@ -2099,6 +2183,40 @@ describe("repo kit-version pin (operator apply support)", () => {
     writeFileSync(templatePath, oldContent);
     after.files[templateRel] = sha256Of(oldContent);
     after.pin = { not: "a string" };
+    writeFileSync(manifestPath, `${JSON.stringify(after, null, 2)}\n`);
+    const secondReport = runInit(defaultOptions());
+    expect(secondReport.conflicted).toEqual([]);
+    const finalManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect("pin" in finalManifest).toBe(false);
+  });
+
+  it("degrades a hand-written manifest with an empty or whitespace-only stored pin to no recorded pin", () => {
+    runInit(defaultOptions());
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    const templateRel = join(".ai", "workflow", "templates", "00-goal.md");
+    const templatePath = join(target, templateRel);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+    // Force the manifest to actually be rewritten on the run below (same
+    // hash-ledger-forcing technique as the malformed-pin test above) so the
+    // written `pin` value is observable on disk rather than possibly masked
+    // by a no-op.
+    const oldContent = "# Goal (older kit version)\n";
+    writeFileSync(templatePath, oldContent);
+    manifest.files[templateRel] = sha256Of(oldContent);
+    manifest.pin = "";
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const report = runInit(defaultOptions());
+    expect(report.conflicted).toEqual([]);
+    expect(report.updated).toContain(templatePath);
+    const after = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect("pin" in after).toBe(false);
+
+    // Same for a whitespace-only stored pin.
+    writeFileSync(templatePath, oldContent);
+    after.files[templateRel] = sha256Of(oldContent);
+    after.pin = "   ";
     writeFileSync(manifestPath, `${JSON.stringify(after, null, 2)}\n`);
     const secondReport = runInit(defaultOptions());
     expect(secondReport.conflicted).toEqual([]);

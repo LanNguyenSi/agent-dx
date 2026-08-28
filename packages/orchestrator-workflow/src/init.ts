@@ -73,7 +73,8 @@ export interface InitOptions {
    * so a later `apply` command can gate on it. A `string` sets a new
    * recorded kit-version pin; `null` clears an existing pin; `undefined`
    * (the default, omitted) carries the previous manifest's pin forward
-   * unchanged.
+   * unchanged. An empty or whitespace-only string is normalized to a clear
+   * too, the same as `null`.
    */
   pin?: string | null;
 }
@@ -185,7 +186,10 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
 
   // A hand-written or damaged manifest may carry a non-string `pin`; that
   // degrades to "no recorded pin" here (the same per-field-degradation
-  // style as `profile`/`tiers` above) rather than throwing.
+  // style as `profile`/`tiers` above) rather than throwing. An empty or
+  // whitespace-only stored `pin` degrades the same way: it can never
+  // usefully name a kit version to gate on, so it is dropped rather than
+  // carried forward as a value nothing can act on.
   return {
     kit: SKILL_NAME,
     version: typeof candidate.version === "string" ? candidate.version : "",
@@ -196,7 +200,12 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     files,
     installedAt:
       typeof candidate.installedAt === "string" ? candidate.installedAt : "",
-    ...(typeof candidate.pin === "string" ? { pin: candidate.pin } : {}),
+    // The kit-version pin is deliberately free-form here: unlike the
+    // fields above it never reaches generated frontmatter, a shell, or a
+    // path, and the command that gates on it validates the value itself.
+    ...(typeof candidate.pin === "string" && candidate.pin.trim() !== ""
+      ? { pin: candidate.pin.trim() }
+      : {}),
   };
 }
 
@@ -393,8 +402,19 @@ export function runInit(options: InitOptions): Report {
 
   const previous = readInstalledManifest(targetDir);
   // `null` clears an existing pin, a string sets a new one, and omitted
-  // (`undefined`) carries the previous manifest's pin forward unchanged.
-  const pin = options.pin === null ? undefined : (options.pin ?? previous?.pin);
+  // (`undefined`) carries the previous manifest's pin forward unchanged. An
+  // empty or whitespace-only string is normalized to a clear as well: it can
+  // never usefully name a kit version to gate on, so treating it as a
+  // sticky value would let a stray empty input linger unnoticed instead of
+  // clearing the pin the caller most likely meant.
+  const normalizedPin =
+    typeof options.pin === "string"
+      ? options.pin.trim() === ""
+        ? null
+        : options.pin.trim()
+      : options.pin;
+  const pin =
+    normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);
   const installedFiles: Record<string, string> = {};
 
   // Both leftover-note loops below are ledger-driven, not enumeration-
