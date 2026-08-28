@@ -4474,3 +4474,199 @@ until the next rewrite.
   carries, since `okf-kit` disambiguates a bare `file.ts:line` citation
   against every package in this monorepo and several share filenames like
   `cli.ts`/`init.ts`/`SKILL.md`).
+
+- 2026-08-28 (fix-round-3, review round 2, H1 repeated + M2-M4 + L5-L10):
+  closed the operator-manifest lost-update class structurally instead of
+  patching another call site: `operator-manifest.ts` gained
+  `updateOperatorManifest(home, mutate, options)`, the single locked
+  read-modify-write entry point every write now goes through. The raw
+  writer (previously exported `writeOperatorManifest`) was renamed to
+  `writeOperatorManifestUnlocked` and stopped being exported at all, so
+  nothing outside this module (production or test) can reach the manifest
+  file without going through the lock. `setup` (cli.ts) was the actual H1
+  repeat: it read the manifest unlocked, ran its prompts, and wrote
+  `{...existing, ...newDefaults}` straight back with no lock at all,
+  discarding any registration `apply` made in the same window; it now
+  calls `updateOperatorManifest` with a mutate that merges only the newly
+  computed defaults onto the manifest re-read *inside* the lock
+  (`current`), so `current.targets`/`current.createdAt` (not `existing`'s)
+  survive into the write. `apply`'s own registration step was ported onto
+  the same entry point in place of its previous direct
+  `withOperatorManifestLock`+`upsertOperatorTarget`+raw-writer sequence.
+
+  Lock hardening (M2, L9): the lock directory now carries an owner file
+  (a random per-acquisition token written right after `mkdirSync`
+  succeeds); `finally` only removes the directory if that token still
+  matches, so a lock a stale-reclaim has since handed to another process
+  is never torn out from under it. Stale-lock reclaim itself is now
+  `renameSync(lockPath, <lockPath>.<token>.stale)` then a removal of the
+  renamed copy, rather than a bare `rmdirSync`: `renameSync` on the same
+  filesystem is atomic, so of two waiters racing to reclaim the same
+  stale-looking directory at most one rename can succeed, and the loser's
+  own attempt throws instead of also entering the critical section.
+  Staleness is now re-checked on every failed acquire attempt rather than
+  once per call (L9): the previous once-per-call gate meant a caller that
+  started 0-20s after a killed holder, with the old 10s timeout under the
+  30s stale threshold, could time out before ever seeing the lock age past
+  `staleMs`. The default timeout moved from 10s to 40s
+  (`DEFAULT_LOCK_TIMEOUT_MS`), now above the unchanged 30s
+  `DEFAULT_LOCK_STALE_MS` (M4: previously unpinned by any test, so
+  `DEFAULT_LOCK_STALE_MS = 0` still passed the full suite); both, plus
+  `DEFAULT_LOCK_POLL_MS`, are now exported and pinned by a dedicated test.
+
+  The staleness check (`lockAgeMs`) and the reclaim `renameSync` are two
+  separate syscalls, not one atomic operation together; the two-waiter test
+  below caught this directly: it passed reliably run in isolation but
+  failed once (1 run out of several) inside a full `npm test` pass under
+  the heavier process contention that many parallel spawned child
+  processes create. The failure mode: process A finishes an entire fresh
+  reclaim (rename the stale directory away, remove it, `mkdirSync` a new
+  one, write its own owner token) inside the gap between process B's
+  `lockAgeMs` read (still showing the old, genuinely-stale mtime) and B's
+  own `renameSync` call, so B's rename relocates A's brand-new, actively-
+  held lock rather than the abandoned one B inspected, and both A and B
+  end up running their critical sections at once. Fixed by re-checking age
+  a second time on the renamed copy immediately after the rename succeeds:
+  only the caller that just renamed it can observe that path, so this
+  second read is itself race-free, and a lock that was actually fresh at
+  rename time still reads as fresh there (rename does not touch mtime on
+  POSIX). A copy that turns out fresh is handed back (renamed to
+  `lockPath` again) instead of destroyed, so a real owner caught mid-
+  reclaim is left running undisturbed; the residual case where a third,
+  unrelated acquisition lands in the brief hand-back gap itself (so there
+  is nothing left to hand the copy back to) is accepted, since that
+  owner's own eventual release already no-ops safely on a missing owner
+  file. Re-run after the fix: the same two-waiter test, plus the full
+  suite, 8/8 clean runs of `npm test` in a row, then 5/5 more of the same
+  two test files run together under artificial CPU load (8 concurrent
+  `yes > /dev/null` processes) to specifically try to reproduce the
+  original timing window; no further failures observed.
+
+  L6/L7: `upsertOperatorTarget` now returns `{ manifest, alreadyRegistered
+  }` instead of a bare manifest, computed once via the same `safeRealpath`
+  comparison its own dedupe already used, rather than `apply` (cli.ts)
+  separately recomputing `alreadyRegistered` via raw string equality
+  against `t.path` (L6's inconsistency: the dedupe compared realpaths, the
+  already-registered flag did not). `safeRealpath` (previously
+  module-private) is now exported and is what both `upsertOperatorTarget`
+  internally, and `apply`'s own resolved-path-for-printing, call; `apply`'s
+  own duplicate copy (`safeRealpathForApply`) is deleted (L7). The upsert's
+  own target-path resolution switched from a bare `realpathSync` to
+  `safeRealpath` too, so a target deleted between install and the locked
+  registration step no longer dies on a bare `ENOENT` after a successful
+  install (L7's other half); the update branch also now rewrites a stored
+  non-realpath `path` to the realpath, so a hand-edited or
+  pre-normalization entry self-heals on its next apply instead of needing
+  `safeRealpath` on every future comparison against it.
+
+  L8: the mid-lock "manifest not ok" message for an unreadable manifest
+  reused the pre-install check's wording verbatim ("back it up and repair
+  it... run `setup` again"), which is wrong once the kit install itself
+  already succeeded and only the registry write failed. Extracted into an
+  exported `applyRegistrationFailureMessage(manifestKind, manifestPath,
+  targetDir)` (operator-manifest.ts) so the wording is unit-testable
+  without spawning the CLI: the unreadable case now says the kit was
+  installed into `targetDir` and only registration could not complete; the
+  absent ("gone mid-lock") case keeps its own already-distinct wording. The
+  *pre-install* unreadable check (before any install work runs, cli.ts's
+  top-of-`apply` `operatorManifestState` read) is untouched and still says
+  the old thing, correctly, since no install happened in that path.
+
+  L5: `testHoldForConcurrencyProbe` (the `ORCHESTRATOR_WORKFLOW_TEST_HOLD_MS`
+  production hook, unused since fix-round-2's own mutation probe did not
+  end up needing it) is deleted, along with the `ApplyRegistration` type
+  and `safeRealpathForApply` it sat next to.
+
+  L10: the "concurrent applies against the same operator home" describe
+  block's ~40-line review-round narrative comment was trimmed to what the
+  two tests underneath it actually assert, plus a one-line pointer to this
+  file for the fix-round history.
+
+  Tests added: `operator-manifest.test.ts` gained a `DEFAULT_LOCK_*`
+  constants-pinned test; two owner-token tests (a fresh token per
+  acquisition; `finally` leaving a lock alone once another process's token
+  has taken it over); a staleness-re-evaluated-per-attempt test; a
+  `withOperatorManifestLock: two real waiters on a stale lock` describe
+  block (two child processes, spawned via `tsx` against a hand-written temp
+  probe script, both racing a lock directory seeded 61s old, asserting
+  their held intervals never overlap, repeated 5 times); an
+  `updateOperatorManifest` describe block (creates when absent; mutate
+  returning `undefined` writes nothing; mutate sees the re-read-inside-the-
+  lock manifest rather than a caller's earlier read; `state` distinguishes
+  unreadable from absent while both hand `current: undefined`; a
+  concurrent-calls-don't-lose-updates test); an
+  `applyRegistrationFailureMessage` describe block (both wordings, unit
+  level); a `safeRealpath` describe block; and `upsertOperatorTarget`
+  additions (reports `alreadyRegistered`; does not throw when the target
+  itself no longer exists; normalizes a stored non-realpath path on
+  update). `apply.test.ts` gained: a whitespace-only `--pin "   "` test
+  (M3: the existing "--pin trims..." test only exercises `init.ts`'s own
+  trim, since `init.ts` trims regardless of what `apply` already trimmed,
+  so it never touched apply's own all-whitespace-rejects-to-empty branch);
+  a symlink-stored-path-normalized-plus-"Refreshed" test; and, in the
+  concurrent-applies describe block, a `setup` running concurrently with
+  `apply` test (H1's own regression test: registers target A via `apply`,
+  then races a `setup --profile minimal` against a second `apply`
+  registering target B, asserting both targets and the new default survive,
+  across 5 iterations). `setup.test.ts` was not touched, per this round's
+  own constraint that setup's pinned CLI-visible behavior stay exactly as
+  its existing tests describe it; all 9 of its tests stayed green
+  throughout.
+
+  Measured: `npm test` (`vitest run`) 440/440 green (up from fix-round-2's
+  421, all additions accounted for above); `npm run typecheck` and
+  `npm run typecheck:test` clean; `npm run format` run first (reformatted
+  only `operator-manifest.ts` and `operator-manifest.test.ts`, confirmed by
+  re-running typecheck and the full suite immediately after with no
+  behavior change), then `npm run format:check` clean. From the repository
+  root: `node scripts/check-cli-flag-order.mjs` clean.
+
+  Mutation probes (each applied to a byte-for-byte-verified-restorable copy,
+  restored and re-verified via `npx tsc --noEmit` on both tsconfigs plus a
+  clean full-suite run before the commit that ships this round):
+  (a) reverted `setup`'s write to the pre-fix pattern (unlocked, against the
+  stale pre-lock `existing` read): the new "setup running concurrently with
+  apply" test failed on its first of 5 iterations in 5/5 separate runs
+  (5/5, not merely "at least once in 5").
+  (b) removed the owner-token check from `withOperatorManifestLock`'s
+  `finally` (always `rmSync` regardless of current ownership): the new
+  "does not remove the lock directory... if another process's owner token
+  has since taken it over" unit test failed (1/51 operator-manifest tests
+  failing, the rest, including the two-waiter race test, still passed,
+  since that race's timing does not reliably hit this specific gap; the
+  dedicated unit test is what discriminates it reliably).
+  (c) set `DEFAULT_LOCK_STALE_MS` to `0`: the new defaults-pinned test
+  failed (`expected +0 to be 30000`).
+  (d) let a whitespace-only `--pin` value through (dropped the `trimmed ===
+  ""` half of the guard, kept only the internal-whitespace check): the new
+  whitespace-only-`--pin` test failed (`expected +0 to be 2`, i.e. exit 0
+  instead of the usage-error exit 2).
+
+  `cli.ts` citation delta: the `operator-manifest.js` import block dropped
+  `withOperatorManifestLock`+`writeOperatorManifest` and added
+  `applyRegistrationFailureMessage`+`safeRealpath`+`updateOperatorManifest`,
+  netting +1 line over fix-round-2's 8-name/10-line block, which shifted
+  every later line in the file by +1. Checked directly against the current
+  file content (not assumed from the +1 offset alone): both of fix-round-2's
+  `cli.ts` lines 136 to 138 citations (install-fence-mechanics.md,
+  model-preselection.md; the `--no-tiers` option description) and the one
+  `cli.ts` lines 181 to 182 citation (install-fence-mechanics.md; the
+  "Found existing install" `console.log`) moved to `cli.ts` lines 137-139
+  and `cli.ts` lines 182-183 respectively, same string anchors, anchor text
+  unchanged. A grep of every `cli.ts:` citation in both docs (string-
+  anchored and bare-line forms) confirmed these two were the only ones. The
+  much larger rewrite of `setup`'s and `apply`'s registration blocks
+  themselves needed no citation re-point: neither doc cites into either
+  region. Both docs were re-stamped anyway for the moves above.
+  `operator-manifest.ts` again carries no `sources:` entry in either doc,
+  so its own much larger set of changes needed no re-stamp on that account.
+
+  From the repository root: `npx -y okf-kit@0.8.0 check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md packages/orchestrator-workflow/README.md
+  INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md`: 0
+  errors (CI-gating) and 0 stale findings; 35 warning/notice findings
+  (13 warnings, 22 notices), byte-identical in count and content to the
+  pre-edit baseline re-run for comparison, all pre-existing and unrelated
+  to this round's edit (the same `log.md` ambiguous-citation notice class
+  fix-round-1's and fix-round-2's own entries already carry).

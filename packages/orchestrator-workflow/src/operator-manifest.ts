@@ -5,7 +5,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
-  rmdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -187,16 +187,21 @@ export function readOperatorManifest(
  * guarantee this), so a reader never observes a partially written file, and
  * two concurrent writers each still write their own complete file whole,
  * rather than interleaving bytes into a shared corrupt one. This alone
- * narrows, but does not close, the operator-manifest lost-update window
- * described in `apply`'s own re-read-before-upsert comment (cli.ts): the
+ * narrows, but does not close, the operator-manifest lost-update window: the
  * remaining race is between one writer's fresh read and its rename, not
- * within the write itself. Closing that race is {@link
- * withOperatorManifestLock}'s job, not this function's: a call site whose
- * read-modify-write sequence must not interleave with another process's
- * (`apply`'s registration step is the one this module knows about today)
- * should wrap the whole read, update, and this write inside it.
+ * within the write itself.
+ *
+ * Deliberately **not exported**. Closing that remaining race is {@link
+ * updateOperatorManifest}'s job, not this function's: every read-modify-
+ * write sequence against the operator manifest (`setup`'s and `apply`'s
+ * registration step, both in cli.ts) must go through that single locked
+ * entry point instead of calling this raw writer directly, so no command
+ * can bypass the lock. This function stays around only as the primitive
+ * `updateOperatorManifest` builds on; even this module's own tests exercise
+ * writes through `updateOperatorManifest` rather than calling this directly,
+ * so no test accidentally models a call path production code no longer has.
  */
-export function writeOperatorManifest(
+function writeOperatorManifestUnlocked(
   home: string,
   manifest: OperatorManifest,
 ): void {
@@ -211,9 +216,20 @@ export function writeOperatorManifest(
 }
 
 const OPERATOR_MANIFEST_LOCK_DIRNAME = ".manifest.lock";
-const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
-const DEFAULT_LOCK_STALE_MS = 30_000;
-const DEFAULT_LOCK_POLL_MS = 20;
+const OPERATOR_MANIFEST_LOCK_OWNER_FILENAME = "owner";
+
+/** Default lock-acquire timeout, in milliseconds. Deliberately kept above
+ * {@link DEFAULT_LOCK_STALE_MS}: a caller that starts anywhere from 0ms up
+ * to `DEFAULT_LOCK_STALE_MS` after a killed holder left its lock behind
+ * must still live long enough, polling, to see that lock cross the
+ * staleness threshold and reclaim it, rather than timing out first. */
+export const DEFAULT_LOCK_TIMEOUT_MS = 40_000;
+/** Default age, in milliseconds, past which a held lock directory is
+ * treated as abandoned and reclaimed. See {@link DEFAULT_LOCK_TIMEOUT_MS}
+ * for why this must stay smaller than the timeout. */
+export const DEFAULT_LOCK_STALE_MS = 30_000;
+/** Default delay, in milliseconds, between acquire retries. */
+export const DEFAULT_LOCK_POLL_MS = 20;
 
 /** Options accepted by {@link withOperatorManifestLock}, exposed only so
  * tests can shrink the timeout/staleness/poll windows below their
@@ -266,36 +282,69 @@ function lockAgeMs(path: string): number | undefined {
   }
 }
 
+/** A fresh, unguessable per-acquisition identifier, written into the lock
+ * directory's owner file right after it is created and compared back on
+ * release, so a call only ever removes a lock directory it still actually
+ * owns (see {@link withOperatorManifestLock}'s release step). */
+function randomLockToken(): string {
+  return randomBytes(16).toString("hex");
+}
+
 /**
  * Runs `fn` while holding an advisory, same-machine lock on the operator
  * manifest at `<home>/manifest.json`, so a read-modify-write sequence
  * (read the manifest, compute an updated copy, write it back) that this
  * function wraps end to end cannot interleave with another process's own
- * read-modify-write against the same `home`. This is what closes the
- * lost-update race `writeOperatorManifest`'s own doc comment and
- * `apply`'s pre-upsert re-read describe as narrowed-but-not-closed: the
- * remaining gap those left open (between one writer's fresh read and its
- * rename) is exactly the window locking here removes, by making the
- * read-then-write a single critical section no other locked writer can
- * enter concurrently.
+ * read-modify-write against the same `home`. {@link updateOperatorManifest}
+ * is the only call site that should ever use this directly; it is what
+ * makes the locked read-modify-write the sole write path to the manifest.
  *
  * Mechanics: `mkdirSync(<home>/.manifest.lock)` is used as the mutex,
  * since directory creation is atomic on every filesystem Node targets
  * (POSIX `mkdir(2)`, Windows `CreateDirectory`): a second, concurrent
  * `mkdirSync` call for the same path fails with `EEXIST` rather than
  * silently succeeding, exactly the primitive a mutual-exclusion lock
- * needs. A caller that finds the lock held retries with a short
- * synchronous sleep (`sleepSync`, `Atomics.wait` on a throwaway
- * `SharedArrayBuffer`, not a CPU-spinning busy loop) until either it
- * acquires the lock or `timeoutMs` (default 10s) elapses, in which case
- * it throws {@link OperatorManifestLockTimeoutError} without ever calling
- * `fn`. A lock directory older than `staleMs` (default 30s, checked via
- * its mtime) is treated as abandoned, most likely left behind by a
- * process that crashed or was killed between acquiring and releasing it
- * (the `finally` below is what normally removes it): it is removed and
- * acquisition is retried exactly once per call, so a genuinely
- * long-running holder is not repeatedly evicted by every waiter racing
- * to reclaim the same stale-looking directory.
+ * needs. Right after `mkdirSync` succeeds, a fresh random token is written
+ * to `<lockPath>/owner`: this is the lock's owner identity, and it is what
+ * makes both the stale-lock reclaim below and the release in `finally`
+ * safe under contention (see each for why).
+ *
+ * A caller that finds the lock held retries with a short synchronous sleep
+ * (`sleepSync`, `Atomics.wait` on a throwaway `SharedArrayBuffer`, not a
+ * CPU-spinning busy loop) until either it acquires the lock or `timeoutMs`
+ * (default {@link DEFAULT_LOCK_TIMEOUT_MS}) elapses, in which case it
+ * throws {@link OperatorManifestLockTimeoutError} without ever calling
+ * `fn`. On every failed attempt (not just the first), a lock directory
+ * older than `staleMs` (default {@link DEFAULT_LOCK_STALE_MS}, checked via
+ * its mtime) is treated as abandoned, most likely left behind by a process
+ * that crashed or was killed between acquiring and releasing it, and
+ * reclaim is attempted: `renameSync(lockPath, <lockPath>.<token>.stale)`
+ * moves it out of the way, then the renamed copy is removed. `renameSync`
+ * on a POSIX filesystem is atomic, so of any two waiters racing to reclaim
+ * the same stale-looking directory, at most one rename can ever succeed;
+ * the loser's `renameSync` throws (the source is already gone) and it
+ * falls through to the normal retry/timeout handling instead of also
+ * entering the critical section. Re-checking staleness on every attempt
+ * (rather than once per call) is safe precisely because of that atomicity:
+ * repeating the check cannot itself cause two callers to both believe they
+ * reclaimed the same lock, it only means a caller that starts partway
+ * through another's abandoned-lock window still gets a chance to reclaim
+ * it once that window is crossed, instead of being stuck waiting out the
+ * full timeout.
+ *
+ * The staleness check and the rename are still two separate syscalls, not
+ * one atomic operation, so a second process could complete an entire fresh
+ * acquisition of its own in the gap between them; the winning `renameSync`
+ * would then have relocated that fresh, actively-held lock rather than the
+ * abandoned one the check inspected. This is closed by re-checking age a
+ * second time on the renamed copy, which only the caller that just renamed
+ * it can observe (so this second read is itself race-free): a lock that
+ * was genuinely fresh still reads as fresh there, and is handed back
+ * (renamed to `lockPath` again) rather than destroyed, so its real owner
+ * is undisturbed (short of the exceedingly narrow case where a third
+ * acquisition lands in that same brief hand-back gap, at which point there
+ * is nothing left to hand it back to; that owner's own eventual release
+ * still no-ops safely, see `finally` below).
  *
  * This lock is advisory (nothing stops a caller from touching the
  * manifest file without going through it, exactly like a POSIX file
@@ -306,11 +355,16 @@ function lockAgeMs(path: string): number | undefined {
  * `home` is created first (`mkdirSync(home, { recursive: true })`) since
  * the lock directory lives inside it and a first-ever `apply`/`setup`
  * against a brand-new operator home would otherwise have nowhere to put
- * it. The lock is always released in `finally`, including when `fn`
- * throws, so a failed critical section never leaves the manifest
- * permanently locked out for the next caller (short of the process being
- * killed before `finally` runs, which is exactly the case the
- * stale-lock reclaim above exists to recover from).
+ * it. The lock is released in `finally`, including when `fn` throws, but
+ * only if the owner file inside it still holds this call's own token: if
+ * another process's stale-lock reclaim has since taken the directory over
+ * (the true holder ran long enough past `staleMs` for a waiter to evict
+ * it), this call's own token no longer matches what is in the owner file,
+ * and removing the directory here would tear down a lock that is no
+ * longer this call's to release, leaving the new owner's critical section
+ * unprotected mid-flight. Skipping the removal in that case is the
+ * correct, if imperfect, response: the directory is left for its actual
+ * current owner to release normally.
  */
 export function withOperatorManifestLock<T>(
   home: string,
@@ -323,28 +377,62 @@ export function withOperatorManifestLock<T>(
 
   mkdirSync(home, { recursive: true });
   const lockPath = join(home, OPERATOR_MANIFEST_LOCK_DIRNAME);
+  const ownerPath = join(lockPath, OPERATOR_MANIFEST_LOCK_OWNER_FILENAME);
   const deadline = Date.now() + timeoutMs;
-  let staleReclaimAttempted = false;
+  let ownToken: string | undefined;
 
   for (;;) {
     try {
       mkdirSync(lockPath);
+      ownToken = randomLockToken();
+      writeFileSync(ownerPath, ownToken, "utf8");
       break;
     } catch (error) {
       if (!isEexist(error)) throw error;
 
-      if (!staleReclaimAttempted) {
-        staleReclaimAttempted = true;
-        const age = lockAgeMs(lockPath);
-        if (age !== undefined && age > staleMs) {
-          try {
-            rmdirSync(lockPath);
-          } catch {
-            // Lost the race to reclaim it (another process removed or
-            // re-acquired it first); fall through to the normal
-            // retry/timeout handling below.
+      const age = lockAgeMs(lockPath);
+      if (age !== undefined && age > staleMs) {
+        const staleRenamePath = `${lockPath}.${randomLockToken()}.stale`;
+        let renamedAway = false;
+        try {
+          renameSync(lockPath, staleRenamePath);
+          renamedAway = true;
+        } catch {
+          // Lost the reclaim race (another process renamed or re-created
+          // it first); fall through to the normal retry/timeout handling
+          // below rather than ever treating this as an acquisition.
+        }
+        if (renamedAway) {
+          // The age check above and this rename are two separate syscalls,
+          // not one atomic operation: another process could complete an
+          // entire fresh acquisition (mkdir + owner-file write) of its own
+          // in the gap between them, in which case this rename would have
+          // just relocated that fresh, actively-held lock rather than the
+          // abandoned one the check above inspected. Re-checking age on
+          // the renamed copy closes that gap: only this call can now
+          // observe `staleRenamePath`, so this second read is race-free,
+          // and a live lock's mtime (set moments ago by its real owner)
+          // still reads as fresh here even though the rename already
+          // moved it.
+          const postAge = lockAgeMs(staleRenamePath);
+          if (postAge !== undefined && postAge > staleMs) {
+            rmSync(staleRenamePath, { recursive: true, force: true });
+            continue;
           }
-          continue;
+          // Turned out fresh: hand it back rather than destroying a lock
+          // its real owner still believes it holds. If `lockPath` was
+          // re-created by yet another process in the brief window since
+          // the rename above (rare: it requires a second, unrelated
+          // acquisition landing in this same narrow gap), there is
+          // nothing sane left to give it back to; the discarded copy's
+          // real owner still finishes `fn()` unaffected; its own release
+          // no-ops safely once it finds its owner file gone (see the
+          // `finally` below).
+          try {
+            renameSync(staleRenamePath, lockPath);
+          } catch {
+            rmSync(staleRenamePath, { recursive: true, force: true });
+          }
         }
       }
 
@@ -359,7 +447,13 @@ export function withOperatorManifestLock<T>(
     return fn();
   } finally {
     try {
-      rmdirSync(lockPath);
+      const currentOwner = readFileSync(ownerPath, "utf8");
+      if (currentOwner === ownToken) {
+        rmSync(lockPath, { recursive: true, force: true });
+      }
+      // Otherwise another process's stale-lock reclaim has already taken
+      // over this lock directory since this call acquired it; it is no
+      // longer this call's to remove (see the doc comment above).
     } catch {
       // Already gone, e.g. reclaimed by another process's stale-lock
       // recovery after this call overran `staleMs` before reaching here;
@@ -395,12 +489,88 @@ export function operatorManifestState(home: string): OperatorManifestState {
 }
 
 /**
+ * The single locked read-modify-write entry point for the operator
+ * manifest: every write to `<home>/manifest.json` (`setup`'s and `apply`'s
+ * registration step in cli.ts, both today) goes through this function
+ * rather than ever calling the lock or the raw writer directly, so no
+ * command can bypass the lock and race another's read-modify-write.
+ *
+ * The whole re-read, `mutate`, and write run inside one
+ * `withOperatorManifestLock` critical section: `mutate` is handed the
+ * manifest re-read *inside the lock* (`current`, `undefined` when
+ * `state.kind` is not `"ok"`) rather than whatever the caller may have read
+ * before calling this, since that earlier read can already be stale by the
+ * time the lock is granted (another locked writer's own read-modify-write
+ * could have landed in between). `state` is the full {@link
+ * OperatorManifestState} the re-read produced, handed to `mutate` alongside
+ * `current` so it can distinguish "no manifest yet" from "manifest present
+ * but unreadable" when that distinction changes what it should do.
+ *
+ * `mutate` returning `undefined` means "do not write anything": the
+ * manifest is left exactly as re-read, and the returned `written` is
+ * `false`. Returning an `OperatorManifest` writes it (via the internal,
+ * unlocked writer, safe here since the write happens inside the lock) and
+ * `written` is `true`; the written manifest is also returned as
+ * `manifest` for a caller that wants it without a further read.
+ */
+export function updateOperatorManifest(
+  home: string,
+  mutate: (
+    current: OperatorManifest | undefined,
+    state: OperatorManifestState,
+  ) => OperatorManifest | undefined,
+  options: OperatorManifestLockOptions = {},
+): {
+  state: OperatorManifestState;
+  written: boolean;
+  manifest?: OperatorManifest;
+} {
+  return withOperatorManifestLock(
+    home,
+    () => {
+      const state = operatorManifestState(home);
+      const current = state.kind === "ok" ? state.manifest : undefined;
+      const next = mutate(current, state);
+      if (next === undefined) {
+        return { state, written: false };
+      }
+      writeOperatorManifestUnlocked(home, next);
+      return { state, written: true, manifest: next };
+    },
+    options,
+  );
+}
+
+/**
+ * The operator-facing message for `apply`'s locked registration step
+ * finding the operator manifest not `"ok"` (unreadable or gone) once the
+ * lock was granted. The two cases get distinct wording: an unreadable
+ * manifest says the kit install itself already succeeded and only the
+ * registry write failed (unlike the *pre-install* unreadable check, which
+ * runs before any install work and so must not claim one happened), while
+ * a manifest gone missing mid-lock keeps its own separately-worded advice.
+ * A pure, exported function (rather than inlined at its one call site in
+ * cli.ts) so the wording can be unit-tested without spawning the CLI.
+ */
+export function applyRegistrationFailureMessage(
+  manifestKind: "unreadable" | "absent",
+  manifestPath: string,
+  targetDir: string,
+): string {
+  return manifestKind === "unreadable"
+    ? `Operator manifest at ${manifestPath} is unreadable; the kit was installed into ${targetDir} but could not be registered. Back it up and repair it, or remove it and run \`orchestrator-workflow setup\` again, then re-apply to register it.`
+    : `Operator manifest at ${manifestPath} is gone; ${targetDir} was installed but could not be registered. Run \`orchestrator-workflow setup\` and re-apply to register it.`;
+}
+
+/**
  * Realpath that never throws: a recorded target whose directory has since
  * been removed or moved (the `missing` case a later doctor reports) must not
  * make an unrelated upsert fail, so the stored path is compared as written
- * when it can no longer be resolved.
+ * when it can no longer be resolved. Exported so cli.ts resolves a target
+ * path the same guarded way this module does internally, rather than
+ * keeping its own duplicate copy of the same guard.
  */
-function safeRealpath(candidate: string): string {
+export function safeRealpath(candidate: string): string {
   try {
     return realpathSync(candidate);
   } catch {
@@ -409,23 +579,32 @@ function safeRealpath(candidate: string): string {
 }
 
 /**
- * Returns a new manifest with `targetPath` recorded as applied. Pure: does
- * not mutate `manifest` or its nested `targets` array/entries. Targets are
- * deduplicated by realpath (`fs.realpathSync`) rather than raw string
+ * Returns a new manifest with `targetPath` recorded as applied, plus
+ * whether `targetPath` was already registered (an update) rather than
+ * newly added, so a caller does not need its own separate, and
+ * potentially inconsistent, check against the same targets array. Pure:
+ * does not mutate `manifest` or its nested `targets` array/entries.
+ * Targets are deduplicated by realpath (`safeRealpath`, guarded against a
+ * target directory that no longer exists) rather than raw string
  * equality, so the same directory reached via a symlink or a differently
  * cased/relative path still updates the existing entry in place instead of
- * appending a duplicate.
+ * appending a duplicate; the update branch also rewrites the stored
+ * `path` to the resolved realpath, so an entry once written as a raw,
+ * non-realpath string (a hand-edited manifest, or one written before this
+ * normalization existed) is normalized going forward instead of needing
+ * `safeRealpath` on every future comparison against it.
  */
 export function upsertOperatorTarget(
   manifest: OperatorManifest,
   targetPath: string,
   appliedVersion: string,
   appliedAt: string,
-): OperatorManifest {
-  const resolvedPath = realpathSync(targetPath);
+): { manifest: OperatorManifest; alreadyRegistered: boolean } {
+  const resolvedPath = safeRealpath(targetPath);
   const existingIndex = manifest.targets.findIndex(
     (target) => safeRealpath(target.path) === resolvedPath,
   );
+  const alreadyRegistered = existingIndex !== -1;
 
   const targets = manifest.targets.map((target) => ({ ...target }));
   if (existingIndex === -1) {
@@ -437,17 +616,21 @@ export function upsertOperatorTarget(
   } else {
     targets[existingIndex] = {
       ...targets[existingIndex],
+      path: resolvedPath,
       lastAppliedVersion: appliedVersion,
       lastAppliedAt: appliedAt,
     };
   }
 
   return {
-    ...manifest,
-    defaults: {
-      ...manifest.defaults,
-      models: { ...manifest.defaults.models },
+    manifest: {
+      ...manifest,
+      defaults: {
+        ...manifest.defaults,
+        models: { ...manifest.defaults.models },
+      },
+      targets,
     },
-    targets,
+    alreadyRegistered,
   };
 }

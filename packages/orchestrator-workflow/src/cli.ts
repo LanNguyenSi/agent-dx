@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { Command } from "commander";
@@ -14,13 +14,14 @@ import { readInstalledManifest, runInit } from "./init.js";
 import type { Manifest } from "./init.js";
 import {
   OperatorManifestLockTimeoutError,
+  applyRegistrationFailureMessage,
   createOperatorManifest,
   operatorManifestState,
   readOperatorManifest,
   resolveOperatorHome,
+  safeRealpath,
+  updateOperatorManifest,
   upsertOperatorTarget,
-  withOperatorManifestLock,
-  writeOperatorManifest,
 } from "./operator-manifest.js";
 import type {
   OperatorManifest,
@@ -306,22 +307,37 @@ program
         models,
       };
 
-      let status: "created" | "updated" | "unchanged";
-      if (!existing) {
-        const manifest = createOperatorManifest(newDefaults);
-        writeOperatorManifest(home, manifest);
-        status = "created";
-      } else if (defaultsEqual(existing.defaults, newDefaults)) {
-        status = "unchanged";
-      } else {
+      // The prompts and resolution above ran against `existing`, an
+      // unlocked read taken before this point; another process (an
+      // `apply` registering a target, most plausibly) may have already
+      // written a newer manifest by the time this reaches the lock. The
+      // mutate callback below re-reads inside the lock (`current`) and
+      // merges only the newly computed defaults onto that fresh copy, so
+      // `current.targets`/`current.createdAt` are what survive into the
+      // write, never `existing`'s (`updateOperatorManifest` is this
+      // module's sole write path; nothing here calls the raw writer
+      // directly). The unchanged/created/updated decision is likewise
+      // made against `current.defaults`, not `existing.defaults`.
+      const result = updateOperatorManifest(home, (current) => {
+        if (!current) {
+          return createOperatorManifest(newDefaults);
+        }
+        if (defaultsEqual(current.defaults, newDefaults)) {
+          return undefined;
+        }
         const manifest: OperatorManifest = {
-          ...existing,
+          ...current,
           defaults: newDefaults,
           updatedAt: new Date().toISOString(),
         };
-        writeOperatorManifest(home, manifest);
-        status = "updated";
-      }
+        return manifest;
+      });
+
+      const status: "created" | "updated" | "unchanged" = !result.written
+        ? "unchanged"
+        : result.state.kind === "ok"
+          ? "updated"
+          : "created";
 
       console.log(`Harnesses: ${harnesses.join(", ")}`);
       console.log(`Profile: ${profile}`);
@@ -391,58 +407,6 @@ program
     for (const note of report.notes) console.log(note);
     console.log(`\norchestrator-workflow uninstalled from ${targetDir}`);
   });
-
-/**
- * Realpath that never throws, `apply`'s own copy of the same-purpose
- * helper in operator-manifest.ts (not exported from there): a target that
- * vanished between `requireDirectory`'s existence check and this
- * resolution must not crash the whole apply, so the path is compared,
- * stored, and printed as written when it can no longer be resolved.
- */
-function safeRealpathForApply(candidate: string): string {
-  try {
-    return realpathSync(candidate);
-  } catch {
-    return candidate;
-  }
-}
-
-/**
- * Outcome of `apply`'s locked re-read/upsert/write critical section:
- * either the target was registered (a fresh entry or a refreshed one), or
- * the re-read found the operator manifest no longer `ok` (unreadable or
- * gone) after the lock was granted, which the caller reports the same way
- * the pre-lock code did.
- */
-type ApplyRegistration =
-  | {
-      kind: "registered";
-      resolvedTargetPath: string;
-      alreadyRegistered: boolean;
-    }
-  | { kind: "manifest-not-ok"; manifestKind: "unreadable" | "absent" };
-
-/**
- * Test-only synchronous delay inside `apply`'s locked critical section,
- * gated on the `ORCHESTRATOR_WORKFLOW_TEST_HOLD_MS` environment variable
- * (unset or non-positive: a no-op). Exists solely so the concurrency
- * regression test (test/apply.test.ts) can widen the re-read/write window
- * enough to reliably discriminate whether the lock is actually serializing
- * concurrent `apply` invocations, rather than depending on process-start
- * jitter alone; production callers never set this variable. Uses the same
- * `Atomics.wait`-on-a-throwaway-`SharedArrayBuffer` synchronous-sleep
- * technique as `withOperatorManifestLock`'s own poll delay, for the same
- * reason: a caller sits inside this critical section synchronously and
- * must not spin the CPU while it waits.
- */
-function testHoldForConcurrencyProbe(): void {
-  const raw = process.env.ORCHESTRATOR_WORKFLOW_TEST_HOLD_MS;
-  if (!raw) return;
-  const ms = Number(raw);
-  if (!Number.isFinite(ms) || ms <= 0) return;
-  const sharedBuffer = new SharedArrayBuffer(4);
-  Atomics.wait(new Int32Array(sharedBuffer), 0, 0, ms);
-}
 
 /**
  * Detects a repo manifest whose raw JSON carries a `pin` key that
@@ -785,24 +749,25 @@ program
       );
 
       // The re-read, upsert, and write below all run inside
-      // `withOperatorManifestLock`, so no other locked writer against this
-      // same `home` can interleave its own read-modify-write between this
-      // process's read and its rename: that closes the lost-update window
-      // `writeOperatorManifest`'s own doc comment describes (the remaining
-      // race is only against an uncooperative writer that bypasses the
-      // lock entirely, which this codebase has none of). The re-read
-      // itself is still necessary even under the lock: `operatorManifest`
-      // (the copy read at the top, before `runInit` did its file writes,
-      // and before this lock was even acquired) may already be stale by
-      // the time the lock is granted, since a previous holder's own
-      // locked write could have landed in between.
-      let registration: ApplyRegistration;
+      // `updateOperatorManifest`'s single locked critical section, so no
+      // other locked writer against this same `home` can interleave its
+      // own read-modify-write in between: that closes the operator-
+      // manifest lost-update window. The re-read itself is still
+      // necessary even under the lock: `operatorManifest` (the copy read
+      // at the top, before `runInit` did its file writes, and before this
+      // lock was even acquired) may already be stale by the time the lock
+      // is granted, since a previous holder's own locked write could have
+      // landed in between. `resolvedTargetPath` and `alreadyRegistered`
+      // are captured from inside the `mutate` callback (it only returns
+      // an `OperatorManifest | undefined`) since both are needed for the
+      // messages printed after the lock is released.
+      let resolvedTargetPath = "";
+      let alreadyRegistered = false;
+      let result: ReturnType<typeof updateOperatorManifest>;
       try {
-        registration = withOperatorManifestLock(home, () => {
-          testHoldForConcurrencyProbe();
-          const latestState = operatorManifestState(home);
-          if (latestState.kind !== "ok") {
-            return { kind: "manifest-not-ok", manifestKind: latestState.kind };
+        result = updateOperatorManifest(home, (current, state) => {
+          if (state.kind !== "ok" || !current) {
+            return undefined;
           }
 
           // A run with local edits that conflicted still registers the
@@ -813,18 +778,15 @@ program
           // this target, the same as any other non-force-pin-gated run.
           // Only the pin gate above returns before reaching this point
           // without registering.
-          const resolvedTargetPath = safeRealpathForApply(targetDir);
-          const alreadyRegistered = latestState.manifest.targets.some(
-            (t) => t.path === resolvedTargetPath,
-          );
-          const updatedOperatorManifest = upsertOperatorTarget(
-            latestState.manifest,
-            resolvedTargetPath,
+          const upserted = upsertOperatorTarget(
+            current,
+            targetDir,
             PACKAGE_VERSION,
             new Date().toISOString(),
           );
-          writeOperatorManifest(home, updatedOperatorManifest);
-          return { kind: "registered", resolvedTargetPath, alreadyRegistered };
+          resolvedTargetPath = safeRealpath(targetDir);
+          alreadyRegistered = upserted.alreadyRegistered;
+          return upserted.manifest;
         });
       } catch (error) {
         if (error instanceof OperatorManifestLockTimeoutError) {
@@ -838,21 +800,23 @@ program
         throw error;
       }
 
-      if (registration.kind === "manifest-not-ok") {
+      if (result.state.kind !== "ok") {
         const manifestPath = join(home, "manifest.json");
         console.error(
-          registration.manifestKind === "unreadable"
-            ? `Operator manifest at ${manifestPath} is unreadable; back it up and repair it, or remove it and run \`orchestrator-workflow setup\` again.`
-            : `Operator manifest at ${manifestPath} is gone; ${targetDir} was installed but could not be registered. Run \`orchestrator-workflow setup\` and re-apply to register it.`,
+          applyRegistrationFailureMessage(
+            result.state.kind,
+            manifestPath,
+            targetDir,
+          ),
         );
         process.exitCode = 1;
         return;
       }
 
       console.log(
-        registration.alreadyRegistered
-          ? `Refreshed the registry entry for ${registration.resolvedTargetPath}`
-          : `Registered ${registration.resolvedTargetPath} in the operator manifest`,
+        alreadyRegistered
+          ? `Refreshed the registry entry for ${resolvedTargetPath}`
+          : `Registered ${resolvedTargetPath} in the operator manifest`,
       );
     },
   );

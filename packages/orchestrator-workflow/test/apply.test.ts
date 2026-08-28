@@ -62,18 +62,19 @@ function runInitCli(dir: string, ...args: string[]) {
   return run("init", dir, ...args);
 }
 
-/** Async counterpart of `runApply`, needed by the concurrency tests below:
+/** Async counterpart of `run`, needed by the concurrency tests below:
  * `spawnSync` blocks this process until the child exits, so two calls can
  * never overlap in wall-clock time no matter how they are sequenced. `spawn`
- * lets several `apply` invocations (or an `apply` and a raw manifest write)
- * genuinely run at the same time. */
-function runApplyAsync(
+ * lets several commands (`apply`/`apply`, or `setup`/`apply`) genuinely run
+ * at the same time. */
+function runAsync(
+  command: string,
   ...args: string[]
 ): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolvePromise, reject) => {
     const child: ChildProcess = spawn(
       process.execPath,
-      ["--import", "tsx", "src/cli.ts", "apply", ...args],
+      ["--import", "tsx", "src/cli.ts", command, ...args],
       {
         cwd: PACKAGE_DIR,
         env: { ...process.env, [OPERATOR_HOME_ENV]: home },
@@ -92,6 +93,14 @@ function runApplyAsync(
       resolvePromise({ status: code, stdout, stderr }),
     );
   });
+}
+
+function runApplyAsync(...args: string[]) {
+  return runAsync("apply", ...args);
+}
+
+function runSetupAsync(...args: string[]) {
+  return runAsync("setup", ...args);
 }
 
 function readOperatorManifest() {
@@ -329,6 +338,21 @@ describe("apply", () => {
     expect(existsSync(repoManifestPath(target))).toBe(false);
   });
 
+  // M3: a whitespace-only --pin trims to an empty string, the one branch of
+  // apply's own pin-trim/validate logic init.ts's own trim can never reach
+  // (init.ts only ever sees the already-trimmed, already-non-empty value),
+  // so this is the only test that actually exercises apply's own trim
+  // rather than init's.
+  it("rejects a whitespace-only --pin value, writing nothing", () => {
+    const setup = runSetup("--yes");
+    expect(setup.status, setup.stderr).toBe(0);
+
+    const result = runApply("--target", target, "--pin", "   ", "--yes");
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Invalid --pin value");
+    expect(existsSync(repoManifestPath(target))).toBe(false);
+  });
+
   it("registers the target and records PACKAGE_VERSION even when local edits conflict (the apply ran; edits were kept)", () => {
     const setup = runSetup("--yes");
     expect(setup.status, setup.stderr).toBe(0);
@@ -424,6 +448,39 @@ describe("apply", () => {
     }
   });
 
+  it("normalizes a target stored under a raw symlink path to its realpath on re-apply, and reports Refreshed (L6/L7)", () => {
+    const setup = runSetup("--yes");
+    expect(setup.status, setup.stderr).toBe(0);
+    const first = runApply("--target", target, "--yes");
+    expect(first.status, first.stderr).toBe(0);
+
+    // Overwrite the stored entry with a raw, non-realpath value, as a
+    // hand-edited or pre-normalization manifest might carry.
+    const link = join(tmpdir(), `apply-target-stored-link-${process.pid}`);
+    symlinkSync(target, link);
+    try {
+      const manifest = readOperatorManifest();
+      manifest.targets[0].path = link;
+      writeFileSync(
+        operatorManifestPath(),
+        `${JSON.stringify(manifest, null, 2)}\n`,
+        "utf8",
+      );
+
+      const result = runApply("--target", target, "--yes");
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(
+        `Refreshed the registry entry for ${realpathSync(target)}`,
+      );
+
+      const after = readOperatorManifest();
+      expect(after.targets).toHaveLength(1);
+      expect(after.targets[0].path).toBe(realpathSync(target));
+    } finally {
+      rmSync(link, { force: true });
+    }
+  });
+
   it("reports an unreadable operator manifest distinctly from an absent one, and touches nothing", () => {
     writeFileSync(operatorManifestPath(), "{not valid json", "utf8");
     const before = existsSync(target) ? readdirSync(target) : [];
@@ -437,34 +494,10 @@ describe("apply", () => {
   });
 
   describe("concurrent applies against the same operator home", () => {
-    // The first test below is deliberately narrower than what H1's
-    // fix-round-1 ("re-read the operator manifest immediately before the
-    // upsert") would ideally get covered by: two fully sequential, non-
-    // overlapping `apply` invocations (this test's own two `runApply`
-    // calls each run to completion before the next starts) cannot produce
-    // the interleaved-write gap that fix narrowed, since nothing changes
-    // the manifest file while either process is running. It does not
-    // discriminate that specific mutation (confirmed by running it against
-    // a reverted re-read line, which passed identically either way); it
-    // still protects a different, real regression (the upsert path
-    // silently dropping an unrelated, already-registered target), so it
-    // stays.
-    //
-    // Fix-round-1 left a documented residual: a truly simultaneous,
-    // several-way `apply` race still lost registrations even with the
-    // re-read fix applied, because process-startup overhead swamped the
-    // internal logic timing enough that near-simultaneous starts raced
-    // past each other's re-read. Fix-round-2 closes that gap with
-    // `withOperatorManifestLock` (operator-manifest.ts): every apply's
-    // re-read, upsert, and write now run inside one advisory lock's
-    // critical section, so no two locked `apply` invocations against the
-    // same operator home can interleave at all, regardless of how close
-    // together their process starts land. The second test below is the
-    // real regression test for that: it asserts every one of N
-    // simultaneously-started targets ends up registered, not merely "the
-    // file stays valid JSON with at least one target" (fix-round-1's
-    // weaker assertion, since the race it only narrowed could not yet
-    // support a stronger one).
+    // Protects the upsert path against silently dropping an unrelated,
+    // already-registered target on a sequential re-apply. See docs/okf/log.md
+    // for the fix-round history (fix-round-1's re-read, fix-round-2's lock,
+    // fix-round-3's setup/apply interleave and lock-hardening tests below).
     it("a target registered directly in the manifest between two sequential applies is not clobbered by the second apply's own registration", () => {
       const setup = runSetup("--yes");
       expect(setup.status, setup.stderr).toBe(0);
@@ -529,6 +562,48 @@ describe("apply", () => {
           }
         } finally {
           for (const t of targets) rmSync(t, { recursive: true, force: true });
+        }
+      }
+    }, 60_000);
+
+    // H1 (fix-round-3): `setup` used to write `{...existing, ...}` back
+    // unlocked, `existing` being a plain, unlocked read taken before its own
+    // prompts/resolution ran; a target `apply` registered in that window
+    // was silently dropped by setup's own write. `setup` now goes through
+    // `updateOperatorManifest` like `apply` does, merging its new defaults
+    // onto a manifest re-read inside the same lock. This asserts both a
+    // concurrently-registered target and a concurrently-changed default
+    // survive, across 5 iterations.
+    it("setup running concurrently with apply preserves both the target apply registers and setup's own default change", async () => {
+      const setup0 = runSetup("--yes");
+      expect(setup0.status, setup0.stderr).toBe(0);
+
+      for (let iteration = 0; iteration < 5; iteration++) {
+        const targetA = mkdtempSync(
+          join(tmpdir(), `apply-target-h1-a-${iteration}-`),
+        );
+        const targetB = mkdtempSync(
+          join(tmpdir(), `apply-target-h1-b-${iteration}-`),
+        );
+        try {
+          const firstA = runApply("--target", targetA, "--yes");
+          expect(firstA.status, firstA.stderr).toBe(0);
+
+          const [setupResult, applyBResult] = await Promise.all([
+            runSetupAsync("--profile", "minimal", "--yes"),
+            runApplyAsync("--target", targetB, "--yes"),
+          ]);
+          expect(setupResult.status, setupResult.stderr).toBe(0);
+          expect(applyBResult.status, applyBResult.stderr).toBe(0);
+
+          const manifest = readOperatorManifest();
+          const paths = manifest.targets.map((t: { path: string }) => t.path);
+          expect(paths).toContain(realpathSync(targetA));
+          expect(paths).toContain(realpathSync(targetB));
+          expect(manifest.defaults.profile).toBe("minimal");
+        } finally {
+          rmSync(targetA, { recursive: true, force: true });
+          rmSync(targetB, { recursive: true, force: true });
         }
       }
     }, 60_000);
