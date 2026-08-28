@@ -104,6 +104,16 @@ describe("setup", () => {
     expect(after.targets).toEqual([seededTarget]);
   });
 
+  it("a codex-only stored default is not widened back to claude on a flag-less re-run", () => {
+    const first = run("--harness", "codex", "--yes");
+    expect(first.status, first.stderr).toBe(0);
+    const second = run("--yes");
+    expect(second.status, second.stderr).toBe(0);
+    const after = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect(after.defaults.harnesses).toEqual(["codex"]);
+    expect(second.stdout).toContain("Unchanged.");
+  });
+
   it("rejects an unknown harness, exits non-zero, and writes nothing", () => {
     const result = run("--harness", "bogus", "--yes");
     expect(result.status).not.toBe(0);

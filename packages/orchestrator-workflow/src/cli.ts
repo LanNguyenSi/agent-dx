@@ -280,7 +280,12 @@ program
       // nothing detected and nothing previously recorded.
       const { harnesses, profile, models, tiers, warnings } =
         await resolveInitInputs({
-          detected: ["claude"],
+          // No target directory exists to detect against: the stored
+          // harnesses are the baseline, and only a first-ever setup falls
+          // back to claude, so a codex-only default is not widened silently.
+          detected: existing?.defaults.harnesses.length
+            ? existing.defaults.harnesses
+            : ["claude"],
           interactive,
           previous: defaultsAsManifest(existing?.defaults),
           opts,
