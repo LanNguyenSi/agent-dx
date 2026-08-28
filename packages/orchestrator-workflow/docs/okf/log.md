@@ -3829,3 +3829,14 @@ intermediate ones from an over-generic replacement anchor,
 `section).toContain(`, were caught by the in-repo low-collision test and
 replaced with `expectPointerMention(section)` before the final measurement
 above).
+
+Orchestrator follow-up to the round-2 entry above: one comma-form
+continuation citation in run-state-lifecycle-and-markers.md (the step-9
+"Repos without a bundle are unaffected" range, written as a comma
+continuation after the fully-qualified step-9 citation) had not moved with
+the SKILL.md shift of that round; re-pointed by two lines, verified
+byte-identical at the target. Also reworded the CHANGELOG Added bullet so
+the pointer's scan fallback and the run-base marker's date-heuristic
+fallback are no longer described as one mechanism. Measured on the
+committed tree: okf-kit check --require-anchors 0 anchor findings, 0
+sources-fresh, 14 warnings, 22 notices, unchanged.

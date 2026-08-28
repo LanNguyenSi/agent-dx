@@ -24,9 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@lannguyensi/grounding-mcp` 0.9.0 (agent-grounding task
   `design/ow-run-pointer-binding`, agent-tasks 43a7ef58, PR #198). The
   reader resolves a run through the pointer first and falls back to scanning
-  `.ai/runs/` (newest by name) only when no pointer file exists, so kits and
-  repos without the pointer keep working under the existing date-heuristic
-  fallback. `README.md` ("What gets installed") and `INSTALL-AGENT.md`
+  the repository's own `.ai/runs/` (newest by name) only when no pointer file
+  exists, so kits and repos without the pointer keep working exactly as
+  before; the run-base marker's own date-heuristic fallback for a `TODO`
+  value is a separate mechanism and is unchanged. `README.md` ("What gets
+  installed") and `INSTALL-AGENT.md`
   ("Write surface" and the manual scaffold list) now note that `.ai/run`
   should be added to the repository's `.gitignore` (the installer does not
   edit `.gitignore` itself). Pinned by new tests in
