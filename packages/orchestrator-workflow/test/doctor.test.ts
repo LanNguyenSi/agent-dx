@@ -238,6 +238,17 @@ describe("(8) exit-code contract", () => {
     expect(report.exitCode).toBe(1);
   });
 
+  it("a mixed registry (clean + missing) exits 1", () => {
+    const cleanRepo = makeRepo();
+    const missingRepo = makeRepo();
+    // Register while missingRepo still exists (upsert realpaths its
+    // argument), then delete it to produce the "missing" case.
+    registerHome(defaults(), [cleanRepo, missingRepo]);
+    rmSync(missingRepo, { recursive: true, force: true });
+    const report = runDoctor(home, {});
+    expect(report.exitCode).toBe(1);
+  });
+
   it("an all-clean registry exits 0", () => {
     const repo = makeRepo();
     registerHome(defaults(), [repo]);
