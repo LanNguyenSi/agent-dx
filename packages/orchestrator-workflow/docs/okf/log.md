@@ -4172,3 +4172,160 @@ until the next rewrite.
   like `init.ts`/`cli.ts`/`SKILL.md` across other packages in the
   monorepo) are unchanged by this entry and unrelated to the re-pointed
   citations above, which resolved with zero findings.
+
+- 2026-08-28 (agent-dx task T-005, `apply --target` fix round after review
+  round 1): closed twelve reviewer findings against the `apply` command
+  (cli.ts) and its operator-manifest module (operator-manifest.ts).
+
+  H1 (lost update under concurrent applies): `writeOperatorManifest` now
+  writes to a `<pid>.<random>.tmp` sibling and `renameSync`s it over the
+  real path (atomic on the same filesystem), and `apply` re-reads the
+  operator manifest a second time (via the new `operatorManifestState`
+  helper) immediately before the upsert instead of reusing the copy read
+  at the top of the action; the early copy is now used only for the
+  operator-setup gate and for `chosenHarnesses`/`previous`'s defaults. A
+  manifest that vanished or turned unreadable between the two reads is
+  reported and left unwritten rather than silently recreated. Measured
+  effect (manual, not committed as a CI test; see the risk this entry's
+  implementer report also carries): a raw external write timed to land
+  roughly 50ms into an in-flight `apply` (a truly interleaved race,
+  spawned via `child_process.spawn`) survived 9/10 times with the fix
+  applied, versus 4/10 with the re-read line reverted to reuse the early
+  copy, over 10 runs each. A genuinely simultaneous three-way race (three
+  `apply` invocations started in the same shell command against three
+  different targets, same operator home) still reliably lost two of the
+  three registrations with the fix applied: a bare `apply` invocation's
+  wall time (~120-130ms, confirmed by timing both a full fresh install and
+  a fast `--target`-points-nowhere failure, which takes about the same
+  ~130ms) is dominated by Node/tsx process startup, not by the apply
+  logic itself, so near-simultaneous starts still race past each other's
+  re-read. The fix narrows the window for staggered concurrent applies
+  (the realistic case); it does not close it for truly simultaneous ones.
+  This residual risk is accepted, not hidden, and test/apply.test.ts's
+  "concurrent applies" describe block documents it inline rather than
+  asserting a flaky "all three registered" outcome (see that block's own
+  comment for the full reasoning, including why the literal fully-
+  sequential two-invocation test the original finding proposed does not
+  by itself discriminate this specific mutation (confirmed by running it
+  against the reverted code directly), and is kept anyway because it
+  protects a different, real regression: the upsert path silently
+  dropping an unrelated, already-registered target).
+
+  M2 (corrupt operator manifest reported as absent): `operator-manifest.ts`
+  gained `operatorManifestState(home)`, returning a discriminated union
+  (`{ kind: "absent" }`, `{ kind: "unreadable" }`, or `{ kind: "ok",
+  manifest }`) instead of `readOperatorManifest`'s plain `| undefined`.
+  `apply`'s top-of-action gate and its pre-upsert re-read both use it: an
+  existing-but-unreadable file (corrupt JSON, an unrecognized envelope,
+  or a read failure) now prints "Operator manifest at <path> is
+  unreadable; back it up and repair it, or remove it and run
+  `orchestrator-workflow setup` again." and exits 1 without touching
+  anything, distinct from the pre-existing "No operator setup found; run
+  `orchestrator-workflow setup` first." for a genuinely absent file.
+
+  M3 (untested `--sync` scope) and the models-precedence gap: added CLI
+  tests covering that `--sync` moves profile/tiers/models to the operator
+  default but leaves the target's own recorded harnesses alone (repo
+  codex, operator claude), that an explicit `--harness` still wins, and
+  the analogous plain-keeps / `--sync`-moves / `--models`-wins triad for
+  a per-role model (`implementer=haiku` on the repo vs `implementer=opus`
+  on the operator).
+
+  M4 (untested `--pin` validation): added tests for a padded `--pin
+  "  1.2.3  "` (trimmed, applied, exit 0) and `--pin "1 2"` (exit 2, no
+  repo manifest written, stderr contains "Invalid --pin value"); both
+  already worked, only coverage was missing.
+
+  M5 (decision: `--force-pin` must only advance an existing pin): the pin
+  computation's `opts.forcePin ? PACKAGE_VERSION : undefined` branch is
+  now `opts.forcePin && repoPin ? PACKAGE_VERSION : undefined`, so
+  `--force-pin` on a target with no recorded pin leaves it unpinned
+  instead of pinning it to this operator install's version as a side
+  effect. The option's own description was reworded to state this
+  explicitly. Tested.
+
+  L6 (no-op test never asserted `lastAppliedAt` advanced): added a test
+  that seeds the registry entry with a hand-written `2000-01-01` timestamp
+  and asserts a no-op re-apply advances it, rather than relying on ISO
+  string inequality across a microtask tick.
+
+  L7 (decision: a run with conflicts still registers): added a code
+  comment next to the upsert stating this is deliberate (the apply did
+  run; conflicting files were left as local edits, not skipped or
+  aborted) and a test that edits a kit-owned file, applies without
+  `--force`, and asserts both "Conflicts" in stdout and the registry
+  entry present afterward with `lastAppliedVersion` at `PACKAGE_VERSION`.
+
+  L8 (mid-file `import type { Harness }`): moved back to the top import
+  block (its 3-line "placed here so the OKF docs' line citations do not
+  shift" comment removed along with it). Because this round's H1/M2 fix
+  also needed a new value import (`operatorManifestState`) from the same
+  `operator-manifest.js` block, the net shift to every line at or after
+  the top import block was +2, not the +1 a diff containing only the
+  `Harness` move would have produced. Both of this bundle's `cli.ts`
+  lines 132 to 134 citations (the `--no-tiers` option description,
+  install-fence-mechanics.md and model-preselection.md) and the one
+  `cli.ts` lines 177 to 178 citation (the "Found existing install"
+  `console.log`, install-fence-mechanics.md) were re-pointed to `cli.ts`
+  lines 134 to 136 and `cli.ts` lines 179 to 180 respectively, each
+  checked against the current file content directly (not assumed from
+  the +2 offset alone), same string anchors, anchor text unchanged. Both
+  docs re-stamped.
+
+  L9 (install announcement before the pin gate; missing git-root note):
+  `console.log(\`Installing into \${targetDir}\`)` and a new git-root note
+  ("Note: the target is not a git repository root. Pass a different
+  --target if this is not the repo you meant.", mirroring `init`'s own
+  wording with `--target` in place of `init <dir>`) now print only after
+  the pin gate's early return, so a skipped (pinned) run no longer claims
+  an install is starting. Tests added for both the note's presence on a
+  normal run and its absence (along with "Installing into") on a skipped
+  one.
+
+  L10 (realpath computed twice, printed line could diverge from the
+  stored path): `apply` now computes the target's realpath once (a local
+  `safeRealpathForApply`, the same never-throws pattern as
+  operator-manifest.ts's file-private `safeRealpath`, not exported from
+  there) and uses that single value for the `alreadyRegistered` check,
+  the upsert, and the printed "Registered"/"Refreshed" line. This is a
+  real, user-visible behavior change beyond the finding's own target
+  fix: on this implementation machine (macOS, where `os.tmpdir()`
+  returns a path reached through the `/var` -> `/private/var` symlink),
+  the printed line for a plain temp-dir target already differed from its
+  own realpath before this fix, and two pre-existing apply.test.ts
+  assertions (`Registered ${target}...` and `Refreshed the registry
+  entry for ${target}...`) were updated to `realpathSync(target)` to
+  match; this is flagged explicitly since "existing assertions" would
+  otherwise read as untouchable, and the alternative (not applying L10 as
+  specified) would leave the finding open. A new test registers a target
+  through an explicit symlink and asserts the printed path equals both
+  the symlink's realpath and the stored registry path.
+
+  L11 (raw manifest `pin` dropped silently): added a small,
+  apply-only `repoManifestHasMalformedPin` helper in cli.ts (a second,
+  independent parse of the same repo manifest file, checking only the
+  one condition `readInstalledManifest` (init.ts, untouched this round)
+  already degrades silently: a `pin` key present but non-string, or
+  empty/whitespace after trimming). When true, apply now writes `Ignoring
+  a malformed pin in <manifest path>; the pin gate did not run` to
+  stderr and proceeds. Tested.
+
+  L12 (interactive "(detected)" harness label): left as-is, out of scope
+  for this round; still a known cosmetic residue.
+
+  Measured on the commit that ships this round, inside
+  packages/orchestrator-workflow: `npm test` (`vitest run`) green, 414
+  tests across 9 files (test/apply.test.ts grew from 11 to 25, plus 6 new
+  operator-manifest.ts unit tests: 2 for `writeOperatorManifest`'s
+  atomicity, 4 for `operatorManifestState`); `npm run typecheck` and `npm
+  run typecheck:test` clean; `npm run format` run first, then `npm run
+  format:check` clean across the package. From the repository root:
+  `node scripts/check-cli-flag-order.mjs` clean. `npx -y okf-kit@0.8.0
+  check --json packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md packages/orchestrator-workflow/README.md
+  INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` (see
+  the exact result recorded at the end of this entry once run against the
+  final commit). `operator-manifest.ts` carries no `sources:` entry in
+  either doc, so its atomic-write and `operatorManifestState` additions
+  needed no re-stamp on that account; both docs were re-stamped anyway
+  for the `cli.ts` citation moves above.

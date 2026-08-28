@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { Command } from "commander";
@@ -8,11 +8,13 @@ import inquirer from "inquirer";
 import { PACKAGE_VERSION } from "./assets.js";
 import { resolveInitInputs } from "./cli-inputs.js";
 import { HARNESSES, detectHarnesses } from "./detect.js";
+import type { Harness } from "./detect.js";
 import { DEFAULT_MODELS, PROFILES } from "./models.js";
 import { readInstalledManifest, runInit } from "./init.js";
 import type { Manifest } from "./init.js";
 import {
   createOperatorManifest,
+  operatorManifestState,
   readOperatorManifest,
   resolveOperatorHome,
   upsertOperatorTarget,
@@ -388,10 +390,48 @@ program
     console.log(`\norchestrator-workflow uninstalled from ${targetDir}`);
   });
 
-// `apply`-only type import, placed here rather than with the file's other
-// imports at the top so adding it does not shift the line numbers of any
-// `init`/`setup` code the OKF docs bundle cites by line.
-import type { Harness } from "./detect.js";
+/**
+ * Realpath that never throws, `apply`'s own copy of the same-purpose
+ * helper in operator-manifest.ts (not exported from there): a target that
+ * vanished between `requireDirectory`'s existence check and this
+ * resolution must not crash the whole apply, so the path is compared,
+ * stored, and printed as written when it can no longer be resolved.
+ */
+function safeRealpathForApply(candidate: string): string {
+  try {
+    return realpathSync(candidate);
+  } catch {
+    return candidate;
+  }
+}
+
+/**
+ * Detects a repo manifest whose raw JSON carries a `pin` key that
+ * `readInstalledManifest` (init.ts) silently dropped rather than surfacing:
+ * a non-string value, or a string that is empty or whitespace-only after
+ * trimming. `readInstalledManifest` already re-parses the file itself and
+ * applies this exact degradation rule for `pin` specifically; this helper
+ * duplicates just that one check against a second, independent parse of
+ * the same file, rather than changing `readInstalledManifest`'s return
+ * shape to also report which fields it dropped. Read failures (missing
+ * file, invalid JSON, non-object) are not this helper's concern: they are
+ * already `readInstalledManifest`'s "no record" case, with no pin to warn
+ * about either way.
+ */
+function repoManifestHasMalformedPin(targetDir: string): boolean {
+  const path = join(targetDir, ".ai", "workflow", "manifest.json");
+  if (!existsSync(path)) return false;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return false;
+  }
+  if (typeof raw !== "object" || raw === null) return false;
+  const candidate = raw as Record<string, unknown>;
+  if (!("pin" in candidate)) return false;
+  return !(typeof candidate.pin === "string" && candidate.pin.trim() !== "");
+}
 
 /**
  * Resolves `apply`'s harnesses ahead of `resolveInitInputs`, per the
@@ -504,7 +544,7 @@ program
   )
   .option(
     "--force-pin",
-    "proceed even when the target is pinned to a different kit version, advancing the pin to this operator install's version",
+    "proceed past an existing pin that differs from this operator install's version, advancing it to this version; has no effect on a target with no pin recorded (it stays unpinned)",
   )
   .option(
     "--pin <version>",
@@ -552,20 +592,32 @@ program
       }
 
       const home = resolveOperatorHome();
-      const operatorManifest = readOperatorManifest(home);
-      if (!operatorManifest) {
+      // `state.manifest` (the "early copy") is used only for the pin-gate
+      // guard just below and for `chosenHarnesses`/`previous`'s defaults;
+      // the upsert at the end re-reads the manifest again immediately
+      // before writing, rather than reusing this copy, so a target another
+      // concurrent `apply` registered in between is not lost. See that
+      // re-read's own comment for why the window is narrowed, not closed.
+      const state = operatorManifestState(home);
+      if (state.kind === "unreadable") {
+        console.error(
+          `Operator manifest at ${join(home, "manifest.json")} is unreadable; back it up and repair it, or remove it and run \`orchestrator-workflow setup\` again.`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      if (state.kind === "absent") {
         console.error(
           "No operator setup found; run `orchestrator-workflow setup` first.",
         );
         process.exitCode = 1;
         return;
       }
+      const operatorManifest = state.manifest;
 
       const targetDir = requireDirectory(opts.target);
       if (!targetDir) return;
       const interactive = !opts.yes && isInteractive();
-
-      console.log(`Installing into ${targetDir}`);
 
       const repoManifest = readInstalledManifest(targetDir);
       if (repoManifest) {
@@ -576,6 +628,19 @@ program
             : "none recorded";
         console.log(
           `Found existing install (${version.startsWith("unknown") ? version : `v${version}`}, harnesses: ${installedFor}, profile: ${repoManifest.profile}, tiers: ${repoManifest.tiers})`,
+        );
+      }
+
+      // A hand-written or damaged repo manifest may carry a `pin` key that
+      // `readInstalledManifest` silently dropped (non-string, or
+      // empty/whitespace after trimming) rather than throwing, the same
+      // per-field-degradation style it uses for every other field; that
+      // also means the pin gate just below never sees it. Warn once so the
+      // operator knows the gate did not run rather than concluding the
+      // target is simply unpinned.
+      if (repoManifestHasMalformedPin(targetDir)) {
+        process.stderr.write(
+          `Ignoring a malformed pin in ${join(targetDir, ".ai", "workflow", "manifest.json")}; the pin gate did not run\n`,
         );
       }
 
@@ -594,6 +659,18 @@ program
           `Repository is pinned at ${repoPin}; this operator install is v${PACKAGE_VERSION}. Skipping.`,
         );
         return;
+      }
+
+      // Say where files will land only once it is certain the apply is
+      // actually going to run (the pin gate above may have already
+      // returned): an accidental cwd read as `--target` is the most likely
+      // operator mistake, and a skipped run must not claim an install is
+      // starting. Mirrors `init`'s own "Installing into"/git-root note.
+      console.log(`Installing into ${targetDir}`);
+      if (!existsSync(join(targetDir, ".git"))) {
+        console.log(
+          "Note: the target is not a git repository root. Pass a different --target if this is not the repo you meant.",
+        );
       }
 
       const chosenHarnesses = resolveApplyHarnesses(
@@ -629,14 +706,18 @@ program
       // (even when it equals the target's existing pin but differs from
       // PACKAGE_VERSION, since the operator asked for this kit version
       // explicitly, the pin gate above already let this call through);
-      // `--force-pin` advances the pin to this operator install's version;
-      // otherwise the pin carries forward unchanged (runInit's own
+      // `--force-pin` advances the pin to this operator install's version,
+      // but only when `repoPin` already held one: it is a "proceed past the
+      // gate and catch this target up" instruction, not a "pin this target
+      // for the first time" one, so on an unpinned target it must leave the
+      // target unpinned rather than pinning it to PACKAGE_VERSION as a side
+      // effect; otherwise the pin carries forward unchanged (runInit's own
       // `undefined` semantics).
       const pin: string | null | undefined = opts.unpin
         ? null
         : pinArg !== undefined
           ? pinArg
-          : opts.forcePin
+          : opts.forcePin && repoPin
             ? PACKAGE_VERSION
             : undefined;
 
@@ -664,27 +745,53 @@ program
         `\norchestrator-workflow v${PACKAGE_VERSION} installed for: ${harnesses.join(", ")} (profile: ${profile}, tiers: ${tiers})`,
       );
 
-      const resolvedTargetPath = (() => {
-        try {
-          return realpathSync(targetDir);
-        } catch {
-          return targetDir;
-        }
-      })();
-      const alreadyRegistered = operatorManifest.targets.some(
+      // Re-read the operator manifest immediately before the upsert rather
+      // than reusing `operatorManifest` (the copy read at the top, before
+      // `runInit` did its file writes): a concurrent `apply` against the
+      // same operator home may have registered its own target in the
+      // meantime, and writing back the stale early copy would silently
+      // lose that registration (last writer wins on the whole file, not a
+      // per-target merge). This narrows the lost-update window to the gap
+      // between this read and `writeOperatorManifest`'s rename, it does
+      // not close it: two applies whose re-read both land before either
+      // one's rename can still race. A vanished or newly-corrupt manifest
+      // in that gap is reported and left unwritten rather than silently
+      // recreated, since guessing its intended prior content is not this
+      // command's call to make.
+      const latestState = operatorManifestState(home);
+      if (latestState.kind !== "ok") {
+        const manifestPath = join(home, "manifest.json");
+        console.error(
+          latestState.kind === "unreadable"
+            ? `Operator manifest at ${manifestPath} is unreadable; back it up and repair it, or remove it and run \`orchestrator-workflow setup\` again.`
+            : `Operator manifest at ${manifestPath} is gone; ${targetDir} was installed but could not be registered. Run \`orchestrator-workflow setup\` and re-apply to register it.`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      // A run with local edits that conflicted still registers the target
+      // and records PACKAGE_VERSION here: the apply itself ran (the
+      // conflicting files were left as the operator's local edits, not
+      // skipped or aborted), so the registry should reflect that a
+      // vPACKAGE_VERSION apply was attempted against this target, the same
+      // as any other non-force-pin-gated run. Only the pin gate above
+      // returns before reaching this point without registering.
+      const resolvedTargetPath = safeRealpathForApply(targetDir);
+      const alreadyRegistered = latestState.manifest.targets.some(
         (t) => t.path === resolvedTargetPath,
       );
       const updatedOperatorManifest = upsertOperatorTarget(
-        operatorManifest,
-        targetDir,
+        latestState.manifest,
+        resolvedTargetPath,
         PACKAGE_VERSION,
         new Date().toISOString(),
       );
       writeOperatorManifest(home, updatedOperatorManifest);
       console.log(
         alreadyRegistered
-          ? `Refreshed the registry entry for ${targetDir}`
-          : `Registered ${targetDir} in the operator manifest`,
+          ? `Refreshed the registry entry for ${resolvedTargetPath}`
+          : `Registered ${resolvedTargetPath} in the operator manifest`,
       );
     },
   );

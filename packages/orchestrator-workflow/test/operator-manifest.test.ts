@@ -1,6 +1,7 @@
 import {
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -15,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   OPERATOR_HOME_ENV,
   createOperatorManifest,
+  operatorManifestState,
   readOperatorManifest,
   resolveOperatorHome,
   upsertOperatorTarget,
@@ -361,5 +363,64 @@ describe("upsertOperatorTarget", () => {
     expect(updated.targets).not.toBe(manifest.targets);
     expect(updated.defaults).not.toBe(manifest.defaults);
     expect(updated.defaults.models).not.toBe(manifest.defaults.models);
+  });
+});
+
+describe("writeOperatorManifest atomicity", () => {
+  it("leaves no .tmp sibling behind after a successful write", () => {
+    writeOperatorManifest(
+      home,
+      createOperatorManifest(defaults(), "2026-08-28T00:00:00.000Z"),
+    );
+    const entries = readdirSync(home);
+    expect(entries).toEqual(["manifest.json"]);
+  });
+
+  it("a second write replaces the file's content wholesale (no merge of stale tmp bytes)", () => {
+    writeOperatorManifest(
+      home,
+      createOperatorManifest(defaults(), "2026-01-01T00:00:00.000Z"),
+    );
+    const second = upsertOperatorTarget(
+      createOperatorManifest(defaults(), "2026-01-02T00:00:00.000Z"),
+      targetDir,
+      "1.0.0",
+      "2026-01-02T00:00:00.000Z",
+    );
+    writeOperatorManifest(home, second);
+    expect(readOperatorManifest(home)).toEqual(second);
+    expect(readdirSync(home)).toEqual(["manifest.json"]);
+  });
+});
+
+describe("operatorManifestState", () => {
+  it("reports absent when no manifest file exists", () => {
+    expect(operatorManifestState(home)).toEqual({ kind: "absent" });
+  });
+
+  it("reports unreadable for corrupt JSON, distinct from absent", () => {
+    writeFileSync(join(home, "manifest.json"), "{not json", "utf8");
+    expect(operatorManifestState(home)).toEqual({ kind: "unreadable" });
+  });
+
+  it("reports unreadable for an unrecognized envelope (wrong kit)", () => {
+    writeFileSync(
+      join(home, "manifest.json"),
+      JSON.stringify({ kit: "something-else", schemaVersion: 1 }),
+      "utf8",
+    );
+    expect(operatorManifestState(home)).toEqual({ kind: "unreadable" });
+  });
+
+  it("reports ok with the parsed manifest for a valid file", () => {
+    const manifest = createOperatorManifest(
+      defaults(),
+      "2026-08-28T00:00:00.000Z",
+    );
+    writeOperatorManifest(home, manifest);
+    expect(operatorManifestState(home)).toEqual({
+      kind: "ok",
+      manifest,
+    });
   });
 });

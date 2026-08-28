@@ -1,8 +1,10 @@
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -176,6 +178,17 @@ export function readOperatorManifest(
  * Writes the operator-level manifest, creating `home` if it does not yet
  * exist. Same two-space-indented-plus-trailing-newline JSON shape
  * `readInstalledManifest`'s writer (init.ts) uses for the per-repo manifest.
+ *
+ * Written atomically: the content lands in a `.<pid>.<random>.tmp` sibling
+ * file first, then `renameSync` swaps it over the real path. A rename onto
+ * an existing file is atomic on the same filesystem (POSIX and NTFS both
+ * guarantee this), so a reader never observes a partially written file, and
+ * two concurrent writers each still write their own complete file whole,
+ * rather than interleaving bytes into a shared corrupt one. This narrows,
+ * but does not close, the operator-manifest lost-update window described in
+ * `apply`'s own re-read-before-upsert comment (cli.ts): the remaining race
+ * is between one writer's fresh read and its rename, not within the write
+ * itself.
  */
 export function writeOperatorManifest(
   home: string,
@@ -183,7 +196,38 @@ export function writeOperatorManifest(
 ): void {
   mkdirSync(home, { recursive: true });
   const path = join(home, OPERATOR_MANIFEST_FILENAME);
-  writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const tmpPath = join(
+    home,
+    `${OPERATOR_MANIFEST_FILENAME}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
+  );
+  writeFileSync(tmpPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  renameSync(tmpPath, path);
+}
+
+/** The three states an operator-manifest read can land in: no file at
+ * `<home>/manifest.json` at all (`absent`, the fresh-operator case); a file
+ * that exists but `readOperatorManifest` could not turn into a manifest
+ * (`unreadable`, e.g. corrupt JSON, an unrecognized envelope, or a read
+ * failure such as a permissions error); or a file that parsed and
+ * validated (`ok`, with `manifest` set). Kept distinct from plain
+ * `readOperatorManifest`'s `OperatorManifest | undefined` so a caller (this
+ * module's own callers today, `apply`'s CLI action; `doctor`, once it
+ * exists, tomorrow) can tell "nothing set up yet" apart from "something is
+ * there and broken", since the two call for different operator advice: the
+ * former says run `setup`, the latter says back up and repair (or remove)
+ * the file first, since blindly running `setup` again would silently wipe
+ * whatever registry data survives in the damaged file.
+ */
+export type OperatorManifestState =
+  | { kind: "absent" }
+  | { kind: "unreadable" }
+  | { kind: "ok"; manifest: OperatorManifest };
+
+export function operatorManifestState(home: string): OperatorManifestState {
+  const path = join(home, OPERATOR_MANIFEST_FILENAME);
+  if (!existsSync(path)) return { kind: "absent" };
+  const manifest = readOperatorManifest(home);
+  return manifest ? { kind: "ok", manifest } : { kind: "unreadable" };
 }
 
 /**
