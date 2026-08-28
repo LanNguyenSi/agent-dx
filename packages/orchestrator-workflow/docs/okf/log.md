@@ -3565,3 +3565,27 @@ added citations here start mid-block instead, by choice, to satisfy the
 stricter in-repo `docs-consistency.test.ts` anchor-uniqueness and
 block-containment guards (see above). No new error or CI-gating finding
 resulted.
+
+Correction, same pass, orchestrator review of the re-point: the 36-warning
+figure above was not a matter of choice. 22 CONTINUATION citations (the
+`:NNN-NNN` short forms that follow a fully-qualified citation on the same
+sentence: 19 in subagent-contracts-superset.md, 3 in model-preselection.md)
+had not been re-pointed at all and still carried their pre-a2d5f85 line
+numbers, so they resolved into the new run-pointer describe block (lines
+359-462 of docs-consistency.test.ts) that none of those docs discuss.
+Neither guard catches this class: okf-kit only warns
+(`test-range-start-not-head`, `blank-start-line`,
+`closing-brace-start-line`), and the in-repo docs-consistency guards check
+anchored and fully-qualified citations only. Found by diffing the
+per-message warning list against the pre-change baseline (13 warnings)
+rather than trusting the category explanation; fixed by re-running the
+difflib line map over continuation tokens too, accepting a move only when
+the old range's content is byte-identical at the mapped position (three
+ranges reflowed by prettier were mapped by block boundary instead:
+lines 565 to 572, 126 to 150 and 152 to 159 of the two test files). Measured after the fix on the working
+tree: 0 anchor findings / 0 sources-fresh / 0 errors / 14 warnings / 22
+notices; the one warning above baseline is the historical bare
+README line-105 spelling quoted in an older entry of this log, left as
+written. Lesson
+for the next re-point: continuation citations are citations too; map
+them with the same script as the fully-qualified ones.
