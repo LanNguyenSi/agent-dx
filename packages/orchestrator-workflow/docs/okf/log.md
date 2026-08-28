@@ -4136,3 +4136,39 @@ re-point pass had moved onto the wrong span were given string anchors so
 the in-repo guard covers them from now on. A stored pin is trimmed on
 write and normalized on read; the raw manifest may hold padded bytes
 until the next rewrite.
+
+- 2026-08-28 (agent-dx task T-005, `apply --target` command): added the
+  `apply` command to `cli.ts`, appended after `uninstall` and before
+  `program.parseAsync` specifically so none of the existing `init`/`setup`
+  code these two docs cite by line moved on the new command's own account.
+  The only line-count change reaching that code was the one new name
+  (`upsertOperatorTarget`) added to the existing multi-line
+  `operator-manifest.js` import, which shifted every following line by
+  exactly +1; the `apply`-only `Harness` type import was placed with the
+  new command's own helpers instead of at the file's top, for the same
+  reason. Both of this bundle's cli.ts lines 131 to 133 citations (the
+  `--no-tiers` option description, install-fence-mechanics.md and
+  model-preselection.md) and the one cli.ts lines 176 to 177 citation (the
+  "Found existing install" `console.log`, install-fence-mechanics.md)
+  re-pointed to cli.ts lines 132 to 134 and cli.ts lines 177 to 178 respectively, byte-
+  identical content confirmed by direct read, same string anchors (the
+  anchor text itself did not change, only its line position). Both docs
+  re-stamped.
+
+  Measured on the commit that ships the change, inside
+  packages/orchestrator-workflow: `npm test` green with the eleven new
+  test/apply.test.ts tests (no existing assertion touched); `npm run
+  typecheck` and `npm run typecheck:test` clean; `npm run format` run
+  first on the new test file, then `npm run format:check` clean across
+  the package. From the repository root: `node
+  scripts/check-cli-flag-order.mjs` clean (the new command's options are
+  all declared `-short, --long` or long-only, same as every other
+  command's). `npx -y okf-kit@0.8.0 check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md packages/orchestrator-workflow/README.md
+  INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` reports
+  no CI-gating finding and no stale source; the pre-existing ambiguous-
+  target notices/warnings in this file's own citations (shared basenames
+  like `init.ts`/`cli.ts`/`SKILL.md` across other packages in the
+  monorepo) are unchanged by this entry and unrelated to the re-pointed
+  citations above, which resolved with zero findings.

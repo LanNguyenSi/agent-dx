@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { Command } from "commander";
@@ -15,6 +15,7 @@ import {
   createOperatorManifest,
   readOperatorManifest,
   resolveOperatorHome,
+  upsertOperatorTarget,
   writeOperatorManifest,
 } from "./operator-manifest.js";
 import type {
@@ -386,6 +387,307 @@ program
     for (const note of report.notes) console.log(note);
     console.log(`\norchestrator-workflow uninstalled from ${targetDir}`);
   });
+
+// `apply`-only type import, placed here rather than with the file's other
+// imports at the top so adding it does not shift the line numbers of any
+// `init`/`setup` code the OKF docs bundle cites by line.
+import type { Harness } from "./detect.js";
+
+/**
+ * Resolves `apply`'s harnesses ahead of `resolveInitInputs`, per the
+ * fallback chain an explicit `--harness` does not need: the target's own
+ * recorded harnesses, else the operator manifest's default harnesses, else
+ * (only when both are empty) `detectHarnesses(targetDir)` or `["claude"]`,
+ * the same shipped fallback `init` uses. The result is handed to
+ * `resolveInitInputs` as `detected`, and mirrored into the synthetic
+ * `previous.harnesses` field built by `buildApplyPrevious` below, so
+ * `resolveInitInputs`'s own union-of-detected-and-installed fallback
+ * resolves to exactly this value rather than widening it further.
+ */
+function resolveApplyHarnesses(
+  targetDir: string,
+  repoManifest: Manifest | undefined,
+  operatorDefaults: OperatorManifestDefaults,
+): Harness[] {
+  if (repoManifest && repoManifest.harnesses.length > 0) {
+    return repoManifest.harnesses;
+  }
+  if (operatorDefaults.harnesses.length > 0) {
+    return operatorDefaults.harnesses;
+  }
+  const detected = detectHarnesses(targetDir);
+  return detected.length > 0 ? detected : ["claude"];
+}
+
+/**
+ * Builds the synthetic `previous` manifest handed to `resolveInitInputs`,
+ * implementing `apply`'s profile/tiers/models precedence: operator defaults
+ * are the floor; when the target has its own recorded manifest, that
+ * recording overrides the operator default for profile/tiers/models UNLESS
+ * `--sync` is passed, in which case the operator default overrides the
+ * recording instead (an explicit CLI flag still wins over either, handled
+ * inside `resolveInitInputs` itself). `harnesses` on the returned value is
+ * always the target's own recorded harnesses (never the operator default),
+ * since `--sync` only affects profile/tiers/models per the rule above; the
+ * full harnesses fallback chain is `resolveApplyHarnesses`'s job, not this
+ * function's.
+ */
+function buildApplyPrevious(
+  repoManifest: Manifest | undefined,
+  operatorDefaults: OperatorManifestDefaults,
+  sync: boolean,
+): Manifest {
+  const harnesses = repoManifest?.harnesses ?? [];
+  const models = sync
+    ? { ...DEFAULT_MODELS, ...operatorDefaults.models }
+    : {
+        ...DEFAULT_MODELS,
+        ...operatorDefaults.models,
+        ...repoManifest?.models,
+      };
+  const profile = sync
+    ? operatorDefaults.profile
+    : (repoManifest?.profile ?? operatorDefaults.profile);
+  const tiers = sync
+    ? operatorDefaults.tiers
+    : (repoManifest?.tiers ?? operatorDefaults.tiers);
+  return {
+    kit: "orchestrator-workflow",
+    version: PACKAGE_VERSION,
+    harnesses,
+    models,
+    profile,
+    tiers,
+    files: {},
+    installedAt: "",
+  };
+}
+
+program
+  .command("apply")
+  .description(
+    "Project this operator's install onto a target repository, sourced from the operator manifest's defaults and the target's previously recorded settings; registers the target in the operator manifest",
+  )
+  .requiredOption(
+    "--target <repo>",
+    "target repository directory to apply the kit to",
+  )
+  .option("-y, --yes", "accept all defaults and skip prompts")
+  .option("-f, --force", "overwrite kit-owned files that have local edits")
+  .option(
+    "--harness <list>",
+    `comma-separated harnesses (${HARNESSES.join(", ")}); default: the target's recorded harnesses, else the operator defaults, else detected`,
+  )
+  .option(
+    "--models <spec>",
+    'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
+  )
+  .option(
+    "--profile <profile>",
+    `subagent role profile (${PROFILES.join(", ")}); default: the target's recorded profile, else the operator default`,
+  )
+  .option(
+    "--opencode-provider <id>",
+    "opencode provider id for alias resolution (e.g. github-copilot); auto-detected when omitted",
+  )
+  .option(
+    "--tiers",
+    "also render per-role effort-tier subagent variants (<role>-<tier>.md); default: the target's recorded value, else the operator default",
+  )
+  .option(
+    "--no-tiers",
+    "explicitly turn effort-tier subagent variants off, overriding a recorded or operator-default --tiers value",
+  )
+  .option(
+    "--sync",
+    "let the operator defaults for profile/tiers/models override the target's own recorded values, instead of the other way around",
+  )
+  .option(
+    "--force-pin",
+    "proceed even when the target is pinned to a different kit version, advancing the pin to this operator install's version",
+  )
+  .option(
+    "--pin <version>",
+    "set or replace the target's recorded kit-version pin and apply this operator install regardless of any existing pin",
+  )
+  .option(
+    "--unpin",
+    "clear the target's recorded kit-version pin and apply this operator install",
+  )
+  .action(
+    async (opts: {
+      target: string;
+      yes?: boolean;
+      force?: boolean;
+      harness?: string;
+      models?: string;
+      profile?: string;
+      opencodeProvider?: string;
+      tiers?: boolean;
+      sync?: boolean;
+      forcePin?: boolean;
+      pin?: string;
+      unpin?: boolean;
+    }) => {
+      // --pin and --unpin express opposite intents (set a pin vs clear it);
+      // accepting both silently would make the effective pin depend on
+      // internal option-resolution order, so this is a usage error rather
+      // than an implicit precedence rule.
+      if (opts.pin !== undefined && opts.unpin) {
+        console.error("--pin and --unpin cannot be used together");
+        process.exitCode = 2;
+        return;
+      }
+      let pinArg: string | undefined;
+      if (opts.pin !== undefined) {
+        const trimmed = opts.pin.trim();
+        if (trimmed === "" || /\s/.test(trimmed)) {
+          console.error(
+            `Invalid --pin value: ${JSON.stringify(opts.pin)}; must be non-empty with no internal whitespace`,
+          );
+          process.exitCode = 2;
+          return;
+        }
+        pinArg = trimmed;
+      }
+
+      const home = resolveOperatorHome();
+      const operatorManifest = readOperatorManifest(home);
+      if (!operatorManifest) {
+        console.error(
+          "No operator setup found; run `orchestrator-workflow setup` first.",
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      const targetDir = requireDirectory(opts.target);
+      if (!targetDir) return;
+      const interactive = !opts.yes && isInteractive();
+
+      console.log(`Installing into ${targetDir}`);
+
+      const repoManifest = readInstalledManifest(targetDir);
+      if (repoManifest) {
+        const version = repoManifest.version || "unknown version";
+        const installedFor =
+          repoManifest.harnesses.length > 0
+            ? repoManifest.harnesses.join(", ")
+            : "none recorded";
+        console.log(
+          `Found existing install (${version.startsWith("unknown") ? version : `v${version}`}, harnesses: ${installedFor}, profile: ${repoManifest.profile}, tiers: ${repoManifest.tiers})`,
+        );
+      }
+
+      // Pin gate: a recorded pin that differs from this operator install's
+      // kit version blocks a plain apply (the repo asked to stay put)
+      // unless the operator explicitly overrides it, either by advancing to
+      // the current kit version (--force-pin) or by setting an explicit pin
+      // decision of its own (--pin/--unpin); either override is itself an
+      // explicit instruction to proceed, so it takes priority over the gate.
+      const repoPin = repoManifest?.pin;
+      const pinOverridden = Boolean(
+        opts.forcePin || pinArg !== undefined || opts.unpin,
+      );
+      if (repoPin && repoPin !== PACKAGE_VERSION && !pinOverridden) {
+        console.log(
+          `Repository is pinned at ${repoPin}; this operator install is v${PACKAGE_VERSION}. Skipping.`,
+        );
+        return;
+      }
+
+      const chosenHarnesses = resolveApplyHarnesses(
+        targetDir,
+        repoManifest,
+        operatorManifest.defaults,
+      );
+      const previous = buildApplyPrevious(
+        repoManifest,
+        operatorManifest.defaults,
+        Boolean(opts.sync),
+      );
+
+      const {
+        harnesses,
+        profile,
+        models,
+        tiers,
+        opencodeModels,
+        opencodeClassModels,
+        warnings,
+      } = await resolveInitInputs({
+        detected: chosenHarnesses,
+        interactive,
+        previous,
+        opts,
+      });
+      for (const w of warnings) {
+        process.stderr.write(`${w}\n`);
+      }
+
+      // `--unpin` clears; an explicit `--pin <version>` sets or replaces
+      // (even when it equals the target's existing pin but differs from
+      // PACKAGE_VERSION, since the operator asked for this kit version
+      // explicitly, the pin gate above already let this call through);
+      // `--force-pin` advances the pin to this operator install's version;
+      // otherwise the pin carries forward unchanged (runInit's own
+      // `undefined` semantics).
+      const pin: string | null | undefined = opts.unpin
+        ? null
+        : pinArg !== undefined
+          ? pinArg
+          : opts.forcePin
+            ? PACKAGE_VERSION
+            : undefined;
+
+      const report = runInit({
+        targetDir,
+        harnesses,
+        models,
+        profile,
+        force: opts.force,
+        opencodeModels,
+        tiers,
+        opencodeClassModels,
+        pin,
+      });
+
+      showPaths("Created", report.written);
+      showPaths("Updated", report.updated);
+      showPaths("Unchanged", report.skipped);
+      showPaths(
+        "Conflicts (local edits kept, re-run with --force to overwrite)",
+        report.conflicted,
+      );
+      for (const note of report.notes) console.log(note);
+      console.log(
+        `\norchestrator-workflow v${PACKAGE_VERSION} installed for: ${harnesses.join(", ")} (profile: ${profile}, tiers: ${tiers})`,
+      );
+
+      const resolvedTargetPath = (() => {
+        try {
+          return realpathSync(targetDir);
+        } catch {
+          return targetDir;
+        }
+      })();
+      const alreadyRegistered = operatorManifest.targets.some(
+        (t) => t.path === resolvedTargetPath,
+      );
+      const updatedOperatorManifest = upsertOperatorTarget(
+        operatorManifest,
+        targetDir,
+        PACKAGE_VERSION,
+        new Date().toISOString(),
+      );
+      writeOperatorManifest(home, updatedOperatorManifest);
+      console.log(
+        alreadyRegistered
+          ? `Refreshed the registry entry for ${targetDir}`
+          : `Registered ${targetDir} in the operator manifest`,
+      );
+    },
+  );
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
