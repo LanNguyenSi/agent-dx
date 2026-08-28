@@ -29,6 +29,7 @@ import type {
 } from "./operator-manifest.js";
 import type { UninstallReport } from "./uninstall.js";
 import { runUninstall } from "./uninstall.js";
+import { runDoctor, targetReportToJson } from "./doctor.js";
 
 function isInteractive(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -837,6 +838,101 @@ program
       );
     },
   );
+program
+  .command("doctor")
+  .description(
+    "Report each operator-registered target's status: clean, divergent from the operator defaults, version-lagging, hash-drifted, missing, or without a repo manifest",
+  )
+  .option(
+    "--json",
+    "print a single JSON report to stdout and suppress human output",
+  )
+  .option(
+    "--prune",
+    "remove missing and no-manifest targets from the operator registry before reporting",
+  )
+  .action(async (opts: { json?: boolean; prune?: boolean }) => {
+    const home = resolveOperatorHome();
+    const report = runDoctor(home, { prune: opts.prune });
+
+    if (opts.json) {
+      console.log(
+        JSON.stringify({
+          operatorHome: report.operatorHome,
+          operatorVersion: report.operatorVersion,
+          targets: report.targets.map(targetReportToJson),
+          pruned: report.pruned,
+          exitCode: report.exitCode,
+          ...(report.error ? { error: report.error } : {}),
+        }),
+      );
+      process.exitCode = report.exitCode;
+      return;
+    }
+
+    if (report.error === "no-operator-manifest") {
+      console.error(
+        "No operator setup found; run `orchestrator-workflow setup` first.",
+      );
+      process.exitCode = report.exitCode;
+      return;
+    }
+
+    console.log(
+      `Operator home: ${report.operatorHome} (kit v${report.operatorVersion})`,
+    );
+
+    const counts = new Map<string, number>();
+    for (const target of report.targets) {
+      console.log(`${target.status}  ${target.path}`);
+      if (target.status === "divergent" && target.divergence) {
+        if (target.divergence.profile) {
+          console.log(
+            `  profile: repo=${target.repoProfile}, operator=${target.operatorProfile}`,
+          );
+        }
+        if (target.divergence.tiers) {
+          console.log(
+            `  tiers: repo=${target.repoTiers}, operator=${target.operatorTiers}`,
+          );
+        }
+        if (target.divergence.models) {
+          console.log(`  models: ${target.divergentModelRoles.join(", ")}`);
+        }
+      }
+      if (
+        (target.status === "version-lag" ||
+          (target.status === "divergent" && target.versionLag)) &&
+        target.installedVersion !== null
+      ) {
+        console.log(
+          `  installed ${target.installedVersion}, operator ${report.operatorVersion}`,
+        );
+      }
+      if (target.status === "drift" && target.driftFiles) {
+        for (const file of target.driftFiles) {
+          console.log(`  ${file}`);
+        }
+      }
+      if (target.pin) {
+        console.log(`  pinned at ${target.pin}`);
+      }
+      counts.set(target.status, (counts.get(target.status) ?? 0) + 1);
+    }
+
+    const summary = [...counts.entries()]
+      .map(([status, count]) => `${count} ${status}`)
+      .join(", ");
+    console.log(
+      `${report.targets.length} targets: ${summary === "" ? "none" : summary}`,
+    );
+    if (opts.prune) {
+      console.log(
+        `pruned: ${report.pruned.length > 0 ? report.pruned.join(", ") : "(none)"}`,
+      );
+    }
+    process.exitCode = report.exitCode;
+  });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
