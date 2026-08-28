@@ -357,6 +357,111 @@ describe("run-base fill instruction ships in the skill", () => {
 });
 
 /**
+ * grounding-mcp's run-completeness reader (own release cycle, agent-grounding
+ * repo) resolves a run through a per-worktree `.ai/run` pointer file before
+ * ever falling back to scanning `.ai/runs/`, and reads a keyed
+ * `run-base[<key>]` marker in `00-goal.md` for multi-repo runs. This
+ * describe block pins that the kit's own docs (the skill, the policy
+ * section, the README, and the install doc) actually instruct writing both,
+ * in the exact shapes the reader recognises, so the instructions the kit
+ * ships cannot drift from what the consumer expects.
+ */
+describe("run pointer and keyed run-base marker ship in the skill, the policy section, and the install docs", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+  const readmeMd = unwrap(readDoc("README.md"));
+  const installAgentMd = unwrap(readDoc("INSTALL-AGENT.md"));
+
+  const runStateSection = phraseBoundedSlice(
+    skillMd,
+    "## Run state",
+    "## Workflow",
+  );
+
+  it("SKILL.md Run state documents the .ai/run pointer contract", () => {
+    expect(runStateSection).toContain(".ai/run");
+    expect(runStateSection).toContain("absolute path");
+    expect(runStateSection).toContain("first non-empty line");
+    expect(runStateSection).toContain(".gitignore");
+    expect(runStateSection).toContain("fail-closed");
+  });
+
+  it("SKILL.md Run state carries the exact keyed run-base example", () => {
+    expect(runStateSection).toContain("run-base[<repo-basename>] = <sha>");
+  });
+
+  it("SKILL.md step 1 mentions writing the .ai/run pointer", () => {
+    const step1 = phraseBoundedSlice(
+      skillMd,
+      "1. **Understand the goal.**",
+      "2. **Discover",
+    );
+    expect(step1).toContain(".ai/run");
+  });
+
+  it("each of the three Harness notes bullets mentions the .ai/run pointer rule", () => {
+    const claudeCode = phraseBoundedSlice(
+      skillMd,
+      "**Claude Code**:",
+      "- **opencode**:",
+    );
+    const opencode = phraseBoundedSlice(
+      skillMd,
+      "**opencode**:",
+      "- **OpenAI Codex**:",
+    );
+    const codex = phraseBoundedSlice(
+      skillMd,
+      "**OpenAI Codex**:",
+      "## Subagent misfire rule",
+    );
+    for (const bullet of [claudeCode, opencode, codex]) {
+      expect(bullet).toContain(".ai/run");
+    }
+  });
+
+  it("agents-md-section Run state carries the pointer and keyed marker bullet", () => {
+    const runState = phraseBoundedSlice(
+      agentsMdSection,
+      "### Run state",
+      "### Models",
+    );
+    expect(runState).toContain(".ai/run");
+    expect(runState).toContain("run-base[<repo-basename>]");
+  });
+
+  it("README What gets installed mentions the .ai/run pointer and .gitignore", () => {
+    const section = phraseBoundedSlice(
+      readmeMd,
+      "## What gets installed",
+      "## Role profile",
+    );
+    expect(section).toContain(".ai/run");
+    expect(section).toContain(".gitignore");
+  });
+
+  it("INSTALL-AGENT.md write surface mentions the .ai/run pointer and .gitignore", () => {
+    const section = phraseBoundedSlice(
+      installAgentMd,
+      "### Write surface",
+      "(opencode)",
+    );
+    expect(section).toContain(".ai/run");
+    expect(section).toContain(".gitignore");
+  });
+
+  it("INSTALL-AGENT.md manual scaffold list mentions the .ai/run pointer and .gitignore", () => {
+    const section = phraseBoundedSlice(
+      installAgentMd,
+      ".ai/runs/.gitkeep`, empty.",
+      "Append the content of",
+    );
+    expect(section).toContain(".ai/run");
+    expect(section).toContain(".gitignore");
+  });
+});
+
+/**
  * Guards the subagent misfire rule added after a live incident: a reviewer
  * spawn returned in 5s with 0 tool uses, handing back harness boilerplate
  * instead of the reviewer output contract. Each assertion pins one
@@ -459,9 +564,7 @@ describe("the misfire rule prefers resume with a repeated assignment for the no-
 
   it("no longer carries the incident tally or the reviewer/model correlation passage (0.24.0 placement rule)", () => {
     expect(skillMd).not.toContain("(four so far)");
-    expect(skillMd).not.toContain(
-      "So far this signal has only been observed",
-    );
+    expect(skillMd).not.toContain("So far this signal has only been observed");
     expect(skillMd).not.toContain(
       "since 0.21.0 the advisor shares the reviewer's default model too",
     );
@@ -3211,7 +3314,10 @@ describe("every CHANGELOG.md:# heading-section citation is backtick-delimited (r
       }
       const closeIndex = content.indexOf("`", index);
       const newlineIndex = content.indexOf("\n", index);
-      if (closeIndex === -1 || (newlineIndex !== -1 && closeIndex > newlineIndex)) {
+      if (
+        closeIndex === -1 ||
+        (newlineIndex !== -1 && closeIndex > newlineIndex)
+      ) {
         violations.push(
           `${doc}: "${LITERAL}" citation at offset ${index} has no closing ` +
             `backtick before the next newline`,

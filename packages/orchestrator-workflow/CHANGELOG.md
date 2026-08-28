@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The orchestrator now writes a per-worktree run pointer, `.ai/run`: a plain
+  text file whose first non-empty line is the absolute path of the run
+  directory, one written in every repository or worktree a run touches
+  (`SKILL.md` Run state, step 1, and all three Harness notes bullets;
+  `agents-md-section.md` Run state gained the matching bullet). For a run
+  spanning more than one repository, `00-goal.md` now also carries one keyed
+  `run-base[<repo-basename>]` marker per repository alongside the existing
+  unkeyed one, exact form `<!-- solution-acceptance: run-base[<repo-basename>]
+  = <sha> -->`; the shipped template line uses the placeholder key
+  `<repo-basename>` and value `<sha>` as a documentation example. Both are
+  written for a new consumer: the `.ai/run` pointer and the keyed marker are
+  read by grounding-mcp's `ow-run-completeness` reader, released as
+  `@lannguyensi/grounding-mcp` 0.9.0 (agent-grounding task
+  `design/ow-run-pointer-binding`, agent-tasks 43a7ef58, PR #198). The
+  reader resolves a run through the pointer first and falls back to scanning
+  `.ai/runs/` (newest by name) only when no pointer file exists, so kits and
+  repos without the pointer keep working under the existing date-heuristic
+  fallback. `README.md` ("What gets installed") and `INSTALL-AGENT.md`
+  ("Write surface" and the manual scaffold list) now note that `.ai/run`
+  should be added to the repository's `.gitignore` (the installer does not
+  edit `.gitignore` itself). Pinned by new tests in
+  `test/template-markers.test.ts` (the keyed placeholder line's exact text,
+  its whole-line-comment shape, its position directly below the unkeyed
+  marker, and that the existing unkeyed `run-base` regex still matches
+  exactly once) and a new `test/docs-consistency.test.ts` describe block
+  (the pointer contract's phrases in SKILL.md Run state, the exact keyed
+  example string, step 1, each of the three Harness notes bullets
+  individually, the agents-md-section bullet, and the README/INSTALL-AGENT
+  gitignore notes). Anchors in `docs/okf/*.md` that cite line ranges in
+  `SKILL.md`, `test/docs-consistency.test.ts`, and
+  `test/template-markers.test.ts` now drift out of range because of the
+  line shifts this change introduces; re-pointing those anchors is left to
+  a follow-up task.
+
 ## [0.25.0] - 2026-08-27
 
 ### Added

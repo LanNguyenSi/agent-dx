@@ -155,6 +155,9 @@ Workflow state lives under `.ai/`:
   one; older ones are the auditable history.
 - `.ai/workflow/manifest.json` records the installed kit version, the chosen
   harnesses, and the per-role model preferences.
+- Every worktree a run touches carries a `.ai/run` pointer (absolute path of
+  the run directory, gitignored) and `00-goal.md` carries one
+  `run-base[<repo-basename>]` marker per repository for multi-repo runs.
 
 ### Models
 
