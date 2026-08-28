@@ -114,6 +114,28 @@ describe("setup", () => {
     expect(second.stdout).toContain("Unchanged.");
   });
 
+  it("a stored --models override survives a flag-less re-run as Unchanged", () => {
+    const first = run("--models", "implementer=haiku", "--yes");
+    expect(first.status, first.stderr).toBe(0);
+    const second = run("--yes");
+    expect(second.status, second.stderr).toBe(0);
+    const after = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect(after.defaults.models.implementer).toBe("haiku");
+    expect(second.stdout).toContain("Unchanged.");
+  });
+
+  it("a --models change on a re-run is written and reported as updated", () => {
+    const first = run("--yes");
+    expect(first.status, first.stderr).toBe(0);
+    const before = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    const second = run("--models", "implementer=haiku", "--yes");
+    expect(second.status, second.stderr).toBe(0);
+    const after = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect(after.defaults.models.implementer).toBe("haiku");
+    expect(after.updatedAt >= before.updatedAt).toBe(true);
+    expect(second.stdout).not.toContain("Unchanged.");
+  });
+
   it("rejects an unknown harness, exits non-zero, and writes nothing", () => {
     const result = run("--harness", "bogus", "--yes");
     expect(result.status).not.toBe(0);
