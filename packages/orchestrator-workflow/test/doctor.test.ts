@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -197,6 +198,74 @@ describe("runDoctor: per-target status", () => {
     expect(report.exitCode).toBe(0);
   });
 
+  it("(3b) missing-file drift: a kit-owned file deleted, manifest.json intact", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    rmSync(join(repo, REVIEWER_MD));
+    const report = runDoctor(home, {});
+    expect(report.targets[0].status).toBe("drift");
+    expect(report.targets[0].driftFiles).toContain(REVIEWER_MD);
+    expect(report.exitCode).toBe(1);
+  });
+
+  it("(mutation-probe a) an unreadable kit-owned file counts as drift for that path, the rest of the registry still reports", () => {
+    if (process.getuid?.() === 0) return; // root can read anything; skip.
+    const cleanRepo = makeRepo();
+    const unreadableRepo = makeRepo();
+    registerHome(defaults(), [cleanRepo, unreadableRepo]);
+    const filePath = join(unreadableRepo, REVIEWER_MD);
+    chmodSync(filePath, 0o000);
+    try {
+      const report = runDoctor(home, {});
+      const unreadableTarget = report.targets.find(
+        (t) => t.path === unreadableRepo,
+      );
+      expect(unreadableTarget?.status).toBe("drift");
+      expect(unreadableTarget?.driftFiles).toContain(REVIEWER_MD);
+      const cleanTarget = report.targets.find((t) => t.path === cleanRepo);
+      expect(cleanTarget?.status).toBe("clean");
+      expect(report.exitCode).toBe(1);
+    } finally {
+      chmodSync(filePath, 0o644);
+    }
+  });
+
+  it("(4b) tiers divergence: repo tiers true vs operator tiers false", () => {
+    const repo = makeRepo();
+    setManifestField(repo, { tiers: true });
+    registerHome(defaults({ tiers: false }), [repo]);
+    const report = runDoctor(home, {});
+    expect(report.targets[0].status).toBe("divergent");
+    expect(report.targets[0].divergence).toEqual({
+      profile: false,
+      tiers: true,
+      models: false,
+    });
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("(6b) version-lag: a pin that no longer matches the installed version", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    setManifestField(repo, { version: "0.0.1", pin: "9.9.9" });
+    const report = runDoctor(home, {});
+    expect(report.targets[0].status).toBe("version-lag");
+    expect(report.targets[0].installedVersion).toBe("0.0.1");
+    expect(report.targets[0].pin).toBe("9.9.9");
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("(6c) version-lag: installed matches the running kit, but not the pin", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    setManifestField(repo, { version: PACKAGE_VERSION, pin: "9.9.9" });
+    const report = runDoctor(home, {});
+    expect(report.targets[0].status).toBe("version-lag");
+    expect(report.targets[0].installedVersion).toBe(PACKAGE_VERSION);
+    expect(report.targets[0].pin).toBe("9.9.9");
+    expect(report.exitCode).toBe(0);
+  });
+
   it("(11) models divergence: operator default implementer differs from the repo's installed model", () => {
     const repo = makeRepo();
     registerHome(defaults({ models: { implementer: "haiku" } }), [repo]);
@@ -219,6 +288,18 @@ describe("runDoctor: per-target status", () => {
     expect(report.targets[0].divergence?.profile).toBe(true);
     expect(report.exitCode).toBe(1);
   });
+
+  it("drift takes precedence over version-lag when a target is both", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    setManifestField(repo, { version: "0.0.1" });
+    tamper(repo);
+    const report = runDoctor(home, {});
+    expect(report.targets[0].status).toBe("drift");
+    expect(report.targets[0].versionLag).toBe(true);
+    expect(report.targets[0].driftFiles).toContain(REVIEWER_MD);
+    expect(report.exitCode).toBe(1);
+  });
 });
 
 describe("(8) exit-code contract", () => {
@@ -226,6 +307,14 @@ describe("(8) exit-code contract", () => {
     const report = runDoctor(home, {});
     expect(report.exitCode).toBe(2);
     expect(report.error).toBe("no-operator-manifest");
+    expect(report.targets).toEqual([]);
+  });
+
+  it("(mutation-probe c) a manifest.json present but unparseable exits 2 with operator-manifest-unreadable, not no-operator-manifest", () => {
+    writeFileSync(join(home, "manifest.json"), "{ not valid json", "utf8");
+    const report = runDoctor(home, {});
+    expect(report.exitCode).toBe(2);
+    expect(report.error).toBe("operator-manifest-unreadable");
     expect(report.targets).toEqual([]);
   });
 
@@ -402,14 +491,99 @@ describe("CLI human output", () => {
     expect(result.status).toBe(0);
   });
 
-  it("prints divergence, version-lag, and pin detail lines", () => {
+  it("prints a divergence line and a matching-pin detail line (pin equals the installed version, no version-lag)", () => {
     const repo = makeRepo({ profile: "minimal" });
-    setManifestField(repo, { pin: "0.0.1" });
+    setManifestField(repo, { version: "0.0.1", pin: "0.0.1" });
     registerHome(defaults({ profile: "full" }), [repo]);
 
     const result = runCli();
     expect(result.stdout).toContain(`divergent  ${repo}`);
     expect(result.stdout).toContain("profile: repo=minimal, operator=full");
     expect(result.stdout).toContain("pinned at 0.0.1");
+    // Pin matches the installed version, so this is not version-lag: no
+    // "installed X, ..." detail line.
+    expect(result.stdout).not.toMatch(/installed 0\.0\.1,/);
+  });
+
+  it("prints the 'installed X, operator Y' line under a divergent status line, plus the models detail line", () => {
+    const repo = makeRepo({ profile: "minimal" });
+    setManifestField(repo, { version: "0.0.1" });
+    registerHome(
+      defaults({ profile: "full", models: { implementer: "haiku" } }),
+      [repo],
+    );
+
+    const result = runCli();
+    expect(result.stdout).toContain(`divergent  ${repo}`);
+    expect(result.stdout).toContain("profile: repo=minimal, operator=full");
+    expect(result.stdout).toContain("models: implementer");
+    expect(result.stdout).toContain(
+      `installed 0.0.1, operator ${PACKAGE_VERSION}`,
+    );
+  });
+
+  it("prints the 'installed X, pinned at Y' line when a pin no longer matches the installed version", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    setManifestField(repo, { version: "0.0.1", pin: "9.9.9" });
+
+    const result = runCli();
+    expect(result.stdout).toContain(`version-lag  ${repo}`);
+    expect(result.stdout).toContain("installed 0.0.1, pinned at 9.9.9");
+    // The standalone pin line is folded into the detail line above, not
+    // printed a second time.
+    expect(result.stdout.match(/pinned at 9\.9\.9/g)?.length).toBe(1);
+  });
+});
+
+describe("CLI --json combined with --prune", () => {
+  it("reflects the post-prune registry in the JSON report", () => {
+    const cleanRepo = makeRepo();
+    const missingRepo = makeRepo();
+    registerHome(defaults(), [cleanRepo, missingRepo]);
+    rmSync(missingRepo, { recursive: true, force: true });
+
+    const result = runCli("--json", "--prune");
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.targets.map((t: { path: string }) => t.path)).toEqual([
+      cleanRepo,
+    ]);
+    expect(parsed.pruned).toEqual([missingRepo]);
+    expect(parsed.exitCode).toBe(0);
+    expect(result.status).toBe(0);
+
+    const onDisk = JSON.parse(
+      readFileSync(join(home, "manifest.json"), "utf8"),
+    );
+    expect((onDisk.targets as { path: string }[]).map((t) => t.path)).toEqual([
+      cleanRepo,
+    ]);
+  });
+});
+
+describe("operator-manifest-unreadable", () => {
+  it("(9) --json emits the operator-manifest-unreadable error object and exits 2", () => {
+    writeFileSync(join(home, "manifest.json"), "{ not valid json", "utf8");
+    const result = runCli("--json");
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed).toEqual({
+      operatorHome: resolve(home),
+      operatorVersion: PACKAGE_VERSION,
+      targets: [],
+      pruned: [],
+      exitCode: 2,
+      error: "operator-manifest-unreadable",
+    });
+    expect(result.status).toBe(2);
+  });
+
+  it("prints the repair hint to stderr, distinct from the no-operator-manifest hint, and exits 2", () => {
+    writeFileSync(join(home, "manifest.json"), "{ not valid json", "utf8");
+    const result = runCli();
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain(join(resolve(home), "manifest.json"));
+    expect(result.stderr).toContain("is unreadable; back it up and repair it");
+    expect(result.stderr).not.toContain("No operator setup found");
+    expect(result.stdout).toBe("");
   });
 });

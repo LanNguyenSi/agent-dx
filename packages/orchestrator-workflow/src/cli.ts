@@ -13,6 +13,7 @@ import { DEFAULT_MODELS, PROFILES } from "./models.js";
 import { readInstalledManifest, runInit } from "./init.js";
 import type { Manifest } from "./init.js";
 import {
+  OPERATOR_MANIFEST_FILENAME,
   OperatorManifestLockTimeoutError,
   applyRegistrationFailureMessage,
   createOperatorManifest,
@@ -849,7 +850,7 @@ program
   )
   .option(
     "--prune",
-    "remove missing and no-manifest targets from the operator registry before reporting",
+    "remove missing and no-manifest targets from the operator registry before reporting; rewrites the whole manifest file in its normalized form (a hand-edited or legacy entry that readOperatorManifest could not parse is dropped from the file, not just left alone)",
   )
   .action(async (opts: { json?: boolean; prune?: boolean }) => {
     const home = resolveOperatorHome();
@@ -878,6 +879,18 @@ program
       return;
     }
 
+    if (report.error === "operator-manifest-unreadable") {
+      const manifestPath = join(
+        report.operatorHome,
+        OPERATOR_MANIFEST_FILENAME,
+      );
+      console.error(
+        `Operator manifest at ${manifestPath} is unreadable; back it up and repair it, or remove it and run \`orchestrator-workflow setup\` again.`,
+      );
+      process.exitCode = report.exitCode;
+      return;
+    }
+
     console.log(
       `Operator home: ${report.operatorHome} (kit v${report.operatorVersion})`,
     );
@@ -900,13 +913,20 @@ program
           console.log(`  models: ${target.divergentModelRoles.join(", ")}`);
         }
       }
-      if (
+      const showsVersionLagDetail =
         (target.status === "version-lag" ||
           (target.status === "divergent" && target.versionLag)) &&
-        target.installedVersion !== null
-      ) {
+        target.installedVersion !== null;
+      if (showsVersionLagDetail) {
+        // A pinned target that is still version-lag (the pin no longer
+        // matches the installed version, see doctor.ts's `versionLag`)
+        // shows what it is pinned at instead of the operator's running
+        // version, which is not the relevant comparison for a pinned
+        // target.
         console.log(
-          `  installed ${target.installedVersion}, operator ${report.operatorVersion}`,
+          target.pin
+            ? `  installed ${target.installedVersion}, pinned at ${target.pin}`
+            : `  installed ${target.installedVersion}, operator ${report.operatorVersion}`,
         );
       }
       if (target.status === "drift" && target.driftFiles) {
@@ -914,7 +934,7 @@ program
           console.log(`  ${file}`);
         }
       }
-      if (target.pin) {
+      if (target.pin && !showsVersionLagDetail) {
         console.log(`  pinned at ${target.pin}`);
       }
       counts.set(target.status, (counts.get(target.status) ?? 0) + 1);
@@ -930,6 +950,11 @@ program
       console.log(
         `pruned: ${report.pruned.length > 0 ? report.pruned.join(", ") : "(none)"}`,
       );
+      if (report.pruned.length > 0) {
+        console.log(
+          "note: the operator manifest was rewritten in normalized form; a raw target entry the parser could not validate was dropped from the file along with the pruned targets above.",
+        );
+      }
     }
     process.exitCode = report.exitCode;
   });

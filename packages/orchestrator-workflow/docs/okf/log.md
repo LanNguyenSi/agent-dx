@@ -4725,14 +4725,22 @@ until the next rewrite.
   35 warning/notice findings (13 warnings, 22 notices), identical in count
   to the pre-edit baseline, all pre-existing and unrelated to this round.
 - 2026-08-28: `doctor` command added (agent-dx task T-006, one of the
-  operator-manifest command slices). It reads no source these two docs
-  list, so neither doc needed new prose, but adding it after `uninstall`
-  in `cli.ts` shifted every line below its insertion point by one: the
-  `--no-tiers` option's citation in install-fence-mechanics.md and its
-  duplicate in model-preselection.md, and the "Found existing install"
-  print-line citation in install-fence-mechanics.md, were re-pointed to
-  their new spans; the anchor strings themselves were unaffected since
-  no line's own content changed, only its number. `npm test` green with
+  operator-manifest command slices). Correction (review round 1): this
+  entry originally claimed doctor reads no source either doc lists, so
+  neither doc needed new prose; that was wrong, doctor.ts reads exactly
+  the per-repo manifest fields install-fence-mechanics.md's "manifest.json:
+  shape and consumers" section documents (files, version, pin, profile,
+  tiers, models), and that section now names doctor.ts as a fourth,
+  non-installer consumer (fix-round-1). The +1 line shift below was
+  caused by the new `import { runDoctor, targetReportToJson } from
+  "./doctor.js";` line near the top of `cli.ts`, not by the doctor
+  command block itself, which was appended after `uninstall` further
+  down the file and does not precede either cited span: the `--no-tiers`
+  option's citation in install-fence-mechanics.md and its duplicate in
+  model-preselection.md, and the "Found existing install" print-line
+  citation in install-fence-mechanics.md, were re-pointed to their new
+  spans; the anchor strings themselves were unaffected since no line's
+  own content changed, only its number. `npm test` green with
   the new doctor.test.ts file (drift/missing/no-manifest/divergent/
   version-lag/clean/pinned-at-own-version cases, the exit-code contract,
   `--prune`, and `--json`); `npm run typecheck`, `npm run typecheck:test`
@@ -4749,3 +4757,59 @@ until the next rewrite.
   over divergent, a missing target dropped from the exit-code trigger set,
   `--prune` also sweeping drift) each broke exactly the test named for it
   and were restored and re-verified green before committing.
+- 2026-08-28: `doctor` review round 1 fix-round-1 (agent-dx task T-006).
+  `computeDriftFiles`'s `readFileSync` call is now wrapped in the same
+  try/catch its `statSync` neighbor already had; an unreadable kit-owned
+  file (permissions, a race) is counted as drift for that one path
+  instead of throwing and aborting the whole target, and the rest of the
+  operator registry still reports. `runDoctor` now distinguishes an
+  absent `<operatorHome>/manifest.json` (`no-operator-manifest`, exit 2,
+  the pre-existing setup hint) from one that exists but does not parse or
+  validate (`operator-manifest-unreadable`, exit 2, a new stderr message
+  naming the path and telling the operator to repair or remove it rather
+  than silently re-running `setup` over a possibly-fine `targets` array).
+  The pin-vs-installed-version rule changed: a pin now suppresses
+  `version-lag` only when it equals the installed version; a pin that no
+  longer matches prints `installed X, pinned at Y` (folded into the same
+  line the pinless case already had, not a duplicate). `--prune`'s help
+  text and its human-output summary note that the manifest is rewritten
+  in normalized form (a raw, parser-rejected target entry is dropped
+  along with the pruned targets, not just left alone); no code change to
+  re-surface those raw entries under `pruned` was made, the note was
+  judged sufficient on its own. install-fence-mechanics.md's
+  "manifest.json: shape and consumers" section gained `doctor.ts` as a
+  fourth, non-installer consumer (it reads `files`/`version`/`pin`/
+  `profile`/`tiers`/`models` off every operator-registered target's own
+  manifest, comparing each against the operator manifest's defaults) and
+  `doctor.ts`/`test/doctor.test.ts` were added to that doc's `sources:`
+  list; both docs' frontmatter `timestamp:` was re-stamped. This same
+  fix round also corrected the prior 2026-08-28 entry above: its claim
+  that doctor read no source either doc lists was wrong (see the
+  correction inline there), and its attribution of the +1 citation-line
+  shift to the doctor command block was wrong too, the actual cause was
+  the new `doctor.js` import line near the top of `cli.ts`; this round's
+  own edits added one further import line (`OPERATOR_MANIFEST_FILENAME`)
+  at the same spot, so the two previously re-pointed citations
+  (`--no-tiers` in both docs, "Found existing install" in
+  install-fence-mechanics.md) were re-pointed again, one line further
+  down, same anchor strings. `npm test` green (net +12 doctor.test.ts
+  cases: 13 added, 1 renamed rather than rewritten in place since its
+  scope narrowed to the matching-pin case only); `npm run typecheck`,
+  `npm run typecheck:test`, and `npm run format:check` (run first) clean;
+  `node scripts/check-cli-flag-order.mjs` clean. From the repository
+  root: `npx -y okf-kit@0.8.0 check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md packages/orchestrator-workflow/README.md
+  INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md`
+  reports 0 errors (CI-gating) and 0 stale-source findings; the warning
+  (13, all pre-existing `init.test.ts` short-form range-start notices)
+  and notice (22, pre-existing ambiguous cross-package citations and one
+  blank-start-line notice) sets are unchanged by this round, and neither
+  the new `doctor.ts` consumer paragraph nor the new log prose above
+  introduced any new finding. Four mutation probes run against
+  `src/doctor.ts` by hand for this round (dropping the `readFileSync`
+  try/catch, reverting the pin rule to any-pin-suppresses-lag, collapsing
+  `operator-manifest-unreadable` back into `no-operator-manifest`, and
+  removing the missing-file push in `computeDriftFiles`) each broke
+  exactly the test named for it and were restored and re-verified green
+  (byte-identical diff against the pre-mutation file) before committing.

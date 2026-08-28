@@ -9,6 +9,7 @@ import type { Profile, Role } from "./models.js";
 import { DEFAULT_MODELS, ROLES } from "./models.js";
 import type { OperatorManifest, OperatorTarget } from "./operator-manifest.js";
 import {
+  OPERATOR_MANIFEST_FILENAME,
   readOperatorManifest,
   writeOperatorManifest,
 } from "./operator-manifest.js";
@@ -99,8 +100,14 @@ export interface DoctorReport {
   targets: TargetReport[];
   pruned: string[];
   exitCode: 0 | 1 | 2;
-  /** Set only when no operator manifest exists; `targets` is then `[]`. */
-  error?: "no-operator-manifest";
+  /**
+   * Set only when no operator manifest was evaluated; `targets` is then
+   * `[]`. `no-operator-manifest`: no file exists at
+   * `<operatorHome>/manifest.json`. `operator-manifest-unreadable`: the
+   * file exists but `readOperatorManifest` could not parse or validate it
+   * (corrupt JSON, or an envelope that does not match this kit).
+   */
+  error?: "no-operator-manifest" | "operator-manifest-unreadable";
 }
 
 function sha256(content: string): string {
@@ -136,7 +143,18 @@ function computeDriftFiles(targetPath: string, manifest: Manifest): string[] {
       drifted.push(relativePath);
       continue;
     }
-    const content = readFileSync(filePath, "utf8");
+    // A file that exists and stat's as a regular file can still fail to
+    // read (permissions, a race with something else removing it, ...). A
+    // read failure means this path's drift status against the recorded
+    // hash cannot be verified, so it is counted as drift rather than
+    // aborting the whole target (and the rest of the registry).
+    let content: string;
+    try {
+      content = readFileSync(filePath, "utf8");
+    } catch {
+      drifted.push(relativePath);
+      continue;
+    }
     if (sha256(content) !== recordedHash) {
       drifted.push(relativePath);
     }
@@ -199,11 +217,19 @@ export function inspectTarget(
     models: divergentModelRoles.length > 0,
   };
 
-  // A recorded pin means the repo deliberately stayed on a kit version;
-  // that is never version-lag, regardless of what the pin's value is
-  // (including a pin equal to the repo's own installed version).
+  // A recorded pin suppresses version-lag only when the pin equals the
+  // repo's own installed version: that is the expected, deliberate-stay
+  // state. When the pin and the installed version differ, the installed
+  // manifest no longer reflects what was pinned (someone changed the pin
+  // without reapplying, or the installed version drifted some other way),
+  // so the target is still version-lag, even though it carries a pin
+  // (drift, if also present, still takes precedence over the final status
+  // field below). With no pin at all, version-lag compares the installed
+  // version against the running kit version, as before.
   const hasPin = typeof manifest.pin === "string" && manifest.pin.length > 0;
-  const versionLag = !hasPin && manifest.version !== kitVersion;
+  const versionLag = hasPin
+    ? manifest.pin !== manifest.version
+    : manifest.version !== kitVersion;
 
   let status: TargetStatus;
   if (driftFiles.length > 0) {
@@ -259,13 +285,24 @@ export function runDoctor(
 ): DoctorReport {
   const operator = readOperatorManifest(home);
   if (!operator) {
+    // `readOperatorManifest` returns `undefined` both when there is no
+    // file to read and when the file exists but is corrupt or does not
+    // validate; distinguish the two here so the CLI can tell an operator
+    // who has simply never run `setup` apart from one whose manifest needs
+    // repair (the latter must not be papered over by re-running `setup`,
+    // which would silently rewrite `targets: []` over a possibly-fine
+    // targets array sitting next to the unreadable envelope).
+    const manifestPath = join(home, OPERATOR_MANIFEST_FILENAME);
+    const error: NonNullable<DoctorReport["error"]> = existsSync(manifestPath)
+      ? "operator-manifest-unreadable"
+      : "no-operator-manifest";
     return {
       operatorHome: home,
       operatorVersion: PACKAGE_VERSION,
       targets: [],
       pruned: [],
       exitCode: 2,
-      error: "no-operator-manifest",
+      error,
     };
   }
 
