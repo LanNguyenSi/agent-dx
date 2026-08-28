@@ -8,8 +8,19 @@ import inquirer from "inquirer";
 import { PACKAGE_VERSION } from "./assets.js";
 import { resolveInitInputs } from "./cli-inputs.js";
 import { HARNESSES, detectHarnesses } from "./detect.js";
-import { PROFILES } from "./models.js";
+import { DEFAULT_MODELS, PROFILES } from "./models.js";
 import { readInstalledManifest, runInit } from "./init.js";
+import type { Manifest } from "./init.js";
+import {
+  createOperatorManifest,
+  readOperatorManifest,
+  resolveOperatorHome,
+  writeOperatorManifest,
+} from "./operator-manifest.js";
+import type {
+  OperatorManifest,
+  OperatorManifestDefaults,
+} from "./operator-manifest.js";
 import type { UninstallReport } from "./uninstall.js";
 import { runUninstall } from "./uninstall.js";
 
@@ -31,6 +42,55 @@ function requireDirectory(dir: string): string | undefined {
     return undefined;
   }
   return targetDir;
+}
+
+/**
+ * `resolveInitInputs` was extracted from `init` and typed against `init`'s
+ * per-repo `Manifest` (kit/version/files/installedAt included), since that
+ * is the only "previous install" shape it existed to read before this
+ * command. `setup` has no repository and no such record; it only has the
+ * operator manifest's `defaults` (harnesses/profile/models/tiers). The
+ * function only ever reads those four fields off `previous`, so this maps
+ * `defaults` into a `Manifest`-shaped value with harmless placeholders for
+ * the unused fields, rather than changing `resolveInitInputs`'s signature
+ * or semantics.
+ */
+function defaultsAsManifest(
+  defaults: OperatorManifestDefaults | undefined,
+): Manifest | undefined {
+  if (!defaults) return undefined;
+  return {
+    kit: "orchestrator-workflow",
+    version: PACKAGE_VERSION,
+    harnesses: defaults.harnesses,
+    models: { ...DEFAULT_MODELS, ...defaults.models },
+    profile: defaults.profile,
+    tiers: defaults.tiers,
+    files: {},
+    installedAt: "",
+  };
+}
+
+/**
+ * Order- and completeness-insensitive comparison of two operator defaults
+ * sets, used to decide whether `setup` needs to rewrite the manifest at
+ * all (a plain re-run that resolves to the same values must not touch
+ * `updatedAt` or the file).
+ */
+function defaultsEqual(
+  a: OperatorManifestDefaults,
+  b: OperatorManifestDefaults,
+): boolean {
+  const normalize = (d: OperatorManifestDefaults) =>
+    JSON.stringify({
+      harnesses: [...d.harnesses].sort(),
+      profile: d.profile,
+      tiers: d.tiers,
+      models: Object.fromEntries(
+        Object.entries(d.models).sort(([x], [y]) => x.localeCompare(y)),
+      ),
+    });
+  return normalize(a) === normalize(b);
 }
 
 const program = new Command();
@@ -158,6 +218,122 @@ program
       console.log(
         `\norchestrator-workflow v${PACKAGE_VERSION} installed for: ${harnesses.join(", ")} (profile: ${profile}, tiers: ${tiers})`,
       );
+    },
+  );
+
+program
+  .command("setup")
+  .description(
+    "Write or update this operator's default install options (harnesses, profile, models, tiers), used as the baseline for future installs; touches no repository",
+  )
+  .option("-y, --yes", "accept all defaults and skip prompts")
+  .option(
+    "--harness <list>",
+    `comma-separated harnesses (${HARNESSES.join(", ")}); default: previously stored, or claude`,
+  )
+  .option(
+    "--models <spec>",
+    'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
+  )
+  .option(
+    "--profile <profile>",
+    `subagent role profile (${PROFILES.join(", ")}); default: full, or the previously stored profile on a re-run`,
+  )
+  .option(
+    "--opencode-provider <id>",
+    "opencode provider id for alias resolution (e.g. github-copilot); auto-detected when omitted",
+  )
+  .option(
+    "--tiers",
+    "select per-role effort-tier subagent variants by default; default: off, or the previously stored value on a re-run",
+  )
+  .option(
+    "--no-tiers",
+    "explicitly turn effort-tier subagent variants off, overriding a previously stored --tiers value",
+  )
+  .action(
+    async (opts: {
+      yes?: boolean;
+      harness?: string;
+      models?: string;
+      profile?: string;
+      opencodeProvider?: string;
+      tiers?: boolean;
+    }) => {
+      const interactive = !opts.yes && isInteractive();
+      const home = resolveOperatorHome();
+      console.log(`Operator home: ${home}`);
+
+      const existing = readOperatorManifest(home);
+      if (existing) {
+        const installedFor =
+          existing.defaults.harnesses.length > 0
+            ? existing.defaults.harnesses.join(", ")
+            : "none recorded";
+        console.log(
+          `Found existing operator defaults (harnesses: ${installedFor}, profile: ${existing.defaults.profile}, tiers: ${existing.defaults.tiers})`,
+        );
+      }
+
+      // No target repository exists to detect harnesses against; "claude"
+      // is the same shipped fallback `init` uses for a fresh install with
+      // nothing detected and nothing previously recorded.
+      const { harnesses, profile, models, tiers, warnings } =
+        await resolveInitInputs({
+          // No target directory exists to detect against: the stored
+          // harnesses are the baseline, and only a first-ever setup falls
+          // back to claude, so a codex-only default is not widened silently.
+          detected: existing?.defaults.harnesses.length
+            ? existing.defaults.harnesses
+            : ["claude"],
+          interactive,
+          previous: defaultsAsManifest(existing?.defaults),
+          opts,
+        });
+      for (const w of warnings) {
+        process.stderr.write(`${w}\n`);
+      }
+
+      const newDefaults: OperatorManifestDefaults = {
+        harnesses,
+        profile,
+        tiers,
+        models,
+      };
+
+      let status: "created" | "updated" | "unchanged";
+      if (!existing) {
+        const manifest = createOperatorManifest(newDefaults);
+        writeOperatorManifest(home, manifest);
+        status = "created";
+      } else if (defaultsEqual(existing.defaults, newDefaults)) {
+        status = "unchanged";
+      } else {
+        const manifest: OperatorManifest = {
+          ...existing,
+          defaults: newDefaults,
+          updatedAt: new Date().toISOString(),
+        };
+        writeOperatorManifest(home, manifest);
+        status = "updated";
+      }
+
+      console.log(`Harnesses: ${harnesses.join(", ")}`);
+      console.log(`Profile: ${profile}`);
+      console.log(
+        `Models: ${Object.entries(models)
+          .map(([role, model]) => `${role}=${model}`)
+          .join(", ")}`,
+      );
+      console.log(`Tiers: ${tiers}`);
+      console.log(
+        status === "created"
+          ? "Created operator defaults."
+          : status === "updated"
+            ? "Updated operator defaults."
+            : "Unchanged.",
+      );
+      console.log("Next: orchestrator-workflow apply --target <repo>");
     },
   );
 

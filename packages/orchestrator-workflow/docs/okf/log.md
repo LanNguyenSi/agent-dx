@@ -3966,3 +3966,18 @@ newer than three docs listing it as a source; review-gate-and-waivers.md,
 run-state-lifecycle-and-markers.md and subagent-contracts-superset.md were
 re-read (nothing they state touches the moved resolution code) and
 re-stamped so the bundle reports zero sources-fresh findings again.
+
+Operator-level install, slice 4 (the `setup` command): src/cli.ts gained
+the `setup` subcommand that writes or updates the operator manifest's
+defaults through the same resolveInitInputs path init uses, with the stored
+harnesses as the detection baseline (a first-ever setup falls back to
+claude), unchanged detection, createdAt and targets preserved on a re-run;
+test/setup.test.ts (7 tests) covers fresh run, explicit flags, no-op,
+tiers-only re-run with a seeded target, invalid harness, models spec, and a
+codex-only default that must not widen back to claude. The additive cli.ts
+lines shifted three citations in install-fence-mechanics.md and
+model-preselection.md (full and continuation forms), re-pointed by the
+difflib line map with the byte-identical rule; both docs re-stamped.
+Measured on the committed tree: vitest 373 of 373, typecheck,
+typecheck:test and prettier clean, check-cli-flag-order clean, okf-kit
+check with require-anchors 0 CI-gating findings and 0 sources-fresh.
