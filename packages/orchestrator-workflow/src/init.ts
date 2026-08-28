@@ -68,6 +68,14 @@ export interface InitOptions {
    * by the role's own preselected model.
    */
   opencodeClassModels?: Record<ModelClass, string | undefined>;
+  /**
+   * Repo kit-version pin (distinct from the actually-installed `version`),
+   * so a later `apply` command can gate on it. A `string` sets a new
+   * recorded kit-version pin; `null` clears an existing pin; `undefined`
+   * (the default, omitted) carries the previous manifest's pin forward
+   * unchanged.
+   */
+  pin?: string | null;
 }
 
 const SKILL_NAME = "orchestrator-workflow";
@@ -88,6 +96,12 @@ export interface Manifest {
    */
   files: Record<string, string>;
   installedAt: string;
+  /**
+   * Optional kit-version pin recorded for this repo (distinct from
+   * `version`, the actually-installed kit version). Absent when no pin was
+   * ever recorded or an existing one was cleared.
+   */
+  pin?: string;
 }
 
 function sha256(content: string): string {
@@ -169,6 +183,9 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   // throwing on a legacy manifest.
   const tiers = typeof candidate.tiers === "boolean" ? candidate.tiers : false;
 
+  // A hand-written or damaged manifest may carry a non-string `pin`; that
+  // degrades to "no recorded pin" here (the same per-field-degradation
+  // style as `profile`/`tiers` above) rather than throwing.
   return {
     kit: SKILL_NAME,
     version: typeof candidate.version === "string" ? candidate.version : "",
@@ -179,6 +196,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     files,
     installedAt:
       typeof candidate.installedAt === "string" ? candidate.installedAt : "",
+    ...(typeof candidate.pin === "string" ? { pin: candidate.pin } : {}),
   };
 }
 
@@ -374,6 +392,9 @@ export function runInit(options: InitOptions): Report {
   const report = emptyReport();
 
   const previous = readInstalledManifest(targetDir);
+  // `null` clears an existing pin, a string sets a new one, and omitted
+  // (`undefined`) carries the previous manifest's pin forward unchanged.
+  const pin = options.pin === null ? undefined : (options.pin ?? previous?.pin);
   const installedFiles: Record<string, string> = {};
 
   // Both leftover-note loops below are ledger-driven, not enumeration-
@@ -585,6 +606,7 @@ export function runInit(options: InitOptions): Report {
     profile,
     tiers,
     files: installedFiles,
+    ...(pin !== undefined ? { pin } : {}),
   };
   const manifestPath = join(targetDir, MANIFEST_PATH);
   if (
@@ -597,6 +619,7 @@ export function runInit(options: InitOptions): Report {
       profile: previous.profile,
       tiers: previous.tiers,
       files: previous.files,
+      ...(previous.pin !== undefined ? { pin: previous.pin } : {}),
     }) === JSON.stringify(desired)
   ) {
     report.skipped.push(manifestPath);

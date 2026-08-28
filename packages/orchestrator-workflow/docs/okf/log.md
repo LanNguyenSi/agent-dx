@@ -3981,3 +3981,62 @@ difflib line map with the byte-identical rule; both docs re-stamped.
 Measured on the committed tree: vitest 373 of 373, typecheck,
 typecheck:test and prettier clean, check-cli-flag-order clean, okf-kit
 check with require-anchors 0 CI-gating findings and 0 sources-fresh.
+T-002 (repo kit-version pin, operator apply support): added an optional
+`pin` field to `Manifest` and `InitOptions` in init.ts, additive only,
+so a caller that never sets it sees a byte-identical manifest.json to
+before. The edit inserted lines in four spots in init.ts (InitOptions,
+Manifest, readInstalledManifest, and runInit's pin resolution plus the
+desired/previous comparison objects), shifting every citation into
+init.ts past line 70 in install-fence-mechanics.md and model-preselection.md;
+re-pointed by content match against the new file (nearest occurrence at
+or after the anchor's own prior line, since only insertions were made,
+never deletions). Two anchors were still ambiguous after that pass
+(multiple identical-text lines); resolved by picking the occurrence
+closest to the citation's original position. One continuation range for
+the opencode per-role tier-variant block, cited right after the claude
+one on the same line, was re-derived by hand from the surrounding
+block's own shift and re-pointed from lines 538 through 569 to lines
+560 through 591. New tests
+added to test/init.test.ts only as appended blocks (never edited inline
+into an existing test body), so no test/init.test.ts citation in either
+doc needed to move. Added a sentence to the Manifest-shape paragraph
+describing the new field and its three InitOptions.pin states. A
+mechanical re-point pass also touched model-preselection.md, outside
+this task's originally listed doc scope but required for the same
+reason: it also cites init.ts by line, and a first okf-kit check pass
+surfaced two further issues from that pass alone, both fixed: a bare
+continuation range that had always resolved to init.ts by file-context
+even though its content (`TIER_DEFS`) actually lives in models.ts,
+silently unflagged before only because the old init.ts line it landed
+on was not a closing brace, exposed once the shift moved it onto one;
+made an explicit, anchored `src/models.ts` citation instead. And a
+prose mention of two plain line-number pairs in this very log entry
+(the 538-569 -> 560-591 re-point above) was itself briefly picked up by
+the checker as a real continuation citation attached to the nearest
+preceding INSTALL-AGENT.md reference; reworded to spell out "lines N
+through N" instead of the bare colon-range form. Measured on the
+committed tree: vitest 333 of 333 (329 existing plus 4 new), typecheck
+and typecheck:test clean, prettier clean, okf-kit check --require-anchors
+0 anchor findings, 36 findings total (14 warnings, 22 notices, both
+unchanged from the pre-change baseline); the one warning whose line
+range moved (install-fence-mechanics.md's opencode-block short-form
+citation, closing-brace-start-line) already existed pre-change at its
+old position, just relocated with the block it cites.
+
+Same pass, mutation-probe follow-up: the malformed-pin degrade test's
+first draft forced a fresh pin value on every run to prove the read
+path did not crash, but that made it insensitive to a mutant that
+carries a non-string `pin` straight through `readInstalledManifest`
+undegraded, since a forced new value overwrites whatever the read
+path produced either way; the mutant survived. Rewrote the test to
+force a manifest rewrite through the existing hash-ledger mechanism
+instead, while leaving `pin` itself unset, so the written file's `pin`
+key is directly observable: correct code writes no `pin` key at all,
+the mutant writes the raw malformed value. Re-ran the mutant against
+the rewritten test: fails as expected; restored, passes. That rewrite
+needed a second `createHash("sha256").update(...).digest("hex")` call
+per scenario, which tripped a pre-existing docs-consistency guard
+capping how many times that call may occur verbatim in this file (an
+anchor-collision check); introduced a small local `sha256Of` helper in
+the new describe block instead of repeating the call, keeping the
+literal occurrence count at the guard's own limit.

@@ -1989,3 +1989,120 @@ describe("cli smoke — opencode harness", () => {
     ]);
   });
 });
+
+describe("repo kit-version pin (operator apply support)", () => {
+  // A pre-existing docs-consistency check caps how many times the sha256
+  // call below may occur verbatim in this file (an anchor-collision
+  // guard), so the pin scenarios that need a hash-ledger-forcing rewrite
+  // share this helper instead of repeating the call.
+  const sha256Of = (content: string): string =>
+    createHash("sha256").update(content, "utf8").digest("hex");
+
+  it("a caller that never sets options.pin (fresh install) records no pin key, byte-identical to today", () => {
+    const report = runInit(defaultOptions());
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(manifest.pin).toBeUndefined();
+    expect(report.conflicted).toEqual([]);
+  });
+
+  it("a caller that never sets options.pin (hash-ledger upgrade re-run) still records no pin key", () => {
+    runInit(defaultOptions());
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    const templateRel = join(".ai", "workflow", "templates", "00-goal.md");
+    const templatePath = join(target, templateRel);
+
+    // Simulate a previous kit version, mirroring the "upgrades via the
+    // manifest hash ledger" scenario above, so this run's manifest write
+    // actually differs from `previous` and gets rewritten (not skipped).
+    const oldContent = "# Goal (older kit version)\n";
+    writeFileSync(templatePath, oldContent);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.files[templateRel] = sha256Of(oldContent);
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const report = runInit(defaultOptions());
+    expect(report.updated).toContain(templatePath);
+    const updatedManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(updatedManifest.pin).toBeUndefined();
+  });
+
+  it("sets a pin, is a byte-for-byte no-op on repeat, carries it forward when omitted, overwrites it, and clears it with null", () => {
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+
+    runInit({ ...defaultOptions(), pin: "0.24.0" });
+    let manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.pin).toBe("0.24.0");
+
+    // A second identical call (same pin) is a byte-for-byte no-op.
+    const before = snapshot(target);
+    const secondReport = runInit({ ...defaultOptions(), pin: "0.24.0" });
+    const after = snapshot(target);
+    expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
+    for (const [path, content] of after) {
+      expect(content, path).toBe(before.get(path));
+    }
+    expect(secondReport.updated).toEqual([]);
+    expect(secondReport.skipped).toContain(manifestPath);
+
+    // A third call omitting `pin` carries the previous pin forward unchanged.
+    const thirdReport = runInit(defaultOptions());
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.pin).toBe("0.24.0");
+    expect(thirdReport.skipped).toContain(manifestPath);
+
+    // A fourth call with a different pin overwrites it and reports the
+    // manifest as updated.
+    const fourthReport = runInit({ ...defaultOptions(), pin: "0.25.0" });
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.pin).toBe("0.25.0");
+    expect(fourthReport.updated).toContain(manifestPath);
+
+    // A fifth call with pin: null clears it (no `pin` key) and reports the
+    // manifest as updated.
+    const fifthReport = runInit({ ...defaultOptions(), pin: null });
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect("pin" in manifest).toBe(false);
+    expect(fifthReport.updated).toContain(manifestPath);
+  });
+
+  it("degrades a hand-written manifest with a non-string pin to no recorded pin, without crashing", () => {
+    runInit(defaultOptions());
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    const templateRel = join(".ai", "workflow", "templates", "00-goal.md");
+    const templatePath = join(target, templateRel);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.pin = 42;
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    // Force the manifest to actually be rewritten (mirroring the
+    // hash-ledger upgrade scenario above) so the written `pin` value is
+    // observable on disk, rather than a possible no-op masking whether the
+    // raw `42` or the degraded `undefined` was what got carried forward: a
+    // run that omits `pin` entirely must read the malformed manifest
+    // without crashing and write no `pin` key at all (degraded to "no
+    // recorded pin"), never the raw `42` value.
+    const oldContent = "# Goal (older kit version)\n";
+    writeFileSync(templatePath, oldContent);
+    manifest.files[templateRel] = sha256Of(oldContent);
+    manifest.pin = 42;
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const report = runInit(defaultOptions());
+    expect(report.conflicted).toEqual([]);
+    expect(report.updated).toContain(templatePath);
+    const after = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect("pin" in after).toBe(false);
+
+    // Same for an object value.
+    writeFileSync(templatePath, oldContent);
+    after.files[templateRel] = sha256Of(oldContent);
+    after.pin = { not: "a string" };
+    writeFileSync(manifestPath, `${JSON.stringify(after, null, 2)}\n`);
+    const secondReport = runInit(defaultOptions());
+    expect(secondReport.conflicted).toEqual([]);
+    const finalManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect("pin" in finalManifest).toBe(false);
+  });
+});
