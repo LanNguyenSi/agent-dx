@@ -3542,13 +3542,26 @@ sentence stating the re-point happened in the same PR and naming the new
 run-state-lifecycle-and-markers.md section; nothing else in that entry
 changed.
 
-Measured on the committed tree after this commit (`packages/okf-kit`
-0.8.0 `--require-anchors` with the CI allowlist for README.md/
-INSTALL-AGENT.md bare ranges, mirroring the `okf-anchor-guard` CI job):
-anchor findings 0, sources-fresh 0, errors 0. Baseline on the committed
-tree immediately before this task (parent commit a2d5f85, before any doc
-edit) was also anchor 0 / sources-fresh 0 / errors 0 / warnings 13 /
-notices 22 (that baseline predates the re-point and does not reflect the
-tests that were red at the time; okf-kit's own check does not run the
-in-repo vitest guards). Post-commit totals and any warnings/notices delta
-are recorded in the operator handoff for this task.
+Measured on the first commit's tree (`packages/okf-kit` 0.8.0
+`--require-anchors` with the CI allowlist for README.md/INSTALL-AGENT.md
+bare ranges, mirroring the `okf-anchor-guard` CI job): 1 CI-gating anchor
+finding, `run-state-lifecycle-and-markers.md`'s
+`INSTALL-AGENT.md:141-144#"repository's"` citation in the new section --
+the local in-repo vitest guard does not resolve README.md/INSTALL-AGENT.md
+citations at all (`anchorScopeResolve()` has no entry for either), so it
+cannot catch this class; only the real okf-kit tool did. Fixed by
+narrowing the range to `141-143` (line 143 carries `repository's`; line
+144 is `` `.gitignore`. `` alone, real content, not boilerplate, so
+okf-kit does not walk back past it) in a second commit, re-measured on
+that second commit's tree: 0 anchor findings / 0 sources-fresh / 0 errors
+/ 36 warnings / 23 notices (37 warnings were measured on the first
+commit's tree, before the narrowing). Warnings rose from the 13-warning
+baseline to 36 and notices from 22 to 23: every new warning is
+`test-range-start-not-head`, `closing-brace-start-line`, or
+`blank-start-line`, a soft okf-kit heuristic (excluded from the CI-gating
+anchor filter used above) that prefers a `*.test.ts` citation range to
+start on a literal `describe(`/`it(` line; several re-pointed and newly
+added citations here start mid-block instead, by choice, to satisfy the
+stricter in-repo `docs-consistency.test.ts` anchor-uniqueness and
+block-containment guards (see above). No new error or CI-gating finding
+resulted.

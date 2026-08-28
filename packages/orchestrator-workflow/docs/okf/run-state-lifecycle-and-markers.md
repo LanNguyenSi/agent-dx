@@ -107,7 +107,7 @@ tracked run file, not gitignored: the README and the manual-install doc both
 note the pointer is machine-local and add it to `.gitignore`
 (packages/orchestrator-workflow/README.md:100-102#"it to the repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:47-50#"repository's";
-packages/orchestrator-workflow/INSTALL-AGENT.md:141-144#"repository's").
+packages/orchestrator-workflow/INSTALL-AGENT.md:141-143#"repository's").
 
 The unkeyed `run-base` marker described in the section above is unchanged by
 any of this: it remains the single-repo path, and it is also the fallback a
