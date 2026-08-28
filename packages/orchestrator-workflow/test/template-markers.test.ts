@@ -87,17 +87,17 @@ describe("solution-acceptance markers in run templates", () => {
   });
 
   /**
-   * Property test mirroring grounding-mcp's KEYED_RUN_BASE_STRICT regex and
-   * its PLACEHOLDER_KEY check (ow-run-completeness.ts), applied to the
-   * captured key only. Keep in sync: a change to either regex there should
-   * be reflected here too. Asserts the shipped line matches the strict
-   * consumer shape, its captured key is the placeholder shape, and that
-   * near-miss variants (uppercase, space before the colon) do not match,
-   * as a sanity check of the mirrored regex itself.
+   * Property test carrying grounding-mcp's KEYED_RUN_BASE_STRICT regex and
+   * its PLACEHOLDER_KEY check (ow-run-completeness.ts) verbatim, kept in
+   * sync by hand: a change to either regex there must be copied here too.
+   * Asserts the shipped line matches the strict consumer shape, its
+   * captured key is the placeholder shape, and that near-miss variants
+   * (uppercase, space before the colon) do not match, as a sanity check of
+   * the copied regex itself.
    */
   it("the shipped keyed run-base line matches the strict consumer shape and near-miss variants do not", () => {
     const KEYED_RUN_BASE_STRICT =
-      /^<!-- solution-acceptance: run-base\[([^\]]+)\] = (\S+) -->$/;
+      /^\s*<!--\s*solution-acceptance:\s*run-base\[([^\]\n]+)\]\s*=\s*(?!-->)(\S+)\s*-->\s*$/;
     const PLACEHOLDER_KEY = /^<[^>]*>$/;
 
     const lines = goalTemplate.split(/\r?\n/);

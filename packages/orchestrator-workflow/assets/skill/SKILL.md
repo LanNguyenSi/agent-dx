@@ -78,26 +78,29 @@ All state for one unit of work lives in a run directory:
 ```
 
 Create it at the start of a run by copying `.ai/workflow/templates/` and fill
-the files as the run progresses. The newest run directory is the active one;
+the files as the run progresses. The newest run directory is the active one
+unless a `.ai/run` pointer names one (see below);
 older directories are the auditable history. Do not edit past runs.
 
-The run directory itself is created wherever the orchestrator session keeps
-its runs: the workspace's own `.ai/runs/`, or one repository's `.ai/runs/`;
-both are fine. For every repository or worktree the run touches, the
-orchestrator additionally writes `<worktree-root>/.ai/run`: a plain text
-file whose first non-empty line is the absolute path of the run directory.
-The run-completeness reader resolves the run through this pointer first and
-only scans `.ai/runs/` when no pointer file exists; a pointer whose target
-is missing blocks the reader, fail-closed. When the run directory lives
-outside a touched repository, that repository's completeness gate is armed
-only by this pointer: a missing pointer there means the gate silently does
-not apply, so write the pointer before the first implementation commit.
-Overwrite the pointer at the start of every run; a pointer left behind by an
-earlier run keeps deciding silently, since the reader prefers it over the
-newest-run scan, so remove it when no run is active. Before writing the
-pointer, make sure it is ignored (the repository's `.gitignore` or
-`.git/info/exclude`); never commit it, it carries a machine-local absolute
-path.
+The run directory may live in the workspace's own `.ai/runs/` or in one
+repository's `.ai/runs/`. Either way, bind every repository or worktree the
+run touches to it with a pointer file, `<worktree-root>/.ai/run`:
+
+- Content: the absolute path of the run directory (a `YYYY-MM-DD-<slug>`
+  directory) on the first non-empty line; nothing else is read.
+- Write it before the first implementation commit, and overwrite it at the
+  start of every later run; remove it when no run is active, since a
+  pointer left behind keeps binding that worktree to the old run.
+- Before writing it, make sure it is ignored (the repository's `.gitignore`
+  or `.git/info/exclude`); never commit it, it carries a machine-local
+  absolute path.
+
+The pointer is how the run-completeness reader finds the run for a change.
+Without it the reader falls back to that repository's own `.ai/runs/` and
+takes the newest run there, which is only right when the run lives in that
+repository and is its newest; a broken pointer is rejected outright. The
+exact accept and reject rules are the consuming gate's (grounding-mcp) to
+document, not the kit's.
 
 When creating the run directory, replace the `TODO` in `00-goal.md`'s
 `<!-- solution-acceptance: run-base = TODO -->` marker with the base commit
@@ -116,11 +119,10 @@ repository on its own line beside the unkeyed one, exact form
 `<repo-basename>` is the worktree directory's basename; in a linked worktree
 the main repository's basename is accepted too, and the value is that
 repository's pre-change HEAD. The template ships that line as a placeholder
-example, which readers ignore until the placeholder key is replaced. Keep
-the grammar exact: lowercase, no space before the colon, exactly two
-dashes; a near-miss there blocks as malformed. A keyed marker that is not
-on its own line (inside a list bullet or prose) is not seen at all, so the
-binding goes silently missing.
+example, which readers ignore until the placeholder key is replaced. Write
+the marker exactly in that form, on its own line: a deviating line is
+either rejected or not recognised, and in both cases the binding for that
+repository is missing.
 
 ## Workflow
 

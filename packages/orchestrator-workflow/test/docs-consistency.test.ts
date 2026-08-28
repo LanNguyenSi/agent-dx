@@ -378,12 +378,22 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
     "## Workflow",
   );
 
+  /**
+   * Discriminates on the exact phrase "`.ai/run` pointer" rather than the
+   * bare substring ".ai/run", which also matches unrelated text like
+   * ".ai/runs/" (the run directory itself) and so cannot tell a real
+   * pointer mention from an incidental one.
+   */
+  const expectPointerMention = (slice: string) =>
+    expect(slice).toContain("`.ai/run` pointer");
+
   it("SKILL.md Run state documents the .ai/run pointer contract", () => {
     expect(runStateSection).toContain("`<worktree-root>/.ai/run`");
     expect(runStateSection).toContain("absolute path");
     expect(runStateSection).toContain("first non-empty line");
     expect(runStateSection).toContain(".gitignore");
-    expect(runStateSection).toContain("fail-closed");
+    expect(runStateSection).toContain("takes the newest run there");
+    expect(runStateSection).toContain("make sure it is ignored");
   });
 
   it("SKILL.md Run state carries the exact keyed run-base example", () => {
@@ -396,7 +406,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
       "1. **Understand the goal.**",
       "2. **Discover",
     );
-    expect(step1).toContain(".ai/run");
+    expectPointerMention(step1);
   });
 
   it("each of the three Harness notes bullets mentions the .ai/run pointer rule", () => {
@@ -416,7 +426,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
       "## Subagent misfire rule",
     );
     for (const bullet of [claudeCode, opencode, codex]) {
-      expect(bullet).toContain(".ai/run");
+      expectPointerMention(bullet);
     }
   });
 
@@ -426,7 +436,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
       "### Run state",
       "### Models",
     );
-    expect(runState).toContain(".ai/run");
+    expectPointerMention(runState);
     expect(runState).toContain("run-base[<repo-basename>]");
   });
 
@@ -436,7 +446,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
       "## What gets installed",
       "## Role profile",
     );
-    expect(section).toContain("`.ai/run` pointer");
+    expectPointerMention(section);
     expect(section).toContain(".gitignore");
   });
 
@@ -446,7 +456,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
       "### Write surface",
       "(opencode)",
     );
-    expect(section).toContain("`.ai/run` pointer");
+    expectPointerMention(section);
     expect(section).toContain(".gitignore");
   });
 
@@ -456,7 +466,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
       ".ai/runs/.gitkeep`, empty.",
       "Append the content of",
     );
-    expect(section).toContain("`.ai/run` pointer");
+    expectPointerMention(section);
     expect(section).toContain(".gitignore");
   });
 });
