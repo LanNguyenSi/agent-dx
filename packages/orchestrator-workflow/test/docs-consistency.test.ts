@@ -2373,13 +2373,18 @@ describe("advisor output contract is byte-identical between SKILL.md and advisor
  * source itself so a future hardcoded regression is caught even though the
  * interactive prompt is not exercised by the non-interactive CLI tests
  * (--yes skips it).
+ *
+ * Agent-dx task T-003 moved `promptProfile` out of cli.ts into
+ * cli-inputs.ts (alongside the rest of init's option resolution, extracted
+ * into `resolveInitInputs` so a later `apply --target` command can reuse
+ * it); this guard now reads the function from its new home.
  */
-describe("cli.ts's --profile prompt labels are derived from rolesForProfile, not hardcoded (review round 1, M1)", () => {
-  const cliSrc = readDoc("src/cli.ts");
+describe("cli-inputs.ts's --profile prompt labels are derived from rolesForProfile, not hardcoded (review round 1, M1)", () => {
+  const cliSrc = readDoc("src/cli-inputs.ts");
 
   it("promptProfile derives both choice labels from rolesForProfile instead of a literal role list", () => {
     const start = cliSrc.indexOf("async function promptProfile");
-    const end = cliSrc.indexOf("const program = new Command();");
+    const end = cliSrc.indexOf("/** The subset of `init`'s commander options");
     expect(start, "promptProfile not found").toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const fn = cliSrc.slice(start, end);

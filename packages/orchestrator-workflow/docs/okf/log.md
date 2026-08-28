@@ -3872,3 +3872,97 @@ shift with the byte-identical rule. One token in model-preselection.md
 (the "second, sibling describe" guarding README's tier-to-model-class
 table) turned out to have pointed into the review-round escalation block
 since before this change; re-pointed to that describe's actual range.
+
+Agent-dx task T-003: pure refactor of `init`'s CLI action, extracting the
+harness/profile/models/tiers/opencode-catalog resolution block (and the
+three interactive prompt helpers it calls) out of cli.ts into a new
+module, cli-inputs.ts, behind one reusable exported function,
+resolveInitInputs. init's action now calls resolveInitInputs then prints
+the returned warning strings verbatim, in the same order, to the same
+stream (stderr) as before; every scenario test/init.test.ts and
+test/opencode.test.ts cover was re-run unmodified and stayed green,
+confirming no CLI-visible behaviour changed. Added test/cli-inputs.test.ts
+with fifteen in-process unit tests covering the defaults case (no flags,
+no previous manifest), previous-manifest persistence, explicit-flag
+overrides, the tiers on/off/carry matrix, and the opencode branch (an
+empty-catalog run with PATH pointed at an empty temp directory, both with
+and without --tiers), none of which touch a TTY or a live opencode
+install.
+
+Docs re-verification: both install-fence-mechanics.md and
+model-preselection.md carried citations into the moved block; all were
+re-pointed to the new file and, where the moved code's own text changed
+(the per-role and per-class opencode warnings now get pushed onto a
+returned array instead of written straight to stderr), to a fresh anchor
+matching the new byte-identical content, full and continuation forms
+alike. One citation (into cli.ts's own `--no-tiers` commander option,
+which did not move) only needed its line numbers bumped, since removing
+the three prompt helpers and folding the resolution imports shifted every
+line below them. One pre-existing docs-consistency test
+(the round-1 M1 guard pinning that the profile prompt's choice labels
+derive from rolesForProfile rather than a hardcoded role list) read its
+target function's source straight out of cli.ts by name; updated to read
+cli-inputs.ts instead, its assertions on the derivation itself untouched.
+Both docs' `sources:` lists gained cli-inputs.ts and both timestamps were
+re-stamped.
+
+Mutation probes run directly, mutant applied and reverted for real between
+each: (a) forcing the extracted function to ignore `previous.profile`
+(hardcoding `DEFAULT_PROFILE` in the else branch, restoring from a saved
+copy afterward) failed both the new "keeps the previous harnesses,
+profile, models, and tiers" unit test and the existing "a plain re-run
+without --profile keeps the previously installed profile" CLI test in
+test/init.test.ts. (b) Dropping the tiers carry-forward (`opts.tiers ??
+previous?.tiers ?? false` to `opts.tiers ?? false`) failed the "tiers:
+true is carried forward" unit test. (c) First tried moving the per-role
+opencode-alias warning loop to run after the per-class tier-warning loop
+instead of before it (an order swap): this mutant survived the entire
+suite untouched, npm test green, 344/344 -- masked, because the acceptance
+criteria's own two named unit tests (and every existing opencode CLI
+assertion) check the warning set by content/`toContain`, never by
+position, so a pure re-ordering of two already-present warning groups
+cannot be caught by content-only assertions. Swapped to a discriminating
+mutant instead: dropping the per-role warning loop entirely (so a
+tiers-on opencode run pushes only the three per-class warnings, never the
+combined per-role one) failed three tests: two of the new unit tests
+("with an empty catalog...one combined warning" -- length 1 expected, got
+0; "with an empty catalog and --tiers...per unresolved model class" --
+length 4 expected, got 3) and the existing
+"writes the --opencode-provider hint to STDERR...when catalog is empty"
+CLI test in test/init.test.ts (expected stderr to contain
+"--opencode-provider", got empty string). All mutants were reverted from
+the same saved copy and `npm test` re-confirmed 344/344 green after each.
+
+Measured before the rebase onto master: `npm test` 344/344 (6 files, 329
+pre-existing plus 15 new); re-confirmed on the committed tree after the
+rebase (master now carries the 22 operator-manifest tests): 366/366; `npm run typecheck`, `npm run typecheck:test`,
+and `npm run format:check` clean; `node scripts/check-cli-flag-order.mjs`
+clean from the repo root (no `.option()` calls were touched). okf-kit
+(0.8.0, `--require-anchors`): 0 CI-gating findings (no `[anchor-...]`,
+`[heading-section-...]`, or `[test-range-straddles-block]` message), 22
+notices (matches the 22-notice baseline; the two transient
+`sources-fresh ... untracked by git` notices on cli-inputs.ts seen before
+committing are gone now that it is tracked). Warnings moved from 14 to
+17: the extra 3 are all `sources-fresh STALE` on
+review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, and
+subagent-contracts-superset.md, none of which this task edited or cites
+into -- they carry test/docs-consistency.test.ts in their own `sources:`
+lists, and the docs-consistency-guard fix above (updating the round-1 M1
+promptProfile check to read cli-inputs.ts) bumped that shared file's git
+mtime past their own `timestamp:` fields. Not CI-gating (no
+`[anchor-...]`/`[heading-section-...]`/`[test-range-straddles-block]`
+suffix) and not a citation problem in any of the three -- a content-only
+staleness flag on docs outside this task's allowed-changes list
+(model-preselection.md and this log only), left for whichever change
+next touches one of those three to re-stamp along with its own edit,
+rather than restamped here without also reviewing content this task did
+not otherwise need to touch. The remaining 14 warnings are the unchanged
+pre-existing baseline (test-range/closing-brace/blank-start-line findings
+this task did not touch).
+
+Same pass, orchestrator follow-up: the docs-consistency test edit above
+(the promptProfile guard now reads src/cli-inputs.ts) made that test file
+newer than three docs listing it as a source; review-gate-and-waivers.md,
+run-state-lifecycle-and-markers.md and subagent-contracts-superset.md were
+re-read (nothing they state touches the moved resolution code) and
+re-stamped so the bundle reports zero sources-fresh findings again.
