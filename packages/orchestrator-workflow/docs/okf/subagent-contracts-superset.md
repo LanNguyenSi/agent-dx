@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-08-28T13:54:33Z
+timestamp: 2026-08-28T14:28:21Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -67,25 +67,25 @@ fenced yaml block (the orchestrator's reference copy), once in the role's
 installed prompt, in its trailing "Return exactly this structure as your
 final output, nothing else" block:
 
-- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:253-274#"risk: low | medium | high"`
+- Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:263-284#"risk: low | medium | high"`
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:47-69#"recommendation:"`.
-- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:301-328#"recommendation: accept | review | fix_required"`
+- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:311-338#"recommendation: accept | review | fix_required"`
   vs. `packages/orchestrator-workflow/assets/agents/implementer.md:36-61#"recommendation: accept | review | fix_required"`.
   Both copies gained a `mutation_probes` field in 0.16.0; see
   [Mutation probes requirement](#mutation-probes-requirement-0160) below.
-- Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:338-361#"matches_implementer_claim: matched | mismatched |"`
+- Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:348-371#"matches_implementer_claim: matched | mismatched |"`
   vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:65-87#"reproduction:"`. Both
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below. Both
   also gained a per-finding `recurrence` field; see
   [Recurrence field](#recurrence-field) below.
 - Task-slicer:
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:374-403#"- T-001"`
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:384-413#"- T-001"`
   (`## Task slicer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/task-slicer.md:36-64#"open_questions:"`.
 - Advisor (since 0.21.0):
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:413-431#"would_change_recommendation_if:"`
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:423-441#"would_change_recommendation_if:"`
   (`## Advisor output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/advisor.md:53-71#"open_questions:"`. Direct
   read confirms the two blocks are field-identical (since review round 1,
@@ -95,7 +95,7 @@ final output, nothing else" block:
   added in review round 1 (M2) — see below.
 - Subagent input contract (the shape the orchestrator sends when delegating,
   not a role's own output) lives only in
-  `packages/orchestrator-workflow/assets/skill/SKILL.md:280-298#"format: structured"`; there is no
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:290-308#"format: structured"`; there is no
   installed-prompt counterpart because it is what the orchestrator constructs,
   not what a subagent returns. Its `role:` enum
   (`role: advisor | explorer | implementer | reviewer | task_slicer`) is the
@@ -149,18 +149,18 @@ required them, forcing the orchestrator to fabricate that content when
 delegating.
 
 Current per-task slicer shape
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:374-403#"- T-001"`): `id, title,
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:384-413#"- T-001"`): `id, title,
 goal, relevant_files, relevant_docs, acceptance_criteria, constraints,
 suggested_tests, allowed_changes, forbidden_changes, dependencies, risk`, in
 that order. The subagent input contract
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:280-298#"format: structured"`) requires:
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:290-308#"format: structured"`) requires:
 `role, task_id, goal, context.relevant_files, context.relevant_docs,
 constraints, acceptance_criteria, allowed_changes, forbidden_changes,
 expected_output.format`. `suggested_tests` is the one slicer field with no
 subagent-input counterpart (tests are not part of that contract); it exists
 for the `02-tasks.md` template and the step-4 workflow narrative instead. The
 copy rule is stated verbatim at
-`packages/orchestrator-workflow/assets/skill/SKILL.md:408-411#"inventing new field values."`: "The
+`packages/orchestrator-workflow/assets/skill/SKILL.md:418-421#"inventing new field values."`: "The
 orchestrator copies each task's goal, relevant_files, relevant_docs,
 acceptance_criteria, constraints, allowed_changes, and forbidden_changes 1:1
 into the subagent input contract when delegating implementation, rather than
@@ -193,42 +193,42 @@ implementer, not implementation instructions
 
 ## Subagent misfire rule (0.11.0, evidence relocated 0.24.0)
 
-`packages/orchestrator-workflow/assets/skill/SKILL.md:476-485#"with it. Treat a misfire as a failed spawn: resume or"` (`## Subagent
+`packages/orchestrator-workflow/assets/skill/SKILL.md:486-495#"with it. Treat a misfire as a failed spawn: resume or"` (`## Subagent
 misfire rule`): a subagent return is a misfire, not evidence, when it fails
 to parse against its role's output contract. Two detection signals:
 
 1. Contract-parse failure: the output does not parse against the role's
-   contract (`SKILL.md:478-479#"against its role's output contract, including an"`). Since a same-day R2 fix-round on 0.16.0
+   contract (`SKILL.md:488-489#"against its role's output contract, including an"`). Since a same-day R2 fix-round on 0.16.0
    this signal names an explicit example: an implementer return that omits
    the `mutation_probes` field even though the task assignment named
-   mutation probes to run (`SKILL.md:480-481#"mutation probes to run. When a subagent returns"`).
-2. Near-instant return with no tool activity (`SKILL.md:481-482#"activity, treat that as a misfire signal rather than"`). This is a
+   mutation probes to run (`SKILL.md:490-491#"mutation probes to run. When a subagent returns"`).
+2. Near-instant return with no tool activity (`SKILL.md:491-492#"activity, treat that as a misfire signal rather than"`). This is a
    signal, not proof: a legitimately tool-free return (e.g. a slicer
    answering entirely from context already supplied) is not automatically a
    misfire. It is accepted only if it is contract-valid *and* the assignment
-   was answerable from the context supplied with it (`SKILL.md:483-485#"with it. Treat a misfire as a failed spawn: resume or"`).
+   was answerable from the context supplied with it (`SKILL.md:493-495#"with it. Treat a misfire as a failed spawn: resume or"`).
 
 Response: treat a misfire as a failed spawn: resume or respawn the
 subagent; never fold the non-contract output into run state or count it as a
-completed step (`SKILL.md:485-487#"completed step. For the near-instant, no-tool-activity"`). Since 0.18.0, for the near-instant,
+completed step (`SKILL.md:495-497#"completed step. For the near-instant, no-tool-activity"`). Since 0.18.0, for the near-instant,
 no-tool-activity signal specifically, the rule states a concrete preference
 rather than leaving the resume-or-respawn choice open: prefer resume over a
 fresh respawn, sending the same subagent a message that explicitly repeats
 the original assignment rather than a generic retry, since resume keeps the
 subagent's prior turn in context while a fresh spawn starts cold
-(`SKILL.md:487-490#"since resume keeps the subagent's prior turn in context"`); fall back to a fresh respawn only if the resume
-attempt itself misfires the same way (`SKILL.md:494-495#"the resume attempt itself misfires the same way. This"`). Every incident of
+(`SKILL.md:497-500#"since resume keeps the subagent's prior turn in context"`); fall back to a fresh respawn only if the resume
+attempt itself misfires the same way (`SKILL.md:504-505#"the resume attempt itself misfires the same way. This"`). Every incident of
 this exact signal whose outcome was recorded has resolved on the first
-resume attempt (`SKILL.md:491-494#"resolved on the first resume attempt; fall back to a"`) — a same-day review-fix round (0.18.0)
+resume attempt (`SKILL.md:501-504#"resolved on the first resume attempt; fall back to a"`) — a same-day review-fix round (0.18.0)
 bound this claim to the recorded count after finding the original wording
 asserted a universal resolve rate the record did not support (see
 Motivation below). The preference is scoped away from a second,
 structurally different misfire class measured separately: a mid-run
 watchdog stall did not resolve on resume and needed a fresh, explicitly
-constrained respawn instead (`SKILL.md:495-500#"watchdog stall as outside this preference. Record every"`). Record every misfire in
-`03-decisions.md` (`SKILL.md:500-501#"This matters most for review: a misfired review is not a"`). Review-gate consequence, stated
+constrained respawn instead (`SKILL.md:505-510#"watchdog stall as outside this preference. Record every"`). Record every misfire in
+`03-decisions.md` (`SKILL.md:510-511#"This matters most for review: a misfired review is not a"`). Review-gate consequence, stated
 explicitly: a misfired review is not a review and never satisfies the review
-gate, since review is never skipped (`SKILL.md:501-502#"review and never satisfies the review gate, since"`). Review-gate
+gate, since review is never skipped (`SKILL.md:511-512#"review and never satisfies the review gate, since"`). Review-gate
 severities and waiver mechanics themselves are out of this doc's lane; see
 [review-gate-and-waivers.md](review-gate-and-waivers.md).
 
@@ -245,8 +245,8 @@ moved to `packages/orchestrator-workflow/CHANGELOG.md`'s `[0.24.0]` entry
 observed for, the recorded incident count, and the separate watchdog-stall
 incident's outcome. The watchdog-stall exception itself was reworded the
 same way, dropping "in the one measured incident of that class, it stalled
-a second time" down to just the outcome (`SKILL.md:497-499#"explicitly constrained respawn produced a"`), since the
-incident count is now evidence rather than rule text too. `SKILL.md:103-104#"gate's documentation (grounding-mcp) for the full"`
+a second time" down to just the outcome (`SKILL.md:507-509#"explicitly constrained respawn produced a"`), since the
+incident count is now evidence rather than rule text too. `SKILL.md:111-112#"gate's documentation (grounding-mcp) for the full"`
 (the run-state paragraph, out of this section but touched by the same
 placement pass) similarly drops a pinned `grounding-mcp 0.6.0` version
 number in favor of "the consuming gate's documentation (grounding-mcp)".
@@ -286,7 +286,7 @@ watchdog scope carve-out, :574-581, and its own resolution detail,
 
 ## Reproduction requirement (0.14.0)
 
-`packages/orchestrator-workflow/assets/skill/SKILL.md:201-208#"lint): only claims that could vary run to run trigger"` (step 7,
+`packages/orchestrator-workflow/assets/skill/SKILL.md:211-218#"lint): only claims that could vary run to run trigger"` (step 7,
 immediately after the placeholder-row rule): when acceptance rests on
 empirical or probabilistic evidence (flake rates, benchmarks, "n runs
 green", performance/timing numbers), the reviewer must independently
@@ -298,7 +298,7 @@ installed `packages/orchestrator-workflow/assets/agents/reviewer.md:56-66#"lint)
 prompt carries the same rule verbatim (second-person voice). Both output
 contracts gained a matching `reproduction` field
 (`method, sample_size, result, matches_implementer_claim`,
-`SKILL.md:357-361#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:82-85#"residual_risks:"`); `matches_implementer_claim`
+`SKILL.md:367-371#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:82-85#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
@@ -317,14 +317,14 @@ field.
 
 Shipped in 0.16.0 and hardened the same day in an R2 fix-round after review
 caught two gaps (see Motivation below).
-`packages/orchestrator-workflow/assets/skill/SKILL.md:156-175#"for real, observe the named test fail, restore,"` (step 6, added
+`packages/orchestrator-workflow/assets/skill/SKILL.md:166-185#"for real, observe the named test fail, restore,"` (step 6, added
 in the R2 pass): when a task's acceptance rests on a test that must fail
 without the change, the orchestrator names the mutation probes to run in the
 task assignment; the implementer reports each one in the output contract's
 `mutation_probes` field (apply the mutant for real, observe the named test
 fail, restore, re-verify). Step 6 also carries a short
 orchestrator-checkable reference to the installed implementer prompt's
-claim-only-what-was-measured rule (`SKILL.md:175-178#"unverified. Record meaningful decisions in"`): treat a verification
+claim-only-what-was-measured rule (`SKILL.md:185-188#"unverified. Record meaningful decisions in"`): treat a verification
 claim in the implementer's report as unverified unless it is backed by a
 check the implementer actually ran. Before this R2 pass step 6 said nothing
 about naming probes at all — the field's only trigger lived in the misfire
@@ -332,9 +332,9 @@ rule's prose, mirroring the gap the 0.14.0 reproduction trigger closed for
 step 7 in the log entry above, but left open here until this pass.
 
 Both output-contract copies carry the field (`mutant, verified_applied_via,
-result, restored_verified`, `SKILL.md:318-322#"restored_verified:"` and `implementer.md:51-55#"restored_verified:"`).
+result, restored_verified`, `SKILL.md:328-332#"restored_verified:"` and `implementer.md:51-55#"restored_verified:"`).
 A paragraph immediately after `SKILL.md`'s contract block
-(`SKILL.md:331-336#"reported'."`) and a matching bullet in the installed prompt
+(`SKILL.md:341-346#"reported'."`) and a matching bullet in the installed prompt
 (`implementer.md:16-21#"rather than omitting the field."`) both state the not-applicable signal added in the
 R2 pass: when the assignment named no probes, the implementer returns
 `mutation_probes: []` rather than omitting the field, so "none asked for" is
@@ -369,17 +369,17 @@ not-applicable signal, both closed in the R2 pass documented here.
 
 The reviewer output contract gained a per-finding `recurrence: new |
 repeated` field, added to both copies identically
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:351#"recurrence: new | repeated"` and
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:361#"recurrence: new | repeated"` and
 `packages/orchestrator-workflow/assets/agents/reviewer.md:81#"recurrence: new | repeated"`, same field, same
 line-relative position inside the findings item in both). It classifies
 each finding against earlier review rounds on the same task: `new` for a
 defect class not previously found there, `repeated` for one that already
 appeared; on a task's first round every finding is `new` by definition
-(`SKILL.md:371-372#"Review-round escalation budget's trigger."`). The
+(`SKILL.md:381-382#"Review-round escalation budget's trigger."`). The
 installed `reviewer.md:30#"classify each finding as"`
 prompt instructs the classification directly, gated on the orchestrator
 having named the review round number in the briefing (a step 7 addition,
-`packages/orchestrator-workflow/assets/skill/SKILL.md:210-213#"trigger (see below) without re-deriving it by hand."`).
+`packages/orchestrator-workflow/assets/skill/SKILL.md:220-223#"trigger (see below) without re-deriving it by hand."`).
 This field feeds the review-round escalation budget's trigger; full
 treatment of that budget (the second-halt-or-third-round trigger, the
 three named escalations, the `03-decisions.md` marker) is out of this

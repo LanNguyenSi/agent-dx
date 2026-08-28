@@ -86,6 +86,41 @@ describe("solution-acceptance markers in run templates", () => {
     expect(matches[0][1]).toBe("TODO");
   });
 
+  /**
+   * Property test mirroring grounding-mcp's KEYED_RUN_BASE_STRICT regex and
+   * its PLACEHOLDER_KEY check (ow-run-completeness.ts), applied to the
+   * captured key only. Keep in sync: a change to either regex there should
+   * be reflected here too. Asserts the shipped line matches the strict
+   * consumer shape, its captured key is the placeholder shape, and that
+   * near-miss variants (uppercase, space before the colon) do not match,
+   * as a sanity check of the mirrored regex itself.
+   */
+  it("the shipped keyed run-base line matches the strict consumer shape and near-miss variants do not", () => {
+    const KEYED_RUN_BASE_STRICT =
+      /^<!-- solution-acceptance: run-base\[([^\]]+)\] = (\S+) -->$/;
+    const PLACEHOLDER_KEY = /^<[^>]*>$/;
+
+    const lines = goalTemplate.split(/\r?\n/);
+    const keyedLine = lines.find((line) =>
+      line.includes("run-base[<repo-basename>]"),
+    );
+    expect(keyedLine).toBeDefined();
+
+    const match = (keyedLine ?? "").match(KEYED_RUN_BASE_STRICT);
+    expect(match).not.toBeNull();
+    expect(PLACEHOLDER_KEY.test(match?.[1] ?? "")).toBe(true);
+
+    const nearMissVariants = [
+      // uppercase
+      "<!-- Solution-acceptance: run-base[<repo>] = <commit> -->",
+      // space before the colon
+      "<!-- solution-acceptance : run-base[<repo>] = <commit> -->",
+    ];
+    for (const variant of nearMissVariants) {
+      expect(KEYED_RUN_BASE_STRICT.test(variant)).toBe(false);
+    }
+  });
+
   it("05-review-findings.md carries a recurrence note pointing at the reviewer contract's recurrence field and the review-round escalation budget", () => {
     expect(reviewTemplate).toContain(
       "<!-- Recurrence note: each finding in the reviewer output contract also carries a `recurrence` field (new or repeated), letting the orchestrator read the Review-round escalation budget's trigger (SKILL.md, Review-round escalation budget) off the reviewer's own return instead of reconstructing it by hand. A repeated finding here is what feeds that budget's round count. -->",

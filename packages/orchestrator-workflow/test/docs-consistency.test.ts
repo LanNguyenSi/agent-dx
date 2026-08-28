@@ -379,7 +379,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
   );
 
   it("SKILL.md Run state documents the .ai/run pointer contract", () => {
-    expect(runStateSection).toContain(".ai/run");
+    expect(runStateSection).toContain("`<worktree-root>/.ai/run`");
     expect(runStateSection).toContain("absolute path");
     expect(runStateSection).toContain("first non-empty line");
     expect(runStateSection).toContain(".gitignore");
@@ -436,7 +436,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
       "## What gets installed",
       "## Role profile",
     );
-    expect(section).toContain(".ai/run");
+    expect(section).toContain("`.ai/run` pointer");
     expect(section).toContain(".gitignore");
   });
 
@@ -446,7 +446,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
       "### Write surface",
       "(opencode)",
     );
-    expect(section).toContain(".ai/run");
+    expect(section).toContain("`.ai/run` pointer");
     expect(section).toContain(".gitignore");
   });
 
@@ -456,7 +456,7 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
       ".ai/runs/.gitkeep`, empty.",
       "Append the content of",
     );
-    expect(section).toContain(".ai/run");
+    expect(section).toContain("`.ai/run` pointer");
     expect(section).toContain(".gitignore");
   });
 });

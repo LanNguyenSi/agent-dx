@@ -150,9 +150,10 @@ Workflow state lives under `.ai/`:
 
 - `.ai/workflow/templates/` holds the canonical file templates
   (`00-goal.md` through `06-handoff.md`).
-- Each unit of work gets a run directory `.ai/runs/YYYY-MM-DD-<slug>/`,
-  created by copying the templates. The newest run directory is the active
-  one; older ones are the auditable history.
+- Each unit of work gets a run directory `.ai/runs/YYYY-MM-DD-<slug>/` (in
+  the workspace or a touched repository), created by copying the templates.
+  The newest run directory is the active one; older ones are the auditable
+  history.
 - `.ai/workflow/manifest.json` records the installed kit version, the chosen
   harnesses, and the per-role model preferences.
 - Every worktree a run touches carries a `.ai/run` pointer (absolute path of

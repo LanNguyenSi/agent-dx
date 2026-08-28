@@ -43,6 +43,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shifts this change introduces; those anchors were re-pointed in the same
   PR, and `run-state-lifecycle-and-markers.md` gained a section documenting
   the pointer and the keyed marker.
+- Review round 1 on the run-pointer change above corrected two claims and
+  hardened three tests. `SKILL.md` Run state now splits the keyed marker's
+  grammar check (lowercase, no space before the colon, exactly two dashes:
+  a near-miss there blocks as malformed) from a separate failure mode: a
+  keyed marker that is not on its own line, inside a list bullet or prose,
+  is not seen at all, so the binding goes silently missing, since the
+  reader only recognizes a whole-line comment. It also now states that a
+  real key left with the placeholder value `<sha>` is not ignored the way a
+  placeholder key is: the value is read as-is and the verdict layer blocks
+  it, since `<sha>` is not a commit sha. The Run state pointer paragraph
+  gained three instructions: write the pointer before the first
+  implementation commit whenever the run directory lives outside a touched
+  repository (the pointer is the only thing that arms that repository's
+  gate); overwrite the pointer at the start of every run, since a stale
+  pointer left by an earlier run keeps deciding silently; and make sure the
+  pointer is ignored (the repository's `.gitignore` or `.git/info/exclude`)
+  before writing it, and never commit it. `test/docs-consistency.test.ts`'s
+  four pointer-doc tests (SKILL.md Run state, README, INSTALL-AGENT.md
+  write surface, and its manual scaffold list) now assert a distinctive
+  phrase (`` `<worktree-root>/.ai/run` `` for the first, `` `.ai/run`
+  pointer `` for the other three) instead of the bare substring `.ai/run`,
+  which a bare `.ai/runs/` mention alone could also satisfy; each was
+  verified to turn red when its source sentence is deleted, and green again
+  once restored. `test/template-markers.test.ts` gained a property test
+  that mirrors grounding-mcp's `KEYED_RUN_BASE_STRICT` regex and its
+  `PLACEHOLDER_KEY` check against the shipped keyed line, and asserts that
+  two constructed near-miss variants (uppercase, space before the colon) do
+  not match, as a sanity check of the mirrored regex itself.
+  `agents-md-section.md`'s run-directory bullet now notes the run directory
+  can live "in the workspace or a touched repository".
+  `docs/okf/run-state-lifecycle-and-markers.md` carries the same corrected
+  claims, and every `docs/okf/*.md` anchor that cited a line range shifted
+  by this round's edits was re-pointed in the same PR.
 
 ## [0.25.0] - 2026-08-27
 

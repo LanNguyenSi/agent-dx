@@ -88,8 +88,16 @@ orchestrator additionally writes `<worktree-root>/.ai/run`: a plain text
 file whose first non-empty line is the absolute path of the run directory.
 The run-completeness reader resolves the run through this pointer first and
 only scans `.ai/runs/` when no pointer file exists; a pointer whose target
-is missing blocks the reader, fail-closed. The pointer is machine-local and
-belongs in `.gitignore`.
+is missing blocks the reader, fail-closed. When the run directory lives
+outside a touched repository, that repository's completeness gate is armed
+only by this pointer: a missing pointer there means the gate silently does
+not apply, so write the pointer before the first implementation commit.
+Overwrite the pointer at the start of every run; a pointer left behind by an
+earlier run keeps deciding silently, since the reader prefers it over the
+newest-run scan, so remove it when no run is active. Before writing the
+pointer, make sure it is ignored (the repository's `.gitignore` or
+`.git/info/exclude`); never commit it, it carries a machine-local absolute
+path.
 
 When creating the run directory, replace the `TODO` in `00-goal.md`'s
 `<!-- solution-acceptance: run-base = TODO -->` marker with the base commit
@@ -105,12 +113,14 @@ gate's documentation (grounding-mcp) for the full consumer semantics. When a
 run touches more than one repository, record one keyed marker per
 repository on its own line beside the unkeyed one, exact form
 `<!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->`, where
-`<repo-basename>` is the worktree directory's basename (or the main
-repository's basename for a linked worktree) and the value is that
+`<repo-basename>` is the worktree directory's basename; in a linked worktree
+the main repository's basename is accepted too, and the value is that
 repository's pre-change HEAD. The template ships that line as a placeholder
 example, which readers ignore until the placeholder key is replaced. Keep
-the grammar exact (whole-line comment, lowercase, no space before the
-colon): a near-miss blocks as malformed.
+the grammar exact: lowercase, no space before the colon, exactly two
+dashes; a near-miss there blocks as malformed. A keyed marker that is not
+on its own line (inside a list bullet or prose) is not seen at all, so the
+binding goes silently missing.
 
 ## Workflow
 
