@@ -3981,3 +3981,158 @@ difflib line map with the byte-identical rule; both docs re-stamped.
 Measured on the committed tree: vitest 373 of 373, typecheck,
 typecheck:test and prettier clean, check-cli-flag-order clean, okf-kit
 check with require-anchors 0 CI-gating findings and 0 sources-fresh.
+Repo kit-version pin (operator apply support): added an optional
+`pin` field to `Manifest` and `InitOptions` in init.ts, additive only,
+so a caller that never sets it sees a byte-identical manifest.json to
+before. The edit inserted lines in four spots in init.ts (InitOptions,
+Manifest, readInstalledManifest, and runInit's pin resolution plus the
+desired/previous comparison objects), shifting every citation into
+init.ts past line 70 in install-fence-mechanics.md and model-preselection.md;
+re-pointed by content match against the new file (nearest occurrence at
+or after the anchor's own prior line, since only insertions were made,
+never deletions). Two anchors were still ambiguous after that pass
+(multiple identical-text lines); resolved by picking the occurrence
+closest to the citation's original position. One continuation range for
+the opencode per-role tier-variant block, cited right after the claude
+one on the same line, was re-derived by hand from the surrounding
+block's own shift and re-pointed from lines 538 through 569 to lines
+560 through 591. New tests
+added to test/init.test.ts only as appended blocks (never edited inline
+into an existing test body), so no test/init.test.ts citation in either
+doc needed to move. Added a sentence to the Manifest-shape paragraph
+describing the new field and its three InitOptions.pin states. A
+mechanical re-point pass also touched model-preselection.md, outside
+this task's originally listed doc scope but required for the same
+reason: it also cites init.ts by line, and a first okf-kit check pass
+surfaced two further issues from that pass alone, both fixed: a bare
+continuation range that had always resolved to init.ts by file-context
+even though its content (`TIER_DEFS`) actually lives in models.ts,
+silently unflagged before only because the old init.ts line it landed
+on was not a closing brace, exposed once the shift moved it onto one;
+made an explicit, anchored `src/models.ts` citation instead. And a
+prose mention of two plain line-number pairs in this very log entry
+(the 538-569 -> 560-591 re-point above) was itself briefly picked up by
+the checker as a real continuation citation attached to the nearest
+preceding INSTALL-AGENT.md reference; reworded to spell out "lines N
+through N" instead of the bare colon-range form. Measured at the time, before this branch was rebased onto master: the
+suite green with the four new pin tests, typecheck and typecheck:test
+clean, prettier clean, okf-kit check --require-anchors: no anchor finding, warning and
+notice sets unchanged from the pre-change baseline; the one warning whose line range moved
+(install-fence-mechanics.md's opencode-block short-form citation,
+closing-brace-start-line) already existed pre-change at its old
+position, just relocated with the block it cites. The rebase onto
+master (slice 3, which moved init's option resolution out of cli.ts
+into cli-inputs.ts) grew the base suite by tests unrelated to this
+task, so the suite measured on the pre-slice-4 tree of this branch was
+green with the same four new tests; a later fix round re-points every
+citation into init.ts again after the rebase's own line shift and adds
+further tests, see that entry below for the count it measured.
+
+Same pass, mutation-probe follow-up: the malformed-pin degrade test's
+first draft forced a fresh pin value on every run to prove the read
+path did not crash, but that made it insensitive to a mutant that
+carries a non-string `pin` straight through `readInstalledManifest`
+undegraded, since a forced new value overwrites whatever the read
+path produced either way; the mutant survived. Rewrote the test to
+force a manifest rewrite through the existing hash-ledger mechanism
+instead, while leaving `pin` itself unset, so the written file's `pin`
+key is directly observable: correct code writes no `pin` key at all,
+the mutant writes the raw malformed value. Re-ran the mutant against
+the rewritten test: fails as expected; restored, passes. That rewrite
+needed a second `createHash("sha256").update(...).digest("hex")` call
+per scenario, which tripped a pre-existing docs-consistency guard
+capping how many times that call may occur verbatim in this file (an
+anchor-collision check); introduced a small local `sha256Of` helper in
+the new describe block instead of repeating the call, keeping the
+literal occurrence count at the guard's own limit.
+
+## 2026-08-28 (repo kit-version pin, review round 1 fix round, implementer)
+
+Fix round after review round 1 of the repo kit-version pin (agent-dx task b457ee55, slice 2): this branch was rebased
+onto master (which had, in the same window, moved init's option
+resolution out of cli.ts into cli-inputs.ts and re-pointed the same two
+docs to it), so two independent re-point passes landed on top of each
+other; the orchestrator resolved the textual conflicts by hand, keeping
+this branch's init.ts numbers and master's cli.ts line. That left four
+anchors in install-fence-mechanics.md broken outright (caught by the
+existing `every string-anchored docs/okf citation's anchor is
+load-bearing` describe in test/docs-consistency.test.ts) plus several
+more that resolved but pointed at the wrong span (the base
+profile-downgrade loop instead of its tier-variant sub-loop, and the
+tiers-off block cited with the profile-downgrade block's own anchor
+text).
+
+Also normalized `options.pin`/a stored `pin` that is empty or
+whitespace-only to a clear (same as `null`/no recorded pin), per the
+round's finding that an empty string is `typeof "" === "string"` and
+so was previously accepted and made sticky; added a test for each
+side (runInit normalization, readInstalledManifest degradation) plus
+two more calls to the existing five-call pin scenario test (a second
+`pin: null` no-op, and a following call that omits `pin` and must not
+resurrect it).
+
+That normalization edit inserted lines in three more spots in init.ts
+(the InitOptions.pin doc comment, readInstalledManifest's pin-field
+handling, and runInit's own pin-resolution block), on top of the lines
+the rebase had already inserted for the cli-inputs.ts extraction, so
+every citation into init.ts past its first ~70 lines needed re-pointing
+a second time regardless of whether the round 1 review had flagged it.
+Rather than trust hand-arithmetic on two stacked shifts, every citation
+into init.ts in both docs was re-derived directly against the current
+file: a small local script mirrored docs-consistency's own
+last-content-line/uniqueness-in-range logic so each candidate range and
+anchor could be checked before writing it, the same rule the doc-level
+test enforces. One citation (the codex-only SKILL.md write, review
+finding M1) was also given a less collision-prone anchor: the literal
+`.agents` path segment, which turned out to be unique file-wide, in
+place of the `, SKILL_NAME,` fragment that also occurs at the claude
+and opencode SKILL.md install lines (harmless once the range itself
+targets the right line, but still ambiguous on its own).
+
+Corrected the log.md entry above: it presented a test count taken
+before this branch was rebased as if measured on the committed tree;
+the absolute counts in this change's paragraphs were later replaced
+by commands, verdicts and deltas; see the closing record at the end of
+this entry.
+Re-stamped both docs' `timestamp:` fields in this commit since both
+were edited again.
+
+Measured before the slice-4 merge reached this branch: `npx vitest run`
+green with the two new tests from this round, `npm run typecheck`,
+`npm run typecheck:test` and `npm run format:check` clean, the
+docs-consistency string-anchor guard green over every re-pointed
+citation, and okf-kit check with require-anchors reporting no CI-gating
+finding and no stale source; the anchor-not-found and
+closing-brace-start-line warnings this round fixed were gone.
+
+Orchestrator note, same change: the branch was rebased twice onto master
+while slices 3 and 4 (the cli-inputs extraction and the setup command)
+landed; the merges left four init.ts citations in
+install-fence-mechanics.md at their master-era line numbers although the
+kit-version pin code above them had grown. Re-pointed by hand to the
+current sub-loop and note lines (the tier-variant sub-loop, the dropped-role
+note with its distinguishing `${relativePath}` prefix, the rolesForProfile
+filter, the tiers-off note), verified by the in-repo anchor guards and a
+full green vitest run; both docs re-stamped.
+
+Closing record for the repo kit-version pin change. This entry records
+commands and verdicts, not suite totals: a total describes one tree, and
+this branch was rebased twice while sibling slices merged, so every total
+written earlier went stale on the next rebase. On the commit that ships
+the change, run inside packages/orchestrator-workflow: `npm test` green
+(the change adds nine tests to init.test.ts: set, no-op, carry-forward,
+overwrite, clear, re-clear, omitted-after-clear, empty and whitespace
+normalization, padded-pin stability); `npm run typecheck`, `npm run
+typecheck:test` and `npm run format:check` clean. From the repository
+root: `npx -y okf-kit@0.8.0 check --json
+packages/orchestrator-workflow/docs/okf --require-anchors
+--require-anchors-allow README.md packages/orchestrator-workflow/README.md
+INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` (the
+okf-anchor-guard CI invocation) reports no CI-gating finding and no stale
+source; its warning set differs from master's by one warning only: the
+opencode-block closing-brace warning in install-fence-mechanics.md went
+away and nothing new appeared; the notice set is identical. Un-anchored citations that a
+re-point pass had moved onto the wrong span were given string anchors so
+the in-repo guard covers them from now on. A stored pin is trimmed on
+write and normalized on read; the raw manifest may hold padded bytes
+until the next rewrite.

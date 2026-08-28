@@ -68,6 +68,15 @@ export interface InitOptions {
    * by the role's own preselected model.
    */
   opencodeClassModels?: Record<ModelClass, string | undefined>;
+  /**
+   * Repo kit-version pin (distinct from the actually-installed `version`),
+   * so a later `apply` command can gate on it. A `string` sets a new
+   * recorded kit-version pin; `null` clears an existing pin; `undefined`
+   * (the default, omitted) carries the previous manifest's pin forward
+   * unchanged. An empty or whitespace-only string is normalized to a clear
+   * too, the same as `null`.
+   */
+  pin?: string | null;
 }
 
 const SKILL_NAME = "orchestrator-workflow";
@@ -88,6 +97,12 @@ export interface Manifest {
    */
   files: Record<string, string>;
   installedAt: string;
+  /**
+   * Optional kit-version pin recorded for this repo (distinct from
+   * `version`, the actually-installed kit version). Absent when no pin was
+   * ever recorded or an existing one was cleared.
+   */
+  pin?: string;
 }
 
 function sha256(content: string): string {
@@ -169,6 +184,12 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   // throwing on a legacy manifest.
   const tiers = typeof candidate.tiers === "boolean" ? candidate.tiers : false;
 
+  // A hand-written or damaged manifest may carry a non-string `pin`; that
+  // degrades to "no recorded pin" here (the same per-field-degradation
+  // style as `profile`/`tiers` above) rather than throwing. An empty or
+  // whitespace-only stored `pin` degrades the same way: it can never
+  // usefully name a kit version to gate on, so it is dropped rather than
+  // carried forward as a value nothing can act on.
   return {
     kit: SKILL_NAME,
     version: typeof candidate.version === "string" ? candidate.version : "",
@@ -179,6 +200,12 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     files,
     installedAt:
       typeof candidate.installedAt === "string" ? candidate.installedAt : "",
+    // The kit-version pin is deliberately free-form here: unlike the
+    // fields above it never reaches generated frontmatter, a shell, or a
+    // path, and the command that gates on it validates the value itself.
+    ...(typeof candidate.pin === "string" && candidate.pin.trim() !== ""
+      ? { pin: candidate.pin.trim() }
+      : {}),
   };
 }
 
@@ -374,6 +401,20 @@ export function runInit(options: InitOptions): Report {
   const report = emptyReport();
 
   const previous = readInstalledManifest(targetDir);
+  // `null` clears an existing pin, a string sets a new one, and omitted
+  // (`undefined`) carries the previous manifest's pin forward unchanged. An
+  // empty or whitespace-only string is normalized to a clear as well: it can
+  // never usefully name a kit version to gate on, so treating it as a
+  // sticky value would let a stray empty input linger unnoticed instead of
+  // clearing the pin the caller most likely meant.
+  const normalizedPin =
+    typeof options.pin === "string"
+      ? options.pin.trim() === ""
+        ? null
+        : options.pin.trim()
+      : options.pin;
+  const pin =
+    normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);
   const installedFiles: Record<string, string> = {};
 
   // Both leftover-note loops below are ledger-driven, not enumeration-
@@ -585,6 +626,7 @@ export function runInit(options: InitOptions): Report {
     profile,
     tiers,
     files: installedFiles,
+    ...(pin !== undefined ? { pin } : {}),
   };
   const manifestPath = join(targetDir, MANIFEST_PATH);
   if (
@@ -597,6 +639,7 @@ export function runInit(options: InitOptions): Report {
       profile: previous.profile,
       tiers: previous.tiers,
       files: previous.files,
+      ...(previous.pin !== undefined ? { pin: previous.pin } : {}),
     }) === JSON.stringify(desired)
   ) {
     report.skipped.push(manifestPath);

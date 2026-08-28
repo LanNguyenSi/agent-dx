@@ -47,3 +47,10 @@ on". When a change touches a path listed in a doc's `sources:`, re-verify
 the doc and re-stamp it (the package's own Hand off step 9 hook describes
 exactly this loop), and add a line to [log.md](log.md). The warn-only
 `okf-staleness` CI workflow surfaces drift on every PR without blocking.
+
+Log entries record commands, verdicts and deltas (for example "green with
+the four new tests"), not suite totals: a total describes exactly one tree
+and goes stale on the next rebase or added test; log.md records how
+that class recurred on one change. Prefer string-anchored
+citations over bare line ranges for the same reason: only anchored
+citations are covered by the in-repo docs-consistency guard.
