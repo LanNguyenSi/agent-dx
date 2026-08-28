@@ -3840,3 +3840,35 @@ the pointer's scan fallback and the run-base marker's date-heuristic
 fallback are no longer described as one mechanism. Measured on the
 committed tree: okf-kit check --require-anchors 0 anchor findings, 0
 sources-fresh, 14 warnings, 22 notices, unchanged.
+
+Review round 3 (accept_with_notes) follow-up, orchestrator edits, same
+pass: SKILL.md's reader-fallback paragraph now says the reader takes the
+run that sorts newest by directory name and is only right when the run
+lives in that repository and sorts last (the reader orders the scan by
+name, not by recency); the keyed-marker deviation sentence now names both
+outcomes, rejected and blocking the run versus not recognised and silently
+missing; both edits kept their paragraphs' line counts so the existing
+anchors held, with the two anchors whose last-line text changed re-pointed
+by hand. The CHANGELOG bullet no longer attributes the sha-placeholder
+rule to the skill text (this doc carries it) and counts six of eight
+helper-routed checks. This doc's opening sentence gained the pointer
+qualifier with a citation spanning SKILL.md lines 80 to 83, and its
+fallback and deviation paraphrases were aligned with the new wording. A
+new docs-consistency test pins the grammar rule's wording, which shifted
+docs-consistency.test.ts by seven lines from line 403 on; the 25
+citations into that file across four docs were re-pointed by the difflib
+line map with the byte-identical-content rule (historical citations in
+this log left as written). Measured on the committed tree: vitest 329 of
+329, typecheck and typecheck:test clean, prettier clean, okf-kit check
+with require-anchors 0 anchor findings, 0 sources-fresh, 14 warnings,
+22 notices, warning list unchanged against the 3e8929a baseline.
+
+Same pass, continuation-citation audit after the round-3 edit: 22 more
+short-form ranges in subagent-contracts-superset.md that follow a
+fully-qualified docs-consistency citation on the NEXT line had been left
+at their pre-edit numbers by the first re-point script (which attributed
+continuations to the current line only); corrected by the seven-line
+shift with the byte-identical rule. One token in model-preselection.md
+(the "second, sibling describe" guarding README's tier-to-model-class
+table) turned out to have pointed into the review-round escalation block
+since before this change; re-pointed to that describe's actual range.

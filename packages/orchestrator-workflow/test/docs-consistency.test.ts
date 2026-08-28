@@ -392,12 +392,19 @@ describe("run pointer and keyed run-base marker ship in the skill, the policy se
     expect(runStateSection).toContain("absolute path");
     expect(runStateSection).toContain("first non-empty line");
     expect(runStateSection).toContain(".gitignore");
-    expect(runStateSection).toContain("takes the newest run there");
+    expect(runStateSection).toContain("sorts newest by directory name");
     expect(runStateSection).toContain("make sure it is ignored");
   });
 
   it("SKILL.md Run state carries the exact keyed run-base example", () => {
     expect(runStateSection).toContain("run-base[<repo-basename>] = <sha>");
+  });
+
+  it("SKILL.md Run state states the keyed-marker grammar rule and both deviation outcomes", () => {
+    expect(runStateSection).toContain("on its own line");
+    expect(runStateSection).toContain(
+      "either rejected (it blocks the run) or not recognised at all",
+    );
   });
 
   it("SKILL.md step 1 mentions writing the .ai/run pointer", () => {

@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-08-28T15:17:39Z
+timestamp: 2026-08-28T19:37:43Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -42,7 +42,7 @@ exactly as `packages/orchestrator-workflow/test/docs-consistency.test.ts:205#"co
 computes it: `ROLES.filter((role) => !READ_ONLY_ROLES.has(role))` →
 `task-slicer, implementer`. That posture is tool-level only for
 Edit/Write/NotebookEdit; Bash mutation is guarded by prompt instruction alone,
-which `packages/orchestrator-workflow/test/docs-consistency.test.ts:628-632#"out of this kit's scope"`
+which `packages/orchestrator-workflow/test/docs-consistency.test.ts:635-639#"out of this kit's scope"`
 pins README.md to state honestly ("guarded by instruction only", "nothing
 technically prevents it") rather than claiming full closure — since 0.21.0
 the pinned phrase names `explorer, reviewer, and advisor` instead of just
@@ -114,25 +114,25 @@ since M2), which corrects what this doc previously reported here
 subagent-input relationship has the equality-and-superset test suite
 documented below; the reviewer pair has had a byte-for-byte `reproduction`
 field equality test since 0.14.0
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:910-923#"expect(skillBlock).toBe(reviewerBlock);"`); the
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:917-930#"expect(skillBlock).toBe(reviewerBlock);"`); the
 implementer pair gained a byte-for-byte `mutation_probes` field equality
 test in 0.16.0
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:985-997#"expect(skillBlock).toBe(implementerBlock);"`),
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:992-1004#"expect(skillBlock).toBe(implementerBlock);"`),
 reinforced by an exact-sub-field-name pin added in a same-day R2 fix-round
-(`test/docs-consistency.test.ts:1040-1044#"expect(implementerMd).toContain(field);"`) that catches a mutant the plain
+(`test/docs-consistency.test.ts:1047-1051#"expect(implementerMd).toContain(field);"`) that catches a mutant the plain
 equality test cannot: renaming a sub-field identically in both copies still
 passes the equality check (it only proves the two copies match each other),
 but fails the exact-name pin. The explorer pair still has no dedicated
 automated drift guard today, protected only by direct read and review. The
 advisor pair started the same way — a 0.21.0
 `describe("advisor escalation policy ships in the AGENTS.md section and
-SKILL.md")` block (`test/docs-consistency.test.ts:2254-2327#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
+SKILL.md")` block (`test/docs-consistency.test.ts:2261-2334#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
 that `SKILL.md` carries an Advisor output contract block with the right
 top-level shape, a substring-presence pin, not byte-for-byte equality — but
 review round 1 (M2) closed that gap: a dedicated
 `describe("advisor output contract is byte-identical between SKILL.md and
 advisor.md (review round 1, M2)")` block
-(`test/docs-consistency.test.ts:2341-2355#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
+(`test/docs-consistency.test.ts:2348-2362#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
 both raw files and asserts equality, the same pattern the reviewer and
 implementer pairs use.
 
@@ -171,24 +171,24 @@ advisor spawn is never assembled from a task-slicer's per-task output the
 way an implementer spawn is.
 
 The load-bearing check enforces this, and its assertion pins the wording
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:852-854#"not implementation instructions"`).
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:859-861#"not implementation instructions"`).
 The check derives the *required* field set from
 the live subagent-input yaml block itself rather than hardcoding it
-(`test/docs-consistency.test.ts:709-745#"^ {4}${field}:"`): it regex-extracts top-level fields
+(`test/docs-consistency.test.ts:716-752#"^ {4}${field}:"`): it regex-extracts top-level fields
 plus `context.*` children, subtracts pure delegation mechanics (`role,
 task_id, context, expected_output, format`), and asserts every remaining name
 appears in the slicer output block, so a field added to the subagent input
 contract later cannot silently go undocumented in the slicer output; the test
 fails instead. Supporting checks in the same suite: both slicer-output copies
 (`SKILL.md` and `task-slicer.md`) carry the same fields in the same order
-(`test/docs-consistency.test.ts:749-759#"expect(slicerFields).toEqual(skillFields);"`); the original field order
+(`test/docs-consistency.test.ts:756-766#"expect(slicerFields).toEqual(skillFields);"`); the original field order
 (`id, title, goal, relevant_files, ... dependencies, risk`) survives around
-the newer fields (`test/docs-consistency.test.ts:762-785#"cursor = idx;"`); `02-tasks.md`'s
+the newer fields (`test/docs-consistency.test.ts:769-792#"cursor = idx;"`); `02-tasks.md`'s
 sections map 1:1 to the fields in order
-(`test/docs-consistency.test.ts:794-811#"cursor = idx;"`); and `task-slicer.md` must frame
+(`test/docs-consistency.test.ts:801-818#"cursor = idx;"`); and `task-slicer.md` must frame
 `allowed_changes`/`forbidden_changes` as scope boundaries for the
 implementer, not implementation instructions
-(`test/docs-consistency.test.ts:852-854#"not implementation instructions"`, prompt text at
+(`test/docs-consistency.test.ts:859-861#"not implementation instructions"`, prompt text at
 `packages/orchestrator-workflow/assets/agents/task-slicer.md:27-29#"and must not touch — not implementation instructions."`).
 
 ## Subagent misfire rule (0.11.0, evidence relocated 0.24.0)
@@ -266,23 +266,23 @@ recorded, which is exactly the gap this fix-round's claim-binding closes.
 reviewer/model correlation as a standing evidence note now that neither
 lives in kit prose.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:482-516#"never satisfies the review gate"` pins
-the 0.11.0 rule clause-by-clause: section heading present, :485-487, both
-detection signals named verbatim, :489-494, the scoping language that
-prevents false-positive misfires, :496-501, the resume-or-respawn response
-plus the non-evidence rule, :503-508, the `03-decisions.md` record
-requirement, :510-512, and the review-gate consequence sentence, :514-517.
-`test/docs-consistency.test.ts:536-595#"did not resolve on resume; only a fresh, explicitly"` pins the 0.18.0 extension, this
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:489-523#"never satisfies the review gate"` pins
+the 0.11.0 rule clause-by-clause: section heading present, :492-494, both
+detection signals named verbatim, :496-501, the scoping language that
+prevents false-positive misfires, :503-508, the resume-or-respawn response
+plus the non-evidence rule, :510-515, the `03-decisions.md` record
+requirement, :517-519, and the review-gate consequence sentence, :521-524.
+`test/docs-consistency.test.ts:543-602#"did not resolve on resume; only a fresh, explicitly"` pins the 0.18.0 extension, this
 fix-round's hardening, and the 0.24.0 evidence removal in one `describe`
-block: the resume-over-respawn preference, :539-543, the
-repeat-the-assignment mechanic, :545-549, why resume beats a fresh respawn,
-:551-555, the parenthetical signal definition, :557-561, the claim-binding
-to recorded outcomes, :563-567, the conditional respawn fallback, :569-573,
+block: the resume-over-respawn preference, :546-550, the
+repeat-the-assignment mechanic, :552-556, why resume beats a fresh respawn,
+:558-562, the parenthetical signal definition, :564-568, the claim-binding
+to recorded outcomes, :570-574, the conditional respawn fallback, :576-580,
 a negative-pin test that the incident tally and the model-correlation
-passage no longer appear (:575-582, replacing the review-round-1 positive
+passage no longer appear (:582-589, replacing the review-round-1 positive
 pins on that passage the 0.24.0 pass removed along with the prose), the
-watchdog scope carve-out, :584-591, and its own resolution detail,
-:593-597.
+watchdog scope carve-out, :591-598, and its own resolution detail,
+:600-604.
 
 ## Reproduction requirement (0.14.0)
 
@@ -345,15 +345,15 @@ the identical placeholder block. An output missing the field when probes
 identically in both copies since the R2 pass as "treated as a misfire, not
 evidence" (the installed prompt alone previously said "incomplete").
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:959-997#"expect(skillBlock).toBe(implementerBlock);"` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:966-1004#"expect(skillBlock).toBe(implementerBlock);"` pins
 the original 0.16.0 shape: the installed prompt's instruction and field
-mention, :963-969, the claim-only-what-was-measured rule, :971-976, the
-misfire-rule sentence, :978-983, and a byte-for-byte cross-copy equality
-check on the field block, :985-998.
-`test/docs-consistency.test.ts:1017-1051#"expect(implementerMd).toContain(enumeration);"` pins the R2 additions: step 6's
-sentence and its claim-only-what-was-measured reference, :1021-1032, the
-not-applicable clause in both copies, :1034-1038, and two exact-string pins,
-:1040-1052, that catch a rename applied identically to both copies — a mutant
+mention, :970-976, the claim-only-what-was-measured rule, :978-983, the
+misfire-rule sentence, :985-990, and a byte-for-byte cross-copy equality
+check on the field block, :992-1005.
+`test/docs-consistency.test.ts:1024-1058#"expect(implementerMd).toContain(enumeration);"` pins the R2 additions: step 6's
+sentence and its claim-only-what-was-measured reference, :1028-1039, the
+not-applicable clause in both copies, :1041-1045, and two exact-string pins,
+:1047-1059, that catch a rename applied identically to both copies — a mutant
 the cross-copy equality check above cannot catch on its own, since it only
 proves the two copies match each other, not that either still uses the
 pinned sub-field names.

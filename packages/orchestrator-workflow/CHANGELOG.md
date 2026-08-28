@@ -51,23 +51,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointer's content is, when to write, overwrite, and remove it, and to
   make sure it is ignored before writing it), followed by a separate
   paragraph on how the run-completeness reader uses it: pointer first,
-  falling back to that repository's own `.ai/runs/` (the newest run there)
-  only when no pointer file exists, with a broken pointer rejected outright
+  falling back to that repository's own `.ai/runs/` (the run there that
+  sorts newest by directory name) only when no pointer file exists, with a broken pointer rejected outright
   rather than falling back; the exact accept/reject rules are left to the
   consuming gate's (grounding-mcp) own documentation, not restated here.
   The keyed-marker grammar sentence is now a single generalised rule: write
   the marker exactly in its documented form, on its own line; a deviating
-  line is either rejected (malformed) or not recognised at all (for
-  example inside a list bullet), and in both cases the binding for that
-  repository is missing. It also still states that a real key left with
-  the placeholder value `<sha>` is not ignored the way a placeholder key
-  is: the value is read as-is and the verdict layer blocks it, since
-  `<sha>` is not a commit sha. `test/docs-consistency.test.ts`'s pointer-doc
-  describe block now routes six of its seven checks through one shared
+  line is either rejected, which blocks the run, or not recognised at all
+  (for example inside a list bullet), which leaves the binding for that
+  repository silently missing. The consumer detail that a real key left
+  with the placeholder value `<sha>` is read as-is and blocked by the
+  verdict layer lives in `docs/okf/run-state-lifecycle-and-markers.md`,
+  not in the skill text. `test/docs-consistency.test.ts`'s pointer-doc
+  describe block now routes six of its eight checks through one shared
   `expectPointerMention` helper that asserts the exact phrase `` `.ai/run`
   pointer `` (a bare `.ai/runs/` mention alone cannot satisfy it); the
-  SKILL.md Run state contract check keeps its own specific phrases instead,
-  since that paragraph does not use the wording the helper looks for.
+  SKILL.md Run state contract check and the exact-keyed-example check keep
+  their own specific phrases instead, and a further check pins the
+  grammar rule's wording ("on its own line", both deviation outcomes).
   `test/template-markers.test.ts`'s property test now carries
   grounding-mcp's `KEYED_RUN_BASE_STRICT` and `PLACEHOLDER_KEY` regexes
   verbatim, kept in sync by hand, instead of a locally tightened mirror,

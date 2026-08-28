@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-08-28T15:17:39Z
+timestamp: 2026-08-28T19:37:43Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -25,7 +25,9 @@ One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 The orchestrator creates it by copying `.ai/workflow/templates/`
 (SKILL.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:91-96;
 packages/orchestrator-workflow/INSTALL-AGENT.md:46-47,139-144). The newest run
-directory is the active one; older directories are the auditable history and
+directory is the active one unless a `.ai/run` pointer names one
+(SKILL.md:80-83#"older directories are the auditable history. Do not", see the pointer section below); older
+directories are the auditable history and
 must not be edited (SKILL.md:83#"older directories are the auditable history. Do not", "Do not edit past runs"). Three of the
 seven files carry a `<!-- solution-acceptance: <key> = <value> -->`
 HTML-comment marker, all sharing one comment prefix but split across two
@@ -80,10 +82,11 @@ the old run (SKILL.md:85-103#"document, not the kit's.").
 
 The run-completeness reader resolves the run through the pointer first. When
 no pointer file exists, it falls back to that repository's own `.ai/runs/`
-and takes the newest run there; a broken pointer (one whose target does not
-resolve) is rejected outright rather than falling back
+and takes the run there that sorts newest by directory name; a broken
+pointer (one whose target does not resolve) is rejected outright rather
+than falling back
 (SKILL.md:98-103#"document, not the kit's."). The scan fallback is only
-right when the run actually lives in that repository and is its newest: the
+right when the run actually lives in that repository and sorts last: the
 consumer's own test suite (agent-grounding, packages/grounding-mcp,
 `tests/ow-run-completeness.test.ts`) measures this directly. With no pointer
 and a run directory present under `.ai/runs/`, the reader reports
@@ -113,9 +116,9 @@ exact form `<!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->`,
 where `<repo-basename>` is the worktree directory's basename (or the main
 repository's basename for a linked worktree) and the value is that
 repository's pre-change HEAD. Write the marker exactly in that form, on its
-own line: a deviating line is either rejected or not recognised, and in
-both cases the binding for that repository is missing
-(SKILL.md:122-125#"repository is missing."). The consumer's own tests
+own line: a deviating line is either rejected (it blocks the run) or not
+recognised at all (the binding for that repository is silently missing)
+(SKILL.md:122-125#"for that repository is silently missing)."). The consumer's own tests
 measure both halves of that generalisation: a rejected line is `malformed`
 (uppercase field name, whitespace before the colon, and extra dashes in the
 comment opener are each their own malformed-blocker test), and a marker
@@ -169,16 +172,16 @@ phrases (docs-consistency.test.ts:390-397#"make sure it is ignored") and
 carries the keyed example verbatim
 (docs-consistency.test.ts:399-401#"run-base[<repo-basename>] = <sha>");
 step 1 mentions the pointer via the helper
-(docs-consistency.test.ts:403-410#"expectPointerMention(step1)"); each of
+(docs-consistency.test.ts:410-417#"expectPointerMention(step1)"); each of
 the three harness bullets mentions it via the helper, in a loop
-(docs-consistency.test.ts:412-431#"expectPointerMention(bullet)"); the
+(docs-consistency.test.ts:419-438#"expectPointerMention(bullet)"); the
 policy-section bullet carries both facts
-(docs-consistency.test.ts:433-441#"run-base[<repo-basename>]"); and the
+(docs-consistency.test.ts:440-448#"run-base[<repo-basename>]"); and the
 README and both INSTALL-AGENT.md write-surface listings mention the pointer
 via the helper and `.gitignore` by substring
-(docs-consistency.test.ts:443-449#"expectPointerMention(section)";
-docs-consistency.test.ts:453-459#"expectPointerMention(section)";
-docs-consistency.test.ts:463-469#"expectPointerMention(section)").
+(docs-consistency.test.ts:450-456#"expectPointerMention(section)";
+docs-consistency.test.ts:460-466#"expectPointerMention(section)";
+docs-consistency.test.ts:470-476#"expectPointerMention(section)").
 
 ## The verdict markers: acceptance signals, fail CLOSED
 

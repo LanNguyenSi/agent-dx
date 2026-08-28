@@ -97,10 +97,10 @@ run touches to it with a pointer file, `<worktree-root>/.ai/run`:
 
 The pointer is how the run-completeness reader finds the run for a change.
 Without it the reader falls back to that repository's own `.ai/runs/` and
-takes the newest run there, which is only right when the run lives in that
-repository and is its newest; a broken pointer is rejected outright. The
-exact accept and reject rules are the consuming gate's (grounding-mcp) to
-document, not the kit's.
+takes the run there that sorts newest by directory name, which is only
+right when the run lives in that repository and sorts last; a broken
+pointer is rejected outright. The exact accept and reject rules are the
+consuming gate's (grounding-mcp) to document, not the kit's.
 
 When creating the run directory, replace the `TODO` in `00-goal.md`'s
 `<!-- solution-acceptance: run-base = TODO -->` marker with the base commit
@@ -121,8 +121,8 @@ the main repository's basename is accepted too, and the value is that
 repository's pre-change HEAD. The template ships that line as a placeholder
 example, which readers ignore until the placeholder key is replaced. Write
 the marker exactly in that form, on its own line: a deviating line is
-either rejected or not recognised, and in both cases the binding for that
-repository is missing.
+either rejected (it blocks the run) or not recognised at all (the binding
+for that repository is silently missing).
 
 ## Workflow
 
