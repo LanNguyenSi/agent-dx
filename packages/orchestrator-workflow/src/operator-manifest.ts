@@ -5,6 +5,8 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  rmdirSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -184,11 +186,15 @@ export function readOperatorManifest(
  * an existing file is atomic on the same filesystem (POSIX and NTFS both
  * guarantee this), so a reader never observes a partially written file, and
  * two concurrent writers each still write their own complete file whole,
- * rather than interleaving bytes into a shared corrupt one. This narrows,
- * but does not close, the operator-manifest lost-update window described in
- * `apply`'s own re-read-before-upsert comment (cli.ts): the remaining race
- * is between one writer's fresh read and its rename, not within the write
- * itself.
+ * rather than interleaving bytes into a shared corrupt one. This alone
+ * narrows, but does not close, the operator-manifest lost-update window
+ * described in `apply`'s own re-read-before-upsert comment (cli.ts): the
+ * remaining race is between one writer's fresh read and its rename, not
+ * within the write itself. Closing that race is {@link
+ * withOperatorManifestLock}'s job, not this function's: a call site whose
+ * read-modify-write sequence must not interleave with another process's
+ * (`apply`'s registration step is the one this module knows about today)
+ * should wrap the whole read, update, and this write inside it.
  */
 export function writeOperatorManifest(
   home: string,
@@ -202,6 +208,164 @@ export function writeOperatorManifest(
   );
   writeFileSync(tmpPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   renameSync(tmpPath, path);
+}
+
+const OPERATOR_MANIFEST_LOCK_DIRNAME = ".manifest.lock";
+const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
+const DEFAULT_LOCK_STALE_MS = 30_000;
+const DEFAULT_LOCK_POLL_MS = 20;
+
+/** Options accepted by {@link withOperatorManifestLock}, exposed only so
+ * tests can shrink the timeout/staleness/poll windows below their
+ * production defaults; callers outside test code should omit this
+ * entirely. */
+export interface OperatorManifestLockOptions {
+  timeoutMs?: number;
+  staleMs?: number;
+  pollMs?: number;
+}
+
+/** Thrown by {@link withOperatorManifestLock} when the lock could not be
+ * acquired within `timeoutMs`. Callers distinguish this from any error
+ * `fn` itself might throw so they can print lock-specific operator
+ * guidance instead of a generic failure. */
+export class OperatorManifestLockTimeoutError extends Error {
+  constructor(lockPath: string) {
+    super(`Timed out waiting for the operator manifest lock at ${lockPath}`);
+    this.name = "OperatorManifestLockTimeoutError";
+  }
+}
+
+function isEexist(error: unknown): boolean {
+  return (
+    error instanceof Error && (error as NodeJS.ErrnoException).code === "EEXIST"
+  );
+}
+
+/** Synchronous sleep via `Atomics.wait` on a throwaway `SharedArrayBuffer`,
+ * used instead of a busy loop so a waiter parks rather than spinning the
+ * CPU while it holds no work to do. `withOperatorManifestLock`'s callers
+ * are synchronous CLI code paths (a single `fn()` call wrapping a
+ * read-modify-write), so a synchronous sleep is what keeps the lock
+ * acquisition loop itself synchronous end to end; an async/Promise-based
+ * sleep would force every caller of this function to become async too. */
+function sleepSync(ms: number): void {
+  const sharedBuffer = new SharedArrayBuffer(4);
+  const view = new Int32Array(sharedBuffer);
+  Atomics.wait(view, 0, 0, ms);
+}
+
+/** Age, in milliseconds, of the directory at `path` (via its mtime), or
+ * `undefined` if it cannot be stat'd (already gone, races with another
+ * process's own reclaim/release). */
+function lockAgeMs(path: string): number | undefined {
+  try {
+    return Date.now() - statSync(path).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Runs `fn` while holding an advisory, same-machine lock on the operator
+ * manifest at `<home>/manifest.json`, so a read-modify-write sequence
+ * (read the manifest, compute an updated copy, write it back) that this
+ * function wraps end to end cannot interleave with another process's own
+ * read-modify-write against the same `home`. This is what closes the
+ * lost-update race `writeOperatorManifest`'s own doc comment and
+ * `apply`'s pre-upsert re-read describe as narrowed-but-not-closed: the
+ * remaining gap those left open (between one writer's fresh read and its
+ * rename) is exactly the window locking here removes, by making the
+ * read-then-write a single critical section no other locked writer can
+ * enter concurrently.
+ *
+ * Mechanics: `mkdirSync(<home>/.manifest.lock)` is used as the mutex,
+ * since directory creation is atomic on every filesystem Node targets
+ * (POSIX `mkdir(2)`, Windows `CreateDirectory`): a second, concurrent
+ * `mkdirSync` call for the same path fails with `EEXIST` rather than
+ * silently succeeding, exactly the primitive a mutual-exclusion lock
+ * needs. A caller that finds the lock held retries with a short
+ * synchronous sleep (`sleepSync`, `Atomics.wait` on a throwaway
+ * `SharedArrayBuffer`, not a CPU-spinning busy loop) until either it
+ * acquires the lock or `timeoutMs` (default 10s) elapses, in which case
+ * it throws {@link OperatorManifestLockTimeoutError} without ever calling
+ * `fn`. A lock directory older than `staleMs` (default 30s, checked via
+ * its mtime) is treated as abandoned, most likely left behind by a
+ * process that crashed or was killed between acquiring and releasing it
+ * (the `finally` below is what normally removes it): it is removed and
+ * acquisition is retried exactly once per call, so a genuinely
+ * long-running holder is not repeatedly evicted by every waiter racing
+ * to reclaim the same stale-looking directory.
+ *
+ * This lock is advisory (nothing stops a caller from touching the
+ * manifest file without going through it, exactly like a POSIX file
+ * lock) and same-machine only (a directory on a network filesystem
+ * shared across hosts is not a safe mutex primitive here); it protects
+ * cooperating `orchestrator-workflow` processes on one machine against
+ * each other, not against an uncooperative writer or a multi-host setup.
+ * `home` is created first (`mkdirSync(home, { recursive: true })`) since
+ * the lock directory lives inside it and a first-ever `apply`/`setup`
+ * against a brand-new operator home would otherwise have nowhere to put
+ * it. The lock is always released in `finally`, including when `fn`
+ * throws, so a failed critical section never leaves the manifest
+ * permanently locked out for the next caller (short of the process being
+ * killed before `finally` runs, which is exactly the case the
+ * stale-lock reclaim above exists to recover from).
+ */
+export function withOperatorManifestLock<T>(
+  home: string,
+  fn: () => T,
+  options: OperatorManifestLockOptions = {},
+): T {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
+  const staleMs = options.staleMs ?? DEFAULT_LOCK_STALE_MS;
+  const pollMs = options.pollMs ?? DEFAULT_LOCK_POLL_MS;
+
+  mkdirSync(home, { recursive: true });
+  const lockPath = join(home, OPERATOR_MANIFEST_LOCK_DIRNAME);
+  const deadline = Date.now() + timeoutMs;
+  let staleReclaimAttempted = false;
+
+  for (;;) {
+    try {
+      mkdirSync(lockPath);
+      break;
+    } catch (error) {
+      if (!isEexist(error)) throw error;
+
+      if (!staleReclaimAttempted) {
+        staleReclaimAttempted = true;
+        const age = lockAgeMs(lockPath);
+        if (age !== undefined && age > staleMs) {
+          try {
+            rmdirSync(lockPath);
+          } catch {
+            // Lost the race to reclaim it (another process removed or
+            // re-acquired it first); fall through to the normal
+            // retry/timeout handling below.
+          }
+          continue;
+        }
+      }
+
+      if (Date.now() >= deadline) {
+        throw new OperatorManifestLockTimeoutError(lockPath);
+      }
+      sleepSync(pollMs);
+    }
+  }
+
+  try {
+    return fn();
+  } finally {
+    try {
+      rmdirSync(lockPath);
+    } catch {
+      // Already gone, e.g. reclaimed by another process's stale-lock
+      // recovery after this call overran `staleMs` before reaching here;
+      // nothing left for this call to release.
+    }
+  }
 }
 
 /** The three states an operator-manifest read can land in: no file at

@@ -437,46 +437,34 @@ describe("apply", () => {
   });
 
   describe("concurrent applies against the same operator home", () => {
-    // The two tests below are deliberately narrower than what H1's fix
-    // ("re-read the operator manifest immediately before the upsert")
-    // would ideally get covered by. A genuinely discriminating regression
-    // test needs an external write to land inside the gap between one
-    // apply's re-read and its own write; two fully sequential, non-
+    // The first test below is deliberately narrower than what H1's
+    // fix-round-1 ("re-read the operator manifest immediately before the
+    // upsert") would ideally get covered by: two fully sequential, non-
     // overlapping `apply` invocations (this test's own two `runApply`
     // calls each run to completion before the next starts) cannot produce
-    // that gap, since nothing changes the manifest file while either
-    // process is running: whatever a process reads for its final upsert,
-    // early or late, is the same on-disk content its own first read
-    // already saw. This test was run against a deliberately re-introduced
-    // version of the bug (the re-read line reverted to reuse the early
-    // copy) and it passed identically either way, confirming it does not
-    // discriminate that specific mutation; it still protects a different,
-    // real regression (the upsert path silently dropping an unrelated,
-    // already-registered target), so it stays.
+    // the interleaved-write gap that fix narrowed, since nothing changes
+    // the manifest file while either process is running. It does not
+    // discriminate that specific mutation (confirmed by running it against
+    // a reverted re-read line, which passed identically either way); it
+    // still protects a different, real regression (the upsert path
+    // silently dropping an unrelated, already-registered target), so it
+    // stays.
     //
-    // A manual, non-committed timing probe against a truly interleaved
-    // write (an external process racing an in-flight `apply`, landing
-    // ~50ms into its run) did discriminate: across 10 runs each, the fixed
-    // code kept the interleaved target registered 9/10 times and the
-    // reverted code only 4/10 times. Both process node startup and `tsx`
-    // transpilation dominate a bare `apply` invocation's ~120ms wall
-    // time (a `--target` pointing at a nonexistent operator home, which
-    // does almost no work before exiting, still takes ~130ms), so the
-    // actual read-to-write gap this fix narrows is a small, timing-
-    // dependent slice of that; a delay-based CLI-subprocess test tuned to
-    // hit it reliably enough for CI was not achievable in the time
-    // available (see the log entry for this round and the risk noted in
-    // the implementer report). A truly parallel run (three `apply`
-    // invocations started at the same instant against three different
-    // targets, same operator home) reliably lost two of the three
-    // registrations even with the fix applied: process-startup overhead
-    // swamps the internal logic timing enough that near-simultaneous
-    // starts still race past each other's re-read. The fix narrows the
-    // window for staggered concurrent applies (the realistic case: two
-    // operators, or one operator's two terminals, rarely start within
-    // single-digit milliseconds of each other); it does not close the
-    // window for truly simultaneous starts. That residual risk is
-    // accepted, not hidden: see the log entry.
+    // Fix-round-1 left a documented residual: a truly simultaneous,
+    // several-way `apply` race still lost registrations even with the
+    // re-read fix applied, because process-startup overhead swamped the
+    // internal logic timing enough that near-simultaneous starts raced
+    // past each other's re-read. Fix-round-2 closes that gap with
+    // `withOperatorManifestLock` (operator-manifest.ts): every apply's
+    // re-read, upsert, and write now run inside one advisory lock's
+    // critical section, so no two locked `apply` invocations against the
+    // same operator home can interleave at all, regardless of how close
+    // together their process starts land. The second test below is the
+    // real regression test for that: it asserts every one of N
+    // simultaneously-started targets ends up registered, not merely "the
+    // file stays valid JSON with at least one target" (fix-round-1's
+    // weaker assertion, since the race it only narrowed could not yet
+    // support a stronger one).
     it("a target registered directly in the manifest between two sequential applies is not clobbered by the second apply's own registration", () => {
       const setup = runSetup("--yes");
       expect(setup.status, setup.stderr).toBe(0);
@@ -509,36 +497,41 @@ describe("apply", () => {
       }
     });
 
-    it("the operator manifest stays valid JSON, with at least one applied target registered, after several concurrent applies", async () => {
+    it("all N simultaneously-started applies register their own target, across several iterations, with the manifest lock in place", async () => {
       const setup = runSetup("--yes");
       expect(setup.status, setup.stderr).toBe(0);
 
-      const targetB = mkdtempSync(join(tmpdir(), "apply-target-b-"));
-      const targetC = mkdtempSync(join(tmpdir(), "apply-target-c-"));
-      try {
-        const results = await Promise.all([
-          runApplyAsync("--target", target, "--yes"),
-          runApplyAsync("--target", targetB, "--yes"),
-          runApplyAsync("--target", targetC, "--yes"),
-        ]);
-        for (const result of results) {
-          expect(result.status, result.stderr).toBe(0);
-        }
+      const TARGET_COUNT = 4;
+      const ITERATIONS = 3;
 
-        // Not "all three registered" (see the comment above this describe
-        // block): the atomic rename (H1b) guarantees the file itself is
-        // never left half-written or corrupt, which is what this asserts.
-        const manifest = readOperatorManifest();
-        expect(manifest.kit).toBe("orchestrator-workflow");
-        expect(manifest.targets.length).toBeGreaterThanOrEqual(1);
-        for (const t of manifest.targets) {
-          expect(t.lastAppliedVersion).toBe(PACKAGE_VERSION);
+      for (let iteration = 0; iteration < ITERATIONS; iteration++) {
+        const targets = Array.from({ length: TARGET_COUNT }, () =>
+          mkdtempSync(join(tmpdir(), `apply-target-race-${iteration}-`)),
+        );
+        try {
+          const results = await Promise.all(
+            targets.map((t) => runApplyAsync("--target", t, "--yes")),
+          );
+          for (const result of results) {
+            expect(result.status, result.stderr).toBe(0);
+          }
+
+          const manifest = readOperatorManifest();
+          expect(manifest.kit).toBe("orchestrator-workflow");
+          const registeredPaths = new Set(
+            manifest.targets.map((t: { path: string }) => t.path),
+          );
+          for (const t of targets) {
+            expect(registeredPaths.has(realpathSync(t))).toBe(true);
+          }
+          for (const t of manifest.targets) {
+            expect(t.lastAppliedVersion).toBe(PACKAGE_VERSION);
+          }
+        } finally {
+          for (const t of targets) rmSync(t, { recursive: true, force: true });
         }
-      } finally {
-        rmSync(targetB, { recursive: true, force: true });
-        rmSync(targetC, { recursive: true, force: true });
       }
-    }, 30_000);
+    }, 60_000);
   });
 
   describe("pin gate", () => {

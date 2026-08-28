@@ -4329,3 +4329,148 @@ until the next rewrite.
   either doc, so its atomic-write and `operatorManifestState` additions
   needed no re-stamp on that account; both docs were re-stamped anyway
   for the `cli.ts` citation moves above.
+
+- 2026-08-29 (agent-dx task T-005, `apply --target` fix round 2, closing
+  the lost-update race for real): fix-round-1's own log entry above
+  measured, and accepted, a residual: a truly simultaneous multi-way
+  `apply` race still lost registrations even with the re-read fix
+  applied, because process-startup jitter swamped the internal
+  read-to-write timing. Fleet `apply` (`xargs -P`, backgrounded loops) is
+  the expected use of this command, so that residual was closed
+  structurally this round rather than left accepted.
+
+  Mechanism: `operator-manifest.ts` gained `withOperatorManifestLock(home,
+  fn, options?)`, an advisory, same-machine, cooperative lock around a
+  read-modify-write critical section. `mkdirSync(<home>/.manifest.lock)`
+  is the mutex (directory creation is atomic on every filesystem Node
+  targets, so a concurrent creator gets `EEXIST` rather than silently
+  succeeding); a caller that finds it held retries with a short
+  synchronous sleep (`Atomics.wait` on a throwaway `SharedArrayBuffer`,
+  not a busy loop) until it acquires the lock or a timeout (default 10s)
+  elapses, at which point it throws `OperatorManifestLockTimeoutError`
+  without ever calling `fn`. A lock directory whose mtime is older than a
+  staleness threshold (default 30s) is treated as abandoned (most likely
+  left behind by a process killed between acquiring and releasing it) and
+  reclaimed: removed, with acquisition retried exactly once per call, so
+  one long-running holder is not repeatedly evicted by every waiter
+  racing to reclaim the same stale-looking directory. The lock is always
+  released in `finally`, including when `fn` throws. `timeoutMs`/
+  `staleMs`/`pollMs` are all overridable via an options argument so tests
+  can shrink the production windows; production callers omit it entirely.
+  `writeOperatorManifest`'s own doc comment (fix-round-1's atomic-rename
+  addition) was updated to point at this function as the thing that
+  actually closes the race it only narrowed.
+
+  `cli.ts`'s `apply` action now wraps the pre-upsert re-read, the upsert,
+  and the write in `withOperatorManifestLock(home, () => { ... })`; the
+  early, unlocked read at the top of the action is unchanged (it still
+  serves only the operator-setup gate and the `chosenHarnesses`/
+  `previous` defaults). The locked callback returns a small discriminated
+  result (`{ kind: "registered", resolvedTargetPath, alreadyRegistered }`
+  or `{ kind: "manifest-not-ok", manifestKind }`) rather than printing or
+  setting `process.exitCode` from inside the lock, so the lock's `finally`
+  release is not entangled with the command's own control flow; the
+  caller switches on that result after the lock returns, preserving the
+  exact pre-existing "unreadable"/"gone" messages byte for byte. A lock
+  acquisition that times out is reported as `Could not lock the operator
+  manifest at <path> (another orchestrator-workflow command holds it);
+  the kit was installed but the target was not registered. Re-run
+  \`apply\` to register it.` and exits 1; the kit's own files were already
+  written by `runInit` earlier in the action, so this message is careful
+  to say the install itself happened and only the registry write did not.
+  A test-only synchronous hold (`testHoldForConcurrencyProbe`, gated on
+  `ORCHESTRATOR_WORKFLOW_TEST_HOLD_MS`, a no-op unless that variable is
+  set) was added inside the locked callback so a future regression test
+  could widen the critical section on demand if process-start jitter ever
+  stopped being enough to discriminate a reintroduced bug; this round's
+  own mutation probe (below) did not end up needing it.
+
+  Tests: `test/operator-manifest.test.ts` gained a `withOperatorManifestLock`
+  describe block: runs `fn` and returns its result when the lock is free;
+  releases the lock directory after `fn` returns; releases it (and lets
+  the error propagate) after `fn` throws; a second acquire against an
+  already-held lock times out with `OperatorManifestLockTimeoutError`; a
+  second acquire succeeds once the lock is released by another process
+  (a short-lived child process removes the lock directory after a delay,
+  since the production poll delay blocks this process's own event loop
+  via `Atomics.wait`, so a same-process `setTimeout` cannot fire while an
+  acquire attempt is polling); a lock directory older than `staleMs` is
+  reclaimed and acquisition succeeds; a lock directory younger than
+  `staleMs` is not reclaimed and a short-timeout acquire still times out.
+
+  `test/apply.test.ts`'s "concurrent applies against the same operator
+  home" describe block's second test (previously asserting only that the
+  manifest file stayed valid JSON with at least one target registered,
+  fix-round-1's own acknowledged weaker assertion) was replaced with a
+  real regression test: four targets are applied with `runApplyAsync`
+  started in the same `Promise.all`, and every one of the four must be
+  registered afterward, repeated across three iterations inside the same
+  `it` to catch flakiness within a single run. The first ("a target
+  registered directly in the manifest between two sequential applies...")
+  test is unchanged and still kept for the different, real regression it
+  protects (the describe block's own comment, trimmed this round to
+  describe the fix-round-2 mechanism instead of the fix-round-1 residual
+  it replaces, explains why).
+
+  Measured pass rate: the new four-target/three-iteration test run in
+  isolation (`npx vitest run test/apply.test.ts -t "all N
+  simultaneously-started"`) 10 times in a row against the code as shipped
+  this round: 10/10 passed.
+
+  Mutation probe (H1, closing the residual race): the lock wrapper around
+  `apply`'s critical section was removed while keeping the pre-upsert
+  re-read in place (the callback called directly, `registration =
+  ((): ApplyRegistration => { ... })();` instead of `registration =
+  withOperatorManifestLock(home, () => { ... });`), reproducing exactly
+  fix-round-1's own accepted residual. The same test, run the same way,
+  10 times against the mutated code: 0/10 passed, every failure at the
+  same assertion (`expect(registeredPaths.has(realpathSync(t))).toBe(true)`
+  on one of the four targets). The mutation discriminates cleanly without
+  needing `ORCHESTRATOR_WORKFLOW_TEST_HOLD_MS`; the mutated file was
+  restored from a byte-for-byte pre-mutation copy (verified by checksum)
+  before the commit that ships this round, then `npm run typecheck` and
+  the full suite were re-run clean to confirm the restore.
+
+  Measured on the commit that ships this round, inside
+  packages/orchestrator-workflow: `npm test` (`vitest run`) green (up
+  from fix-round-1's 414 across 9 files: 7 new `withOperatorManifestLock`
+  unit tests in operator-manifest.test.ts, apply.test.ts's concurrent-
+  applies second test rewritten in place rather than added). `npm run
+  typecheck` and `npm run typecheck:test` clean. `npm run format` run
+  first (reformatted only `operator-manifest.ts`, a pure style pass with
+  no behavior change, confirmed by the type-check and full suite re-run
+  immediately after), then `npm run format:check` clean across the
+  package. From the repository root: `node scripts/check-cli-flag-order.mjs`
+  clean.
+
+  `cli.ts` citation delta: the lock import
+  (`OperatorManifestLockTimeoutError` and `withOperatorManifestLock`, two
+  new names, not one) added two lines to the top import block, not the
+  one the task brief guessed at; every citation into `cli.ts` at or after
+  that block shifts by the same two lines unless a later edit in the same
+  file shifts it further. Checked directly against the current file
+  content (not assumed from the +2 offset alone) rather than trusted on
+  the offset: both of this bundle's `cli.ts` lines 134 to 136 citations
+  (install-fence-mechanics.md, model-preselection.md; the `--no-tiers`
+  option description) and the one `cli.ts` lines 179 to 180 citation
+  (install-fence-mechanics.md; the "Found existing install" `console.log`)
+  moved to `cli.ts` lines 136 to 138 and `cli.ts` lines 181 to 182
+  respectively, same string anchors, anchor text unchanged; a grep of
+  every `cli.ts:` citation in both docs (string-anchored and bare-line
+  forms) confirmed these two were the only ones. The much larger rewrite
+  of `apply`'s registration block itself (`cli.ts`, well past line 700)
+  needed no citation re-point: neither doc cites into that region. Both
+  docs were re-stamped anyway for the moves above. `operator-manifest.ts`
+  again carries no `sources:` entry in either doc, so the new lock
+  function needed no re-stamp on that account.
+
+  From the repository root: `npx -y okf-kit@0.8.0 check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md packages/orchestrator-workflow/README.md
+  INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md`: 0
+  errors (CI-gating) and 0 stale findings; 35 warning/notice findings, all
+  pre-existing and unrelated to this round's edit (the same class of
+  `log.md` ambiguous-citation notices fix-round-1's own entry already
+  carries, since `okf-kit` disambiguates a bare `file.ts:line` citation
+  against every package in this monorepo and several share filenames like
+  `cli.ts`/`init.ts`/`SKILL.md`).

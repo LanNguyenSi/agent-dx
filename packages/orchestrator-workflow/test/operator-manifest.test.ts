@@ -1,10 +1,14 @@
+import { spawn } from "node:child_process";
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -15,11 +19,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   OPERATOR_HOME_ENV,
+  OperatorManifestLockTimeoutError,
   createOperatorManifest,
   operatorManifestState,
   readOperatorManifest,
   resolveOperatorHome,
   upsertOperatorTarget,
+  withOperatorManifestLock,
   writeOperatorManifest,
 } from "../src/operator-manifest.js";
 import type {
@@ -422,5 +428,105 @@ describe("operatorManifestState", () => {
       kind: "ok",
       manifest,
     });
+  });
+});
+
+/** Spawns a short-lived, detached child process that removes `path` after
+ * `delayMs`. Needed instead of `setTimeout` in the same process: the
+ * production acquire loop's poll delay (`sleepSync`) blocks the whole JS
+ * thread synchronously via `Atomics.wait`, so nothing scheduled on this
+ * process's own event loop (a `setTimeout`, a `setImmediate`) can run
+ * while a test's own call into `withOperatorManifestLock` is polling. A
+ * separate OS process is unaffected by that block, so it can genuinely
+ * release the lock out from under an in-progress, synchronously-polling
+ * acquire attempt in this process. */
+function releaseLockAfterDelay(path: string, delayMs: number) {
+  return spawn(
+    process.execPath,
+    [
+      "-e",
+      `setTimeout(()=>{try{require("fs").rmdirSync(process.argv[1]);}catch{}},${delayMs});`,
+      path,
+    ],
+    { stdio: "ignore" },
+  );
+}
+
+describe("withOperatorManifestLock", () => {
+  const lockPath = () => join(home, ".manifest.lock");
+
+  it("runs fn and returns its result when the lock is free", () => {
+    const result = withOperatorManifestLock(home, () => 42);
+    expect(result).toBe(42);
+  });
+
+  it("releases the lock directory after fn returns", () => {
+    withOperatorManifestLock(home, () => undefined);
+    expect(existsSync(lockPath())).toBe(false);
+  });
+
+  it("releases the lock directory after fn throws, and the error propagates", () => {
+    expect(() =>
+      withOperatorManifestLock(home, () => {
+        throw new Error("boom");
+      }),
+    ).toThrow("boom");
+    expect(existsSync(lockPath())).toBe(false);
+  });
+
+  it("a second acquire waits while the lock is held, and times out with OperatorManifestLockTimeoutError", () => {
+    mkdirSync(lockPath());
+    try {
+      expect(() =>
+        withOperatorManifestLock(home, () => "should not run", {
+          timeoutMs: 60,
+          pollMs: 10,
+        }),
+      ).toThrow(OperatorManifestLockTimeoutError);
+    } finally {
+      rmSync(lockPath(), { recursive: true, force: true });
+    }
+  });
+
+  it("succeeds once the held lock is released by another process, without needing a stale-lock reclaim", () => {
+    mkdirSync(lockPath());
+    const child = releaseLockAfterDelay(lockPath(), 100);
+    try {
+      const result = withOperatorManifestLock(home, () => "done", {
+        timeoutMs: 3_000,
+        pollMs: 20,
+      });
+      expect(result).toBe("done");
+    } finally {
+      child.kill();
+    }
+  });
+
+  it("treats a lock directory older than staleMs as abandoned and reclaims it", () => {
+    mkdirSync(lockPath());
+    const sixtySecondsAgo = new Date(Date.now() - 60_000);
+    utimesSync(lockPath(), sixtySecondsAgo, sixtySecondsAgo);
+
+    const result = withOperatorManifestLock(home, () => "reclaimed", {
+      staleMs: 30_000,
+      timeoutMs: 5_000,
+      pollMs: 10,
+    });
+    expect(result).toBe("reclaimed");
+  });
+
+  it("does not reclaim a lock directory younger than staleMs (fresh lock still times out)", () => {
+    mkdirSync(lockPath());
+    try {
+      expect(() =>
+        withOperatorManifestLock(home, () => "should not run", {
+          timeoutMs: 50,
+          staleMs: 30_000,
+          pollMs: 10,
+        }),
+      ).toThrow(OperatorManifestLockTimeoutError);
+    } finally {
+      rmSync(lockPath(), { recursive: true, force: true });
+    }
   });
 });
