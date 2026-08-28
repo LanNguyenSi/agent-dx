@@ -4724,3 +4724,28 @@ until the next rewrite.
   entry above, bundle path first): 0 errors (CI-gating), 0 stale findings,
   35 warning/notice findings (13 warnings, 22 notices), identical in count
   to the pre-edit baseline, all pre-existing and unrelated to this round.
+- 2026-08-28: `doctor` command added (agent-dx task T-006, one of the
+  operator-manifest command slices). It reads no source these two docs
+  list, so neither doc needed new prose, but adding it after `uninstall`
+  in `cli.ts` shifted every line below its insertion point by one: the
+  `--no-tiers` option's citation in install-fence-mechanics.md and its
+  duplicate in model-preselection.md, and the "Found existing install"
+  print-line citation in install-fence-mechanics.md, were re-pointed to
+  their new spans; the anchor strings themselves were unaffected since
+  no line's own content changed, only its number. `npm test` green with
+  the new doctor.test.ts file (drift/missing/no-manifest/divergent/
+  version-lag/clean/pinned-at-own-version cases, the exit-code contract,
+  `--prune`, and `--json`); `npm run typecheck`, `npm run typecheck:test`
+  and `npm run format:check` clean; `node scripts/check-cli-flag-order.mjs`
+  clean. From the repository root: `npx -y okf-kit@0.8.0 check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md packages/orchestrator-workflow/README.md
+  INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` (the
+  okf-anchor-guard CI invocation) reports no CI-gating finding and no
+  stale source; the warning and notice sets are the same ones the prior
+  entry already described, none of them touching the two re-pointed
+  citations. Four mutation probes run against `src/doctor.ts` by hand
+  (pin-equals-own-version treated as version-lag, drift losing precedence
+  over divergent, a missing target dropped from the exit-code trigger set,
+  `--prune` also sweeping drift) each broke exactly the test named for it
+  and were restored and re-verified green before committing.
