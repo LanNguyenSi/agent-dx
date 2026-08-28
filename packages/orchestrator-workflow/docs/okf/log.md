@@ -2329,7 +2329,7 @@
   `docs-consistency.test.ts:1891-2038`, where start correctly resolved to a
   `describe(` block but end escaped past its own close) and 1
   (`subagent-contracts-superset.md`'s citation into
-  `docs-consistency.test.ts:513-519`) where the citation starts inside a
+  `docs-consistency.test.ts:523-529`) where the citation starts inside a
   JSDoc comment immediately before a `describe(` rather than inside any
   block at all, so it has no containing block to straddle from; all 16 were
   re-pointed
@@ -3457,3 +3457,418 @@ findings (errors 0, warnings 13, notices 22), 0 sources-fresh; the CI
 anchor filter (anchor-* and heading-section-*) 0; the --require-anchors
 run with the four allowlisted doc spellings 0; vitest 314/314; typecheck
 and typecheck:test clean; placement-guard clean.
+
+## 2026-08-28 (agent-tasks 2c3d141c, implementer, re-point pass for the .ai/run pointer commit)
+
+Commit a2d5f85 (`design/ow-run-pointer-binding`, agent-grounding task
+43a7ef58) added the per-worktree `.ai/run` pointer and the keyed
+`run-base[<repo-basename>]` marker: SKILL.md's Run state gained a pointer
+paragraph (84-92) and an extended run-base paragraph (94 -> 104-113),
+step 1 gained a pointer sentence (123-124), and all three Harness notes
+bullets gained a trailing pointer sentence (466-467, 469-470, 473-474);
+agents-md-section.md's Run state gained one bullet (158-160); 00-goal.md
+gained the keyed placeholder line at line 4; README.md and INSTALL-AGENT.md
+each gained a `.gitignore` paragraph; and both test/template-markers.test.ts
+(a new describe-internal block, 4 new `it`s) and test/docs-consistency.test.ts
+(a new `describe` block, 8 `it`s) gained coverage. The CHANGELOG's own
+[Unreleased] entry for that commit said re-pointing `docs/okf/*.md` anchors
+was left to a follow-up; this task does that re-pointing in the same PR
+instead, rather than shipping a second commit's worth of drift.
+
+Re-pointing method: `git diff 9740c71..a2d5f85 -- <file>` per changed
+source plus a `difflib.SequenceMatcher` line-mapping script (old line ->
+new line, keyed by "equal" vs "replace"/"insert" opcodes) gave the exact
+old-line -> new-line map for SKILL.md, agents-md-section.md, 00-goal.md,
+README.md, INSTALL-AGENT.md, template-markers.test.ts, and
+docs-consistency.test.ts; every re-pointed citation's new range was then
+read back and diffed against the old range's content to confirm the cited
+text itself did not change (only shifted), before the anchor text was kept
+verbatim. Citations into files a2d5f85 did not touch (05-review-findings.md,
+06-handoff.md, agents/*.md, src/**, CHANGELOG.md) were left alone.
+
+Re-pointed citation lines by doc (counted mechanically as the number of
+removed diff lines carrying an old `<file>:<range>` for a changed source,
+so one line touching two sub-ranges of the same source counts once here):
+subagent-contracts-superset.md 48 (32 SKILL.md-prefixed + 16
+docs-consistency.test.ts-prefixed), review-gate-and-waivers.md 22 (19
+SKILL.md, 2 docs-consistency.test.ts, 1 template-markers.test.ts;
+agents-md-section.md citations in this doc all sat below a2d5f85's
+insertion point and needed no change), model-preselection.md 13 (5
+README.md, 6 INSTALL-AGENT.md, 1 agents-md-section.md, 1
+docs-consistency.test.ts), install-fence-mechanics.md 6 (2 README.md, 4
+INSTALL-AGENT.md), run-state-lifecycle-and-markers.md at least 14 (12
+SKILL.md-prefixed lines across the run-base and Knowledge Bundle sections,
+plus the template-markers.test.ts and INSTALL-AGENT.md combined-range
+lines), plus the "Gotcha" and "Where the shapes are pinned" wording fixes
+and the new pointer/keyed-marker section's own citations (12 new ones, all
+into the changed sources). Citations whose cited range sat entirely before
+a2d5f85's first insertion point in a given source (for example most
+SKILL.md citations under old line 84, or any docs-consistency.test.ts
+citation under old line 360) needed no change and were left untouched,
+confirmed per-citation by the line-mapping script rather than assumed from
+proximity.
+
+A new section, "The `.ai/run` pointer and keyed `run-base[<repo-basename>]`
+markers (0.26.0-unreleased)", was added to run-state-lifecycle-and-markers.md
+between the existing run-base section and the verdict-markers section: the
+pointer's location and fail-closed resolution order, the keyed marker's
+grammar and its placeholder-line convention, that the unkeyed marker stays
+the single-repo path and fallback, and which of the new
+template-markers.test.ts/docs-consistency.test.ts tests pin what, each with
+a string-anchored citation chosen to avoid the anchor-collision and
+test-block-straddle guards (an anchor inside a repeated `expect(...)`
+pattern, or a citation range crossing an `it()` boundary from outside any
+enclosing block, both fail those guards; several draft anchors were
+rejected this way before landing on ones unique to their own cited range
+and to the target file as a whole). The doc's "Gotcha for anyone grepping
+`solution-acceptance:`" section and its "Where the shapes are pinned"
+section were both updated to state precisely that there are still three
+`solution-acceptance:` marker KEYS, with the new keyed line being a fourth
+LINE in the `run-base` key's family, not a fourth key. The frontmatter
+gained `agents-md-section.md` as a source (already cited, previously
+missing from the list) and the description/tags were extended to mention
+the pointer and the keyed marker. `docs/okf/index.md`'s one-line summary of
+the run-state module was extended with the same since-0.26.0-unreleased
+note.
+
+`npx vitest run test/docs-consistency.test.ts` was red before any doc edit
+(3 failing tests: last-content-line anchor, anchor-occurs-once-in-range,
+and the *.test.ts block-straddle check) and green (197/197) after all
+re-points above; `npm test` 327/327; `npm run typecheck:test` clean.
+
+`CHANGELOG.md`'s [Unreleased] entry for a2d5f85 had its trailing
+"re-pointing... is left to a follow-up task" sentence replaced with a
+sentence stating the re-point happened in the same PR and naming the new
+run-state-lifecycle-and-markers.md section; nothing else in that entry
+changed.
+
+Measured on the first commit's tree (`packages/okf-kit` 0.8.0
+`--require-anchors` with the CI allowlist for README.md/INSTALL-AGENT.md
+bare ranges, mirroring the `okf-anchor-guard` CI job): 1 CI-gating anchor
+finding, `run-state-lifecycle-and-markers.md`'s
+`INSTALL-AGENT.md:141-144#"repository's"` citation in the new section --
+the local in-repo vitest guard does not resolve README.md/INSTALL-AGENT.md
+citations at all (`anchorScopeResolve()` has no entry for either), so it
+cannot catch this class; only the real okf-kit tool did. Fixed by
+narrowing the range to `141-143` (line 143 carries `repository's`; line
+144 is `` `.gitignore`. `` alone, real content, not boilerplate, so
+okf-kit does not walk back past it) in a second commit, re-measured on
+that second commit's tree: 0 anchor findings / 0 sources-fresh / 0 errors
+/ 36 warnings / 23 notices (37 warnings were measured on the first
+commit's tree, before the narrowing). Warnings rose from the 13-warning
+baseline to 36 and notices from 22 to 23: every new warning is
+`test-range-start-not-head`, `closing-brace-start-line`, or
+`blank-start-line`, a soft okf-kit heuristic (excluded from the CI-gating
+anchor filter used above) that prefers a `*.test.ts` citation range to
+start on a literal `describe(`/`it(` line; several re-pointed and newly
+added citations here start mid-block instead, by choice, to satisfy the
+stricter in-repo `docs-consistency.test.ts` anchor-uniqueness and
+block-containment guards (see above). No new error or CI-gating finding
+resulted.
+
+Correction, same pass, orchestrator review of the re-point: the 36-warning
+figure above was not a matter of choice. 22 CONTINUATION citations (the
+`:NNN-NNN` short forms that follow a fully-qualified citation on the same
+sentence: 19 in subagent-contracts-superset.md, 3 in model-preselection.md)
+had not been re-pointed at all and still carried their pre-a2d5f85 line
+numbers, so they resolved into the new run-pointer describe block (lines
+359-462 of docs-consistency.test.ts) that none of those docs discuss.
+Neither guard catches this class: okf-kit only warns
+(`test-range-start-not-head`, `blank-start-line`,
+`closing-brace-start-line`), and the in-repo docs-consistency guards check
+anchored and fully-qualified citations only. Found by diffing the
+per-message warning list against the pre-change baseline (13 warnings)
+rather than trusting the category explanation; fixed by re-running the
+difflib line map over continuation tokens too, accepting a move only when
+the old range's content is byte-identical at the mapped position (three
+ranges reflowed by prettier were mapped by block boundary instead:
+lines 565 to 572, 126 to 150 and 152 to 159 of the two test files). Measured after the fix on the working
+tree: 0 anchor findings / 0 sources-fresh / 0 errors / 14 warnings / 22
+notices; the one warning above baseline is the historical bare
+README line-105 spelling quoted in an older entry of this log, left as
+written. Lesson
+for the next re-point: continuation citations are citations too; map
+them with the same script as the fully-qualified ones.
+
+## 2026-08-28 (agent-tasks 2c3d141c, implementer, review round 1 fixes)
+
+Review round 1 on the `.ai/run` pointer change found two inaccurate
+claims (F1, F2), a discriminating-substring gap in four docs-consistency
+tests (F3), two missing instructions (F4, F5), two wording nits (L6, L7),
+a run-directory-location gap in the agents-md-section bullet (L10), and a
+missing property test on the shipped keyed marker line (M1); L8 and L9
+were accepted, not fixed.
+
+F1: SKILL.md's Run state run-base paragraph (now lines 102 to 123) had
+conflated two different failure modes under one "near-miss blocks as
+malformed" claim. Split into two sentences: the grammar check (lowercase,
+no space before the colon, exactly two dashes) still blocks as malformed,
+but a keyed marker that is not on its own line, inside a list bullet or
+prose, is not seen at all, so the binding goes silently missing instead.
+The same split was applied to run-state-lifecycle-and-markers.md's own
+paraphrase of that sentence.
+
+F2: the same doc's claim that a real key left with the placeholder value
+`<sha>` is ignored "along with" the placeholder key was wrong per the
+reviewer's fixture measurement (a real key with value `<sha>` is read
+as-is and blocked by the verdict layer, not ignored). Corrected to state
+that only a placeholder key of the shape `<repo-basename>` is ignored as a
+documentation example, and a real key with the placeholder value is not
+ignored the same way, citing SKILL.md's own "until the placeholder key is
+replaced" wording rather than asserting reader internals beyond what the
+in-repo text says.
+
+F3: the four pointer-doc tests in test/docs-consistency.test.ts (SKILL.md
+Run state, README, INSTALL-AGENT.md write surface, and its manual
+scaffold list) asserted the bare substring `.ai/run`, which a mention of
+`.ai/runs/` alone also satisfies. Replaced with a phrase each source
+sentence actually needs: `` `<worktree-root>/.ai/run` `` for the SKILL.md
+test (this exact backtick-wrapped form appears only in the pointer
+sentence) and `` `.ai/run` pointer `` for the other three (present in all
+three target sentences, absent from a bare `.ai/runs/` mention). Verified
+by deleting each target sentence in turn and confirming the corresponding
+test fails, then restoring it and confirming the test passes again: the
+SKILL.md Run state pointer paragraph, the README "What gets installed"
+sentence, the INSTALL-AGENT.md Write surface bullet, and the
+INSTALL-AGENT.md manual scaffold list bullet all round-tripped red then
+green.
+
+F4 and L6: the Run state pointer paragraph gained two instructions the
+review found missing: when the run directory lives outside a touched
+repository, that repository's completeness gate is armed only by the
+pointer, so a missing pointer there means the gate silently does not
+apply and the pointer must be written before the first implementation
+commit (F4); and the pointer must be overwritten at the start of every
+run, since the reader prefers a stale pointer left by an earlier run over
+the newest-run scan, so it should be removed when no run is active (L6).
+
+F5: the pointer paragraph's gitignore remark ("the pointer is
+machine-local and belongs in `.gitignore`") was reworded as an
+instruction: make sure the pointer is ignored (the repository's
+`.gitignore` or `.git/info/exclude`) before writing it, and never commit
+it. The README and INSTALL-AGENT.md sentences were left as they were, per
+the task assignment.
+
+L7: SKILL.md's "(or the main repository's basename for a linked
+worktree)" parenthetical was reworded to "; in a linked worktree the main
+repository's basename is accepted too" (run-state-lifecycle-and-markers.md
+was not required to carry this wording change and still uses the
+parenthetical form; only its citations into SKILL.md were re-pointed).
+
+L10: agents-md-section.md's run-directory bullet gained "(in the
+workspace or a touched repository)" after the `.ai/runs/YYYY-MM-DD-<slug>/`
+path, matching the fuller SKILL.md wording. No docs-consistency test pins
+this bullet's exact old sentence, so no test needed adjusting.
+
+M1: test/template-markers.test.ts gained a property test on the shipped
+keyed placeholder line: it matches a strict-shape regex mirroring
+grounding-mcp's `KEYED_RUN_BASE_STRICT`, its captured key matches the
+`PLACEHOLDER_KEY` shape, and two constructed near-miss variants
+(uppercase, space before the colon) do not match the strict regex. The
+near-miss variants deliberately use a different key/value spelling
+(`<repo>`/`<commit>` instead of `<repo-basename>`/`<sha>`) so they do not
+add a fourth file-wide occurrence of the exact string
+`run-base[<repo-basename>] = <sha>` that
+run-state-lifecycle-and-markers.md's own citation into this file already
+holds at a 3-occurrence cap; the first attempt (reusing the real
+key/value) tripped the in-repo anchor guard's file-wide occurrence check
+and was caught by running the guard test, not assumed.
+
+Re-point: the pointer paragraph's and the run-base paragraph's own
+citations into SKILL.md sit inside the two sentences F1, F2, F4, and L6
+rewrote, so a byte-identical old-content-at-new-position move was not
+possible for either; both were re-anchored by hand instead. The pointer
+paragraph's fail-closed citation now anchors on its own last line,
+"path.", occurring exactly once in SKILL.md; a second, new citation backs
+the F4/L6 sentence, anchored on "newest-run scan, so remove it when no
+run is active." The run-base paragraph's grammar citation now anchors on
+"a near-miss there blocks as malformed"; a second, new citation backs the
+silent-fail-open sentence F1 added, anchored on "binding goes silently
+missing."; a third, new citation backs F2's corrected placeholder-value
+claim, anchored on SKILL.md's own "until the placeholder key is
+replaced." Every other fully-qualified and `:N-M`-continuation citation
+into SKILL.md, agents-md-section.md, and test/template-markers.test.ts
+across the five live docs was re-pointed by a `difflib.SequenceMatcher`
+line-map script run from the previous commit's tree to the current
+working tree in one pass (building on the previous round's script,
+extended to also move fully-qualified `path:N-M` citations, not only the
+`:N-M` continuations): the script itself reported applying 20 edits to
+run-state-lifecycle-and-markers.md, 32 to subagent-contracts-superset.md,
+20 to review-gate-and-waivers.md, 1 to model-preselection.md, and 0 to
+install-fence-mechanics.md (it cites none of the files this round
+touched). test/docs-consistency.test.ts's own edits (the four
+distinctive-phrase test bodies) landed on the same line count as before,
+so no docs/okf citation into that file needed shifting this round.
+
+The script's regex only recognizes a continuation written as `:N-M`
+(colon-prefixed); a manual audit of the five docs for comma-separated
+continuations (`"..." ,N-M`, a shorthand this bundle also uses) found two
+the script could not have caught, both in
+run-state-lifecycle-and-markers.md: the citation into SKILL.md's
+scaling-rule lines 18 to 22 has a `,140-144` continuation (task-slicer
+scaling rule text, byte-identical at the new position lines 150 to 154),
+and the citation into SKILL.md's Knowledge Bundle lines 244 to 245 has a
+`,239-240` continuation (the Knowledge Bundle non-gating text,
+byte-identical at the new position lines 249 to 250). Both were confirmed
+byte-identical at their mapped target before fixing, then fixed by hand;
+a third such comma-continuation,
+in install-fence-mechanics.md, points at `writers.ts`, a file this round
+did not touch, so it needed no change.
+
+Measured on the working tree: `npx vitest run test/docs-consistency.test.ts`
+green (213/213 together with test/template-markers.test.ts); `npm test`
+328/328; `npm run typecheck` and `npm run typecheck:test` clean; `npm run
+format:check` clean. okf-kit (0.8.0, `--require-anchors`, the CI
+allowlist for README.md/INSTALL-AGENT.md bare ranges): 0 CI-gating anchor
+findings, 0 `sources-fresh` findings, 0 errors, 14 warnings, 22 notices.
+The per-message warning list is byte-identical to the prior round's
+14-line baseline; L8 is why: the one warning above the pre-a2d5f85
+baseline is the historical bare README line-105 spelling quoted in the
+prior round's own log entry above, an append-only entry this round does
+not edit, left as written. This round's CHANGELOG.md addition (a new
+[Unreleased] bullet, inserted above the versioned entries) shifts every
+line number below it in that file, including the two `CHANGELOG.md`
+line-range citations elsewhere in this log (the 0.7.0 and 0.9.0 citations
+above); those are bare `path:N-M` citations with no `#"..."` string
+anchor, so okf-kit's citation-resolve rule checks only that the range
+still exists in the file, not that its content is unchanged, and reports
+nothing for either.
+
+## 2026-08-28 (agent-tasks 2c3d141c, implementer, review round 2 fixes)
+
+Round-2 review on the `.ai/run` pointer change found one HIGH-adjacent
+inaccuracy (F1), one MEDIUM test-strength gap (F2), and three lower-severity
+findings (L3-L5). This round closed all five and redesigned the two SKILL.md
+prose blocks the round targeted, rather than patching sentences in place.
+
+F1: SKILL.md's pointer paragraph said "a missing pointer there means the
+gate silently does not apply," which is false whenever the repository still
+carries run history: grounding-mcp's own reader falls back to scanning that
+repository's `.ai/runs/` and grades the newest run found there, stale or
+not. Fixed by replacing the sentence with an accurate description of the
+scan fallback, and this doc now cites the consumer's own measured behavior
+as evidence (`tests/ow-run-completeness.test.ts`, read directly, not run
+from this repo): no pointer plus a run directory present reports
+`enforced: true`, `complete: true` (given an otherwise-accepted run),
+`runSource: 'scan'` against whichever run the scan finds newest; no pointer
+and no run directory reports `enforced: false`.
+
+F2: three of the seven pointer-doc tests (step 1, the three harness
+bullets as one test, and the agents-md-section Run state test) still
+asserted the bare substring `.ai/run`, which a bare `.ai/runs/` mention
+could also satisfy; two of the three were measurably inert (deleting the
+source sentence they were meant to guard left them green). Fixed by adding
+one `expectPointerMention` helper to the describe block that asserts the
+exact phrase `` `.ai/run` pointer `` and routing all seven pointer tests
+through it or an equivalent specific assertion (the SKILL.md Run state
+contract test keeps its own phrase-based assertions, since that paragraph's
+wording does not contain the helper's phrase).
+
+L3: four `docs/okf/*.md` files (model-preselection.md,
+review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
+subagent-contracts-superset.md) had lost their trailing newline at some
+earlier edit; restored, confirmed byte-for-byte against the 9740c71 tree
+before the loss.
+
+L4: the property test in template-markers.test.ts claimed to mirror
+grounding-mcp's `KEYED_RUN_BASE_STRICT` regex while actually using a
+tightened local subset (missing the leading `\s*`, the `[^\]\n]+` key
+class, and the `(?!-->)` guard). Fixed by copying both
+`KEYED_RUN_BASE_STRICT` and `PLACEHOLDER_KEY` verbatim from
+`agent-grounding/packages/grounding-mcp/src/ow-run-completeness.ts` (read
+directly to confirm the exact source, not from memory), updating the
+comment to say "verbatim... kept in sync by hand," and re-verifying the two
+near-miss variants (uppercase, space before the colon) still fail to match
+the verbatim regex.
+
+L5: SKILL.md's 17-line pointer paragraph was rewritten as a lead sentence
+plus three bullets (content, write/overwrite/remove, ignore-before-write)
+followed by a separate paragraph on reader behavior, and the "newest run
+directory is the active one" sentence in the preceding paragraph now says
+"unless a `.ai/run` pointer names one (see below)" instead of silently
+being superseded. The keyed-marker deviation sentence was generalised from
+"lowercase, no space before the colon, exactly two dashes; a near-miss
+there blocks as malformed. A keyed marker that is not on its own line...
+is not seen at all" to one sentence: a deviating line is either rejected or
+not recognised, and in both cases the binding for that repository is
+missing.
+
+Re-point: the SKILL.md edits shifted every line at or after old line 81 by
+a non-uniform amount (a net +2 by the end of the file, but +9 through the
+new helper-comment insertion point in the pointer paragraph and +3 to +4
+elsewhere depending on position); the docs-consistency.test.ts edits
+shifted every line at or after old line 387 by +10 (the new helper plus one
+net extra line inside the first pointer test). Both were computed with a
+`difflib.SequenceMatcher` line-map built from the pre-round-2 commit
+(41db099) tree against the working tree, then applied to every
+fully-qualified and continuation (`:N-M`, `,N-M`) citation into SKILL.md,
+docs-consistency.test.ts, and template-markers.test.ts across the four
+live docs that cite them, accepting a mapped move only where the old
+range's content matched the new position; a handful the map could not
+place automatically (content that changed inside the cited range, or a
+too-generic replacement anchor that collided with unrelated text elsewhere
+in the target file) were re-anchored by hand instead. Measured by grep
+against the working diff (approximate, since a few of these lines carry
+more than one citation): about 1 citation edit in model-preselection.md, 24
+in review-gate-and-waivers.md, 30 in run-state-lifecycle-and-markers.md,
+and 50 in subagent-contracts-superset.md. run-state-lifecycle-and-markers.md
+also gained the F1/F2 corrected-claims section rewrite described above, and
+one continuation-citation line in log.md's own round-1 entry (a historical
+example quoting a then-current `docs-consistency.test.ts` line range) was
+re-pointed the same way, since its start line drifted onto a blank line
+after the shift.
+
+Measured on the working tree: `npm test` 328/328 (5 files);
+`npm run typecheck` and `npm run typecheck:test` clean; `npm run
+format:check` clean. okf-kit (0.8.0, `--require-anchors`, the CI allowlist
+for README.md/INSTALL-AGENT.md bare ranges): 0 CI-gating anchor findings, 0
+`sources-fresh` findings, 0 errors, 14 warnings, 22 notices. The
+per-message warning list is byte-identical to the prior round's 14-line
+baseline (3e8929a); no new warning survived past the fix pass (three
+intermediate ones from an over-generic replacement anchor,
+`section).toContain(`, were caught by the in-repo low-collision test and
+replaced with `expectPointerMention(section)` before the final measurement
+above).
+
+Orchestrator follow-up to the round-2 entry above: one comma-form
+continuation citation in run-state-lifecycle-and-markers.md (the step-9
+"Repos without a bundle are unaffected" range, written as a comma
+continuation after the fully-qualified step-9 citation) had not moved with
+the SKILL.md shift of that round; re-pointed by two lines, verified
+byte-identical at the target. Also reworded the CHANGELOG Added bullet so
+the pointer's scan fallback and the run-base marker's date-heuristic
+fallback are no longer described as one mechanism. Measured on the
+committed tree: okf-kit check --require-anchors 0 anchor findings, 0
+sources-fresh, 14 warnings, 22 notices, unchanged.
+
+Review round 3 (accept_with_notes) follow-up, orchestrator edits, same
+pass: SKILL.md's reader-fallback paragraph now says the reader takes the
+run that sorts newest by directory name and is only right when the run
+lives in that repository and sorts last (the reader orders the scan by
+name, not by recency); the keyed-marker deviation sentence now names both
+outcomes, rejected and blocking the run versus not recognised and silently
+missing; both edits kept their paragraphs' line counts so the existing
+anchors held, with the two anchors whose last-line text changed re-pointed
+by hand. The CHANGELOG bullet no longer attributes the sha-placeholder
+rule to the skill text (this doc carries it) and counts six of eight
+helper-routed checks. This doc's opening sentence gained the pointer
+qualifier with a citation spanning SKILL.md lines 80 to 83, and its
+fallback and deviation paraphrases were aligned with the new wording. A
+new docs-consistency test pins the grammar rule's wording, which shifted
+docs-consistency.test.ts by seven lines from line 403 on; the 25
+citations into that file across four docs were re-pointed by the difflib
+line map with the byte-identical-content rule (historical citations in
+this log left as written). Measured on the committed tree: vitest 329 of
+329, typecheck and typecheck:test clean, prettier clean, okf-kit check
+with require-anchors 0 anchor findings, 0 sources-fresh, 14 warnings,
+22 notices, warning list unchanged against the 3e8929a baseline.
+
+Same pass, continuation-citation audit after the round-3 edit: 22 more
+short-form ranges in subagent-contracts-superset.md that follow a
+fully-qualified docs-consistency citation on the NEXT line had been left
+at their pre-edit numbers by the first re-point script (which attributed
+continuations to the current line only); corrected by the seven-line
+shift with the byte-identical rule. One token in model-preselection.md
+(the "second, sibling describe" guarding README's tier-to-model-class
+table) turned out to have pointed into the review-round escalation block
+since before this change; re-pointed to that describe's actual range.

@@ -44,7 +44,10 @@ which is mutable. For a stable audit, pin the URL to a commit SHA instead
 The install creates or touches only these paths:
 
 - `.ai/workflow/templates/00-goal.md` through `06-handoff.md`,
-  `.ai/workflow/manifest.json`, `.ai/runs/.gitkeep` (new files)
+  `.ai/workflow/manifest.json`, `.ai/runs/.gitkeep` (new files). The
+  orchestrator later writes a per-worktree `.ai/run` pointer at run time (a
+  machine-local absolute path, not written by the installer); add it to the
+  repository's `.gitignore`.
 - `AGENTS.md`: the marker-fenced workflow section is appended (file created
   when missing); content outside the
   `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:end -->`
@@ -135,7 +138,10 @@ steps in the repository you were asked to install into.
 
    - `.ai/workflow/templates/00-goal.md` through `06-handoff.md` from
      `assets/templates/`, unchanged.
-   - `.ai/runs/.gitkeep`, empty.
+   - `.ai/runs/.gitkeep`, empty. The orchestrator later writes a
+     per-worktree `.ai/run` pointer at run time (a machine-local absolute
+     path, not written by the installer); add it to the repository's
+     `.gitignore`.
    - Append the content of `assets/agents-md-section.md` to `AGENTS.md`
      (create the file when missing; the installer starts a fresh file with a
      `# Agent instructions` heading). Never change anything outside the

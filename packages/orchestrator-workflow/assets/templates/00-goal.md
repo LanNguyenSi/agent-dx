@@ -1,6 +1,7 @@
 # Goal
 
 <!-- solution-acceptance: run-base = TODO -->
+<!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->
 
 ## Operator Request
 

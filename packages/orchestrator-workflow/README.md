@@ -97,6 +97,10 @@ to a commit SHA for a stable audit.
 AGENTS.md             marker-fenced "Agentic Coding Workflow" policy section
 ```
 
+The orchestrator writes a `.ai/run` pointer file in every worktree a run
+touches (a machine-local absolute path, not written by the installer); add
+it to the repository's `.gitignore`.
+
 Per selected harness:
 
 | Harness | Files | Notes |

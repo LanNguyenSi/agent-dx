@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The orchestrator now writes a per-worktree run pointer, `.ai/run`: a plain
+  text file whose first non-empty line is the absolute path of the run
+  directory, one written in every repository or worktree a run touches
+  (`SKILL.md` Run state, step 1, and all three Harness notes bullets;
+  `agents-md-section.md` Run state gained the matching bullet). For a run
+  spanning more than one repository, `00-goal.md` now also carries one keyed
+  `run-base[<repo-basename>]` marker per repository alongside the existing
+  unkeyed one, exact form `<!-- solution-acceptance: run-base[<repo-basename>]
+  = <sha> -->`; the shipped template line uses the placeholder key
+  `<repo-basename>` and value `<sha>` as a documentation example. Both are
+  written for a new consumer: the `.ai/run` pointer and the keyed marker are
+  read by grounding-mcp's `ow-run-completeness` reader, released as
+  `@lannguyensi/grounding-mcp` 0.9.0 (agent-grounding task
+  `design/ow-run-pointer-binding`, agent-tasks 43a7ef58, PR #198). The
+  reader resolves a run through the pointer first and falls back to scanning
+  the repository's own `.ai/runs/` (newest by name) only when no pointer file
+  exists, so kits and repos without the pointer keep working exactly as
+  before; the run-base marker's own date-heuristic fallback for a `TODO`
+  value is a separate mechanism and is unchanged. `README.md` ("What gets
+  installed") and `INSTALL-AGENT.md`
+  ("Write surface" and the manual scaffold list) now note that `.ai/run`
+  should be added to the repository's `.gitignore` (the installer does not
+  edit `.gitignore` itself). Pinned by new tests in
+  `test/template-markers.test.ts` (the keyed placeholder line's exact text,
+  its whole-line-comment shape, its position directly below the unkeyed
+  marker, and that the existing unkeyed `run-base` regex still matches
+  exactly once) and a new `test/docs-consistency.test.ts` describe block
+  (the pointer contract's phrases in SKILL.md Run state, the exact keyed
+  example string, step 1, each of the three Harness notes bullets
+  individually, the agents-md-section bullet, and the README/INSTALL-AGENT
+  gitignore notes). Anchors in `docs/okf/*.md` that cite line ranges in
+  `SKILL.md`, `test/docs-consistency.test.ts`, and
+  `test/template-markers.test.ts` drifted out of range because of the line
+  shifts this change introduces; those anchors were re-pointed in the same
+  PR, and `run-state-lifecycle-and-markers.md` gained a section documenting
+  the pointer and the keyed marker.
+- Two review rounds on the run-pointer change above corrected inaccurate
+  claims and hardened the pinning tests. `SKILL.md` Run state now states the
+  pointer contract as a short lead sentence plus three bullets (what the
+  pointer's content is, when to write, overwrite, and remove it, and to
+  make sure it is ignored before writing it), followed by a separate
+  paragraph on how the run-completeness reader uses it: pointer first,
+  falling back to that repository's own `.ai/runs/` (the run there that
+  sorts newest by directory name) only when no pointer file exists, with a broken pointer rejected outright
+  rather than falling back; the exact accept/reject rules are left to the
+  consuming gate's (grounding-mcp) own documentation, not restated here.
+  The keyed-marker grammar sentence is now a single generalised rule: write
+  the marker exactly in its documented form, on its own line; a deviating
+  line is either rejected, which blocks the run, or not recognised at all
+  (for example inside a list bullet), which leaves the binding for that
+  repository silently missing. The consumer detail that a real key left
+  with the placeholder value `<sha>` is read as-is and blocked by the
+  verdict layer lives in `docs/okf/run-state-lifecycle-and-markers.md`,
+  not in the skill text. `test/docs-consistency.test.ts`'s pointer-doc
+  describe block now routes six of its eight checks through one shared
+  `expectPointerMention` helper that asserts the exact phrase `` `.ai/run`
+  pointer `` (a bare `.ai/runs/` mention alone cannot satisfy it); the
+  SKILL.md Run state contract check and the exact-keyed-example check keep
+  their own specific phrases instead, and a further check pins the
+  grammar rule's wording ("on its own line", both deviation outcomes).
+  `test/template-markers.test.ts`'s property test now carries
+  grounding-mcp's `KEYED_RUN_BASE_STRICT` and `PLACEHOLDER_KEY` regexes
+  verbatim, kept in sync by hand, instead of a locally tightened mirror,
+  and still asserts that two constructed near-miss variants (uppercase,
+  space before the colon) do not match. `agents-md-section.md`'s
+  run-directory bullet still notes the run directory can live "in the
+  workspace or a touched repository". `docs/okf/run-state-lifecycle-and-markers.md`
+  carries the corrected claims plus the consumer's own test-measured
+  evidence for the scan fallback and the malformed/not-seen split, and
+  every `docs/okf/*.md` anchor that cited a line range shifted by either
+  round's edits was re-pointed in the same PR.
+
 ## [0.25.0] - 2026-08-27
 
 ### Added
