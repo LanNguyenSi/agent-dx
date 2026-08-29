@@ -964,6 +964,29 @@ describe("updateOperatorManifest", () => {
     expect(result.manifest?.updatedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 
+  it("writes a mutate-computed updatedAt distinct from current's verbatim, without re-stamping it again (L10)", () => {
+    const seeded = createOperatorManifest(
+      defaults(),
+      "2026-01-01T00:00:00.000Z",
+    );
+    writeOperatorManifest(home, seeded);
+
+    // A refresh whose `mutate` already computed its own distinct
+    // `updatedAt` (`doctor --prune`'s own manual bump, this test's stand-in
+    // for it) must be left exactly as returned: the "refreshing write"
+    // re-stamp only fires when `next.updatedAt` still reads as
+    // `current.updatedAt` (i.e. `mutate` did not touch it), not whenever a
+    // write refreshes an existing manifest.
+    const intentional = "2026-03-03T03:03:03.000Z";
+    const result = updateOperatorManifest(home, (current) => {
+      if (!current) return undefined;
+      return { ...current, updatedAt: intentional };
+    });
+    expect(result.written).toBe(true);
+    expect(result.manifest?.updatedAt).toBe(intentional);
+    expect(readOperatorManifest(home)?.updatedAt).toBe(intentional);
+  });
+
   it("serializes concurrent updateOperatorManifest calls via the same lock (no lost update)", async () => {
     writeOperatorManifest(
       home,

@@ -513,10 +513,11 @@ export function operatorManifestState(home: string): OperatorManifestState {
 
 /**
  * The single locked read-modify-write entry point for the operator
- * manifest: every write to `<home>/manifest.json` (`setup`'s and `apply`'s
- * registration step in cli.ts, both today) goes through this function
- * rather than ever calling the lock or the raw writer directly, so no
- * command can bypass the lock and race another's read-modify-write.
+ * manifest: every write to `<home>/manifest.json` (`setup`, `apply`,
+ * `doctor --prune`, and `adopt`'s own registration step in cli.ts, all four
+ * today) goes through this function rather than ever calling the lock or
+ * the raw writer directly, so no command can bypass the lock and race
+ * another's read-modify-write.
  *
  * The whole re-read, `mutate`, and write run inside one
  * `withOperatorManifestLock` critical section: `mutate` is handed the
@@ -534,7 +535,12 @@ export function operatorManifestState(home: string): OperatorManifestState {
  * `false`. Returning an `OperatorManifest` writes it (via the internal,
  * unlocked writer, safe here since the write happens inside the lock) and
  * `written` is `true`; the written manifest is also returned as
- * `manifest` for a caller that wants it without a further read.
+ * `manifest` for a caller that wants it without a further read. A write
+ * that refreshes an already-existing manifest (`current` truthy) is also
+ * stamped with a fresh `updatedAt` here, unless `mutate`'s own returned
+ * value already carries a distinct one of its own, in which case that
+ * value is written verbatim (see the write itself, below, for the exact
+ * condition).
  */
 export function updateOperatorManifest(
   home: string,

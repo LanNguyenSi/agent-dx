@@ -5137,17 +5137,18 @@ before this commit).
 `cli.ts`'s two doctor.js import edits (`statOrClassify`,
 `adoptExitCodeForStatus`, then `adoptJsonExtras` added in a second pass)
 each grew that one import line, shifting every line below it: the
-`--no-tiers` description (cited at `cli.ts:140-142` before this round,
-`cli.ts:147-149` now) and the "Found existing install" console.log
-(`cli.ts:185-186` before, `cli.ts:192-193` now) in both
+`--no-tiers` description (cited at cli.ts lines 140 to 142 before this
+round, 147 to 149 now) and the "Found existing install" console.log
+(cli.ts lines 185 to 186 before, 192 to 193 now) in both
 install-fence-mechanics.md and model-preselection.md were re-pointed
 after each shift and re-verified with `npx vitest run
 test/docs-consistency.test.ts`. `doctor.ts`'s own edits (removing the
 duplicated `REPO_MANIFEST_RELATIVE_PATH` const/comment, exporting
 `statOrClassify`, adding `adoptExitCodeForStatus` right after
-`targetReportToJson`) shifted `inspectTarget`'s cited span
-(`doctor.ts:304-356`/`:309` before, `doctor.ts:322-374`/`:327` now,
-re-pointed in install-fence-mechanics.md); `adoptJsonExtras` was
+`targetReportToJson`) shifted `inspectTarget`'s cited span (doctor.ts
+lines 304 to 356, anchor line 309, before this round; lines 322 to 374,
+anchor line 327, now), re-pointed in install-fence-mechanics.md;
+`adoptJsonExtras` was
 deliberately appended at the very end of the file, after `runDoctor`,
 so it shifted nothing already cited. A before/after diff of every
 non-`log.md` finding from `npx okf-kit@0.8.0 check` (see command below)
@@ -5200,3 +5201,94 @@ branch itself, since it is unreachable through a live `adopt` run by
 design (the same property the pre-existing source comment on that branch
 already documented); it is pinned instead by direct unit tests of
 `adoptExitCodeForStatus` and `adoptJsonExtras`.
+
+## 2026-08-29 (agent-dx b457ee55, task T-007, closing round-2 notes, implementer)
+
+Six small fixes closing this task's remaining round-2 notes, all scoped to
+`adopt`.
+
+`adopt`'s no-repo-manifest branch previously folded an `EACCES` on the
+manifest FILE itself (mode 000, its containing `.ai/workflow` directory
+still readable) into the reinstall-advising `unreadable-repo-manifest`
+branch: a stat on the file succeeds even when it cannot be read (stat only
+needs search access on ancestor directories), so `readInstalledManifest`
+and the old `repoManifestIsForeign` each silently swallowed the read
+error and reported "not foreign"/"no record" alike. The branch now reads
+the file's bytes itself, inspects the caught error's `code`, and routes
+any non-ENOENT read failure to `unverifiable-repo-manifest` (no repair or
+reinstall advice) before ever attempting to parse or foreign-check it; a
+parse failure on bytes that did read cleanly still reports
+`unreadable-repo-manifest` as before. `repoManifestIsForeign` no longer
+re-reads the file itself; it now takes the already-parsed value, so this
+one read is the only one for this branch.
+
+The human-mode unexpected-status decision (suppress the success line,
+print the stderr bug note) was pulled out of `cli.ts`'s inline
+`exitCode === 2` check into `doctor.ts`'s exported `suppressSuccessLine`,
+next to `adoptExitCodeForStatus`, and unit-tested directly over all seven
+`TargetStatus` values.
+
+`adopt` now reads back `result.manifest` (the bytes `updateOperatorManifest`
+actually wrote) for `inspectTarget` and the registered-target lookup,
+instead of the `mutate` callback's own return value: that return value can
+be stale when `updateOperatorManifest`'s central "refreshing write"
+re-stamp fires on top of it. The `mutate`-captured booleans
+(`alreadyRegistered`, `bootstrapped`, `resolvedTargetPath`) are unchanged.
+
+`operator-manifest.test.ts` gained one additive test pinning the other
+half of the L10 guard: a `mutate` that returns a manifest carrying its own
+distinct `updatedAt` is written verbatim, not re-stamped a second time.
+
+`updateOperatorManifest`'s header comment now names its four writers
+(`setup`, `apply`, `doctor --prune`, `adopt`, all confirmed by grep against
+`src/`) instead of the stale two-writer list, and states plainly that a
+refreshing write stamps `updatedAt` unless `mutate`'s own return value
+already carries a distinct one.
+
+The prior round's log entry cited its own line-shift analysis using
+backtick-wrapped `path:line` ranges, which okf-kit's citation resolver
+picks up as citations in their own right; two of those ranges (the
+`--no-tiers` description and the `inspectTarget` span/`driftFiles` line)
+were themselves stale by the time this round's `doctor.ts`/`cli.ts` edits
+landed (this round's own `suppressSuccessLine` addition and import-list
+growth shifted both by a further one to seventeen lines). Rewrote that
+prose as plain line-number language instead of backtick-quoted ranges,
+and re-pointed the two okf docs that actually cite those spans
+(install-fence-mechanics.md, model-preselection.md): the `--no-tiers`
+description moved from cli.ts lines 147 to 149 to lines 148 to 150; the
+"Found existing install" console.log moved from cli.ts lines 192 to 193
+to lines 193 to 194; `inspectTarget`'s cited span moved from doctor.ts
+lines 322 to 374 to lines 339 to 391, with its `driftFiles` anchor line
+moving from 327 to 344. Verified each new span's content against the
+current source with a direct read before saving.
+
+Mutation probes, run for real against the working tree, each mutated,
+the named test run, then hand-restored to the exact pre-mutation text and
+re-verified green (no intermediate commit exists yet to `git checkout`
+back to): (a) folding the manifest-file `EACCES` case back into
+`unreadable-repo-manifest` (short-circuiting the new `code !== "ENOENT"`
+check to never trigger) failed the new "fix-round-2" file-permission test
+(expected `unverifiable-repo-manifest`, got `unreadable-repo-manifest`);
+restored, green again. (b) making `suppressSuccessLine` always return
+`false` failed its own "fix-round-2" unit test (expected `true` for
+`missing`/`no-manifest`/`unverifiable`, got `false`); restored, green
+again.
+
+`npm test`: green, +2 tests over this task's prior round (the
+manifest-file-`EACCES` test in `adopt.test.ts` and the
+`suppressSuccessLine` unit test). `npm run typecheck` and `npm run
+typecheck:test`: clean. `npm run format` (write, no files changed) then
+`npm run format:check`: clean. `node scripts/check-cli-flag-order.mjs`
+(from the repository root): clean. From the repository root: `npx -y
+okf-kit@0.8.0 check --json packages/orchestrator-workflow/docs/okf
+--require-anchors --require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` reports 0 errors
+(CI-gating), warnings and notices unchanged from the master baseline
+(13 warnings, 22 notices); the only finding touching either edited
+source file is the pre-existing, unrelated ambiguous-citation notice on
+cli.ts around lines 304 to 307, not one of this round's own anchors.
+
+Not done: no further scope. All six notes from this round's assignment
+are addressed above; `init`/`setup`/`uninstall`/`apply`/`doctor`
+behavior and their existing tests are untouched.

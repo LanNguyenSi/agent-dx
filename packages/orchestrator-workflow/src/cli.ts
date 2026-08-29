@@ -36,6 +36,7 @@ import {
   inspectTarget,
   runDoctor,
   statOrClassify,
+  suppressSuccessLine,
   targetReportToJson,
 } from "./doctor.js";
 import type { DoctorReport, TargetReport } from "./doctor.js";
@@ -1082,25 +1083,24 @@ function operatorDefaultsFromRepoManifest(
 }
 
 /**
- * True when the repo manifest at `manifestPath` parses as a JSON object
- * whose `kit` field is a string that is not `"orchestrator-workflow"`: a
- * manifest written by some other tool at this well-known path, not a
- * damaged or hand-edited orchestrator-workflow one.
+ * True when the already-parsed repo manifest `raw` is a JSON object whose
+ * `kit` field is a string that is not `"orchestrator-workflow"`: a manifest
+ * written by some other tool at this well-known path, not a damaged or
+ * hand-edited orchestrator-workflow one. Takes the already-parsed value
+ * (rather than re-reading the file itself) so its caller controls exactly
+ * how a read failure on that file is classified (fix-round-2: reading the
+ * file here too, and swallowing any error into "not foreign", previously
+ * folded an `EACCES` on the manifest file into the reinstall-advising
+ * `unreadable-repo-manifest` branch instead of `unverifiable-repo-manifest`).
  * `readInstalledManifest` (init.ts) already treats any `kit` mismatch,
  * missing or otherwise, as "no record" (`undefined`); this needs its own
- * independent re-parse to tell a genuinely foreign manifest apart from
+ * independent check to tell a genuinely foreign manifest apart from
  * `adopt`'s other `!repoManifest` causes (missing file, invalid JSON, a
  * manifest with `kit` absent or some other invalid field), the same way
  * `repoManifestHasMalformedPin` above re-parses independently for its own,
  * different question (fix-round, review finding L8).
  */
-function repoManifestIsForeign(manifestPath: string): boolean {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(manifestPath, "utf8"));
-  } catch {
-    return false;
-  }
+function repoManifestIsForeign(raw: unknown): boolean {
   if (typeof raw !== "object" || raw === null) return false;
   const candidate = raw as Record<string, unknown>;
   return (
@@ -1188,39 +1188,77 @@ program
           "unverifiable-repo-manifest",
           `Could not verify the repository manifest at ${repoManifestPath} (its directory is not accessible); check its permissions and try again.`,
         );
-      } else if (repoManifestIsForeign(repoManifestPath)) {
-        // Distinct from the generic "unreadable" case below (fix-round,
-        // review finding L8): this is not a damaged or hand-edited
-        // orchestrator-workflow manifest to repair, it is a different
-        // tool's manifest that happens to live at the same well-known
-        // path, and "repair it, or reinstall" is the wrong advice either
-        // way.
-        reportUsageError(
-          "foreign-manifest",
-          `${repoManifestPath} is not an orchestrator-workflow manifest; nothing was registered.`,
-        );
       } else {
-        reportUsageError(
-          "unreadable-repo-manifest",
-          `Unreadable repository manifest at ${repoManifestPath}; repair it, or run \`orchestrator-workflow apply --target ${targetDir}\` to reinstall.`,
-        );
+        // `manifestStat.kind === "ok"`: the manifest file itself stats
+        // fine (stat only needs search access on its ancestor directories,
+        // not read access on the file), so a mode-000 manifest file lands
+        // here too. Read its bytes once, ourselves, so an `EACCES`/`EPERM`
+        // (or any other non-`ENOENT` read failure) is told apart from a
+        // parse failure: `readInstalledManifest` and the old
+        // `repoManifestIsForeign` each re-read this same file and swallow
+        // that distinction, which previously folded an unreadable file into
+        // the reinstall-advising `unreadable-repo-manifest` branch instead
+        // of `unverifiable-repo-manifest` (fix-round-2).
+        let bytes: string | undefined;
+        try {
+          bytes = readFileSync(repoManifestPath, "utf8");
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT") {
+            reportUsageError(
+              "unverifiable-repo-manifest",
+              `Could not verify the repository manifest at ${repoManifestPath} (its directory is not accessible); check its permissions and try again.`,
+            );
+            return;
+          }
+        }
+        let raw: unknown;
+        let parseError = bytes === undefined;
+        if (bytes !== undefined) {
+          try {
+            raw = JSON.parse(bytes);
+          } catch {
+            parseError = true;
+          }
+        }
+        if (!parseError && repoManifestIsForeign(raw)) {
+          // Distinct from the generic "unreadable" case below (fix-round,
+          // review finding L8): this is not a damaged or hand-edited
+          // orchestrator-workflow manifest to repair, it is a different
+          // tool's manifest that happens to live at the same well-known
+          // path, and "repair it, or reinstall" is the wrong advice either
+          // way.
+          reportUsageError(
+            "foreign-manifest",
+            `${repoManifestPath} is not an orchestrator-workflow manifest; nothing was registered.`,
+          );
+        } else {
+          reportUsageError(
+            "unreadable-repo-manifest",
+            `Unreadable repository manifest at ${repoManifestPath}; repair it, or run \`orchestrator-workflow apply --target ${targetDir}\` to reinstall.`,
+          );
+        }
       }
       return;
     }
 
-    // `resolvedTargetPath`, `alreadyRegistered`, `bootstrapped`, and
-    // `writtenManifest` are captured from inside the `mutate` callback
-    // (mirroring `apply`'s own capture of `resolvedTargetPath`/
-    // `alreadyRegistered`) since `mutate` can only return an
-    // `OperatorManifest | undefined`. `mutate` re-reads `current`/`state`
-    // fresh inside the lock rather than relying on any earlier unlocked
-    // read (there is none here: unlike `apply`, `adopt` never reads the
-    // operator manifest before this call), so a concurrent writer's own
-    // read-modify-write cannot be lost.
+    // `resolvedTargetPath`, `alreadyRegistered`, and `bootstrapped` are
+    // captured from inside the `mutate` callback (mirroring `apply`'s own
+    // capture of `resolvedTargetPath`/`alreadyRegistered`) since `mutate`
+    // can only return an `OperatorManifest | undefined`. `mutate` re-reads
+    // `current`/`state` fresh inside the lock rather than relying on any
+    // earlier unlocked read (there is none here: unlike `apply`, `adopt`
+    // never reads the operator manifest before this call), so a concurrent
+    // writer's own read-modify-write cannot be lost. The manifest object
+    // itself is read back from `result.manifest` below rather than a
+    // `mutate`-captured local (fix-round-2): `updateOperatorManifest` may
+    // re-stamp `updatedAt` on the value `mutate` returned before writing it
+    // (its "refreshing write" case), so `mutate`'s own return value can be
+    // stale by the time the lock releases; `result.manifest` is always the
+    // bytes actually written.
     let resolvedTargetPath = "";
     let alreadyRegistered = false;
     let bootstrapped = false;
-    let writtenManifest: OperatorManifest | undefined;
     let result: ReturnType<typeof updateOperatorManifest>;
     try {
       result = updateOperatorManifest(home, (current, state) => {
@@ -1243,7 +1281,6 @@ program
         );
         resolvedTargetPath = safeRealpath(targetDir);
         alreadyRegistered = upserted.alreadyRegistered;
-        writtenManifest = upserted.manifest;
         return upserted.manifest;
       });
     } catch (error) {
@@ -1261,6 +1298,7 @@ program
       return;
     }
 
+    const writtenManifest = result.manifest;
     if (result.state.kind === "unreadable" || !writtenManifest) {
       const manifestPath = join(home, OPERATOR_MANIFEST_FILENAME);
       reportUsageError(
@@ -1306,7 +1344,7 @@ program
     // so all seven statuses are pinned by a direct unit test rather than
     // only the subset a live `adopt` run can actually reach.
     const exitCode = adoptExitCodeForStatus(targetReport.status);
-    const unexpectedStatus = exitCode === 2;
+    const unexpectedStatus = suppressSuccessLine(targetReport.status);
 
     if (opts.json) {
       console.log(

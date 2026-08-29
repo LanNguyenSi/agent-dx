@@ -154,6 +154,23 @@ export function adoptExitCodeForStatus(status: TargetStatus): 0 | 1 | 2 {
   }
 }
 
+/**
+ * Whether `adopt`'s human-mode success line ("Adopted ...") must be
+ * suppressed for a target report whose status is `status`: true for exactly
+ * the three statuses {@link adoptExitCodeForStatus} maps to exit code 2
+ * (`missing`, `no-manifest`, `unverifiable`), statuses that should not
+ * occur for a target whose directory and manifest were just verified
+ * immediately before this status was computed, so printing the success line
+ * ahead of the stderr bug note would be misleading. A pure function,
+ * exported and unit-tested directly against all seven {@link TargetStatus}
+ * values, rather than left as `cli.ts`'s inline `exitCode === 2` check
+ * (fix-round-2), the same reasoning that already pulled
+ * `adoptExitCodeForStatus` itself out of an inline ternary chain.
+ */
+export function suppressSuccessLine(status: TargetStatus): boolean {
+  return adoptExitCodeForStatus(status) === 2;
+}
+
 export interface DoctorReport {
   operatorHome: string;
   operatorVersion: string;

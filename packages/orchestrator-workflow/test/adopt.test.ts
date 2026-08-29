@@ -19,7 +19,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { PACKAGE_VERSION } from "../src/assets.js";
-import { adoptExitCodeForStatus, adoptJsonExtras } from "../src/doctor.js";
+import {
+  adoptExitCodeForStatus,
+  adoptJsonExtras,
+  suppressSuccessLine,
+} from "../src/doctor.js";
 import { runInit } from "../src/init.js";
 import { DEFAULT_MODELS } from "../src/models.js";
 import type { Profile } from "../src/models.js";
@@ -434,6 +438,27 @@ describe("adopt", () => {
     },
   );
 
+  it.skipIf(isRoot)(
+    "an inaccessible manifest.json FILE (directory still accessible) reports unverifiable-repo-manifest, not unreadable-repo-manifest, and gives no repair/reinstall advice (fix-round-2)",
+    () => {
+      initRepo();
+      const manifestFile = repoManifestPath(target);
+      chmodSync(manifestFile, 0o000);
+      try {
+        const result = runAdopt(target, "--json");
+        expect(result.status).toBe(2);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.error).toBe("unverifiable-repo-manifest");
+        expect(parsed.exitCode).toBe(2);
+        expect(parsed.message).not.toContain("repair it");
+        expect(parsed.message).not.toContain("orchestrator-workflow apply");
+        expect(existsSync(operatorManifestPath())).toBe(false);
+      } finally {
+        chmodSync(manifestFile, 0o644);
+      }
+    },
+  );
+
   // --- fix-round tests (L8) -----------------------------------------------
 
   it("--json: a foreign kit's manifest at the same path is reported distinctly from unreadable (L8)", () => {
@@ -561,5 +586,17 @@ describe("adoptExitCodeForStatus (M3/L5)", () => {
     expect(adoptJsonExtras("unverifiable")).toEqual({
       error: "unexpected-target-status",
     });
+  });
+});
+
+describe("suppressSuccessLine (fix-round-2)", () => {
+  it("suppresses the success line only for the three exit-2 statuses, all seven values covered", () => {
+    expect(suppressSuccessLine("clean")).toBe(false);
+    expect(suppressSuccessLine("divergent")).toBe(false);
+    expect(suppressSuccessLine("version-lag")).toBe(false);
+    expect(suppressSuccessLine("drift")).toBe(false);
+    expect(suppressSuccessLine("missing")).toBe(true);
+    expect(suppressSuccessLine("no-manifest")).toBe(true);
+    expect(suppressSuccessLine("unverifiable")).toBe(true);
   });
 });
