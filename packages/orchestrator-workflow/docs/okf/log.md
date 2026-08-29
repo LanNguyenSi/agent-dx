@@ -3546,7 +3546,8 @@ Measured on the first commit's tree (`packages/okf-kit` 0.8.0
 `--require-anchors` with the CI allowlist for README.md/INSTALL-AGENT.md
 bare ranges, mirroring the `okf-anchor-guard` CI job): 1 CI-gating anchor
 finding, `run-state-lifecycle-and-markers.md`'s
-`INSTALL-AGENT.md:141-144#"repository's"` citation in the new section --
+INSTALL-AGENT.md citation (range 141 through 144 as the file stood then,
+anchor text "repository's") in the new section --
 the local in-repo vitest guard does not resolve README.md/INSTALL-AGENT.md
 citations at all (`anchorScopeResolve()` has no entry for either), so it
 cannot catch this class; only the real okf-kit tool did. Fixed by
@@ -5367,9 +5368,13 @@ master baseline's content, since the real bullet's `repository's` sat at
 old line 142, inside both the narrowed 141-143 range and the pre-fix
 141-144 one; after this task's shift the same substring no longer
 resolves against the live file, even though it is prose quoting a past
-finding, not a live citation. That third warning is left as-is: rewriting
-the historical quote's line numbers to keep it resolving would misstate
-what the 2026-08-28 fix actually narrowed the range to.
+finding, not a live citation. That third warning was first left as-is
+(rewriting the historical quote's line numbers to keep it resolving would
+misstate what the 2026-08-28 fix actually narrowed the range to), then
+rewritten as prose once the pull request's `okf-anchor-guard` job showed
+that the CI guard gates every finding carrying an anchor rule id,
+warnings included: the 2026-08-28 entry now names the range and the
+anchor text as they stood then, without a citation token.
 
 Orchestrator follow-up in the same task (T-008, after the implementer
 return): `run-state-lifecycle-and-markers.md` is a third consumer of
@@ -5385,8 +5390,10 @@ lines, the two anchored citations by plus twelve and plus thirty-two
 lines as well; the doc was re-stamped afterwards. The remaining
 `anchor-not-found-in-range` warning sits in this file's own 2026-08-28
 entry, which quotes the citation as it stood at that time; historical
-entries are not re-pointed. Re-run of the CI-argument okf-kit command
-after the edit: 0 CI-gating findings; the two doc warnings are gone.
+entries are not re-pointed, but this quote was later rewritten as prose
+because the CI anchor guard counts every anchor finding (see the
+round-2 closure below). Re-run of the CI-argument okf-kit command
+after the edit: the two doc warnings are gone.
 
 After the rebase onto the merged adopt commit and the CHANGELOG commit
 naming PR 147, the okf-kit sources-fresh rule reported three docs stale
@@ -5461,3 +5468,11 @@ the test file as sources (`install-fence-mechanics.md`,
 starts at or after the operator section, the CHANGELOG is cited by
 heading only, and the test-file citations lie above the appended guard
 block, so no range moved.
+
+CI result on the pull request (round-2 closure, orchestrator): the
+`okf-anchor-guard` job failed on exactly one finding, the 2026-08-28
+entry's quoted citation token, because the job gates every finding whose
+message carries an anchor rule id regardless of severity, while the local
+measurement above had counted only error-severity findings as gating.
+The token was rewritten as prose (range and anchor text as they stood
+then); re-run with the CI criterion (any anchor rule id): 0 findings.
