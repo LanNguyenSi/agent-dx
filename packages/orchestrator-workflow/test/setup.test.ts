@@ -53,6 +53,7 @@ describe("setup", () => {
     expect(manifest.targets).toEqual([]);
     expect(manifest.createdAt).toBeTruthy();
     expect(manifest.createdAt).toBe(manifest.updatedAt);
+    expect(result.stdout).toContain("Created operator defaults.");
   });
 
   it("explicit --harness/--profile write exactly those values", () => {
@@ -134,6 +135,7 @@ describe("setup", () => {
     expect(after.defaults.models.implementer).toBe("haiku");
     expect(after.updatedAt >= before.updatedAt).toBe(true);
     expect(second.stdout).not.toContain("Unchanged.");
+    expect(second.stdout).toContain("Updated operator defaults.");
   });
 
   it("rejects an unknown harness, exits non-zero, and writes nothing", () => {
@@ -141,6 +143,35 @@ describe("setup", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Unknown harness");
     expect(() => readFileSync(manifestPath(), "utf8")).toThrow();
+  });
+
+  it("an unreadable manifest is left untouched: setup exits 1 and reports it instead of overwriting", () => {
+    const first = run("--yes");
+    expect(first.status, first.stderr).toBe(0);
+    const before = JSON.parse(readFileSync(manifestPath(), "utf8"));
+
+    // Seed a target by hand (setup itself never writes targets), then
+    // corrupt the envelope so `readOperatorManifest` rejects it. The
+    // corrupted bytes, targets included, must survive a re-run untouched.
+    const seededTarget = {
+      path: "/some/repo",
+      lastAppliedVersion: "1.2.3",
+      lastAppliedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const corrupted = {
+      ...before,
+      schemaVersion: 2,
+      targets: [seededTarget],
+    };
+    const corruptedBytes = `${JSON.stringify(corrupted, null, 2)}\n`;
+    writeFileSync(manifestPath(), corruptedBytes);
+
+    const second = run("--yes");
+    expect(second.status).toBe(1);
+    expect(second.stderr).toContain(
+      "is unreadable; back it up and repair it (any recorded targets would be lost by overwriting it), or remove it and run setup again.",
+    );
+    expect(readFileSync(manifestPath(), "utf8")).toBe(corruptedBytes);
   });
 
   it("--models sets per-role model overrides", () => {
