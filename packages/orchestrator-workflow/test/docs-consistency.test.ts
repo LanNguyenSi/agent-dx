@@ -3762,3 +3762,83 @@ describe("operator-install-and-registry.md keeps doctor's own aggregate exit cod
     expect(adoptSection).toMatch(/`2`\s+for\s+`missing`/);
   });
 });
+
+/**
+ * agent-tasks b457ee55 (T-009 fix round 2, review finding M1): the doc
+ * previously claimed "once the install actually runs, the only case that
+ * runs it and then returns without registering is the pin gate above" --
+ * inverted. The pin gate (cli.ts's `if (repoPin && repoPin !==
+ * PACKAGE_VERSION && !pinOverridden)` block) returns BEFORE `runInit` is
+ * ever called, so it never "runs" the install at all; and registration can
+ * still fail AFTER a real install ran, without a second install attempt
+ * (the operator-manifest lock-timeout catch, and the
+ * `applyRegistrationFailureMessage` branch when the operator manifest turns
+ * unreadable or absent between this command's own read and its later
+ * write). This pins both halves of the correction: (a) the round-2 wording
+ * must not reappear in the doc's own `apply` section, and (b) the real
+ * control-flow order in cli.ts -- derived from the source text itself, not
+ * hand-copied line numbers -- actually has the pin gate's `return;` before
+ * `runInit`'s call, and the lock-timeout catch's `return;` after it, so a
+ * later refactor that moves the pin gate past the install fails (b) loudly
+ * instead of only leaving the doc's prose to silently go wrong again.
+ */
+describe("operator-install-and-registry.md's apply section states the pin gate's return in the right order relative to the install (fix round 2, M1)", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const applySection = unwrap(
+    phraseBoundedSlice(doc, "## `apply`", "## `doctor`"),
+  );
+  const cliSource = readFileSync(`${PACKAGE_DIR}/src/cli.ts`, "utf8");
+
+  it("does not claim the pin gate runs the install and then returns", () => {
+    expect(applySection).not.toContain(
+      "runs it and then returns without registering is the pin gate",
+    );
+  });
+
+  it("the pin gate's own return precedes runInit's call in cli.ts's real source order, and the lock-timeout catch's return follows it", () => {
+    const pinGateIfIndex = cliSource.indexOf(
+      "if (repoPin && repoPin !== PACKAGE_VERSION && !pinOverridden) {",
+    );
+    expect(
+      pinGateIfIndex,
+      "pin gate condition not found",
+    ).toBeGreaterThanOrEqual(0);
+    const pinGateReturnIndex = cliSource.indexOf("return;", pinGateIfIndex);
+    expect(
+      pinGateReturnIndex,
+      "pin gate return not found after its condition",
+    ).toBeGreaterThan(pinGateIfIndex);
+
+    const runInitIndex = cliSource.indexOf(
+      "const report = runInit({",
+      pinGateIfIndex,
+    );
+    expect(
+      runInitIndex,
+      "runInit call not found after pin gate",
+    ).toBeGreaterThan(pinGateIfIndex);
+
+    // The pin gate's own return must lie strictly before runInit's call: a
+    // refactor that moved the pin gate to run after the install (or that
+    // reordered runInit above the gate) flips this comparison.
+    expect(pinGateReturnIndex).toBeLessThan(runInitIndex);
+
+    const lockCatchIndex = cliSource.indexOf(
+      "if (error instanceof OperatorManifestLockTimeoutError) {",
+    );
+    expect(
+      lockCatchIndex,
+      "lock-timeout catch not found",
+    ).toBeGreaterThanOrEqual(0);
+    const lockReturnIndex = cliSource.indexOf("return;", lockCatchIndex);
+    expect(
+      lockReturnIndex,
+      "lock-timeout catch's return not found",
+    ).toBeGreaterThan(lockCatchIndex);
+
+    // The lock-timeout catch's own return sits AFTER runInit's call: unlike
+    // the pin gate, this return is only reachable once the install already
+    // ran.
+    expect(lockReturnIndex).toBeGreaterThan(runInitIndex);
+  });
+});
