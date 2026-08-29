@@ -3,7 +3,7 @@ type: module
 title: Install fence mechanics
 description: How orchestrator-workflow's installer writes, fences, updates, and removes its surface in a target repo.
 tags: [installer, marker-fence, manifest, agents-md, harness-adapters, uninstall]
-timestamp: 2026-08-29T05:01:54Z
+timestamp: 2026-08-29T05:22:50Z
 sources:
   - packages/orchestrator-workflow/src/init.ts
   - packages/orchestrator-workflow/src/uninstall.ts

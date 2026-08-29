@@ -5454,5 +5454,10 @@ prose guard in `test/docs-consistency.test.ts`) pointed at other
 describe blocks since before this task; re-pointed to the describe
 blocks the prose names, base unchanged (the preceding fully qualified
 citation of the test file), and the doc re-stamped in the following
-commit together with the two docs that list the test file and the
-CHANGELOG as sources.
+commit together with the four docs that list README.md, the CHANGELOG or
+the test file as sources (`install-fence-mechanics.md`,
+`run-state-lifecycle-and-markers.md`, `review-gate-and-waivers.md`,
+`subagent-contracts-superset.md`); no README citation in the bundle
+starts at or after the operator section, the CHANGELOG is cited by
+heading only, and the test-file citations lie above the appended guard
+block, so no range moved.
