@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-08-29T04:24:59Z
+timestamp: 2026-08-29T05:01:54Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -508,15 +508,15 @@ hand: step 2 tells the agent to *ask* the operator for harnesses, the role
 profile, per-role models, and (since 0.19.0) whether to render tier
 variants, rather than guess, suggesting the same defaults and skipping the
 model question for a role the chosen profile does not install
-(`INSTALL-AGENT.md:23-30, 117-131`); step 4's manual fallback spells out
+(`INSTALL-AGENT.md:23-30, 118-132`); step 4's manual fallback spells out
 byte-precise placement (`model:` line directly after `description:` for
 Claude Code, scoped to `.claude/agents/<role>.md` for each role in the
-chosen profile, `INSTALL-AGENT.md:182-191`; conditional `model:` line only
-for fully-qualified opencode ids, `INSTALL-AGENT.md:193-219`) and an example
+chosen profile, `INSTALL-AGENT.md:184-193`; conditional `model:` line only
+for fully-qualified opencode ids, `INSTALL-AGENT.md:195-221`) and an example
 `manifest.json` shape carrying the `profile` and (since 0.19.0) `tiers`
 fields and keyed by all five roles under `full` since 0.21.0 (was four)
-(`INSTALL-AGENT.md:237-259`; under `minimal`, `models` only needs the
-`implementer` and `reviewer` keys, `INSTALL-AGENT.md:261-265`). That same
+(`INSTALL-AGENT.md:239-261`; under `minimal`, `models` only needs the
+`implementer` and `reviewer` keys, `INSTALL-AGENT.md:263-267`). That same
 step 4 states explicitly that the manual path never renders tier-variant
 files regardless of what the operator asked for. Since fix-round-1 (review
 finding L3) this is framed as an installer-scope decision — composing
@@ -525,7 +525,7 @@ implement — rather than attributed to the missing live `opencode models`
 catalog: the original wording blamed the catalog, but Claude Code's
 tier-variant composition needs no catalog at all, so the catalog gap only
 ever explained the opencode half of the omission
-(`INSTALL-AGENT.md:164-169`).
+(`INSTALL-AGENT.md:166-171`).
 
 ## Orchestrator-runs-on-session-model policy
 
@@ -558,7 +558,7 @@ the "Solution-neutral notes" section below describes.
 
 A fifth, adjacent test guards the read-only-role brace lists
 (`agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`) in
-`INSTALL-AGENT.md` (`:43-50`); it is role-enumeration generally, not
+`INSTALL-AGENT.md` (`:44-51`); it is role-enumeration generally, not
 model-specific, but shares the same drift-prevention purpose.
 
 Since 0.19.0, a standalone `describe` (`:1254-1311`) guards a tier-specific

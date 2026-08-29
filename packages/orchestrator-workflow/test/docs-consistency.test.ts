@@ -3349,3 +3349,97 @@ describe("every CHANGELOG.md:# heading-section citation is backtick-delimited (r
     expect(violations, violations.join("\n")).toEqual([]);
   });
 });
+
+describe("operator-install CLI surface stays documented in README (fix round 1, L7)", () => {
+  const readmeMd = readDoc("README.md");
+  const cliTs = readDoc("src/cli.ts");
+  const doctorTs = readDoc("src/doctor.ts");
+
+  const OPERATOR_COMMANDS = ["setup", "apply", "doctor", "adopt"] as const;
+
+  /**
+   * Slices `src/cli.ts` into one text block per operator-install command,
+   * from its `.command("<name>")` call up to (but excluding) the next
+   * `.command(` call or end of file, so an `.option(`/`.requiredOption(`
+   * match below is scoped to the right command and cannot leak into a
+   * sibling command's flags.
+   */
+  function commandBlock(name: string): string {
+    const start = cliTs.indexOf(`.command("${name}")`);
+    if (start === -1) {
+      throw new Error(`src/cli.ts has no .command("${name}") call`);
+    }
+    const nextCommand = cliTs.indexOf(".command(", start + 1);
+    return nextCommand === -1
+      ? cliTs.slice(start)
+      : cliTs.slice(start, nextCommand);
+  }
+
+  /**
+   * Extracts every long-form `--flag` name commander registers via
+   * `.option(...)`/`.requiredOption(...)` in the given block. A flag spec
+   * string can carry a short alias too (e.g. `"-y, --yes"`), so this pulls
+   * every `--word[-word]*` token out of each spec rather than assuming one
+   * flag per call.
+   */
+  function extractLongFlags(block: string): string[] {
+    const flags = new Set<string>();
+    const callRe = /\.(?:requiredOption|option)\(\s*"([^"]+)"/g;
+    let match: RegExpExecArray | null;
+    while ((match = callRe.exec(block)) !== null) {
+      const spec = match[1];
+      const flagRe = /--[a-zA-Z][a-zA-Z0-9-]*/g;
+      let flagMatch: RegExpExecArray | null;
+      while ((flagMatch = flagRe.exec(spec)) !== null) {
+        flags.add(flagMatch[0]);
+      }
+    }
+    return [...flags];
+  }
+
+  const expectedFlags = new Set<string>();
+  for (const name of OPERATOR_COMMANDS) {
+    for (const flag of extractLongFlags(commandBlock(name))) {
+      expectedFlags.add(flag);
+    }
+  }
+
+  it("found a non-trivial set of flags to check (sanity: not vacuously true)", () => {
+    expect(expectedFlags.size).toBeGreaterThanOrEqual(10);
+  });
+
+  it("every setup/apply/doctor/adopt option name appears verbatim in README.md", () => {
+    const missing: string[] = [];
+    for (const flag of expectedFlags) {
+      const boundaryRe = new RegExp(`(?<![\\w-])${flag}(?![\\w-])`);
+      if (!boundaryRe.test(readmeMd)) {
+        missing.push(flag);
+      }
+    }
+    expect(missing, missing.join(", ")).toEqual([]);
+  });
+
+  const TARGET_STATUSES = (() => {
+    const start = doctorTs.indexOf("export type TargetStatus =");
+    if (start === -1) {
+      throw new Error("src/doctor.ts has no `export type TargetStatus =`");
+    }
+    const end = doctorTs.indexOf(";", start);
+    const union = doctorTs.slice(start, end);
+    return [...union.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+  })();
+
+  it("found all seven TargetStatus members (sanity: not vacuously true)", () => {
+    expect(TARGET_STATUSES.length).toBe(7);
+  });
+
+  it("every TargetStatus member appears in README's doctor status list", () => {
+    const missing: string[] = [];
+    for (const status of TARGET_STATUSES) {
+      if (!readmeMd.includes(`\`${status}\``)) {
+        missing.push(status);
+      }
+    }
+    expect(missing, missing.join(", ")).toEqual([]);
+  });
+});

@@ -5327,17 +5327,20 @@ section's insertion point (after line 339), so none needed re-pointing.
 Both docs' `timestamp:` frontmatter was re-stamped as the last edit
 before commit.
 
-`run-state-lifecycle-and-markers.md` also lists `README.md` and
-`INSTALL-AGENT.md` as sources and cites the same Write-surface bullets
-(`INSTALL-AGENT.md:46-47,139-144` and `:47-50#"repository's"`/
-`:141-143#"repository's"`) that this task's edits shifted, but that file
-is outside this task's `allowed_changes`; its citations were left stale
-and a follow-up to re-point them is recommended rather than fixed here.
+At the time of the implementer return, `run-state-lifecycle-and-markers.md`
+also listed `README.md` and `INSTALL-AGENT.md` as sources and cited the
+same Write-surface bullets (`INSTALL-AGENT.md`, ranges 46 through 47 and
+139 through 144, with anchor text "repository's" at range 47 through 50
+and again at range 141 through 143) that this task's edits shifted, but
+that file was outside this task's `allowed_changes`; its citations were
+left stale by the implementer. They were re-pointed by the orchestrator in
+the same slice, see below.
 
-`npm test`: 498/498 green, including `docs-consistency.test.ts`
-unmodified (README.md/INSTALL-AGENT.md carry no local anchor-scope
-mapping, so none of that suite's anchor-load-bearing checks apply to
-either file's citations). `npm run typecheck` and `npm run
+`npm test`: green, including `docs-consistency.test.ts` unmodified (no
+test added or changed by this docs-only slice; README.md/INSTALL-AGENT.md
+carry no local anchor-scope mapping, so none of that suite's
+anchor-load-bearing checks apply to either file's citations). `npm run
+typecheck` and `npm run
 typecheck:test`: clean. `npm run format:check`: clean (no `.ts` files
 touched). From the repository root, `node
 packages/slop-detector/dist/cli.js check . --pack placement-slop
@@ -5353,7 +5356,7 @@ packages/orchestrator-workflow/docs/okf --require-anchors
 --require-anchors-allow README.md packages/orchestrator-workflow/README.md
 INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` reports
 0 errors (CI-gating) both before and after this task's edits. Warnings
-rose from the 13-warning baseline to 16; notices stayed at 22, unchanged.
+rose from the 13-warning baseline to 16; notices unchanged.
 The three new warnings are all `anchor-not-found-in-range`, all caused by
 the same `INSTALL-AGENT.md` line shift described above: two are the
 `run-state-lifecycle-and-markers.md` citations named above (their

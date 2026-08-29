@@ -363,7 +363,9 @@ previously stored values; a first-ever `setup` falls back to `claude` /
 
 **`apply --target <repo>`** projects the operator's install onto a target
 repository and registers that target, by its real resolved path, in the
-operator manifest. Option resolution follows one precedence order: an
+operator manifest. It requires a prior `orchestrator-workflow setup`;
+without one it exits `1` with "No operator setup found". Option resolution
+follows one precedence order: an
 explicit flag wins, then the target's own previously recorded settings,
 then the operator's defaults (harnesses fall back one step further, to
 what `init` would have auto-detected). Pass `--sync` to invert that for
@@ -374,17 +376,19 @@ rule below).
 
 **`doctor [--json] [--prune]`** reports every operator-registered target's
 status: `clean`, `divergent` (from the operator defaults), `version-lag`,
-`drift` (installed files edited outside the kit), `missing`, `no-manifest`,
-or `unverifiable`. It exits `2` when the operator manifest itself cannot be
-read at all, `1` when any target is `drift`, `missing`, `no-manifest`, or
-`unverifiable`, and `0` otherwise. `--json` prints one JSON object instead
+`drift` (installed files edited, deleted, or unreadable since install),
+`missing`, `no-manifest`, or `unverifiable`. It exits `2` when the operator
+manifest is missing or unreadable, or, with `--prune`, when the operator
+manifest lock cannot be acquired or the rewrite fails; `1` when any target
+is `drift`, `missing`, `no-manifest`, or `unverifiable`; and `0` otherwise.
+`--json` prints one JSON object instead
 of human output, with one entry per target plus the operator home and
 version. `--prune` removes `missing` and `no-manifest` targets from the
 registry before reporting (never an `unverifiable` one, since that status
 means the check itself was inconclusive, not that the target is confirmed
 gone) and rewrites the manifest file in its normalized form.
 
-**`adopt [dir]`** brings a repository that already has the kit installed,
+**`adopt [dir] [--json]`** brings a repository that already has the kit installed,
 by hand or by an earlier `init`, under the operator's management without
 changing anything in that repository: it registers the repository
 verbatim, using the repository's own recorded settings to bootstrap the
@@ -401,9 +405,11 @@ to a different version than the one being applied. `--pin <version>` sets
 or replaces the pin and applies regardless of any existing one; `--unpin`
 clears it and applies; `--force-pin` advances an existing pin that
 differs, but has no effect on a target with no pin recorded (it stays
-unpinned). `doctor` reports `version-lag` only when the installed version
-trails the operator's; a pin equal to the installed version suppresses
-that status.
+unpinned). `doctor` reports `version-lag` when the installed version
+differs from the running kit version; on a pinned target the pin is
+compared against the installed version instead, so a pin equal to the
+installed version is `clean` and a pin that no longer matches it is
+`version-lag`.
 
 **The registry is implicit**, not a separate command: `apply` and `adopt`
 register a target as a side effect of a real run, and `doctor --prune` is
@@ -418,7 +424,9 @@ corrupt each other's state.
 
 ## Ownership and re-runs
 
-`init` is idempotent: a second run changes nothing. The rules:
+`init` is idempotent: a second run changes nothing; so is `apply`, which
+installs through that same `runInit` path and is subject to the same
+conflict/`--force`/ownership rules. The rules:
 
 - `AGENTS.md` and `CLAUDE.md` belong to you. The installer only appends its
   fenced section or the import line, and on re-run replaces only the content
@@ -429,9 +437,9 @@ corrupt each other's state.
   updates files you never touched and reports files you edited as conflicts
   instead of overwriting them; `--force` overwrites those too.
 - `.ai/workflow/manifest.json` is the kit's state file. It records the applied
-  version, harnesses, role profile, models, the `--tiers` flag, and file
-  hashes, and is rewritten whenever that state changes; do not edit it by
-  hand.
+  version, harnesses, role profile, models, the `--tiers` flag, the optional
+  kit-version pin, and file hashes, and is rewritten whenever that state
+  changes; do not edit it by hand.
 
 ## Uninstall
 

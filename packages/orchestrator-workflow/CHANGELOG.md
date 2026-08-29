@@ -103,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manifest itself is unreadable, `1` when any target is
   `drift`/`missing`/`no-manifest`/`unverifiable`, else `0`, and `--prune`
   removes `missing`/`no-manifest` targets (never `unverifiable`) and
-  rewrites the manifest in normalized form; `adopt [dir]` registers an
+  rewrites the manifest in normalized form; `adopt [dir] [--json]` registers an
   already-installed repository verbatim, touching nothing in it,
   bootstrapping the operator manifest from the repository's own recorded
   settings when none exists, recording the repository's own version as
@@ -121,11 +121,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surface list. Consumer-side evidence: agent-tasks `b457ee55`, PRs
   #142-#147.
 - The repo manifest (`.ai/workflow/manifest.json`) gained one optional
-  field, `pin`: a kit-version string `apply --pin`/`--unpin` sets,
-  replaces, or clears (trimmed; an empty value clears it), read by
-  `apply`'s pin gate and by `doctor`'s `version-lag` suppression. Purely
-  additive: a caller that never sets it sees a byte-identical manifest to
-  before.
+  field, `pin`: a kit-version string. `apply --pin <version>` sets or
+  replaces it (trimmed; empty or whitespace-only rejected as a usage
+  error, exit `2`, writing nothing), `--unpin` clears it, and `--force-pin`
+  advances an existing pin to the running version; read by `apply`'s pin
+  gate and by `doctor`'s `version-lag` suppression. Purely additive: a
+  caller that never sets it sees a byte-identical manifest to before.
 
 ### Changed
 
