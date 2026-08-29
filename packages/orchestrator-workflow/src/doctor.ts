@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { PACKAGE_VERSION } from "./assets.js";
 import type { Manifest } from "./init.js";
-import { readInstalledManifest } from "./init.js";
+import { MANIFEST_PATH, readInstalledManifest } from "./init.js";
 import type { Profile, Role } from "./models.js";
 import { DEFAULT_MODELS, ROLES } from "./models.js";
 import type {
@@ -127,6 +127,50 @@ export function targetReportToJson(report: TargetReport): TargetReportJson {
   };
 }
 
+/**
+ * Maps a single target's status to `adopt`'s single-target exit-code
+ * contract: 0 for `clean`/`divergent`/`version-lag`, 1 for `drift`, 2 for
+ * `missing`/`no-manifest`/`unverifiable`. A pure function, exported and
+ * unit-testable directly against all seven {@link TargetStatus} values,
+ * rather than left as the inline ternary chain `cli.ts`'s `adopt` action
+ * used to carry (fix-round, review findings M3/L5): a live `adopt` run can
+ * only ever exercise `clean`/`divergent`/`version-lag`/`drift` in practice
+ * (the directory and manifest were just read successfully immediately
+ * before this status is computed), so the `missing`/`no-manifest`/
+ * `unverifiable` branches were previously pinned by nothing at all.
+ */
+export function adoptExitCodeForStatus(status: TargetStatus): 0 | 1 | 2 {
+  switch (status) {
+    case "missing":
+    case "no-manifest":
+    case "unverifiable":
+      return 2;
+    case "drift":
+      return 1;
+    case "clean":
+    case "divergent":
+    case "version-lag":
+      return 0;
+  }
+}
+
+/**
+ * Whether `adopt`'s human-mode success line ("Adopted ...") must be
+ * suppressed for a target report whose status is `status`: true for exactly
+ * the three statuses {@link adoptExitCodeForStatus} maps to exit code 2
+ * (`missing`, `no-manifest`, `unverifiable`), statuses that should not
+ * occur for a target whose directory and manifest were just verified
+ * immediately before this status was computed, so printing the success line
+ * ahead of the stderr bug note would be misleading. A pure function,
+ * exported and unit-tested directly against all seven {@link TargetStatus}
+ * values, rather than left as `cli.ts`'s inline `exitCode === 2` check
+ * (fix-round-2), the same reasoning that already pulled
+ * `adoptExitCodeForStatus` itself out of an inline ternary chain.
+ */
+export function suppressSuccessLine(status: TargetStatus): boolean {
+  return adoptExitCodeForStatus(status) === 2;
+}
+
 export interface DoctorReport {
   operatorHome: string;
   operatorVersion: string;
@@ -239,7 +283,7 @@ function baseReport(
  * what let an inaccessible-but-present target get misreported as
  * `missing`/`no-manifest` and then pruned out of the registry on a guess.
  */
-function statOrClassify(
+export function statOrClassify(
   path: string,
 ): { kind: "ok"; stat: Stats } | { kind: "enoent" } | { kind: "error" } {
   try {
@@ -250,13 +294,6 @@ function statOrClassify(
       : { kind: "error" };
   }
 }
-
-/** Relative path, from a target's repo root, to its own installed manifest.
- * Duplicated from init.ts's private `MANIFEST_PATH` rather than importing
- * it (not exported): both this module's own `statOrClassify` check and
- * `readInstalledManifest` itself need to agree on the same path, and
- * `readInstalledManifest` already hardcodes it identically internally. */
-const REPO_MANIFEST_RELATIVE_PATH = join(".ai", "workflow", "manifest.json");
 
 /**
  * Computes one target's status against the operator's registry. Pure
@@ -286,9 +323,7 @@ export function inspectTarget(
     return baseReport(target, operator, "missing", null);
   }
 
-  const manifestStat = statOrClassify(
-    join(target.path, REPO_MANIFEST_RELATIVE_PATH),
-  );
+  const manifestStat = statOrClassify(join(target.path, MANIFEST_PATH));
   if (manifestStat.kind === "enoent") {
     return baseReport(target, operator, "no-manifest", null);
   }
@@ -561,4 +596,26 @@ export function runDoctor(
     exitCode,
     unvalidatedDropped,
   };
+}
+
+/**
+ * The extra `--json` key `adopt` adds only for a target status that should
+ * be unreachable immediately after a successful directory/manifest read
+ * (`missing`/`no-manifest`/`unverifiable`, i.e. wherever
+ * {@link adoptExitCodeForStatus} returns `2`): `error:
+ * "unexpected-target-status"`, so a `--json` consumer can tell this genuine
+ * internal-error case apart from any other result sharing the same exit
+ * code (fix-round, review finding M3). Appended at the end of this module,
+ * after every other exported member, so adding it does not shift any
+ * existing `doctor.ts:` line citation in docs/okf. A pure function,
+ * exported and unit-tested directly (the branch itself stays unreachable
+ * through a live `adopt` run, the same "unreachable in practice" property
+ * `cli.ts`'s own comment on that branch already documents).
+ */
+export function adoptJsonExtras(
+  status: TargetStatus,
+): { error: "unexpected-target-status" } | Record<string, never> {
+  return adoptExitCodeForStatus(status) === 2
+    ? { error: "unexpected-target-status" }
+    : {};
 }

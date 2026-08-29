@@ -4974,3 +4974,321 @@ citations in install-fence-mechanics.md (the `inspectTarget`
 post-manifest-read span and the `computeDriftFiles` call line) needed the
 same one-line shift, caused by this round's added
 `OperatorManifestLockOptions` type import near the top of `doctor.ts`.
+
+## 2026-08-29 (agent-dx b457ee55, task T-007, implementer)
+
+Added the `adopt [dir]` command: it imports a repository that `init` or
+`apply` already installed into the operator manifest's target registry
+verbatim, touching nothing in the repository itself. When no operator
+manifest exists yet, it bootstraps one from the repository's own
+recorded `harnesses`/`profile`/`tiers`/`models` (`operatorDefaultsFromRepoManifest`)
+rather than the shipped defaults `setup` would otherwise fall back to.
+The target is registered with the repository's own recorded
+`version` as `lastAppliedVersion` (contrast `apply`, which always
+records this operator's `PACKAGE_VERSION`), then `doctor.ts`'s exported
+`inspectTarget` is run against the freshly written manifest and its
+report is printed for that one target. Precondition and operator-
+manifest failures (no or unreadable repo manifest, unreadable operator
+manifest, a lock timeout or write failure) all exit 2, contrasting
+`apply`'s 1; among the reachable report statuses, only `drift` exits 1,
+everything else (`clean`/`divergent`/`version-lag`) exits 0.
+`missing`/`no-manifest`/`unverifiable` are unreachable immediately after
+a directory and manifest read that both just succeeded, so a report in
+one of those three is treated as an internal-error exit 2 rather than
+folded into the normal contract. `--json` mirrors `doctor`'s per-target
+object plus `registered: "new" | "refreshed"` and `bootstrapped: boolean`.
+
+The doctor-style per-target printer (status line, divergence detail,
+version-lag detail, drift-file list, pin line) was factored out of
+`doctor`'s own per-target loop in `cli.ts` into a standalone
+`printTargetDetail` function so `adopt` reuses the identical format
+rather than hand-duplicating it; `doctor`'s own per-target loop now just
+calls it. `doctor`'s own tests were left untouched and stayed green,
+confirming the extraction changed nothing about its output.
+
+The two new imports this round needed (`inspectTarget` and the
+`TargetReport` type from `doctor.ts`) were folded into that module's
+already-existing import lines in `cli.ts` (`import { inspectTarget,
+runDoctor, targetReportToJson } from "./doctor.js";` and `import type {
+DoctorReport, TargetReport } from "./doctor.js";`) instead of adding new
+import lines, specifically to avoid repeating last round's citation
+shift (see the two immediately preceding log entries above, whose
+`cli.ts`/`doctor.ts` citations moved by one line each from a newly added
+import line). `printTargetDetail` and the new `adopt` command itself
+were appended after `doctor`'s command definition and before
+`program.parseAsync`, well past every cited span in either doc. A
+before/after diff of the full findings set from `npx okf-kit@0.8.0
+check` (see command below) against a run from the pre-round commit
+confirms this worked: the two sets are identical member-for-member, so
+no `cli.ts:` citation in install-fence-mechanics.md or model-
+preselection.md needed re-pointing this round. Both docs' `timestamp:`
+front matter was still re-stamped to the time of this change, since
+`cli.ts` (a listed source in both) was edited.
+
+Mutation probes, run for real against the committed state (`git
+checkout` restoring `cli.ts` after each), each restored and re-verified
+afterward: (a) registering `PACKAGE_VERSION` instead of
+`repoManifest.version` in the `upsertOperatorTarget` call failed the
+"contrast with apply" test (expected `"0.0.1"`, got the running package
+version); restored, green again. (b) adding `divergent` alongside
+`drift` in the exit-code ternary failed the "divergent target against an
+existing operator manifest" test (expected exit 0, got 1); restored,
+green again. (c) hardcoding `profile: "full"` and `{ ...DEFAULT_MODELS }`
+in `operatorDefaultsFromRepoManifest` instead of reading them off
+`repoManifest` failed the bootstrap test (the freshly bootstrapped
+operator defaults no longer matched the repo's own `minimal` profile and
+overridden `implementer` model, so the newly registered target reported
+`divergent` instead of `clean`); restored, green again. (d) adding a
+`writeFileSync` call into the target directory at the top of the
+`adopt` action failed the "target directory is never written to" test
+(the before/after tree snapshot gained an extra entry); restored, green
+again.
+
+`npm test`: green, with the 13 new `adopt` tests added alongside every
+pre-existing command's test file, all of which stayed untouched and
+passing. `npm run typecheck` and `npm run typecheck:test`: clean. `npm
+run format` (write) then `npm run format:check`: clean. `node
+scripts/check-cli-flag-order.mjs` (from the repository root): clean.
+From the repository root: `npx -y okf-kit@0.8.0 check --json
+packages/orchestrator-workflow/docs/okf --require-anchors
+--require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` reports 0 errors
+(CI-gating); as noted above, the warning/notice finding set is identical
+to a run against the pre-round commit, member-for-member (fix-round
+correction, review finding L7: an earlier version of this entry claimed
+"0 stale-source findings", which this command does not report at all;
+see the fix-round entry below for what it actually reports).
+
+## 2026-08-29 (agent-dx b457ee55, task T-007, fix round, implementer)
+
+Closed the review-round-1 findings on `adopt`: M1 (`--json`-unaware
+directory precondition), M2 (`existsSync` swallowing `EACCES` on the repo
+manifest path), M3 (the missing/no-manifest/unverifiable fallback's JSON
+shape and human-mode ordering), L6 (untested write-failure/lock-timeout
+JSON shapes), L7 (this doc's own vacuous "0 stale-source findings"
+claim, corrected above), L8 (a foreign tool's manifest at the same path
+read as "unreadable"), L9 (the repo-manifest relative path defined three
+times), and L10 (`updatedAt` never bumped on an `apply`/`adopt`
+refresh).
+
+`adopt` no longer calls `requireDirectory` (the shared helper stays
+`--json`-unaware and unchanged for `init`/`uninstall`/`apply`); it
+resolves its own target directory and routes a non-directory target
+through the same `reportUsageError` shape as every other precondition
+failure, with a new `target-not-a-directory` error at exit 2, keeping
+the existing "Target is not a directory: ..." wording in human mode
+(M1). The repo-manifest existence check now goes through `doctor.ts`'s
+`statOrClassify` (newly exported) instead of `existsSync`, so an
+inaccessible `.ai/workflow` directory (`EACCES`) is reported as a new
+`unverifiable-repo-manifest` error, distinct from `no-repo-manifest`,
+with wording that does not suggest `init`/`apply` (M2). A new
+`repoManifestIsForeign` helper (mirroring the existing
+`repoManifestHasMalformedPin`'s independent-reparse pattern) detects a
+`kit` field that is a string other than `"orchestrator-workflow"` and
+reports a distinct `foreign-manifest` error instead of folding it into
+the generic "unreadable" wording (L8).
+
+The missing/no-manifest/unverifiable fallback after a successful
+registration (unreachable through a live `adopt` run today, since the
+directory and manifest were just read successfully moments before) now
+gets an `error: "unexpected-target-status"` key in `--json`, and human
+mode no longer prints the "Adopted ..." success line ahead of the detail
+lines and the stderr bug note (M3). The status-to-exit-code mapping
+itself moved out of `cli.ts`'s inline ternary chain into `doctor.ts`'s
+newly exported `adoptExitCodeForStatus`, a pure function covering all
+seven `TargetStatus` values, and the `--json` extras (the conditional
+`error` key) into a second exported pure function, `adoptJsonExtras`;
+both are unit-tested directly in `test/adopt.test.ts` against every
+status, closing L5 (the inert branch) without needing to force an
+actually-unreachable race through the CLI.
+
+`REPO_MANIFEST_RELATIVE_PATH` was defined three times (`init.ts`'s
+private `MANIFEST_PATH`, and independent duplicates in `doctor.ts` and
+`cli.ts`); `init.ts` now exports `MANIFEST_PATH` (a one-line change,
+`export` added to the existing declaration, so no `init.ts:` citation in
+either doc shifted), and both `doctor.ts` and `cli.ts` import it instead
+of keeping their own copy (L9).
+
+`updateOperatorManifest` (operator-manifest.ts) now bumps `updatedAt` to
+the current time immediately before every write that refreshes an
+already-existing manifest (`current` truthy) whose `mutate` callback
+did not already give it a distinct `updatedAt` of its own; a brand-new
+manifest (`current` undefined, typically built by
+`createOperatorManifest`) is left untouched, preserving its
+self-consistent `createdAt`/`updatedAt` pair. This is what `setup`'s own
+manual bump did before (now removed as redundant, since `setup`'s
+refresh branch always has `current` truthy and never sets its own
+distinct `updatedAt`) and what `apply`'s and `adopt`'s own registration
+callbacks (built purely on `upsertOperatorTarget`, which never touches
+`updatedAt`) never did, so both previously left a stale `updatedAt` on
+every refresh (L10). `doctor --prune`'s own manual bump (out of this
+round's `doctor.ts` edit scope) is left as-is: it already computes its
+own distinct `updatedAt` before returning, so the central logic's
+"already distinct, leave it" branch takes over for that path with no
+double-bump. The condition (`next.updatedAt === current.updatedAt`
+rather than a blanket "`current` truthy") specifically preserves an
+existing `operator-manifest.test.ts` atomicity test that writes a fully
+custom manifest object, with its own deliberately-different `updatedAt`,
+over an already-existing one and asserts an exact round-trip; a blanket
+bump broke that test on first attempt (caught by `npm test`, fixed
+before this commit).
+
+`cli.ts`'s two doctor.js import edits (`statOrClassify`,
+`adoptExitCodeForStatus`, then `adoptJsonExtras` added in a second pass)
+each grew that one import line, shifting every line below it: the
+`--no-tiers` description (cited at cli.ts lines 140 to 142 before this
+round, 147 to 149 now) and the "Found existing install" console.log
+(cli.ts lines 185 to 186 before, 192 to 193 now) in both
+install-fence-mechanics.md and model-preselection.md were re-pointed
+after each shift and re-verified with `npx vitest run
+test/docs-consistency.test.ts`. `doctor.ts`'s own edits (removing the
+duplicated `REPO_MANIFEST_RELATIVE_PATH` const/comment, exporting
+`statOrClassify`, adding `adoptExitCodeForStatus` right after
+`targetReportToJson`) shifted `inspectTarget`'s cited span (doctor.ts
+lines 304 to 356, anchor line 309, before this round; lines 322 to 374,
+anchor line 327, now), re-pointed in install-fence-mechanics.md;
+`adoptJsonExtras` was
+deliberately appended at the very end of the file, after `runDoctor`,
+so it shifted nothing already cited. A before/after diff of every
+non-`log.md` finding from `npx okf-kit@0.8.0 check` (see command below)
+against a run from the pre-round commit (`git show HEAD:<path>` into a
+scratch copy of the seven changed files) confirms the two sets are
+identical member-for-member; `log.md` itself is excluded from that diff
+since this entry necessarily changes it.
+
+Mutation probes, run for real against the working tree (each mutated,
+the named test run, then hand-restored to the exact pre-mutation text
+and re-verified green, since no intermediate commit exists yet to `git
+checkout` back to): (a) reverting the M2 gate from `statOrClassify` back
+to a plain `existsSync` failed the "M2" chmod-000 test (expected
+`unverifiable-repo-manifest`, got `no-repo-manifest`); restored, green
+again. (b) making `adoptJsonExtras` always return `{}` failed its own
+"M3" unit test (expected the `error` key on `missing`, got `{}`);
+restored, green again. (c) moving `unverifiable` from `adoptExitCodeForStatus`'s
+2-returning cases to its 0-returning cases failed both the
+"maps all seven `TargetStatus` values" test and the downstream
+`adoptJsonExtras` unit test; restored, green again. (d) removing the
+central `updatedAt` bump in `updateOperatorManifest` (returning `next`
+unconditionally) failed both the new "L10" test in `test/adopt.test.ts`
+(a second `adopt` no longer advanced `updatedAt`) and its
+`operator-manifest.test.ts` unit counterpart; restored, green again.
+
+`npm test`: green, 524 tests (511 pre-existing plus 13 new: 3 for M1, 1
+for M2, 1 for L8, 1 for L6's write-failure branch, 1 for L10's adopt
+refresh, 1 for the symlink-then-real-path dedup, 1 for adopt-then-apply,
+2 for `adoptExitCodeForStatus`/`adoptJsonExtras` in adopt.test.ts, and 2
+additive unit tests in operator-manifest.test.ts for the central
+`updatedAt` bump). `npm run typecheck` and `npm run typecheck:test`:
+clean. `npm run format` (write, no files changed) then `npm run
+format:check`: clean. `node scripts/check-cli-flag-order.mjs` (from the
+repository root): clean. From the repository root: `npx -y
+okf-kit@0.8.0 check --json packages/orchestrator-workflow/docs/okf
+--require-anchors --require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` reports 0 errors
+(CI-gating); the non-`log.md` finding set is identical to the pre-round
+commit, member-for-member, as verified above.
+
+Not done: a lock-timeout counterpart to L6's write-failure test (an
+`adopt`-scoped `OW_DOCTOR_TEST_LOCK_TIMEOUT_MS`-style env hatch) was not
+added; `adopt`'s `updateOperatorManifest` call takes no lock options at
+all today, and wiring one in would be a production-code change beyond
+this test-coverage finding's scope. The write-failure test added instead
+exercises the same `catch` block's non-timeout arm. Also not done: a
+live-CLI integration test for M3's `unexpected-target-status`/`error`-key
+branch itself, since it is unreachable through a live `adopt` run by
+design (the same property the pre-existing source comment on that branch
+already documented); it is pinned instead by direct unit tests of
+`adoptExitCodeForStatus` and `adoptJsonExtras`.
+
+## 2026-08-29 (agent-dx b457ee55, task T-007, closing round-2 notes, implementer)
+
+Six small fixes closing this task's remaining round-2 notes, all scoped to
+`adopt`.
+
+`adopt`'s no-repo-manifest branch previously folded an `EACCES` on the
+manifest FILE itself (mode 000, its containing `.ai/workflow` directory
+still readable) into the reinstall-advising `unreadable-repo-manifest`
+branch: a stat on the file succeeds even when it cannot be read (stat only
+needs search access on ancestor directories), so `readInstalledManifest`
+and the old `repoManifestIsForeign` each silently swallowed the read
+error and reported "not foreign"/"no record" alike. The branch now reads
+the file's bytes itself, inspects the caught error's `code`, and routes
+any non-ENOENT read failure to `unverifiable-repo-manifest` (no repair or
+reinstall advice) before ever attempting to parse or foreign-check it; a
+parse failure on bytes that did read cleanly still reports
+`unreadable-repo-manifest` as before. `repoManifestIsForeign` no longer
+re-reads the file itself; it now takes the already-parsed value, so this
+one read is the only one for this branch.
+
+The human-mode unexpected-status decision (suppress the success line,
+print the stderr bug note) was pulled out of `cli.ts`'s inline
+`exitCode === 2` check into `doctor.ts`'s exported `suppressSuccessLine`,
+next to `adoptExitCodeForStatus`, and unit-tested directly over all seven
+`TargetStatus` values.
+
+`adopt` now reads back `result.manifest` (the bytes `updateOperatorManifest`
+actually wrote) for `inspectTarget` and the registered-target lookup,
+instead of the `mutate` callback's own return value: that return value can
+be stale when `updateOperatorManifest`'s central "refreshing write"
+re-stamp fires on top of it. The `mutate`-captured booleans
+(`alreadyRegistered`, `bootstrapped`, `resolvedTargetPath`) are unchanged.
+
+`operator-manifest.test.ts` gained one additive test pinning the other
+half of the L10 guard: a `mutate` that returns a manifest carrying its own
+distinct `updatedAt` is written verbatim, not re-stamped a second time.
+
+`updateOperatorManifest`'s header comment now names its four writers
+(`setup`, `apply`, `doctor --prune`, `adopt`, all confirmed by grep against
+`src/`) instead of the stale two-writer list, and states plainly that a
+refreshing write stamps `updatedAt` unless `mutate`'s own return value
+already carries a distinct one.
+
+The prior round's log entry cited its own line-shift analysis using
+backtick-wrapped `path:line` ranges, which okf-kit's citation resolver
+picks up as citations in their own right; two of those ranges (the
+`--no-tiers` description and the `inspectTarget` span/`driftFiles` line)
+were themselves stale by the time this round's `doctor.ts`/`cli.ts` edits
+landed (this round's own `suppressSuccessLine` addition and import-list
+growth shifted both by a further one to seventeen lines). Rewrote that
+prose as plain line-number language instead of backtick-quoted ranges,
+and re-pointed the two okf docs that actually cite those spans
+(install-fence-mechanics.md, model-preselection.md): the `--no-tiers`
+description moved from cli.ts lines 147 to 149 to lines 148 to 150; the
+"Found existing install" console.log moved from cli.ts lines 192 to 193
+to lines 193 to 194; `inspectTarget`'s cited span moved from doctor.ts
+lines 322 to 374 to lines 339 to 391, with its `driftFiles` anchor line
+moving from 327 to 344. Verified each new span's content against the
+current source with a direct read before saving.
+
+Mutation probes, run for real against the working tree, each mutated,
+the named test run, then hand-restored to the exact pre-mutation text and
+re-verified green (no intermediate commit exists yet to `git checkout`
+back to): (a) folding the manifest-file `EACCES` case back into
+`unreadable-repo-manifest` (short-circuiting the new `code !== "ENOENT"`
+check to never trigger) failed the new "fix-round-2" file-permission test
+(expected `unverifiable-repo-manifest`, got `unreadable-repo-manifest`);
+restored, green again. (b) making `suppressSuccessLine` always return
+`false` failed its own "fix-round-2" unit test (expected `true` for
+`missing`/`no-manifest`/`unverifiable`, got `false`); restored, green
+again.
+
+`npm test`: green, +2 tests over this task's prior round (the
+manifest-file-`EACCES` test in `adopt.test.ts` and the
+`suppressSuccessLine` unit test). `npm run typecheck` and `npm run
+typecheck:test`: clean. `npm run format` (write, no files changed) then
+`npm run format:check`: clean. `node scripts/check-cli-flag-order.mjs`
+(from the repository root): clean. From the repository root: `npx -y
+okf-kit@0.8.0 check --json packages/orchestrator-workflow/docs/okf
+--require-anchors --require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` reports 0 errors
+(CI-gating), warnings and notices unchanged from the master baseline
+(13 warnings, 22 notices); the only finding touching either edited
+source file is the pre-existing, unrelated ambiguous-citation notice on
+cli.ts around lines 304 to 307, not one of this round's own anchors.
+
+Not done: no further scope. All six notes from this round's assignment
+are addressed above; `init`/`setup`/`uninstall`/`apply`/`doctor`
+behavior and their existing tests are untouched.

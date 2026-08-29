@@ -80,7 +80,7 @@ export interface InitOptions {
 }
 
 const SKILL_NAME = "orchestrator-workflow";
-const MANIFEST_PATH = join(".ai", "workflow", "manifest.json");
+export const MANIFEST_PATH = join(".ai", "workflow", "manifest.json"); // shared with doctor.ts/cli.ts (L9); see readInstalledManifest below
 
 export interface Manifest {
   kit: string;

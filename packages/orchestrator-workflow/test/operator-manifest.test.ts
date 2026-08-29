@@ -927,6 +927,66 @@ describe("updateOperatorManifest", () => {
     expect(result.state).toEqual({ kind: "unreadable" });
   });
 
+  it("bumps updatedAt on any write that refreshes an existing manifest, even when mutate did not set one itself (L10)", () => {
+    const seeded = createOperatorManifest(
+      defaults(),
+      "2026-01-01T00:00:00.000Z",
+    );
+    writeOperatorManifest(home, seeded);
+
+    // `upsertOperatorTarget` never touches `updatedAt` itself; a `mutate`
+    // built purely from it (mirroring `apply`'s and `adopt`'s own
+    // registration callbacks) previously left the stale, seeded
+    // `updatedAt` in place on a refresh (fix-round, review finding L10).
+    const result = updateOperatorManifest(home, (current) => {
+      if (!current) return undefined;
+      return upsertOperatorTarget(
+        current,
+        targetDir,
+        "1.0.0",
+        "2026-01-02T00:00:00.000Z",
+      ).manifest;
+    });
+    expect(result.written).toBe(true);
+    expect(result.manifest?.updatedAt).not.toBe(seeded.updatedAt);
+    expect(() =>
+      new Date(result.manifest!.updatedAt).toISOString(),
+    ).not.toThrow();
+  });
+
+  it("does not split a freshly created manifest's createdAt/updatedAt pair", () => {
+    const result = updateOperatorManifest(home, (current) => {
+      expect(current).toBeUndefined();
+      return createOperatorManifest(defaults(), "2026-01-01T00:00:00.000Z");
+    });
+    expect(result.written).toBe(true);
+    expect(result.manifest?.createdAt).toBe(result.manifest?.updatedAt);
+    expect(result.manifest?.updatedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  it("writes a mutate-computed updatedAt distinct from current's verbatim, without re-stamping it again (L10)", () => {
+    const seeded = createOperatorManifest(
+      defaults(),
+      "2026-01-01T00:00:00.000Z",
+    );
+    writeOperatorManifest(home, seeded);
+
+    // A refresh whose `mutate` already computed its own distinct
+    // `updatedAt` (`doctor --prune`'s own manual bump, this test's stand-in
+    // for it) must be left exactly as returned: the "refreshing write"
+    // re-stamp only fires when `next.updatedAt` still reads as
+    // `current.updatedAt` (i.e. `mutate` did not touch it), not whenever a
+    // write refreshes an existing manifest.
+    const intentional = "2026-03-03T03:03:03.000Z";
+    const result = updateOperatorManifest(home, (current) => {
+      if (!current) return undefined;
+      return { ...current, updatedAt: intentional };
+    });
+    expect(result.written).toBe(true);
+    expect(result.manifest?.updatedAt).toBe(intentional);
+    expect(readOperatorManifest(home)?.updatedAt).toBe(intentional);
+  });
+
   it("serializes concurrent updateOperatorManifest calls via the same lock (no lost update)", async () => {
     writeOperatorManifest(
       home,
