@@ -141,8 +141,13 @@ updates the existing entry in place instead of appending a duplicate. Both
 mutation; a brand-new operator manifest otherwise starts with an empty
 `targets` array
 (operator-manifest.ts:81-92#"updatedAt: timestamp,"). Nothing removes a
-registry entry except `doctor --prune` (below); an `uninstall` on the target
-repository never touches it (see "Uninstall" below).
+well-formed registry entry except `doctor --prune` (below); a row that
+fails `readOperatorManifest`'s own per-entry shape check is silently
+dropped on read instead, before any command ever sees it, since every
+write path rewrites the manifest from that same validated read
+(operator-manifest.ts:154-163#"typeof t.lastAppliedAt ==="). An `uninstall` on the
+target repository never touches the registry either way (see "Uninstall"
+below).
 
 ## `setup`: operator-level defaults
 
@@ -200,10 +205,18 @@ carries the previous manifest's pin forward unchanged
 (init.ts:410-417#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
 
 Registration happens even when local edits left some files `conflicted` (the
-apply itself still ran); the only case that returns before registering is the
-pin gate above. If the operator-manifest lock cannot be acquired, the kit is
-still installed in the target but not registered, and the operator is told to
-re-run `apply` to register it
+apply itself still ran); once the install actually runs, the only case that
+runs it and then returns without registering is the pin gate above. Every
+other return happens before the install is attempted: `--pin` and `--unpin`
+together (cli.ts:611-612#"cannot be used together") or a malformed `--pin`
+value (cli.ts:617-622#"must be non-empty with no internal whitespace") are
+usage errors at exit code 2; an unreadable
+(cli.ts:637-639#"back it up and repair it, or remove it and run") or absent
+(cli.ts:644-646#"No operator setup found") operator manifest, and a target
+that is not a directory (cli.ts:54-57#"Target is not a directory"), are
+precondition failures at exit code 1. If the operator-manifest lock cannot
+be acquired, the kit is still installed in the target but not registered,
+and the operator is told to re-run `apply` to register it
 (cli.ts:823-827#"the kit was installed but the target was not registered").
 
 ## `doctor`: report every registered target's status
@@ -221,26 +234,40 @@ case from both `missing` and `no-manifest`: it means the target directory or
 its repo manifest could not even be *checked* (a stat failure other than
 ENOENT, or a manifest file present but unreadable), so nothing is actually
 known about that target's real state
-(doctor.ts:24-39#"that basis would be an unrecoverable guess."). Every
-non-`--json` field on a `TargetReport`
-(doctor.ts:64-70#"driftFiles: string[] | null;") is available for human
-output; only a subset is part of the `--json` contract, `TargetReportJson`
+(doctor.ts:24-39#"that basis would be an unrecoverable guess."). Only a
+subset of `TargetReport`'s fields is part of the `--json` contract,
+`TargetReportJson`
 (doctor.ts:106-114#"reason: string | null;",
-doctor.ts:117-126#"reason: report.reason,").
+doctor.ts:117-126#"reason: report.reason,"); the fields outside that
+contract exist only for the human-output printer in `cli.ts`, to render
+detail lines without recomputing values `inspectTarget` already worked out
+(doctor.ts:56-61#"render detail lines without recomputing values").
 
 Exit codes: `2` when no operator manifest exists at all (nothing else is
 evaluated), whether the file is simply absent or present-but-unreadable
 (doctor.ts:462-473#"a possibly-fine targets array sitting next to the unreadable");
-else `1` if any remaining target (after an optional prune) is `drift`,
-`missing`, `no-manifest`, or `unverifiable`; else `0`
-(doctor.ts:581-589#": 0;"). `--json` prints exactly this report as one JSON
-object, including `unvalidatedDropped`
+also `2`, via a separate path in `cli.ts` rather than in `runDoctor` itself,
+when a `--prune` run's locked read-modify-write throws instead of returning
+a report (a foreign lock held past its timeout, or any other error
+acquiring or writing the lock, e.g. `EACCES` in a read-only operator home):
+the manifest is left untouched and `cli.ts`'s own `catch` block prints a
+differently-shaped JSON object with `error: "operator-manifest-locked"` or
+`"operator-manifest-write-failed"` plus a `message` string, carrying no
+`unvalidatedDropped` field at all (cli.ts:884-912#"error: doctorError,").
+Otherwise: `1` if any remaining target (after an optional prune) is
+`drift`, `missing`, `no-manifest`, or `unverifiable`; else `0`
+(doctor.ts:581-589#": 0;"). Outside that thrown-lock-error path, `--json`
+prints exactly the `DoctorReport` as one JSON object, including
+`unvalidatedDropped`
 (doctor.ts:192#"unvalidatedDropped: number;") and `pruned`
 (doctor.ts:178#"pruned: string[];")
-(cli.ts:927-936#"report.error ? { error: report.error }"); `error` is set
-only when no manifest was evaluated, distinguishing "never ran `setup`" from
-"manifest exists but does not parse or validate"
-(doctor.ts:193-198#"(corrupt JSON, or an envelope that does not match this kit).").
+(cli.ts:927-936#"report.error ? { error: report.error }"); within that
+object, `error` is set only when no manifest was evaluated, distinguishing
+"never ran `setup`" from "manifest exists but does not parse or validate"
+(doctor.ts:193-198#"(corrupt JSON, or an envelope that does not match this kit)."). That
+lock-failure JSON object above is assembled directly by `cli.ts`'s `catch`
+block, not by `runDoctor`, and carries its own, differently-named `error`
+values outside `DoctorReport`'s error contract entirely.
 
 `--prune` removes exactly the `missing` and `no-manifest` targets from the
 registry before reporting, rewriting the whole manifest file in normalized
@@ -264,13 +291,19 @@ shipped defaults `setup` would use
 (cli.ts:1114-1115#"bootstraps the operator manifest from the repository's own recorded settings",
 cli.ts:1074-1082#"models: { ...repoManifest.models },",
 cli.ts:1264-1275#"bootstrapped = !current;"). It then prints the one
-target's doctor report and exits with `adoptExitCodeForStatus`'s mapping,
-the same mapping `doctor`'s multi-target exit code is built from status by
-status: `0` for `clean`/`divergent`/`version-lag`, `1` for `drift`, `2` for
+target's doctor report and exits with `adoptExitCodeForStatus`'s own
+single-target mapping, a function scoped to `adopt`'s contract
+(doctor.ts:130-131#"single-target exit-code") and not something `doctor`'s
+own multi-target exit code is built from: `0` for
+`clean`/`divergent`/`version-lag`, `1` for `drift`, `2` for
 `missing`/`no-manifest`/`unverifiable`
 (doctor.ts:142-153#"return 0;",
 test/adopt.test.ts:564-565#"maps all seven TargetStatus values to adopt").
-The same mapping also drives whether the success line is suppressed
+This three-way, per-status split is deliberately finer than `doctor`'s own
+two-way `0`/`1` aggregate exit code over all registered targets (above),
+which never derives a `2` from any individual target's status
+(doctor.ts:581-589#": 0;"). The same `adoptExitCodeForStatus` mapping also
+drives whether the success line is suppressed
 (doctor.ts:170-171#"return adoptExitCodeForStatus(status) === 2;") and
 whether the `--json` output carries an `unexpected-target-status` error key
 (doctor.ts:615-618#"return adoptExitCodeForStatus(status) === 2"), both
@@ -278,8 +311,11 @@ wired into `adopt`'s own action
 (cli.ts:1346-1347#"const unexpectedStatus = suppressSuccessLine(targetReport.status);").
 Every failure `adopt` can report before it has a target report to return
 (not a directory, no repo manifest, a foreign or unreadable repo manifest, a
-lock failure) is a usage/precondition error at exit code 2, distinct from
-`apply`'s own precondition failures at exit code 1.
+lock failure) is a usage/precondition error at exit code 2, unlike `apply`
+above: only `apply`'s unreadable/absent operator manifest and its own
+not-a-directory check land on exit code 1, while `apply`'s own
+`--pin`/`--unpin` usage errors exit at 2, the same code as every one of
+`adopt`'s failures here.
 
 ## The pin rule
 

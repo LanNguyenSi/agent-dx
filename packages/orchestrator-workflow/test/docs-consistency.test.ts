@@ -3492,8 +3492,19 @@ import {
  * `upsertOperatorTarget` are used rather than a hand-typed key list so the
  * schema pin tracks the real runtime shape, not a second, potentially
  * diverging enumeration of the same fields.
+ *
+ * fix round (review finding M2): the three per-key `toContain` loops below
+ * are not discriminating against an *added* key: a new field whose name
+ * happens to already appear elsewhere in the doc (in backticks, for
+ * whatever unrelated reason) would keep every `toContain` green while the
+ * doc's own "stores exactly ..."/"carries ..." enumeration sentences became
+ * false. Each `it` below now also asserts the exact key list via `toEqual`
+ * against a literal copied from the doc's current enumeration, so a key
+ * added to (or removed from) the real runtime shape fails this test loudly
+ * regardless of what the doc's prose happens to already contain, forcing
+ * both the test and the doc's enumeration sentence to be updated together.
  */
-describe("operator-install-and-registry.md names the real operator manifest schema keys (T-009)", () => {
+describe("operator-install-and-registry.md names the real operator manifest schema keys", () => {
   const doc = readDoc("docs/okf/operator-install-and-registry.md");
 
   function sampleManifest() {
@@ -3504,12 +3515,32 @@ describe("operator-install-and-registry.md names the real operator manifest sche
   }
 
   it("names every OperatorManifest envelope key", () => {
+    // Literal mirrors the doc's own "carries `kit`, `schemaVersion`,
+    // `defaults`, `targets`, `createdAt`, `updatedAt`" sentence; a key added
+    // to or removed from the real envelope fails here even if its name
+    // already appears elsewhere in the doc.
+    expect(Object.keys(sampleManifest())).toEqual([
+      "kit",
+      "schemaVersion",
+      "defaults",
+      "targets",
+      "createdAt",
+      "updatedAt",
+    ]);
     for (const key of Object.keys(sampleManifest())) {
       expect(doc).toContain(`\`${key}\``);
     }
   });
 
   it("names every OperatorManifestDefaults key", () => {
+    // Literal mirrors the doc's own "carries `harnesses`, `profile`,
+    // `tiers`, and `models`" sentence.
+    expect(Object.keys(sampleManifest().defaults)).toEqual([
+      "harnesses",
+      "profile",
+      "tiers",
+      "models",
+    ]);
     for (const key of Object.keys(sampleManifest().defaults)) {
       expect(doc).toContain(`\`${key}\``);
     }
@@ -3524,6 +3555,18 @@ describe("operator-install-and-registry.md names the real operator manifest sche
     );
     const target = manifest.targets[0];
     expect(target).toBeDefined();
+    // Literal mirrors the doc's own "stores exactly `path`,
+    // `lastAppliedVersion`, `lastAppliedAt`" sentence. This is the exact
+    // mutation probe from review finding M2: adding `pin?: string` to
+    // `OperatorTarget` and emitting it from `upsertOperatorTarget`'s push
+    // branch previously kept every per-key `toContain` above green while
+    // this doc sentence went false; this `toEqual` now fails loudly
+    // instead.
+    expect(Object.keys(target as object)).toEqual([
+      "path",
+      "lastAppliedVersion",
+      "lastAppliedAt",
+    ]);
     for (const key of Object.keys(target)) {
       expect(doc).toContain(`\`${key}\``);
     }
@@ -3539,7 +3582,7 @@ describe("operator-install-and-registry.md names the real operator manifest sche
  * mapping, so the doc's stated grouping cannot silently diverge from the
  * real one in doctor.ts.
  */
-describe("operator-install-and-registry.md names every doctor status and its real exit-code mapping (T-009)", () => {
+describe("operator-install-and-registry.md names every doctor status and its real exit-code mapping", () => {
   const doc = readDoc("docs/okf/operator-install-and-registry.md");
   const unwrapped = unwrap(doc);
   const STATUSES: TargetStatus[] = [
@@ -3587,7 +3630,7 @@ describe("operator-install-and-registry.md names every doctor status and its rea
  * going unchecked; `init`/`uninstall` are excluded since they belong to
  * install-fence-mechanics.md, not this doc.
  */
-describe("operator-install-and-registry.md names the real operator-facing commands (T-009)", () => {
+describe("operator-install-and-registry.md names the real operator-facing commands", () => {
   const doc = readDoc("docs/okf/operator-install-and-registry.md");
   const cliSource = readFileSync(`${PACKAGE_DIR}/src/cli.ts`, "utf8");
   const allCommandNames = [
@@ -3625,7 +3668,7 @@ describe("operator-install-and-registry.md names the real operator-facing comman
  * from the (whitespace-unwrapped, so a line-wrapped mention still counts)
  * doc text and requires every one of them to equal the real constant.
  */
-describe("operator-install-and-registry.md states the real lock timeout and stale-window defaults (T-009)", () => {
+describe("operator-install-and-registry.md states the real lock timeout and stale-window defaults", () => {
   const doc = readDoc("docs/okf/operator-install-and-registry.md");
   const unwrapped = unwrap(doc);
 
@@ -3654,5 +3697,66 @@ describe("operator-install-and-registry.md states the real lock timeout and stal
   it("states the real timeout-above-stale invariant, not just the two numbers", () => {
     expect(DEFAULT_LOCK_TIMEOUT_MS).toBeGreaterThan(DEFAULT_LOCK_STALE_MS);
     expect(doc).toContain("is deliberately kept above");
+  });
+});
+
+/**
+ * agent-tasks b457ee55 (T-009 fix round 1, review finding H1): the doc
+ * previously claimed `doctor`'s own multi-target exit code was "built from"
+ * `adoptExitCodeForStatus`'s per-status 0/1/2 mapping. False: `runDoctor`'s
+ * own exit code, once a manifest exists to evaluate, is a two-way 0/1
+ * aggregate over all registered targets (`doctor.ts`'s `targets.some(...)  ?
+ * 1 : 0`), computed inline and never assigning `2` to any individual
+ * target's status; `adoptExitCodeForStatus` is a separate, exported,
+ * single-target function scoped to `adopt`'s own contract. This pins the
+ * two apart: `doctor`'s own exit-code paragraph never attaches a status to
+ * exit `2`, and `adopt`'s own paragraph is the only place the full 0/1/2
+ * per-status grouping appears. The four-status set that pushes `doctor`'s
+ * own aggregate to `1` is read directly out of `doctor.ts`'s source text
+ * (there is no exported constant for it, unlike `REMOVE_ON_PRUNE`, which is
+ * a different, two-status set used only for `--prune` eligibility), so a
+ * change to that inline condition is caught here too.
+ */
+describe("operator-install-and-registry.md keeps doctor's own aggregate exit code and adopt's per-status mapping distinct", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const doctorSource = readFileSync(`${PACKAGE_DIR}/src/doctor.ts`, "utf8");
+  const doctorSection = unwrap(
+    phraseBoundedSlice(doc, "## `doctor`", "## `adopt`"),
+  );
+  const adoptSection = unwrap(
+    phraseBoundedSlice(doc, "## `adopt`", "## The pin rule"),
+  );
+
+  it("found runDoctor's own status-to-exit-1 set in doctor.ts (sanity: not vacuously true)", () => {
+    const blockStart = doctorSource.indexOf(
+      "const exitCode: 0 | 1 = targets.some(",
+    );
+    expect(blockStart, "exitCode block not found").toBeGreaterThanOrEqual(0);
+    const blockEnd = doctorSource.indexOf("? 1", blockStart);
+    expect(blockEnd, "? 1 not found after exitCode block").toBeGreaterThan(
+      blockStart,
+    );
+    const block = doctorSource.slice(blockStart, blockEnd);
+    const statuses = [...block.matchAll(/report\.status === "([a-z-]+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(statuses).toEqual([
+      "drift",
+      "missing",
+      "no-manifest",
+      "unverifiable",
+    ]);
+  });
+
+  it("doctor's own aggregate paragraph never attaches any status to exit 2", () => {
+    expect(doctorSection).toContain("`1` if any remaining target");
+    expect(doctorSection).toContain("else `0`");
+    expect(doctorSection).not.toMatch(/`2`\s+for\s+`/);
+  });
+
+  it("adopt's own paragraph names the full 0/1/2 per-status mapping", () => {
+    expect(adoptSection).toMatch(/`0`\s+for\s+`clean`/);
+    expect(adoptSection).toMatch(/`1`\s+for\s+`drift`/);
+    expect(adoptSection).toMatch(/`2`\s+for\s+`missing`/);
   });
 });
