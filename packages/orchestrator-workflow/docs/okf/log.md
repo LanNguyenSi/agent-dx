@@ -5656,11 +5656,20 @@ same commit as the source edit is stale by construction, since
 `sources-fresh` compares commit times). Re-ran the same okf-kit command
 after the re-stamp commit: 0 errors, 13 warnings (down from 17; the 4
 STALE warnings are gone, leaving the pre-existing baseline of 12
-`install-fence-mechanics.md` short-form-citation warnings and the 1
-`README.md:105` blank-start-line warning), 0 warnings naming
+`install-fence-mechanics.md` short-form-citation warnings and the one
+blank-start-line warning on the README citation at line 105), 0 warnings naming
 `operator-install-and-registry.md`.
 
 Not done beyond this fix round: no further scope. `src/` (other than the
 M2 probe, applied and restored, never committed), README.md,
 INSTALL-AGENT.md, CHANGELOG.md, and every OKF doc other than the four
 re-stamped above are untouched.
+
+Rebase onto the merged slice-8 commit (orchestrator): both slices append
+to `test/docs-consistency.test.ts` and to this log, so the rebase
+conflicted on both files and on the four re-stamped docs; resolved by
+keeping the slice-8 blocks first and the slice-9 blocks after them and
+taking the later timestamp. The merge dropped the closing braces of the
+slice-8 describe block at the seam (typecheck: expected a closing brace);
+restored by hand. One citation-shaped token in this entry's own prose
+(the README line-105 warning) was rewritten as prose.

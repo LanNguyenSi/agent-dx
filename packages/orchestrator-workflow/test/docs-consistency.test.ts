@@ -3469,6 +3469,8 @@ describe("operator-install CLI surface stays documented in README (fix round 1, 
       }
     }
     expect(missing, missing.join(", ")).toEqual([]);
+  });
+});
 
 // Imported here (appended at file end), not moved to the top-of-file import
 // block, so adding it does not shift every existing citation into this file
