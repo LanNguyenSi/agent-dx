@@ -5566,3 +5566,101 @@ clean.
 
 Not done: no further scope. `src/`, README.md, INSTALL-AGENT.md,
 CHANGELOG.md, and every other OKF doc are untouched.
+
+Fix round 1 (agent-dx b457ee55, task T-009, implementer, closing round-1
+review): closed H1 (the adopt section wrongly claimed doctor's own
+multi-target exit code was "built from" `adoptExitCodeForStatus`'s
+per-status mapping; rewritten as adopt's own single-target mapping,
+deliberately finer than doctor's own two-way `0`/`1` aggregate, with
+citations to both), M1 (the doctor section's exit-code paragraph was
+missing the third exit-2 path: a `--prune` run whose locked write throws
+is caught in `cli.ts` and prints a differently-shaped JSON object with
+`error: "operator-manifest-locked"`/`"operator-manifest-write-failed"`
+plus `message` and no `unvalidatedDropped`; added, and narrowed the two
+sentences that were false outside that path), M2 (the three schema-key
+pins were not discriminating against an added field; each now also
+asserts an exact `toEqual` key list, in addition to the existing per-key
+`toContain` loop), M5 (the "available for human output" sentence cited
+`TargetReport`'s `--json`-contract field range instead of its own doc
+comment; re-anchored to doctor.ts:56-61 and reworded to "exist only for
+the human-output printer"), L1 (narrowed "the only case that returns
+before registering is the pin gate" to "the only case that runs the
+install and then returns without registering", naming apply's other
+early returns and their real exit codes), L2 (apply's own precondition
+failures split across both exit codes, not only 1; fixed the adopt
+section's contrast accordingly), L3 (added the well-formed-row qualifier
+to the registry-removal claim, citing `readOperatorManifest`'s per-entry
+filter), L4 (dropped the `(T-009)` suffix from the four describe titles;
+provenance stays in the block comments). Also added one new describe
+block (three `it`s) that derives doctor's own status-to-exit-1 set from
+`doctor.ts`'s source text and asserts doctor's own paragraph never
+attaches a status to exit `2` while adopt's own paragraph names the full
+`0`/`1`/`2` mapping (the reviewer's suggested missing test for H1); the
+second suggested missing test was folded into the M2 fix above rather
+than added separately, since the `toEqual` list is the "stores exactly
+..." pin itself.
+
+Every new or changed citation was re-verified against this file's own
+"last content line" / "at most 3 times file-wide" / "exactly once in
+range" guard (`describe("every string-anchored docs/okf citation's anchor
+is load-bearing ...")`): several of the first-draft anchors for this fix
+round failed that guard even though the ranges themselves were correct
+(most commonly, the literal `process.exitCode = N;` line recurs more than
+3 times across `cli.ts`, and a doc-comment's closing `*/` counts as a
+content line under this guard's own boilerplate definition, unlike `});`
+or a bare `}`); every citation below was narrowed or re-pointed until the
+guard was green, verified by running `npx vitest run
+test/docs-consistency.test.ts` after each change, not by inspection alone.
+
+Mutation probes, run for real against the working tree: (a) the M2 probe
+named by the reviewer, adding `pin?: string` to `OperatorTarget` and
+`pin: "mutation-probe"` to `upsertOperatorTarget`'s push branch in
+src/operator-manifest.ts, failed the new "names every OperatorTarget
+registry-entry key" test (`toEqual` mismatch: `path`, `lastAppliedVersion`,
+`lastAppliedAt`, `pin` vs. the expected three-key list); `src/` was then
+restored from a pre-mutation copy and `cmp`-verified byte-identical, and
+the test re-run green. (b) The two pre-existing pins from the original
+T-009 pass were re-verified against this round's edited doc: changing
+`version-lag` to `version-lagging` inside the seven-status sentence still
+fails "names the exact seven-status vocabulary"; changing one of the two
+`40-second timeout` mentions to `45-second timeout` still fails "every
+second-based mention of the lock timeout"; both restored and re-verified
+green.
+
+`npx vitest run test/docs-consistency.test.ts`: green (211 tests; +3 over
+this file's post-T-009 state, all three from the new H1-discriminator
+describe block; the three schema-key `it`s each gained one additional
+`toEqual` assertion without becoming new tests). `npm test`: green across
+the whole package. `npm run typecheck` and `npm run typecheck:test`:
+clean. `npm run format` reformatted only `docs-consistency.test.ts` (this
+file's own new blocks); `npm run format:check` then clean; the full suite
+was re-run green after the reformat. `node scripts/check-cli-flag-order.mjs`
+(from the repository root): clean. `node packages/slop-detector/dist/cli.js
+check . --pack placement-slop --config slop.config.yml`: clean. Grepped
+both changed files for em dashes and control characters: none (one
+pre-existing em dash at `test/docs-consistency.test.ts:2368` is untouched
+by this round, outside its scope).
+
+Committed the doc/test fixes first (fix commit), confirmed via `npx -y
+okf-kit@0.8.0 check --json packages/orchestrator-workflow/docs/okf
+--require-anchors --require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` that editing
+`docs-consistency.test.ts` in that commit produced exactly the four STALE
+warnings M4 predicted (model-preselection.md, review-gate-and-waivers.md,
+run-state-lifecycle-and-markers.md, subagent-contracts-superset.md, each
+naming `test/docs-consistency.test.ts` as the changed source), then
+re-stamped those four docs' `timestamp` frontmatter to `2026-08-29T05:40:16Z`
+in this separate, later commit per the Maintenance rule (a stamp in the
+same commit as the source edit is stale by construction, since
+`sources-fresh` compares commit times). Re-ran the same okf-kit command
+after the re-stamp commit: 0 errors, 13 warnings (down from 17; the 4
+STALE warnings are gone, leaving the pre-existing baseline of 12
+`install-fence-mechanics.md` short-form-citation warnings and the 1
+`README.md:105` blank-start-line warning), 0 warnings naming
+`operator-install-and-registry.md`.
+
+Not done beyond this fix round: no further scope. `src/` (other than the
+M2 probe, applied and restored, never committed), README.md,
+INSTALL-AGENT.md, CHANGELOG.md, and every OKF doc other than the four
+re-stamped above are untouched.
