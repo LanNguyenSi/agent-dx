@@ -317,8 +317,17 @@ program
       // write, never `existing`'s (`updateOperatorManifest` is this
       // module's sole write path; nothing here calls the raw writer
       // directly). The unchanged/created/updated decision is likewise
-      // made against `current.defaults`, not `existing.defaults`.
-      const result = updateOperatorManifest(home, (current) => {
+      // made against `current.defaults`, not `existing.defaults`. A
+      // manifest that re-reads as `unreadable` inside the lock (damaged or
+      // hand-edited since the unlocked `existing` read above) must not be
+      // silently replaced with a fresh one: that would discard whatever
+      // targets survive in the damaged file. `mutate` returns `undefined`
+      // in that case (no write), and the caller below reports it and exits
+      // non-zero instead of ever printing a created/updated status.
+      const result = updateOperatorManifest(home, (current, state) => {
+        if (state.kind === "unreadable") {
+          return undefined;
+        }
         if (!current) {
           return createOperatorManifest(newDefaults);
         }
@@ -332,6 +341,14 @@ program
         };
         return manifest;
       });
+
+      if (result.state.kind === "unreadable") {
+        process.stderr.write(
+          `Operator manifest at ${join(home, "manifest.json")} is unreadable; back it up and repair it (any recorded targets would be lost by overwriting it), or remove it and run setup again.\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
 
       const status: "created" | "updated" | "unchanged" = !result.written
         ? "unchanged"

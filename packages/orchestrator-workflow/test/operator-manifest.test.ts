@@ -30,6 +30,7 @@ import {
   readOperatorManifest,
   resolveOperatorHome,
   safeRealpath,
+  shouldDestroyReclaimedLock,
   updateOperatorManifest,
   upsertOperatorTarget,
   withOperatorManifestLock,
@@ -713,6 +714,23 @@ function spawnLockProbe(
   });
 }
 
+describe("shouldDestroyReclaimedLock", () => {
+  it("destroys a renamed copy that re-checks as older than staleMs", () => {
+    expect(shouldDestroyReclaimedLock(31_000, 30_000)).toBe(true);
+  });
+
+  it("hands back a renamed copy that re-checks as still within staleMs", () => {
+    expect(shouldDestroyReclaimedLock(1_000, 30_000)).toBe(false);
+  });
+
+  it("hands back rather than destroys when the renamed copy could not be aged", () => {
+    // The renamed copy vanished before it could be stat'd (e.g. a third
+    // acquisition raced in and took it over): a lock this call cannot age
+    // must not be destroyed on its behalf.
+    expect(shouldDestroyReclaimedLock(undefined, 30_000)).toBe(false);
+  });
+});
+
 describe("withOperatorManifestLock: two real waiters on a stale lock (M2)", () => {
   it("never both hold the lock at once, across 5 repeats", async () => {
     for (let i = 0; i < 5; i++) {
@@ -750,6 +768,99 @@ describe("withOperatorManifestLock: two real waiters on a stale lock (M2)", () =
       rmSync(lockPath, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+/** Same pattern as {@link LOCK_PROBE_SCRIPT}, but drives the lock
+ * indirectly through `updateOperatorManifest`'s own `mutate` callback
+ * rather than calling `withOperatorManifestLock` directly. This is what
+ * discriminates `updateOperatorManifest`'s call site (does it actually
+ * still delegate to the lock?) from `withOperatorManifestLock` itself,
+ * which the test above already covers on its own. */
+const UPDATE_PROBE_SCRIPT = (() => {
+  const scriptPath = join(
+    mkdtempSync(join(tmpdir(), "update-probe-script-")),
+    "probe.mjs",
+  );
+  const modulePath = fileURLToPath(
+    new URL("../src/operator-manifest.ts", import.meta.url),
+  );
+  writeFileSync(
+    scriptPath,
+    [
+      `import { writeFileSync } from "node:fs";`,
+      `import { updateOperatorManifest } from ${JSON.stringify(modulePath)};`,
+      `const [, , home, outFile, holdMsRaw] = process.argv;`,
+      `const holdMs = Number(holdMsRaw);`,
+      `updateOperatorManifest(home, (current) => {`,
+      `  const start = Date.now();`,
+      `  const sharedBuffer = new SharedArrayBuffer(4);`,
+      `  Atomics.wait(new Int32Array(sharedBuffer), 0, 0, holdMs);`,
+      `  const end = Date.now();`,
+      `  writeFileSync(outFile, JSON.stringify({ start, end }), "utf8");`,
+      `  return current;`,
+      `});`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return scriptPath;
+})();
+
+function spawnUpdateProbe(
+  homeDir: string,
+  outFile: string,
+  holdMs: number,
+): Promise<{ status: number | null; stderr: string }> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        UPDATE_PROBE_SCRIPT,
+        homeDir,
+        outFile,
+        String(holdMs),
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("close", (status) => resolvePromise({ status, stderr }));
+  });
+}
+
+describe("updateOperatorManifest: two real cross-process callers", () => {
+  it("never run mutate concurrently, across 3 repeats", async () => {
+    for (let i = 0; i < 3; i++) {
+      const outA = join(home, `update-probe-a-${i}.json`);
+      const outB = join(home, `update-probe-b-${i}.json`);
+      const [a, b] = await Promise.all([
+        spawnUpdateProbe(home, outA, 200),
+        spawnUpdateProbe(home, outB, 200),
+      ]);
+      expect(a.status, a.stderr).toBe(0);
+      expect(b.status, b.stderr).toBe(0);
+
+      const markerA = JSON.parse(readFileSync(outA, "utf8")) as {
+        start: number;
+        end: number;
+      };
+      const markerB = JSON.parse(readFileSync(outB, "utf8")) as {
+        start: number;
+        end: number;
+      };
+      const noOverlap =
+        markerA.end <= markerB.start || markerB.end <= markerA.start;
+      expect(noOverlap, JSON.stringify({ markerA, markerB })).toBe(true);
+
+      rmSync(outA, { force: true });
+      rmSync(outB, { force: true });
+    }
+  }, 30_000);
 });
 
 describe("updateOperatorManifest", () => {

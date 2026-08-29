@@ -4670,3 +4670,57 @@ until the next rewrite.
   pre-edit baseline re-run for comparison, all pre-existing and unrelated
   to this round's edit (the same `log.md` ambiguous-citation notice class
   fix-round-1's and fix-round-2's own entries already carry).
+
+  Round-3 close-out (T-005): three contained additions, no re-stamp
+  needed. `setup`'s registration `mutate` callback (cli.ts) now takes the
+  re-read `state` alongside `current` and returns `undefined` without
+  writing when `state.kind === "unreadable"`, so a corrupted or hand-edited
+  operator manifest is reported (stderr, exit 1) instead of silently
+  replaced by a fresh one that would drop its recorded targets; the diff
+  starts at line 317 of the pre-edit file, well past both of this bundle's
+  `cli.ts` citations (137-139, 182-183, both inside `init`'s block, above
+  `setup`'s), so neither needed re-pointing. `operator-manifest.ts` gained
+  an exported pure helper, `shouldDestroyReclaimedLock(postAgeMs, staleMs)`,
+  extracted from the stale-lock reclaim's post-rename re-check
+  (`postAge !== undefined && postAge > staleMs`); the `undefined` case
+  resolves hand-back-safe (do not destroy a lock this call cannot age),
+  consistent with the same module's `finally`-release stance already
+  documented there. Neither doc cites into `operator-manifest.ts` (no
+  `sources:` entry, same as every prior round), so this needed no
+  re-stamp either. Tests added: three unit cases for
+  `shouldDestroyReclaimedLock` (destroy, hand-back, undefined-hands-back);
+  one cross-process test (`test/operator-manifest.test.ts`,
+  `updateOperatorManifest: two real cross-process callers`) spawning two
+  `tsx` children that each call `updateOperatorManifest` with a mutate
+  sleeping ~200ms and recording its own [start, end] interval to a
+  per-process marker file, repeated 3 times, asserting the two intervals
+  never overlap in any repeat; one CLI test in `test/setup.test.ts`
+  seeding a target by hand, corrupting `schemaVersion` to 2, and asserting
+  `setup --yes` exits 1, prints the unreadable-manifest stderr message,
+  and leaves the file's bytes byte-for-byte unchanged; plus two existing
+  tests were tightened to pin the previously unasserted
+  "Created operator defaults."/"Updated operator defaults." status
+  strings.
+
+  Mutation probes, both run against a committed baseline before applying
+  the mutant, and restored+re-verified green afterward: (1) inverting the
+  comparison in `shouldDestroyReclaimedLock` from `postAgeMs > staleMs` to
+  `postAgeMs < staleMs` made the new unit test suite fail (2 of 3 cases
+  flipped); reverted, unit tests green again. (2) replacing
+  `updateOperatorManifest`'s `return withOperatorManifestLock(home, () =>
+  {...}, options);` with a bare `return (() => {...})();` (skipping the
+  lock entirely) made the new cross-process test fail on its first of 3
+  repeats (the assertion throws and stops the loop, so only 1 of 3 ran;
+  that repeat's two marker intervals overlapped, since both children now
+  ran their mutate concurrently with no lock serializing them); reverted,
+  cross-process test green again on a follow-up run (all 3 repeats).
+
+  `npm test` (twice, full suite): 445 passed, 9 test files, both runs.
+  `npm run typecheck` and `npm run typecheck:test`: clean, no errors.
+  `npm run format` (write) then `npm run format:check`: all files
+  already Prettier-formatted, `format:check` reports no changes needed.
+  `node scripts/check-cli-flag-order.mjs` (from the worktree root):
+  "commander-flag-order: clean". okf re-run (same command as fix-round-2's
+  entry above, bundle path first): 0 errors (CI-gating), 0 stale findings,
+  35 warning/notice findings (13 warnings, 22 notices), identical in count
+  to the pre-edit baseline, all pre-existing and unrelated to this round.

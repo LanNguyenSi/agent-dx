@@ -291,6 +291,29 @@ function randomLockToken(): string {
 }
 
 /**
+ * Decides, from a lock directory's age measured *after* it was renamed
+ * aside during a reclaim attempt, whether that renamed copy should be
+ * destroyed (a genuinely abandoned lock) or handed back to its real owner
+ * (a lock that turned out fresh once re-checked; see
+ * {@link withOperatorManifestLock}'s reclaim comment for why this second
+ * check exists at all). `postAgeMs` is `undefined` when the renamed copy
+ * could no longer be stat'd by the time this runs (already gone, e.g. a
+ * third acquisition raced in and took it over): that is treated as
+ * hand-back-safe, not stale-and-destroy, since a lock this call cannot
+ * age must not be destroyed on its behalf — the same "when in doubt,
+ * don't tear down what might still be someone else's critical section"
+ * stance {@link withOperatorManifestLock}'s doc comment describes for its
+ * own `finally` release guard. A pure function so both branches, and the
+ * `undefined` case, are unit-testable without spawning a lock directory.
+ */
+export function shouldDestroyReclaimedLock(
+  postAgeMs: number | undefined,
+  staleMs: number,
+): boolean {
+  return postAgeMs !== undefined && postAgeMs > staleMs;
+}
+
+/**
  * Runs `fn` while holding an advisory, same-machine lock on the operator
  * manifest at `<home>/manifest.json`, so a read-modify-write sequence
  * (read the manifest, compute an updated copy, write it back) that this
@@ -415,7 +438,7 @@ export function withOperatorManifestLock<T>(
           // still reads as fresh here even though the rename already
           // moved it.
           const postAge = lockAgeMs(staleRenamePath);
-          if (postAge !== undefined && postAge > staleMs) {
+          if (shouldDestroyReclaimedLock(postAge, staleMs)) {
             rmSync(staleRenamePath, { recursive: true, force: true });
             continue;
           }
