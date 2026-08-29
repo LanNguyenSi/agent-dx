@@ -100,7 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pin (below); `doctor [--json] [--prune]` walks the registry and reports
   each target's status (`clean`, `divergent`, `version-lag`, `drift`,
   `missing`, `no-manifest`, `unverifiable`), exiting `2` when the operator
-  manifest itself is unreadable, `1` when any target is
+  manifest is missing or unreadable (or, with `--prune`, when the manifest
+  lock cannot be acquired or the rewrite fails), `1` when any target is
   `drift`/`missing`/`no-manifest`/`unverifiable`, else `0`, and `--prune`
   removes `missing`/`no-manifest` targets (never `unverifiable`) and
   rewrites the manifest in normalized form; `adopt [dir] [--json]` registers an
@@ -122,10 +123,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   #142-#147.
 - The repo manifest (`.ai/workflow/manifest.json`) gained one optional
   field, `pin`: a kit-version string. `apply --pin <version>` sets or
-  replaces it (trimmed; empty or whitespace-only rejected as a usage
-  error, exit `2`, writing nothing), `--unpin` clears it, and `--force-pin`
-  advances an existing pin to the running version; read by `apply`'s pin
-  gate and by `doctor`'s `version-lag` suppression. Purely additive: a
+  replaces it (trimmed; empty, whitespace-only, or containing internal
+  whitespace rejected as a usage error, exit `2`, writing nothing),
+  `--unpin` clears it, and `--force-pin` advances an existing pin to the
+  running version (a no-op on an unpinned target); read by `apply`'s pin
+  gate and by `doctor`, which on a pinned target compares the pin against
+  the installed version instead of the installed version against the
+  running kit. Purely additive: a
   caller that never sets it sees a byte-identical manifest to before.
 
 ### Changed

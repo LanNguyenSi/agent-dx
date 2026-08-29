@@ -3408,11 +3408,22 @@ describe("operator-install CLI surface stays documented in README (fix round 1, 
     expect(expectedFlags.size).toBeGreaterThanOrEqual(10);
   });
 
-  it("every setup/apply/doctor/adopt option name appears verbatim in README.md", () => {
+  const operatorSection = (() => {
+    const start = readmeMd.indexOf("## Operator-level install");
+    const end = readmeMd.indexOf("## Ownership and re-runs", start);
+    if (start === -1 || end === -1) {
+      throw new Error(
+        "README.md lost the Operator-level install section or its successor heading",
+      );
+    }
+    return readmeMd.slice(start, end);
+  })();
+
+  it("every setup/apply/doctor/adopt option name appears verbatim inside README's Operator-level install section", () => {
     const missing: string[] = [];
     for (const flag of expectedFlags) {
       const boundaryRe = new RegExp(`(?<![\\w-])${flag}(?![\\w-])`);
-      if (!boundaryRe.test(readmeMd)) {
+      if (!boundaryRe.test(operatorSection)) {
         missing.push(flag);
       }
     }
@@ -3433,10 +3444,27 @@ describe("operator-install CLI surface stays documented in README (fix round 1, 
     expect(TARGET_STATUSES.length).toBe(7);
   });
 
-  it("every TargetStatus member appears in README's doctor status list", () => {
+  const doctorParagraph = (() => {
+    const start = operatorSection.indexOf("**`doctor [--json] [--prune]`**");
+    const end = operatorSection.indexOf("**`adopt", start);
+    if (start === -1 || end === -1) {
+      throw new Error(
+        "README.md lost the doctor paragraph lead-in or the adopt lead-in after it",
+      );
+    }
+    const statusSentenceEnd = operatorSection.indexOf(". It exits", start);
+    if (statusSentenceEnd === -1 || statusSentenceEnd > end) {
+      throw new Error(
+        'README.md doctor paragraph lost its status sentence (ending in ". It exits")',
+      );
+    }
+    return operatorSection.slice(start, statusSentenceEnd);
+  })();
+
+  it("every TargetStatus member appears inside README's doctor status sentence", () => {
     const missing: string[] = [];
     for (const status of TARGET_STATUSES) {
-      if (!readmeMd.includes(`\`${status}\``)) {
+      if (!doctorParagraph.includes(`\`${status}\``)) {
         missing.push(status);
       }
     }

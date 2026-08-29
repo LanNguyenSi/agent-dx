@@ -357,9 +357,12 @@ orchestrator-workflow apply --target /path/to/repo
 (harnesses, profile, models, tiers) as the baseline for future installs; it
 touches no repository. A flag always wins; a flag-less re-run keeps the
 previously stored values; a first-ever `setup` falls back to `claude` /
-`full` / the kit's default models / tiers off. The defaults live in
-`~/.orchestrator-workflow/manifest.json` (override the location with the
-`ORCHESTRATOR_WORKFLOW_HOME` environment variable).
+`full` / the kit's default models / tiers off. `setup` takes the same
+option flags as `init` (`--harness`, `--profile`, `--models`, `--tiers` /
+`--no-tiers`, `--opencode-provider`, `--yes`). The defaults live in
+`<operator home>/manifest.json`, where the operator home is
+`~/.orchestrator-workflow/` unless the `ORCHESTRATOR_WORKFLOW_HOME`
+environment variable names a different directory.
 
 **`apply --target <repo>`** projects the operator's install onto a target
 repository and registers that target, by its real resolved path, in the
@@ -372,7 +375,9 @@ what `init` would have auto-detected). Pass `--sync` to invert that for
 profile, tiers, and models: the operator's defaults then win over whatever
 the target already had recorded. A target pinned to a kit version other
 than the one being applied is skipped rather than touched (see the pin
-rule below).
+rule below). `apply` also takes the same install options as `init` (`--harness`,
+`--profile`, `--models`, `--tiers` / `--no-tiers`, `--opencode-provider`,
+`--force`, `--yes`), which feed the precedence rule above.
 
 **`doctor [--json] [--prune]`** reports every operator-registered target's
 status: `clean`, `divergent` (from the operator defaults), `version-lag`,
@@ -424,9 +429,11 @@ corrupt each other's state.
 
 ## Ownership and re-runs
 
-`init` is idempotent: a second run changes nothing; so is `apply`, which
-installs through that same `runInit` path and is subject to the same
-conflict/`--force`/ownership rules. The rules:
+`init` is idempotent: a second run changes nothing. `apply` installs
+through that same `runInit` path and is subject to the same
+conflict/`--force`/ownership rules; on the repository side it changes
+nothing either, but it refreshes this target's entry in the operator
+manifest on every run. The rules:
 
 - `AGENTS.md` and `CLAUDE.md` belong to you. The installer only appends its
   fenced section or the import line, and on re-run replaces only the content

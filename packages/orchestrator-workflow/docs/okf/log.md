@@ -5355,9 +5355,8 @@ From the repository root: `npx -y okf-kit@0.8.0 check --json
 packages/orchestrator-workflow/docs/okf --require-anchors
 --require-anchors-allow README.md packages/orchestrator-workflow/README.md
 INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` reports
-0 errors (CI-gating) both before and after this task's edits. Warnings
-rose from the 13-warning baseline to 16; notices unchanged.
-The three new warnings are all `anchor-not-found-in-range`, all caused by
+0 errors (CI-gating) both before and after this task's edits; notices
+unchanged; three new warnings, all `anchor-not-found-in-range`, all caused by
 the same `INSTALL-AGENT.md` line shift described above: two are the
 `run-state-lifecycle-and-markers.md` citations named above (their
 `"repository's"` anchor no longer sits inside the cited range); the third
@@ -5397,11 +5396,14 @@ heading only, which the Unreleased entries do not move). Re-verified and
 re-stamped all three in a commit of their own, after the source commits,
 so the stamps postdate the sources.
 
-Fix round 1 (T-008b, implementer-high, then orchestrator): the twelve
+Fix round 1 (T-008b, implementer-high, then orchestrator): the thirteen
 round-1 findings were closed in place (README rule for version-lag and
 the pin comparison, the pin sentence in the CHANGELOG, doctor exit-2
-causes, adopt --json, drift gloss, operator-home wording in
-INSTALL-AGENT.md, the log entry's totals and citation-shaped tokens) and
+causes, adopt --json, the pin in README's manifest enumeration and
+--force-pin as a pin writer, drift gloss, operator-home wording in
+INSTALL-AGENT.md, the init-and-apply idempotency clause, apply requiring
+setup, the log entry's totals, citation-shaped tokens and superseded
+first paragraph) and
 a new describe block in `test/docs-consistency.test.ts` pins every
 setup/apply/doctor/adopt option name and every TargetStatus member
 against README.md (two mutation probes, each red with the mutant and
@@ -5430,3 +5432,27 @@ full suite green, typecheck and typecheck:test clean, prettier clean,
 flag-order lint clean, placement check clean, okf-kit with the CI
 arguments 0 CI-gating findings and the warning set back to the
 pre-round set once the re-stamps landed.
+
+Round-2 notes (reviewer accept_with_notes, closed by the orchestrator):
+the new README guard was document-wide, so four of the seven doctor
+statuses and six of the operator flags were satisfied by text outside
+the operator section (the reviewer's own probe removed four statuses
+from the list and stayed green); the guard now slices README to the
+Operator-level install section for the flags and to the doctor status
+sentence for the statuses, and README's setup and apply paragraphs now
+name the install options they share with init so the scoped flag check
+holds. CHANGELOG brought in line with the corrected README (all doctor
+exit-2 causes, the pin comparison rule instead of a suppression, the
+--force-pin no-op caveat, internal whitespace in --pin). README's
+operator-home sentence uses the same operator-home framing as
+INSTALL-AGENT.md; the idempotency clause now says apply refreshes the
+registry entry on every run. In this log entry the absolute warning
+counts were replaced by the delta and the round-1 count corrected to
+thirteen. Two pre-existing continuation citations in
+`model-preselection.md` (the tier-table guard and the opencode-effort
+prose guard in `test/docs-consistency.test.ts`) pointed at other
+describe blocks since before this task; re-pointed to the describe
+blocks the prose names, base unchanged (the preceding fully qualified
+citation of the test file), and the doc re-stamped in the following
+commit together with the two docs that list the test file and the
+CHANGELOG as sources.
