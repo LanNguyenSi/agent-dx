@@ -134,6 +134,13 @@ function corruptManifest(repo: string): void {
 }
 
 function runCli(...args: string[]) {
+  return runCliWithEnv({}, ...args);
+}
+
+/** Like `runCli`, but with extra environment variables layered on top of
+ * the standard `OPERATOR_HOME_ENV` one (e.g. the CLI's test-only
+ * `OW_DOCTOR_TEST_LOCK_TIMEOUT_MS` lock-timeout override). */
+function runCliWithEnv(extraEnv: Record<string, string>, ...args: string[]) {
   return spawnSync(
     process.execPath,
     ["--import", "tsx", "src/cli.ts", "doctor", ...args],
@@ -141,7 +148,7 @@ function runCli(...args: string[]) {
       cwd: PACKAGE_DIR,
       encoding: "utf8",
       timeout: 60_000,
-      env: { ...process.env, [OPERATOR_HOME_ENV]: home },
+      env: { ...process.env, [OPERATOR_HOME_ENV]: home, ...extraEnv },
     },
   );
 }
@@ -236,27 +243,29 @@ describe("runDoctor: per-target status", () => {
     expect(report.exitCode).toBe(1);
   });
 
-  it("(mutation-probe a) an unreadable kit-owned file counts as drift for that path, the rest of the registry still reports", () => {
-    if (process.getuid?.() === 0) return; // root can read anything; skip.
-    const cleanRepo = makeRepo();
-    const unreadableRepo = makeRepo();
-    registerHome(defaults(), [cleanRepo, unreadableRepo]);
-    const filePath = join(unreadableRepo, REVIEWER_MD);
-    chmodSync(filePath, 0o000);
-    try {
-      const report = runDoctor(home, {});
-      const unreadableTarget = report.targets.find(
-        (t) => t.path === unreadableRepo,
-      );
-      expect(unreadableTarget?.status).toBe("drift");
-      expect(unreadableTarget?.driftFiles).toContain(REVIEWER_MD);
-      const cleanTarget = report.targets.find((t) => t.path === cleanRepo);
-      expect(cleanTarget?.status).toBe("clean");
-      expect(report.exitCode).toBe(1);
-    } finally {
-      chmodSync(filePath, 0o644);
-    }
-  });
+  it.skipIf(process.getuid?.() === 0)(
+    "(mutation-probe a) an unreadable kit-owned file counts as drift for that path, the rest of the registry still reports",
+    () => {
+      const cleanRepo = makeRepo();
+      const unreadableRepo = makeRepo();
+      registerHome(defaults(), [cleanRepo, unreadableRepo]);
+      const filePath = join(unreadableRepo, REVIEWER_MD);
+      chmodSync(filePath, 0o000);
+      try {
+        const report = runDoctor(home, {});
+        const unreadableTarget = report.targets.find(
+          (t) => t.path === unreadableRepo,
+        );
+        expect(unreadableTarget?.status).toBe("drift");
+        expect(unreadableTarget?.driftFiles).toContain(REVIEWER_MD);
+        const cleanTarget = report.targets.find((t) => t.path === cleanRepo);
+        expect(cleanTarget?.status).toBe("clean");
+        expect(report.exitCode).toBe(1);
+      } finally {
+        chmodSync(filePath, 0o644);
+      }
+    },
+  );
 
   it("(4b) tiers divergence: repo tiers true vs operator tiers false", () => {
     const repo = makeRepo();
@@ -328,6 +337,24 @@ describe("runDoctor: per-target status", () => {
     expect(report.targets[0].driftFiles).toContain(REVIEWER_MD);
     expect(report.exitCode).toBe(1);
   });
+
+  it("a registered target path replaced by a regular file is missing, and is pruned", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    rmSync(repo, { recursive: true, force: true });
+    writeFileSync(repo, "not a directory anymore\n", "utf8");
+    try {
+      const report = runDoctor(home, {});
+      expect(report.targets[0].status).toBe("missing");
+      expect(report.exitCode).toBe(1);
+
+      const pruneReport = runDoctor(home, { prune: true });
+      expect(pruneReport.targets).toHaveLength(0);
+      expect(pruneReport.pruned).toEqual([repo]);
+    } finally {
+      rmSync(repo, { force: true });
+    }
+  });
 });
 
 describe("(12) unverifiable (review round 2, M1/M2)", () => {
@@ -341,45 +368,49 @@ describe("(12) unverifiable (review round 2, M1/M2)", () => {
     expect(report.exitCode).toBe(1);
   });
 
-  it("a chmod-000 repo manifest file is unverifiable, not no-manifest", () => {
-    if (process.getuid?.() === 0) return; // root can read anything; skip.
-    const repo = makeRepo();
-    registerHome(defaults(), [repo]);
-    const manifestPath = join(repo, ".ai", "workflow", "manifest.json");
-    chmodSync(manifestPath, 0o000);
-    try {
-      const report = runDoctor(home, {});
-      expect(report.targets[0].status).toBe("unverifiable");
-      expect(report.targets[0].reason).toBe("manifest unreadable");
-      expect(report.exitCode).toBe(1);
-    } finally {
-      chmodSync(manifestPath, 0o644);
-    }
-  });
+  it.skipIf(process.getuid?.() === 0)(
+    "a chmod-000 repo manifest file is unverifiable, not no-manifest",
+    () => {
+      const repo = makeRepo();
+      registerHome(defaults(), [repo]);
+      const manifestPath = join(repo, ".ai", "workflow", "manifest.json");
+      chmodSync(manifestPath, 0o000);
+      try {
+        const report = runDoctor(home, {});
+        expect(report.targets[0].status).toBe("unverifiable");
+        expect(report.targets[0].reason).toBe("manifest unreadable");
+        expect(report.exitCode).toBe(1);
+      } finally {
+        chmodSync(manifestPath, 0o644);
+      }
+    },
+  );
 
-  it("an inaccessible ancestor directory is unverifiable, not missing", () => {
-    if (process.getuid?.() === 0) return; // root can read anything; skip.
-    const parent = mkdtempSync(join(tmpdir(), "ow-doctor-parent-"));
-    const repoDir = join(parent, "repo");
-    mkdirSync(repoDir);
-    runInit({
-      targetDir: repoDir,
-      harnesses: ["claude"],
-      models: { ...DEFAULT_MODELS },
-    });
-    const repo = realpathSync(repoDir);
-    registerHome(defaults(), [repo]);
-    chmodSync(parent, 0o000);
-    try {
-      const report = runDoctor(home, {});
-      expect(report.targets[0].status).toBe("unverifiable");
-      expect(report.targets[0].reason).toBe("directory not accessible");
-      expect(report.exitCode).toBe(1);
-    } finally {
-      chmodSync(parent, 0o755);
-      rmSync(parent, { recursive: true, force: true });
-    }
-  });
+  it.skipIf(process.getuid?.() === 0)(
+    "an inaccessible ancestor directory is unverifiable, not missing",
+    () => {
+      const parent = mkdtempSync(join(tmpdir(), "ow-doctor-parent-"));
+      const repoDir = join(parent, "repo");
+      mkdirSync(repoDir);
+      runInit({
+        targetDir: repoDir,
+        harnesses: ["claude"],
+        models: { ...DEFAULT_MODELS },
+      });
+      const repo = realpathSync(repoDir);
+      registerHome(defaults(), [repo]);
+      chmodSync(parent, 0o000);
+      try {
+        const report = runDoctor(home, {});
+        expect(report.targets[0].status).toBe("unverifiable");
+        expect(report.targets[0].reason).toBe("directory not accessible");
+        expect(report.exitCode).toBe(1);
+      } finally {
+        chmodSync(parent, 0o755);
+        rmSync(parent, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("a genuinely deleted target directory is still missing, not unverifiable", () => {
     const repo = makeRepo();
@@ -548,6 +579,62 @@ describe("(10) --prune", () => {
   });
 });
 
+describe("--prune: operator-manifest lock failures (CLI)", () => {
+  it("a foreign lock holder times out to exit 2 with a parseable JSON error", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+
+    // A fresh (not stale) lock directory with its own owner file, mimicking
+    // another orchestrator-workflow process genuinely holding the lock
+    // right now: `withOperatorManifestLock`'s stale-reclaim only kicks in
+    // past `staleMs` (default 30s), so this lock is never reclaimed and the
+    // CLI's shortened test-only timeout (below) is what actually elapses.
+    const lockPath = join(home, ".manifest.lock");
+    mkdirSync(lockPath);
+    writeFileSync(join(lockPath, "owner"), "some-other-process-token", "utf8");
+
+    try {
+      const result = runCliWithEnv(
+        { OW_DOCTOR_TEST_LOCK_TIMEOUT_MS: "200" },
+        "--prune",
+        "--json",
+      );
+      expect(result.status).toBe(2);
+      expect(() => JSON.parse(result.stdout)).not.toThrow();
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.exitCode).toBe(2);
+      expect(parsed.error).toBe("operator-manifest-locked");
+      expect(parsed.targets).toEqual([]);
+      expect(parsed.pruned).toEqual([]);
+      expect(typeof parsed.message).toBe("string");
+    } finally {
+      rmSync(lockPath, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "a read-only operator home (EACCES acquiring the lock) exits 2 with a parseable JSON error",
+    () => {
+      const repo = makeRepo();
+      registerHome(defaults(), [repo]);
+      chmodSync(home, 0o500);
+      try {
+        const result = runCli("--prune", "--json");
+        expect(result.status).toBe(2);
+        expect(() => JSON.parse(result.stdout)).not.toThrow();
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.exitCode).toBe(2);
+        expect(parsed.error).toBe("operator-manifest-write-failed");
+        expect(parsed.targets).toEqual([]);
+        expect(parsed.pruned).toEqual([]);
+        expect(typeof parsed.message).toBe("string");
+      } finally {
+        chmodSync(home, 0o755);
+      }
+    },
+  );
+});
+
 describe("(9) CLI --json", () => {
   it("prints one JSON object whose exitCode matches the process exit status", () => {
     const repo = makeRepo();
@@ -571,6 +658,7 @@ describe("(9) CLI --json", () => {
       },
     ]);
     expect(parsed.pruned).toEqual([]);
+    expect(parsed.unvalidatedDropped).toBe(0);
   });
 
   it("on a missing operator manifest, prints the no-operator-manifest error object and exits 2", () => {
@@ -582,6 +670,7 @@ describe("(9) CLI --json", () => {
       targets: [],
       pruned: [],
       exitCode: 2,
+      unvalidatedDropped: 0,
       error: "no-operator-manifest",
     });
     expect(result.status).toBe(2);
@@ -614,6 +703,15 @@ describe("CLI human output", () => {
     expect(result.status).toBe(1);
   });
 
+  it("pluralizes the summary line's noun for a single target", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+
+    const result = runCli();
+    expect(result.stdout).toContain("1 target: 1 clean");
+    expect(result.stdout).not.toContain("1 targets:");
+  });
+
   it("prints a pruned line with --prune, and drops the pruned target's own status line", () => {
     const cleanRepo = makeRepo();
     const missingRepo = makeRepo();
@@ -623,7 +721,7 @@ describe("CLI human output", () => {
     const result = runCli("--prune");
     expect(result.stdout).toContain(`clean  ${cleanRepo}`);
     expect(result.stdout).not.toContain(`missing  ${missingRepo}`);
-    expect(result.stdout).toMatch(/\d+ targets:/);
+    expect(result.stdout).toMatch(/\d+ targets?:/);
     expect(result.stdout).toContain(`pruned: ${missingRepo}`);
     // missingRepo pruned away, only the clean target remains -> exit 0.
     expect(result.status).toBe(0);
@@ -766,6 +864,30 @@ describe("CLI --json combined with --prune", () => {
     expect((onDisk.targets as { path: string }[]).map((t) => t.path)).toEqual([
       cleanRepo,
     ]);
+    expect(parsed.unvalidatedDropped).toBe(0);
+  });
+
+  it("reports unvalidatedDropped when the file held one raw entry the parser could not validate", () => {
+    const cleanRepo = makeRepo();
+    const missingRepo = makeRepo();
+    registerHome(defaults(), [cleanRepo, missingRepo]);
+    rmSync(missingRepo, { recursive: true, force: true });
+
+    // Inject one raw target entry that `readOperatorManifest`'s own
+    // per-entry validation drops (missing `lastAppliedAt`): invisible to
+    // the parsed manifest, but still present in the file's raw JSON.
+    const manifestPath = join(home, "manifest.json");
+    const onDisk = JSON.parse(readFileSync(manifestPath, "utf8"));
+    onDisk.targets.push({
+      path: "/not/a/real/target",
+      lastAppliedVersion: "0.0.0",
+    });
+    writeFileSync(manifestPath, `${JSON.stringify(onDisk, null, 2)}\n`, "utf8");
+
+    const result = runCli("--json", "--prune");
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.pruned).toEqual([missingRepo]);
+    expect(parsed.unvalidatedDropped).toBe(1);
   });
 });
 
@@ -780,6 +902,7 @@ describe("operator-manifest-unreadable", () => {
       targets: [],
       pruned: [],
       exitCode: 2,
+      unvalidatedDropped: 0,
       error: "operator-manifest-unreadable",
     });
     expect(result.status).toBe(2);

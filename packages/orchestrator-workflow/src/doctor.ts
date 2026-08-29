@@ -10,6 +10,7 @@ import type { Profile, Role } from "./models.js";
 import { DEFAULT_MODELS, ROLES } from "./models.js";
 import type {
   OperatorManifest,
+  OperatorManifestLockOptions,
   OperatorManifestState,
   OperatorTarget,
 } from "./operator-manifest.js";
@@ -409,10 +410,23 @@ function countRawTargets(home: string): number | null {
  * here rather than doctor keeping a second, unlocked read-modify-write path
  * of its own), so a concurrent `apply`/`setup`/another `doctor --prune`
  * cannot land its own write in between this read and this write.
+ *
+ * `options.lockOptions` is exposed only so tests can shrink
+ * `updateOperatorManifest`'s lock-acquire timeout/staleness/poll windows
+ * below their production defaults (see `OperatorManifestLockOptions`);
+ * production callers should omit it entirely. `updateOperatorManifest`
+ * (via `withOperatorManifestLock`) can itself throw rather than return,
+ * most commonly `OperatorManifestLockTimeoutError` (another
+ * orchestrator-workflow command holds the lock past the timeout) or any
+ * other error raised while acquiring it (e.g. `EACCES` creating the lock
+ * directory under a read-only operator home). This function deliberately
+ * does not catch either: `cli.ts`'s `doctor` action is the layer that
+ * turns such a throw into a `--json`/human-readable exit-2 report,
+ * exactly the way it already turns a returned `DoctorReport` into one.
  */
 export function runDoctor(
   home: string,
-  options: { prune?: boolean } = {},
+  options: { prune?: boolean; lockOptions?: OperatorManifestLockOptions } = {},
 ): DoctorReport {
   const state: OperatorManifestState = operatorManifestState(home);
   if (state.kind !== "ok") {
@@ -451,47 +465,78 @@ export function runDoctor(
     // stale by the time the lock is granted), the same reasoning `apply`'s
     // own re-read documents.
     let computedReports: TargetReport[] | undefined;
-    updateOperatorManifest(home, (current, innerState) => {
-      if (innerState.kind !== "ok" || !current) {
-        return undefined;
-      }
-      const reports = current.targets.map((target) =>
-        inspectTarget(target, current, PACKAGE_VERSION),
-      );
-      computedReports = reports;
-
-      const keepPaths = new Set<string>();
-      for (const report of reports) {
-        if (REMOVE_ON_PRUNE.has(report.status)) {
-          pruned.push(report.path);
-        } else {
-          keepPaths.add(report.path);
+    const result = updateOperatorManifest(
+      home,
+      (current, innerState) => {
+        if (innerState.kind !== "ok" || !current) {
+          return undefined;
         }
-      }
-      if (pruned.length === 0) {
-        return undefined;
-      }
-
-      const rawTargetCount = countRawTargets(home);
-      if (rawTargetCount !== null) {
-        unvalidatedDropped = Math.max(
-          0,
-          rawTargetCount - current.targets.length,
+        const reports = current.targets.map((target) =>
+          inspectTarget(target, current, PACKAGE_VERSION),
         );
-      }
+        computedReports = reports;
 
+        const keepPaths = new Set<string>();
+        for (const report of reports) {
+          if (REMOVE_ON_PRUNE.has(report.status)) {
+            pruned.push(report.path);
+          } else {
+            keepPaths.add(report.path);
+          }
+        }
+        if (pruned.length === 0) {
+          return undefined;
+        }
+
+        const rawTargetCount = countRawTargets(home);
+        if (rawTargetCount !== null) {
+          unvalidatedDropped = Math.max(
+            0,
+            rawTargetCount - current.targets.length,
+          );
+        }
+
+        return {
+          ...current,
+          targets: current.targets.filter((target) =>
+            keepPaths.has(target.path),
+          ),
+          updatedAt: new Date().toISOString(),
+        };
+      },
+      options.lockOptions,
+    );
+
+    if (result.state.kind !== "ok") {
+      // The manifest that read `"ok"` in the outer, unlocked check above
+      // (`state`) was found gone or unreadable once the lock was actually
+      // granted: a concurrent writer's own read-modify-write landed in
+      // between that outer read and this one. `state` is now stale and
+      // must not be used as a fallback source of targets (that fallback
+      // is exactly what previously let a `--prune` run report, and
+      // silently keep, target rows against a registry that no longer
+      // exists on disk). Report the failure directly instead, the same
+      // shape the outer absent/unreadable check above already returns.
+      const error: NonNullable<DoctorReport["error"]> =
+        result.state.kind === "absent"
+          ? "no-operator-manifest"
+          : "operator-manifest-unreadable";
       return {
-        ...current,
-        targets: current.targets.filter((target) => keepPaths.has(target.path)),
-        updatedAt: new Date().toISOString(),
+        operatorHome: home,
+        operatorVersion: PACKAGE_VERSION,
+        targets: [],
+        pruned: [],
+        exitCode: 2,
+        unvalidatedDropped: 0,
+        error,
       };
-    });
+    }
 
-    targets = computedReports
-      ? computedReports.filter((report) => !pruned.includes(report.path))
-      : state.manifest.targets.map((target) =>
-          inspectTarget(target, state.manifest, PACKAGE_VERSION),
-        );
+    // `result.state.kind === "ok"` means `mutate` above ran with a truthy
+    // `current`, so `computedReports` was always assigned.
+    targets = (computedReports as TargetReport[]).filter(
+      (report) => !pruned.includes(report.path),
+    );
   } else {
     targets = state.manifest.targets.map((target) =>
       inspectTarget(target, state.manifest, PACKAGE_VERSION),

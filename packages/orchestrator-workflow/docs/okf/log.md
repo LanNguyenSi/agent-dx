@@ -4893,11 +4893,84 @@ until the next rewrite.
   packages/orchestrator-workflow/README.md INSTALL-AGENT.md
   packages/orchestrator-workflow/INSTALL-AGENT.md` reports 0 errors
   (CI-gating) and 0 stale-source findings after install-fence-mechanics.md
-  and model-preselection.md were re-stamped; the warning count dropped by
-  one (a stale-source warning this round's re-stamp cleared) and the
-  notice set is unchanged, both re-pointed `doctor.ts` citations in
-  install-fence-mechanics.md (the `inspectTarget` post-manifest-read span
-  and the `computeDriftFiles` call line, both of which moved further down
-  the function once the new stat-classification checks were inserted
-  ahead of them) resolving with zero findings alongside the two `cli.ts`
-  citations above.
+  and model-preselection.md were re-stamped; the warning and notice sets
+  are unchanged against the pre-round baseline, both re-pointed
+  `doctor.ts` citations in install-fence-mechanics.md (the `inspectTarget`
+  post-manifest-read span and the `computeDriftFiles` call line, both of
+  which moved further down the function once the new stat-classification
+  checks were inserted ahead of them) resolving with zero findings
+  alongside the two `cli.ts` citations above.
+
+## 2026-08-29 (agent-dx b457ee55, task T-006, implementer, closing round-3 notes)
+
+Closes the notes carried into this round before merge. `runDoctor`'s
+`--prune` path now captures `updateOperatorManifest`'s own return value
+instead of falling back to the stale, pre-lock read of the operator
+manifest when the manifest turns out gone or unreadable once the lock is
+actually granted: it now reports `no-operator-manifest`/
+`operator-manifest-unreadable` (exit 2, an empty target list) directly
+rather than describing targets that may no longer exist on disk. The
+`doctor` action in `cli.ts` now also catches whatever
+`updateOperatorManifest` itself can throw rather than return --
+`OperatorManifestLockTimeoutError` (a foreign holder still past the lock
+timeout) or any other error raised while acquiring the lock (most
+commonly `EACCES` on a read-only operator home) -- emitting a `--json`
+object (`error: "operator-manifest-locked" |
+"operator-manifest-write-failed"`, exit 2, a `message` field) or a
+one-line stderr explanation in human mode, instead of letting either
+crash the CLI with a raw stack trace. `unvalidatedDropped` joined the
+`--json` contract (it already lived on `DoctorReport`, it just never made
+it into the printed object). The human summary line now pluralizes its
+noun ("1 target:" vs "N targets:").
+
+Test coverage added: a registered target path replaced by a regular file
+(still `missing`, still pruned); the three permission-gated tests now use
+`it.skipIf` instead of an early return, so a root run shows a skip rather
+than a silently passing test; a foreign, fresh lock directory plus the
+CLI's test-only `OW_DOCTOR_TEST_LOCK_TIMEOUT_MS` override (read only
+inside the `doctor` action, and only honored when `--prune` is also
+passed) forces the timeout path deterministically instead of waiting out
+the production timeout; a chmod-500 operator home forces the `EACCES`
+path (skipped under root, which bypasses permissions).
+install-fence-mechanics.md's doctor-consumer sentence now names the
+mechanism only (`doctor.ts` as a fourth, non-installer consumer),
+dropping the task-id/slice aside this log entry already carries, and
+gained one sentence stating that `computeDriftFiles`' unreadable-file-as-
+drift behavior is deliberate, not an oversight.
+
+Mutation probes, run for real against the committed state, each restored
+and re-verified afterward: (a) removing the lock-timeout/generic-catch
+branch in `cli.ts`'s `doctor` action (falling straight through to the
+previous, unguarded `runDoctor` call) failed the new foreign-lock-holder
+JSON test with an uncaught `OperatorManifestLockTimeoutError` instead of
+a parseable exit-2 report; restored, test green again. (b) dropping
+`unvalidatedDropped` from the `--json` object literal in `cli.ts` failed
+both the JSON-shape test and the `--json --prune` unvalidatedDropped
+test; restored, both green again.
+
+`npm test`: full suite green, every existing assertion across every
+command's test file left untouched and passing, including every
+`init`/`setup`/`uninstall`/`apply` test. `npm run typecheck` and `npm run
+typecheck:test`: clean. `npm run format` (write) then `npm run
+format:check`: clean. `node scripts/check-cli-flag-order.mjs` (from the
+repository root): clean. From the repository root: `npx -y
+okf-kit@0.8.0 check --json packages/orchestrator-workflow/docs/okf
+--require-anchors --require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` reports 0 errors
+(CI-gating) and 0 stale-source findings after install-fence-mechanics.md
+and model-preselection.md (both list `cli.ts`, and the former also lists
+`doctor.ts`, as sources) were re-stamped; a direct diff of this run's
+findings against a run from the pre-round commit shows the warning and
+notice sets are set-for-set identical, no addition or removal in either
+direction. Two `cli.ts` citations needed re-pointing by one line each
+(the `--no-tiers` option's citation in install-fence-mechanics.md and its
+duplicate in model-preselection.md, plus the "Found existing install"
+print-line citation in install-fence-mechanics.md), all three caused by
+this round's own added `import type { DoctorReport } from "./doctor.js";`
+line near the top of `cli.ts`, not by anything in the `doctor` action
+body itself (appended well after every cited span); `doctor.ts`'s own two
+citations in install-fence-mechanics.md (the `inspectTarget`
+post-manifest-read span and the `computeDriftFiles` call line) needed the
+same one-line shift, caused by this round's added
+`OperatorManifestLockOptions` type import near the top of `doctor.ts`.

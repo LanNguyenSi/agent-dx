@@ -31,6 +31,7 @@ import type {
 import type { UninstallReport } from "./uninstall.js";
 import { runUninstall } from "./uninstall.js";
 import { runDoctor, targetReportToJson } from "./doctor.js";
+import type { DoctorReport } from "./doctor.js";
 
 function isInteractive(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -854,7 +855,62 @@ program
   )
   .action(async (opts: { json?: boolean; prune?: boolean }) => {
     const home = resolveOperatorHome();
-    const report = runDoctor(home, { prune: opts.prune });
+
+    // Test-only escape hatch: shrinks `--prune`'s lock-acquire timeout so a
+    // test can force `OperatorManifestLockTimeoutError` (a foreign holder
+    // sitting on the lock) without waiting out the production
+    // `DEFAULT_LOCK_TIMEOUT_MS`. Unset in every real invocation, and
+    // effective only when `--prune` is also passed (only `--prune` ever
+    // takes the operator-manifest lock).
+    const testLockTimeoutMs = process.env.OW_DOCTOR_TEST_LOCK_TIMEOUT_MS;
+    const lockOptions =
+      opts.prune && testLockTimeoutMs
+        ? { timeoutMs: Number(testLockTimeoutMs), pollMs: 10 }
+        : undefined;
+
+    let report: DoctorReport;
+    try {
+      report = runDoctor(home, { prune: opts.prune, lockOptions });
+    } catch (error) {
+      // `runDoctor`'s `--prune` path runs its read-modify-write through
+      // `updateOperatorManifest`, which can throw instead of returning:
+      // `OperatorManifestLockTimeoutError` when another
+      // orchestrator-workflow command already holds the operator-manifest
+      // lock past the timeout, or any other error raised while acquiring
+      // it (most commonly `EACCES` creating the lock directory itself,
+      // e.g. a read-only operator home). Either way the manifest was left
+      // untouched; report the failure directly instead of letting an
+      // uncaught exception crash the CLI with a raw stack trace.
+      const isLockTimeout = error instanceof OperatorManifestLockTimeoutError;
+      const doctorError:
+        | "operator-manifest-locked"
+        | "operator-manifest-write-failed" = isLockTimeout
+        ? "operator-manifest-locked"
+        : "operator-manifest-write-failed";
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (opts.json) {
+        console.log(
+          JSON.stringify({
+            operatorHome: home,
+            operatorVersion: PACKAGE_VERSION,
+            targets: [],
+            pruned: [],
+            exitCode: 2,
+            error: doctorError,
+            message,
+          }),
+        );
+      } else {
+        console.error(
+          isLockTimeout
+            ? `Could not acquire the operator manifest lock at ${home} (another orchestrator-workflow command holds it): ${message}`
+            : `Could not update the operator manifest at ${home}: ${message}`,
+        );
+      }
+      process.exitCode = 2;
+      return;
+    }
 
     if (opts.json) {
       console.log(
@@ -864,6 +920,7 @@ program
           targets: report.targets.map(targetReportToJson),
           pruned: report.pruned,
           exitCode: report.exitCode,
+          unvalidatedDropped: report.unvalidatedDropped,
           ...(report.error ? { error: report.error } : {}),
         }),
       );
@@ -956,8 +1013,9 @@ program
     const summary = [...counts.entries()]
       .map(([status, count]) => `${count} ${status}`)
       .join(", ");
+    const targetCount = report.targets.length;
     console.log(
-      `${report.targets.length} targets: ${summary === "" ? "none" : summary}`,
+      `${targetCount} target${targetCount === 1 ? "" : "s"}: ${summary === "" ? "none" : summary}`,
     );
     if (opts.prune) {
       console.log(
