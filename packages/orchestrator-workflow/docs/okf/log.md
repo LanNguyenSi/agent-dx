@@ -4724,3 +4724,253 @@ until the next rewrite.
   entry above, bundle path first): 0 errors (CI-gating), 0 stale findings,
   35 warning/notice findings (13 warnings, 22 notices), identical in count
   to the pre-edit baseline, all pre-existing and unrelated to this round.
+- 2026-08-28: `doctor` command added (agent-dx task T-006, one of the
+  operator-manifest command slices). Correction (review round 1): this
+  entry originally claimed doctor reads no source either doc lists, so
+  neither doc needed new prose; that was wrong, doctor.ts reads exactly
+  the per-repo manifest fields install-fence-mechanics.md's "manifest.json:
+  shape and consumers" section documents (files, version, pin, profile,
+  tiers, models), and that section now names doctor.ts as a fourth,
+  non-installer consumer (fix-round-1). The +1 line shift below was
+  caused by the new `import { runDoctor, targetReportToJson } from
+  "./doctor.js";` line near the top of `cli.ts`, not by the doctor
+  command block itself, which was appended after `uninstall` further
+  down the file and does not precede either cited span: the `--no-tiers`
+  option's citation in install-fence-mechanics.md and its duplicate in
+  model-preselection.md, and the "Found existing install" print-line
+  citation in install-fence-mechanics.md, were re-pointed to their new
+  spans; the anchor strings themselves were unaffected since no line's
+  own content changed, only its number. `npm test` green with
+  the new doctor.test.ts file (drift/missing/no-manifest/divergent/
+  version-lag/clean/pinned-at-own-version cases, the exit-code contract,
+  `--prune`, and `--json`); `npm run typecheck`, `npm run typecheck:test`
+  and `npm run format:check` clean; `node scripts/check-cli-flag-order.mjs`
+  clean. From the repository root: `npx -y okf-kit@0.8.0 check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md packages/orchestrator-workflow/README.md
+  INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` (the
+  okf-anchor-guard CI invocation) reports no CI-gating finding and no
+  stale source; the warning and notice sets are the same ones the prior
+  entry already described, none of them touching the two re-pointed
+  citations. Four mutation probes run against `src/doctor.ts` by hand
+  (pin-equals-own-version treated as version-lag, drift losing precedence
+  over divergent, a missing target dropped from the exit-code trigger set,
+  `--prune` also sweeping drift) each broke exactly the test named for it
+  and were restored and re-verified green before committing.
+- 2026-08-28: `doctor` review round 1 fix-round-1 (agent-dx task T-006).
+  `computeDriftFiles`'s `readFileSync` call is now wrapped in the same
+  try/catch its `statSync` neighbor already had; an unreadable kit-owned
+  file (permissions, a race) is counted as drift for that one path
+  instead of throwing and aborting the whole target, and the rest of the
+  operator registry still reports. `runDoctor` now distinguishes an
+  absent `<operatorHome>/manifest.json` (`no-operator-manifest`, exit 2,
+  the pre-existing setup hint) from one that exists but does not parse or
+  validate (`operator-manifest-unreadable`, exit 2, a new stderr message
+  naming the path and telling the operator to repair or remove it rather
+  than silently re-running `setup` over a possibly-fine `targets` array).
+  The pin-vs-installed-version rule changed: a pin now suppresses
+  `version-lag` only when it equals the installed version; a pin that no
+  longer matches prints `installed X, pinned at Y` (folded into the same
+  line the pinless case already had, not a duplicate). `--prune`'s help
+  text and its human-output summary note that the manifest is rewritten
+  in normalized form (a raw, parser-rejected target entry is dropped
+  along with the pruned targets, not just left alone); no code change to
+  re-surface those raw entries under `pruned` was made, the note was
+  judged sufficient on its own. install-fence-mechanics.md's
+  "manifest.json: shape and consumers" section gained `doctor.ts` as a
+  fourth, non-installer consumer (it reads `files`/`version`/`pin`/
+  `profile`/`tiers`/`models` off every operator-registered target's own
+  manifest, comparing each against the operator manifest's defaults) and
+  `doctor.ts`/`test/doctor.test.ts` were added to that doc's `sources:`
+  list; both docs' frontmatter `timestamp:` was re-stamped. This same
+  fix round also corrected the prior 2026-08-28 entry above: its claim
+  that doctor read no source either doc lists was wrong (see the
+  correction inline there), and its attribution of the +1 citation-line
+  shift to the doctor command block was wrong too, the actual cause was
+  the new `doctor.js` import line near the top of `cli.ts`; this round's
+  own edits added one further import line (`OPERATOR_MANIFEST_FILENAME`)
+  at the same spot, so the two previously re-pointed citations
+  (`--no-tiers` in both docs, "Found existing install" in
+  install-fence-mechanics.md) were re-pointed again, one line further
+  down, same anchor strings. `npm test` green (net +12 doctor.test.ts
+  cases: 13 added, 1 renamed rather than rewritten in place since its
+  scope narrowed to the matching-pin case only); `npm run typecheck`,
+  `npm run typecheck:test`, and `npm run format:check` (run first) clean;
+  `node scripts/check-cli-flag-order.mjs` clean. From the repository
+  root: `npx -y okf-kit@0.8.0 check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors
+  --require-anchors-allow README.md packages/orchestrator-workflow/README.md
+  INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md`
+  reports 0 errors (CI-gating) and 0 stale-source findings; the warning
+  (13, all pre-existing `init.test.ts` short-form range-start notices)
+  and notice (22, pre-existing ambiguous cross-package citations and one
+  blank-start-line notice) sets are unchanged by this round, and neither
+  the new `doctor.ts` consumer paragraph nor the new log prose above
+  introduced any new finding. Four mutation probes run against
+  `src/doctor.ts` by hand for this round (dropping the `readFileSync`
+  try/catch, reverting the pin rule to any-pin-suppresses-lag, collapsing
+  `operator-manifest-unreadable` back into `no-operator-manifest`, and
+  removing the missing-file push in `computeDriftFiles`) each broke
+  exactly the test named for it and were restored and re-verified green
+  (byte-identical diff against the pre-mutation file) before committing.
+- 2026-08-29 (agent-dx task T-006, rebase onto the `apply` slice plus
+  review round 2 findings): `doctor` was rebased onto master, which had
+  meanwhile gained the `apply` command (agent-dx task T-005) between
+  `uninstall` and where `doctor` itself was appended; `apply` and `doctor`
+  now sit in that order in `cli.ts`, and the operator-manifest import
+  block merges both commands' names. `writeOperatorManifest` no longer
+  exists on master (renamed, unexported): `--prune`'s write now goes
+  through `updateOperatorManifest`, with the whole re-read, report
+  computation, and write inside its one locked critical section, the
+  same guard `apply`'s own registration step already relies on, rather
+  than doctor keeping a second, unlocked read-modify-write path of its
+  own. The two `--no-tiers`/"Found existing install" citations in
+  install-fence-mechanics.md and model-preselection.md were re-pointed a
+  second time, this time by direct line count against the actual merged
+  file rather than by arithmetic: the doctor import and the `apply`
+  slice's own `OPERATOR_MANIFEST_FILENAME` import together shift
+  everything below by two lines, not one, which a signed-off arithmetic
+  shift had gotten wrong the first time around (docs-consistency.test.ts
+  caught the drift on the first `npm test` after the rebase, before this
+  entry existed to explain it).
+
+  Review round 2 found four findings against the pre-rebase state. M1
+  (repeated class, corrupt/unreadable target manifest reported as
+  `no-manifest` and pruned) and M2 (`existsSync` swallowing `EACCES` the
+  same way): a new `unverifiable` status, distinct from both `missing`
+  (directory ENOENT specifically) and `no-manifest` (manifest file ENOENT
+  specifically), covers a directory or manifest stat failure for any
+  other reason and a manifest present but unparseable/unreadable;
+  `unverifiable` is excluded from `--prune`'s removal set and counts
+  toward exit 1; a `reason` field (`"directory not accessible"` /
+  `"manifest unreadable"`) is now part of the `--json` contract and the
+  human output's own detail line under an `unverifiable` status line. M3
+  (the `--prune` note claimed unconditionally that an unvalidatable raw
+  entry was dropped): the note now prints only when the file's raw
+  `targets` array actually held more entries than `readOperatorManifest`
+  parsed, naming the count, computed by re-reading the raw JSON once
+  inside the same locked `mutate` callback that does the prune write. L6
+  (`versionLag` absent from `--json`, and a drift target's divergence/lag
+  facts silently dropped from human output): `versionLag` joined the
+  `--json` contract, and the divergence and version-lag detail lines now
+  print under a `drift` status line the same way they already did under
+  `divergent`. L5 (inert human-output lines): CLI assertions were added
+  for the tiers divergence detail line, the drift file list under a
+  drift status line, and both the presence and the absence of the prune
+  note. L7 (CHANGELOG) is deferred to the docs slice per the task
+  assignment.
+
+  Tests added for M1: a corrupt target manifest, a chmod-000 target
+  manifest, and a chmod-000 ancestor directory (the latter two skipped
+  under root, which bypasses permissions) all report `unverifiable`, not
+  `no-manifest`/`missing`, are not pruned, and count toward exit 1; a
+  genuinely deleted target directory is still `missing`, and a target
+  with an ENOENT manifest (uninstalled) is still `no-manifest`, both
+  still pruned as before, confirming the new stat-classification helper
+  did not regress either of the two original prune-eligible statuses.
+
+  Mutation probes, run for real against the committed rebase-plus-fix
+  state, each restored and re-verified byte-identical afterward: (a)
+  folding all three `unverifiable` call sites in `inspectTarget` back to
+  `no-manifest` failed all six of this round's new "(12) unverifiable"
+  tests; (b) adding `unverifiable` to `REMOVE_ON_PRUNE` failed the
+  "`--prune` never removes an unverifiable target" test; (c) reverting
+  the prune note's guard from `report.unvalidatedDropped > 0` back to the
+  old unconditional `report.pruned.length > 0` failed the new
+  "unvalidatable-entry prune note only when the file actually held one"
+  test (the note printed "0 raw target entries..." instead of staying
+  silent); (d) dropping `versionLag` from `targetReportToJson`'s return
+  failed the existing "(9) CLI --json" JSON-shape test.
+
+  `npm test` green (all existing assertions untouched and passing,
+  including every `init`/`setup`/`uninstall`/`apply` test, plus this
+  round's new and updated `doctor.test.ts` assertions); `npm run
+  typecheck` and `npm run typecheck:test` clean; `npm run format` (write)
+  then `npm run format:check` clean. `node scripts/check-cli-flag-order.mjs`
+  (from the repository root) reports clean. From the repository root:
+  `npx -y okf-kit@0.8.0 check --json packages/orchestrator-workflow/docs/okf
+  --require-anchors --require-anchors-allow README.md
+  packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+  packages/orchestrator-workflow/INSTALL-AGENT.md` reports 0 errors
+  (CI-gating) and 0 stale-source findings after install-fence-mechanics.md
+  and model-preselection.md were re-stamped; the warning and notice sets
+  are unchanged against the pre-round baseline, both re-pointed
+  `doctor.ts` citations in install-fence-mechanics.md (the `inspectTarget`
+  post-manifest-read span and the `computeDriftFiles` call line, both of
+  which moved further down the function once the new stat-classification
+  checks were inserted ahead of them) resolving with zero findings
+  alongside the two `cli.ts` citations above.
+
+## 2026-08-29 (agent-dx b457ee55, task T-006, implementer, closing round-3 notes)
+
+Closes the notes carried into this round before merge. `runDoctor`'s
+`--prune` path now captures `updateOperatorManifest`'s own return value
+instead of falling back to the stale, pre-lock read of the operator
+manifest when the manifest turns out gone or unreadable once the lock is
+actually granted: it now reports `no-operator-manifest`/
+`operator-manifest-unreadable` (exit 2, an empty target list) directly
+rather than describing targets that may no longer exist on disk. The
+`doctor` action in `cli.ts` now also catches whatever
+`updateOperatorManifest` itself can throw rather than return --
+`OperatorManifestLockTimeoutError` (a foreign holder still past the lock
+timeout) or any other error raised while acquiring the lock (most
+commonly `EACCES` on a read-only operator home) -- emitting a `--json`
+object (`error: "operator-manifest-locked" |
+"operator-manifest-write-failed"`, exit 2, a `message` field) or a
+one-line stderr explanation in human mode, instead of letting either
+crash the CLI with a raw stack trace. `unvalidatedDropped` joined the
+`--json` contract (it already lived on `DoctorReport`, it just never made
+it into the printed object). The human summary line now pluralizes its
+noun ("1 target:" vs "N targets:").
+
+Test coverage added: a registered target path replaced by a regular file
+(still `missing`, still pruned); the three permission-gated tests now use
+`it.skipIf` instead of an early return, so a root run shows a skip rather
+than a silently passing test; a foreign, fresh lock directory plus the
+CLI's test-only `OW_DOCTOR_TEST_LOCK_TIMEOUT_MS` override (read only
+inside the `doctor` action, and only honored when `--prune` is also
+passed) forces the timeout path deterministically instead of waiting out
+the production timeout; a chmod-500 operator home forces the `EACCES`
+path (skipped under root, which bypasses permissions).
+install-fence-mechanics.md's doctor-consumer sentence now names the
+mechanism only (`doctor.ts` as a fourth, non-installer consumer),
+dropping the task-id/slice aside this log entry already carries, and
+gained one sentence stating that `computeDriftFiles`' unreadable-file-as-
+drift behavior is deliberate, not an oversight.
+
+Mutation probes, run for real against the committed state, each restored
+and re-verified afterward: (a) removing the lock-timeout/generic-catch
+branch in `cli.ts`'s `doctor` action (falling straight through to the
+previous, unguarded `runDoctor` call) failed the new foreign-lock-holder
+JSON test with an uncaught `OperatorManifestLockTimeoutError` instead of
+a parseable exit-2 report; restored, test green again. (b) dropping
+`unvalidatedDropped` from the `--json` object literal in `cli.ts` failed
+both the JSON-shape test and the `--json --prune` unvalidatedDropped
+test; restored, both green again.
+
+`npm test`: full suite green, every existing assertion across every
+command's test file left untouched and passing, including every
+`init`/`setup`/`uninstall`/`apply` test. `npm run typecheck` and `npm run
+typecheck:test`: clean. `npm run format` (write) then `npm run
+format:check`: clean. `node scripts/check-cli-flag-order.mjs` (from the
+repository root): clean. From the repository root: `npx -y
+okf-kit@0.8.0 check --json packages/orchestrator-workflow/docs/okf
+--require-anchors --require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` reports 0 errors
+(CI-gating) and 0 stale-source findings after install-fence-mechanics.md
+and model-preselection.md (both list `cli.ts`, and the former also lists
+`doctor.ts`, as sources) were re-stamped; a direct diff of this run's
+findings against a run from the pre-round commit shows the warning and
+notice sets are set-for-set identical, no addition or removal in either
+direction. Two `cli.ts` citations needed re-pointing by one line each
+(the `--no-tiers` option's citation in install-fence-mechanics.md and its
+duplicate in model-preselection.md, plus the "Found existing install"
+print-line citation in install-fence-mechanics.md), all three caused by
+this round's own added `import type { DoctorReport } from "./doctor.js";`
+line near the top of `cli.ts`, not by anything in the `doctor` action
+body itself (appended well after every cited span); `doctor.ts`'s own two
+citations in install-fence-mechanics.md (the `inspectTarget`
+post-manifest-read span and the `computeDriftFiles` call line) needed the
+same one-line shift, caused by this round's added
+`OperatorManifestLockOptions` type import near the top of `doctor.ts`.

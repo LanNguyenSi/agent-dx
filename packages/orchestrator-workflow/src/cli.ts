@@ -13,6 +13,7 @@ import { DEFAULT_MODELS, PROFILES } from "./models.js";
 import { readInstalledManifest, runInit } from "./init.js";
 import type { Manifest } from "./init.js";
 import {
+  OPERATOR_MANIFEST_FILENAME,
   OperatorManifestLockTimeoutError,
   applyRegistrationFailureMessage,
   createOperatorManifest,
@@ -29,6 +30,8 @@ import type {
 } from "./operator-manifest.js";
 import type { UninstallReport } from "./uninstall.js";
 import { runUninstall } from "./uninstall.js";
+import { runDoctor, targetReportToJson } from "./doctor.js";
+import type { DoctorReport } from "./doctor.js";
 
 function isInteractive(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -837,6 +840,201 @@ program
       );
     },
   );
+program
+  .command("doctor")
+  .description(
+    "Report each operator-registered target's status: clean, divergent from the operator defaults, version-lagging, hash-drifted, missing, without a repo manifest, or unverifiable (could not be checked at all)",
+  )
+  .option(
+    "--json",
+    "print a single JSON report to stdout and suppress human output",
+  )
+  .option(
+    "--prune",
+    "remove missing and no-manifest targets from the operator registry before reporting; rewrites the whole manifest file in its normalized form (a hand-edited or legacy entry that readOperatorManifest could not parse is dropped from the file, not just left alone)",
+  )
+  .action(async (opts: { json?: boolean; prune?: boolean }) => {
+    const home = resolveOperatorHome();
+
+    // Test-only escape hatch: shrinks `--prune`'s lock-acquire timeout so a
+    // test can force `OperatorManifestLockTimeoutError` (a foreign holder
+    // sitting on the lock) without waiting out the production
+    // `DEFAULT_LOCK_TIMEOUT_MS`. Unset in every real invocation, and
+    // effective only when `--prune` is also passed (only `--prune` ever
+    // takes the operator-manifest lock).
+    const testLockTimeoutMs = process.env.OW_DOCTOR_TEST_LOCK_TIMEOUT_MS;
+    const lockOptions =
+      opts.prune && testLockTimeoutMs
+        ? { timeoutMs: Number(testLockTimeoutMs), pollMs: 10 }
+        : undefined;
+
+    let report: DoctorReport;
+    try {
+      report = runDoctor(home, { prune: opts.prune, lockOptions });
+    } catch (error) {
+      // `runDoctor`'s `--prune` path runs its read-modify-write through
+      // `updateOperatorManifest`, which can throw instead of returning:
+      // `OperatorManifestLockTimeoutError` when another
+      // orchestrator-workflow command already holds the operator-manifest
+      // lock past the timeout, or any other error raised while acquiring
+      // it (most commonly `EACCES` creating the lock directory itself,
+      // e.g. a read-only operator home). Either way the manifest was left
+      // untouched; report the failure directly instead of letting an
+      // uncaught exception crash the CLI with a raw stack trace.
+      const isLockTimeout = error instanceof OperatorManifestLockTimeoutError;
+      const doctorError:
+        | "operator-manifest-locked"
+        | "operator-manifest-write-failed" = isLockTimeout
+        ? "operator-manifest-locked"
+        : "operator-manifest-write-failed";
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (opts.json) {
+        console.log(
+          JSON.stringify({
+            operatorHome: home,
+            operatorVersion: PACKAGE_VERSION,
+            targets: [],
+            pruned: [],
+            exitCode: 2,
+            error: doctorError,
+            message,
+          }),
+        );
+      } else {
+        console.error(
+          isLockTimeout
+            ? `Could not acquire the operator manifest lock at ${home} (another orchestrator-workflow command holds it): ${message}`
+            : `Could not update the operator manifest at ${home}: ${message}`,
+        );
+      }
+      process.exitCode = 2;
+      return;
+    }
+
+    if (opts.json) {
+      console.log(
+        JSON.stringify({
+          operatorHome: report.operatorHome,
+          operatorVersion: report.operatorVersion,
+          targets: report.targets.map(targetReportToJson),
+          pruned: report.pruned,
+          exitCode: report.exitCode,
+          unvalidatedDropped: report.unvalidatedDropped,
+          ...(report.error ? { error: report.error } : {}),
+        }),
+      );
+      process.exitCode = report.exitCode;
+      return;
+    }
+
+    if (report.error === "no-operator-manifest") {
+      console.error(
+        "No operator setup found; run `orchestrator-workflow setup` first.",
+      );
+      process.exitCode = report.exitCode;
+      return;
+    }
+
+    if (report.error === "operator-manifest-unreadable") {
+      const manifestPath = join(
+        report.operatorHome,
+        OPERATOR_MANIFEST_FILENAME,
+      );
+      console.error(
+        `Operator manifest at ${manifestPath} is unreadable; back it up and repair it, or remove it and run \`orchestrator-workflow setup\` again.`,
+      );
+      process.exitCode = report.exitCode;
+      return;
+    }
+
+    console.log(
+      `Operator home: ${report.operatorHome} (kit v${report.operatorVersion})`,
+    );
+
+    const counts = new Map<string, number>();
+    for (const target of report.targets) {
+      console.log(`${target.status}  ${target.path}`);
+      if (target.status === "unverifiable" && target.reason) {
+        console.log(`  ${target.reason}`);
+      }
+      // Divergence and version-lag detail lines print for both `divergent`
+      // and `drift` status lines (fix-round-2, review finding L6): a drift
+      // target can also be divergent and/or version-lagging (see
+      // doctor.ts's status-precedence doc comment), and before this fix
+      // its `divergent`/`version-lag` facts were silently dropped from the
+      // human output whenever `drift` won the status field.
+      if (
+        (target.status === "divergent" || target.status === "drift") &&
+        target.divergence
+      ) {
+        if (target.divergence.profile) {
+          console.log(
+            `  profile: repo=${target.repoProfile}, operator=${target.operatorProfile}`,
+          );
+        }
+        if (target.divergence.tiers) {
+          console.log(
+            `  tiers: repo=${target.repoTiers}, operator=${target.operatorTiers}`,
+          );
+        }
+        if (target.divergence.models) {
+          console.log(`  models: ${target.divergentModelRoles.join(", ")}`);
+        }
+      }
+      const showsVersionLagDetail =
+        (target.status === "version-lag" ||
+          ((target.status === "divergent" || target.status === "drift") &&
+            target.versionLag)) &&
+        target.installedVersion !== null;
+      if (showsVersionLagDetail) {
+        // A pinned target that is still version-lag (the pin no longer
+        // matches the installed version, see doctor.ts's `versionLag`)
+        // shows what it is pinned at instead of the operator's running
+        // version, which is not the relevant comparison for a pinned
+        // target.
+        console.log(
+          target.pin
+            ? `  installed ${target.installedVersion}, pinned at ${target.pin}`
+            : `  installed ${target.installedVersion}, operator ${report.operatorVersion}`,
+        );
+      }
+      if (target.status === "drift" && target.driftFiles) {
+        for (const file of target.driftFiles) {
+          console.log(`  ${file}`);
+        }
+      }
+      if (target.pin && !showsVersionLagDetail) {
+        console.log(`  pinned at ${target.pin}`);
+      }
+      counts.set(target.status, (counts.get(target.status) ?? 0) + 1);
+    }
+
+    const summary = [...counts.entries()]
+      .map(([status, count]) => `${count} ${status}`)
+      .join(", ");
+    const targetCount = report.targets.length;
+    console.log(
+      `${targetCount} target${targetCount === 1 ? "" : "s"}: ${summary === "" ? "none" : summary}`,
+    );
+    if (opts.prune) {
+      console.log(
+        `pruned: ${report.pruned.length > 0 ? report.pruned.join(", ") : "(none)"}`,
+      );
+      // Printed only when the file actually held a raw target entry the
+      // parser could not validate (fix-round-2, review finding M3): the
+      // note used to print unconditionally whenever anything at all was
+      // pruned, even when every dropped entry was a validly-shaped
+      // missing/no-manifest target and the file held no unvalidatable
+      // entry to report.
+      if (report.unvalidatedDropped > 0) {
+        console.log(
+          `note: the operator manifest was rewritten in normalized form; ${report.unvalidatedDropped} raw target ${report.unvalidatedDropped === 1 ? "entry" : "entries"} the parser could not validate ${report.unvalidatedDropped === 1 ? "was" : "were"} dropped from the file along with the pruned targets above.`,
+        );
+      }
+    }
+    process.exitCode = report.exitCode;
+  });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
