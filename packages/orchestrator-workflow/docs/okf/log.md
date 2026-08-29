@@ -3546,7 +3546,8 @@ Measured on the first commit's tree (`packages/okf-kit` 0.8.0
 `--require-anchors` with the CI allowlist for README.md/INSTALL-AGENT.md
 bare ranges, mirroring the `okf-anchor-guard` CI job): 1 CI-gating anchor
 finding, `run-state-lifecycle-and-markers.md`'s
-`INSTALL-AGENT.md:141-144#"repository's"` citation in the new section --
+INSTALL-AGENT.md citation (range 141 through 144 as the file stood then,
+anchor text "repository's") in the new section --
 the local in-repo vitest guard does not resolve README.md/INSTALL-AGENT.md
 citations at all (`anchorScopeResolve()` has no entry for either), so it
 cannot catch this class; only the real okf-kit tool did. Fixed by
@@ -5292,3 +5293,186 @@ cli.ts around lines 304 to 307, not one of this round's own anchors.
 Not done: no further scope. All six notes from this round's assignment
 are addressed above; `init`/`setup`/`uninstall`/`apply`/`doctor`
 behavior and their existing tests are untouched.
+
+## 2026-08-29 (agent-dx b457ee55, task T-008, implementer, operator-install docs)
+
+Documents the operator-level install (`setup`, `apply --target`, `doctor`,
+`adopt`, the repo-manifest `pin`) in the public docs: `README.md` gained a
+new "Operator-level install" section, inserted directly before "Ownership
+and re-runs" so every citation into the file at or before "Effort tiers"
+stays put; `INSTALL-AGENT.md` gained the operator path in its numbered
+"Instructions for the agent" flow (a new paragraph after step 3's
+conflict-handling sentence, and a one-line addition to step 4's opening
+sentence) and two new Write-surface bullets (the operator home files, and
+the repo manifest's optional `pin`); `CHANGELOG.md`'s `[Unreleased]`
+section gained an `### Added` entry for the operator-manifest module, the
+operator home, the four new subcommands, and the `pin` field, plus a new
+`### Changed` entry naming the shared locked write API
+(`updateOperatorManifest`/`withOperatorManifestLock`) `setup`, `apply`,
+`doctor --prune`, and `adopt` all go through.
+
+`INSTALL-AGENT.md`'s edits landed inside the Write-surface bullet list
+(old lines 46-50 expanded to new 58-70) and inside numbered step 3 (old
+line 34 expanded to new lines 34-44) and step 4's opening line, growing
+the file from 241 to 273 lines; every citation into it from
+`install-fence-mechanics.md` and `model-preselection.md` was re-pointed
+by diffing old against new with Python's `difflib.SequenceMatcher` and
+sampling the target line ranges after the edit to confirm the quoted
+content still matches: `install-fence-mechanics.md`'s `46-61`/`63-85`/
+`63-66`/`80-82` became `58-81`/`83-105`/`83-86`/`100-102`;
+`model-preselection.md`'s `97-111`/`150-159`/`161-187`/`205-227`/
+`229-233`/`132-137` became `117-131`/`182-191`/`193-219`/`237-259`/
+`261-265`/`164-169`. `README.md` grew from 378 to 457 lines but every
+citation into it from either doc (lines 109-239) sits before the new
+section's insertion point (after line 339), so none needed re-pointing.
+Both docs' `timestamp:` frontmatter was re-stamped as the last edit
+before commit.
+
+At the time of the implementer return, `run-state-lifecycle-and-markers.md`
+also listed `README.md` and `INSTALL-AGENT.md` as sources and cited the
+same Write-surface bullets (`INSTALL-AGENT.md`, ranges 46 through 47 and
+139 through 144, with anchor text "repository's" at range 47 through 50
+and again at range 141 through 143) that this task's edits shifted, but
+that file was outside this task's `allowed_changes`; its citations were
+left stale by the implementer. They were re-pointed by the orchestrator in
+the same slice, see below.
+
+`npm test`: green, including `docs-consistency.test.ts` unmodified (no
+test added or changed by this docs-only slice; README.md/INSTALL-AGENT.md
+carry no local anchor-scope mapping, so none of that suite's
+anchor-load-bearing checks apply to either file's citations). `npm run
+typecheck` and `npm run
+typecheck:test`: clean. `npm run format:check`: clean (no `.ts` files
+touched). From the repository root, `node
+packages/slop-detector/dist/cli.js check . --pack placement-slop
+--config slop.config.yml` (after `npm ci && npm run build` in
+`packages/slop-detector`, whose `dist/` was missing in this worktree):
+clean. A grep for an em dash, and for a digit adjacent to "tests" or
+"repos", a `2026-` date, or "agent-tasks", across both edited docs found
+zero occurrences inside either doc's new prose; every em dash grep hit in
+both files sits at a pre-existing line outside the edited ranges.
+
+From the repository root: `npx -y okf-kit@0.8.0 check --json
+packages/orchestrator-workflow/docs/okf --require-anchors
+--require-anchors-allow README.md packages/orchestrator-workflow/README.md
+INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` reports
+0 errors (CI-gating) both before and after this task's edits; notices
+unchanged; three new warnings, all `anchor-not-found-in-range`, all caused by
+the same `INSTALL-AGENT.md` line shift described above: two are the
+`run-state-lifecycle-and-markers.md` citations named above (their
+`"repository's"` anchor no longer sits inside the cited range); the third
+is this log's own 2026-08-28 entry, which quotes the pre-fix citation as
+history (`INSTALL-AGENT.md`, range 141 through 144, anchor text
+`repository's`). That quoted range happened to still resolve against the
+master baseline's content, since the real bullet's `repository's` sat at
+old line 142, inside both the narrowed 141-143 range and the pre-fix
+141-144 one; after this task's shift the same substring no longer
+resolves against the live file, even though it is prose quoting a past
+finding, not a live citation. That third warning was first left as-is
+(rewriting the historical quote's line numbers to keep it resolving would
+misstate what the 2026-08-28 fix actually narrowed the range to), then
+rewritten as prose once the pull request's `okf-anchor-guard` job showed
+that the CI guard gates every finding carrying an anchor rule id,
+warnings included: the 2026-08-28 entry now names the range and the
+anchor text as they stood then, without a citation token.
+
+Orchestrator follow-up in the same task (T-008, after the implementer
+return): `run-state-lifecycle-and-markers.md` is a third consumer of
+`INSTALL-AGENT.md` and was outside the implementer's allowed changes, so
+its three `INSTALL-AGENT.md` citations still pointed at the pre-edit
+lines (okf-kit: two `anchor-not-found-in-range` warnings, plus the
+unanchored two-range citation that resolved to the wrong text without a
+warning). Re-pointed by a line map computed from the old and new file
+(every mapped line byte-identical except the last line of the
+write-surface span, which gained a sentence but still carries the
+anchor): the two-range citation moved by plus twelve and plus thirty-two
+lines, the two anchored citations by plus twelve and plus thirty-two
+lines as well; the doc was re-stamped afterwards. The remaining
+`anchor-not-found-in-range` warning sits in this file's own 2026-08-28
+entry, which quotes the citation as it stood at that time; historical
+entries are not re-pointed, but this quote was later rewritten as prose
+because the CI anchor guard counts every anchor finding (see the
+round-2 closure below). Re-run of the CI-argument okf-kit command
+after the edit: the two doc warnings are gone.
+
+After the rebase onto the merged adopt commit and the CHANGELOG commit
+naming PR 147, the okf-kit sources-fresh rule reported three docs stale
+by commit time (`review-gate-and-waivers.md`, `subagent-contracts-superset.md`,
+`run-state-lifecycle-and-markers.md`; the first two cite the CHANGELOG by
+heading only, which the Unreleased entries do not move). Re-verified and
+re-stamped all three in a commit of their own, after the source commits,
+so the stamps postdate the sources.
+
+Fix round 1 (T-008b, implementer-high, then orchestrator): the thirteen
+round-1 findings were closed in place (README rule for version-lag and
+the pin comparison, the pin sentence in the CHANGELOG, doctor exit-2
+causes, adopt --json, the pin in README's manifest enumeration and
+--force-pin as a pin writer, drift gloss, operator-home wording in
+INSTALL-AGENT.md, the init-and-apply idempotency clause, apply requiring
+setup, the log entry's totals, citation-shaped tokens and superseded
+first paragraph) and
+a new describe block in `test/docs-consistency.test.ts` pins every
+setup/apply/doctor/adopt option name and every TargetStatus member
+against README.md (two mutation probes, each red with the mutant and
+green after restore). The INSTALL-AGENT.md edits shifted lines by two
+below the operator-path step; eleven citation ranges in
+`install-fence-mechanics.md`, `model-preselection.md` and
+`run-state-lifecycle-and-markers.md` were re-pointed to byte-identical
+content and the three docs re-stamped, with one correction by the
+orchestrator: the continuation range in `model-preselection.md` next to
+the words INSTALL-AGENT.md binds to the preceding fully qualified
+citation of `test/docs-consistency.test.ts` and names the fifth guard
+test there, not a span of INSTALL-AGENT.md; the fix round had shifted it
+by one as if it were, and it was restored to the test-file range (which
+did not move, the new describe block being appended at the end). A
+fully qualified INSTALL-AGENT.md citation at that spot would also have
+re-bound the three later continuation ranges of the same paragraph to
+the wrong file, which okf-kit reported as ranges exceeding the file
+length; continuation forms resolve against the last fully qualified
+citation, whatever the surrounding prose names. Because the fix commit changed
+`test/docs-consistency.test.ts` and the CHANGELOG, the sources-fresh rule
+flagged `review-gate-and-waivers.md` and `subagent-contracts-superset.md`
+(both cite the test file by line ranges that lie above the appended
+block, so no range moved); re-verified and re-stamped in a commit after
+the fix commit. Checks after the fix round: docs-consistency test green,
+full suite green, typecheck and typecheck:test clean, prettier clean,
+flag-order lint clean, placement check clean, okf-kit with the CI
+arguments 0 CI-gating findings and the warning set back to the
+pre-round set once the re-stamps landed.
+
+Round-2 notes (reviewer accept_with_notes, closed by the orchestrator):
+the new README guard was document-wide, so four of the seven doctor
+statuses and six of the operator flags were satisfied by text outside
+the operator section (the reviewer's own probe removed four statuses
+from the list and stayed green); the guard now slices README to the
+Operator-level install section for the flags and to the doctor status
+sentence for the statuses, and README's setup and apply paragraphs now
+name the install options they share with init so the scoped flag check
+holds. CHANGELOG brought in line with the corrected README (all doctor
+exit-2 causes, the pin comparison rule instead of a suppression, the
+--force-pin no-op caveat, internal whitespace in --pin). README's
+operator-home sentence uses the same operator-home framing as
+INSTALL-AGENT.md; the idempotency clause now says apply refreshes the
+registry entry on every run. In this log entry the absolute warning
+counts were replaced by the delta and the round-1 count corrected to
+thirteen. Two pre-existing continuation citations in
+`model-preselection.md` (the tier-table guard and the opencode-effort
+prose guard in `test/docs-consistency.test.ts`) pointed at other
+describe blocks since before this task; re-pointed to the describe
+blocks the prose names, base unchanged (the preceding fully qualified
+citation of the test file), and the doc re-stamped in the following
+commit together with the four docs that list README.md, the CHANGELOG or
+the test file as sources (`install-fence-mechanics.md`,
+`run-state-lifecycle-and-markers.md`, `review-gate-and-waivers.md`,
+`subagent-contracts-superset.md`); no README citation in the bundle
+starts at or after the operator section, the CHANGELOG is cited by
+heading only, and the test-file citations lie above the appended guard
+block, so no range moved.
+
+CI result on the pull request (round-2 closure, orchestrator): the
+`okf-anchor-guard` job failed on exactly one finding, the 2026-08-28
+entry's quoted citation token, because the job gates every finding whose
+message carries an anchor rule id regardless of severity, while the local
+measurement above had counted only error-severity findings as gating.
+The token was rewritten as prose (range and anchor text as they stood
+then); re-run with the CI criterion (any anchor rule id): 0 findings.

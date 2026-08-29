@@ -31,10 +31,23 @@ which is mutable. For a stable audit, pin the URL to a commit SHA instead
 3. **Run the non-interactive installer** with your answers:
    `npx orchestrator-workflow init --yes --harness ... --profile ... --models ... [--tiers]`.
    If the installer reports conflicts with locally edited files, the agent
-   shows them to you and asks before any `--force` re-run.
+   shows them to you and asks before any `--force` re-run. **The operator
+   path**: when an operator has already run `orchestrator-workflow setup`
+   on this machine (an operator manifest exists at
+   `<operator home>/manifest.json`, where the operator home is
+   `~/.orchestrator-workflow/` unless `ORCHESTRATOR_WORKFLOW_HOME` names a
+   different directory), the agent runs
+   `orchestrator-workflow apply --target <repo>` instead of `init`, which
+   sources its defaults from that operator install and registers the
+   repository under it. A repository that already has the kit installed
+   and only needs bringing under that management, with nothing in it
+   changed, is registered with `orchestrator-workflow adopt <repo>`
+   instead of either command.
 4. **Manual fallback only when npx or the registry is unavailable**: create
    the same files by hand from this repository's `assets/` directory,
-   following the byte-precise rules in step 4 below.
+   following the byte-precise rules in step 4 below. This manual path
+   covers `init` only; there is no manual equivalent for `apply` or
+   `adopt`, both of which require the installed CLI.
 5. **Report back**: which harnesses were installed, which profile and model
    each role uses, whether effort-tier variants were rendered, and any
    conflicts left in place.
@@ -47,7 +60,15 @@ The install creates or touches only these paths:
   `.ai/workflow/manifest.json`, `.ai/runs/.gitkeep` (new files). The
   orchestrator later writes a per-worktree `.ai/run` pointer at run time (a
   machine-local absolute path, not written by the installer); add it to the
-  repository's `.gitignore`.
+  repository's `.gitignore`. This repository's own `.ai/workflow/manifest.json`
+  can additionally carry one optional field, `pin`: a kit version recorded
+  by `apply --pin`/`--unpin`/`--force-pin`, absent when no pin was ever set.
+- **Operator path only** (`apply`/`adopt`, not `init`): the operator's own
+  home's manifest, `<operator home>/manifest.json`, where the operator home
+  is `~/.orchestrator-workflow/` unless `ORCHESTRATOR_WORKFLOW_HOME` names a
+  different directory, gains or updates its record of this repository,
+  guarded by a transient `.manifest.lock` directory held only for the
+  duration of that write. Neither path lives inside the target repository.
 - `AGENTS.md`: the marker-fenced workflow section is appended (file created
   when missing); content outside the
   `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:end -->`
@@ -128,6 +149,19 @@ steps in the repository you were asked to install into.
    tiers off on a fresh install, or whatever value was previously installed
    on a re-run. If the command reports conflicts, show them to the operator
    and ask before re-running with --force.
+
+   **Operator path**: before running `init`, check whether an operator
+   manifest already exists on this machine, at
+   `<operator home>/manifest.json` (the operator home is
+   `~/.orchestrator-workflow/` unless `ORCHESTRATOR_WORKFLOW_HOME` names a
+   different directory). If it does, run
+   `orchestrator-workflow apply --target <repo>` with the same flags in
+   place of `init --yes` instead: it sources its defaults from the operator
+   install and the target's own prior settings, and registers the
+   repository. If the repository already has the kit installed and the
+   operator only wants it brought under that management without any file
+   changes, run `orchestrator-workflow adopt <repo>` instead and skip the
+   rest of this step.
 
 4. Only if npx or the registry is unavailable, scaffold manually from
    https://github.com/LanNguyenSi/agent-dx/tree/master/packages/orchestrator-workflow/assets.

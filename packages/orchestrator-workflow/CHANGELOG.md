@@ -80,6 +80,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evidence for the scan fallback and the malformed/not-seen split, and
   every `docs/okf/*.md` anchor that cited a line range shifted by either
   round's edits was re-pointed in the same PR.
+- An operator-level install layer: a new `operator-manifest.ts` module and
+  an operator home directory (default `~/.orchestrator-workflow/`,
+  overridable via the `ORCHESTRATOR_WORKFLOW_HOME` environment variable)
+  hold one manifest per operator (`{ kit, schemaVersion: 1, defaults: {
+  harnesses, profile, tiers, models }, targets: [{ path,
+  lastAppliedVersion, lastAppliedAt }], createdAt, updatedAt }`), separate
+  from each repository's own `.ai/workflow/manifest.json`. Four new
+  subcommands sit alongside the existing per-repository `init`/`uninstall`,
+  which stay fully supported and unchanged: `setup` writes or updates the
+  operator defaults without touching any repository; `apply --target
+  <repo>` projects those defaults, and the target's own previously
+  recorded settings, onto one repository through the same
+  option-resolution logic `init` uses (`resolveInitInputs`, extracted for
+  reuse), and registers the target, by its resolved real path, in the
+  operator manifest, with `--sync` inverting precedence so the operator's
+  defaults win over the target's recorded profile/tiers/models, and
+  `--pin`/`--unpin`/`--force-pin` controlling the new per-repo kit-version
+  pin (below); `doctor [--json] [--prune]` walks the registry and reports
+  each target's status (`clean`, `divergent`, `version-lag`, `drift`,
+  `missing`, `no-manifest`, `unverifiable`), exiting `2` when the operator
+  manifest is missing or unreadable (or, with `--prune`, when the manifest
+  lock cannot be acquired or the rewrite fails), `1` when any target is
+  `drift`/`missing`/`no-manifest`/`unverifiable`, else `0`, and `--prune`
+  removes `missing`/`no-manifest` targets (never `unverifiable`) and
+  rewrites the manifest in normalized form; `adopt [dir] [--json]` registers an
+  already-installed repository verbatim, touching nothing in it,
+  bootstrapping the operator manifest from the repository's own recorded
+  settings when none exists, recording the repository's own version as
+  `lastAppliedVersion`, and printing that target's `doctor` report (exit
+  `1` only on drift, exit `2` for a precondition failure). Design
+  decisions: no new binary, all four subcommands live on the existing
+  `orchestrator-workflow` CLI; the registry is implicit, `apply`/`adopt`
+  register as a side effect of a real run and `doctor --prune` is the only
+  way to remove an entry; a multi-repo workspace root is an ordinary
+  target, nothing special. `README.md` gained a new "Operator-level
+  install" section and `INSTALL-AGENT.md` gained the operator path (an
+  installing agent runs `apply` instead of `init` when an operator
+  manifest already exists, and `adopt` for an already-installed
+  repository) plus the new operator-home and `pin` entries in its Write
+  surface list. Consumer-side evidence: agent-tasks `b457ee55`, PRs
+  #142-#147.
+- The repo manifest (`.ai/workflow/manifest.json`) gained one optional
+  field, `pin`: a kit-version string. `apply --pin <version>` sets or
+  replaces it (trimmed; empty, whitespace-only, or containing internal
+  whitespace rejected as a usage error, exit `2`, writing nothing),
+  `--unpin` clears it, and `--force-pin` advances an existing pin to the
+  running version (a no-op on an unpinned target); read by `apply`'s pin
+  gate and by `doctor`, which on a pinned target compares the pin against
+  the installed version instead of the installed version against the
+  running kit. Purely additive: a
+  caller that never sets it sees a byte-identical manifest to before.
+
+### Changed
+
+- `setup`, `apply`'s registration step, `doctor --prune`, and `adopt` all
+  write the operator manifest through the same locked write API,
+  `updateOperatorManifest`/`withOperatorManifestLock`, backed by one
+  advisory lock (`.manifest.lock` in the operator home, stale after 30s)
+  so concurrent `orchestrator-workflow` invocations on one machine cannot
+  race each other's writes.
 
 ## [0.25.0] - 2026-08-27
 
