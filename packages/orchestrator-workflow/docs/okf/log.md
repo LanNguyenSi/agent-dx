@@ -4974,3 +4974,85 @@ citations in install-fence-mechanics.md (the `inspectTarget`
 post-manifest-read span and the `computeDriftFiles` call line) needed the
 same one-line shift, caused by this round's added
 `OperatorManifestLockOptions` type import near the top of `doctor.ts`.
+
+## 2026-08-29 (agent-dx b457ee55, task T-007, implementer)
+
+Added the `adopt [dir]` command: it imports a repository that `init` or
+`apply` already installed into the operator manifest's target registry
+verbatim, touching nothing in the repository itself. When no operator
+manifest exists yet, it bootstraps one from the repository's own
+recorded `harnesses`/`profile`/`tiers`/`models` (`operatorDefaultsFromRepoManifest`)
+rather than the shipped defaults `setup` would otherwise fall back to.
+The target is registered with the repository's own recorded
+`version` as `lastAppliedVersion` (contrast `apply`, which always
+records this operator's `PACKAGE_VERSION`), then `doctor.ts`'s exported
+`inspectTarget` is run against the freshly written manifest and its
+report is printed for that one target. Precondition and operator-
+manifest failures (no or unreadable repo manifest, unreadable operator
+manifest, a lock timeout or write failure) all exit 2, contrasting
+`apply`'s 1; among the reachable report statuses, only `drift` exits 1,
+everything else (`clean`/`divergent`/`version-lag`) exits 0.
+`missing`/`no-manifest`/`unverifiable` are unreachable immediately after
+a directory and manifest read that both just succeeded, so a report in
+one of those three is treated as an internal-error exit 2 rather than
+folded into the normal contract. `--json` mirrors `doctor`'s per-target
+object plus `registered: "new" | "refreshed"` and `bootstrapped: boolean`.
+
+The doctor-style per-target printer (status line, divergence detail,
+version-lag detail, drift-file list, pin line) was factored out of
+`doctor`'s own per-target loop in `cli.ts` into a standalone
+`printTargetDetail` function so `adopt` reuses the identical format
+rather than hand-duplicating it; `doctor`'s own per-target loop now just
+calls it. `doctor`'s own tests were left untouched and stayed green,
+confirming the extraction changed nothing about its output.
+
+The two new imports this round needed (`inspectTarget` and the
+`TargetReport` type from `doctor.ts`) were folded into that module's
+already-existing import lines in `cli.ts` (`import { inspectTarget,
+runDoctor, targetReportToJson } from "./doctor.js";` and `import type {
+DoctorReport, TargetReport } from "./doctor.js";`) instead of adding new
+import lines, specifically to avoid repeating last round's citation
+shift (see the two immediately preceding log entries above, whose
+`cli.ts`/`doctor.ts` citations moved by one line each from a newly added
+import line). `printTargetDetail` and the new `adopt` command itself
+were appended after `doctor`'s command definition and before
+`program.parseAsync`, well past every cited span in either doc. A
+before/after diff of the full findings set from `npx okf-kit@0.8.0
+check` (see command below) against a run from the pre-round commit
+confirms this worked: the two sets are identical member-for-member, so
+no `cli.ts:` citation in install-fence-mechanics.md or model-
+preselection.md needed re-pointing this round. Both docs' `timestamp:`
+front matter was still re-stamped to the time of this change, since
+`cli.ts` (a listed source in both) was edited.
+
+Mutation probes, run for real against the committed state (`git
+checkout` restoring `cli.ts` after each), each restored and re-verified
+afterward: (a) registering `PACKAGE_VERSION` instead of
+`repoManifest.version` in the `upsertOperatorTarget` call failed the
+"contrast with apply" test (expected `"0.0.1"`, got the running package
+version); restored, green again. (b) adding `divergent` alongside
+`drift` in the exit-code ternary failed the "divergent target against an
+existing operator manifest" test (expected exit 0, got 1); restored,
+green again. (c) hardcoding `profile: "full"` and `{ ...DEFAULT_MODELS }`
+in `operatorDefaultsFromRepoManifest` instead of reading them off
+`repoManifest` failed the bootstrap test (the freshly bootstrapped
+operator defaults no longer matched the repo's own `minimal` profile and
+overridden `implementer` model, so the newly registered target reported
+`divergent` instead of `clean`); restored, green again. (d) adding a
+`writeFileSync` call into the target directory at the top of the
+`adopt` action failed the "target directory is never written to" test
+(the before/after tree snapshot gained an extra entry); restored, green
+again.
+
+`npm test`: green, with the 13 new `adopt` tests added alongside every
+pre-existing command's test file, all of which stayed untouched and
+passing. `npm run typecheck` and `npm run typecheck:test`: clean. `npm
+run format` (write) then `npm run format:check`: clean. `node
+scripts/check-cli-flag-order.mjs` (from the repository root): clean.
+From the repository root: `npx -y okf-kit@0.8.0 check --json
+packages/orchestrator-workflow/docs/okf --require-anchors
+--require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` reports 0 errors
+(CI-gating) and 0 stale-source findings; as noted above, the finding set
+is identical to a run against the pre-round commit, member-for-member.
