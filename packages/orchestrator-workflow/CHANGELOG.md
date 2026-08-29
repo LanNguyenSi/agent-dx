@@ -119,7 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manifest already exists, and `adopt` for an already-installed
   repository) plus the new operator-home and `pin` entries in its Write
   surface list. Consumer-side evidence: agent-tasks `b457ee55`, PRs
-  #142-#146 and the adopt PR.
+  #142-#147.
 - The repo manifest (`.ai/workflow/manifest.json`) gained one optional
   field, `pin`: a kit-version string `apply --pin`/`--unpin` sets,
   replaces, or clears (trimmed; an empty value clears it), read by
