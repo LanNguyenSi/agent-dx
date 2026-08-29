@@ -5396,3 +5396,37 @@ by commit time (`review-gate-and-waivers.md`, `subagent-contracts-superset.md`,
 heading only, which the Unreleased entries do not move). Re-verified and
 re-stamped all three in a commit of their own, after the source commits,
 so the stamps postdate the sources.
+
+Fix round 1 (T-008b, implementer-high, then orchestrator): the twelve
+round-1 findings were closed in place (README rule for version-lag and
+the pin comparison, the pin sentence in the CHANGELOG, doctor exit-2
+causes, adopt --json, drift gloss, operator-home wording in
+INSTALL-AGENT.md, the log entry's totals and citation-shaped tokens) and
+a new describe block in `test/docs-consistency.test.ts` pins every
+setup/apply/doctor/adopt option name and every TargetStatus member
+against README.md (two mutation probes, each red with the mutant and
+green after restore). The INSTALL-AGENT.md edits shifted lines by two
+below the operator-path step; eleven citation ranges in
+`install-fence-mechanics.md`, `model-preselection.md` and
+`run-state-lifecycle-and-markers.md` were re-pointed to byte-identical
+content and the three docs re-stamped, with one correction by the
+orchestrator: the continuation range in `model-preselection.md` next to
+the words INSTALL-AGENT.md binds to the preceding fully qualified
+citation of `test/docs-consistency.test.ts` and names the fifth guard
+test there, not a span of INSTALL-AGENT.md; the fix round had shifted it
+by one as if it were, and it was restored to the test-file range (which
+did not move, the new describe block being appended at the end). A
+fully qualified INSTALL-AGENT.md citation at that spot would also have
+re-bound the three later continuation ranges of the same paragraph to
+the wrong file, which okf-kit reported as ranges exceeding the file
+length; continuation forms resolve against the last fully qualified
+citation, whatever the surrounding prose names. Because the fix commit changed
+`test/docs-consistency.test.ts` and the CHANGELOG, the sources-fresh rule
+flagged `review-gate-and-waivers.md` and `subagent-contracts-superset.md`
+(both cite the test file by line ranges that lie above the appended
+block, so no range moved); re-verified and re-stamped in a commit after
+the fix commit. Checks after the fix round: docs-consistency test green,
+full suite green, typecheck and typecheck:test clean, prettier clean,
+flag-order lint clean, placement check clean, okf-kit with the CI
+arguments 0 CI-gating findings and the warning set back to the
+pre-round set once the re-stamps landed.

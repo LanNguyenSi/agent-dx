@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-08-29T05:01:54Z
+timestamp: 2026-08-29T05:06:25Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -558,7 +558,7 @@ the "Solution-neutral notes" section below describes.
 
 A fifth, adjacent test guards the read-only-role brace lists
 (`agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`) in
-`INSTALL-AGENT.md` (`:44-51`); it is role-enumeration generally, not
+`INSTALL-AGENT.md` (`:43-50`); it is role-enumeration generally, not
 model-specific, but shares the same drift-prevention purpose.
 
 Since 0.19.0, a standalone `describe` (`:1254-1311`) guards a tier-specific
