@@ -5292,3 +5292,79 @@ cli.ts around lines 304 to 307, not one of this round's own anchors.
 Not done: no further scope. All six notes from this round's assignment
 are addressed above; `init`/`setup`/`uninstall`/`apply`/`doctor`
 behavior and their existing tests are untouched.
+
+## 2026-08-29 (agent-dx b457ee55, task T-008, implementer, operator-install docs)
+
+Documents the operator-level install (`setup`, `apply --target`, `doctor`,
+`adopt`, the repo-manifest `pin`) in the public docs: `README.md` gained a
+new "Operator-level install" section, inserted directly before "Ownership
+and re-runs" so every citation into the file at or before "Effort tiers"
+stays put; `INSTALL-AGENT.md` gained the operator path in its numbered
+"Instructions for the agent" flow (a new paragraph after step 3's
+conflict-handling sentence, and a one-line addition to step 4's opening
+sentence) and two new Write-surface bullets (the operator home files, and
+the repo manifest's optional `pin`); `CHANGELOG.md`'s `[Unreleased]`
+section gained an `### Added` entry for the operator-manifest module, the
+operator home, the four new subcommands, and the `pin` field, plus a new
+`### Changed` entry naming the shared locked write API
+(`updateOperatorManifest`/`withOperatorManifestLock`) `setup`, `apply`,
+`doctor --prune`, and `adopt` all go through.
+
+`INSTALL-AGENT.md`'s edits landed inside the Write-surface bullet list
+(old lines 46-50 expanded to new 58-70) and inside numbered step 3 (old
+line 34 expanded to new lines 34-44) and step 4's opening line, growing
+the file from 241 to 273 lines; every citation into it from
+`install-fence-mechanics.md` and `model-preselection.md` was re-pointed
+by diffing old against new with Python's `difflib.SequenceMatcher` and
+sampling the target line ranges after the edit to confirm the quoted
+content still matches: `install-fence-mechanics.md`'s `46-61`/`63-85`/
+`63-66`/`80-82` became `58-81`/`83-105`/`83-86`/`100-102`;
+`model-preselection.md`'s `97-111`/`150-159`/`161-187`/`205-227`/
+`229-233`/`132-137` became `117-131`/`182-191`/`193-219`/`237-259`/
+`261-265`/`164-169`. `README.md` grew from 378 to 457 lines but every
+citation into it from either doc (lines 109-239) sits before the new
+section's insertion point (after line 339), so none needed re-pointing.
+Both docs' `timestamp:` frontmatter was re-stamped as the last edit
+before commit.
+
+`run-state-lifecycle-and-markers.md` also lists `README.md` and
+`INSTALL-AGENT.md` as sources and cites the same Write-surface bullets
+(`INSTALL-AGENT.md:46-47,139-144` and `:47-50#"repository's"`/
+`:141-143#"repository's"`) that this task's edits shifted, but that file
+is outside this task's `allowed_changes`; its citations were left stale
+and a follow-up to re-point them is recommended rather than fixed here.
+
+`npm test`: 498/498 green, including `docs-consistency.test.ts`
+unmodified (README.md/INSTALL-AGENT.md carry no local anchor-scope
+mapping, so none of that suite's anchor-load-bearing checks apply to
+either file's citations). `npm run typecheck` and `npm run
+typecheck:test`: clean. `npm run format:check`: clean (no `.ts` files
+touched). From the repository root, `node
+packages/slop-detector/dist/cli.js check . --pack placement-slop
+--config slop.config.yml` (after `npm ci && npm run build` in
+`packages/slop-detector`, whose `dist/` was missing in this worktree):
+clean. A grep for an em dash, and for a digit adjacent to "tests" or
+"repos", a `2026-` date, or "agent-tasks", across both edited docs found
+zero occurrences inside either doc's new prose; every em dash grep hit in
+both files sits at a pre-existing line outside the edited ranges.
+
+From the repository root: `npx -y okf-kit@0.8.0 check --json
+packages/orchestrator-workflow/docs/okf --require-anchors
+--require-anchors-allow README.md packages/orchestrator-workflow/README.md
+INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` reports
+0 errors (CI-gating) both before and after this task's edits. Warnings
+rose from the 13-warning baseline to 16; notices stayed at 22, unchanged.
+The three new warnings are all `anchor-not-found-in-range`, all caused by
+the same `INSTALL-AGENT.md` line shift described above: two are the
+`run-state-lifecycle-and-markers.md` citations named above (their
+`"repository's"` anchor no longer sits inside the cited range); the third
+is this log's own 2026-08-28 entry, which quotes the pre-fix citation as
+history (`INSTALL-AGENT.md`, range 141 through 144, anchor text
+`repository's`). That quoted range happened to still resolve against the
+master baseline's content, since the real bullet's `repository's` sat at
+old line 142, inside both the narrowed 141-143 range and the pre-fix
+141-144 one; after this task's shift the same substring no longer
+resolves against the live file, even though it is prose quoting a past
+finding, not a live citation. That third warning is left as-is: rewriting
+the historical quote's line numbers to keep it resolving would misstate
+what the 2026-08-28 fix actually narrowed the range to.
