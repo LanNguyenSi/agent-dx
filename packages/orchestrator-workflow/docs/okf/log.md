@@ -5368,3 +5368,20 @@ resolves against the live file, even though it is prose quoting a past
 finding, not a live citation. That third warning is left as-is: rewriting
 the historical quote's line numbers to keep it resolving would misstate
 what the 2026-08-28 fix actually narrowed the range to.
+
+Orchestrator follow-up in the same task (T-008, after the implementer
+return): `run-state-lifecycle-and-markers.md` is a third consumer of
+`INSTALL-AGENT.md` and was outside the implementer's allowed changes, so
+its three `INSTALL-AGENT.md` citations still pointed at the pre-edit
+lines (okf-kit: two `anchor-not-found-in-range` warnings, plus the
+unanchored two-range citation that resolved to the wrong text without a
+warning). Re-pointed by a line map computed from the old and new file
+(every mapped line byte-identical except the last line of the
+write-surface span, which gained a sentence but still carries the
+anchor): the two-range citation moved by plus twelve and plus thirty-two
+lines, the two anchored citations by plus twelve and plus thirty-two
+lines as well; the doc was re-stamped afterwards. The remaining
+`anchor-not-found-in-range` warning sits in this file's own 2026-08-28
+entry, which quotes the citation as it stood at that time; historical
+entries are not re-pointed. Re-run of the CI-argument okf-kit command
+after the edit: 0 CI-gating findings; the two doc warnings are gone.
