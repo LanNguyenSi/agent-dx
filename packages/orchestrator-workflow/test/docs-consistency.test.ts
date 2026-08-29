@@ -3795,6 +3795,35 @@ describe("operator-install-and-registry.md's apply section states the pin gate's
     );
   });
 
+  it("states positively that the pin gate returns before the install, citing the gate before runInit's call site", () => {
+    expect(applySection).toContain(
+      "The pin gate returns before the install is ever attempted",
+    );
+    const gateCitation = applySection.indexOf(
+      'cli.ts:688-694#"Repository is pinned at"',
+    );
+    const runInitCitation = applySection.indexOf(
+      'cli.ts:759#"const report = runInit({"',
+    );
+    expect(gateCitation, "pin-gate citation missing").toBeGreaterThanOrEqual(0);
+    expect(runInitCitation, "runInit citation missing").toBeGreaterThan(
+      gateCitation,
+    );
+    expect(applySection).not.toMatch(
+      /pin gate returns (only )?after the install/,
+    );
+  });
+
+  it("keeps the post-install registration-failure paragraph (installed but unregistered, exit 1)", () => {
+    expect(applySection).toContain(
+      "Once the install has actually run, registration can still fail without a second install attempt",
+    );
+    expect(applySection).toContain(
+      'cli.ts:823-827#"the kit was installed but the target was not registered"',
+    );
+    expect(applySection).toContain("applyRegistrationFailureMessage");
+  });
+
   it("the pin gate's own return precedes runInit's call in cli.ts's real source order, and the lock-timeout catch's return follows it", () => {
     const pinGateIfIndex = cliSource.indexOf(
       "if (repoPin && repoPin !== PACKAGE_VERSION && !pinOverridden) {",

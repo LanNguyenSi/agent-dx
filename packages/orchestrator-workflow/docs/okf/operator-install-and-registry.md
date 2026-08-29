@@ -236,7 +236,9 @@ the kit already installed but the target unregistered
 ## `doctor`: report every registered target's status
 
 `doctor` walks every entry in the operator manifest's registry and reports
-each target's status against the operator's defaults
+each target's status against the operator's defaults; the citation below is
+the plain path, and under `--prune` the same per-target walk runs inside
+the locked read-modify-write described further down
 (cli.ts:857-858#"Report each operator-registered target's status",
 doctor.ts:576-578#"inspectTarget(target, state.manifest, PACKAGE_VERSION),").
 The vocabulary is a seven-member union, `TargetStatus`

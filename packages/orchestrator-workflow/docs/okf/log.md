@@ -5786,3 +5786,15 @@ taken before its commit, so the four docs listing the guard file as a
 source came out stale by commit time once the fix commit existed (four
 sources-fresh warnings); re-verified (no cited range below the appended
 blocks moved) and re-stamped in this separate commit.
+
+Round-3 notes (reviewer accept_with_notes, closed by the orchestrator): the
+apply-order pin was negative only (the exact inverse of the corrected
+sentence stayed green in the reviewer's probe); two positive assertions
+were added, one on the ordering sentence and the order of its two
+citations, one on the post-install registration-failure paragraph, and
+the inverse-sentence probe is now red. The doctor walk sentence is scoped
+to the plain path with a pointer to the locked walk under --prune. The
+misleading source comment above apply's registration step in cli.ts (it
+names the pin gate as the only pre-registration return) is a follow-up in
+src, outside this docs slice. The four docs listing the guard file as a
+source are re-stamped in the commit after this one.
