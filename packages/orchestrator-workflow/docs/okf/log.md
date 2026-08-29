@@ -5385,3 +5385,11 @@ lines as well; the doc was re-stamped afterwards. The remaining
 entry, which quotes the citation as it stood at that time; historical
 entries are not re-pointed. Re-run of the CI-argument okf-kit command
 after the edit: 0 CI-gating findings; the two doc warnings are gone.
+
+After the rebase onto the merged adopt commit and the CHANGELOG commit
+naming PR 147, the okf-kit sources-fresh rule reported three docs stale
+by commit time (`review-gate-and-waivers.md`, `subagent-contracts-superset.md`,
+`run-state-lifecycle-and-markers.md`; the first two cite the CHANGELOG by
+heading only, which the Unreleased entries do not move). Re-verified and
+re-stamped all three in a commit of their own, after the source commits,
+so the stamps postdate the sources.
