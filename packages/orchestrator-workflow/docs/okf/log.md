@@ -5673,3 +5673,6 @@ taking the later timestamp. The merge dropped the closing braces of the
 slice-8 describe block at the seam (typecheck: expected a closing brace);
 restored by hand. One citation-shaped token in this entry's own prose
 (the README line-105 warning) was rewritten as prose.
+The four docs listing the guard file as a source were re-verified (no cited
+range below the appended blocks moved) and re-stamped in a commit after
+the seam repair.
