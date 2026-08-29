@@ -26,6 +26,11 @@ them.
   across re-installs, and kept in sync with docs by consistency tests; since
   0.19.0 also covers the opt-in `--tiers` effort-tier subagent variants
   (`<role>-<tier>.md`) rendered alongside each role's base file.
+- [Operator install and target registry](operator-install-and-registry.md),
+  the operator-level home, its manifest schema and read states, the single
+  locked read-modify-write API and its lock semantics, the target registry,
+  and the `setup`/`apply`/`doctor`/`adopt` commands built on top of it,
+  including the pin rule and how uninstall leaves the registry untouched.
 
 ## Invariants
 

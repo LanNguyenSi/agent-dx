@@ -5476,3 +5476,325 @@ message carries an anchor rule id regardless of severity, while the local
 measurement above had counted only error-severity findings as gating.
 The token was rewritten as prose (range and anchor text as they stood
 then); re-run with the CI criterion (any anchor rule id): 0 findings.
+
+## 2026-08-29 (agent-dx b457ee55, task T-009, implementer)
+
+Added a new module doc for the operator-level install layer added by the
+operator-apply slice: the operator home and its resolution order, the
+operator manifest schema and its three read states, the single locked
+read-modify-write entry point and its lock mechanics (mkdir-based mutex,
+owner-token release guard, stale-lock reclaim, timeout), the implicit
+target registry, the setup/apply/doctor/adopt commands and their
+precedence/pin/exit-code contracts, the pin rule, and how uninstall leaves
+the registry untouched. Listed it under Modules in index.md; did not touch
+the Maintenance section there. Every non-trivial claim carries a
+string-anchored citation into src/ or test/ only (README.md and
+INSTALL-AGENT.md were deliberately left out of scope, a parallel slice is
+changing them); every cited range and anchor was verified by opening the
+real file and checking the anchor text sits on the range's own last
+content line, occurs at most three times in the whole target file, and
+occurs exactly once inside the cited range, mirroring the same three
+properties this file's own docs-consistency guard enforces, before the doc
+was written.
+
+test/docs-consistency.test.ts gained four new describe blocks pinning the
+doc's schema/status/command/lock claims against real src/ exports rather
+than a second, hand-typed enumeration: the operator manifest's envelope,
+defaults, and per-target keys are read off objects actually returned by
+createOperatorManifest and upsertOperatorTarget; the seven TargetStatus
+values and their exit-code grouping are checked against
+adoptExitCodeForStatus itself; the four operator-facing command names are
+read out of cli.ts's own command registrations rather than listed by hand;
+and the lock timeout/stale-window numbers are checked against
+DEFAULT_LOCK_TIMEOUT_MS/DEFAULT_LOCK_STALE_MS. The new imports were
+appended just before these new blocks, not moved into the top-of-file
+import block, since this file's own citation-guard comment already notes
+that a top-of-file insertion shifts every existing line-numbered citation
+other docs in this bundle hold into this file; confirmed by trying the
+top-of-file placement first, watching three of this file's own citation
+self-checks fail against other docs (model-preselection.md,
+review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
+subagent-contracts-superset.md all cite line ranges into this file), then
+moving the imports to the end and re-running green.
+
+The first pass at the status-vocabulary and lock-defaults pins used a
+per-value `toContain` check, which is not discriminating: the doc states
+`version-lag` and the `40-second`/`30-second` figures more than once, so
+mutating only one occurrence still left another, unmutated occurrence
+satisfying a bare substring check. Rewrote both as: the status pin now
+matches the exact, comma-joined seven-status sentence built from the same
+literal list the exit-code test uses; the lock-defaults pins now extract
+every `<N>-second timeout`/`<N>-second staleness window` mention from the
+doc (whitespace-unwrapped, so a line-wrapped mention is not missed) and
+require every one of them to equal the real constant, so a mutation to
+any single mention fails the check regardless of which one a later mutant
+targets.
+
+Mutation probes, run for real against the working tree, each mutated,
+the named test run, then hand-restored to the exact pre-mutation text
+(diffed byte-identical against a saved copy) and re-verified green: (a)
+changing the doc's `version-lag` status word to `version-lagging` inside
+the seven-status vocabulary sentence failed the new
+"names the exact seven-status vocabulary" test; restored, green again.
+(b) changing one of the doc's two `40-second timeout` mentions to
+`45-second timeout` failed the new "every second-based mention of the
+lock timeout" test; restored, green again.
+
+This worktree's own packages/orchestrator-workflow/node_modules and
+packages/slop-detector/node_modules were plain empty directories rather
+than symlinks into the main checkout (unlike the worktree root's own
+node_modules), which made `typescript` and the slop-detector build
+unresolvable; re-pointed both as symlinks to the corresponding directory
+in the main checkout before running anything, the same way the worktree
+root's own node_modules is already set up. Not a source change, and not
+staged.
+
+`npm test`: green, +10 tests over the prior state of this file (the four
+new T-009 describe blocks). `npm run typecheck` and `npm run
+typecheck:test`: clean. `npm run format` (rewrote only
+docs-consistency.test.ts, no other file changed) then `npm run
+format:check`: clean. `node scripts/check-cli-flag-order.mjs` (from the
+repository root): clean. From the repository root: `npx -y okf-kit@0.8.0
+check --json packages/orchestrator-workflow/docs/okf --require-anchors
+--require-anchors-allow README.md packages/orchestrator-workflow/README.md
+INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` reports
+0 gating findings; warnings and notices are unchanged from the pre-task
+baseline, and none of them mention the new doc by name. `node
+packages/slop-detector/dist/cli.js check . --pack placement-slop --config
+slop.config.yml` (after building slop-detector, whose dist was missing):
+clean.
+
+Not done: no further scope. `src/`, README.md, INSTALL-AGENT.md,
+CHANGELOG.md, and every other OKF doc are untouched.
+
+Fix round 1 (agent-dx b457ee55, task T-009, implementer, closing round-1
+review): closed H1 (the adopt section wrongly claimed doctor's own
+multi-target exit code was "built from" `adoptExitCodeForStatus`'s
+per-status mapping; rewritten as adopt's own single-target mapping,
+deliberately finer than doctor's own two-way `0`/`1` aggregate, with
+citations to both), M1 (the doctor section's exit-code paragraph was
+missing the third exit-2 path: a `--prune` run whose locked write throws
+is caught in `cli.ts` and prints a differently-shaped JSON object with
+`error: "operator-manifest-locked"`/`"operator-manifest-write-failed"`
+plus `message` and no `unvalidatedDropped`; added, and narrowed the two
+sentences that were false outside that path), M2 (the three schema-key
+pins were not discriminating against an added field; each now also
+asserts an exact `toEqual` key list, in addition to the existing per-key
+`toContain` loop), M5 (the "available for human output" sentence cited
+`TargetReport`'s `--json`-contract field range instead of its own doc
+comment; re-anchored to `TargetReport`'s own doc comment and reworded to
+"exist only for the human-output printer"), L1 (narrowed "the only case that returns
+before registering is the pin gate" to "the only case that runs the
+install and then returns without registering", naming apply's other
+early returns and their real exit codes), L2 (apply's own precondition
+failures split across both exit codes, not only 1; fixed the adopt
+section's contrast accordingly), L3 (added the well-formed-row qualifier
+to the registry-removal claim, citing `readOperatorManifest`'s per-entry
+filter), L4 (dropped the `(T-009)` suffix from the four describe titles;
+provenance stays in the block comments). Also added one new describe
+block (three `it`s) that derives doctor's own status-to-exit-1 set from
+`doctor.ts`'s source text and asserts doctor's own paragraph never
+attaches a status to exit `2` while adopt's own paragraph names the full
+`0`/`1`/`2` mapping (the reviewer's suggested missing test for H1); the
+second suggested missing test was folded into the M2 fix above rather
+than added separately, since the `toEqual` list is the "stores exactly
+..." pin itself.
+
+Every new or changed citation was re-verified against this file's own
+"last content line" / "at most 3 times file-wide" / "exactly once in
+range" guard (`describe("every string-anchored docs/okf citation's anchor
+is load-bearing ...")`): several of the first-draft anchors for this fix
+round failed that guard even though the ranges themselves were correct
+(most commonly, the literal `process.exitCode = N;` line recurs more than
+3 times across `cli.ts`, and a doc-comment's closing `*/` counts as a
+content line under this guard's own boilerplate definition, unlike `});`
+or a bare `}`); every citation below was narrowed or re-pointed until the
+guard was green, verified by running `npx vitest run
+test/docs-consistency.test.ts` after each change, not by inspection alone.
+
+Mutation probes, run for real against the working tree: (a) the M2 probe
+named by the reviewer, adding `pin?: string` to `OperatorTarget` and
+`pin: "mutation-probe"` to `upsertOperatorTarget`'s push branch in
+src/operator-manifest.ts, failed the new "names every OperatorTarget
+registry-entry key" test (`toEqual` mismatch: `path`, `lastAppliedVersion`,
+`lastAppliedAt`, `pin` vs. the expected three-key list); `src/` was then
+restored from a pre-mutation copy and `cmp`-verified byte-identical, and
+the test re-run green. (b) The two pre-existing pins from the original
+T-009 pass were re-verified against this round's edited doc: changing
+`version-lag` to `version-lagging` inside the seven-status sentence still
+fails "names the exact seven-status vocabulary"; changing one of the two
+`40-second timeout` mentions to `45-second timeout` still fails "every
+second-based mention of the lock timeout"; both restored and re-verified
+green.
+
+`npx vitest run test/docs-consistency.test.ts`: green (+3, all from the new
+H1-discriminator describe block; the three schema-key `it`s each gained one additional
+`toEqual` assertion without becoming new tests). `npm test`: green across
+the whole package. `npm run typecheck` and `npm run typecheck:test`:
+clean. `npm run format` reformatted only `docs-consistency.test.ts` (this
+file's own new blocks); `npm run format:check` then clean; the full suite
+was re-run green after the reformat. `node scripts/check-cli-flag-order.mjs`
+(from the repository root): clean. `node packages/slop-detector/dist/cli.js
+check . --pack placement-slop --config slop.config.yml`: clean. Grepped
+both changed files for em dashes and control characters: none (one
+pre-existing em dash in the guard file is untouched by this round, outside
+its scope).
+
+Committed the doc/test fixes first (fix commit), confirmed via `npx -y
+okf-kit@0.8.0 check --json packages/orchestrator-workflow/docs/okf
+--require-anchors --require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` that editing
+`docs-consistency.test.ts` in that commit produced exactly the four STALE
+warnings M4 predicted (model-preselection.md, review-gate-and-waivers.md,
+run-state-lifecycle-and-markers.md, subagent-contracts-superset.md, each
+naming `test/docs-consistency.test.ts` as the changed source), then
+re-stamped those four docs' `timestamp` frontmatter to `2026-08-29T05:40:16Z`
+in this separate, later commit per the Maintenance rule (a stamp in the
+same commit as the source edit is stale by construction, since
+`sources-fresh` compares commit times). Re-ran the same okf-kit command
+after the re-stamp commit: 0 errors, 13 warnings (down from 17; the 4
+STALE warnings are gone, leaving the pre-existing baseline of 12
+`install-fence-mechanics.md` short-form-citation warnings and the one
+blank-start-line warning on the README citation at line 105), 0 warnings naming
+`operator-install-and-registry.md`.
+
+Not done beyond this fix round: no further scope. `src/` (other than the
+M2 probe, applied and restored, never committed), README.md,
+INSTALL-AGENT.md, CHANGELOG.md, and every OKF doc other than the four
+re-stamped above are untouched.
+
+Rebase onto the merged slice-8 commit (orchestrator): both slices append
+to `test/docs-consistency.test.ts` and to this log, so the rebase
+conflicted on both files and on the four re-stamped docs; resolved by
+keeping the slice-8 blocks first and the slice-9 blocks after them and
+taking the later timestamp. The merge dropped the closing braces of the
+slice-8 describe block at the seam (typecheck: expected a closing brace);
+restored by hand. One citation-shaped token in this entry's own prose
+(the README line-105 warning) was rewritten as prose.
+The four docs listing the guard file as a source were re-verified (no cited
+range below the appended blocks moved) and re-stamped in a commit after
+the seam repair.
+
+Fix round 2 (agent-dx b457ee55, task T-009, implementer, closing round-2
+review): closed M1 (the `apply` section's registration paragraph was
+inverted: it claimed the pin gate is the only case that "runs" the install
+and then returns without registering, contradicting the very next
+sentences, which already listed several early returns that never run the
+install at all. Rewritten in two paragraphs: the pin gate and every other
+early return happen BEFORE `runInit` is ever called, citing the pin gate's
+own condition alongside `runInit`'s call site so the ordering is anchored,
+not asserted; and, separately, registration can still fail AFTER a real
+install ran, without a second install attempt, via either the
+operator-manifest lock-timeout catch or the `applyRegistrationFailureMessage`
+branch when the operator manifest turns unreadable or absent between this
+command's own read and its later write; the "conflicted files still
+register" sentence was kept unchanged), L1 (the `--json` sentence claimed
+it prints "exactly" the `DoctorReport`, glossing over that every target is
+first projected through `targetReportToJson` to its narrower
+`TargetReportJson` shape; reworded and paired with a citation to that
+`.map` call), L2 (dropped the suite-total figure from this entry's own
+vitest-result sentence below, keeping only the delta), L3 (rewrote the two
+citation-shaped tokens sitting in this entry's own prose, above, as plain
+descriptions instead of literal `path:N` citations, since this log is
+outside the anchor guard's scope but the convention against path:N tokens
+in log prose still applies), L4 (the `setup`/`apply`/`doctor`/`adopt`
+sections each had one load-bearing behavioural claim anchored only into a
+commander `.description()` help string; each now also carries an
+implementation anchor: `setup`'s claim pairs with its own
+`updateOperatorManifest` call, the action's only write, targeting the
+operator manifest; `apply`'s pairs with its own `upsertOperatorTarget`
+call; `doctor`'s pairs with `runDoctor`'s own per-target `.map`; `adopt`'s
+"touching nothing" claim now also cites the same bootstrap-branch
+`updateOperatorManifest` call already anchoring its neighboring bootstrap
+claim, since it is that action's own only write call too, targeting the
+operator manifest and never the repository).
+
+Added one new describe block (two `it`s) to the very end of
+`test/docs-consistency.test.ts`, matching this file's established
+append-at-the-end convention (several sibling docs cite this file by line
+range, so an insertion anywhere else would shift those citations): (a)
+asserts the doc's own `apply` section does not contain the round-2
+sentence's exact wording, and (b) derives the real control-flow order
+directly from `src/cli.ts`'s own source text, string-indexing the pin
+gate's condition, its own `return;`, `runInit`'s call site, and the
+lock-timeout catch's own `return;`, and asserts the pin gate's return
+precedes `runInit` while the lock-timeout catch's return follows it, so a
+future refactor that reorders the pin gate relative to the install fails
+this test instead of only leaving the doc's prose to drift again.
+
+Mutation probes, run for real: (1) reinserted the round-2 sentence into the
+doc's `apply` section: failed test (a) with the expected "expected ... not
+to contain" assertion error; restored from a pre-mutation copy, diffed
+byte-identical, and the test re-run green. (2) In a copy-aside of
+`src/cli.ts`, textually inserted the `runInit` call-site string inside the
+pin gate's own `if` block, ahead of its `return;`, so the pin gate's return
+would appear to follow `runInit` in source order: failed test (b) with the
+expected index-ordering assertion error; `src/cli.ts` was then restored
+from the pre-mutation copy and `cmp`-verified byte-identical (also
+confirmed via `git hash-object` against the same blob `HEAD` already
+carries), never staged, and the test re-run green. The three pre-existing
+probes from the original T-009 pass and its first fix round were also
+re-verified against this round's edited doc and source: `version-lag` to
+`version-lagging` inside the seven-status sentence still fails "names the
+exact seven-status vocabulary"; one of the two `40-second timeout`
+mentions bumped to `45-second timeout` still fails "every second-based
+mention of the lock timeout"; and adding `pin?: string` to
+`OperatorTarget`'s push branch in `upsertOperatorTarget` still fails "names
+every OperatorTarget registry-entry key"; each mutation was restored and
+`cmp`-verified byte-identical before its test was re-run green.
+
+`npx vitest run test/docs-consistency.test.ts`: green (+2 over this file's
+post-round-1 state, both from the new M1-discriminator describe block).
+`npm test`: green across the whole package. `npm run typecheck` and `npm
+run typecheck:test`: clean. `npm run format` reformatted only
+`docs-consistency.test.ts` (whitespace inside this round's own new block,
+appended at the file's end; nothing earlier in the file shifted, so no
+other doc's citation into this file was affected, confirmed by the still-
+green anchor-guard describe blocks after the reformat); `npm run
+format:check` then clean; the full suite was re-run green after the
+reformat. `node scripts/check-cli-flag-order.mjs` (from the repository
+root): clean. `node packages/slop-detector/dist/cli.js check . --pack
+placement-slop --config slop.config.yml` (from the repository root):
+clean. Grepped every line this round actually changed (the doc, this log
+entry, and the new test block) for em dashes and control characters: none;
+the file-wide em dashes a plain grep of the whole log or test file turns
+up predate this round and are untouched by it.
+
+`npx -y okf-kit@0.8.0 check --json packages/orchestrator-workflow/docs/okf
+--require-anchors --require-anchors-allow README.md
+packages/orchestrator-workflow/README.md INSTALL-AGENT.md
+packages/orchestrator-workflow/INSTALL-AGENT.md` after this round's fix
+commit: 0 errors, 0 findings whose message ends in an anchor rule id, no
+STALE finding and no finding naming `operator-install-and-registry.md` at
+all; the warning/notice counts and their contents are unchanged from the
+pre-round-2 baseline (the 12 `install-fence-mechanics.md` short-form
+citation warnings, the one blank-start-line warning on the README citation
+at line 105, surfaced under `log.md`, and the pre-existing
+`unresolved-ambiguous` notices), confirming this round's edits introduced
+no new drift and needed
+no re-stamp of the four docs that list `docs-consistency.test.ts` as a
+source.
+
+Not done beyond this fix round: no further scope. `src/cli.ts` and
+`src/operator-manifest.ts` (both touched only by the probes above, applied
+and restored, never committed), README.md, INSTALL-AGENT.md,
+CHANGELOG.md, and `docs/okf/index.md` are untouched.
+
+Orchestrator note after fix round 2: the round's okf-kit measurement was
+taken before its commit, so the four docs listing the guard file as a
+source came out stale by commit time once the fix commit existed (four
+sources-fresh warnings); re-verified (no cited range below the appended
+blocks moved) and re-stamped in this separate commit.
+
+Round-3 notes (reviewer accept_with_notes, closed by the orchestrator): the
+apply-order pin was negative only (the exact inverse of the corrected
+sentence stayed green in the reviewer's probe); two positive assertions
+were added, one on the ordering sentence and the order of its two
+citations, one on the post-install registration-failure paragraph, and
+the inverse-sentence probe is now red. The doctor walk sentence is scoped
+to the plain path with a pointer to the locked walk under --prune. The
+misleading source comment above apply's registration step in cli.ts (it
+names the pin gate as the only pre-registration return) is a follow-up in
+src, outside this docs slice. The four docs listing the guard file as a
+source are re-stamped in the commit after this one.

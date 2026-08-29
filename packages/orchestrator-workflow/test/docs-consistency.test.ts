@@ -3471,3 +3471,403 @@ describe("operator-install CLI surface stays documented in README (fix round 1, 
     expect(missing, missing.join(", ")).toEqual([]);
   });
 });
+
+// Imported here (appended at file end), not moved to the top-of-file import
+// block, so adding it does not shift every existing citation into this file
+// (line numbers into this file are cited by other docs/okf modules) -- see
+// the ANCHOR_OKF_DOCS comment above for why this file treats top-of-file
+// insertion as unsafe.
+import { adoptExitCodeForStatus, type TargetStatus } from "../src/doctor.js";
+import {
+  DEFAULT_LOCK_STALE_MS,
+  DEFAULT_LOCK_TIMEOUT_MS,
+  createOperatorManifest,
+  upsertOperatorTarget,
+} from "../src/operator-manifest.js";
+
+/**
+ * agent-tasks b457ee55 (T-009): pins the new operator-install-and-registry.md
+ * module doc's load-bearing claims against the real exports they describe,
+ * so a later change to the operator manifest schema, the doctor status
+ * vocabulary, the CLI command set, or the lock's timing defaults fails here
+ * instead of only going stale silently in prose. `createOperatorManifest`/
+ * `upsertOperatorTarget` are used rather than a hand-typed key list so the
+ * schema pin tracks the real runtime shape, not a second, potentially
+ * diverging enumeration of the same fields.
+ *
+ * fix round (review finding M2): the three per-key `toContain` loops below
+ * are not discriminating against an *added* key: a new field whose name
+ * happens to already appear elsewhere in the doc (in backticks, for
+ * whatever unrelated reason) would keep every `toContain` green while the
+ * doc's own "stores exactly ..."/"carries ..." enumeration sentences became
+ * false. Each `it` below now also asserts the exact key list via `toEqual`
+ * against a literal copied from the doc's current enumeration, so a key
+ * added to (or removed from) the real runtime shape fails this test loudly
+ * regardless of what the doc's prose happens to already contain, forcing
+ * both the test and the doc's enumeration sentence to be updated together.
+ */
+describe("operator-install-and-registry.md names the real operator manifest schema keys", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+
+  function sampleManifest() {
+    return createOperatorManifest(
+      { harnesses: [], profile: "full", tiers: false, models: {} },
+      "2020-01-01T00:00:00.000Z",
+    );
+  }
+
+  it("names every OperatorManifest envelope key", () => {
+    // Literal mirrors the doc's own "carries `kit`, `schemaVersion`,
+    // `defaults`, `targets`, `createdAt`, `updatedAt`" sentence; a key added
+    // to or removed from the real envelope fails here even if its name
+    // already appears elsewhere in the doc.
+    expect(Object.keys(sampleManifest())).toEqual([
+      "kit",
+      "schemaVersion",
+      "defaults",
+      "targets",
+      "createdAt",
+      "updatedAt",
+    ]);
+    for (const key of Object.keys(sampleManifest())) {
+      expect(doc).toContain(`\`${key}\``);
+    }
+  });
+
+  it("names every OperatorManifestDefaults key", () => {
+    // Literal mirrors the doc's own "carries `harnesses`, `profile`,
+    // `tiers`, and `models`" sentence.
+    expect(Object.keys(sampleManifest().defaults)).toEqual([
+      "harnesses",
+      "profile",
+      "tiers",
+      "models",
+    ]);
+    for (const key of Object.keys(sampleManifest().defaults)) {
+      expect(doc).toContain(`\`${key}\``);
+    }
+  });
+
+  it("names every OperatorTarget registry-entry key", () => {
+    const { manifest } = upsertOperatorTarget(
+      sampleManifest(),
+      "/tmp/operator-install-and-registry-schema-pin",
+      "1.2.3",
+      "2020-01-01T00:00:00.000Z",
+    );
+    const target = manifest.targets[0];
+    expect(target).toBeDefined();
+    // Literal mirrors the doc's own "stores exactly `path`,
+    // `lastAppliedVersion`, `lastAppliedAt`" sentence. This is the exact
+    // mutation probe from review finding M2: adding `pin?: string` to
+    // `OperatorTarget` and emitting it from `upsertOperatorTarget`'s push
+    // branch previously kept every per-key `toContain` above green while
+    // this doc sentence went false; this `toEqual` now fails loudly
+    // instead.
+    expect(Object.keys(target as object)).toEqual([
+      "path",
+      "lastAppliedVersion",
+      "lastAppliedAt",
+    ]);
+    for (const key of Object.keys(target)) {
+      expect(doc).toContain(`\`${key}\``);
+    }
+  });
+});
+
+/**
+ * agent-tasks b457ee55 (T-009): the seven-member `TargetStatus` union has no
+ * runtime export of its own, so this pins the vocabulary as a literal list
+ * typed against `adoptExitCodeForStatus`'s parameter (an invalid status
+ * string here would fail to compile), and derives the exit-code grouping
+ * from that same exported function rather than a second hand-written
+ * mapping, so the doc's stated grouping cannot silently diverge from the
+ * real one in doctor.ts.
+ */
+describe("operator-install-and-registry.md names every doctor status and its real exit-code mapping", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const unwrapped = unwrap(doc);
+  const STATUSES: TargetStatus[] = [
+    "clean",
+    "divergent",
+    "version-lag",
+    "drift",
+    "missing",
+    "no-manifest",
+    "unverifiable",
+  ];
+
+  // A per-status `toContain` check would not be discriminating: mutating
+  // one status word (e.g. `version-lag` -> `version-lagging`) inside the
+  // doc's vocabulary sentence still leaves the correct spelling sitting in
+  // several other sentences of the doc (the precedence rule, the exit-code
+  // grouping, the pin-rule section, ...), so a per-word `toContain` stays
+  // green. Instead this asserts the exact contiguous vocabulary-listing
+  // sentence, built from `STATUSES` itself, so any single word substituted
+  // inside that one sentence breaks the match.
+  it("names the exact seven-status vocabulary as one contiguous, comma-joined sentence", () => {
+    const sentence = unwrap(`${STATUSES.map((s) => `\`${s}\``).join(", ")}.`);
+    expect(unwrapped).toContain(sentence);
+  });
+
+  it("states the real adoptExitCodeForStatus grouping, derived from the export itself", () => {
+    const byCode = new Map<number, TargetStatus[]>();
+    for (const status of STATUSES) {
+      const code = adoptExitCodeForStatus(status);
+      byCode.set(code, [...(byCode.get(code) ?? []), status]);
+    }
+    for (const [code, statuses] of byCode) {
+      const phrase = unwrap(
+        `\`${code}\` for ${statuses.map((s) => `\`${s}\``).join("/")}`,
+      );
+      expect(unwrapped).toContain(phrase);
+    }
+  });
+});
+
+/**
+ * agent-tasks b457ee55 (T-009): command names are read out of cli.ts's own
+ * `.command("...")` registrations rather than hand-listed, so a command
+ * added or renamed later is picked up automatically instead of silently
+ * going unchecked; `init`/`uninstall` are excluded since they belong to
+ * install-fence-mechanics.md, not this doc.
+ */
+describe("operator-install-and-registry.md names the real operator-facing commands", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const cliSource = readFileSync(`${PACKAGE_DIR}/src/cli.ts`, "utf8");
+  const allCommandNames = [
+    ...cliSource.matchAll(/\.command\("([a-z]+)"\)/g),
+  ].map((m) => m[1]);
+  const operatorCommandNames = allCommandNames.filter(
+    (name) => name !== "init" && name !== "uninstall",
+  );
+
+  it("found the four operator-facing commands in cli.ts (sanity: not vacuously true)", () => {
+    expect(operatorCommandNames.sort()).toEqual([
+      "adopt",
+      "apply",
+      "doctor",
+      "setup",
+    ]);
+  });
+
+  it("names every operator-facing command cli.ts actually registers", () => {
+    for (const name of operatorCommandNames) {
+      expect(doc).toContain(`\`${name}\``);
+    }
+  });
+});
+
+/**
+ * agent-tasks b457ee55 (T-009): pins the doc's stated lock timeout/stale
+ * window against the real exported constants, not a copied-in number, and
+ * against the real invariant (timeout > stale) rather than assuming it.
+ * The doc states each number more than once (the timeout is mentioned where
+ * it is introduced and again where it is compared to the stale window), so
+ * a single `toContain` check is not discriminating: mutating only one of
+ * the two mentions would still leave the other one matching. Instead this
+ * extracts every `<N>-second timeout`/`<N>-second staleness window` mention
+ * from the (whitespace-unwrapped, so a line-wrapped mention still counts)
+ * doc text and requires every one of them to equal the real constant.
+ */
+describe("operator-install-and-registry.md states the real lock timeout and stale-window defaults", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const unwrapped = unwrap(doc);
+
+  it("every second-based mention of the lock timeout matches DEFAULT_LOCK_TIMEOUT_MS", () => {
+    const expectedSeconds = DEFAULT_LOCK_TIMEOUT_MS / 1000;
+    const mentions = [...unwrapped.matchAll(/(\d+)-second timeout/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(mentions.length).toBeGreaterThan(0);
+    for (const seconds of mentions) {
+      expect(seconds).toBe(expectedSeconds);
+    }
+  });
+
+  it("every second-based mention of the lock stale window matches DEFAULT_LOCK_STALE_MS", () => {
+    const expectedSeconds = DEFAULT_LOCK_STALE_MS / 1000;
+    const mentions = [
+      ...unwrapped.matchAll(/(\d+)-second staleness window/g),
+    ].map((m) => Number(m[1]));
+    expect(mentions.length).toBeGreaterThan(0);
+    for (const seconds of mentions) {
+      expect(seconds).toBe(expectedSeconds);
+    }
+  });
+
+  it("states the real timeout-above-stale invariant, not just the two numbers", () => {
+    expect(DEFAULT_LOCK_TIMEOUT_MS).toBeGreaterThan(DEFAULT_LOCK_STALE_MS);
+    expect(doc).toContain("is deliberately kept above");
+  });
+});
+
+/**
+ * agent-tasks b457ee55 (T-009 fix round 1, review finding H1): the doc
+ * previously claimed `doctor`'s own multi-target exit code was "built from"
+ * `adoptExitCodeForStatus`'s per-status 0/1/2 mapping. False: `runDoctor`'s
+ * own exit code, once a manifest exists to evaluate, is a two-way 0/1
+ * aggregate over all registered targets (`doctor.ts`'s `targets.some(...)  ?
+ * 1 : 0`), computed inline and never assigning `2` to any individual
+ * target's status; `adoptExitCodeForStatus` is a separate, exported,
+ * single-target function scoped to `adopt`'s own contract. This pins the
+ * two apart: `doctor`'s own exit-code paragraph never attaches a status to
+ * exit `2`, and `adopt`'s own paragraph is the only place the full 0/1/2
+ * per-status grouping appears. The four-status set that pushes `doctor`'s
+ * own aggregate to `1` is read directly out of `doctor.ts`'s source text
+ * (there is no exported constant for it, unlike `REMOVE_ON_PRUNE`, which is
+ * a different, two-status set used only for `--prune` eligibility), so a
+ * change to that inline condition is caught here too.
+ */
+describe("operator-install-and-registry.md keeps doctor's own aggregate exit code and adopt's per-status mapping distinct", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const doctorSource = readFileSync(`${PACKAGE_DIR}/src/doctor.ts`, "utf8");
+  const doctorSection = unwrap(
+    phraseBoundedSlice(doc, "## `doctor`", "## `adopt`"),
+  );
+  const adoptSection = unwrap(
+    phraseBoundedSlice(doc, "## `adopt`", "## The pin rule"),
+  );
+
+  it("found runDoctor's own status-to-exit-1 set in doctor.ts (sanity: not vacuously true)", () => {
+    const blockStart = doctorSource.indexOf(
+      "const exitCode: 0 | 1 = targets.some(",
+    );
+    expect(blockStart, "exitCode block not found").toBeGreaterThanOrEqual(0);
+    const blockEnd = doctorSource.indexOf("? 1", blockStart);
+    expect(blockEnd, "? 1 not found after exitCode block").toBeGreaterThan(
+      blockStart,
+    );
+    const block = doctorSource.slice(blockStart, blockEnd);
+    const statuses = [...block.matchAll(/report\.status === "([a-z-]+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(statuses).toEqual([
+      "drift",
+      "missing",
+      "no-manifest",
+      "unverifiable",
+    ]);
+  });
+
+  it("doctor's own aggregate paragraph never attaches any status to exit 2", () => {
+    expect(doctorSection).toContain("`1` if any remaining target");
+    expect(doctorSection).toContain("else `0`");
+    expect(doctorSection).not.toMatch(/`2`\s+for\s+`/);
+  });
+
+  it("adopt's own paragraph names the full 0/1/2 per-status mapping", () => {
+    expect(adoptSection).toMatch(/`0`\s+for\s+`clean`/);
+    expect(adoptSection).toMatch(/`1`\s+for\s+`drift`/);
+    expect(adoptSection).toMatch(/`2`\s+for\s+`missing`/);
+  });
+});
+
+/**
+ * agent-tasks b457ee55 (T-009 fix round 2, review finding M1): the doc
+ * previously claimed "once the install actually runs, the only case that
+ * runs it and then returns without registering is the pin gate above" --
+ * inverted. The pin gate (cli.ts's `if (repoPin && repoPin !==
+ * PACKAGE_VERSION && !pinOverridden)` block) returns BEFORE `runInit` is
+ * ever called, so it never "runs" the install at all; and registration can
+ * still fail AFTER a real install ran, without a second install attempt
+ * (the operator-manifest lock-timeout catch, and the
+ * `applyRegistrationFailureMessage` branch when the operator manifest turns
+ * unreadable or absent between this command's own read and its later
+ * write). This pins both halves of the correction: (a) the round-2 wording
+ * must not reappear in the doc's own `apply` section, and (b) the real
+ * control-flow order in cli.ts -- derived from the source text itself, not
+ * hand-copied line numbers -- actually has the pin gate's `return;` before
+ * `runInit`'s call, and the lock-timeout catch's `return;` after it, so a
+ * later refactor that moves the pin gate past the install fails (b) loudly
+ * instead of only leaving the doc's prose to silently go wrong again.
+ */
+describe("operator-install-and-registry.md's apply section states the pin gate's return in the right order relative to the install (fix round 2, M1)", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const applySection = unwrap(
+    phraseBoundedSlice(doc, "## `apply`", "## `doctor`"),
+  );
+  const cliSource = readFileSync(`${PACKAGE_DIR}/src/cli.ts`, "utf8");
+
+  it("does not claim the pin gate runs the install and then returns", () => {
+    expect(applySection).not.toContain(
+      "runs it and then returns without registering is the pin gate",
+    );
+  });
+
+  it("states positively that the pin gate returns before the install, citing the gate before runInit's call site", () => {
+    expect(applySection).toContain(
+      "The pin gate returns before the install is ever attempted",
+    );
+    const gateCitation = applySection.indexOf(
+      'cli.ts:688-694#"Repository is pinned at"',
+    );
+    const runInitCitation = applySection.indexOf(
+      'cli.ts:759#"const report = runInit({"',
+    );
+    expect(gateCitation, "pin-gate citation missing").toBeGreaterThanOrEqual(0);
+    expect(runInitCitation, "runInit citation missing").toBeGreaterThan(
+      gateCitation,
+    );
+    expect(applySection).not.toMatch(
+      /pin gate returns (only )?after the install/,
+    );
+  });
+
+  it("keeps the post-install registration-failure paragraph (installed but unregistered, exit 1)", () => {
+    expect(applySection).toContain(
+      "Once the install has actually run, registration can still fail without a second install attempt",
+    );
+    expect(applySection).toContain(
+      'cli.ts:823-827#"the kit was installed but the target was not registered"',
+    );
+    expect(applySection).toContain("applyRegistrationFailureMessage");
+  });
+
+  it("the pin gate's own return precedes runInit's call in cli.ts's real source order, and the lock-timeout catch's return follows it", () => {
+    const pinGateIfIndex = cliSource.indexOf(
+      "if (repoPin && repoPin !== PACKAGE_VERSION && !pinOverridden) {",
+    );
+    expect(
+      pinGateIfIndex,
+      "pin gate condition not found",
+    ).toBeGreaterThanOrEqual(0);
+    const pinGateReturnIndex = cliSource.indexOf("return;", pinGateIfIndex);
+    expect(
+      pinGateReturnIndex,
+      "pin gate return not found after its condition",
+    ).toBeGreaterThan(pinGateIfIndex);
+
+    const runInitIndex = cliSource.indexOf(
+      "const report = runInit({",
+      pinGateIfIndex,
+    );
+    expect(
+      runInitIndex,
+      "runInit call not found after pin gate",
+    ).toBeGreaterThan(pinGateIfIndex);
+
+    // The pin gate's own return must lie strictly before runInit's call: a
+    // refactor that moved the pin gate to run after the install (or that
+    // reordered runInit above the gate) flips this comparison.
+    expect(pinGateReturnIndex).toBeLessThan(runInitIndex);
+
+    const lockCatchIndex = cliSource.indexOf(
+      "if (error instanceof OperatorManifestLockTimeoutError) {",
+    );
+    expect(
+      lockCatchIndex,
+      "lock-timeout catch not found",
+    ).toBeGreaterThanOrEqual(0);
+    const lockReturnIndex = cliSource.indexOf("return;", lockCatchIndex);
+    expect(
+      lockReturnIndex,
+      "lock-timeout catch's return not found",
+    ).toBeGreaterThan(lockCatchIndex);
+
+    // The lock-timeout catch's own return sits AFTER runInit's call: unlike
+    // the pin gate, this return is only reachable once the install already
+    // ran.
+    expect(lockReturnIndex).toBeGreaterThan(runInitIndex);
+  });
+});
