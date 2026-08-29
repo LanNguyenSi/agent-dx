@@ -30,8 +30,8 @@ import type {
 } from "./operator-manifest.js";
 import type { UninstallReport } from "./uninstall.js";
 import { runUninstall } from "./uninstall.js";
-import { runDoctor, targetReportToJson } from "./doctor.js";
-import type { DoctorReport } from "./doctor.js";
+import { inspectTarget, runDoctor, targetReportToJson } from "./doctor.js";
+import type { DoctorReport, TargetReport } from "./doctor.js";
 
 function isInteractive(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -954,59 +954,7 @@ program
 
     const counts = new Map<string, number>();
     for (const target of report.targets) {
-      console.log(`${target.status}  ${target.path}`);
-      if (target.status === "unverifiable" && target.reason) {
-        console.log(`  ${target.reason}`);
-      }
-      // Divergence and version-lag detail lines print for both `divergent`
-      // and `drift` status lines (fix-round-2, review finding L6): a drift
-      // target can also be divergent and/or version-lagging (see
-      // doctor.ts's status-precedence doc comment), and before this fix
-      // its `divergent`/`version-lag` facts were silently dropped from the
-      // human output whenever `drift` won the status field.
-      if (
-        (target.status === "divergent" || target.status === "drift") &&
-        target.divergence
-      ) {
-        if (target.divergence.profile) {
-          console.log(
-            `  profile: repo=${target.repoProfile}, operator=${target.operatorProfile}`,
-          );
-        }
-        if (target.divergence.tiers) {
-          console.log(
-            `  tiers: repo=${target.repoTiers}, operator=${target.operatorTiers}`,
-          );
-        }
-        if (target.divergence.models) {
-          console.log(`  models: ${target.divergentModelRoles.join(", ")}`);
-        }
-      }
-      const showsVersionLagDetail =
-        (target.status === "version-lag" ||
-          ((target.status === "divergent" || target.status === "drift") &&
-            target.versionLag)) &&
-        target.installedVersion !== null;
-      if (showsVersionLagDetail) {
-        // A pinned target that is still version-lag (the pin no longer
-        // matches the installed version, see doctor.ts's `versionLag`)
-        // shows what it is pinned at instead of the operator's running
-        // version, which is not the relevant comparison for a pinned
-        // target.
-        console.log(
-          target.pin
-            ? `  installed ${target.installedVersion}, pinned at ${target.pin}`
-            : `  installed ${target.installedVersion}, operator ${report.operatorVersion}`,
-        );
-      }
-      if (target.status === "drift" && target.driftFiles) {
-        for (const file of target.driftFiles) {
-          console.log(`  ${file}`);
-        }
-      }
-      if (target.pin && !showsVersionLagDetail) {
-        console.log(`  pinned at ${target.pin}`);
-      }
+      printTargetDetail(target, report.operatorVersion);
       counts.set(target.status, (counts.get(target.status) ?? 0) + 1);
     }
 
@@ -1034,6 +982,285 @@ program
       }
     }
     process.exitCode = report.exitCode;
+  });
+
+/**
+ * Prints one target's doctor-style status line and detail lines. Factored
+ * out of `doctor`'s own per-target loop above so `adopt` below can print
+ * the exact same format for the single target it just registered, rather
+ * than hand-duplicating it; `doctor`'s own output is unchanged (same
+ * lines, same order, same content), only the printing code moved into
+ * this function. (A function declaration, not a `const`, so it is hoisted
+ * above its one call site inside `doctor`'s action, further up this file.)
+ */
+function printTargetDetail(
+  target: TargetReport,
+  operatorVersion: string,
+): void {
+  console.log(`${target.status}  ${target.path}`);
+  if (target.status === "unverifiable" && target.reason) {
+    console.log(`  ${target.reason}`);
+  }
+  // Divergence and version-lag detail lines print for both `divergent`
+  // and `drift` status lines (fix-round-2, review finding L6): a drift
+  // target can also be divergent and/or version-lagging (see
+  // doctor.ts's status-precedence doc comment), and before this fix
+  // its `divergent`/`version-lag` facts were silently dropped from the
+  // human output whenever `drift` won the status field.
+  if (
+    (target.status === "divergent" || target.status === "drift") &&
+    target.divergence
+  ) {
+    if (target.divergence.profile) {
+      console.log(
+        `  profile: repo=${target.repoProfile}, operator=${target.operatorProfile}`,
+      );
+    }
+    if (target.divergence.tiers) {
+      console.log(
+        `  tiers: repo=${target.repoTiers}, operator=${target.operatorTiers}`,
+      );
+    }
+    if (target.divergence.models) {
+      console.log(`  models: ${target.divergentModelRoles.join(", ")}`);
+    }
+  }
+  const showsVersionLagDetail =
+    (target.status === "version-lag" ||
+      ((target.status === "divergent" || target.status === "drift") &&
+        target.versionLag)) &&
+    target.installedVersion !== null;
+  if (showsVersionLagDetail) {
+    // A pinned target that is still version-lag (the pin no longer
+    // matches the installed version, see doctor.ts's `versionLag`)
+    // shows what it is pinned at instead of the operator's running
+    // version, which is not the relevant comparison for a pinned
+    // target.
+    console.log(
+      target.pin
+        ? `  installed ${target.installedVersion}, pinned at ${target.pin}`
+        : `  installed ${target.installedVersion}, operator ${operatorVersion}`,
+    );
+  }
+  if (target.status === "drift" && target.driftFiles) {
+    for (const file of target.driftFiles) {
+      console.log(`  ${file}`);
+    }
+  }
+  if (target.pin && !showsVersionLagDetail) {
+    console.log(`  pinned at ${target.pin}`);
+  }
+}
+
+/**
+ * Builds this operator's bootstrap defaults from a target's own recorded
+ * manifest, used only when `adopt` finds no operator manifest at all: the
+ * freshly created operator manifest's `defaults` become exactly what this
+ * repository was already installed with (harnesses/profile/tiers/models),
+ * rather than the shipped defaults `setup` would otherwise fall back to.
+ */
+function operatorDefaultsFromRepoManifest(
+  repoManifest: Manifest,
+): OperatorManifestDefaults {
+  return {
+    harnesses: repoManifest.harnesses,
+    profile: repoManifest.profile,
+    tiers: repoManifest.tiers,
+    models: { ...repoManifest.models },
+  };
+}
+
+const REPO_MANIFEST_RELATIVE_PATH = join(".ai", "workflow", "manifest.json");
+
+program
+  .command("adopt")
+  .description(
+    "Register an already-installed repository into the operator manifest verbatim, touching nothing in the repository; bootstraps the operator manifest from the repository's own recorded settings when none exists yet, then prints this one target's doctor report",
+  )
+  .argument("[dir]", "target repository directory", ".")
+  .option(
+    "--json",
+    "print a single JSON report to stdout and suppress human output",
+  )
+  .action(async (dir: string, opts: { json?: boolean }) => {
+    const targetDir = requireDirectory(dir);
+    if (!targetDir) return;
+    const home = resolveOperatorHome();
+
+    // Every failure this command can report before it has anything to put
+    // in a `TargetReportJson` is a usage/precondition error, and the
+    // decisions this task is scoped to fix that at exit code 2 (contrast
+    // `apply`, which uses 1 for its own precondition failures); this
+    // helper centralizes that one shape for both `--json` and human mode
+    // rather than repeating it at each of this action's several failure
+    // points.
+    function reportUsageError(error: string, message: string): void {
+      if (opts.json) {
+        console.log(
+          JSON.stringify({
+            operatorHome: home,
+            operatorVersion: PACKAGE_VERSION,
+            targetDir,
+            target: null,
+            registered: null,
+            bootstrapped: null,
+            error,
+            message,
+            exitCode: 2,
+          }),
+        );
+      } else {
+        console.error(message);
+      }
+      process.exitCode = 2;
+    }
+
+    const repoManifest = readInstalledManifest(targetDir);
+    if (!repoManifest) {
+      const repoManifestPath = join(targetDir, REPO_MANIFEST_RELATIVE_PATH);
+      if (existsSync(repoManifestPath)) {
+        reportUsageError(
+          "unreadable-repo-manifest",
+          `Unreadable repository manifest at ${repoManifestPath}; repair it, or run \`orchestrator-workflow apply --target ${targetDir}\` to reinstall.`,
+        );
+      } else {
+        reportUsageError(
+          "no-repo-manifest",
+          `No orchestrator-workflow install found in ${targetDir}; run 'orchestrator-workflow init' or 'orchestrator-workflow apply --target ${targetDir}' first.`,
+        );
+      }
+      return;
+    }
+
+    // `resolvedTargetPath`, `alreadyRegistered`, `bootstrapped`, and
+    // `writtenManifest` are captured from inside the `mutate` callback
+    // (mirroring `apply`'s own capture of `resolvedTargetPath`/
+    // `alreadyRegistered`) since `mutate` can only return an
+    // `OperatorManifest | undefined`. `mutate` re-reads `current`/`state`
+    // fresh inside the lock rather than relying on any earlier unlocked
+    // read (there is none here: unlike `apply`, `adopt` never reads the
+    // operator manifest before this call), so a concurrent writer's own
+    // read-modify-write cannot be lost.
+    let resolvedTargetPath = "";
+    let alreadyRegistered = false;
+    let bootstrapped = false;
+    let writtenManifest: OperatorManifest | undefined;
+    let result: ReturnType<typeof updateOperatorManifest>;
+    try {
+      result = updateOperatorManifest(home, (current, state) => {
+        if (state.kind === "unreadable") {
+          return undefined;
+        }
+        const appliedAt = new Date().toISOString();
+        const base =
+          current ??
+          createOperatorManifest(
+            operatorDefaultsFromRepoManifest(repoManifest),
+            appliedAt,
+          );
+        bootstrapped = !current;
+        const upserted = upsertOperatorTarget(
+          base,
+          targetDir,
+          repoManifest.version,
+          appliedAt,
+        );
+        resolvedTargetPath = safeRealpath(targetDir);
+        alreadyRegistered = upserted.alreadyRegistered;
+        writtenManifest = upserted.manifest;
+        return upserted.manifest;
+      });
+    } catch (error) {
+      const manifestPath = join(home, OPERATOR_MANIFEST_FILENAME);
+      const isLockTimeout = error instanceof OperatorManifestLockTimeoutError;
+      const message = isLockTimeout
+        ? `Could not lock the operator manifest at ${manifestPath} (another orchestrator-workflow command holds it); nothing was changed. Re-run \`orchestrator-workflow adopt\` to register ${targetDir}.`
+        : `Could not update the operator manifest at ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`;
+      reportUsageError(
+        isLockTimeout
+          ? "operator-manifest-locked"
+          : "operator-manifest-write-failed",
+        message,
+      );
+      return;
+    }
+
+    if (result.state.kind === "unreadable" || !writtenManifest) {
+      const manifestPath = join(home, OPERATOR_MANIFEST_FILENAME);
+      reportUsageError(
+        "operator-manifest-unreadable",
+        `Operator manifest at ${manifestPath} is unreadable; back it up and repair it, or remove it and run \`orchestrator-workflow setup\` again.`,
+      );
+      return;
+    }
+
+    const registeredTarget = writtenManifest.targets.find(
+      (candidate) => candidate.path === resolvedTargetPath,
+    );
+    if (!registeredTarget) {
+      // Unreachable in practice: `upsertOperatorTarget` always writes an
+      // entry at `safeRealpath(targetDir)`, which is exactly
+      // `resolvedTargetPath`. Reported rather than assumed away, matching
+      // the "never guess" posture the rest of this command takes with
+      // every other unreachable-in-practice branch.
+      reportUsageError(
+        "target-not-registered",
+        `Internal error: ${resolvedTargetPath} was not found in the operator manifest immediately after registering it.`,
+      );
+      return;
+    }
+
+    const targetReport = inspectTarget(
+      registeredTarget,
+      writtenManifest,
+      PACKAGE_VERSION,
+    );
+
+    const registered: "new" | "refreshed" = alreadyRegistered
+      ? "refreshed"
+      : "new";
+
+    // The target directory and its manifest were just read successfully
+    // above, so `missing`/`no-manifest`/`unverifiable` should not recur a
+    // moment later; if one nonetheless does (a race with something else
+    // removing or damaging the target in between), that is reported as an
+    // error rather than folded into the normal 0/1 exit-code contract.
+    const exitCode: 0 | 1 | 2 =
+      targetReport.status === "missing" ||
+      targetReport.status === "no-manifest" ||
+      targetReport.status === "unverifiable"
+        ? 2
+        : targetReport.status === "drift"
+          ? 1
+          : 0;
+
+    if (opts.json) {
+      console.log(
+        JSON.stringify({
+          operatorHome: home,
+          operatorVersion: PACKAGE_VERSION,
+          target: targetReportToJson(targetReport),
+          registered,
+          bootstrapped,
+          exitCode,
+        }),
+      );
+      process.exitCode = exitCode;
+      return;
+    }
+
+    console.log(
+      `Adopted ${resolvedTargetPath} (registered: ${registered}; operator defaults ${
+        bootstrapped ? "bootstrapped from this repository" : "kept"
+      })`,
+    );
+    printTargetDetail(targetReport, PACKAGE_VERSION);
+    if (exitCode === 2) {
+      console.error(
+        `Unexpected status ${targetReport.status} for a target whose directory and manifest were just verified; treat this as a bug.`,
+      );
+    }
+    process.exitCode = exitCode;
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
