@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -21,13 +22,28 @@ import type { Profile } from "../src/models.js";
 import {
   OPERATOR_HOME_ENV,
   createOperatorManifest,
+  updateOperatorManifest,
   upsertOperatorTarget,
-  writeOperatorManifest,
 } from "../src/operator-manifest.js";
-import type { OperatorManifestDefaults } from "../src/operator-manifest.js";
+import type {
+  OperatorManifest,
+  OperatorManifestDefaults,
+} from "../src/operator-manifest.js";
 import { runUninstall } from "../src/uninstall.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
+
+/** Writes `manifest` through the module's sole write path
+ * (`updateOperatorManifest`), for tests that need to seed the file directly
+ * rather than through a `mutate` callback of their own. Mirrors the
+ * identical helper in operator-manifest.test.ts: no test in this file calls
+ * a raw, unlocked writer, since production code has none to call either. */
+function writeOperatorManifest(home: string, manifest: OperatorManifest): void {
+  const result = updateOperatorManifest(home, () => manifest);
+  if (!result.written) {
+    throw new Error("writeOperatorManifest test helper: unexpectedly a no-op");
+  }
+}
 
 let home: string;
 const repos: string[] = [];
@@ -84,7 +100,7 @@ function registerHome(
       path,
       "0.0.0",
       "2026-01-01T00:00:00.000Z",
-    );
+    ).manifest;
   }
   writeOperatorManifest(home, manifest);
 }
@@ -101,6 +117,18 @@ function setManifestField(repo: string, patch: Record<string, unknown>): void {
   writeFileSync(
     manifestPath,
     `${JSON.stringify({ ...manifest, ...patch }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+/** Overwrites a target's own repo manifest with unparseable JSON, so it
+ * exists (the directory stats fine, the file stats fine) but
+ * `readInstalledManifest` cannot read it: the `unverifiable` case, distinct
+ * from `no-manifest` (file absent) and from `missing` (directory absent). */
+function corruptManifest(repo: string): void {
+  writeFileSync(
+    join(repo, ".ai", "workflow", "manifest.json"),
+    "{ not valid json",
     "utf8",
   );
 }
@@ -302,6 +330,114 @@ describe("runDoctor: per-target status", () => {
   });
 });
 
+describe("(12) unverifiable (review round 2, M1/M2)", () => {
+  it("a corrupt repo manifest is unverifiable, not no-manifest", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    corruptManifest(repo);
+    const report = runDoctor(home, {});
+    expect(report.targets[0].status).toBe("unverifiable");
+    expect(report.targets[0].reason).toBe("manifest unreadable");
+    expect(report.exitCode).toBe(1);
+  });
+
+  it("a chmod-000 repo manifest file is unverifiable, not no-manifest", () => {
+    if (process.getuid?.() === 0) return; // root can read anything; skip.
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    const manifestPath = join(repo, ".ai", "workflow", "manifest.json");
+    chmodSync(manifestPath, 0o000);
+    try {
+      const report = runDoctor(home, {});
+      expect(report.targets[0].status).toBe("unverifiable");
+      expect(report.targets[0].reason).toBe("manifest unreadable");
+      expect(report.exitCode).toBe(1);
+    } finally {
+      chmodSync(manifestPath, 0o644);
+    }
+  });
+
+  it("an inaccessible ancestor directory is unverifiable, not missing", () => {
+    if (process.getuid?.() === 0) return; // root can read anything; skip.
+    const parent = mkdtempSync(join(tmpdir(), "ow-doctor-parent-"));
+    const repoDir = join(parent, "repo");
+    mkdirSync(repoDir);
+    runInit({
+      targetDir: repoDir,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+    const repo = realpathSync(repoDir);
+    registerHome(defaults(), [repo]);
+    chmodSync(parent, 0o000);
+    try {
+      const report = runDoctor(home, {});
+      expect(report.targets[0].status).toBe("unverifiable");
+      expect(report.targets[0].reason).toBe("directory not accessible");
+      expect(report.exitCode).toBe(1);
+    } finally {
+      chmodSync(parent, 0o755);
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("a genuinely deleted target directory is still missing, not unverifiable", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    rmSync(repo, { recursive: true, force: true });
+    const report = runDoctor(home, {});
+    expect(report.targets[0].status).toBe("missing");
+  });
+
+  it("an uninstalled target (manifest ENOENT) is still no-manifest, not unverifiable", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    runUninstall({ targetDir: repo, force: true });
+    const report = runDoctor(home, {});
+    expect(report.targets[0].status).toBe("no-manifest");
+  });
+
+  it("--prune never removes an unverifiable target", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    corruptManifest(repo);
+    const report = runDoctor(home, { prune: true });
+    expect(report.targets.map((t) => t.path)).toEqual([repo]);
+    expect(report.targets[0].status).toBe("unverifiable");
+    expect(report.pruned).toEqual([]);
+    expect(report.exitCode).toBe(1);
+  });
+
+  it("a mixed registry (clean + unverifiable) exits 1", () => {
+    const cleanRepo = makeRepo();
+    const unverifiableRepo = makeRepo();
+    corruptManifest(unverifiableRepo);
+    registerHome(defaults(), [cleanRepo, unverifiableRepo]);
+    const report = runDoctor(home, {});
+    expect(report.exitCode).toBe(1);
+  });
+
+  it("--json reports the reason for an unverifiable target", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    corruptManifest(repo);
+    const result = runCli("--json");
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.targets[0].status).toBe("unverifiable");
+    expect(parsed.targets[0].reason).toBe("manifest unreadable");
+  });
+
+  it("prints the reason line under an unverifiable status line", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    corruptManifest(repo);
+    const result = runCli();
+    expect(result.stdout).toContain(`unverifiable  ${repo}`);
+    expect(result.stdout).toContain("  manifest unreadable");
+    expect(result.status).toBe(1);
+  });
+});
+
 describe("(8) exit-code contract", () => {
   it("no operator manifest exits 2 with the error set and no targets evaluated", () => {
     const report = runDoctor(home, {});
@@ -430,6 +566,8 @@ describe("(9) CLI --json", () => {
         pin: null,
         divergence: { profile: false, tiers: false, models: false },
         driftFiles: null,
+        versionLag: false,
+        reason: null,
       },
     ]);
     expect(parsed.pruned).toEqual([]);
@@ -533,6 +671,76 @@ describe("CLI human output", () => {
     // The standalone pin line is folded into the detail line above, not
     // printed a second time.
     expect(result.stdout.match(/pinned at 9\.9\.9/g)?.length).toBe(1);
+  });
+
+  it("prints the tiers divergence detail line (review round 2, L5)", () => {
+    const repo = makeRepo();
+    setManifestField(repo, { tiers: true });
+    registerHome(defaults({ tiers: false }), [repo]);
+
+    const result = runCli();
+    expect(result.stdout).toContain(`divergent  ${repo}`);
+    expect(result.stdout).toContain("tiers: repo=true, operator=false");
+  });
+
+  it("prints the drift file list under a drift status line (review round 2, L5)", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    tamper(repo);
+
+    const result = runCli();
+    expect(result.stdout).toContain(`drift  ${repo}`);
+    expect(result.stdout).toContain(`  ${REVIEWER_MD}`);
+  });
+
+  it("prints divergence and version-lag detail lines under a drift status line too (review round 2, L6)", () => {
+    const repo = makeRepo({ profile: "minimal" });
+    registerHome(defaults({ profile: "full" }), [repo]);
+    setManifestField(repo, { version: "0.0.1" });
+    tamper(repo);
+
+    const result = runCli();
+    expect(result.stdout).toContain(`drift  ${repo}`);
+    expect(result.stdout).toContain("profile: repo=minimal, operator=full");
+    expect(result.stdout).toContain(
+      `installed 0.0.1, operator ${PACKAGE_VERSION}`,
+    );
+  });
+
+  it("prints the unvalidatable-entry prune note only when the file actually held one (review round 2, M3)", () => {
+    const cleanRepo = makeRepo();
+    const missingRepo = makeRepo();
+    registerHome(defaults(), [cleanRepo, missingRepo]);
+    rmSync(missingRepo, { recursive: true, force: true });
+
+    // No unvalidatable raw entry in the file: the note must not print.
+    const withoutUnvalidatable = runCli("--prune");
+    expect(withoutUnvalidatable.stdout).toContain(`pruned: ${missingRepo}`);
+    expect(withoutUnvalidatable.stdout).not.toContain("raw target");
+  });
+
+  it("prints the unvalidatable-entry prune note, with its count, when the file held one (review round 2, M3)", () => {
+    const cleanRepo = makeRepo();
+    const missingRepo = makeRepo();
+    registerHome(defaults(), [cleanRepo, missingRepo]);
+    rmSync(missingRepo, { recursive: true, force: true });
+
+    // Inject one raw target entry that `readOperatorManifest`'s own
+    // per-entry validation drops (missing `lastAppliedAt`): invisible to
+    // the parsed manifest, but still present in the file's raw JSON.
+    const manifestPath = join(home, "manifest.json");
+    const onDisk = JSON.parse(readFileSync(manifestPath, "utf8"));
+    onDisk.targets.push({
+      path: "/not/a/real/target",
+      lastAppliedVersion: "0.0.0",
+    });
+    writeFileSync(manifestPath, `${JSON.stringify(onDisk, null, 2)}\n`, "utf8");
+
+    const result = runCli("--prune");
+    expect(result.stdout).toContain(`pruned: ${missingRepo}`);
+    expect(result.stdout).toContain(
+      "1 raw target entry the parser could not validate was dropped",
+    );
   });
 });
 

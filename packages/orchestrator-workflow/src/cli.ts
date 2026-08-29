@@ -842,7 +842,7 @@ program
 program
   .command("doctor")
   .description(
-    "Report each operator-registered target's status: clean, divergent from the operator defaults, version-lagging, hash-drifted, missing, or without a repo manifest",
+    "Report each operator-registered target's status: clean, divergent from the operator defaults, version-lagging, hash-drifted, missing, without a repo manifest, or unverifiable (could not be checked at all)",
   )
   .option(
     "--json",
@@ -898,7 +898,19 @@ program
     const counts = new Map<string, number>();
     for (const target of report.targets) {
       console.log(`${target.status}  ${target.path}`);
-      if (target.status === "divergent" && target.divergence) {
+      if (target.status === "unverifiable" && target.reason) {
+        console.log(`  ${target.reason}`);
+      }
+      // Divergence and version-lag detail lines print for both `divergent`
+      // and `drift` status lines (fix-round-2, review finding L6): a drift
+      // target can also be divergent and/or version-lagging (see
+      // doctor.ts's status-precedence doc comment), and before this fix
+      // its `divergent`/`version-lag` facts were silently dropped from the
+      // human output whenever `drift` won the status field.
+      if (
+        (target.status === "divergent" || target.status === "drift") &&
+        target.divergence
+      ) {
         if (target.divergence.profile) {
           console.log(
             `  profile: repo=${target.repoProfile}, operator=${target.operatorProfile}`,
@@ -915,7 +927,8 @@ program
       }
       const showsVersionLagDetail =
         (target.status === "version-lag" ||
-          (target.status === "divergent" && target.versionLag)) &&
+          ((target.status === "divergent" || target.status === "drift") &&
+            target.versionLag)) &&
         target.installedVersion !== null;
       if (showsVersionLagDetail) {
         // A pinned target that is still version-lag (the pin no longer
@@ -950,9 +963,15 @@ program
       console.log(
         `pruned: ${report.pruned.length > 0 ? report.pruned.join(", ") : "(none)"}`,
       );
-      if (report.pruned.length > 0) {
+      // Printed only when the file actually held a raw target entry the
+      // parser could not validate (fix-round-2, review finding M3): the
+      // note used to print unconditionally whenever anything at all was
+      // pruned, even when every dropped entry was a validly-shaped
+      // missing/no-manifest target and the file held no unvalidatable
+      // entry to report.
+      if (report.unvalidatedDropped > 0) {
         console.log(
-          "note: the operator manifest was rewritten in normalized form; a raw target entry the parser could not validate was dropped from the file along with the pruned targets above.",
+          `note: the operator manifest was rewritten in normalized form; ${report.unvalidatedDropped} raw target ${report.unvalidatedDropped === 1 ? "entry" : "entries"} the parser could not validate ${report.unvalidatedDropped === 1 ? "was" : "were"} dropped from the file along with the pruned targets above.`,
         );
       }
     }

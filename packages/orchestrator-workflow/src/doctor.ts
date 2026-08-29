@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import type { Stats } from "node:fs";
 import { join } from "node:path";
 
 import { PACKAGE_VERSION } from "./assets.js";
@@ -7,11 +8,15 @@ import type { Manifest } from "./init.js";
 import { readInstalledManifest } from "./init.js";
 import type { Profile, Role } from "./models.js";
 import { DEFAULT_MODELS, ROLES } from "./models.js";
-import type { OperatorManifest, OperatorTarget } from "./operator-manifest.js";
+import type {
+  OperatorManifest,
+  OperatorManifestState,
+  OperatorTarget,
+} from "./operator-manifest.js";
 import {
   OPERATOR_MANIFEST_FILENAME,
-  readOperatorManifest,
-  writeOperatorManifest,
+  operatorManifestState,
+  updateOperatorManifest,
 } from "./operator-manifest.js";
 
 /**
@@ -22,7 +27,15 @@ import {
  * divergence is still reported on the target). `divergent` in turn takes
  * precedence over `version-lag`: a target can be both divergent and
  * version-lagging (see `versionLag` below), and both facts are reported,
- * but the status is `divergent`.
+ * but the status is `divergent`. `unverifiable` is separate from both
+ * `missing` and `no-manifest`: the target directory or its repo manifest
+ * could not be checked at all (a stat failure other than ENOENT, most
+ * commonly EACCES on an ancestor directory, or a manifest file present but
+ * unreadable/unparseable), so nothing is actually known about this
+ * target's real state. Unlike `missing`/`no-manifest`, `--prune` never
+ * removes an `unverifiable` target (review round 2, M1): an unreadable
+ * target might still be perfectly fine, and dropping its registry row on
+ * that basis would be an unrecoverable guess.
  */
 export type TargetStatus =
   | "clean"
@@ -30,7 +43,8 @@ export type TargetStatus =
   | "version-lag"
   | "drift"
   | "missing"
-  | "no-manifest";
+  | "no-manifest"
+  | "unverifiable";
 
 export interface TargetDivergence {
   profile: boolean;
@@ -40,10 +54,11 @@ export interface TargetDivergence {
 
 /**
  * Per-target report. Only `path`, `status`, `installedVersion`, `pin`,
- * `divergence`, and `driftFiles` are part of the `--json` contract
- * (`targetReportToJson` below picks exactly those); the remaining fields
- * exist to let the human-output printer in `cli.ts` render detail lines
- * without recomputing values `inspectTarget` already worked out.
+ * `divergence`, `driftFiles`, `versionLag`, and `reason` are part of the
+ * `--json` contract (`targetReportToJson` below picks exactly those); the
+ * remaining fields exist to let the human-output printer in `cli.ts`
+ * render detail lines without recomputing values `inspectTarget` already
+ * worked out.
  */
 export interface TargetReport {
   path: string;
@@ -63,14 +78,27 @@ export interface TargetReport {
   /** Human-output-only: roles whose resolved model differs from the operator default. */
   divergentModelRoles: Role[];
   /**
-   * Human-output-only: whether this target is lagging the running kit
-   * version (no pin recorded, and the installed version differs from the
-   * kit version), independent of the final `status` field. Lets the
-   * printer show the "installed X, operator Y" line for a target whose
-   * status was overridden to `divergent` because it is both divergent and
-   * lagging.
+   * Whether this target is lagging the running kit version (no pin
+   * recorded, and the installed version differs from the kit version),
+   * independent of the final `status` field. Lets the printer show the
+   * "installed X, operator Y" line for a target whose status was
+   * overridden to `divergent` or `drift` because it is also lagging.
+   * Part of the `--json` contract since fix-round-2 (review finding L6):
+   * a `--json` consumer previously had no way to see version-lag on a
+   * target whose status field reads `divergent` or `drift`.
    */
   versionLag: boolean;
+  /**
+   * `null` for every status except `unverifiable`, where it explains what
+   * could not be checked: `"directory not accessible"` (the target
+   * directory, or a directory on the path to its repo manifest, failed to
+   * stat for a reason other than ENOENT) or `"manifest unreadable"` (the
+   * directory itself stats fine and the manifest file exists, but it could
+   * not be parsed or read). Part of the `--json` contract (review finding
+   * M1) so a `--json` consumer can distinguish the two causes without
+   * re-deriving them.
+   */
+  reason: string | null;
 }
 
 /** The subset of `TargetReport` that is part of the `--json` contract. */
@@ -81,6 +109,8 @@ export interface TargetReportJson {
   pin: string | null;
   divergence: TargetDivergence | null;
   driftFiles: string[] | null;
+  versionLag: boolean;
+  reason: string | null;
 }
 
 export function targetReportToJson(report: TargetReport): TargetReportJson {
@@ -91,6 +121,8 @@ export function targetReportToJson(report: TargetReport): TargetReportJson {
     pin: report.pin,
     divergence: report.divergence,
     driftFiles: report.driftFiles,
+    versionLag: report.versionLag,
+    reason: report.reason,
   };
 }
 
@@ -100,6 +132,19 @@ export interface DoctorReport {
   targets: TargetReport[];
   pruned: string[];
   exitCode: 0 | 1 | 2;
+  /**
+   * The count of raw `targets` array entries in the on-disk operator
+   * manifest that `readOperatorManifest`'s own per-entry validation
+   * silently dropped (wrong shape, a missing field, ...), distinct from
+   * the targets named in `pruned` above (which were validly-shaped but
+   * `missing`/`no-manifest`). Always `0` unless `--prune` both ran and
+   * actually wrote (`pruned.length > 0`); `cli.ts`'s human-output prune
+   * note prints only when this is greater than zero, naming the count
+   * (fix-round-2 review finding M3: the note used to print unconditionally
+   * whenever anything at all was pruned, even when the file held no
+   * unvalidatable raw entry to report).
+   */
+  unvalidatedDropped: number;
   /**
    * Set only when no operator manifest was evaluated; `targets` is then
    * `[]`. `no-operator-manifest`: no file exists at
@@ -165,7 +210,8 @@ function computeDriftFiles(targetPath: string, manifest: Manifest): string[] {
 function baseReport(
   target: OperatorTarget,
   operator: OperatorManifest,
-  status: "missing" | "no-manifest",
+  status: "missing" | "no-manifest" | "unverifiable",
+  reason: string | null,
 ): TargetReport {
   return {
     path: target.path,
@@ -180,8 +226,36 @@ function baseReport(
     operatorTiers: operator.defaults.tiers,
     divergentModelRoles: [],
     versionLag: false,
+    reason,
   };
 }
+
+/**
+ * Stats `path`, distinguishing "does not exist" (`ENOENT`) from every other
+ * stat failure (most commonly `EACCES` on an ancestor directory). Plain
+ * `existsSync` cannot make this distinction: it swallows every error alike
+ * and returns `false` either way (review round 2, M2), which is exactly
+ * what let an inaccessible-but-present target get misreported as
+ * `missing`/`no-manifest` and then pruned out of the registry on a guess.
+ */
+function statOrClassify(
+  path: string,
+): { kind: "ok"; stat: Stats } | { kind: "enoent" } | { kind: "error" } {
+  try {
+    return { kind: "ok", stat: statSync(path) };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? { kind: "enoent" }
+      : { kind: "error" };
+  }
+}
+
+/** Relative path, from a target's repo root, to its own installed manifest.
+ * Duplicated from init.ts's private `MANIFEST_PATH` rather than importing
+ * it (not exported): both this module's own `statOrClassify` check and
+ * `readInstalledManifest` itself need to agree on the same path, and
+ * `readInstalledManifest` already hardcodes it identically internally. */
+const REPO_MANIFEST_RELATIVE_PATH = join(".ai", "workflow", "manifest.json");
 
 /**
  * Computes one target's status against the operator's registry. Pure
@@ -195,13 +269,40 @@ export function inspectTarget(
   operator: OperatorManifest,
   kitVersion: string,
 ): TargetReport {
-  if (!existsSync(target.path) || !statSync(target.path).isDirectory()) {
-    return baseReport(target, operator, "missing");
+  const dirStat = statOrClassify(target.path);
+  if (dirStat.kind === "enoent") {
+    return baseReport(target, operator, "missing", null);
+  }
+  if (dirStat.kind === "error") {
+    return baseReport(
+      target,
+      operator,
+      "unverifiable",
+      "directory not accessible",
+    );
+  }
+  if (!dirStat.stat.isDirectory()) {
+    return baseReport(target, operator, "missing", null);
+  }
+
+  const manifestStat = statOrClassify(
+    join(target.path, REPO_MANIFEST_RELATIVE_PATH),
+  );
+  if (manifestStat.kind === "enoent") {
+    return baseReport(target, operator, "no-manifest", null);
+  }
+  if (manifestStat.kind === "error") {
+    return baseReport(
+      target,
+      operator,
+      "unverifiable",
+      "directory not accessible",
+    );
   }
 
   const manifest = readInstalledManifest(target.path);
   if (!manifest) {
-    return baseReport(target, operator, "no-manifest");
+    return baseReport(target, operator, "unverifiable", "manifest unreadable");
   }
 
   const driftFiles = computeDriftFiles(target.path, manifest);
@@ -255,6 +356,7 @@ export function inspectTarget(
     operatorTiers: operator.defaults.tiers,
     divergentModelRoles,
     versionLag,
+    reason: null,
   };
 }
 
@@ -264,82 +366,144 @@ const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>([
 ]);
 
 /**
+ * Re-reads `<home>/manifest.json`'s raw JSON (independent of
+ * `readOperatorManifest`'s own parsed, validated result) and counts the
+ * entries in its `targets` array, or `null` when the file cannot be read
+ * or parsed at all. `readOperatorManifest` silently drops any raw target
+ * entry that fails its own per-entry shape check, so its parsed
+ * `manifest.targets.length` alone cannot tell whether the file held extra,
+ * unvalidatable entries; this reads the same bytes a second time to answer
+ * exactly that (review round 2, M3).
+ */
+function countRawTargets(home: string): number | null {
+  try {
+    const raw: unknown = JSON.parse(
+      readFileSync(join(home, OPERATOR_MANIFEST_FILENAME), "utf8"),
+    );
+    if (typeof raw !== "object" || raw === null) return null;
+    const candidate = raw as Record<string, unknown>;
+    return Array.isArray(candidate.targets) ? candidate.targets.length : 0;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Walks the operator manifest's target registry at `home` and reports each
  * target's status. No printing, no `process.exit`: `cli.ts` turns this
  * into human or `--json` output and applies `exitCode` itself.
  *
  * Exit-code contract: 2 when no operator manifest exists (nothing else is
  * evaluated); else 1 if any *remaining* target (after an optional prune) is
- * `drift`, `missing`, or `no-manifest`; else 0.
+ * `drift`, `missing`, `no-manifest`, or `unverifiable`; else 0.
  *
  * `--prune`: targets whose status is `missing` or `no-manifest` are removed
  * from the operator manifest's `targets` array and persisted (only when at
  * least one target was actually removed, mirroring `setup`'s no-op-write
  * avoidance) before the exit code and `targets` in the returned report are
- * computed, so both reflect the post-prune registry. `pruned` always lists
- * the removed paths, even when empty.
+ * computed, so both reflect the post-prune registry. `unverifiable` targets
+ * are never removed (see {@link TargetStatus}'s doc comment). `pruned`
+ * always lists the removed paths, even when empty. The whole re-read,
+ * report computation, and write run inside {@link updateOperatorManifest}'s
+ * single locked critical section (review round 1, H1's own fix, reused
+ * here rather than doctor keeping a second, unlocked read-modify-write path
+ * of its own), so a concurrent `apply`/`setup`/another `doctor --prune`
+ * cannot land its own write in between this read and this write.
  */
 export function runDoctor(
   home: string,
   options: { prune?: boolean } = {},
 ): DoctorReport {
-  const operator = readOperatorManifest(home);
-  if (!operator) {
-    // `readOperatorManifest` returns `undefined` both when there is no
-    // file to read and when the file exists but is corrupt or does not
-    // validate; distinguish the two here so the CLI can tell an operator
-    // who has simply never run `setup` apart from one whose manifest needs
-    // repair (the latter must not be papered over by re-running `setup`,
-    // which would silently rewrite `targets: []` over a possibly-fine
-    // targets array sitting next to the unreadable envelope).
-    const manifestPath = join(home, OPERATOR_MANIFEST_FILENAME);
-    const error: NonNullable<DoctorReport["error"]> = existsSync(manifestPath)
-      ? "operator-manifest-unreadable"
-      : "no-operator-manifest";
+  const state: OperatorManifestState = operatorManifestState(home);
+  if (state.kind !== "ok") {
+    // `absent`: no file to read. `unreadable`: the file exists but is
+    // corrupt or does not validate. Distinguished here so the CLI can tell
+    // an operator who has simply never run `setup` apart from one whose
+    // manifest needs repair (the latter must not be papered over by
+    // re-running `setup`, which would silently rewrite `targets: []` over
+    // a possibly-fine targets array sitting next to the unreadable
+    // envelope).
+    const error: NonNullable<DoctorReport["error"]> =
+      state.kind === "absent"
+        ? "no-operator-manifest"
+        : "operator-manifest-unreadable";
     return {
       operatorHome: home,
       operatorVersion: PACKAGE_VERSION,
       targets: [],
       pruned: [],
       exitCode: 2,
+      unvalidatedDropped: 0,
       error,
     };
   }
 
-  const allReports = operator.targets.map((target) =>
-    inspectTarget(target, operator, PACKAGE_VERSION),
-  );
-
-  let targets = allReports;
   const pruned: string[] = [];
+  let unvalidatedDropped = 0;
+  let targets: TargetReport[];
 
   if (options.prune) {
-    const keepPaths = new Set<string>();
-    for (const report of allReports) {
-      if (REMOVE_ON_PRUNE.has(report.status)) {
-        pruned.push(report.path);
-      } else {
-        keepPaths.add(report.path);
+    // `computedReports`/`pruned`/`unvalidatedDropped` are captured from
+    // inside `mutate` (mirroring `apply`'s own `resolvedTargetPath`/
+    // `alreadyRegistered` capture in cli.ts) since `mutate` can only return
+    // an `OperatorManifest | undefined`. `mutate` re-reads and re-computes
+    // from scratch rather than reusing `state` above (which may already be
+    // stale by the time the lock is granted), the same reasoning `apply`'s
+    // own re-read documents.
+    let computedReports: TargetReport[] | undefined;
+    updateOperatorManifest(home, (current, innerState) => {
+      if (innerState.kind !== "ok" || !current) {
+        return undefined;
       }
-    }
-    targets = allReports.filter((report) => keepPaths.has(report.path));
+      const reports = current.targets.map((target) =>
+        inspectTarget(target, current, PACKAGE_VERSION),
+      );
+      computedReports = reports;
 
-    if (pruned.length > 0) {
-      writeOperatorManifest(home, {
-        ...operator,
-        targets: operator.targets.filter((target) =>
-          keepPaths.has(target.path),
-        ),
+      const keepPaths = new Set<string>();
+      for (const report of reports) {
+        if (REMOVE_ON_PRUNE.has(report.status)) {
+          pruned.push(report.path);
+        } else {
+          keepPaths.add(report.path);
+        }
+      }
+      if (pruned.length === 0) {
+        return undefined;
+      }
+
+      const rawTargetCount = countRawTargets(home);
+      if (rawTargetCount !== null) {
+        unvalidatedDropped = Math.max(
+          0,
+          rawTargetCount - current.targets.length,
+        );
+      }
+
+      return {
+        ...current,
+        targets: current.targets.filter((target) => keepPaths.has(target.path)),
         updatedAt: new Date().toISOString(),
-      });
-    }
+      };
+    });
+
+    targets = computedReports
+      ? computedReports.filter((report) => !pruned.includes(report.path))
+      : state.manifest.targets.map((target) =>
+          inspectTarget(target, state.manifest, PACKAGE_VERSION),
+        );
+  } else {
+    targets = state.manifest.targets.map((target) =>
+      inspectTarget(target, state.manifest, PACKAGE_VERSION),
+    );
   }
 
   const exitCode: 0 | 1 = targets.some(
     (report) =>
       report.status === "drift" ||
       report.status === "missing" ||
-      report.status === "no-manifest",
+      report.status === "no-manifest" ||
+      report.status === "unverifiable",
   )
     ? 1
     : 0;
@@ -350,5 +514,6 @@ export function runDoctor(
     targets,
     pruned,
     exitCode,
+    unvalidatedDropped,
   };
 }
