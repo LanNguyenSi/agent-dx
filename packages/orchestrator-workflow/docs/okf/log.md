@@ -5780,3 +5780,9 @@ Not done beyond this fix round: no further scope. `src/cli.ts` and
 `src/operator-manifest.ts` (both touched only by the probes above, applied
 and restored, never committed), README.md, INSTALL-AGENT.md,
 CHANGELOG.md, and `docs/okf/index.md` are untouched.
+
+Orchestrator note after fix round 2: the round's okf-kit measurement was
+taken before its commit, so the four docs listing the guard file as a
+source came out stale by commit time once the fix commit existed (four
+sources-fresh warnings); re-verified (no cited range below the appended
+blocks moved) and re-stamped in this separate commit.
