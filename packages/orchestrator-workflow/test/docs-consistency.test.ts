@@ -3469,5 +3469,190 @@ describe("operator-install CLI surface stays documented in README (fix round 1, 
       }
     }
     expect(missing, missing.join(", ")).toEqual([]);
+
+// Imported here (appended at file end), not moved to the top-of-file import
+// block, so adding it does not shift every existing citation into this file
+// (line numbers into this file are cited by other docs/okf modules) -- see
+// the ANCHOR_OKF_DOCS comment above for why this file treats top-of-file
+// insertion as unsafe.
+import { adoptExitCodeForStatus, type TargetStatus } from "../src/doctor.js";
+import {
+  DEFAULT_LOCK_STALE_MS,
+  DEFAULT_LOCK_TIMEOUT_MS,
+  createOperatorManifest,
+  upsertOperatorTarget,
+} from "../src/operator-manifest.js";
+
+/**
+ * agent-tasks b457ee55 (T-009): pins the new operator-install-and-registry.md
+ * module doc's load-bearing claims against the real exports they describe,
+ * so a later change to the operator manifest schema, the doctor status
+ * vocabulary, the CLI command set, or the lock's timing defaults fails here
+ * instead of only going stale silently in prose. `createOperatorManifest`/
+ * `upsertOperatorTarget` are used rather than a hand-typed key list so the
+ * schema pin tracks the real runtime shape, not a second, potentially
+ * diverging enumeration of the same fields.
+ */
+describe("operator-install-and-registry.md names the real operator manifest schema keys (T-009)", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+
+  function sampleManifest() {
+    return createOperatorManifest(
+      { harnesses: [], profile: "full", tiers: false, models: {} },
+      "2020-01-01T00:00:00.000Z",
+    );
+  }
+
+  it("names every OperatorManifest envelope key", () => {
+    for (const key of Object.keys(sampleManifest())) {
+      expect(doc).toContain(`\`${key}\``);
+    }
+  });
+
+  it("names every OperatorManifestDefaults key", () => {
+    for (const key of Object.keys(sampleManifest().defaults)) {
+      expect(doc).toContain(`\`${key}\``);
+    }
+  });
+
+  it("names every OperatorTarget registry-entry key", () => {
+    const { manifest } = upsertOperatorTarget(
+      sampleManifest(),
+      "/tmp/operator-install-and-registry-schema-pin",
+      "1.2.3",
+      "2020-01-01T00:00:00.000Z",
+    );
+    const target = manifest.targets[0];
+    expect(target).toBeDefined();
+    for (const key of Object.keys(target)) {
+      expect(doc).toContain(`\`${key}\``);
+    }
+  });
+});
+
+/**
+ * agent-tasks b457ee55 (T-009): the seven-member `TargetStatus` union has no
+ * runtime export of its own, so this pins the vocabulary as a literal list
+ * typed against `adoptExitCodeForStatus`'s parameter (an invalid status
+ * string here would fail to compile), and derives the exit-code grouping
+ * from that same exported function rather than a second hand-written
+ * mapping, so the doc's stated grouping cannot silently diverge from the
+ * real one in doctor.ts.
+ */
+describe("operator-install-and-registry.md names every doctor status and its real exit-code mapping (T-009)", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const unwrapped = unwrap(doc);
+  const STATUSES: TargetStatus[] = [
+    "clean",
+    "divergent",
+    "version-lag",
+    "drift",
+    "missing",
+    "no-manifest",
+    "unverifiable",
+  ];
+
+  // A per-status `toContain` check would not be discriminating: mutating
+  // one status word (e.g. `version-lag` -> `version-lagging`) inside the
+  // doc's vocabulary sentence still leaves the correct spelling sitting in
+  // several other sentences of the doc (the precedence rule, the exit-code
+  // grouping, the pin-rule section, ...), so a per-word `toContain` stays
+  // green. Instead this asserts the exact contiguous vocabulary-listing
+  // sentence, built from `STATUSES` itself, so any single word substituted
+  // inside that one sentence breaks the match.
+  it("names the exact seven-status vocabulary as one contiguous, comma-joined sentence", () => {
+    const sentence = unwrap(`${STATUSES.map((s) => `\`${s}\``).join(", ")}.`);
+    expect(unwrapped).toContain(sentence);
+  });
+
+  it("states the real adoptExitCodeForStatus grouping, derived from the export itself", () => {
+    const byCode = new Map<number, TargetStatus[]>();
+    for (const status of STATUSES) {
+      const code = adoptExitCodeForStatus(status);
+      byCode.set(code, [...(byCode.get(code) ?? []), status]);
+    }
+    for (const [code, statuses] of byCode) {
+      const phrase = unwrap(
+        `\`${code}\` for ${statuses.map((s) => `\`${s}\``).join("/")}`,
+      );
+      expect(unwrapped).toContain(phrase);
+    }
+  });
+});
+
+/**
+ * agent-tasks b457ee55 (T-009): command names are read out of cli.ts's own
+ * `.command("...")` registrations rather than hand-listed, so a command
+ * added or renamed later is picked up automatically instead of silently
+ * going unchecked; `init`/`uninstall` are excluded since they belong to
+ * install-fence-mechanics.md, not this doc.
+ */
+describe("operator-install-and-registry.md names the real operator-facing commands (T-009)", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const cliSource = readFileSync(`${PACKAGE_DIR}/src/cli.ts`, "utf8");
+  const allCommandNames = [
+    ...cliSource.matchAll(/\.command\("([a-z]+)"\)/g),
+  ].map((m) => m[1]);
+  const operatorCommandNames = allCommandNames.filter(
+    (name) => name !== "init" && name !== "uninstall",
+  );
+
+  it("found the four operator-facing commands in cli.ts (sanity: not vacuously true)", () => {
+    expect(operatorCommandNames.sort()).toEqual([
+      "adopt",
+      "apply",
+      "doctor",
+      "setup",
+    ]);
+  });
+
+  it("names every operator-facing command cli.ts actually registers", () => {
+    for (const name of operatorCommandNames) {
+      expect(doc).toContain(`\`${name}\``);
+    }
+  });
+});
+
+/**
+ * agent-tasks b457ee55 (T-009): pins the doc's stated lock timeout/stale
+ * window against the real exported constants, not a copied-in number, and
+ * against the real invariant (timeout > stale) rather than assuming it.
+ * The doc states each number more than once (the timeout is mentioned where
+ * it is introduced and again where it is compared to the stale window), so
+ * a single `toContain` check is not discriminating: mutating only one of
+ * the two mentions would still leave the other one matching. Instead this
+ * extracts every `<N>-second timeout`/`<N>-second staleness window` mention
+ * from the (whitespace-unwrapped, so a line-wrapped mention still counts)
+ * doc text and requires every one of them to equal the real constant.
+ */
+describe("operator-install-and-registry.md states the real lock timeout and stale-window defaults (T-009)", () => {
+  const doc = readDoc("docs/okf/operator-install-and-registry.md");
+  const unwrapped = unwrap(doc);
+
+  it("every second-based mention of the lock timeout matches DEFAULT_LOCK_TIMEOUT_MS", () => {
+    const expectedSeconds = DEFAULT_LOCK_TIMEOUT_MS / 1000;
+    const mentions = [...unwrapped.matchAll(/(\d+)-second timeout/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(mentions.length).toBeGreaterThan(0);
+    for (const seconds of mentions) {
+      expect(seconds).toBe(expectedSeconds);
+    }
+  });
+
+  it("every second-based mention of the lock stale window matches DEFAULT_LOCK_STALE_MS", () => {
+    const expectedSeconds = DEFAULT_LOCK_STALE_MS / 1000;
+    const mentions = [
+      ...unwrapped.matchAll(/(\d+)-second staleness window/g),
+    ].map((m) => Number(m[1]));
+    expect(mentions.length).toBeGreaterThan(0);
+    for (const seconds of mentions) {
+      expect(seconds).toBe(expectedSeconds);
+    }
+  });
+
+  it("states the real timeout-above-stale invariant, not just the two numbers", () => {
+    expect(DEFAULT_LOCK_TIMEOUT_MS).toBeGreaterThan(DEFAULT_LOCK_STALE_MS);
+    expect(doc).toContain("is deliberately kept above");
   });
 });

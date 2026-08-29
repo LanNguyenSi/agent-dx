@@ -5476,3 +5476,93 @@ message carries an anchor rule id regardless of severity, while the local
 measurement above had counted only error-severity findings as gating.
 The token was rewritten as prose (range and anchor text as they stood
 then); re-run with the CI criterion (any anchor rule id): 0 findings.
+
+## 2026-08-29 (agent-dx b457ee55, task T-009, implementer)
+
+Added a new module doc for the operator-level install layer added by the
+operator-apply slice: the operator home and its resolution order, the
+operator manifest schema and its three read states, the single locked
+read-modify-write entry point and its lock mechanics (mkdir-based mutex,
+owner-token release guard, stale-lock reclaim, timeout), the implicit
+target registry, the setup/apply/doctor/adopt commands and their
+precedence/pin/exit-code contracts, the pin rule, and how uninstall leaves
+the registry untouched. Listed it under Modules in index.md; did not touch
+the Maintenance section there. Every non-trivial claim carries a
+string-anchored citation into src/ or test/ only (README.md and
+INSTALL-AGENT.md were deliberately left out of scope, a parallel slice is
+changing them); every cited range and anchor was verified by opening the
+real file and checking the anchor text sits on the range's own last
+content line, occurs at most three times in the whole target file, and
+occurs exactly once inside the cited range, mirroring the same three
+properties this file's own docs-consistency guard enforces, before the doc
+was written.
+
+test/docs-consistency.test.ts gained four new describe blocks pinning the
+doc's schema/status/command/lock claims against real src/ exports rather
+than a second, hand-typed enumeration: the operator manifest's envelope,
+defaults, and per-target keys are read off objects actually returned by
+createOperatorManifest and upsertOperatorTarget; the seven TargetStatus
+values and their exit-code grouping are checked against
+adoptExitCodeForStatus itself; the four operator-facing command names are
+read out of cli.ts's own command registrations rather than listed by hand;
+and the lock timeout/stale-window numbers are checked against
+DEFAULT_LOCK_TIMEOUT_MS/DEFAULT_LOCK_STALE_MS. The new imports were
+appended just before these new blocks, not moved into the top-of-file
+import block, since this file's own citation-guard comment already notes
+that a top-of-file insertion shifts every existing line-numbered citation
+other docs in this bundle hold into this file; confirmed by trying the
+top-of-file placement first, watching three of this file's own citation
+self-checks fail against other docs (model-preselection.md,
+review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
+subagent-contracts-superset.md all cite line ranges into this file), then
+moving the imports to the end and re-running green.
+
+The first pass at the status-vocabulary and lock-defaults pins used a
+per-value `toContain` check, which is not discriminating: the doc states
+`version-lag` and the `40-second`/`30-second` figures more than once, so
+mutating only one occurrence still left another, unmutated occurrence
+satisfying a bare substring check. Rewrote both as: the status pin now
+matches the exact, comma-joined seven-status sentence built from the same
+literal list the exit-code test uses; the lock-defaults pins now extract
+every `<N>-second timeout`/`<N>-second staleness window` mention from the
+doc (whitespace-unwrapped, so a line-wrapped mention is not missed) and
+require every one of them to equal the real constant, so a mutation to
+any single mention fails the check regardless of which one a later mutant
+targets.
+
+Mutation probes, run for real against the working tree, each mutated,
+the named test run, then hand-restored to the exact pre-mutation text
+(diffed byte-identical against a saved copy) and re-verified green: (a)
+changing the doc's `version-lag` status word to `version-lagging` inside
+the seven-status vocabulary sentence failed the new
+"names the exact seven-status vocabulary" test; restored, green again.
+(b) changing one of the doc's two `40-second timeout` mentions to
+`45-second timeout` failed the new "every second-based mention of the
+lock timeout" test; restored, green again.
+
+This worktree's own packages/orchestrator-workflow/node_modules and
+packages/slop-detector/node_modules were plain empty directories rather
+than symlinks into the main checkout (unlike the worktree root's own
+node_modules), which made `typescript` and the slop-detector build
+unresolvable; re-pointed both as symlinks to the corresponding directory
+in the main checkout before running anything, the same way the worktree
+root's own node_modules is already set up. Not a source change, and not
+staged.
+
+`npm test`: green, +10 tests over the prior state of this file (the four
+new T-009 describe blocks). `npm run typecheck` and `npm run
+typecheck:test`: clean. `npm run format` (rewrote only
+docs-consistency.test.ts, no other file changed) then `npm run
+format:check`: clean. `node scripts/check-cli-flag-order.mjs` (from the
+repository root): clean. From the repository root: `npx -y okf-kit@0.8.0
+check --json packages/orchestrator-workflow/docs/okf --require-anchors
+--require-anchors-allow README.md packages/orchestrator-workflow/README.md
+INSTALL-AGENT.md packages/orchestrator-workflow/INSTALL-AGENT.md` reports
+0 gating findings; warnings and notices are unchanged from the pre-task
+baseline, and none of them mention the new doc by name. `node
+packages/slop-detector/dist/cli.js check . --pack placement-slop --config
+slop.config.yml` (after building slop-detector, whose dist was missing):
+clean.
+
+Not done: no further scope. `src/`, README.md, INSTALL-AGENT.md,
+CHANGELOG.md, and every other OKF doc are untouched.
