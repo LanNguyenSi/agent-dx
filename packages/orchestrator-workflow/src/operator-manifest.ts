@@ -557,8 +557,33 @@ export function updateOperatorManifest(
       if (next === undefined) {
         return { state, written: false };
       }
-      writeOperatorManifestUnlocked(home, next);
-      return { state, written: true, manifest: next };
+      // A write that refreshes an already-existing manifest (`current`
+      // truthy) gets a fresh `updatedAt` here whenever the `mutate`
+      // callback that produced `next` did not already set one of its own
+      // (`next.updatedAt` still reads as `current.updatedAt`): `setup`'s
+      // defaults refresh, `apply`'s and `adopt`'s target
+      // registration/refresh all write through this one path via a
+      // `mutate` built on `upsertOperatorTarget`/a plain object spread,
+      // neither of which ever touches `updatedAt` itself, so before this
+      // fix only `setup` (which set it manually) and `doctor --prune`
+      // (same) actually bumped it; `apply`/`adopt` silently left a stale
+      // `updatedAt` on every registration (fix-round, review finding
+      // L10). A `mutate` that already computed its own distinct
+      // `updatedAt` (`doctor --prune`'s own manual bump, or a test that
+      // deliberately writes a fully custom manifest wholesale) is left
+      // exactly as returned, so this does not stomp on an intentional
+      // value. A brand-new manifest (`current` undefined, `next`
+      // typically built by `createOperatorManifest`) is likewise left
+      // untouched: it already carries a single, self-consistent
+      // `createdAt`/`updatedAt` pair from its own construction, and
+      // re-stamping only `updatedAt` here would needlessly split that
+      // pair by a few milliseconds.
+      const toWrite: OperatorManifest =
+        current && next.updatedAt === current.updatedAt
+          ? { ...next, updatedAt: new Date().toISOString() }
+          : next;
+      writeOperatorManifestUnlocked(home, toWrite);
+      return { state, written: true, manifest: toWrite };
     },
     options,
   );

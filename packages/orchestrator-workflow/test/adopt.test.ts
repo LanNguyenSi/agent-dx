@@ -1,12 +1,15 @@
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { PACKAGE_VERSION } from "../src/assets.js";
+import { adoptExitCodeForStatus, adoptJsonExtras } from "../src/doctor.js";
 import { runInit } from "../src/init.js";
 import { DEFAULT_MODELS } from "../src/models.js";
 import type { Profile } from "../src/models.js";
@@ -26,6 +30,11 @@ import {
   upsertOperatorTarget,
 } from "../src/operator-manifest.js";
 import type { OperatorManifestDefaults } from "../src/operator-manifest.js";
+
+/** `true` when running as root: `chmod`-based precondition tests below
+ * (an unreadable directory, a read-only operator home) are meaningless for
+ * root, which ignores permission bits entirely on most systems. */
+const isRoot = process.getuid ? process.getuid() === 0 : false;
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
 
@@ -50,6 +59,22 @@ function runAdopt(...args: string[]) {
   return spawnSync(
     process.execPath,
     ["--import", "tsx", "src/cli.ts", "adopt", ...args],
+    {
+      cwd: PACKAGE_DIR,
+      encoding: "utf8",
+      timeout: 60_000,
+      env: { ...process.env, [OPERATOR_HOME_ENV]: home },
+    },
+  );
+}
+
+/** Only used by the "adopt then apply" test below, mirroring `apply.test.ts`'s
+ * own `runApply` helper (not imported from there: each command test file
+ * keeps its own copy rather than sharing test infrastructure across files). */
+function runApply(...args: string[]) {
+  return spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "apply", ...args],
     {
       cwd: PACKAGE_DIR,
       encoding: "utf8",
@@ -353,5 +378,188 @@ describe("adopt", () => {
 
     const after = snapshotTree(target);
     expect(after).toEqual(before);
+  });
+
+  // --- fix-round tests (M1) ---------------------------------------------
+
+  it("--json: a missing target directory reports target-not-a-directory and exits 2 (M1)", () => {
+    const missing = join(target, "does-not-exist");
+    const result = runAdopt(missing, "--json");
+    expect(result.status).toBe(2);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.error).toBe("target-not-a-directory");
+    expect(parsed.exitCode).toBe(2);
+    expect(parsed.target).toBeNull();
+    expect(existsSync(operatorManifestPath())).toBe(false);
+  });
+
+  it("--json: a regular file as the target reports target-not-a-directory and exits 2 (M1)", () => {
+    const filePath = join(target, "not-a-dir");
+    writeFileSync(filePath, "x", "utf8");
+    const result = runAdopt(filePath, "--json");
+    expect(result.status).toBe(2);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.error).toBe("target-not-a-directory");
+    expect(parsed.exitCode).toBe(2);
+  });
+
+  it("human mode: a regular file as the target keeps the existing wording, at exit 2 (M1)", () => {
+    const filePath = join(target, "not-a-dir");
+    writeFileSync(filePath, "x", "utf8");
+    const result = runAdopt(filePath);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain(`Target is not a directory: ${filePath}`);
+  });
+
+  // --- fix-round tests (M2) -----------------------------------------------
+
+  it.skipIf(isRoot)(
+    "an inaccessible .ai/workflow directory reports unverifiable-repo-manifest, not no-repo-manifest, and does not advise init/apply (M2)",
+    () => {
+      initRepo();
+      const workflowDir = join(target, ".ai", "workflow");
+      chmodSync(workflowDir, 0o000);
+      try {
+        const result = runAdopt(target, "--json");
+        expect(result.status).toBe(2);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.error).toBe("unverifiable-repo-manifest");
+        expect(parsed.exitCode).toBe(2);
+        expect(parsed.message).not.toContain("orchestrator-workflow init");
+        expect(parsed.message).not.toContain("orchestrator-workflow apply");
+        expect(existsSync(operatorManifestPath())).toBe(false);
+      } finally {
+        chmodSync(workflowDir, 0o755);
+      }
+    },
+  );
+
+  // --- fix-round tests (L8) -----------------------------------------------
+
+  it("--json: a foreign kit's manifest at the same path is reported distinctly from unreadable (L8)", () => {
+    mkdirSync(join(target, ".ai", "workflow"), { recursive: true });
+    writeFileSync(
+      repoManifestPath(target),
+      JSON.stringify({ kit: "some-other-tool", version: "1.0.0" }),
+      "utf8",
+    );
+    const result = runAdopt(target, "--json");
+    expect(result.status).toBe(2);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.error).toBe("foreign-manifest");
+    expect(parsed.message).toContain("not an orchestrator-workflow manifest");
+    expect(existsSync(operatorManifestPath())).toBe(false);
+  });
+
+  // --- fix-round tests (L6) -----------------------------------------------
+
+  it.skipIf(isRoot)(
+    "a read-only operator home exits 2 with operator-manifest-write-failed and creates no manifest (L6)",
+    () => {
+      initRepo();
+      chmodSync(home, 0o500);
+      try {
+        const result = runAdopt(target, "--json");
+        expect(result.status).toBe(2);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.error).toBe("operator-manifest-write-failed");
+        expect(parsed.exitCode).toBe(2);
+        expect(existsSync(operatorManifestPath())).toBe(false);
+      } finally {
+        chmodSync(home, 0o700);
+      }
+    },
+  );
+  // A lock-timeout counterpart (mirroring doctor.ts's
+  // OW_DOCTOR_TEST_LOCK_TIMEOUT_MS hatch) is not added here: that hatch is
+  // wired only into `doctor`'s own `--prune` lock-options plumbing in
+  // cli.ts, and `adopt`'s `updateOperatorManifest` call takes no lock
+  // options at all today. Reusing it generically would mean threading a
+  // second, adopt-scoped env-var-to-lockOptions hatch through `adopt`'s
+  // action, a production-code change beyond this test-coverage finding's
+  // scope; the write-failure branch above already exercises the same
+  // catch block's non-timeout arm.
+
+  // --- fix-round tests (L10) -----------------------------------------------
+
+  it("adopting an already-registered target advances the operator manifest's updatedAt (L10)", () => {
+    initRepo();
+    const first = runAdopt(target);
+    expect(first.status, first.stderr).toBe(0);
+    const afterFirst = readOperatorManifest().updatedAt;
+
+    const second = runAdopt(target);
+    expect(second.status, second.stderr).toBe(0);
+    const afterSecond = readOperatorManifest().updatedAt;
+
+    expect(afterSecond).not.toBe(afterFirst);
+  });
+
+  // --- fix-round tests (reviewer-listed, unpinned) -------------------------
+
+  it("adopting through a symlink then through the real path yields exactly one entry", () => {
+    initRepo();
+    const linkedTarget = join(tmpdir(), `adopt-symlink-${process.pid}`);
+    symlinkSync(target, linkedTarget);
+    try {
+      const first = runAdopt(linkedTarget);
+      expect(first.status, first.stderr).toBe(0);
+
+      const second = runAdopt(target);
+      expect(second.status, second.stderr).toBe(0);
+
+      const operatorManifest = readOperatorManifest();
+      expect(operatorManifest.targets).toHaveLength(1);
+      expect(operatorManifest.targets[0].path).toBe(realpathSync(target));
+    } finally {
+      rmSync(linkedTarget, { force: true });
+    }
+  });
+
+  it("adopt then apply --target: one entry, lastAppliedVersion advances to PACKAGE_VERSION", () => {
+    initRepo();
+    setRepoManifestField(target, { version: "0.0.1" });
+
+    const adopted = runAdopt(target);
+    expect(adopted.status, adopted.stderr).not.toBe(2);
+    expect(readOperatorManifest().targets).toHaveLength(1);
+    expect(readOperatorManifest().targets[0].lastAppliedVersion).toBe("0.0.1");
+
+    const applied = runApply("--target", target, "--yes");
+    expect(applied.status, applied.stderr).toBe(0);
+
+    const operatorManifest = readOperatorManifest();
+    expect(operatorManifest.targets).toHaveLength(1);
+    expect(operatorManifest.targets[0].lastAppliedVersion).toBe(
+      PACKAGE_VERSION,
+    );
+  });
+});
+
+describe("adoptExitCodeForStatus (M3/L5)", () => {
+  it("maps all seven TargetStatus values to adopt's exit-code contract", () => {
+    expect(adoptExitCodeForStatus("clean")).toBe(0);
+    expect(adoptExitCodeForStatus("divergent")).toBe(0);
+    expect(adoptExitCodeForStatus("version-lag")).toBe(0);
+    expect(adoptExitCodeForStatus("drift")).toBe(1);
+    expect(adoptExitCodeForStatus("missing")).toBe(2);
+    expect(adoptExitCodeForStatus("no-manifest")).toBe(2);
+    expect(adoptExitCodeForStatus("unverifiable")).toBe(2);
+  });
+
+  it("adds the error key only for the three exit-2 statuses (M3)", () => {
+    expect(adoptJsonExtras("clean")).toEqual({});
+    expect(adoptJsonExtras("divergent")).toEqual({});
+    expect(adoptJsonExtras("version-lag")).toEqual({});
+    expect(adoptJsonExtras("drift")).toEqual({});
+    expect(adoptJsonExtras("missing")).toEqual({
+      error: "unexpected-target-status",
+    });
+    expect(adoptJsonExtras("no-manifest")).toEqual({
+      error: "unexpected-target-status",
+    });
+    expect(adoptJsonExtras("unverifiable")).toEqual({
+      error: "unexpected-target-status",
+    });
   });
 });

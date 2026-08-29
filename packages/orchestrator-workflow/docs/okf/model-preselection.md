@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-08-29T01:27:27Z
+timestamp: 2026-08-29T03:46:26Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -414,7 +414,7 @@ way to express an explicit "turn it off" short of hand-editing the
 manifest, since commander only ever set `opts.tiers` to `true` or left it
 `undefined` — there was no negated flag to produce `false`. commander's
 negatable-option pairing (`--tiers` / `--no-tiers` declared under the same
-`"tiers"` option name, `cli.ts:140-142#"explicitly turn effort-tier subagent variants off, overriding a previously installed --tiers value"`) resolves `opts.tiers` to `true`
+`"tiers"` option name, `cli.ts:147-149#"explicitly turn effort-tier subagent variants off, overriding a previously installed --tiers value"`) resolves `opts.tiers` to `true`
 when `--tiers` is passed, `false` when `--no-tiers` is passed, and
 `undefined` when neither is passed; verified end-to-end against the
 installed commander version rather than assuming the pairing behavior:

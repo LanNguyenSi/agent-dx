@@ -10,7 +10,7 @@ import { resolveInitInputs } from "./cli-inputs.js";
 import { HARNESSES, detectHarnesses } from "./detect.js";
 import type { Harness } from "./detect.js";
 import { DEFAULT_MODELS, PROFILES } from "./models.js";
-import { readInstalledManifest, runInit } from "./init.js";
+import { MANIFEST_PATH, readInstalledManifest, runInit } from "./init.js";
 import type { Manifest } from "./init.js";
 import {
   OPERATOR_MANIFEST_FILENAME,
@@ -30,7 +30,14 @@ import type {
 } from "./operator-manifest.js";
 import type { UninstallReport } from "./uninstall.js";
 import { runUninstall } from "./uninstall.js";
-import { inspectTarget, runDoctor, targetReportToJson } from "./doctor.js";
+import {
+  adoptExitCodeForStatus,
+  adoptJsonExtras,
+  inspectTarget,
+  runDoctor,
+  statOrClassify,
+  targetReportToJson,
+} from "./doctor.js";
 import type { DoctorReport, TargetReport } from "./doctor.js";
 
 function isInteractive(): boolean {
@@ -337,10 +344,14 @@ program
         if (defaultsEqual(current.defaults, newDefaults)) {
           return undefined;
         }
+        // `updatedAt` is no longer set here: `updateOperatorManifest`
+        // stamps it centrally on any write that refreshes an existing
+        // manifest (`current` is truthy in this branch), the same way it
+        // now does for `apply`'s and `adopt`'s own refreshes (fix-round,
+        // review finding L10).
         const manifest: OperatorManifest = {
           ...current,
           defaults: newDefaults,
-          updatedAt: new Date().toISOString(),
         };
         return manifest;
       });
@@ -1070,7 +1081,33 @@ function operatorDefaultsFromRepoManifest(
   };
 }
 
-const REPO_MANIFEST_RELATIVE_PATH = join(".ai", "workflow", "manifest.json");
+/**
+ * True when the repo manifest at `manifestPath` parses as a JSON object
+ * whose `kit` field is a string that is not `"orchestrator-workflow"`: a
+ * manifest written by some other tool at this well-known path, not a
+ * damaged or hand-edited orchestrator-workflow one.
+ * `readInstalledManifest` (init.ts) already treats any `kit` mismatch,
+ * missing or otherwise, as "no record" (`undefined`); this needs its own
+ * independent re-parse to tell a genuinely foreign manifest apart from
+ * `adopt`'s other `!repoManifest` causes (missing file, invalid JSON, a
+ * manifest with `kit` absent or some other invalid field), the same way
+ * `repoManifestHasMalformedPin` above re-parses independently for its own,
+ * different question (fix-round, review finding L8).
+ */
+function repoManifestIsForeign(manifestPath: string): boolean {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch {
+    return false;
+  }
+  if (typeof raw !== "object" || raw === null) return false;
+  const candidate = raw as Record<string, unknown>;
+  return (
+    typeof candidate.kit === "string" &&
+    candidate.kit !== "orchestrator-workflow"
+  );
+}
 
 program
   .command("adopt")
@@ -1083,8 +1120,14 @@ program
     "print a single JSON report to stdout and suppress human output",
   )
   .action(async (dir: string, opts: { json?: boolean }) => {
-    const targetDir = requireDirectory(dir);
-    if (!targetDir) return;
+    // `targetDir` is only `resolve(dir)` here, not yet verified: unlike
+    // every other command, `adopt` cannot reuse `requireDirectory` for this
+    // precondition, since that helper is `--json`-unaware (`console.error`
+    // and a bare `process.exitCode = 1`) and every other failure this
+    // command reports goes through `reportUsageError` at exit code 2, not
+    // 1 (fix-round, review finding M1). `init`/`uninstall`/`apply` keep
+    // using `requireDirectory` unchanged.
+    const targetDir = resolve(dir);
     const home = resolveOperatorHome();
 
     // Every failure this command can report before it has anything to put
@@ -1115,18 +1158,51 @@ program
       process.exitCode = 2;
     }
 
+    const targetStat = statOrClassify(targetDir);
+    if (targetStat.kind !== "ok" || !targetStat.stat.isDirectory()) {
+      reportUsageError(
+        "target-not-a-directory",
+        `Target is not a directory: ${targetDir}`,
+      );
+      return;
+    }
+
     const repoManifest = readInstalledManifest(targetDir);
     if (!repoManifest) {
-      const repoManifestPath = join(targetDir, REPO_MANIFEST_RELATIVE_PATH);
-      if (existsSync(repoManifestPath)) {
-        reportUsageError(
-          "unreadable-repo-manifest",
-          `Unreadable repository manifest at ${repoManifestPath}; repair it, or run \`orchestrator-workflow apply --target ${targetDir}\` to reinstall.`,
-        );
-      } else {
+      const repoManifestPath = join(targetDir, MANIFEST_PATH);
+      // `statOrClassify` distinguishes "no such file" from every other
+      // stat failure (most commonly `EACCES` on `.ai/workflow` itself), the
+      // same distinction `doctor.ts`'s own `inspectTarget` relies on:
+      // plain `existsSync` swallows both alike and reports `false` either
+      // way, which previously misreported an inaccessible-but-installed
+      // repo as `no-repo-manifest` and advised `init`/`apply`, which would
+      // have overwritten it (fix-round, review finding M2).
+      const manifestStat = statOrClassify(repoManifestPath);
+      if (manifestStat.kind === "enoent") {
         reportUsageError(
           "no-repo-manifest",
           `No orchestrator-workflow install found in ${targetDir}; run 'orchestrator-workflow init' or 'orchestrator-workflow apply --target ${targetDir}' first.`,
+        );
+      } else if (manifestStat.kind === "error") {
+        reportUsageError(
+          "unverifiable-repo-manifest",
+          `Could not verify the repository manifest at ${repoManifestPath} (its directory is not accessible); check its permissions and try again.`,
+        );
+      } else if (repoManifestIsForeign(repoManifestPath)) {
+        // Distinct from the generic "unreadable" case below (fix-round,
+        // review finding L8): this is not a damaged or hand-edited
+        // orchestrator-workflow manifest to repair, it is a different
+        // tool's manifest that happens to live at the same well-known
+        // path, and "repair it, or reinstall" is the wrong advice either
+        // way.
+        reportUsageError(
+          "foreign-manifest",
+          `${repoManifestPath} is not an orchestrator-workflow manifest; nothing was registered.`,
+        );
+      } else {
+        reportUsageError(
+          "unreadable-repo-manifest",
+          `Unreadable repository manifest at ${repoManifestPath}; repair it, or run \`orchestrator-workflow apply --target ${targetDir}\` to reinstall.`,
         );
       }
       return;
@@ -1224,15 +1300,13 @@ program
     // above, so `missing`/`no-manifest`/`unverifiable` should not recur a
     // moment later; if one nonetheless does (a race with something else
     // removing or damaging the target in between), that is reported as an
-    // error rather than folded into the normal 0/1 exit-code contract.
-    const exitCode: 0 | 1 | 2 =
-      targetReport.status === "missing" ||
-      targetReport.status === "no-manifest" ||
-      targetReport.status === "unverifiable"
-        ? 2
-        : targetReport.status === "drift"
-          ? 1
-          : 0;
+    // error rather than folded into the normal 0/1 exit-code contract. The
+    // mapping itself is `doctor.ts`'s exported `adoptExitCodeForStatus`
+    // (fix-round, review findings M3/L5), not an inline ternary chain here,
+    // so all seven statuses are pinned by a direct unit test rather than
+    // only the subset a live `adopt` run can actually reach.
+    const exitCode = adoptExitCodeForStatus(targetReport.status);
+    const unexpectedStatus = exitCode === 2;
 
     if (opts.json) {
       console.log(
@@ -1243,7 +1317,27 @@ program
           registered,
           bootstrapped,
           exitCode,
+          // Only this genuinely-unreachable-in-practice case gets an
+          // `error` key (`doctor.ts`'s exported, unit-tested
+          // `adoptJsonExtras`); a `--json` consumer previously had no way
+          // to tell this apart from a normal (if unlucky) result at the
+          // same exit code (fix-round, review finding M3).
+          ...adoptJsonExtras(targetReport.status),
         }),
+      );
+      process.exitCode = exitCode;
+      return;
+    }
+
+    if (unexpectedStatus) {
+      // The success line ("Adopted ...") must not print here: the target
+      // was not cleanly adopted, only registered before an unexplained
+      // status turned up immediately after (fix-round, review finding M3;
+      // before this fix the success line printed unconditionally, ahead of
+      // the detail lines and the stderr note below).
+      printTargetDetail(targetReport, PACKAGE_VERSION);
+      console.error(
+        `Unexpected status ${targetReport.status} for a target whose directory and manifest were just verified; treat this as a bug.`,
       );
       process.exitCode = exitCode;
       return;
@@ -1255,11 +1349,6 @@ program
       })`,
     );
     printTargetDetail(targetReport, PACKAGE_VERSION);
-    if (exitCode === 2) {
-      console.error(
-        `Unexpected status ${targetReport.status} for a target whose directory and manifest were just verified; treat this as a bug.`,
-      );
-    }
     process.exitCode = exitCode;
   });
 
