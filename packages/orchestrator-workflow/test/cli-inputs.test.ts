@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import inquirer from "inquirer";
 
 import { resolveInitInputs } from "../src/cli-inputs.js";
+import { MANIFEST_PATH, readInstalledManifest } from "../src/init.js";
 import type { Manifest } from "../src/init.js";
 import { DEFAULT_MODELS, DEFAULT_PROFILE } from "../src/models.js";
 
@@ -402,32 +403,103 @@ describe("resolveInitInputs: --harness none (templates-only mode)", () => {
     expect(result.harnesses).toEqual(["claude"]);
   });
 
-  it('a previous harnesses: ["cursor"]/["Claude"] (all-unknown harness names, F1) does NOT stick either: falls back to detected instead', async () => {
-    // readInstalledManifest also sanitizes an array whose every entry fails
-    // the known-harness filter (an unrecognized name like "cursor", or the
-    // wrong case like "Claude") down to harnesses: [], the same shape as a
-    // deliberate --harness none install -- but the raw field itself was a
-    // real, non-empty array, so harnessesRecordedEmpty must be false, not
-    // true. Before the fix (review finding F1, agent-tasks 613316c9 round
-    // 2), the gate's signal was `Array.isArray(candidate.harnesses)`
-    // captured BEFORE filtering, so this exact shape set it to `true` and
-    // stuck a live claude install to templates-only on a plain `init
-    // --yes`. This models what readInstalledManifest now actually computes
-    // for that raw shape; the CLI-level "installed for: claude" assertion
-    // against a real hand-written ["cursor"]/["Claude"] manifest lives in
-    // test/init.test.ts.
-    const previous = fakeManifest({
-      harnesses: [],
-      harnessesRecordedEmpty: false,
+  describe('a hand-written manifest with harnesses: ["cursor"] (all-unknown harness name)', () => {
+    // readInstalledManifest sanitizes an array whose every entry fails the
+    // known-harness filter (an unrecognized name like "cursor") down to
+    // harnesses: [], the same shape as a deliberate --harness none install
+    // -- but the raw field itself was a real, non-empty array, so
+    // harnessesRecordedEmpty must be false, not true. Before the fix
+    // (see CHANGELOG), the gate's signal was
+    // `Array.isArray(candidate.harnesses)` captured BEFORE filtering, so
+    // this exact shape set it to `true` and stuck a live claude install to
+    // templates-only on a plain `init --yes`. Unlike the neighbouring
+    // damaged/legacy cases above, this one writes a real manifest.json to
+    // disk and runs it through `readInstalledManifest` itself, so the
+    // sanitization this test relies on is the actual production code path,
+    // not a hand-built `fakeManifest` standing in for it.
+    let manifestDir: string;
+
+    beforeEach(() => {
+      manifestDir = mkdtempSync(join(tmpdir(), "cursor-manifest-unit-"));
+      mkdirSync(join(manifestDir, ".ai", "workflow"), { recursive: true });
+      const { harnessesRecordedEmpty: _unused, ...rest } = fakeManifest();
+      const raw: Record<string, unknown> = { ...rest, harnesses: ["cursor"] };
+      writeFileSync(
+        join(manifestDir, MANIFEST_PATH),
+        `${JSON.stringify(raw, null, 2)}\n`,
+      );
     });
-    const result = await resolveInitInputs({
-      detected: ["claude"],
-      interactive: false,
-      previous,
+
+    afterEach(() => {
+      rmSync(manifestDir, { recursive: true, force: true });
+    });
+
+    it("readInstalledManifest sanitizes it to harnesses: [] with harnessesRecordedEmpty: false", () => {
+      const previous = readInstalledManifest(manifestDir);
+      expect(previous?.harnesses).toEqual([]);
+      expect(previous?.harnessesRecordedEmpty).toBe(false);
+    });
+
+    it("does NOT stick: resolveInitInputs falls back to detected instead", async () => {
+      const previous = readInstalledManifest(manifestDir);
+      const result = await resolveInitInputs({
+        detected: ["claude"],
+        interactive: false,
+        previous,
+        opts: {},
+        previousIsRecordedManifest: true,
+      });
+      expect(result.harnesses).toEqual(["claude"]);
+    });
+  });
+});
+
+describe("resolveInitInputs: interactive plain first run (no previous manifest)", () => {
+  // This is the "else" branch, not the templates-only-re-run branch below:
+  // no previous manifest at all, so `promptHarnesses` is called with its
+  // default `fallbackToClaude` (`true`), not the explicit `false` the
+  // templates-only re-run passes. Nothing else in this file exercises that
+  // default; a test only covering the templates-only branch's explicit
+  // `false` would stay green even if the default flipped.
+  function mockHarnessesPrompt() {
+    vi.mocked(inquirer.prompt).mockImplementation(async (questions) => {
+      const q = (questions as Array<Record<string, unknown>>)[0];
+      if (q.name === "harnesses") return { harnesses: [] };
+      if (q.name === "profile") return { profile: q.default };
+      if (q.name === "choice") return { choice: q.default };
+      throw new Error(`unmocked prompt: ${String(q.name)}`);
+    });
+  }
+
+  afterEach(() => {
+    vi.mocked(inquirer.prompt).mockReset();
+  });
+
+  it("pre-checks claude (fallbackToClaude's default true) when nothing is detected and there is no previous manifest", async () => {
+    mockHarnessesPrompt();
+
+    await resolveInitInputs({
+      detected: [],
+      interactive: true,
+      previous: undefined,
       opts: {},
-      previousIsRecordedManifest: true,
     });
-    expect(result.harnesses).toEqual(["claude"]);
+
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    for (const choice of choices) {
+      expect(choice.checked).toBe(choice.value === "claude");
+    }
   });
 });
 

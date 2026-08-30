@@ -36,7 +36,7 @@ export async function promptHarnesses(
   // always empty there too, and pre-checking `claude` on Enter would
   // silently re-widen an explicit `--harness none` install -- contradicting
   // README.md's and this function's own "nothing forced pre-selected" claim
-  // (review finding F2, agent-tasks 613316c9 round 2).
+  // (see CHANGELOG).
   const preselected =
     known.length > 0 ? known : fallbackToClaude ? ["claude" as Harness] : [];
   const { harnesses } = await inquirer.prompt<{ harnesses: Harness[] }>([
@@ -50,7 +50,7 @@ export async function promptHarnesses(
         value: harness,
         checked: preselected.includes(harness),
       })),
-      // An empty selection is a supported state since agent-tasks 613316c9
+      // An empty selection is a supported state
       // (`--harness none`, templates-only mode): it used to be rejected
       // here because every install always wrote at least one harness
       // adapter; there is no longer a reason to require one.
@@ -226,12 +226,7 @@ export async function resolveInitInputs(
     // ["cursor"], all-unknown names), also sanitizes to
     // `harnesses.length === 0` (readInstalledManifest in init.ts) but must
     // fall through to detection below instead, the same as any other
-    // damaged manifest (review finding F1, agent-tasks 613316c9 round 2:
-    // the previous form of this gate checked `harnessesRecorded &&
-    // harnesses.length === 0`, where `harnessesRecorded` was set from
-    // `Array.isArray` alone, before filtering -- an all-unknown-names raw
-    // array satisfied both conjuncts and stuck a live install to
-    // templates-only).
+    // damaged manifest (see CHANGELOG).
     //
     // An interactive re-run is different: stickiness only protects a
     // non-interactive call (`--yes`, or any other flow with no prompt) from
@@ -244,8 +239,7 @@ export async function resolveInitInputs(
     // from that state, only `detected` entries pre-checked. `fallbackToClaude:
     // false` closes the same gap for the case where nothing is detected
     // either: without it, `promptHarnesses` would pre-check `claude` on its
-    // own "nothing known" fallback, re-widening the install on a bare Enter
-    // (review finding F2, agent-tasks 613316c9 round 2).
+    // own "nothing known" fallback, re-widening the install on a bare Enter.
     harnesses = interactive ? await promptHarnesses(detected, [], false) : [];
   } else {
     const installed = previous?.harnesses ?? [];

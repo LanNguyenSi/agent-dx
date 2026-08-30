@@ -2658,4 +2658,47 @@ describe("dropped-harness note loop is file-ledger-driven, not previous.harnesse
       ),
     ).toBe(false);
   });
+
+  it("a damaged manifest (harnesses: ['cursor']) over a live claude install still notes AGENTS.md/CLAUDE.md as untracked when this run collapses to --harness none", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+    expect(existsSync(join(target, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(target, "CLAUDE.md"))).toBe(true);
+
+    // Hand-corrupt the manifest so "claude" is replaced by an unknown name;
+    // `files` (the raw ledger) still carries the .claude/ entries, so
+    // `previous.harnesses` sanitizes to [] even though a live claude
+    // install's files are still on disk and in the ledger.
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.harnesses = ["cursor"];
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: [],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // Before the fix, this note was gated on `previous.harnesses.length > 0`
+    // (post-filter: 0, "cursor" dropped), so it silently skipped these two
+    // notes even though the six .claude/ file notes still fired.
+    expect(
+      report.notes.some(
+        (note) =>
+          note.startsWith("AGENTS.md: ") &&
+          note.includes("now untracked after --harness dropped to none"),
+      ),
+    ).toBe(true);
+    expect(
+      report.notes.some(
+        (note) =>
+          note.startsWith("CLAUDE.md: ") &&
+          note.includes("now untracked after --harness dropped to none"),
+      ),
+    ).toBe(true);
+  });
 });

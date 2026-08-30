@@ -113,10 +113,10 @@ export interface Manifest {
    * never actually recorded as empty, it just failed to name anything this
    * kit recognizes, and treating that the same as a deliberate `none` would
    * silently degrade a live install to templates-only on a plain re-run
-   * (review finding F1, agent-tasks 613316c9 round 2). A missing/malformed
-   * `harnesses` field (not an array at all) is the same "not a recorded
-   * empty set" case and also leaves this `false`. Only `readInstalledManifest`
-   * ever sets this from an actual on-disk manifest. A synthetic previous
+   * (see CHANGELOG). A missing/malformed `harnesses` field (not an array at
+   * all) is the same "not a recorded empty set" case and also leaves this
+   * `false`. Only `readInstalledManifest` ever sets this from an actual
+   * on-disk manifest. A synthetic previous
    * (e.g. `apply`'s `buildApplyPrevious` in cli.ts) leaves it `undefined`,
    * which the harnesses-stickiness gate in `cli-inputs.ts` treats as "not
    * recorded" and therefore never sticky.
@@ -163,7 +163,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   // length, not the filtered one: an invalid array element (a string, an
   // unknown harness name) also filters down to `harnesses: []` below, but
   // must not be mistaken for a deliberate recorded `harnesses: []` -- see
-  // the `Manifest.harnessesRecordedEmpty` doc comment above for why (F1).
+  // the `Manifest.harnessesRecordedEmpty` doc comment above for why.
   const rawHarnessesIsArray = Array.isArray(candidate.harnesses);
   const rawHarnesses = rawHarnessesIsArray
     ? (candidate.harnesses as unknown[])
@@ -545,7 +545,7 @@ export function runInit(options: InitOptions): Report {
   // harness's name out of `previous.harnesses` entirely, but its files are
   // still sitting in `previous.files` under `.claude/`; deriving the
   // dropped-harness set from `previous.harnesses` would silently miss those
-  // notes (review finding F1, agent-tasks 613316c9 round 2). Checking each
+  // notes (see CHANGELOG). Checking each
   // known harness's own file-ledger prefix directly is immune to that: a
   // harness with no files in the ledger under its prefix produces no notes
   // either way, whether or not `previous.harnesses` ever named it.
@@ -572,8 +572,18 @@ export function runInit(options: InitOptions): Report {
     // when the harness set collapses to none this run, this install skips
     // writing them (see the `options.harnesses.length > 0` guard below),
     // so note them by on-disk existence instead of a ledger lookup -- the
-    // same untracked signal for a file the ledger never recorded.
-    if (previous.harnesses.length > 0 && options.harnesses.length === 0) {
+    // same untracked signal for a file the ledger never recorded. Gated on
+    // ledger evidence (any known harness's file prefix present in
+    // `previous.files`), not on the sanitized `previous.harnesses`, for the
+    // same reason as the loop above: a damaged manifest can filter a valid
+    // harness out of `previous.harnesses` while its files remain recorded.
+    const hadTrackedHarnessFiles = Object.keys(previous.files).some(
+      (relativePath) =>
+        HARNESSES.some((harness) =>
+          relativePath.startsWith(harnessDirs[harness] + sep),
+        ),
+    );
+    if (hadTrackedHarnessFiles && options.harnesses.length === 0) {
       for (const name of ["AGENTS.md", "CLAUDE.md"]) {
         if (existsSync(join(targetDir, name))) {
           report.notes.push(
