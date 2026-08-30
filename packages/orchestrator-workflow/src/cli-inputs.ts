@@ -32,14 +32,17 @@ export async function promptHarnesses(
     {
       type: "checkbox",
       name: "harnesses",
-      message: "Install adapters for which harnesses?",
+      message:
+        "Install adapters for which harnesses? (deselect all for templates only, no harness)",
       choices: HARNESSES.map((harness) => ({
         name: harness + (detected.includes(harness) ? " (detected)" : ""),
         value: harness,
         checked: preselected.includes(harness),
       })),
-      validate: (selection: unknown[]) =>
-        selection.length > 0 || "Select at least one harness",
+      // An empty selection is a supported state since agent-tasks 613316c9
+      // (`--harness none`, templates-only mode): it used to be rejected
+      // here because every install always wrote at least one harness
+      // adapter; there is no longer a reason to require one.
     },
   ]);
   return harnesses;
@@ -141,11 +144,16 @@ export interface ResolveInitInputsParams {
    * to a synthetic "operator defaults as floor" object (`apply`'s
    * `buildApplyPrevious`, which is never `undefined` even for a target with
    * no manifest of its own). Only consulted for the harnesses-stickiness
-   * rule below: a real recorded `harnesses: []` means a deliberate
-   * `--harness none` install, and a plain re-run must not silently widen it
-   * via detection; a synthetic floor previous carries no such signal, so
-   * `apply` omits this (default `false`) and keeps its own
-   * `resolveApplyHarnesses` fallback chain unchanged.
+   * rule below, together with `previous.harnessesRecorded`: a real recorded
+   * `harnesses: []` means a deliberate `--harness none` install, and a
+   * plain re-run must not silently widen it via detection; a synthetic
+   * floor previous carries no such signal, so `apply` omits this (default
+   * `false`) and keeps its own `resolveApplyHarnesses` fallback chain
+   * unchanged. This flag alone does not distinguish a deliberate
+   * `harnesses: []` from a damaged/legacy manifest whose `harnesses` field
+   * was missing or malformed and therefore sanitized to `[]` by
+   * `readInstalledManifest` -- that distinction is `harnessesRecorded`'s
+   * job; both must hold for the stickiness gate to fire.
    */
   previousIsRecordedManifest?: boolean;
 }
@@ -190,17 +198,33 @@ export async function resolveInitInputs(
   } else if (
     previousIsRecordedManifest &&
     previous &&
+    previous.harnessesRecorded &&
     previous.harnesses.length === 0
   ) {
     // A recorded previous manifest with harnesses: [] was an explicit
-    // --harness none (templates-only) install. A plain re-run (no
-    // --harness flag) must stay templates-only rather than falling back to
-    // filesystem detection and silently installing a harness (e.g. claude)
-    // the operator never asked for; adding one back requires an explicit
-    // --harness on this run, the same override-vs-persist rule
-    // --profile/--models/--tiers already use, just applied to the "no
-    // harnesses" case specifically.
-    harnesses = [];
+    // --harness none (templates-only) install. A plain non-interactive
+    // re-run (no --harness flag) must stay templates-only rather than
+    // falling back to filesystem detection and silently installing a
+    // harness (e.g. claude) the operator never asked for; adding one back
+    // requires an explicit --harness on this run, the same
+    // override-vs-persist rule --profile/--models/--tiers already use,
+    // just applied to the "no harnesses" case specifically.
+    // `harnessesRecorded` gates this on the raw JSON's `harnesses` field
+    // having actually been an array: a missing/malformed field also
+    // sanitizes to `harnesses.length === 0` (readInstalledManifest in
+    // init.ts) but must fall through to detection below instead, the same
+    // as any other damaged manifest.
+    //
+    // An interactive re-run is different: stickiness only protects a
+    // non-interactive call (`--yes`, or any other flow with no prompt) from
+    // silently widening an explicit "none" back out; an interactive session
+    // can already ask and let the operator decide, so it still prompts here
+    // instead of skipping straight to templates-only. `installed` is passed
+    // as `[]` (not the recorded `previous.harnesses`) so nothing is
+    // pre-checked, unlike the "else" branch below's normal re-run prompt --
+    // the previous run explicitly asked for none, so the checkbox starts
+    // from that state, only `detected` entries pre-checked.
+    harnesses = interactive ? await promptHarnesses(detected, []) : [];
   } else {
     const installed = previous?.harnesses ?? [];
     const fallback = [...new Set([...detected, ...installed])];

@@ -103,6 +103,19 @@ export interface Manifest {
    * ever recorded or an existing one was cleared.
    */
   pin?: string;
+  /**
+   * True when the raw manifest JSON's `harnesses` field was itself a valid
+   * array (whether empty or not) rather than missing, malformed, or the
+   * wrong type and therefore sanitized to `[]` by `readInstalledManifest`
+   * below. Distinguishes a deliberate recorded `harnesses: []` (a real
+   * `--harness none` install) from a damaged/legacy manifest that merely
+   * degrades to the same empty array; only `readInstalledManifest` ever
+   * sets this from an actual on-disk manifest. A synthetic previous (e.g.
+   * `apply`'s `buildApplyPrevious` in cli.ts) leaves it `undefined`, which
+   * the harnesses-stickiness gate in `cli-inputs.ts` treats as "not
+   * recorded" and therefore never sticky.
+   */
+  harnessesRecorded?: boolean;
 }
 
 function sha256(content: string): string {
@@ -140,8 +153,13 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   const candidate = raw as Record<string, unknown>;
   if (candidate.kit !== SKILL_NAME) return undefined;
 
+  // Captured before filtering: an invalid array element (a string, an
+  // unknown harness name) still leaves this true, since the field itself
+  // was a real array; only a missing/non-array `harnesses` field is
+  // "not recorded".
+  const harnessesRecorded = Array.isArray(candidate.harnesses);
   const harnesses = (
-    Array.isArray(candidate.harnesses) ? candidate.harnesses : []
+    harnessesRecorded ? (candidate.harnesses as unknown[]) : []
   ).filter((value): value is Harness =>
     (HARNESSES as string[]).includes(value as string),
   );
@@ -194,6 +212,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     kit: SKILL_NAME,
     version: typeof candidate.version === "string" ? candidate.version : "",
     harnesses,
+    harnessesRecorded,
     models: models as Record<Role, string>,
     profile,
     tiers,
@@ -493,6 +512,53 @@ export function runInit(options: InitOptions): Report {
               `${relativePath}: now untracked after tiers were turned off; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
             );
           }
+        }
+      }
+    }
+  }
+
+  // Dropping a harness this run (a previously installed harness no longer
+  // in options.harnesses -- including the whole set collapsing to
+  // `--harness none`) leaves that harness's files on disk but out of the
+  // manifest's file ledger, the same untracked-leftover shape as the two
+  // note loops above; surface it the same way instead of a silent leftover
+  // for `uninstall` to trip over later. Unlike the two loops above (which
+  // only ever touch claude/opencode agent files), this one also covers
+  // codex's SKILL.md under `.agents/`, since codex has no per-role agent
+  // files but its skill file is still a ledger-tracked kit-owned file.
+  if (previous) {
+    const droppedHarnesses = previous.harnesses.filter(
+      (harness) => !options.harnesses.includes(harness),
+    );
+    for (const harness of droppedHarnesses) {
+      const harnessDir =
+        harness === "claude"
+          ? ".claude"
+          : harness === "opencode"
+            ? ".opencode"
+            : ".agents";
+      const prefix = harnessDir + sep;
+      for (const relativePath of Object.keys(previous.files)) {
+        if (relativePath.startsWith(prefix)) {
+          report.notes.push(
+            `${relativePath}: now untracked after --harness dropped ${harness}; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+          );
+        }
+      }
+    }
+    // AGENTS.md/CLAUDE.md are never ledger-tracked in the first place
+    // (upsertMarkerSection/ensureClaudeImport below write them directly,
+    // not through installKitFile, so they never enter previous.files);
+    // when the harness set collapses to none this run, this install skips
+    // writing them (see the `options.harnesses.length > 0` guard below),
+    // so note them by on-disk existence instead of a ledger lookup -- the
+    // same untracked signal for a file the ledger never recorded.
+    if (previous.harnesses.length > 0 && options.harnesses.length === 0) {
+      for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+        if (existsSync(join(targetDir, name))) {
+          report.notes.push(
+            `${name}: now untracked after --harness dropped to none; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+          );
         }
       }
     }

@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import inquirer from "inquirer";
 
 import { resolveInitInputs } from "../src/cli-inputs.js";
 import type { Manifest } from "../src/init.js";
@@ -13,17 +14,32 @@ import { DEFAULT_MODELS, DEFAULT_PROFILE } from "../src/models.js";
  * (agent-dx task T-003) so a later `apply --target` command can reuse the
  * same harness/profile/models/tiers/opencode-catalog resolution without
  * duplicating it. These tests call the function directly, in-process, with
- * `interactive: false` throughout so no TTY or inquirer prompt is ever
- * reached; the CLI-visible behaviour (stdout/stderr/exit codes/files
+ * `interactive: false` throughout (one dedicated describe block below is
+ * the sole exception, see its own comment) so no TTY or inquirer prompt is
+ * ever reached; the CLI-visible behaviour (stdout/stderr/exit codes/files
  * written) is instead covered end-to-end by `test/init.test.ts`'s
  * `spawnSync`-of-the-CLI smoke tests, unchanged by this extraction.
  */
+
+// `inquirer.prompt` is mocked module-wide only for the "interactive
+// re-run" describe block below (task agent-tasks 613316c9, F4): every
+// other describe block in this file passes `interactive: false`, which
+// never reaches this mock, so mocking it here does not change their
+// behaviour.
+vi.mock("inquirer", () => ({
+  default: { prompt: vi.fn() },
+}));
 
 function fakeManifest(overrides: Partial<Manifest> = {}): Manifest {
   return {
     kit: "orchestrator-workflow",
     version: "0.25.0",
     harnesses: ["claude"],
+    // Matches what readInstalledManifest actually records for any manifest
+    // whose raw `harnesses` field is a real (even if empty) array, which is
+    // the common case these fakes model; a test exercising the
+    // damaged/legacy-manifest case overrides this explicitly to `false`.
+    harnessesRecorded: true,
     models: { ...DEFAULT_MODELS },
     profile: DEFAULT_PROFILE,
     tiers: false,
@@ -308,6 +324,16 @@ describe("resolveInitInputs: --harness none (templates-only mode)", () => {
     ).rejects.toThrow(/templates-only mode and cannot be combined/);
   });
 
+  it('"none,none" (a repeated "none", not a different entry) resolves the same as a plain "none" instead of throwing (F6)', async () => {
+    const result = await resolveInitInputs({
+      detected: [],
+      interactive: false,
+      previous: undefined,
+      opts: { harness: "none,none" },
+    });
+    expect(result.harnesses).toEqual([]);
+  });
+
   it("a plain re-run (no --harness flag) after a previous harnesses: [] install stays templates-only, even when a harness is detected on disk (previousIsRecordedManifest: true, init's own call)", async () => {
     const previous = fakeManifest({ harnesses: [] });
     const result = await resolveInitInputs({
@@ -341,6 +367,96 @@ describe("resolveInitInputs: --harness none (templates-only mode)", () => {
       opts: {},
       // previousIsRecordedManifest omitted (defaults to false/undefined)
     });
+    expect(result.harnesses).toEqual(["claude"]);
+  });
+
+  it("a previous harnesses: [] with harnessesRecorded: false (a damaged/legacy manifest, not a real recorded --harness none) does NOT stick: falls back to detected instead", async () => {
+    // readInstalledManifest sanitizes a missing/malformed harnesses field
+    // (undefined, a string, an object, unknown names) to harnesses: [] too,
+    // but marks harnessesRecorded: false since the raw field was never
+    // actually an array. previousIsRecordedManifest alone (init's own
+    // call) is not enough to make this stick: both flags are required.
+    const previous = fakeManifest({ harnesses: [], harnessesRecorded: false });
+    const result = await resolveInitInputs({
+      detected: ["claude"],
+      interactive: false,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+    expect(result.harnesses).toEqual(["claude"]);
+  });
+});
+
+describe("resolveInitInputs: interactive re-run after a templates-only install (F4)", () => {
+  // resolveInitInputs prompts for more than just harnesses when
+  // interactive and the corresponding opts.* flag is absent (profile,
+  // then one models prompt per role): answer every prompt generically by
+  // its `name`/`default` except "harnesses", which the harnessesAnswer
+  // parameter controls, so these tests can assert on the harnesses prompt
+  // specifically without hardcoding the total prompt count.
+  function mockPrompts(harnessesAnswer: string[]) {
+    vi.mocked(inquirer.prompt).mockImplementation(async (questions) => {
+      const q = (questions as Array<Record<string, unknown>>)[0];
+      if (q.name === "harnesses") return { harnesses: harnessesAnswer };
+      if (q.name === "profile") return { profile: q.default };
+      if (q.name === "choice") return { choice: q.default };
+      throw new Error(`unmocked prompt: ${String(q.name)}`);
+    });
+  }
+
+  afterEach(() => {
+    vi.mocked(inquirer.prompt).mockReset();
+  });
+
+  it("still prompts instead of skipping straight to templates-only, with nothing pre-checked except what is detected", async () => {
+    const previous = fakeManifest({ harnesses: [] });
+    mockPrompts([]);
+
+    const result = await resolveInitInputs({
+      detected: ["codex"],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    // The stickiness gate did not short-circuit straight to []: the
+    // harnesses prompt was actually invoked.
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    // Only the detected harness ("codex") is pre-checked; the previous
+    // install's own recorded harnesses ([]) contribute nothing, so
+    // "claude"/"opencode" are unchecked rather than carried forward.
+    for (const choice of choices) {
+      expect(choice.checked).toBe(choice.value === "codex");
+    }
+    // The mocked answer (operator deselected everything) flows through.
+    expect(result.harnesses).toEqual([]);
+  });
+
+  it("an operator who selects a harness in the prompt gets it installed, not stuck at []", async () => {
+    const previous = fakeManifest({ harnesses: [] });
+    mockPrompts(["claude"]);
+
+    const result = await resolveInitInputs({
+      detected: [],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
     expect(result.harnesses).toEqual(["claude"]);
   });
 });

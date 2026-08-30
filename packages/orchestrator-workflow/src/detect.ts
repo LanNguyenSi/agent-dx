@@ -53,10 +53,19 @@ export function parseHarnessList(list: string): Harness[] {
  * `parseHarnessList` unchanged.
  */
 export function parseHarnessOption(list: string): Harness[] {
-  const entries = list
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter((entry) => entry !== "");
+  // Deduplicated before the arity check below so a repeated "none"
+  // (`none,none`) is recognized as the same single-entry intent as a
+  // plain "none", rather than tripping the "cannot be combined with other
+  // harnesses" error meant for an actually different entry like
+  // "none,claude".
+  const entries = [
+    ...new Set(
+      list
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter((entry) => entry !== ""),
+    ),
+  ];
   if (entries.includes("none")) {
     if (entries.length > 1) {
       throw new Error(
