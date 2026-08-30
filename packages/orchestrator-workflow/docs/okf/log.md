@@ -5856,8 +5856,9 @@ source are re-stamped in the commit after this one.
 
   Negative control: on the committed tree, deleting the `#"one directory
   per unit of work, newest = active"` anchor from
-  `run-state-lifecycle-and-markers.md`'s `packages/orchestrator-workflow/
-  README.md:91-96` citation (working tree only) and re-running both the
+  `run-state-lifecycle-and-markers.md`'s citation into
+  `packages/orchestrator-workflow/README.md` (its lines 91 through 96,
+  working tree only) and re-running both the
   bare `okf-kit check --require-anchors` command and the CI step's jq
   filter reproduced 1 `[anchor-required]` finding, count 1, exit 1 (red);
   `git checkout -- packages/orchestrator-workflow/docs/okf/run-state-
@@ -6071,3 +6072,85 @@ source are re-stamped in the commit after this one.
   dedicated damaged-manifest unit test (`test/cli-inputs.test.ts`) turned
   red (expected `["claude"]`, got `[]`). Restored the line, re-ran: both
   green again.
+
+- 2026-08-30 (agent-tasks 613316c9 round 3: round-2 review findings F1/F2
+  plus L1-L3): F1 (repeated, MEDIUM) was still live after round 2's own
+  fix -- the stickiness signal was captured from `Array.isArray` on the
+  raw JSON `harnesses` field BEFORE the known-harness filter ran, so a
+  manifest whose raw array had entries that all failed that filter (an
+  unrecognized name, or the right name in the wrong case) still recorded
+  the signal true, filtered down to an empty array, and stuck a live
+  install to templates-only on a plain re-run. Renamed the field to
+  `harnessesRecordedEmpty` and computed it from the raw array's own
+  (pre-filter) length instead, so only a genuinely empty raw array sets
+  it. The dropped-harness note loop shared the same root cause a
+  different way: it derived which harness's files to note as untracked
+  from the sanitized `previous.harnesses`, so a harness whose name was
+  lost the same way left its files silently unmentioned; it now walks
+  every known harness's own file-ledger prefix directly, independent of
+  what the (possibly damaged) harnesses array says. F2 (MEDIUM, new):
+  `promptHarnesses`'s own "nothing known" fallback pre-checked `claude`
+  unconditionally, including on the templates-only interactive branch,
+  where nothing is ever detected by construction, contradicting the
+  README's and the function's own "nothing forced pre-selected" claim;
+  gave it an explicit `fallbackToClaude` parameter the templates-only
+  branch passes `false`.
+
+  Tests added: a dedicated CLI-level pair (hand-written manifest with
+  `harnesses` set to an unrecognized single-entry array, one lower-case
+  and one differently-cased) asserting the install recovers to the live
+  harness rather than sticking; a `resolveInitInputs`-level unit case
+  modeling the same raw shape; an interactive-prompt unit case asserting
+  no checkbox is pre-checked when nothing is detected and nothing was
+  previously recorded; a `runInit`-level pair covering the dropped-note
+  loop against a hand-corrupted manifest (one asserting the ledger-driven
+  fix directly, one covering a partial two-harness drop that leaves the
+  surviving harness's files and the AGENTS.md/CLAUDE.md note alone); and
+  an `apply --harness none` end-to-end CLI case confirming the CHANGELOG's
+  "apply shares the same option parsing" claim holds. The four new
+  `runInit`/CLI-level tests were appended as new `describe` blocks at the
+  very end of `test/init.test.ts` rather than inlined near the code they
+  cover, deliberately: every citation in this bundle naming a
+  `test/init.test.ts` line range would otherwise have shifted out from
+  under an insertion made earlier in the file, and did on a first attempt
+  before this was caught and reverted.
+
+  Mutation probes: M1 (F1) reverted `harnessesRecordedEmpty` back to the
+  round-2-era "was an array" signal (`Array.isArray` alone, no length
+  check). Result: both new CLI-level all-unknown-names tests turned red
+  (expected `installed for: claude`, got the install stuck at
+  templates-only). Restored, re-ran: green again. M2 (F2) dropped the
+  `fallbackToClaude: false` argument at the templates-only branch's
+  `promptHarnesses` call site. Result: the new interactive-prompt unit
+  test turned red (expected every choice unchecked, `claude` came back
+  checked). Restored, re-ran: green again.
+
+  Verification: `npm test` (green, one dogfood test in
+  `test/docs-consistency.test.ts` initially caught two anchors this round
+  introduced that collided with existing text elsewhere in
+  `test/init.test.ts` above the 3-occurrence cap; both re-picked, then
+  green), `npm run typecheck` and `npm run typecheck:test` (clean),
+  `npm run build` (clean), `npm run format:check` (clean, after one
+  `prettier --write` pass on the two touched source files, which reflowed
+  a couple of long lines and required a second re-point pass over every
+  affected citation), `node scripts/check-cli-flag-order.mjs` from the
+  repo root (clean), and `node packages/slop-detector/dist/cli.js check .
+  --pack placement-slop --config slop.config.yml` from the repo root
+  (clean). `okf-kit check --require-anchors` against the committed bundle:
+  0 errors, 0 findings in the blocking set, 0 warnings; the same 21
+  pre-existing `unresolved-ambiguous` notices as before this round,
+  unrelated to it (well under the round's own "do not exceed head"
+  budget, since head going into this round already carried 21 warnings
+  from stale citations this round's own line-shift firefighting also
+  happened to clean up).
+
+  CLI drive-through in a fresh temp git repo, using `tsx` against the
+  package's own source (not the built `dist/`): installed claude, hand-
+  edited the manifest's `harnesses` field to a single unrecognized name,
+  re-ran a plain `init --yes` -- printed `installed for: claude`, the
+  manifest's `harnesses` recovered to the live harness, and every one of
+  the five role files plus the skill file were back in the file ledger
+  (no ledger loss). A second temp repo: installed claude, then hand-set
+  `harnesses` to a real empty array and re-ran a plain `init --yes` --
+  stayed at `templates only` as the deliberate-`none` case still requires,
+  confirming the fix did not also loosen the genuine stickiness rule.

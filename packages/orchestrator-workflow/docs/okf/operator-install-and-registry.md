@@ -3,7 +3,7 @@ type: module
 title: Operator install and target registry
 description: The operator-level home, manifest schema, locked write API, target registry, and the setup/apply/doctor/adopt commands built on top of it.
 tags: [operator, manifest, registry, lock, doctor, adopt, pin, cli]
-timestamp: 2026-08-30T09:40:00Z
+timestamp: 2026-08-30T10:22:05Z
 sources:
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/src/doctor.ts
@@ -175,7 +175,7 @@ harnesses/profile/tiers/models precedence is layered:
    `resolveInitInputs` already applies to a plain `init` re-run: for
    example `--tiers`/`--no-tiers` always overrides whatever `previous`
    (the synthetic manifest built below) carries
-   (cli-inputs.ts:258-268#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
+   (cli-inputs.ts:280-290#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
 2. Absent an explicit `--harness`, harnesses fall back to the target's own
    recorded harnesses, else the operator defaults, else detection
    (cli.ts:569-571#"else the operator defaults, else detected",
@@ -206,7 +206,7 @@ CLI layer, a usage error rather than an implicit precedence rule
 resolves the final stored pin the same way for both `init` and `apply`: a
 `string` sets it, `null` clears it, `undefined` (the default, no flag passed)
 carries the previous manifest's pin forward unchanged
-(init.ts:429-436#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
+(init.ts:439-446#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
 
 Registration happens even when local edits left some files `conflicted` (the
 apply itself still ran). The pin gate returns before the install is ever
@@ -348,7 +348,7 @@ version); `InitOptions.pin` is how a caller sets it: a `string` to set, `null`
 to clear, `undefined` to carry the previous value forward unchanged
 (init.ts:71-79#"pin?: string | null;"). A stored pin that is empty or
 whitespace-only is treated as no pin at all, both on write and on read back
-(init.ts:222-226#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
+(init.ts:232-236#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
 computation applies the pin rule precisely: a recorded pin suppresses
 `version-lag` only when the pin equals the repo's own *installed* version;
 that is the expected, deliberate-stay state. When the pin and the installed
