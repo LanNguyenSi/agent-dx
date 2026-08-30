@@ -73,6 +73,22 @@ npx orchestrator-workflow init --harness claude,codex,opencode --models "impleme
 npx orchestrator-workflow init --profile minimal --yes
 ```
 
+**Templates-only mode.** `--harness none` (the literal word `none`, on its
+own) installs only `.ai/workflow/**` and `.ai/runs/.gitkeep`: no
+`AGENTS.md`, no `CLAUDE.md`, no harness-specific directory, and a manifest
+recording `harnesses: []`. Use it for a repo that wants the run-state
+templates and the workflow itself, but no per-harness subagent files yet
+(e.g. no harness has been chosen, or the files were dropped by hand).
+`none` combined with a real harness name (`--harness none,claude`) is
+rejected as ambiguous rather than silently picking one. A plain re-run (no
+`--harness` flag) after a templates-only install stays templates-only; add
+a harness back with an explicit `--harness <list>` on a later run, the same
+override-vs-persist rule every other `--harness` re-run already follows.
+
+```bash
+npx orchestrator-workflow init --harness none --yes
+```
+
 To let a coding agent do the install, give it this single line:
 
 ```text

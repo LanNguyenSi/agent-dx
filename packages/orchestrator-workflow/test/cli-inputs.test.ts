@@ -263,3 +263,84 @@ describe("resolveInitInputs: opencode branch", () => {
     expect(result.warnings).toEqual([]);
   });
 });
+
+describe("resolveInitInputs: --harness none (templates-only mode)", () => {
+  it("--harness none resolves to an empty harnesses array on a fresh install", async () => {
+    const result = await resolveInitInputs({
+      detected: ["claude"],
+      interactive: false,
+      previous: undefined,
+      opts: { harness: "none" },
+    });
+    expect(result.harnesses).toEqual([]);
+  });
+
+  it("--harness none overrides a previous install's non-empty harnesses", async () => {
+    const previous = fakeManifest({ harnesses: ["claude", "codex"] });
+    const result = await resolveInitInputs({
+      detected: ["claude"],
+      interactive: false,
+      previous,
+      opts: { harness: "none" },
+    });
+    expect(result.harnesses).toEqual([]);
+  });
+
+  it('"none" combined with a real harness (none,claude) throws a clear usage error', async () => {
+    await expect(
+      resolveInitInputs({
+        detected: [],
+        interactive: false,
+        previous: undefined,
+        opts: { harness: "none,claude" },
+      }),
+    ).rejects.toThrow(/templates-only mode and cannot be combined/);
+  });
+
+  it('"claude,none" (either order) also throws', async () => {
+    await expect(
+      resolveInitInputs({
+        detected: [],
+        interactive: false,
+        previous: undefined,
+        opts: { harness: "claude,none" },
+      }),
+    ).rejects.toThrow(/templates-only mode and cannot be combined/);
+  });
+
+  it("a plain re-run (no --harness flag) after a previous harnesses: [] install stays templates-only, even when a harness is detected on disk (previousIsRecordedManifest: true, init's own call)", async () => {
+    const previous = fakeManifest({ harnesses: [] });
+    const result = await resolveInitInputs({
+      detected: ["claude"],
+      interactive: false,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+    expect(result.harnesses).toEqual([]);
+  });
+
+  it("an explicit --harness claude after a previous harnesses: [] install adds the harness back", async () => {
+    const previous = fakeManifest({ harnesses: [] });
+    const result = await resolveInitInputs({
+      detected: [],
+      interactive: false,
+      previous,
+      opts: { harness: "claude" },
+      previousIsRecordedManifest: true,
+    });
+    expect(result.harnesses).toEqual(["claude"]);
+  });
+
+  it("without previousIsRecordedManifest (e.g. apply's synthetic operator-defaults previous), a previous harnesses: [] does NOT stick: falls back to detected instead", async () => {
+    const previous = fakeManifest({ harnesses: [] });
+    const result = await resolveInitInputs({
+      detected: ["claude"],
+      interactive: false,
+      previous,
+      opts: {},
+      // previousIsRecordedManifest omitted (defaults to false/undefined)
+    });
+    expect(result.harnesses).toEqual(["claude"]);
+  });
+});

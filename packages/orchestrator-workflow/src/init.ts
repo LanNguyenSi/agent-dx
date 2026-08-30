@@ -531,14 +531,19 @@ export function runInit(options: InitOptions): Report {
   installKitFile(join(".ai", "runs", ".gitkeep"), "");
 
   // Codex and opencode read AGENTS.md natively; Claude Code gets it via the
-  // CLAUDE.md import. The policy section is therefore installed regardless of
-  // the harness selection. AGENTS.md and CLAUDE.md are user-owned: only the
-  // fenced section and the import line are ever touched.
-  upsertMarkerSection(
-    report,
-    join(targetDir, "AGENTS.md"),
-    readAsset("agents-md-section.md"),
-  );
+  // CLAUDE.md import. The policy section is therefore installed whenever any
+  // harness is selected, regardless of which one. AGENTS.md and CLAUDE.md
+  // are user-owned: only the fenced section and the import line are ever
+  // touched. `options.harnesses.length === 0` is templates-only mode
+  // (`--harness none`): only `.ai/workflow/**` and `.ai/runs/.gitkeep` are
+  // written, so AGENTS.md is left untouched (and never created) too.
+  if (options.harnesses.length > 0) {
+    upsertMarkerSection(
+      report,
+      join(targetDir, "AGENTS.md"),
+      readAsset("agents-md-section.md"),
+    );
+  }
 
   const skill = readAsset(join("skill", "SKILL.md"));
 

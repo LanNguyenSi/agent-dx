@@ -654,7 +654,7 @@
   `DEFAULT_MODELS` at 70-75, all in subagent-contracts-superset.md) needed no
   correction at all, confirmed unchanged by direct read: the branch's
   ~55-line tier block is purely appended after the file's old line 142, past
-  every citation into it. `README.md:91-96` (run-state-lifecycle-and-markers.md's
+  every citation into it. `README.md:107-112` (run-state-lifecycle-and-markers.md's
   "What gets installed" code-fence citation, supporting the same
   copy-from-templates claim as the INSTALL-AGENT.md citation below) also
   needed no correction, confirmed byte-identical by direct read: both of the
@@ -2689,8 +2689,8 @@ clean (395 files scanned).
   with `anchor-`. The `--require-anchors-allow` allowlist uses
   `*README.md`/`*INSTALL-AGENT.md` globs rather than the bare exact
   strings: this bundle cites both docs under two different spellings
-  (bare `README.md:105` and the fully-qualified
-  `packages/orchestrator-workflow/README.md:91-96`/`INSTALL-AGENT.md:46-
+  (bare `README.md:121` and the fully-qualified
+  `packages/orchestrator-workflow/README.md:107-112`/`INSTALL-AGENT.md:46-
   47`), and the exact-string form left the two fully-qualified citations
   reporting `anchor-required` (measured: `okf-kit check --json
   packages/orchestrator-workflow/docs/okf --require-anchors
@@ -5798,3 +5798,53 @@ misleading source comment above apply's registration step in cli.ts (it
 names the pin gate as the only pre-registration return) is a follow-up in
 src, outside this docs slice. The four docs listing the guard file as a
 source are re-stamped in the commit after this one.
+
+- 2026-08-30 (agent-tasks 613316c9, `init --harness none` templates-only
+  mode): `install-fence-mechanics.md`'s AGENTS.md-write bullet re-verified
+  and reworded (the write is now gated on `options.harnesses.length > 0`,
+  no longer unconditional), and a new "`--harness none` (templates-only
+  mode)" section added, citing `detect.ts` (new `parseHarnessOption`),
+  `init.ts` (the harness-length guard and the manifest's `harnesses: []`
+  record), and `cli-inputs.ts`/`cli.ts` (the `previousIsRecordedManifest`
+  re-run-stickiness flag and the `installedForClause` summary-line helper).
+  `model-preselection.md` and `operator-install-and-registry.md` needed no
+  content change (neither describes `--harness`/init-writes mechanics
+  directly) but had citations into `cli.ts`/`cli-inputs.ts`/`init.ts` that
+  shifted from the same source edits, re-pointed in this commit; two
+  hardcoded citation strings in `test/docs-consistency.test.ts` itself
+  (the apply pin-gate-before-runInit ordering test) shifted the same way
+  and were updated to match. `test/init.test.ts` gained a new describe
+  block (fresh templates-only install shape, idempotence, additive
+  `--harness claude` follow-up, plus three CLI-smoke cases: `--harness
+  none` end to end, `none,claude` as a usage error, and re-run stickiness
+  with a harness config appearing on disk after the templates-only
+  install); every citation into it from `install-fence-mechanics.md` and
+  `model-preselection.md` re-pointed to match, verified individually
+  (anchor text present, on the cited range's last content line, occurring
+  exactly once in range) rather than by uniform offset, since the new
+  block's placement plus a Prettier reformat pass shifted different
+  pre-existing citations by different amounts depending on which side of
+  the insertion they fell on. `README.md` gained a "Templates-only mode"
+  paragraph plus example under "Non-interactive"; every `README.md:N-M`
+  citation across the whole bundle (`install-fence-mechanics.md`,
+  `model-preselection.md`, `run-state-lifecycle-and-markers.md`, and
+  `log.md`'s own historical entries reference `CHANGELOG.md:#[version]`
+  heading anchors, not `README.md` line numbers, so those were unaffected)
+  re-pointed the same way. `CHANGELOG.md` gained an `[Unreleased]` "Added"
+  entry; no bundle doc cites `[Unreleased]` by line number (the existing
+  `CHANGELOG.md:#[version]` citations all target released version
+  headings), so nothing else needed re-pointing there.
+
+  Commands run on the committed tree, in the package directory unless
+  noted: `npm run typecheck` (clean), `npm run typecheck:test` (clean),
+  `npm run build` (clean), `npm test` (561/561), `npm run format:check`
+  (clean, after one `prettier --write test/init.test.ts` pass), `node
+  ../../scripts/check-cli-flag-order.mjs` from the repo root (clean), and
+  the CI's own bundle check invocation, `node
+  packages/okf-kit/dist/cli.js check --json packages/orchestrator-workflow/docs/okf
+  --require-anchors --require-anchors-allow 'README.md'
+  'packages/orchestrator-workflow/README.md' 'INSTALL-AGENT.md'
+  'packages/orchestrator-workflow/INSTALL-AGENT.md'` from the repo root:
+  0 errors, 0 findings in the CI guard's blocking set
+  (`anchor-`/`test-range-straddles-block`/`heading-section-`), 0 STALE
+  sources-fresh findings.

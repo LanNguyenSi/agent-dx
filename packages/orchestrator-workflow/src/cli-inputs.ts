@@ -1,7 +1,7 @@
 import inquirer from "inquirer";
 
 import type { Harness } from "./detect.js";
-import { HARNESSES, parseHarnessList } from "./detect.js";
+import { HARNESSES, parseHarnessOption } from "./detect.js";
 import type { Manifest } from "./init.js";
 import type { ModelClass, Profile, Role } from "./models.js";
 import {
@@ -135,6 +135,19 @@ export interface ResolveInitInputsParams {
   /** The previously installed manifest, if any (`readInstalledManifest`). */
   previous: Manifest | undefined;
   opts: InitResolutionOptions;
+  /**
+   * True when `previous` reflects the target's own actually-recorded
+   * manifest (`init`'s use, `readInstalledManifest(targetDir)`), as opposed
+   * to a synthetic "operator defaults as floor" object (`apply`'s
+   * `buildApplyPrevious`, which is never `undefined` even for a target with
+   * no manifest of its own). Only consulted for the harnesses-stickiness
+   * rule below: a real recorded `harnesses: []` means a deliberate
+   * `--harness none` install, and a plain re-run must not silently widen it
+   * via detection; a synthetic floor previous carries no such signal, so
+   * `apply` omits this (default `false`) and keeps its own
+   * `resolveApplyHarnesses` fallback chain unchanged.
+   */
+  previousIsRecordedManifest?: boolean;
 }
 
 export interface ResolvedInitInputs {
@@ -168,11 +181,26 @@ export interface ResolvedInitInputs {
 export async function resolveInitInputs(
   params: ResolveInitInputsParams,
 ): Promise<ResolvedInitInputs> {
-  const { detected, interactive, previous, opts } = params;
+  const { detected, interactive, previous, opts, previousIsRecordedManifest } =
+    params;
 
   let harnesses: Harness[];
   if (opts.harness) {
-    harnesses = parseHarnessList(opts.harness);
+    harnesses = parseHarnessOption(opts.harness);
+  } else if (
+    previousIsRecordedManifest &&
+    previous &&
+    previous.harnesses.length === 0
+  ) {
+    // A recorded previous manifest with harnesses: [] was an explicit
+    // --harness none (templates-only) install. A plain re-run (no
+    // --harness flag) must stay templates-only rather than falling back to
+    // filesystem detection and silently installing a harness (e.g. claude)
+    // the operator never asked for; adding one back requires an explicit
+    // --harness on this run, the same override-vs-persist rule
+    // --profile/--models/--tiers already use, just applied to the "no
+    // harnesses" case specifically.
+    harnesses = [];
   } else {
     const installed = previous?.harnesses ?? [];
     const fallback = [...new Set([...detected, ...installed])];
