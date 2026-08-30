@@ -103,6 +103,25 @@ export interface Manifest {
    * ever recorded or an existing one was cleared.
    */
   pin?: string;
+  /**
+   * True only when the raw manifest JSON's `harnesses` field was itself an
+   * array AND that raw array had zero elements -- i.e. the operator
+   * recorded an explicit empty harness set (a real `--harness none`
+   * install). An array with entries that all fail the known-harness filter
+   * (e.g. `["cursor"]`, or `["Claude"]` with the wrong case) also filters
+   * down to `harnesses: []` but must NOT set this flag: the raw field was
+   * never actually recorded as empty, it just failed to name anything this
+   * kit recognizes, and treating that the same as a deliberate `none` would
+   * silently degrade a live install to templates-only on a plain re-run
+   * (see CHANGELOG). A missing/malformed `harnesses` field (not an array at
+   * all) is the same "not a recorded empty set" case and also leaves this
+   * `false`. Only `readInstalledManifest` ever sets this from an actual
+   * on-disk manifest. A synthetic previous
+   * (e.g. `apply`'s `buildApplyPrevious` in cli.ts) leaves it `undefined`,
+   * which the harnesses-stickiness gate in `cli-inputs.ts` treats as "not
+   * recorded" and therefore never sticky.
+   */
+  harnessesRecordedEmpty?: boolean;
 }
 
 function sha256(content: string): string {
@@ -140,9 +159,18 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   const candidate = raw as Record<string, unknown>;
   if (candidate.kit !== SKILL_NAME) return undefined;
 
-  const harnesses = (
-    Array.isArray(candidate.harnesses) ? candidate.harnesses : []
-  ).filter((value): value is Harness =>
+  // Captured before filtering, and deliberately on the RAW array's own
+  // length, not the filtered one: an invalid array element (a string, an
+  // unknown harness name) also filters down to `harnesses: []` below, but
+  // must not be mistaken for a deliberate recorded `harnesses: []` -- see
+  // the `Manifest.harnessesRecordedEmpty` doc comment above for why.
+  const rawHarnessesIsArray = Array.isArray(candidate.harnesses);
+  const rawHarnesses = rawHarnessesIsArray
+    ? (candidate.harnesses as unknown[])
+    : [];
+  const harnessesRecordedEmpty =
+    rawHarnessesIsArray && rawHarnesses.length === 0;
+  const harnesses = rawHarnesses.filter((value): value is Harness =>
     (HARNESSES as string[]).includes(value as string),
   );
   const models: Partial<Record<Role, string>> = {};
@@ -194,6 +222,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     kit: SKILL_NAME,
     version: typeof candidate.version === "string" ? candidate.version : "",
     harnesses,
+    harnessesRecordedEmpty,
     models: models as Record<Role, string>,
     profile,
     tiers,
@@ -498,6 +527,73 @@ export function runInit(options: InitOptions): Report {
     }
   }
 
+  // Dropping a harness this run (a previously installed harness no longer
+  // in options.harnesses -- including the whole set collapsing to
+  // `--harness none`) leaves that harness's files on disk but out of the
+  // manifest's file ledger, the same untracked-leftover shape as the two
+  // note loops above; surface it the same way instead of a silent leftover
+  // for `uninstall` to trip over later. Unlike the two loops above (which
+  // only ever touch claude/opencode agent files), this one also covers
+  // codex's SKILL.md under `.agents/`, since codex has no per-role agent
+  // files but its skill file is still a ledger-tracked kit-owned file.
+  //
+  // Deliberately keyed off `HARNESSES` (every known harness) and
+  // `previous.files` (the raw file ledger) rather than `previous.harnesses`
+  // (the sanitized, filtered harness list): a damaged/hand-edited manifest
+  // whose raw `harnesses` field lists a valid harness under an unrecognized
+  // name (e.g. `["cursor"]` where it once said `["claude"]`) filters that
+  // harness's name out of `previous.harnesses` entirely, but its files are
+  // still sitting in `previous.files` under `.claude/`; deriving the
+  // dropped-harness set from `previous.harnesses` would silently miss those
+  // notes (see CHANGELOG). Checking each
+  // known harness's own file-ledger prefix directly is immune to that: a
+  // harness with no files in the ledger under its prefix produces no notes
+  // either way, whether or not `previous.harnesses` ever named it.
+  if (previous) {
+    const harnessDirs: Record<Harness, string> = {
+      claude: ".claude",
+      codex: ".agents",
+      opencode: ".opencode",
+    };
+    for (const harness of HARNESSES) {
+      if (options.harnesses.includes(harness)) continue;
+      const prefix = harnessDirs[harness] + sep;
+      for (const relativePath of Object.keys(previous.files)) {
+        if (relativePath.startsWith(prefix)) {
+          report.notes.push(
+            `${relativePath}: now untracked after --harness dropped ${harness}; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+          );
+        }
+      }
+    }
+    // AGENTS.md/CLAUDE.md are never ledger-tracked in the first place
+    // (upsertMarkerSection/ensureClaudeImport below write them directly,
+    // not through installKitFile, so they never enter previous.files);
+    // when the harness set collapses to none this run, this install skips
+    // writing them (see the `options.harnesses.length > 0` guard below),
+    // so note them by on-disk existence instead of a ledger lookup -- the
+    // same untracked signal for a file the ledger never recorded. Gated on
+    // ledger evidence (any known harness's file prefix present in
+    // `previous.files`), not on the sanitized `previous.harnesses`, for the
+    // same reason as the loop above: a damaged manifest can filter a valid
+    // harness out of `previous.harnesses` while its files remain recorded.
+    const hadTrackedHarnessFiles = Object.keys(previous.files).some(
+      (relativePath) =>
+        HARNESSES.some((harness) =>
+          relativePath.startsWith(harnessDirs[harness] + sep),
+        ),
+    );
+    if (hadTrackedHarnessFiles && options.harnesses.length === 0) {
+      for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+        if (existsSync(join(targetDir, name))) {
+          report.notes.push(
+            `${name}: now untracked after --harness dropped to none; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+          );
+        }
+      }
+    }
+  }
+
   /**
    * Installs a kit-owned file. An unedited file (it still matches the hash
    * recorded at install time) is updated in place when the kit content
@@ -531,14 +627,19 @@ export function runInit(options: InitOptions): Report {
   installKitFile(join(".ai", "runs", ".gitkeep"), "");
 
   // Codex and opencode read AGENTS.md natively; Claude Code gets it via the
-  // CLAUDE.md import. The policy section is therefore installed regardless of
-  // the harness selection. AGENTS.md and CLAUDE.md are user-owned: only the
-  // fenced section and the import line are ever touched.
-  upsertMarkerSection(
-    report,
-    join(targetDir, "AGENTS.md"),
-    readAsset("agents-md-section.md"),
-  );
+  // CLAUDE.md import. The policy section is therefore installed whenever any
+  // harness is selected, regardless of which one. AGENTS.md and CLAUDE.md
+  // are user-owned: only the fenced section and the import line are ever
+  // touched. `options.harnesses.length === 0` is templates-only mode
+  // (`--harness none`): only `.ai/workflow/**` and `.ai/runs/.gitkeep` are
+  // written, so AGENTS.md is left untouched (and never created) too.
+  if (options.harnesses.length > 0) {
+    upsertMarkerSection(
+      report,
+      join(targetDir, "AGENTS.md"),
+      readAsset("agents-md-section.md"),
+    );
+  }
 
   const skill = readAsset(join("skill", "SKILL.md"));
 

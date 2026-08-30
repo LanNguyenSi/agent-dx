@@ -3804,10 +3804,10 @@ describe("operator-install-and-registry.md's apply section states the pin gate's
       "The pin gate returns before the install is ever attempted",
     );
     const gateCitation = applySection.indexOf(
-      'cli.ts:688-694#"Repository is pinned at"',
+      'cli.ts:705-711#"Repository is pinned at"',
     );
     const runInitCitation = applySection.indexOf(
-      'cli.ts:759#"const report = runInit({"',
+      'cli.ts:776#"const report = runInit({"',
     );
     expect(gateCitation, "pin-gate citation missing").toBeGreaterThanOrEqual(0);
     expect(runInitCitation, "runInit citation missing").toBeGreaterThan(
@@ -3823,7 +3823,7 @@ describe("operator-install-and-registry.md's apply section states the pin gate's
       "Once the install has actually run, registration can still fail without a second install attempt",
     );
     expect(applySection).toContain(
-      'cli.ts:823-827#"the kit was installed but the target was not registered"',
+      'cli.ts:840-844#"the kit was installed but the target was not registered"',
     );
     expect(applySection).toContain("applyRegistrationFailureMessage");
   });

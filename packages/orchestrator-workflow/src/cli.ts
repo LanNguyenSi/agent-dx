@@ -51,6 +51,18 @@ function showPaths(label: string, paths: string[]): void {
   for (const path of paths) console.log(`  ${path}`);
 }
 
+/**
+ * Formats the "installed for: ..." clause of `init`/`apply`'s final summary
+ * line. An empty `harnesses` list is templates-only mode (`--harness none`):
+ * "installed for: " with nothing after the colon reads as broken output, so
+ * that case prints "templates only" instead.
+ */
+function installedForClause(harnesses: Harness[]): string {
+  return harnesses.length > 0
+    ? `installed for: ${harnesses.join(", ")}`
+    : "templates only";
+}
+
 function requireDirectory(dir: string): string | undefined {
   const targetDir = resolve(dir);
   if (!existsSync(targetDir) || !statSync(targetDir).isDirectory()) {
@@ -127,7 +139,7 @@ program
   .option("-f, --force", "overwrite kit-owned files that have local edits")
   .option(
     "--harness <list>",
-    `comma-separated harnesses (${HARNESSES.join(", ")}); default: detected`,
+    `comma-separated harnesses (${HARNESSES.join(", ")}), or "none" alone for templates-only mode (.ai/workflow/** and .ai/runs/.gitkeep only, no AGENTS.md/CLAUDE.md/harness files); default: detected`,
   )
   .option(
     "--models <spec>",
@@ -208,6 +220,11 @@ program
         interactive,
         previous,
         opts,
+        // `previous` here is `readInstalledManifest(targetDir)` (undefined,
+        // or the target's own actually-recorded manifest), unlike `apply`'s
+        // synthetic operator-defaults "floor" object: an empty harnesses
+        // array is a real recorded --harness none install here.
+        previousIsRecordedManifest: true,
       });
       for (const w of warnings) {
         process.stderr.write(`${w}\n`);
@@ -233,7 +250,7 @@ program
       );
       for (const note of report.notes) console.log(note);
       console.log(
-        `\norchestrator-workflow v${PACKAGE_VERSION} installed for: ${harnesses.join(", ")} (profile: ${profile}, tiers: ${tiers})`,
+        `\norchestrator-workflow v${PACKAGE_VERSION} ${installedForClause(harnesses)} (profile: ${profile}, tiers: ${tiers})`,
       );
     },
   );
@@ -777,7 +794,7 @@ program
       );
       for (const note of report.notes) console.log(note);
       console.log(
-        `\norchestrator-workflow v${PACKAGE_VERSION} installed for: ${harnesses.join(", ")} (profile: ${profile}, tiers: ${tiers})`,
+        `\norchestrator-workflow v${PACKAGE_VERSION} ${installedForClause(harnesses)} (profile: ${profile}, tiers: ${tiers})`,
       );
 
       // The re-read, upsert, and write below all run inside

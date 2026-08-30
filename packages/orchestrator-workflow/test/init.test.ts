@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -301,6 +301,17 @@ describe("upgrades via the manifest hash ledger", () => {
     expect(result.status, result.stderr).toBe(0);
 
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    // harnesses: "claude" (a string, not an array) is not a valid harnesses
+    // value; readInstalledManifest sanitizes it to [] but also records
+    // harnessesRecordedEmpty: false (Array.isArray(candidate.harnesses) is
+    // false), so this stays a damaged/legacy manifest rather than a
+    // deliberate recorded `--harness none` install. The harnesses-
+    // stickiness rule (task agent-tasks 613316c9) only fires when
+    // harnessesRecordedEmpty is true, so a plain re-run (no --harness flag)
+    // here falls through to filesystem detection like before that
+    // feature existed: the earlier install's `.claude/` files are still
+    // on disk, detectHarnesses finds them, and harnesses recovers to
+    // ["claude"] rather than silently degrading to templates only.
     expect(manifest.harnesses).toEqual(["claude"]);
     // The invalid reviewer id is dropped (back to default), the valid
     // implementer override survives.
@@ -1163,6 +1174,284 @@ describe("cli smoke", () => {
     expect(
       readFileSync(join(target, ".claude", "agents", "implementer.md"), "utf8"),
     ).toContain("model: haiku");
+  });
+});
+
+describe("templates-only mode (harnesses: [])", () => {
+  it("writes only .ai/workflow/** and .ai/runs/.gitkeep; manifest harnesses [] and files limited to those paths", () => {
+    runInit({
+      targetDir: target,
+      harnesses: [],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    const written = [...snapshot(target).keys()]
+      .map((p) => p.slice(target.length + 1))
+      .sort();
+    expect(written).toEqual([
+      join(".ai", "runs", ".gitkeep"),
+      join(".ai", "workflow", "manifest.json"),
+      join(".ai", "workflow", "templates", "00-goal.md"),
+      join(".ai", "workflow", "templates", "01-plan.md"),
+      join(".ai", "workflow", "templates", "02-tasks.md"),
+      join(".ai", "workflow", "templates", "03-decisions.md"),
+      join(".ai", "workflow", "templates", "04-implementation-summary.md"),
+      join(".ai", "workflow", "templates", "05-review-findings.md"),
+      join(".ai", "workflow", "templates", "06-handoff.md"),
+    ]);
+    expect(existsSync(join(target, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(target, "CLAUDE.md"))).toBe(false);
+    expect(existsSync(join(target, ".claude"))).toBe(false);
+    expect(existsSync(join(target, ".codex"))).toBe(false);
+    expect(existsSync(join(target, ".agents"))).toBe(false);
+    expect(existsSync(join(target, ".opencode"))).toBe(false);
+
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(manifest.harnesses).toEqual([]);
+    expect(Object.keys(manifest.files).sort()).toEqual([
+      join(".ai", "runs", ".gitkeep"),
+      join(".ai", "workflow", "templates", "00-goal.md"),
+      join(".ai", "workflow", "templates", "01-plan.md"),
+      join(".ai", "workflow", "templates", "02-tasks.md"),
+      join(".ai", "workflow", "templates", "03-decisions.md"),
+      join(".ai", "workflow", "templates", "04-implementation-summary.md"),
+      join(".ai", "workflow", "templates", "05-review-findings.md"),
+      join(".ai", "workflow", "templates", "06-handoff.md"),
+    ]);
+    // profile/tiers still recorded (as given, or defaults) even with no
+    // harness selected.
+    expect(manifest.profile).toBe("full");
+    expect(manifest.tiers).toBe(false);
+  });
+
+  it("re-running with harnesses: [] is idempotent (byte-identical templates, manifest untouched)", () => {
+    runInit({
+      targetDir: target,
+      harnesses: [],
+      models: { ...DEFAULT_MODELS },
+    });
+    const before = snapshot(target);
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: [],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    expect(report.written).toEqual([]);
+    expect(report.updated.length).toBe(0);
+    expect(report.conflicted).toEqual([]);
+    const after = snapshot(target);
+    expect(after).toEqual(before);
+  });
+
+  it("a subsequent run with --harness claude adds the harness files and manifest entries without touching the already-installed templates", () => {
+    runInit({
+      targetDir: target,
+      harnesses: [],
+      models: { ...DEFAULT_MODELS },
+    });
+    const templatesBefore = new Map(
+      [...snapshot(target)].filter(([path]) =>
+        path.includes(join(".ai", "workflow", "templates")),
+      ),
+    );
+    const gitkeepBefore = readFileSync(
+      join(target, ".ai", "runs", ".gitkeep"),
+      "utf8",
+    );
+    const manifestBefore = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // Templates and .gitkeep are unchanged (not in written/updated, and
+    // byte-identical on disk).
+    for (const path of templatesBefore.keys()) {
+      expect(report.written).not.toContain(path);
+      expect(report.updated).not.toContain(path);
+    }
+    const templatesAfter = new Map(
+      [...snapshot(target)].filter(([path]) =>
+        path.includes(join(".ai", "workflow", "templates")),
+      ),
+    );
+    expect(templatesAfter).toEqual(templatesBefore);
+    expect(readFileSync(join(target, ".ai", "runs", ".gitkeep"), "utf8")).toBe(
+      gitkeepBefore,
+    );
+
+    // Harness files and AGENTS.md are now present.
+    expect(existsSync(join(target, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(target, "CLAUDE.md"))).toBe(true);
+    expect(statSync(join(target, ".claude", "agents")).isDirectory()).toBe(
+      true,
+    );
+
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(manifest.harnesses).toEqual(["claude"]);
+    // The template/gitkeep entries in the file ledger are unchanged too
+    // (same hash before and after the harness was added).
+    for (const [path, hash] of Object.entries(manifestBefore.files) as [
+      string,
+      string,
+    ][]) {
+      expect(manifest.files[path]).toBe(hash);
+    }
+  });
+
+  it("a subsequent run with harnesses: [] over a claude install leaves the harness files on disk but untracks them, with a note per file (F3)", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+    const claudeFilesBefore = [...snapshot(target).keys()]
+      .map((p) => p.slice(target.length + 1))
+      .filter((p) => p.startsWith(".claude" + sep));
+    // SKILL.md plus the 5 default-profile role files.
+    expect(claudeFilesBefore.length).toBe(6);
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: [],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // The harness files are left in place, not deleted.
+    for (const relativePath of claudeFilesBefore) {
+      expect(existsSync(join(target, relativePath))).toBe(true);
+    }
+    // AGENTS.md/CLAUDE.md are also left in place.
+    expect(existsSync(join(target, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(target, "CLAUDE.md"))).toBe(true);
+
+    // manifest.files has exactly the 8 template paths: the harness files
+    // (and AGENTS.md/CLAUDE.md, which were never ledger-tracked to begin
+    // with) dropped out of the ledger.
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(manifest.harnesses).toEqual([]);
+    expect(Object.keys(manifest.files).sort()).toEqual([
+      join(".ai", "runs", ".gitkeep"),
+      join(".ai", "workflow", "templates", "00-goal.md"),
+      join(".ai", "workflow", "templates", "01-plan.md"),
+      join(".ai", "workflow", "templates", "02-tasks.md"),
+      join(".ai", "workflow", "templates", "03-decisions.md"),
+      join(".ai", "workflow", "templates", "04-implementation-summary.md"),
+      join(".ai", "workflow", "templates", "05-review-findings.md"),
+      join(".ai", "workflow", "templates", "06-handoff.md"),
+    ]);
+
+    // A note names every dropped harness file, plus AGENTS.md/CLAUDE.md.
+    for (const relativePath of claudeFilesBefore) {
+      expect(
+        report.notes.some(
+          (note) =>
+            note.startsWith(`${relativePath}: `) &&
+            note.includes("now untracked after --harness dropped claude"),
+        ),
+      ).toBe(true);
+    }
+    for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+      expect(
+        report.notes.some(
+          (note) =>
+            note.startsWith(`${name}: `) &&
+            note.includes("now untracked after --harness dropped to none"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('--harness none end to end: prints "templates only", writes no AGENTS.md/CLAUDE.md/harness dirs', () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "src/cli.ts",
+        "init",
+        target,
+        "--yes",
+        "--harness",
+        "none",
+      ],
+      { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("templates only");
+    expect(result.stdout).not.toContain("installed for: ");
+    expect(existsSync(join(target, ".ai", "workflow", "manifest.json"))).toBe(
+      true,
+    );
+    expect(existsSync(join(target, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(target, ".claude"))).toBe(false);
+
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(manifest.harnesses).toEqual([]);
+  });
+
+  it("--harness none,claude is a usage error (exit non-zero, clear message)", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "src/cli.ts",
+        "init",
+        target,
+        "--yes",
+        "--harness",
+        "none,claude",
+      ],
+      { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr + result.stdout).toContain(
+      "templates-only mode and cannot be combined",
+    );
+    expect(existsSync(join(target, ".ai", "workflow", "manifest.json"))).toBe(
+      false,
+    );
+  });
+
+  it("a plain re-run (no --harness) after --harness none stays templates-only, even with a harness config now present on disk", () => {
+    const run = (...extra: string[]) =>
+      spawnSync(
+        process.execPath,
+        ["--import", "tsx", "src/cli.ts", "init", target, "--yes", ...extra],
+        { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+      );
+    expect(run("--harness", "none").status).toBe(0);
+
+    // Simulate a harness config showing up on disk after the templates-only
+    // install (e.g. hand-authored, or from an unrelated tool), which would
+    // otherwise be picked up by detection.
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, "CLAUDE.md"), "unrelated file\n");
+
+    const second = run();
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.stdout).toContain("templates only");
+    expect(existsSync(join(target, ".claude"))).toBe(false);
+
+    const manifest = JSON.parse(
+      readFileSync(join(target, ".ai", "workflow", "manifest.json"), "utf8"),
+    );
+    expect(manifest.harnesses).toEqual([]);
   });
 });
 
@@ -2222,5 +2511,194 @@ describe("repo kit-version pin (operator apply support)", () => {
     expect(secondReport.conflicted).toEqual([]);
     const finalManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     expect("pin" in finalManifest).toBe(false);
+  });
+});
+
+// Round-3 fix-round tests (agent-tasks 613316c9 review findings F1/F2) are
+// appended here, rather than inlined next to the describe blocks they most
+// naturally belong with, deliberately: every citation in this bundle's docs
+// that names an init.test.ts line range would otherwise shift out from
+// under an insertion made earlier in the file. Appending keeps every
+// existing citation's line numbers stable; only the two citations this
+// round's docs update (see docs/okf/install-fence-mechanics.md) need to
+// point in here.
+describe("harnesses-stickiness gate is immune to an all-unknown-names manifest (review round 3, F1)", () => {
+  it.each([["cursor"], ["Claude"]])(
+    "survives a hand-written manifest whose harnesses field is %j (a real array, every entry unknown) without sticking to templates-only",
+    (unknownHarness) => {
+      runInit(defaultOptions());
+      const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+      writeFileSync(
+        manifestPath,
+        `${JSON.stringify(
+          {
+            kit: "orchestrator-workflow",
+            version: "0.1.0",
+            harnesses: [unknownHarness],
+            models: {},
+            files: {},
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "src/cli.ts", "init", target, "--yes"],
+        { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      // Before the fix (review finding F1), the harnesses-stickiness gate's
+      // signal (`harnessesRecorded`) was set from
+      // `Array.isArray(candidate.harnesses)` BEFORE the known-harness filter
+      // ran, so this raw shape (a real array, every entry unknown) recorded
+      // `true`, filtered down to `harnesses: []`, and stuck a live claude
+      // install to templates-only on this plain `init --yes`.
+      expect(result.stdout).toContain("installed for: claude");
+      expect(result.stdout.includes("templates only")).toBe(false);
+
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      expect(manifest.harnesses).toEqual(["claude"]);
+      // The .claude/ files from the first runInit call are still on disk
+      // and back in the ledger, not silently untracked.
+      expect(
+        Object.keys(manifest.files).some((p) => p.startsWith(".claude" + sep)),
+      ).toBe(true);
+    },
+  );
+});
+
+describe("dropped-harness note loop is file-ledger-driven, not previous.harnesses-driven (review round 3, F1)", () => {
+  it("a damaged manifest whose harnesses field lost a real harness's name still notes that harness's files as dropped", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "codex"],
+      models: { ...DEFAULT_MODELS },
+    });
+    const codexFilesBefore = [...snapshot(target).keys()]
+      .map((p) => p.slice(target.length + 1))
+      .filter((p) => p.startsWith(".agents" + sep));
+    expect(codexFilesBefore.length).toBeGreaterThan(0);
+
+    // Hand-corrupt the manifest so "codex" is replaced by an unknown name;
+    // `files` (the raw ledger) is left untouched, still carrying the
+    // .agents/ entries -- the same shape readInstalledManifest sanitizes to
+    // harnesses: ["claude"] (cursor filtered out), same as if codex had
+    // never been recorded at all.
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.harnesses = ["claude", "cursor"];
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    // This run explicitly asks for claude only: codex is really dropped.
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // Before the fix, the dropped-harness note loop derived its harness set
+    // from `previous.harnesses` (post-filter: ["claude"] only, "cursor"
+    // dropped), so it never saw "codex" as dropped and emitted zero notes
+    // for these files even though they are now genuinely untracked.
+    for (const relativePath of codexFilesBefore) {
+      expect(
+        report.notes.some(
+          (note) =>
+            note.startsWith(`${relativePath}: `) &&
+            note.includes("now untracked after --harness dropped codex"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("a partial harness drop (claude,codex -> claude) notes only the dropped harness's files, and no AGENTS.md/CLAUDE.md note (the harness set did not collapse to none)", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "codex"],
+      models: { ...DEFAULT_MODELS },
+    });
+    const codexFilesBefore = [...snapshot(target).keys()]
+      .map((p) => p.slice(target.length + 1))
+      .filter((p) => p.startsWith(".agents" + sep));
+    const claudeFilesBefore = [...snapshot(target).keys()]
+      .map((p) => p.slice(target.length + 1))
+      .filter((p) => p.startsWith(".claude" + sep));
+    expect(codexFilesBefore.length).toBeGreaterThan(0);
+    expect(claudeFilesBefore.length).toBeGreaterThan(0);
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    for (const relativePath of codexFilesBefore) {
+      expect(
+        report.notes.some(
+          (note) =>
+            note.startsWith(`${relativePath}: `) &&
+            note.includes("now untracked after --harness dropped codex"),
+        ),
+      ).toBe(true);
+    }
+    // claude was not dropped: none of its own files get a note.
+    for (const relativePath of claudeFilesBefore) {
+      expect(
+        report.notes.some((note) => note.startsWith(`${relativePath}: `)),
+      ).toBe(false);
+    }
+    // AGENTS.md/CLAUDE.md stay tracked: options.harnesses did not collapse
+    // to none (claude is still selected).
+    expect(
+      report.notes.some(
+        (note) =>
+          note.startsWith("AGENTS.md: ") || note.startsWith("CLAUDE.md: "),
+      ),
+    ).toBe(false);
+  });
+
+  it("a damaged manifest (harnesses: ['cursor']) over a live claude install still notes AGENTS.md/CLAUDE.md as untracked when this run collapses to --harness none", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+    expect(existsSync(join(target, "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(target, "CLAUDE.md"))).toBe(true);
+
+    // Hand-corrupt the manifest so "claude" is replaced by an unknown name;
+    // `files` (the raw ledger) still carries the .claude/ entries, so
+    // `previous.harnesses` sanitizes to [] even though a live claude
+    // install's files are still on disk and in the ledger.
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.harnesses = ["cursor"];
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: [],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // Before the fix, this note was gated on `previous.harnesses.length > 0`
+    // (post-filter: 0, "cursor" dropped), so it silently skipped these two
+    // notes even though the six .claude/ file notes still fired.
+    expect(
+      report.notes.some(
+        (note) =>
+          note.startsWith("AGENTS.md: ") &&
+          note.includes("now untracked after --harness dropped to none"),
+      ),
+    ).toBe(true);
+    expect(
+      report.notes.some(
+        (note) =>
+          note.startsWith("CLAUDE.md: ") &&
+          note.includes("now untracked after --harness dropped to none"),
+      ),
+    ).toBe(true);
   });
 });

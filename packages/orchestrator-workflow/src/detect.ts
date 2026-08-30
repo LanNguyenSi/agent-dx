@@ -41,3 +41,38 @@ export function parseHarnessList(list: string): Harness[] {
   }
   return parsed;
 }
+
+/**
+ * Parses a `--harness` option value, additionally accepting the literal
+ * `none` (templates-only mode: install `.ai/workflow/**` and
+ * `.ai/runs/.gitkeep` only, no AGENTS.md/CLAUDE.md/harness directories, and
+ * an empty `harnesses` array in the manifest). `none` must be the only entry
+ * in the list; combining it with a real harness name (`none,claude`) is
+ * ambiguous about intent, so it is rejected with a clear message instead of
+ * silently picking one interpretation. Every other value delegates to
+ * `parseHarnessList` unchanged.
+ */
+export function parseHarnessOption(list: string): Harness[] {
+  // Deduplicated before the arity check below so a repeated "none"
+  // (`none,none`) is recognized as the same single-entry intent as a
+  // plain "none", rather than tripping the "cannot be combined with other
+  // harnesses" error meant for an actually different entry like
+  // "none,claude".
+  const entries = [
+    ...new Set(
+      list
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter((entry) => entry !== ""),
+    ),
+  ];
+  if (entries.includes("none")) {
+    if (entries.length > 1) {
+      throw new Error(
+        `--harness none selects templates-only mode and cannot be combined with other harnesses; got "${list}"`,
+      );
+    }
+    return [];
+  }
+  return parseHarnessList(list);
+}

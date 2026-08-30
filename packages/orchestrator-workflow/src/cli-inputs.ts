@@ -1,7 +1,7 @@
 import inquirer from "inquirer";
 
 import type { Harness } from "./detect.js";
-import { HARNESSES, parseHarnessList } from "./detect.js";
+import { HARNESSES, parseHarnessOption } from "./detect.js";
 import type { Manifest } from "./init.js";
 import type { ModelClass, Profile, Role } from "./models.js";
 import {
@@ -25,21 +25,35 @@ import {
 export async function promptHarnesses(
   detected: Harness[],
   installed: Harness[],
+  fallbackToClaude = true,
 ): Promise<Harness[]> {
   const known = [...new Set([...detected, ...installed])];
-  const preselected = known.length > 0 ? known : ["claude" as Harness];
+  // Nothing detected and nothing previously installed: the plain-first-run
+  // case pre-checks `claude` as a sane default (`fallbackToClaude`'s default
+  // `true`). The templates-only re-run branch below opts OUT of that
+  // (`fallbackToClaude: false`): a repo the operator explicitly recorded as
+  // `harnesses: []` has no harness files by construction, so `detected` is
+  // always empty there too, and pre-checking `claude` on Enter would
+  // silently re-widen an explicit `--harness none` install -- contradicting
+  // README.md's and this function's own "nothing forced pre-selected" claim
+  // (see CHANGELOG).
+  const preselected =
+    known.length > 0 ? known : fallbackToClaude ? ["claude" as Harness] : [];
   const { harnesses } = await inquirer.prompt<{ harnesses: Harness[] }>([
     {
       type: "checkbox",
       name: "harnesses",
-      message: "Install adapters for which harnesses?",
+      message:
+        "Install adapters for which harnesses? (deselect all for templates only, no harness)",
       choices: HARNESSES.map((harness) => ({
         name: harness + (detected.includes(harness) ? " (detected)" : ""),
         value: harness,
         checked: preselected.includes(harness),
       })),
-      validate: (selection: unknown[]) =>
-        selection.length > 0 || "Select at least one harness",
+      // An empty selection is a supported state
+      // (`--harness none`, templates-only mode): it used to be rejected
+      // here because every install always wrote at least one harness
+      // adapter; there is no longer a reason to require one.
     },
   ]);
   return harnesses;
@@ -135,6 +149,25 @@ export interface ResolveInitInputsParams {
   /** The previously installed manifest, if any (`readInstalledManifest`). */
   previous: Manifest | undefined;
   opts: InitResolutionOptions;
+  /**
+   * True when `previous` reflects the target's own actually-recorded
+   * manifest (`init`'s use, `readInstalledManifest(targetDir)`), as opposed
+   * to a synthetic "operator defaults as floor" object (`apply`'s
+   * `buildApplyPrevious`, which is never `undefined` even for a target with
+   * no manifest of its own). Only consulted for the harnesses-stickiness
+   * rule below, together with `previous.harnessesRecordedEmpty`: a real
+   * recorded `harnesses: []` means a deliberate `--harness none` install,
+   * and a plain re-run must not silently widen it via detection; a
+   * synthetic floor previous carries no such signal, so `apply` omits this
+   * (default `false`) and keeps its own `resolveApplyHarnesses` fallback
+   * chain unchanged. This flag alone does not distinguish a deliberate
+   * `harnesses: []` from a damaged/legacy manifest whose raw `harnesses`
+   * field was missing, malformed, or an array whose every entry failed the
+   * known-harness filter (all of which also sanitize to `harnesses: []`)
+   * -- that distinction is `harnessesRecordedEmpty`'s job; both must hold
+   * for the stickiness gate to fire.
+   */
+  previousIsRecordedManifest?: boolean;
 }
 
 export interface ResolvedInitInputs {
@@ -168,11 +201,46 @@ export interface ResolvedInitInputs {
 export async function resolveInitInputs(
   params: ResolveInitInputsParams,
 ): Promise<ResolvedInitInputs> {
-  const { detected, interactive, previous, opts } = params;
+  const { detected, interactive, previous, opts, previousIsRecordedManifest } =
+    params;
 
   let harnesses: Harness[];
   if (opts.harness) {
-    harnesses = parseHarnessList(opts.harness);
+    harnesses = parseHarnessOption(opts.harness);
+  } else if (
+    previousIsRecordedManifest &&
+    previous &&
+    previous.harnessesRecordedEmpty
+  ) {
+    // A recorded previous manifest with harnesses: [] was an explicit
+    // --harness none (templates-only) install. A plain non-interactive
+    // re-run (no --harness flag) must stay templates-only rather than
+    // falling back to filesystem detection and silently installing a
+    // harness (e.g. claude) the operator never asked for; adding one back
+    // requires an explicit --harness on this run, the same
+    // override-vs-persist rule --profile/--models/--tiers already use,
+    // just applied to the "no harnesses" case specifically.
+    // `harnessesRecordedEmpty` gates this on the raw JSON's `harnesses`
+    // field having actually been an empty array: a missing/malformed field,
+    // or an array whose every entry failed the known-harness filter (e.g.
+    // ["cursor"], all-unknown names), also sanitizes to
+    // `harnesses.length === 0` (readInstalledManifest in init.ts) but must
+    // fall through to detection below instead, the same as any other
+    // damaged manifest (see CHANGELOG).
+    //
+    // An interactive re-run is different: stickiness only protects a
+    // non-interactive call (`--yes`, or any other flow with no prompt) from
+    // silently widening an explicit "none" back out; an interactive session
+    // can already ask and let the operator decide, so it still prompts here
+    // instead of skipping straight to templates-only. `installed` is passed
+    // as `[]` (not the recorded `previous.harnesses`) so nothing is
+    // pre-checked, unlike the "else" branch below's normal re-run prompt --
+    // the previous run explicitly asked for none, so the checkbox starts
+    // from that state, only `detected` entries pre-checked. `fallbackToClaude:
+    // false` closes the same gap for the case where nothing is detected
+    // either: without it, `promptHarnesses` would pre-check `claude` on its
+    // own "nothing known" fallback, re-widening the install on a bare Enter.
+    harnesses = interactive ? await promptHarnesses(detected, [], false) : [];
   } else {
     const installed = previous?.harnesses ?? [];
     const fallback = [...new Set([...detected, ...installed])];

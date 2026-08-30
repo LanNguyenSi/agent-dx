@@ -319,6 +319,21 @@ describe("apply", () => {
     expect(readRepoManifest(target).harnesses).toEqual(["claude"]);
   });
 
+  it("an explicit --harness none on a fresh apply resolves to templates-only, matching init (CHANGELOG's 'apply shares the same option parsing' claim)", () => {
+    const setup = runSetup("--yes");
+    expect(setup.status, setup.stderr).toBe(0);
+
+    const result = runApply("--target", target, "--yes", "--harness", "none");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("templates only");
+    expect(result.stdout).not.toContain("installed for: ");
+
+    const repoManifest = readRepoManifest(target);
+    expect(repoManifest.harnesses).toEqual([]);
+    expect(existsSync(join(target, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(target, ".claude"))).toBe(false);
+  });
+
   it("--pin trims surrounding whitespace and applies", () => {
     const setup = runSetup("--yes");
     expect(setup.status, setup.stderr).toBe(0);

@@ -131,6 +131,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the installed version instead of the installed version against the
   running kit. Purely additive: a
   caller that never sets it sees a byte-identical manifest to before.
+- `init --harness none` (the literal word `none`, alone): a templates-only
+  mode that writes only `.ai/workflow/**` and `.ai/runs/.gitkeep`, records
+  `harnesses: []` in the manifest, and touches no `AGENTS.md`, `CLAUDE.md`,
+  or per-harness directory. `none` combined with a real harness name
+  (`none,claude`, either order) is a usage error rather than an implicit
+  precedence rule. A plain re-run (no `--harness` flag) after a recorded
+  `harnesses: []` install stays templates-only instead of falling back to
+  filesystem detection; a later `init --harness <list>` on the same target
+  adds harness files and manifest entries additively, without touching the
+  already-installed templates. `apply` shares the same option parsing (an
+  explicit `--harness none` on an `apply` call resolves to templates-only
+  too) but not the re-run stickiness: `apply`'s own harness fallback chain
+  (target's recorded harnesses, else the operator defaults, else detection)
+  is unchanged, so a target `apply`-installed as templates-only is not
+  guaranteed to stay that way on a flagless `apply` re-run, a gap left open
+  by this change rather than closed. The closing summary line prints
+  `templates only` instead of `installed for: ` followed by nothing.
+  Motivated by friction filed 2026-08-28 while refreshing an agent-tasks
+  install that had ended up in the templates-only manifest shape (`harnesses:
+  []`, produced by a 0.14.0-era install with no harness configured) with no
+  supported way to reproduce or re-render that state: `--harness none`
+  rejected the literal value, and `--harness ""` fell back to detection,
+  which under `--yes` installed `claude` unasked. Documented in `README.md`
+  ("Non-interactive") and `docs/okf/install-fence-mechanics.md` (new
+  "`--harness none` (templates-only mode)" section). Agent-tasks 613316c9.
 
 ### Changed
 
