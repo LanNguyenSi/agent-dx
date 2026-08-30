@@ -5798,3 +5798,86 @@ misleading source comment above apply's registration step in cli.ts (it
 names the pin gate as the only pre-registration return) is a follow-up in
 src, outside this docs slice. The four docs listing the guard file as a
 source are re-stamped in the commit after this one.
+
+- 2026-08-30 (agent-tasks 84917365): the 19 `anchor-required` findings the
+  `okf-anchor-guard` job's `--require-anchors-allow` allowlist has exempted
+  since batch 31 (agent-tasks 8c89aa12, README.md/INSTALL-AGENT.md
+  citations) are now all anchored, and the allowlist flag is removed from
+  the "Anchor-citation guard" step's `okf-kit check` command entirely, so
+  `--require-anchors` applies to the whole bundle with no exemption.
+  Measured on the working tree before this task's edits (`node
+  packages/okf-kit/dist/cli.js check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors`, built
+  okf-kit@0.8.0): 54 total findings, 19 tagged `[anchor-required]` (8
+  `README.md`, of which 1 is the `packages/orchestrator-workflow/`-
+  prefixed spelling; 11 `INSTALL-AGENT.md`, of which 1 is prefixed), 35
+  non-anchor findings, matching batch 31's own count. All 19 live in
+  `install-fence-mechanics.md` (6), `model-preselection.md` (11), and
+  `run-state-lifecycle-and-markers.md` (2); each got a `#"..."` string
+  anchor citing exact, verified-unique text on its own cited range's last
+  content line, no citation converted to prose or short form.
+
+  Two of the 19 could not be anchored on their original end line: an
+  anchor's text may not contain a backtick (`CITATION_RE`'s quoted-anchor
+  group excludes it), and `model-preselection.md`'s `INSTALL-AGENT.md:
+  239-261` citation (the example `manifest.json` fence) ends on a bare
+  ```` ``` ```` closing-fence line, which okf-kit's `isContentLine` does
+  not treat as boilerplate (only `]`/`)`/`}`/`;`/`,` runs are), so the
+  computed "last content line" landed on that all-backtick line with no
+  anchor-able substring; re-pointed to `INSTALL-AGENT.md:239-260` (drops
+  only the fence delimiter itself, keeps the whole JSON body), whose
+  computed last content line falls back past the lone `}` to the
+  `"installedAt"` line. `README.md:210-213` (the `openrouter` example
+  line, itself fully backtick-wrapped bar a trailing period) is similarly
+  re-pointed to `README.md:210-212`. Neither is a de-citation: both still
+  cite the same passage, just with an end line that lands on real
+  content instead of pure Markdown/code punctuation.
+
+  Verified after committing (`node packages/okf-kit/dist/cli.js check
+  --json packages/orchestrator-workflow/docs/okf --require-anchors`,
+  committed tree): 35 total findings, 0 tagged `[anchor-required]` (or any
+  other `anchor-*`/`heading-section-*`/`test-range-straddles-block`
+  finding) — the same 35 non-anchor findings as the pre-edit baseline
+  (12 `install-fence-mechanics.md` `test-range-start-not-head` warnings
+  and 1 `test-range-end-not-closing` notice, both short-form test-file
+  citations; 1 `log.md` blank-start-line warning; 21 `log.md`
+  unresolved-ambiguous notices), confirming no new drift. The
+  `okf-anchor-guard` job's real
+  "Anchor-citation guard" step logic (its jq filter over the same report,
+  matching `\[(anchor-[a-z-]+|heading-section-[a-z-]+|test-range-
+  straddles-block)\]$`) was reproduced locally against the committed tree
+  with a wrapper `okf-kit` shim on `PATH` execing the built CLI: count 0,
+  exit 0, "Clean, 0 anchor findings." The "Self-test the anchor-finding
+  filter" step (its own throwaway drifted fixture under `$RUNNER_TEMP`,
+  unaffected by this bundle's content) was reproduced the same way:
+  1 finding in each of the seven anchor families, "Self-test OK", exit 0.
+
+  Negative control: on the committed tree, deleting the `#"one directory
+  per unit of work, newest = active"` anchor from
+  `run-state-lifecycle-and-markers.md`'s `packages/orchestrator-workflow/
+  README.md:91-96` citation (working tree only) and re-running both the
+  bare `okf-kit check --require-anchors` command and the CI step's jq
+  filter reproduced 1 `[anchor-required]` finding, count 1, exit 1 (red);
+  `git checkout -- packages/orchestrator-workflow/docs/okf/run-state-
+  lifecycle-and-markers.md` restored it, re-run: 0 findings, count 0,
+  exit 0.
+
+  Baseline comparison (batch 31's own committed shape, allowlist still
+  present): `git show 5c286cb:.github/workflows/ci.yml` still carries
+  `--require-anchors-allow 'README.md' 'packages/orchestrator-workflow/
+  README.md' 'INSTALL-AGENT.md' 'packages/orchestrator-workflow/
+  INSTALL-AGENT.md'`; running `okf-kit check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors` (no
+  allowlist flag) against that same commit's docs/okf tree reports the 19
+  `[anchor-required]` findings above, matching this task's own pre-edit
+  measurement.
+
+  Other verification on the committed tree: `npm test` (packages/
+  orchestrator-workflow) 548/548 tests green across 11 files, including
+  `test/docs-consistency.test.ts`'s anchored-citation assertions; `npm run
+  typecheck` clean; root `node packages/slop-detector/dist/cli.js check .
+  --pack placement-slop --config slop.config.yml` clean, 416 files
+  scanned. `install-fence-mechanics.md`, `model-preselection.md`, and
+  `run-state-lifecycle-and-markers.md` (the three edited docs) had their
+  `timestamp:` frontmatter bumped in this commit; a post-bump
+  `sources-fresh` re-check reported no new STALE findings.

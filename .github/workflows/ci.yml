@@ -301,25 +301,15 @@ jobs:
         run: |
           set +e
           # --require-anchors turns on the four opt-in checks named in
-          # the Install step above; --require-anchors-allow exempts
-          # README.md and INSTALL-AGENT.md (documentation-category
-          # citations, not kit-source) -- an exact-match list of the four
-          # spellings this bundle's own citation text actually uses (both
-          # the bare and the `packages/orchestrator-workflow/`-prefixed
-          # form), not a glob: matchesAllowPattern (citations-resolve.ts)
-          # does a plain `pattern === citedPath` string comparison when a
-          # pattern carries no `*`/`?`, so each spelling needs its own
-          # exact entry here rather than a wildcard covering all of them.
-          # Follow-up: anchoring the 19 citations this allowlist
-          # currently exempts, then dropping the allowlist entirely (see
-          # docs/okf/log.md).
+          # the Install step above, applied to the whole bundle with no
+          # exemption: every full citation into an in-repo file,
+          # README.md and INSTALL-AGENT.md included, must carry an
+          # anchor. An earlier revision of this step exempted those two
+          # files via --require-anchors-allow while their citations were
+          # unanchored; the allowlist was removed once all of them were
+          # anchored (see docs/okf/log.md).
           okf-kit check --json "${BUNDLE_PATH}" \
             --require-anchors \
-            --require-anchors-allow \
-              'README.md' \
-              'packages/orchestrator-workflow/README.md' \
-              'INSTALL-AGENT.md' \
-              'packages/orchestrator-workflow/INSTALL-AGENT.md' \
             > okf-anchor-report.json
           code=$?
           set -e
