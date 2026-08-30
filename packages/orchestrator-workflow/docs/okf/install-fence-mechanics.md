@@ -3,7 +3,7 @@ type: module
 title: Install fence mechanics
 description: How orchestrator-workflow's installer writes, fences, updates, and removes its surface in a target repo.
 tags: [installer, marker-fence, manifest, agents-md, harness-adapters, uninstall]
-timestamp: 2026-08-30T08:26:52Z
+timestamp: 2026-08-30T08:49:17Z
 sources:
   - packages/orchestrator-workflow/src/init.ts
   - packages/orchestrator-workflow/src/uninstall.ts
@@ -143,7 +143,7 @@ unexplained leftover: the note itself now says so, whenever the ledger
 confirms the file is a real leftover, though uninstall remains available
 for a fully clean removal, same as the profile-downgrade case.
 
-INSTALL-AGENT.md:59-82#"(opencode)" documents this identical write-surface enumeration for the agent-driven manual-fallback path (used when npx/the registry is unavailable), extended since 0.19.0 with a paragraph (INSTALL-AGENT.md:84-106#"raw.githubusercontent.com.", since fix-round-1 also naming `--no-tiers`) stating both the tier-variant naming scheme and that the manual fallback never renders those files at all. INSTALL-AGENT.md:84-87#"profile choice does not change" notes it is the `full`-profile shape, with `minimal` writing only the `implementer`/`reviewer` files, and states the install is "fully reversible" via uninstall (INSTALL-AGENT.md:101-103#"run history under").
+INSTALL-AGENT.md:59-82#"(opencode)" documents this identical write-surface enumeration for the agent-driven manual-fallback path (used when npx/the registry is unavailable), extended since 0.19.0 with a paragraph (INSTALL-AGENT.md:84-96#"does not cover them.", since fix-round-1 also naming `--no-tiers`) stating both the tier-variant naming scheme and that the manual fallback never renders those files at all. INSTALL-AGENT.md:84-87#"profile choice does not change" notes it is the `full`-profile shape, with `minimal` writing only the `implementer`/`reviewer` files, and states the install is "fully reversible" via uninstall (INSTALL-AGENT.md:101-103#"run history under").
 
 ## The AGENTS.md fence contract
 
@@ -163,7 +163,7 @@ Claude Code reads `CLAUDE.md`, not `AGENTS.md` (writers.ts:119-121#"* imports AG
 - No `CLAUDE.md`: created verbatim as `CLAUDE_MD_BOILERPLATE`, a heading plus "Project agent instructions live in AGENTS.md." plus the `@AGENTS.md` import line (writers.ts:117#"# CLAUDE.md\n\nProject agent instructions live in AGENTS.md.\n\n${CLAUDE_IMPORT_LINE}\n").
 - `CLAUDE.md` exists: if any line's whitespace-split tokens already include the literal `@AGENTS.md` (writers.ts:130-134#".some((line) => line.split(/\s+/).includes(CLAUDE_IMPORT_LINE));"), nothing is written, an inline mention like `"Rules: see @AGENTS.md first."` already counts (init.test.ts:247-251#"expect(claudeMd).toBe("). Otherwise a blank line plus `@AGENTS.md` is appended once (writers.ts:139-144#"${base}\n\n${CLAUDE_IMPORT_LINE}\n"); a second `init` run does not duplicate it (init.test.ts:234-244#"expect(importCount).toBe(1);").
 
-Codex and opencode need no such import, both read `AGENTS.md` natively (README.md:109-110#"Model resolution is described below.").
+Codex and opencode need no such import, both read `AGENTS.md` natively (README.md:109-110#"natively. Subagents get").
 
 ## manifest.json: shape and consumers
 

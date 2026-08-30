@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-08-30T08:26:52Z
+timestamp: 2026-08-30T08:49:17Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -149,7 +149,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`README.md:210-212#"be supplied as a fully-qualified"`,
+  must be passed as fully-qualified `--models` entries (`README.md:210-213#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:514-537#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:1896-1904#"${role}.md must not contain model:"`,
@@ -535,7 +535,7 @@ the session's main model. Use the strongest reasoning model available,"
 plus "Per-role model preferences ... are recorded in
 `.ai/workflow/manifest.json` and, where the harness supports per-agent
 models, in the subagent definitions themselves." README states the same
-rule at `README.md:176-178#"downgrade's now-untracked"`.
+rule at `README.md:194-196#"reused as the default on later re-runs."`.
 
 ## Docs-consistency pins (model-specific)
 

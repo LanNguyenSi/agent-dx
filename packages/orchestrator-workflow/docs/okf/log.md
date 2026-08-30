@@ -5817,27 +5817,29 @@ source are re-stamped in the commit after this one.
   anchor citing exact, verified-unique text on its own cited range's last
   content line, no citation converted to prose or short form.
 
-  Two of the 19 could not be anchored on their original end line: an
-  anchor's text may not contain a backtick (`CITATION_RE`'s quoted-anchor
-  group excludes it), and `model-preselection.md`'s `INSTALL-AGENT.md:
-  239-261` citation (the example `manifest.json` fence) ends on a bare
-  ```` ``` ```` closing-fence line, which okf-kit's `isContentLine` does
-  not treat as boilerplate (only `]`/`)`/`}`/`;`/`,` runs are), so the
-  computed "last content line" landed on that all-backtick line with no
-  anchor-able substring; re-pointed to `INSTALL-AGENT.md:239-260` (drops
-  only the fence delimiter itself, keeps the whole JSON body), whose
-  computed last content line falls back past the lone `}` to the
-  `"installedAt"` line. `README.md:210-213` (the `openrouter` example
-  line, itself fully backtick-wrapped bar a trailing period) is similarly
-  re-pointed to `README.md:210-212`. Neither is a de-citation: both still
-  cite the same passage, just with an end line that lands on real
-  content instead of pure Markdown/code punctuation.
+  One of the 19 could not be anchored on its original end line: an
+  anchor's text may not itself *contain* a backtick (`CITATION_RE`'s
+  quoted-anchor group excludes it), but a code span's backtick-free
+  *inner* text is still a legal anchor (the check is a plain substring
+  test, `lines[i].includes(anchor.text)` in okf-kit's
+  `citations-resolve.ts`); a fully backtick-wrapped line is only
+  unanchorable when it carries no backtick-free substring at all.
+  `model-preselection.md`'s `INSTALL-AGENT.md:239-261` citation (the
+  example `manifest.json` fence) ends on a bare ```` ``` ```` closing-fence
+  line, which okf-kit's `isContentLine` does not treat as boilerplate
+  (only `]`/`)`/`}`/`;`/`,` runs are), so the computed "last content line"
+  landed on that all-backtick line with literally nothing else on it;
+  re-pointed to `INSTALL-AGENT.md:239-260` (drops only the fence delimiter
+  itself, keeps the whole JSON body), whose computed last content line
+  falls back past the lone `}` to the `"installedAt"` line. This is not a
+  de-citation: it still cites the same passage, just with an end line that
+  lands on real content instead of a pure fence-punctuation line.
 
   Verified after committing (`node packages/okf-kit/dist/cli.js check
   --json packages/orchestrator-workflow/docs/okf --require-anchors`,
   committed tree): 35 total findings, 0 tagged `[anchor-required]` (or any
   other `anchor-*`/`heading-section-*`/`test-range-straddles-block`
-  finding) — the same 35 non-anchor findings as the pre-edit baseline
+  finding): the same 35 non-anchor findings as the pre-edit baseline
   (12 `install-fence-mechanics.md` `test-range-start-not-head` warnings
   and 1 `test-range-end-not-closing` notice, both short-form test-file
   citations; 1 `log.md` blank-start-line warning; 21 `log.md`
@@ -5872,12 +5874,41 @@ source are re-stamped in the commit after this one.
   `[anchor-required]` findings above, matching this task's own pre-edit
   measurement.
 
-  Other verification on the committed tree: `npm test` (packages/
-  orchestrator-workflow) 548/548 tests green across 11 files, including
-  `test/docs-consistency.test.ts`'s anchored-citation assertions; `npm run
-  typecheck` clean; root `node packages/slop-detector/dist/cli.js check .
-  --pack placement-slop --config slop.config.yml` clean, 416 files
-  scanned. `install-fence-mechanics.md`, `model-preselection.md`, and
+  Other verification on the committed tree: `npm test --prefix
+  packages/orchestrator-workflow` green, including
+  `test/docs-consistency.test.ts`'s anchored-citation assertions and the
+  three new assertions added this round that the `okf-anchor-guard` job's
+  "Anchor-citation guard" step runs `--require-anchors` with no
+  `--require-anchors-allow` exemption (fix-round-2, finding F7a); `npm run
+  typecheck --prefix packages/orchestrator-workflow` clean; root `node
+  packages/slop-detector/dist/cli.js check . --pack placement-slop
+  --config slop.config.yml` clean. `install-fence-mechanics.md`,
+  `model-preselection.md`, and
   `run-state-lifecycle-and-markers.md` (the three edited docs) had their
   `timestamp:` frontmatter bumped in this commit; a post-bump
   `sources-fresh` re-check reported no new STALE findings.
+
+  Fix-round-2 (review findings F1-F7): re-pointed one citation off a wrong
+  passage (README.md's orchestrator-runs-on-session-model statement is at
+  `:194-196`, not the full->minimal downgrade passage the round-1 citation
+  actually named), restored `README.md:210-213` to its full range (the
+  narrowing rationale in the paragraph above was wrong: an anchor may not
+  contain a backtick, but a code span's backtick-free inner text is a
+  legal anchor, so that citation never needed narrowing), tightened two
+  anchors that pinned a range end past the paragraph their sentence
+  actually describes, trimmed the CI comment, corrected this entry's own
+  wording (verdicts instead of suite totals, an accurate `npm test`
+  invocation, one em dash), and added the missing coverage for the
+  guard step itself: `test/docs-consistency.test.ts` now asserts the
+  `okf-anchor-guard` job's "Anchor-citation guard" step runs
+  `--require-anchors` with no `--require-anchors-allow` exemption
+  (mutation-probed: re-adding the flag to that step in a working-tree
+  edit turned the new assertion red; reverting restored green). That
+  test-file edit landed after this entry's `docs-consistency.test.ts`-line
+  citations above and did not shift any of them (re-verified: the
+  post-edit `--require-anchors` re-check still reports 0 anchor-family
+  findings), but it did trip `sources-fresh` STALE on three docs that list
+  `test/docs-consistency.test.ts` as a source
+  (`review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`); all three had their `timestamp:`
+  bumped in this commit too, re-check: 0 STALE.

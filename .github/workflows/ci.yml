@@ -300,14 +300,9 @@ jobs:
         shell: bash
         run: |
           set +e
-          # --require-anchors turns on the four opt-in checks named in
-          # the Install step above, applied to the whole bundle with no
-          # exemption: every full citation into an in-repo file,
-          # README.md and INSTALL-AGENT.md included, must carry an
-          # anchor. An earlier revision of this step exempted those two
-          # files via --require-anchors-allow while their citations were
-          # unanchored; the allowlist was removed once all of them were
-          # anchored (see docs/okf/log.md).
+          # --require-anchors applies to the whole bundle with no
+          # exemption: every full citation into an in-repo file must
+          # carry an anchor (history: docs/okf/log.md).
           okf-kit check --json "${BUNDLE_PATH}" \
             --require-anchors \
             > okf-anchor-report.json
