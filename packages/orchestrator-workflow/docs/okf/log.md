@@ -5828,12 +5828,13 @@ source are re-stamped in the commit after this one.
   paragraph plus example under "Non-interactive"; every `README.md:N-M`
   citation across the whole bundle (`install-fence-mechanics.md`,
   `model-preselection.md`, `run-state-lifecycle-and-markers.md`, and
-  `log.md`'s own historical entries reference `CHANGELOG.md:#[version]`
-  heading anchors, not `README.md` line numbers, so those were unaffected)
-  re-pointed the same way. `CHANGELOG.md` gained an `[Unreleased]` "Added"
-  entry; no bundle doc cites `[Unreleased]` by line number (the existing
-  `CHANGELOG.md:#[version]` citations all target released version
-  headings), so nothing else needed re-pointing there.
+  `log.md`'s own historical entries reference CHANGELOG.md via
+  version-heading anchors (e.g. `CHANGELOG.md:#[0.9.0]`), not `README.md`
+  line numbers, so those were unaffected) re-pointed the same way.
+  `CHANGELOG.md` gained an `[Unreleased]` "Added" entry; no bundle doc
+  cites the `[Unreleased]` heading itself, and every existing
+  version-heading citation into `CHANGELOG.md` targets an already-released
+  version, so nothing else needed re-pointing there.
 
   Commands run on the committed tree, in the package directory unless
   noted: `npm run typecheck` (clean), `npm run typecheck:test` (clean),
