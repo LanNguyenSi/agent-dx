@@ -303,11 +303,11 @@ describe("upgrades via the manifest hash ledger", () => {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     // harnesses: "claude" (a string, not an array) is not a valid harnesses
     // value; readInstalledManifest sanitizes it to [] but also records
-    // harnessesRecorded: false (Array.isArray(candidate.harnesses) is
+    // harnessesRecordedEmpty: false (Array.isArray(candidate.harnesses) is
     // false), so this stays a damaged/legacy manifest rather than a
     // deliberate recorded `--harness none` install. The harnesses-
     // stickiness rule (task agent-tasks 613316c9) only fires when
-    // harnessesRecorded is true, so a plain re-run (no --harness flag)
+    // harnessesRecordedEmpty is true, so a plain re-run (no --harness flag)
     // here falls through to filesystem detection like before that
     // feature existed: the earlier install's `.claude/` files are still
     // on disk, detectHarnesses finds them, and harnesses recovers to
@@ -2511,5 +2511,151 @@ describe("repo kit-version pin (operator apply support)", () => {
     expect(secondReport.conflicted).toEqual([]);
     const finalManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     expect("pin" in finalManifest).toBe(false);
+  });
+});
+
+// Round-3 fix-round tests (agent-tasks 613316c9 review findings F1/F2) are
+// appended here, rather than inlined next to the describe blocks they most
+// naturally belong with, deliberately: every citation in this bundle's docs
+// that names an init.test.ts line range would otherwise shift out from
+// under an insertion made earlier in the file. Appending keeps every
+// existing citation's line numbers stable; only the two citations this
+// round's docs update (see docs/okf/install-fence-mechanics.md) need to
+// point in here.
+describe("harnesses-stickiness gate is immune to an all-unknown-names manifest (review round 3, F1)", () => {
+  it.each([["cursor"], ["Claude"]])(
+    "survives a hand-written manifest whose harnesses field is %j (a real array, every entry unknown) without sticking to templates-only",
+    (unknownHarness) => {
+      runInit(defaultOptions());
+      const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+      writeFileSync(
+        manifestPath,
+        `${JSON.stringify(
+          {
+            kit: "orchestrator-workflow",
+            version: "0.1.0",
+            harnesses: [unknownHarness],
+            models: {},
+            files: {},
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "src/cli.ts", "init", target, "--yes"],
+        { cwd: PACKAGE_DIR, encoding: "utf8", timeout: 60_000 },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      // Before the fix (review finding F1), the harnesses-stickiness gate's
+      // signal (`harnessesRecorded`) was set from
+      // `Array.isArray(candidate.harnesses)` BEFORE the known-harness filter
+      // ran, so this raw shape (a real array, every entry unknown) recorded
+      // `true`, filtered down to `harnesses: []`, and stuck a live claude
+      // install to templates-only on this plain `init --yes`.
+      expect(result.stdout).toContain("installed for: claude");
+      expect(result.stdout.includes("templates only")).toBe(false);
+
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      expect(manifest.harnesses).toEqual(["claude"]);
+      // The .claude/ files from the first runInit call are still on disk
+      // and back in the ledger, not silently untracked.
+      expect(
+        Object.keys(manifest.files).some((p) => p.startsWith(".claude" + sep)),
+      ).toBe(true);
+    },
+  );
+});
+
+describe("dropped-harness note loop is file-ledger-driven, not previous.harnesses-driven (review round 3, F1)", () => {
+  it("a damaged manifest whose harnesses field lost a real harness's name still notes that harness's files as dropped", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "codex"],
+      models: { ...DEFAULT_MODELS },
+    });
+    const codexFilesBefore = [...snapshot(target).keys()]
+      .map((p) => p.slice(target.length + 1))
+      .filter((p) => p.startsWith(".agents" + sep));
+    expect(codexFilesBefore.length).toBeGreaterThan(0);
+
+    // Hand-corrupt the manifest so "codex" is replaced by an unknown name;
+    // `files` (the raw ledger) is left untouched, still carrying the
+    // .agents/ entries -- the same shape readInstalledManifest sanitizes to
+    // harnesses: ["claude"] (cursor filtered out), same as if codex had
+    // never been recorded at all.
+    const manifestPath = join(target, ".ai", "workflow", "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.harnesses = ["claude", "cursor"];
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    // This run explicitly asks for claude only: codex is really dropped.
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // Before the fix, the dropped-harness note loop derived its harness set
+    // from `previous.harnesses` (post-filter: ["claude"] only, "cursor"
+    // dropped), so it never saw "codex" as dropped and emitted zero notes
+    // for these files even though they are now genuinely untracked.
+    for (const relativePath of codexFilesBefore) {
+      expect(
+        report.notes.some(
+          (note) =>
+            note.startsWith(`${relativePath}: `) &&
+            note.includes("now untracked after --harness dropped codex"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("a partial harness drop (claude,codex -> claude) notes only the dropped harness's files, and no AGENTS.md/CLAUDE.md note (the harness set did not collapse to none)", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "codex"],
+      models: { ...DEFAULT_MODELS },
+    });
+    const codexFilesBefore = [...snapshot(target).keys()]
+      .map((p) => p.slice(target.length + 1))
+      .filter((p) => p.startsWith(".agents" + sep));
+    const claudeFilesBefore = [...snapshot(target).keys()]
+      .map((p) => p.slice(target.length + 1))
+      .filter((p) => p.startsWith(".claude" + sep));
+    expect(codexFilesBefore.length).toBeGreaterThan(0);
+    expect(claudeFilesBefore.length).toBeGreaterThan(0);
+
+    const report = runInit({
+      targetDir: target,
+      harnesses: ["claude"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    for (const relativePath of codexFilesBefore) {
+      expect(
+        report.notes.some(
+          (note) =>
+            note.startsWith(`${relativePath}: `) &&
+            note.includes("now untracked after --harness dropped codex"),
+        ),
+      ).toBe(true);
+    }
+    // claude was not dropped: none of its own files get a note.
+    for (const relativePath of claudeFilesBefore) {
+      expect(
+        report.notes.some((note) => note.startsWith(`${relativePath}: `)),
+      ).toBe(false);
+    }
+    // AGENTS.md/CLAUDE.md stay tracked: options.harnesses did not collapse
+    // to none (claude is still selected).
+    expect(
+      report.notes.some(
+        (note) =>
+          note.startsWith("AGENTS.md: ") || note.startsWith("CLAUDE.md: "),
+      ),
+    ).toBe(false);
   });
 });

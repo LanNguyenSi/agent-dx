@@ -104,18 +104,24 @@ export interface Manifest {
    */
   pin?: string;
   /**
-   * True when the raw manifest JSON's `harnesses` field was itself a valid
-   * array (whether empty or not) rather than missing, malformed, or the
-   * wrong type and therefore sanitized to `[]` by `readInstalledManifest`
-   * below. Distinguishes a deliberate recorded `harnesses: []` (a real
-   * `--harness none` install) from a damaged/legacy manifest that merely
-   * degrades to the same empty array; only `readInstalledManifest` ever
-   * sets this from an actual on-disk manifest. A synthetic previous (e.g.
-   * `apply`'s `buildApplyPrevious` in cli.ts) leaves it `undefined`, which
-   * the harnesses-stickiness gate in `cli-inputs.ts` treats as "not
+   * True only when the raw manifest JSON's `harnesses` field was itself an
+   * array AND that raw array had zero elements -- i.e. the operator
+   * recorded an explicit empty harness set (a real `--harness none`
+   * install). An array with entries that all fail the known-harness filter
+   * (e.g. `["cursor"]`, or `["Claude"]` with the wrong case) also filters
+   * down to `harnesses: []` but must NOT set this flag: the raw field was
+   * never actually recorded as empty, it just failed to name anything this
+   * kit recognizes, and treating that the same as a deliberate `none` would
+   * silently degrade a live install to templates-only on a plain re-run
+   * (review finding F1, agent-tasks 613316c9 round 2). A missing/malformed
+   * `harnesses` field (not an array at all) is the same "not a recorded
+   * empty set" case and also leaves this `false`. Only `readInstalledManifest`
+   * ever sets this from an actual on-disk manifest. A synthetic previous
+   * (e.g. `apply`'s `buildApplyPrevious` in cli.ts) leaves it `undefined`,
+   * which the harnesses-stickiness gate in `cli-inputs.ts` treats as "not
    * recorded" and therefore never sticky.
    */
-  harnessesRecorded?: boolean;
+  harnessesRecordedEmpty?: boolean;
 }
 
 function sha256(content: string): string {
@@ -153,14 +159,18 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   const candidate = raw as Record<string, unknown>;
   if (candidate.kit !== SKILL_NAME) return undefined;
 
-  // Captured before filtering: an invalid array element (a string, an
-  // unknown harness name) still leaves this true, since the field itself
-  // was a real array; only a missing/non-array `harnesses` field is
-  // "not recorded".
-  const harnessesRecorded = Array.isArray(candidate.harnesses);
-  const harnesses = (
-    harnessesRecorded ? (candidate.harnesses as unknown[]) : []
-  ).filter((value): value is Harness =>
+  // Captured before filtering, and deliberately on the RAW array's own
+  // length, not the filtered one: an invalid array element (a string, an
+  // unknown harness name) also filters down to `harnesses: []` below, but
+  // must not be mistaken for a deliberate recorded `harnesses: []` -- see
+  // the `Manifest.harnessesRecordedEmpty` doc comment above for why (F1).
+  const rawHarnessesIsArray = Array.isArray(candidate.harnesses);
+  const rawHarnesses = rawHarnessesIsArray
+    ? (candidate.harnesses as unknown[])
+    : [];
+  const harnessesRecordedEmpty =
+    rawHarnessesIsArray && rawHarnesses.length === 0;
+  const harnesses = rawHarnesses.filter((value): value is Harness =>
     (HARNESSES as string[]).includes(value as string),
   );
   const models: Partial<Record<Role, string>> = {};
@@ -212,7 +222,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     kit: SKILL_NAME,
     version: typeof candidate.version === "string" ? candidate.version : "",
     harnesses,
-    harnessesRecorded,
+    harnessesRecordedEmpty,
     models: models as Record<Role, string>,
     profile,
     tiers,
@@ -526,18 +536,28 @@ export function runInit(options: InitOptions): Report {
   // only ever touch claude/opencode agent files), this one also covers
   // codex's SKILL.md under `.agents/`, since codex has no per-role agent
   // files but its skill file is still a ledger-tracked kit-owned file.
+  //
+  // Deliberately keyed off `HARNESSES` (every known harness) and
+  // `previous.files` (the raw file ledger) rather than `previous.harnesses`
+  // (the sanitized, filtered harness list): a damaged/hand-edited manifest
+  // whose raw `harnesses` field lists a valid harness under an unrecognized
+  // name (e.g. `["cursor"]` where it once said `["claude"]`) filters that
+  // harness's name out of `previous.harnesses` entirely, but its files are
+  // still sitting in `previous.files` under `.claude/`; deriving the
+  // dropped-harness set from `previous.harnesses` would silently miss those
+  // notes (review finding F1, agent-tasks 613316c9 round 2). Checking each
+  // known harness's own file-ledger prefix directly is immune to that: a
+  // harness with no files in the ledger under its prefix produces no notes
+  // either way, whether or not `previous.harnesses` ever named it.
   if (previous) {
-    const droppedHarnesses = previous.harnesses.filter(
-      (harness) => !options.harnesses.includes(harness),
-    );
-    for (const harness of droppedHarnesses) {
-      const harnessDir =
-        harness === "claude"
-          ? ".claude"
-          : harness === "opencode"
-            ? ".opencode"
-            : ".agents";
-      const prefix = harnessDir + sep;
+    const harnessDirs: Record<Harness, string> = {
+      claude: ".claude",
+      codex: ".agents",
+      opencode: ".opencode",
+    };
+    for (const harness of HARNESSES) {
+      if (options.harnesses.includes(harness)) continue;
+      const prefix = harnessDirs[harness] + sep;
       for (const relativePath of Object.keys(previous.files)) {
         if (relativePath.startsWith(prefix)) {
           report.notes.push(

@@ -35,11 +35,14 @@ function fakeManifest(overrides: Partial<Manifest> = {}): Manifest {
     kit: "orchestrator-workflow",
     version: "0.25.0",
     harnesses: ["claude"],
-    // Matches what readInstalledManifest actually records for any manifest
-    // whose raw `harnesses` field is a real (even if empty) array, which is
-    // the common case these fakes model; a test exercising the
-    // damaged/legacy-manifest case overrides this explicitly to `false`.
-    harnessesRecorded: true,
+    // Matches what readInstalledManifest actually records for this default
+    // shape: harnesses: ["claude"] is a non-empty recorded array, so the raw
+    // field was NOT recorded empty. A test exercising the harnesses: []
+    // stickiness gate overrides this explicitly to `true` (a real recorded
+    // `--harness none` install); a test exercising a damaged/legacy or
+    // all-unknown-names manifest (both also sanitize to harnesses: [], but
+    // must NOT stick, review finding F1) overrides it to `false`.
+    harnessesRecordedEmpty: false,
     models: { ...DEFAULT_MODELS },
     profile: DEFAULT_PROFILE,
     tiers: false,
@@ -335,7 +338,10 @@ describe("resolveInitInputs: --harness none (templates-only mode)", () => {
   });
 
   it("a plain re-run (no --harness flag) after a previous harnesses: [] install stays templates-only, even when a harness is detected on disk (previousIsRecordedManifest: true, init's own call)", async () => {
-    const previous = fakeManifest({ harnesses: [] });
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
     const result = await resolveInitInputs({
       detected: ["claude"],
       interactive: false,
@@ -347,7 +353,10 @@ describe("resolveInitInputs: --harness none (templates-only mode)", () => {
   });
 
   it("an explicit --harness claude after a previous harnesses: [] install adds the harness back", async () => {
-    const previous = fakeManifest({ harnesses: [] });
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
     const result = await resolveInitInputs({
       detected: [],
       interactive: false,
@@ -359,7 +368,10 @@ describe("resolveInitInputs: --harness none (templates-only mode)", () => {
   });
 
   it("without previousIsRecordedManifest (e.g. apply's synthetic operator-defaults previous), a previous harnesses: [] does NOT stick: falls back to detected instead", async () => {
-    const previous = fakeManifest({ harnesses: [] });
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
     const result = await resolveInitInputs({
       detected: ["claude"],
       interactive: false,
@@ -370,13 +382,44 @@ describe("resolveInitInputs: --harness none (templates-only mode)", () => {
     expect(result.harnesses).toEqual(["claude"]);
   });
 
-  it("a previous harnesses: [] with harnessesRecorded: false (a damaged/legacy manifest, not a real recorded --harness none) does NOT stick: falls back to detected instead", async () => {
+  it("a previous harnesses: [] with harnessesRecordedEmpty: false (a damaged/legacy manifest, not a real recorded --harness none) does NOT stick: falls back to detected instead", async () => {
     // readInstalledManifest sanitizes a missing/malformed harnesses field
-    // (undefined, a string, an object, unknown names) to harnesses: [] too,
-    // but marks harnessesRecorded: false since the raw field was never
-    // actually an array. previousIsRecordedManifest alone (init's own
-    // call) is not enough to make this stick: both flags are required.
-    const previous = fakeManifest({ harnesses: [], harnessesRecorded: false });
+    // (undefined, a string, an object) to harnesses: [] too, but marks
+    // harnessesRecordedEmpty: false since the raw field was never actually
+    // an array. previousIsRecordedManifest alone (init's own call) is not
+    // enough to make this stick: both flags are required.
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: false,
+    });
+    const result = await resolveInitInputs({
+      detected: ["claude"],
+      interactive: false,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+    expect(result.harnesses).toEqual(["claude"]);
+  });
+
+  it('a previous harnesses: ["cursor"]/["Claude"] (all-unknown harness names, F1) does NOT stick either: falls back to detected instead', async () => {
+    // readInstalledManifest also sanitizes an array whose every entry fails
+    // the known-harness filter (an unrecognized name like "cursor", or the
+    // wrong case like "Claude") down to harnesses: [], the same shape as a
+    // deliberate --harness none install -- but the raw field itself was a
+    // real, non-empty array, so harnessesRecordedEmpty must be false, not
+    // true. Before the fix (review finding F1, agent-tasks 613316c9 round
+    // 2), the gate's signal was `Array.isArray(candidate.harnesses)`
+    // captured BEFORE filtering, so this exact shape set it to `true` and
+    // stuck a live claude install to templates-only on a plain `init
+    // --yes`. This models what readInstalledManifest now actually computes
+    // for that raw shape; the CLI-level "installed for: claude" assertion
+    // against a real hand-written ["cursor"]/["Claude"] manifest lives in
+    // test/init.test.ts.
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: false,
+    });
     const result = await resolveInitInputs({
       detected: ["claude"],
       interactive: false,
@@ -410,7 +453,10 @@ describe("resolveInitInputs: interactive re-run after a templates-only install (
   });
 
   it("still prompts instead of skipping straight to templates-only, with nothing pre-checked except what is detected", async () => {
-    const previous = fakeManifest({ harnesses: [] });
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
     mockPrompts([]);
 
     const result = await resolveInitInputs({
@@ -445,8 +491,49 @@ describe("resolveInitInputs: interactive re-run after a templates-only install (
     expect(result.harnesses).toEqual([]);
   });
 
+  it("with nothing detected either, no choice is pre-checked (F2): the readme/comment promise 'nothing forced pre-selected' holds even when detected is empty too", async () => {
+    // Before the fix (review finding F2, agent-tasks 613316c9 round 2),
+    // promptHarnesses's own "nothing known" fallback pre-checked "claude"
+    // unconditionally; since a templates-only repo has no harness files by
+    // construction, `detected` is always empty here too, so a bare Enter on
+    // this prompt silently re-widened the install.
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
+    mockPrompts([]);
+
+    const result = await resolveInitInputs({
+      detected: [],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    for (const choice of choices) {
+      expect(choice.checked).toBe(false);
+    }
+    expect(result.harnesses).toEqual([]);
+  });
+
   it("an operator who selects a harness in the prompt gets it installed, not stuck at []", async () => {
-    const previous = fakeManifest({ harnesses: [] });
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
     mockPrompts(["claude"]);
 
     const result = await resolveInitInputs({
