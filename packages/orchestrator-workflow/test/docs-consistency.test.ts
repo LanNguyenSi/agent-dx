@@ -2637,8 +2637,12 @@ describe("every okf-kit@<version> pin under .github/workflows/ matches package.j
 // run templates, and assets/agents-md-section.md). Deliberately excludes
 // CHANGELOG.md (its citations use okf-kit's own heading-form anchor, a
 // different mechanism, already checked by okf-kit's own anchor-heading-*
-// rules) and README.md/INSTALL-AGENT.md (neither is a kit-source file;
-// both stay out of scope).
+// rules) and README.md/INSTALL-AGENT.md: neither is a kit-source file, so
+// this in-repo mirror does not cover them, but since agent-tasks 84917365
+// their own anchor coverage comes from the unexempted `okf-anchor-guard`
+// CI step's `--require-anchors` run instead (see the describe block
+// asserting that step carries no `--require-anchors-allow` exemption,
+// below).
 //
 // Review round 3 (MEDIUM 5): all lists below are derived from their own
 // source of truth (`ROLES`, `test/`'s own directory listing, `src/`'s own
@@ -3869,5 +3873,38 @@ describe("operator-install-and-registry.md's apply section states the pin gate's
     // the pin gate, this return is only reachable once the install already
     // ran.
     expect(lockReturnIndex).toBeGreaterThan(runInitIndex);
+  });
+});
+
+/**
+ * Round-2 review fix (agent-tasks 84917365, finding F7a): the
+ * `okf-anchor-guard` job's "Anchor-citation guard" step in
+ * `.github/workflows/ci.yml` used to run `okf-kit check` with
+ * `--require-anchors-allow 'README.md' ...`, exempting README.md and
+ * INSTALL-AGENT.md's own citations from the anchor requirement. That
+ * allowlist was removed once every citation into those two files was
+ * anchored (see docs/okf/log.md's 2026-08-30 entry). Nothing pinned its
+ * absence, so a re-added allowlist flag on that step would silently
+ * un-cover README.md/INSTALL-AGENT.md again with no test to catch it.
+ */
+describe("the Anchor-citation guard CI step runs --require-anchors with no --require-anchors-allow exemption", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const workflow = readFileSync(`${repoRoot}/.github/workflows/ci.yml`, "utf8");
+
+  const stepStart = workflow.indexOf("- name: Anchor-citation guard");
+  const stepEnd = workflow.indexOf("\n  lint-cli-flag-order:", stepStart);
+  const step = workflow.slice(stepStart, stepEnd === -1 ? undefined : stepEnd);
+
+  it("found the step (sanity: not vacuously true)", () => {
+    expect(stepStart).toBeGreaterThanOrEqual(0);
+    expect(stepEnd).toBeGreaterThan(stepStart);
+  });
+
+  it("runs okf-kit check with --require-anchors", () => {
+    expect(step).toContain("--require-anchors");
+  });
+
+  it("never re-adds --require-anchors-allow to this step", () => {
+    expect(step).not.toContain("--require-anchors-allow");
   });
 });
