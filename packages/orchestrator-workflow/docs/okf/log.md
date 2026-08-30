@@ -5967,3 +5967,107 @@ source are re-stamped in the commit after this one.
   0 errors, 0 findings in the CI guard's blocking set
   (`anchor-`/`test-range-straddles-block`/`heading-section-`), 0 STALE
   sources-fresh findings.
+- 2026-08-30 (agent-tasks 613316c9 round 2: merge plus round-1 review
+  findings F1-F7): merged origin/master (task 84917365) into this branch.
+  Conflicts in the three docs master had re-anchored (install-fence-
+  mechanics, model-preselection, run-state-lifecycle-and-markers) were
+  resolved by taking master's anchored citation text and re-deriving the
+  line numbers against this branch's own grown files (README.md and
+  test/init.test.ts both differ between the two branches); two more docs
+  (review-gate-and-waivers, subagent-contracts-superset) conflicted on
+  their `timestamp:` field only, the later value kept; this file's own
+  tail conflicted (both branches append), master's entry kept first,
+  this branch's second.
+
+  Applied review round 1's F1-F7. F1 (HIGH): the harnesses-stickiness
+  gate keyed off a bare empty-array check, so a damaged manifest (a
+  missing or malformed `harnesses` field, which readInstalledManifest
+  already sanitizes to an empty array) degraded a fully installed repo to
+  templates-only on a plain re-run. `Manifest` gained `harnessesRecorded`,
+  set from whether the raw JSON's `harnesses` field was itself an array
+  before filtering; the gate now requires it. F3 (MEDIUM): dropping a
+  harness (including the whole set collapsing to none) left every one of
+  its files on disk but untracked with no note, unlike the existing
+  profile-downgrade and tiers-off leftover notes; a third ledger-driven
+  note loop was added, plus a same-shaped note for AGENTS.md/CLAUDE.md
+  (never ledger-tracked) when the harness set becomes empty. F4 (MEDIUM):
+  the stickiness branch pre-empted the interactive prompt entirely; it now
+  only short-circuits a non-interactive call, and an interactive re-run
+  still prompts with nothing pre-checked from the old recording. F6
+  (LOW): a repeated "none" (`none,none`) tripped the same usage error as
+  an actually different entry; the entry list is deduplicated before the
+  arity check. F7 (LOW): one em dash in this bundle's new prose, one
+  overstated README claim, and this file's own round-1 entry recording a
+  suite total instead of a verdict, all corrected in place; see the round-1
+  entry above, whose "verified individually" claim about every citation
+  into `test/init.test.ts` was itself false: 15 bare continuation
+  citations were left unpointed, corrected in this round (see that
+  entry's own in-place correction). F2's docs re-stamp is folded into this
+  entry rather than kept separate, since applying F1/F3/F4/F6 shifted the
+  same lines the merge had just re-pointed.
+
+  Every citation into the five touched source files (`init.ts`,
+  `cli-inputs.ts`, `detect.ts`, `test/init.test.ts`,
+  `test/cli-inputs.test.ts`) across `install-fence-mechanics.md`,
+  `model-preselection.md`, and `operator-install-and-registry.md` was
+  re-verified against the final, post-fix file content (anchor text
+  present, on the cited range's last content line); the 15 bare
+  continuation citations were re-pointed the same way, each opened and
+  confirmed to name the test the sentence describes rather than assumed
+  from a uniform offset. `README.md` grew twice on this branch (once at
+  the merge, once again from F4's wording change); every `README.md`
+  citation across the same three docs plus `run-state-lifecycle-and-
+  markers.md` was re-verified against its final content, not just its
+  state right after the merge.
+
+  Commands run on the committed tree, in the package directory unless
+  noted: `npm test` (green, all passing), `npm run typecheck` (clean),
+  `npm run typecheck:test` (clean), `npm run build` (clean), `npm run
+  format:check` (clean, after one `prettier --write test/cli-inputs.test.ts`
+  pass), `node ../../scripts/check-cli-flag-order.mjs` from the repo root
+  (clean), root `node packages/slop-detector/dist/cli.js check . --pack
+  placement-slop --config slop.config.yml` (clean, 416 files scanned).
+
+  CI's own bundle check invocation, now with no allowlist (master's task
+  84917365 removed it): `node packages/okf-kit/dist/cli.js check --json
+  packages/orchestrator-workflow/docs/okf --require-anchors` from the repo
+  root: 0 errors, 1 warning, 21 notices; 0 findings in the CI guard's
+  blocking set. `install-fence-mechanics.md`, `model-preselection.md`,
+  `operator-install-and-registry.md`, and `run-state-lifecycle-and-
+  markers.md` had their `timestamp:` frontmatter bumped in this commit
+  (each lists at least one of the five source files this round touched);
+  a post-bump re-check reported no new STALE findings. The one remaining
+  warning is this file's
+  own historical negative-control sentence citing a `README.md` range as
+  it stood mid-round-1 (a narrative record of a past state, not a live
+  pointer, deliberately left unrewritten); the 21 notices are all
+  pre-existing `unresolved-ambiguous`/`blank-start-line` findings inside
+  this file's own older entries. Compared against origin/master (task
+  84917365's own commit) run the same way inside a real git checkout
+  (the read-only main checkout, not a `git archive` extraction, which
+  skips every git-backed check and falsely reports clean): 0 errors, 13
+  warnings, 22 notices -- master's own bundle already carries the same
+  class of stale short-form `test/init.test.ts` continuation citations
+  this round fixed, plus one historical `log.md` finding of its own; this
+  branch's head carries fewer warnings and notices than that baseline, no
+  new warning class introduced.
+
+  CLI drive-through in a fresh temp git repo, using the built
+  `dist/cli.js`: `init . --harness none --yes` (templates only, 0
+  harnesses recorded) -> `init . --yes` (stayed templates only, the F1/F4
+  stickiness path) -> `init . --harness claude --yes` (installed for:
+  claude) -> `init . --harness none --yes` over that install (templates
+  only again, printing eight "now untracked after --harness dropped
+  claude"/"...dropped to none" notes naming the six `.claude/` files plus
+  `AGENTS.md`/`CLAUDE.md`, the F3 fix) -> hand-deleted the manifest's
+  `harnesses` field -> `init . --yes` (installed for: claude, not
+  templates only, confirming F1's fix over a damaged manifest); a
+  separate fresh target's `init . --harness none,none --yes` exited 0
+  (F6's fix; previously a usage error).
+
+  Mutation probe M1 (F1): removed the `previous.harnessesRecorded &&`
+  line from the stickiness gate in `cli-inputs.ts`. Result: both the
+  restored malformed-manifest test (`test/init.test.ts`) and the
+  dedicated damaged-manifest unit test (`test/cli-inputs.test.ts`) turned
+  red (expected `["claude"]`, got `[]`). Restored the line, re-ran: both
+  green again.
