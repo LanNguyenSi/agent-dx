@@ -358,6 +358,13 @@ describe("apply", () => {
     expect(second.status, second.stderr).toBe(0);
     expect(second.stdout).toContain("templates only");
     expect(second.stdout).not.toContain("installed for: ");
+    // The "Found existing install" line must distinguish a real recorded
+    // harnesses: [] from a missing/malformed/all-unknown harnesses field
+    // (both otherwise print the same "none recorded"); this target's
+    // manifest was recorded empty by the `first` apply above.
+    expect(second.stdout).toContain(
+      "harnesses: none (recorded templates-only)",
+    );
     expect(readRepoManifest(target).harnesses).toEqual([]);
     expect(existsSync(join(target, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(target, ".claude"))).toBe(false);
