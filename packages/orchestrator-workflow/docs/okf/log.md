@@ -6160,8 +6160,9 @@ source are re-stamped in the commit after this one.
 Task: `apply` did not carry the harnesses-stickiness fix from `init`
 (agent-tasks 613316c9) forward to itself. `resolveInitInputs`'s
 `previousIsRecordedManifest && previous.harnessesRecordedEmpty` gate only
-ever saw `true` for `init`'s own call site (`cli.ts:227#"previousIsRecordedManifest: true,"`
-before this round); `apply`'s action never passed the flag at all, and its
+ever saw `true` for `init`'s own call site (its `resolveInitInputs` call
+already passed `previousIsRecordedManifest: true` before this round);
+`apply`'s action never passed the flag at all, and its
 synthetic `buildApplyPrevious` manifest never carried `harnessesRecordedEmpty`
 through from the target's own repo manifest, so the gate could never fire
 for `apply`. A target `apply`-installed as templates-only (`--harness none`,
