@@ -2261,3 +2261,294 @@ describe("citations-resolve: --require-anchors opt-in", () => {
     expect(nonReservedHits.length).toBeGreaterThan(0);
   });
 });
+
+// Fixture: test/fixtures/citations-resolve-require-anchors-continuations/
+// (docs/okf/require-anchors-continuations.md + src/target.ts). Exercises
+// `anchor-required-continuation` (see `pushAnchorRequiredContinuation` and
+// the "Anchor strictness (opt-in)" doc block in
+// src/rules/citations-resolve.ts), the fifth --require-anchors check: a
+// continuation (all three backtick forms) or a bound short-form citation
+// chained off an in-repo full citation is flagged once the opt-in is on,
+// even when its governing full citation is itself already anchored (an
+// anchor on the full citation does not cover a later continuation of it).
+// Also pins the status quo the task's spec originally assumed was already
+// covered: in DEFAULT mode, a continuation that drifts onto a blank line
+// or past EOF is still caught by the existing mechanical checks, while a
+// continuation that merely drifts onto still-plausible content produces
+// nothing at all -- exactly the gap this check closes only when opted in.
+const REQUIRE_ANCHORS_CONT_ROOT = path.join(
+  FIXTURES_DIR,
+  "citations-resolve-require-anchors-continuations",
+);
+
+function loadRequireAnchorsCont(requireAnchors = false) {
+  const ctx = loadFixture(
+    "citations-resolve-require-anchors-continuations/docs/okf",
+    REQUIRE_ANCHORS_CONT_ROOT,
+  );
+  return requireAnchors ? { ...ctx, requireAnchors: { allow: [] } } : ctx;
+}
+
+describe("citations-resolve: anchor-required-continuation (--require-anchors opt-in)", () => {
+  it("default mode: exactly the two pre-existing mechanical findings, nothing new", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont());
+    const messages = findings.map((f) => f.message).sort();
+    expect(messages).toEqual(
+      [
+        "`src/target.ts:4 (continuation)`: start line is blank [blank-start-line]",
+        "`src/target.ts:6-50 (continuation)`: citation exceeds file length (19 line(s)) [range-exceeds-file]",
+      ].sort(),
+    );
+  });
+
+  it("default mode: a clean colon-, dash-, and paren-form continuation off an anchored full citation produce no finding at all", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont());
+    expect(
+      findingFor(findings, "src/target.ts:2 (continuation)"),
+    ).toBeUndefined();
+    expect(
+      findingFor(findings, "src/target.ts:5-7 (continuation)"),
+    ).toBeUndefined();
+    expect(
+      findingFor(findings, "src/target.ts:10 (continuation)"),
+    ).toBeUndefined();
+  });
+
+  it("--require-anchors: a colon-form fresh continuation off an anchored full citation is flagged anchor-required-continuation", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const f = findingFor(findings, "src/target.ts:2 (continuation)");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[anchor-required-continuation]");
+    expect(f?.message).toContain("continuation `:2`");
+    expect(f?.message).toContain(
+      "is chained to the governing citation `src/target.ts:1`",
+    );
+    expect(f?.message).toContain("lift it into a full");
+  });
+
+  it("--require-anchors: a dash-form cont-ext continuation off an anchored full citation is flagged, naming its own raw form", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const f = findingFor(findings, "src/target.ts:5-7 (continuation)");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-required-continuation]");
+    expect(f?.message).toContain("continuation -`7`");
+    expect(f?.message).toContain(
+      "is chained to the governing citation `src/target.ts:5`",
+    );
+  });
+
+  it("--require-anchors: a paren-form fresh continuation off an anchored full citation is flagged, naming its own raw form", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const f = findingFor(findings, "src/target.ts:10 (continuation)");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-required-continuation]");
+    expect(f?.message).toContain("continuation (`10`)");
+    expect(f?.message).toContain(
+      "is chained to the governing citation `src/target.ts:9`",
+    );
+  });
+
+  it("--require-anchors: a continuation drifted onto a blank line gets BOTH the existing blank-start-line finding and anchor-required-continuation", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/target.ts:4 (continuation)`"),
+    );
+    expect(matches.some((f) => f.message.includes("[blank-start-line]"))).toBe(
+      true,
+    );
+    const anchorReq = matches.find((f) =>
+      f.message.includes("[anchor-required-continuation]"),
+    );
+    expect(anchorReq).toBeDefined();
+    expect(anchorReq?.message).toContain(
+      "is chained to the governing citation `src/target.ts:2`",
+    );
+  });
+
+  it("--require-anchors: a continuation drifted past EOF gets BOTH the existing range-exceeds-file finding and anchor-required-continuation", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/target.ts:6-50 (continuation)`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[range-exceeds-file]")),
+    ).toBe(true);
+    const anchorReq = matches.find((f) =>
+      f.message.includes("[anchor-required-continuation]"),
+    );
+    expect(anchorReq).toBeDefined();
+    expect(anchorReq?.message).toContain(
+      "is chained to the governing citation `src/target.ts:6`",
+    );
+  });
+
+  it("--require-anchors: a bound short-form citation off an anchored full range citation is also flagged, for the identical reason a backtick continuation is", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const f = findingFor(findings, "src/target.ts:17-19 (short-form)");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-required-continuation]");
+    expect(f?.message).toContain("continuation :17-19");
+    expect(f?.message).toContain(
+      "is chained to the governing citation `src/target.ts:17-19`",
+    );
+  });
+
+  it("--require-anchors: an anchored full citation with no continuation at all is never flagged anchor-required-continuation or anchor-required", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const matches = findings.filter((f) =>
+      f.message.startsWith('`src/target.ts:13#"qux"`'),
+    );
+    expect(matches).toEqual([]);
+  });
+
+  it("--require-anchors: a cont-ext chained off a preceding cont-fresh (not directly off the full citation) names the message honestly", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const fresh = findingFor(findings, "src/target.ts:18 (continuation)");
+    expect(fresh).toBeDefined();
+    expect(fresh?.message).toContain("[anchor-required-continuation]");
+    expect(fresh?.message).toContain("continuation `:18`");
+    expect(fresh?.message).toContain(
+      "is chained to the governing citation `src/target.ts:17`",
+    );
+    const ext = findingFor(findings, "src/target.ts:18-19 (continuation)");
+    expect(ext).toBeDefined();
+    expect(ext?.message).toContain("[anchor-required-continuation]");
+    expect(ext?.message).toContain("continuation -`19`");
+    // The honest wording: this chains off the cont-fresh at line 18, not
+    // literally an "extension" of the ORIGINAL full citation's own range
+    // (line 17) -- `governingRange` still names the full citation (see
+    // `pushAnchorRequiredContinuation`'s doc comment), so the message says
+    // "chained to", never claims to be extending line 17 into 18-19.
+    expect(ext?.message).toContain(
+      "is chained to the governing citation `src/target.ts:17`",
+    );
+    expect(ext?.message).not.toContain("extends");
+  });
+
+  it("--require-anchors fixture: exactly the ten expected findings, no extras", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const ruleIds = findings
+      .map((f) => f.message.match(/\[([\w-]+)\]$/)?.[1])
+      .sort();
+    expect(ruleIds).toEqual(
+      [
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "blank-start-line",
+        "range-exceeds-file",
+      ].sort(),
+    );
+  });
+});
+
+// Fixture: test/fixtures/citations-resolve-require-anchors-continuation-exemptions/
+// (docs/okf/exemptions.md, docs/okf/log.md + src/target.ts). Pins the two
+// exemptions `pushAnchorRequiredContinuation` carries (see its doc comment
+// in src/rules/citations-resolve.ts): a `requireAnchors.allow` pattern
+// matched against the GOVERNING citation's own citedPath, and the
+// reserved-citing-doc carve-out folded into `requireAnchorsForDoc` by the
+// caller -- plus the two "no governing citation at all" cases (an
+// out-of-scope leading-`/` citation, and an unresolvable one) that reset
+// `governing` to null before the continuation is ever reached, so there is
+// nothing for `anchor-required-continuation` to fire against either.
+const REQUIRE_ANCHORS_CONT_EXEMPT_ROOT = path.join(
+  FIXTURES_DIR,
+  "citations-resolve-require-anchors-continuation-exemptions",
+);
+
+function loadRequireAnchorsContExempt(allow: string[] = []) {
+  const ctx = loadFixture(
+    "citations-resolve-require-anchors-continuation-exemptions/docs/okf",
+    REQUIRE_ANCHORS_CONT_EXEMPT_ROOT,
+  );
+  return { ...ctx, requireAnchors: { allow } };
+}
+
+describe("citations-resolve: anchor-required-continuation's own exemptions", () => {
+  it("requireAnchors.allow matching the governing citation's path exempts its continuation, same as anchor-required", () => {
+    const exempt = citationsResolveRule.run(
+      loadRequireAnchorsContExempt(["src/target.ts"]),
+    );
+    const exemptHit = exempt.filter(
+      (f) =>
+        f.file.endsWith("exemptions.md") &&
+        f.message.includes("[anchor-required-continuation]"),
+    );
+    expect(exemptHit).toEqual([]);
+
+    // Negative control: without the allow pattern, the very same
+    // continuation IS flagged -- proves the absence above is the allow
+    // exemption actually working, not a fixture that never fires at all
+    // (this is the reviewer probe A mutant target: deleting the allow
+    // check in `pushAnchorRequiredContinuation` leaves this control
+    // passing but the exempt case above failing).
+    const baseline = citationsResolveRule.run(loadRequireAnchorsContExempt());
+    const baselineHit = baseline.filter(
+      (f) =>
+        f.file.endsWith("exemptions.md") &&
+        f.message.includes("[anchor-required-continuation]"),
+    );
+    expect(baselineHit.length).toBe(1);
+    expect(baselineHit[0]?.message).toContain("continuation `:2`");
+  });
+
+  it("a reserved citing doc (log.md) is exempt from anchor-required-continuation, not just the other opt-in checks", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsContExempt());
+    const logHits = findings.filter(
+      (f) =>
+        f.file.endsWith("log.md") &&
+        f.message.includes("[anchor-required-continuation]"),
+    );
+    expect(logHits).toEqual([]);
+
+    // Negative control: the identical citation+continuation pair, cited
+    // from the non-reserved exemptions.md doc instead, DOES produce the
+    // finding -- proves the log.md absence above is the reserved-doc
+    // exemption, not a fixture that never fires (reviewer probe B mutant
+    // target: swapping `requireAnchorsForDoc` for `requireAnchors` at the
+    // three call sites drops this carve-out but leaves the control
+    // passing).
+    const nonReservedHits = findings.filter(
+      (f) =>
+        f.file.endsWith("exemptions.md") &&
+        f.message.includes("[anchor-required-continuation]"),
+    );
+    expect(nonReservedHits.length).toBeGreaterThan(0);
+  });
+
+  it("an out-of-scope (leading-`/`) governing citation leaves its continuation with nothing to validate against: no finding", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsContExempt());
+    // /etc/app.yml is out of scope (leading `/`) and produces no finding of
+    // its own either; assert there is no anchor-required-continuation
+    // anywhere naming it as a governing citation.
+    expect(
+      findings.some((f) =>
+        f.message.includes("chained to the governing citation `/etc/app.yml"),
+      ),
+    ).toBe(false);
+  });
+
+  it("a missing-file governing citation leaves its continuation with nothing to validate against: no anchor-required-continuation finding", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsContExempt());
+    expect(
+      findings.some((f) =>
+        f.message.includes(
+          "chained to the governing citation `does-not-exist.ts",
+        ),
+      ),
+    ).toBe(false);
+    // The missing-file citation itself is still reported (unrelated to
+    // this rule) -- confirms the fixture actually exercises the
+    // missing-file path rather than accidentally resolving.
+    expect(
+      findings.some((f) => f.message.includes("[missing-file]")),
+    ).toBe(true);
+  });
+});

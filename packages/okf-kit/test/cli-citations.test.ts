@@ -115,4 +115,33 @@ describe("okf-kit cli citations-resolve", () => {
       ),
     ).toBe(true);
   });
+
+  it("check --require-anchors --json surfaces anchor-required-continuation end to end on the continuations fixture", () => {
+    const bundleDir = path.join(
+      FIXTURES_DIR,
+      "citations-resolve-require-anchors-continuations/docs/okf",
+    );
+    const repoRoot = path.join(
+      FIXTURES_DIR,
+      "citations-resolve-require-anchors-continuations",
+    );
+
+    const result = runCli([
+      "check",
+      bundleDir,
+      "--repo-root",
+      repoRoot,
+      "--require-anchors",
+      "--json",
+    ]);
+
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ ruleId: string; message: string }>;
+    };
+    expect(
+      parsed.findings.some((f) =>
+        f.message.includes("[anchor-required-continuation]"),
+      ),
+    ).toBe(true);
+  });
 });
