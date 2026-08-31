@@ -6154,3 +6154,67 @@ source are re-stamped in the commit after this one.
   `harnesses` to a real empty array and re-ran a plain `init --yes` --
   stayed at `templates only` as the deliberate-`none` case still requires,
   confirming the fix did not also loosen the genuine stickiness rule.
+
+## 2026-08-31 (agent-tasks 8602a952, implementer)
+
+Task: `apply` did not carry the harnesses-stickiness fix from `init`
+(agent-tasks 613316c9) forward to itself. `resolveInitInputs`'s
+`previousIsRecordedManifest && previous.harnessesRecordedEmpty` gate only
+ever saw `true` for `init`'s own call site (`cli.ts:227#"previousIsRecordedManifest: true,"`
+before this round); `apply`'s action never passed the flag at all, and its
+synthetic `buildApplyPrevious` manifest never carried `harnessesRecordedEmpty`
+through from the target's own repo manifest, so the gate could never fire
+for `apply`. A target `apply`-installed as templates-only (`--harness none`,
+a real recorded `harnesses: []`) could silently widen back out on a plain,
+non-interactive `apply` re-run to the operator manifest's default harness
+or whatever `detectHarnesses` found on disk, both of which install-fence-
+mechanics.md's own "Templates-only mode" section named as a known,
+deliberately-left-open gap before this round.
+
+Fix: `buildApplyPrevious` (src/cli.ts) now carries
+`harnessesRecordedEmpty: repoManifest?.harnessesRecordedEmpty` into the
+synthetic `previous` it returns, and the `apply` action's `resolveInitInputs`
+call now passes `previousIsRecordedManifest: Boolean(repoManifest)` (not
+`Boolean(previous)`, since `buildApplyPrevious` always returns a defined
+object even for a target with no manifest of its own). The existing gate in
+`cli-inputs.ts` needed no change: both flags together already distinguish a
+real recorded `harnesses: []` from a missing/malformed `harnesses` field
+(which sanitizes to the same `harnesses: []` but `harnessesRecordedEmpty:
+false`), so a damaged manifest still falls through to `apply`'s existing
+`resolveApplyHarnesses` fallback chain (target's recorded harnesses, else
+the operator defaults, else detection) unchanged. Interactive `apply` is
+unaffected in intent (it still prompts); the only behavior change for the
+interactive templates-only case is that the checkbox now starts from
+nothing pre-checked instead of the operator-default/detected candidates,
+the same as `init`'s own interactive re-run, which was not previously
+possible for `apply` since the gate never fired for it at all.
+
+Tests added: a CLI-level `apply.test.ts` case chaining three `apply` runs
+against one target (an `apply --harness none` fresh install, a stray
+`CLAUDE.md` written to disk plus an operator `setup --yes` default of
+`claude`, a flagless `apply --yes` re-run asserting `templates only` and no
+`.claude`/`AGENTS.md` written, then an explicit `apply --harness claude`
+re-run asserting the upgrade still works), and a second case covering a
+hand-written repo manifest with no `harnesses` field at all (not a real
+recorded empty set), asserting a flagless `apply` still falls back to the
+operator default (`installed for: claude`).
+
+Mutation probe: reverted the `apply` action's `resolveInitInputs` call to
+omit `previousIsRecordedManifest` (the pre-fix state). Result: the new
+sticky test's `expect(result.stdout).toContain("templates only")` assertion
+turned red -- the re-run installed `claude` instead (`installed for:
+claude` printed, `.claude` written), reproducing the exact gap this round
+closes. Restored, re-ran: green again.
+
+Verification: `npm test` (all 581 tests green, including
+`test/docs-consistency.test.ts`'s citation guard, after re-pointing every
+`cli.ts`/`cli-inputs.ts` citation shifted by this round's doc-comment
+insertions across `install-fence-mechanics.md`, `operator-install-and-
+registry.md`, and `model-preselection.md`, plus two hardcoded citation
+strings inside `test/docs-consistency.test.ts` itself), `npm run
+typecheck` (clean). `okf-kit check --require-anchors --json` against the
+committed bundle (this round's own commit) versus the same command against
+a `git archive` of master (672932f, pre-round): the two finding lists are
+compared in this task's implementer report rather than duplicated here;
+see that report for the exact counts. No new finding beyond the baseline
+set was left unresolved by this round.

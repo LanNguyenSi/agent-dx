@@ -495,6 +495,16 @@ function repoManifestHasMalformedPin(targetDir: string): boolean {
  * `previous.harnesses` field built by `buildApplyPrevious` below, so
  * `resolveInitInputs`'s own union-of-detected-and-installed fallback
  * resolves to exactly this value rather than widening it further.
+ *
+ * This chain is not the last word for a target whose own manifest recorded
+ * a real `harnesses: []` (a deliberate `--harness none` install):
+ * `resolveInitInputs`'s harnesses-stickiness gate (fed by
+ * `previousIsRecordedManifest` and `previous.harnessesRecordedEmpty`, both
+ * set by the caller below from `repoManifest`) overrides whatever this
+ * function returns and keeps a non-interactive re-run templates-only. This
+ * function's own fallback chain still runs first and its result is still
+ * used as `detected` (relevant to an interactive prompt, and to any target
+ * whose manifest is missing or malformed rather than deliberately empty).
  */
 function resolveApplyHarnesses(
   targetDir: string,
@@ -522,7 +532,11 @@ function resolveApplyHarnesses(
  * always the target's own recorded harnesses (never the operator default),
  * since `--sync` only affects profile/tiers/models per the rule above; the
  * full harnesses fallback chain is `resolveApplyHarnesses`'s job, not this
- * function's.
+ * function's. `harnessesRecordedEmpty` is carried straight from
+ * `repoManifest` too (`undefined` when there is no repo manifest), so the
+ * harnesses-stickiness gate in `resolveInitInputs` can see whether an empty
+ * `harnesses` here was really a recorded `--harness none` or just the
+ * "no repo manifest at all" case.
  */
 function buildApplyPrevious(
   repoManifest: Manifest | undefined,
@@ -547,6 +561,13 @@ function buildApplyPrevious(
     kit: "orchestrator-workflow",
     version: PACKAGE_VERSION,
     harnesses,
+    // Carried straight from the target's own recorded manifest (when it
+    // has one) so `resolveInitInputs`'s harnesses-stickiness gate can tell
+    // a deliberate recorded `--harness none` install apart from a
+    // missing/malformed `harnesses` field, exactly as it already does for
+    // `init`'s own re-run. Left `undefined` when there is no repo manifest
+    // at all, which the gate treats the same as "not recorded".
+    harnessesRecordedEmpty: repoManifest?.harnessesRecordedEmpty,
     models,
     profile,
     tiers,
@@ -749,6 +770,17 @@ program
         interactive,
         previous,
         opts,
+        // `previous` is always defined here (`buildApplyPrevious` returns a
+        // synthetic object even for a target with no manifest of its own),
+        // so `previousIsRecordedManifest` cannot be `Boolean(previous)`;
+        // it has to track whether the target itself actually has a
+        // recorded manifest, since only that manifest's own
+        // `harnessesRecordedEmpty` (carried into `previous` by
+        // `buildApplyPrevious`) can mean a deliberate `--harness none`
+        // install. A target with no manifest at all never sets this, and
+        // the stickiness gate in `resolveInitInputs` requires both flags
+        // together, so this alone does not by itself make anything sticky.
+        previousIsRecordedManifest: Boolean(repoManifest),
       });
       for (const w of warnings) {
         process.stderr.write(`${w}\n`);
