@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `citations-resolve`: a fifth `--require-anchors` check,
+  `anchor-required-continuation` (warning), closes a gap the four checks
+  added in 0.8.0 left open: they all fire only for a "full" citation, so a
+  continuation (`` `:N` ``/`` `:N-M` ``, `` -`M` ``/`` –`M` ``, `` (`N`) ``)
+  or a bound paragraph-bound short-form `:N-M` chained off an
+  ALREADY-anchored full citation was invisible to `--require-anchors`
+  entirely: it carries no path of its own to hang an anchor on (see
+  "Anchored citations" in the README), so it was never itself an in-repo
+  full citation `anchor-required` could reach, and the anchor on its
+  governing citation does not (and structurally cannot) extend to a later
+  continuation of it. A line-shift that lands the continuation on still
+  non-blank, in-bounds, unrelated content -- exactly the drift class this
+  rule exists to catch -- was previously silent for a continuation the
+  same way it was for an unanchored full citation before 0.8.0. Fires once
+  the continuation's governing citation resolves in-repo, mirroring
+  `anchor-required`'s own exemptions (a reserved citing doc; a
+  `requireAnchors.allow` pattern, matched against the GOVERNING citation's
+  raw citedPath, since a continuation has no path of its own to match).
+  The paragraph-bound short form is included under the identical
+  reasoning. See "Anchor strictness (opt-in, `--require-anchors`)" in the
+  README for the full rationale.
+
+### Verification
+
+- Default mode (no `--require-anchors`) is byte-identical before and
+  after this change: verified by building the CLI at both the pre-change
+  commit and this change, then running `check --json` in default mode
+  against three real bundles (this repo's own
+  `packages/orchestrator-workflow/docs/okf`, harness's `docs/okf`, and
+  agent-grounding's `docs/okf`, each extracted read-only at a pinned
+  commit) and diffing the sorted finding lists -- 0 lines of diff on all
+  three, both against a narrow `docs/okf`-only extraction and against the
+  full real repo tree as `--repo-root`.
+- Migration backlog, run with `--require-anchors` after this change
+  against the same three bundles with their full real repo tree as
+  `--repo-root` (a narrow `docs/okf`-only extraction under-counts this,
+  since most citations fail to resolve without the rest of the repo
+  present): agent-dx's own orchestrator-workflow bundle 70
+  `anchor-required-continuation` findings, harness 24, agent-grounding
+  24. Consumer CI pins (agent-dx's and agent-grounding's own
+  `okf-anchor-guard` jobs, which select findings by the trailing
+  `[rule-id]` bracket) must be bumped to this version before
+  `anchor-required-continuation` starts gating; that bump is out of scope
+  here.
+
 ## [0.8.0] - 2026-08-27
 
 ### Added

@@ -207,6 +207,11 @@ const RULE_ID = "citations-resolve";
  * nowhere natural to hang an anchor on one without inventing a second,
  * detached syntax; the migration this rule was built for (CHANGELOG.md
  * citations) is written as full citations throughout the corpus it targets.
+ * Under `--require-anchors`, this remains true (no second anchor syntax is
+ * added), but a continuation or short-form that chains off an in-repo full
+ * citation is instead flagged, `anchor-required-continuation`, so it does
+ * not drift silently -- see the "Anchor strictness (opt-in)" doc block
+ * below for that check.
  *
  * Rejected alternatives (see the PR/CHANGELOG for the fuller writeup):
  *   - Embedding the literal heading markup itself, e.g.
@@ -300,6 +305,30 @@ const RULE_ID = "citations-resolve";
  * `checkShortFormTarget`'s own doc comment already gives for the Markdown
  * half of the block-boundary check: a full citation into a Markdown target
  * legitimately cites a couple of arbitrary lines all the time.
+ *
+ * A fifth check, `anchor-required-continuation` (warning), closes a gap the
+ * four checks above leave open: every one of them is gated on reaching a
+ * "full" atom, so a continuation (` :N`/`:N-M` `, `` -`M` ``/`` –`M` ``,
+ * `` (`N`) ``) or a paragraph-bound short-form `:N-M` chained off an
+ * ALREADY-ANCHORED full citation was previously invisible to
+ * `--require-anchors` entirely -- it carries no path of its own
+ * (see the "Continuation citations" / "Short-form citations" doc blocks),
+ * so it was never itself an in-repo full citation `anchor-required` could
+ * reach, and the anchor on the governing citation it chains off does not
+ * (and structurally cannot) cover it: a line-shift that only affects the
+ * continuation's own start/end line is exactly the drift this rule's base
+ * checks (blank-start-line and friends) already catch when it lands on
+ * unusable content, but a shift that lands the continuation on still
+ * non-blank, in-bounds, unrelated content is invisible to any of them --
+ * see `pushAnchorRequiredContinuation` for where this is pushed, from all
+ * three places a continuation or short-form atom is processed in `scanDoc`.
+ * Unlike `anchor-required`, there is no "already carries one" escape here:
+ * a continuation is structurally anchor-less regardless of whether its
+ * governing full citation has an anchor, so this fires unconditionally
+ * once the same exemptions (reserved citing doc, `requireAnchors.allow`
+ * matched against the GOVERNING citation's citedPath) clear. The remedy is
+ * always the same: lift the continuation into its own full,
+ * `path:N-M#anchor` citation.
  */
 
 /**
@@ -745,8 +774,21 @@ type Atom =
       index: number;
       startLine: number;
       endLine: number | null;
+      // The continuation exactly as written, including its backtick(s) and
+      // any leading dash/paren -- e.g. `` `:75-78` `` or `` (`92`) `` --
+      // carried so `anchor-required-continuation` (see the "Anchor
+      // strictness (opt-in)" doc block above) can name the continuation
+      // text as written rather than re-deriving it from startLine/endLine,
+      // which would lose the syntactic form (colon vs. paren).
+      raw: string;
     }
-  | { kind: "cont-ext"; index: number; value: number };
+  | {
+      kind: "cont-ext";
+      index: number;
+      value: number;
+      // See "cont-fresh"'s `raw` above -- e.g. `` -`85` `` or `` `:85` ``.
+      raw: string;
+    };
 
 type Resolution =
   { skip: true } | { path: string } | { ambiguous: true; candidates: string[] };
@@ -1619,6 +1661,7 @@ function collectContinuationAtoms(content: string): Atom[] {
         kind: "cont-ext",
         index: m.index,
         value: m[2] ? Number(m[2]) : Number(m[1]),
+        raw: m[0],
       });
     } else {
       atoms.push({
@@ -1626,13 +1669,19 @@ function collectContinuationAtoms(content: string): Atom[] {
         index: m.index,
         startLine: Number(m[1]),
         endLine: m[2] ? Number(m[2]) : null,
+        raw: m[0],
       });
     }
   }
 
   const dashRe = new RegExp(CONT_DASH_RE.source, "g");
   while ((m = dashRe.exec(content)) !== null) {
-    atoms.push({ kind: "cont-ext", index: m.index, value: Number(m[1]) });
+    atoms.push({
+      kind: "cont-ext",
+      index: m.index,
+      value: Number(m[1]),
+      raw: m[0],
+    });
   }
 
   const parenRe = new RegExp(CONT_PAREN_RE.source, "g");
@@ -1642,6 +1691,7 @@ function collectContinuationAtoms(content: string): Atom[] {
       index: m.index,
       startLine: Number(m[1]),
       endLine: null,
+      raw: m[0],
     });
   }
 
@@ -1955,6 +2005,12 @@ function paragraphStartFor(starts: number[], index: number): number {
 type NamedFullCitation = {
   index: number;
   citedPath: string;
+  // Carried so a bound short-form citation can also be checked by
+  // `anchor-required-continuation` (see `pushAnchorRequiredContinuation`
+  // above), which needs the naming full citation's own path AND range to
+  // describe "the governing citation" in its message.
+  startLine: number;
+  endLine: number | null;
 };
 
 /**
@@ -2023,6 +2079,54 @@ function pushUnreadable(
     message: `\`${citation}\`: target file exists but could not be read [unreadable-target]`,
     detail: `resolvedTo: ${resolvedTo}, errorCode: ${code}`,
   });
+}
+
+/**
+ * `anchor-required-continuation` (opt-in, `--require-anchors`, warning):
+ * see the "Anchor strictness (opt-in)" doc block above. A continuation
+ * atom (cont-fresh or cont-ext, any of the three backtick forms, or a
+ * paragraph-bound short-form `:N-M`) is structurally anchor-less by
+ * construction -- see the "Continuation citations" doc block -- so
+ * unlike `anchor-required` there is no "already carries one" escape: this
+ * fires once its governing citation resolved in-repo, REGARDLESS of
+ * whether that governing full citation itself carries an anchor (an
+ * anchor on the full citation does not extend to a later continuation of
+ * it). Exemptions mirror `anchor-required`'s exactly: the caller already
+ * folds the reserved-citing-doc carve-out into `requireAnchorsForDoc`
+ * (undefined for a reserved doc), and `requireAnchors.allow` is matched
+ * here against `governing.citedPath` -- the path the continuation is
+ * chained to, since a continuation carries no path of its own to match
+ * against.
+ */
+function pushAnchorRequiredContinuation(
+  findings: Finding[],
+  file: string,
+  citation: string,
+  raw: string,
+  governing: {
+    citedPath: string;
+    resolvedPath: string;
+    startLine: number;
+    endLine: number | null;
+  },
+  requireAnchorsForDoc: RequireAnchorsOptions | undefined,
+  root: string,
+): void {
+  if (
+    !requireAnchorsForDoc ||
+    matchesAllowPattern(governing.citedPath, requireAnchorsForDoc.allow)
+  ) {
+    return;
+  }
+  const governingRange = `${governing.citedPath}:${governing.startLine}${governing.endLine ? "-" + governing.endLine : ""}`;
+  pushDrift(
+    findings,
+    file,
+    citation,
+    "anchor-required-continuation",
+    `continuation ${raw} extends \`${governingRange}\`; a continuation cannot carry its own #anchor, lift it into a full \`path:N-M#anchor\` citation (--require-anchors is on)`,
+    path.relative(root, governing.resolvedPath),
+  );
 }
 
 /**
@@ -2173,16 +2277,34 @@ function scanDoc(
 
   // `governing`: nearest preceding citation (full or continuation) that
   // resolved to a real file; see the "Continuation citations" doc block
-  // above for the reset rules. `lastStartLine`: the start line a "cont-ext"
-  // atom extends into a range; tracks the most recent full or cont-fresh
-  // atom's own startLine, scoped together with `governing`.
-  let governing: { citedPath: string; resolvedPath: string } | null = null;
+  // above for the reset rules. Carries the ORIGINAL full citation's own
+  // startLine/endLine (not the extended range a later cont-ext might grow
+  // into) so `anchor-required-continuation` (see `pushAnchorRequiredContinuation`
+  // above) can name "the governing citation" the same way it was actually
+  // written. `lastStartLine`: the start line a "cont-ext" atom extends into
+  // a range; tracks the most recent full or cont-fresh atom's own
+  // startLine, scoped together with `governing`.
+  let governing: {
+    citedPath: string;
+    resolvedPath: string;
+    startLine: number;
+    endLine: number | null;
+  } | null = null;
   let lastStartLine: number | null = null;
 
   for (const atom of atoms) {
     if (atom.kind === "cont-ext") {
       if (!governing || lastStartLine === null) continue; // nothing to extend
       const citation = `${governing.citedPath}:${lastStartLine}-${atom.value} (continuation)`;
+      pushAnchorRequiredContinuation(
+        findings,
+        doc.relPath,
+        citation,
+        atom.raw,
+        governing,
+        requireAnchorsForDoc,
+        root,
+      );
       const problem = checkRangeBoundOnly(
         lastStartLine,
         atom.value,
@@ -2213,6 +2335,15 @@ function scanDoc(
       if (!governing) continue; // nothing to validate a bare continuation against
       const { startLine, endLine } = atom;
       const citation = `${governing.citedPath}:${startLine}${endLine ? "-" + endLine : ""} (continuation)`;
+      pushAnchorRequiredContinuation(
+        findings,
+        doc.relPath,
+        citation,
+        atom.raw,
+        governing,
+        requireAnchorsForDoc,
+        root,
+      );
       const problem = checkTarget(
         governing.citedPath,
         startLine,
@@ -2367,7 +2498,12 @@ function scanDoc(
         );
       }
     }
-    governing = { citedPath, resolvedPath: resolution.path };
+    governing = {
+      citedPath,
+      resolvedPath: resolution.path,
+      startLine,
+      endLine,
+    };
     lastStartLine = startLine;
   }
 
@@ -2495,6 +2631,8 @@ function scanDoc(
         namedFullAtoms.push({
           index: a.index,
           citedPath: a.citedPath,
+          startLine: a.startLine,
+          endLine: a.endLine,
         });
       }
     }
@@ -2555,6 +2693,27 @@ function scanDoc(
         pushAmbiguous(findings, doc.relPath, citation, resolution.candidates);
         continue;
       }
+
+      // anchor-required-continuation (opt-in, warning) also applies to a
+      // bound short-form citation: it is just as anchor-less as a
+      // backtick continuation (see the "Short-form citations" doc block
+      // above), for the identical reason -- no path of its own to hang an
+      // anchor on -- so it is included under the same D-006 decision
+      // rather than left as a silent gap in `--require-anchors`.
+      pushAnchorRequiredContinuation(
+        findings,
+        doc.relPath,
+        citation,
+        `:${rangeLabel}`,
+        {
+          citedPath: targetPath,
+          resolvedPath: resolution.path,
+          startLine: target.startLine,
+          endLine: target.endLine,
+        },
+        requireAnchorsForDoc,
+        root,
+      );
 
       const problem = checkShortFormTarget(
         targetPath,

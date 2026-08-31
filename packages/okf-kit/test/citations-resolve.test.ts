@@ -2261,3 +2261,151 @@ describe("citations-resolve: --require-anchors opt-in", () => {
     expect(nonReservedHits.length).toBeGreaterThan(0);
   });
 });
+
+// Fixture: test/fixtures/citations-resolve-require-anchors-continuations/
+// (docs/okf/require-anchors-continuations.md + src/target.ts). Exercises
+// `anchor-required-continuation` (see `pushAnchorRequiredContinuation` and
+// the "Anchor strictness (opt-in)" doc block in
+// src/rules/citations-resolve.ts), the fifth --require-anchors check: a
+// continuation (all three backtick forms) or a bound short-form citation
+// chained off an in-repo full citation is flagged once the opt-in is on,
+// even when its governing full citation is itself already anchored (an
+// anchor on the full citation does not cover a later continuation of it).
+// Also pins the status quo the task's spec originally assumed was already
+// covered: in DEFAULT mode, a continuation that drifts onto a blank line
+// or past EOF is still caught by the existing mechanical checks, while a
+// continuation that merely drifts onto still-plausible content produces
+// nothing at all -- exactly the gap this check closes only when opted in.
+const REQUIRE_ANCHORS_CONT_ROOT = path.join(
+  FIXTURES_DIR,
+  "citations-resolve-require-anchors-continuations",
+);
+
+function loadRequireAnchorsCont(requireAnchors = false) {
+  const ctx = loadFixture(
+    "citations-resolve-require-anchors-continuations/docs/okf",
+    REQUIRE_ANCHORS_CONT_ROOT,
+  );
+  return requireAnchors ? { ...ctx, requireAnchors: { allow: [] } } : ctx;
+}
+
+describe("citations-resolve: anchor-required-continuation (--require-anchors opt-in)", () => {
+  it("default mode: exactly the two pre-existing mechanical findings, nothing new", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont());
+    const messages = findings.map((f) => f.message).sort();
+    expect(messages).toEqual(
+      [
+        "`src/target.ts:4 (continuation)`: start line is blank [blank-start-line]",
+        "`src/target.ts:6-50 (continuation)`: citation exceeds file length (19 line(s)) [range-exceeds-file]",
+      ].sort(),
+    );
+  });
+
+  it("default mode: a clean colon-, dash-, and paren-form continuation off an anchored full citation produce no finding at all", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont());
+    expect(
+      findingFor(findings, "src/target.ts:2 (continuation)"),
+    ).toBeUndefined();
+    expect(
+      findingFor(findings, "src/target.ts:5-7 (continuation)"),
+    ).toBeUndefined();
+    expect(
+      findingFor(findings, "src/target.ts:10 (continuation)"),
+    ).toBeUndefined();
+  });
+
+  it("--require-anchors: a colon-form fresh continuation off an anchored full citation is flagged anchor-required-continuation", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const f = findingFor(findings, "src/target.ts:2 (continuation)");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("warning");
+    expect(f?.message).toContain("[anchor-required-continuation]");
+    expect(f?.message).toContain("continuation `:2`");
+    expect(f?.message).toContain("extends `src/target.ts:1`");
+    expect(f?.message).toContain("lift it into a full");
+  });
+
+  it("--require-anchors: a dash-form cont-ext continuation off an anchored full citation is flagged, naming its own raw form", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const f = findingFor(findings, "src/target.ts:5-7 (continuation)");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-required-continuation]");
+    expect(f?.message).toContain("continuation -`7`");
+    expect(f?.message).toContain("extends `src/target.ts:5`");
+  });
+
+  it("--require-anchors: a paren-form fresh continuation off an anchored full citation is flagged, naming its own raw form", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const f = findingFor(findings, "src/target.ts:10 (continuation)");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-required-continuation]");
+    expect(f?.message).toContain("continuation (`10`)");
+    expect(f?.message).toContain("extends `src/target.ts:9`");
+  });
+
+  it("--require-anchors: a continuation drifted onto a blank line gets BOTH the existing blank-start-line finding and anchor-required-continuation", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/target.ts:4 (continuation)`"),
+    );
+    expect(matches.some((f) => f.message.includes("[blank-start-line]"))).toBe(
+      true,
+    );
+    const anchorReq = matches.find((f) =>
+      f.message.includes("[anchor-required-continuation]"),
+    );
+    expect(anchorReq).toBeDefined();
+    expect(anchorReq?.message).toContain("extends `src/target.ts:2`");
+  });
+
+  it("--require-anchors: a continuation drifted past EOF gets BOTH the existing range-exceeds-file finding and anchor-required-continuation", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const matches = findings.filter((f) =>
+      f.message.startsWith("`src/target.ts:6-50 (continuation)`"),
+    );
+    expect(
+      matches.some((f) => f.message.includes("[range-exceeds-file]")),
+    ).toBe(true);
+    const anchorReq = matches.find((f) =>
+      f.message.includes("[anchor-required-continuation]"),
+    );
+    expect(anchorReq).toBeDefined();
+    expect(anchorReq?.message).toContain("extends `src/target.ts:6`");
+  });
+
+  it("--require-anchors: a bound short-form citation off an anchored full range citation is also flagged, per D-006", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const f = findingFor(findings, "src/target.ts:17-19 (short-form)");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-required-continuation]");
+    expect(f?.message).toContain("continuation :17-19");
+    expect(f?.message).toContain("extends `src/target.ts:17-19`");
+  });
+
+  it("--require-anchors: an anchored full citation with no continuation at all is never flagged anchor-required-continuation or anchor-required", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const matches = findings.filter((f) =>
+      f.message.startsWith('`src/target.ts:13#"qux"`'),
+    );
+    expect(matches).toEqual([]);
+  });
+
+  it("--require-anchors fixture: exactly the eight expected findings, no extras", () => {
+    const findings = citationsResolveRule.run(loadRequireAnchorsCont(true));
+    const ruleIds = findings
+      .map((f) => f.message.match(/\[([\w-]+)\]$/)?.[1])
+      .sort();
+    expect(ruleIds).toEqual(
+      [
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "anchor-required-continuation",
+        "blank-start-line",
+        "range-exceeds-file",
+      ].sort(),
+    );
+  });
+});
