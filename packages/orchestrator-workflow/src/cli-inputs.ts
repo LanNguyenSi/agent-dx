@@ -36,7 +36,19 @@ export async function promptHarnesses(
   // always empty there too, and pre-checking `claude` on Enter would
   // silently re-widen an explicit `--harness none` install -- contradicting
   // README.md's and this function's own "nothing forced pre-selected" claim
-  // (see CHANGELOG).
+  // (see CHANGELOG). That "`detected` is always empty there too" premise
+  // holds only for `init`'s own call site, where `detected` is
+  // `detectHarnesses(targetDir)` on a target with no harness files by
+  // construction. `apply`'s call site (`resolveInitInputs`'s interactive
+  // branch just below) instead passes `resolveApplyHarnesses`'s result,
+  // which is never empty (it falls back through the operator default,
+  // then detection, then `["claude"]`); there `detected` pre-checks
+  // whatever `resolveApplyHarnesses` returned regardless of
+  // `fallbackToClaude`, so an interactive apply re-run on a templates-only
+  // target still starts with that harness pre-checked and a bare Enter
+  // re-widens the install. `fallbackToClaude: false` is live for `init`
+  // and dead code on `apply`'s interactive path; noted as a known residual
+  // (see docs/okf/log.md's 2026-08-31 entry).
   const preselected =
     known.length > 0 ? known : fallbackToClaude ? ["claude" as Harness] : [];
   const { harnesses } = await inquirer.prompt<{ harnesses: Harness[] }>([

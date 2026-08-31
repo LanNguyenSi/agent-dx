@@ -695,10 +695,18 @@ program
       const repoManifest = readInstalledManifest(targetDir);
       if (repoManifest) {
         const version = repoManifest.version || "unknown version";
+        // Distinguish a real recorded `harnesses: []` (a deliberate
+        // `--harness none` install, sticky on a flagless apply below) from
+        // a missing/malformed/all-unknown `harnesses` field, which also
+        // filters down to an empty array but is NOT sticky -- see
+        // `Manifest.harnessesRecordedEmpty`'s doc comment in init.ts. The
+        // printed phrase must not conflate the two cases.
         const installedFor =
           repoManifest.harnesses.length > 0
             ? repoManifest.harnesses.join(", ")
-            : "none recorded";
+            : repoManifest.harnessesRecordedEmpty
+              ? "none (recorded templates-only)"
+              : "none recorded";
         console.log(
           `Found existing install (${version.startsWith("unknown") ? version : `v${version}`}, harnesses: ${installedFor}, profile: ${repoManifest.profile}, tiers: ${repoManifest.tiers})`,
         );
@@ -780,6 +788,12 @@ program
         // install. A target with no manifest at all never sets this, and
         // the stickiness gate in `resolveInitInputs` requires both flags
         // together, so this alone does not by itself make anything sticky.
+        // This does overlap with `harnessesRecordedEmpty` today (both
+        // ultimately trace back to the same repo manifest being present),
+        // but the two are kept as separate flags on purpose, as defence in
+        // depth: `previousIsRecordedManifest` guards against a future
+        // caller of `resolveInitInputs` synthesizing a `previous` with
+        // `harnessesRecordedEmpty` set but no real repo manifest behind it.
         previousIsRecordedManifest: Boolean(repoManifest),
       });
       for (const w of warnings) {

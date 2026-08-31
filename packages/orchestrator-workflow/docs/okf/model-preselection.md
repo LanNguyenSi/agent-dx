@@ -71,14 +71,14 @@ below.
    as `DEFAULT_MODELS` overlaid with the *previous* manifest's models (if
    any), then applies `--models` on top; when running interactively with no
    `--models`, it prompts per role instead, defaulting each prompt to the
-   already-resolved value (`src/cli-inputs.ts:274-275#"...DEFAULT_MODELS,"`, prompt UI at
-   `src/cli-inputs.ts:89-131#"return models;"`). Since agent-dx task T-003, this whole
+   already-resolved value (`src/cli-inputs.ts:286-287#"...DEFAULT_MODELS,"`, prompt UI at
+   `src/cli-inputs.ts:101-143#"return models;"`). Since agent-dx task T-003, this whole
    resolution step (harnesses, profile, models, tiers, and the opencode
    catalog resolution) lives in a single reusable function,
    `resolveInitInputs` (`src/cli-inputs.ts`), which `init`'s CLI action
    calls; a later `apply --target` command can call the same function
    without duplicating the logic. Since 0.15.0 the interactive prompt only asks about
-   the roles `rolesForProfile(profile)` selects (`src/cli-inputs.ts:89-94#"for (const role of roles) {"`
+   the roles `rolesForProfile(profile)` selects (`src/cli-inputs.ts:101-106#"for (const role of roles) {"`
    iterates a `roles` parameter instead of the full `ROLES` list), so a
    `minimal` install is not asked for `explorer`/`task-slicer` models (and,
    since 0.21.0, not for `advisor` either — the same `rolesForProfile`
@@ -86,7 +86,7 @@ below.
    required). Since
    0.19.0 the CLI also resolves `tiers` right after models, on the same
    override-vs-persist rule, now via a `--tiers`/`--no-tiers` negatable pair
-   with no interactive prompt at all (`src/cli-inputs.ts:282-292#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`; see "Effort
+   with no interactive prompt at all (`src/cli-inputs.ts:294-304#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`; see "Effort
    tiers" below).
 3. **Manifest.** `runInit` writes the resolved map to
    `.ai/workflow/manifest.json` under `models` (`src/init.ts:720-757#"force: true,"`,
@@ -174,7 +174,7 @@ Since 0.19.0, `init` also accepts `--tiers`: for each role, it renders one
 additional subagent file per effort tier the role has that is not that
 role's own default tier, alongside the base `<role>.md` file described
 above. Off by default; there is no interactive prompt for it at all
-(`src/cli-inputs.ts:282-292#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`; the code comment there states explicitly why: tiers
+(`src/cli-inputs.ts:294-304#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`; the code comment there states explicitly why: tiers
 is opt-in/off via the flags only). A fix-round-1 correction on the initial
 0.19.0 release (review finding M2) added commander's negatable-option
 counterpart, `--no-tiers`, so a re-run can explicitly turn a previously
@@ -263,7 +263,7 @@ class resolution at all) silently rendered a no-op opencode variant file
 carrying neither `model:` nor an effort line, distinguishable from the base
 file only by diffing the two, and with no warning anywhere. Two changes
 close this. First, `resolveInitInputs`'s tier-class resolution loop
-(`cli-inputs.ts:313-339#"// and need no live catalog lookup, so they are unaffected)."`) now returns one warning
+(`cli-inputs.ts:325-351#"// and need no live catalog lookup, so they are unaffected)."`) now returns one warning
 line per unresolved class (`small`/`medium`/
 `large`) in its `warnings` array (agent-dx task T-003 moved this loop out
 of `init`'s CLI action into `resolveInitInputs` so a later `apply --target`
@@ -287,7 +287,7 @@ effect. The wording also never named which harness it applied to, reading
 as if it could affect Claude Code variants too, when Claude Code's
 `model:` line resolves from a plain alias (`haiku`/`sonnet`/`opus`) and
 needs no live catalog lookup at all. The corrected wording
-(`cli-inputs.ts:313-339#"// and need no live catalog lookup, so they are unaffected)."`) is `Warning: Tier model class "<class>" (alias
+(`cli-inputs.ts:325-351#"// and need no live catalog lookup, so they are unaffected)."`) is `Warning: Tier model class "<class>" (alias
 "<alias>") could not be resolved to an opencode model id (<reason>); no
 opencode effort-tier variant files will be rendered for this class (Claude
 Code variants are unaffected).`, stating both the real rendering effect and
@@ -330,8 +330,8 @@ still carry `model: opus`, now with `effort: high` rather than no `effort:`
 line since 0.22.0). opencode's variant `model:` values come from a new,
 separate resolution pass keyed by `ModelClass` instead of `Role`
 (`InitOptions.opencodeClassModels`, `init.ts:62-70#"opencodeClassModels?: Record<ModelClass, string | undefined>;"`; resolved in `resolveInitInputs` at
-`cli-inputs.ts:313-339#"// and need no live catalog lookup, so they are unaffected)."`, mirroring the existing per-role opencode resolution just above
-it at `cli-inputs.ts:300-311#"warnings.push("`). The Claude-family-`variant:` and Ollama-no-effort-field
+`cli-inputs.ts:325-351#"// and need no live catalog lookup, so they are unaffected)."`, mirroring the existing per-role opencode resolution just above
+it at `cli-inputs.ts:312-323#"warnings.push("`). The Claude-family-`variant:` and Ollama-no-effort-field
 provider-branch outcomes are pinned at `test/init.test.ts:1793-1826#"expect(implementerLow).not.toContain(" and test/init.test.ts:1830-1848#"model: ollama/llama3"`; a
 resolved class id with no provider prefix at all (no `/`) reaches the same
 no-effort-field outcome as Ollama but via `opencodeEffortLine`'s
@@ -407,7 +407,7 @@ used for a missing `profile` field just above it (`init.ts:201-207#": DEFAULT_PR
 manifest never rendered variant files, so `false` is the only value
 consistent with what is actually on disk. `resolveInitInputs` (`cli-inputs.ts`) resolves the flag with
 the same override-vs-persist rule as `--profile`/`--models`, but with no
-interactive branch: `opts.tiers ?? previous?.tiers ?? false` (`cli-inputs.ts:292#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`).
+interactive branch: `opts.tiers ?? previous?.tiers ?? false` (`cli-inputs.ts:304#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`).
 This is the fix-round-1 form (review finding M2); the original 0.19.0
 release read `opts.tiers ? true : (previous?.tiers ?? false)`, which had no
 way to express an explicit "turn it off" short of hand-editing the
@@ -482,9 +482,9 @@ tier-variant files.
 
 A re-run with no `--models` reuses the previously chosen models rather than
 resetting to shipped defaults: `models = { ...DEFAULT_MODELS,
-...(previous?.models ?? {}) }` in `src/cli-inputs.ts:270-271#"if (interactive) profile = await promptProfile(profile);"`. The same
-override-vs-persist rule now also covers `--profile` (`src/cli-inputs.ts:262-267#"if (opts.profile) {"`)
-and, since 0.19.0, `--tiers`/`--no-tiers` (`src/cli-inputs.ts:282-292#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`, see
+...(previous?.models ?? {}) }` in `src/cli-inputs.ts:282-283#"if (interactive) profile = await promptProfile(profile);"`. The same
+override-vs-persist rule now also covers `--profile` (`src/cli-inputs.ts:274-279#"if (opts.profile) {"`)
+and, since 0.19.0, `--tiers`/`--no-tiers` (`src/cli-inputs.ts:294-304#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`, see
 "Effort tiers" above): a plain re-run keeps the previously installed value
 for each, an explicit flag overrides it. Test:
 `test/init.test.ts:1157-1176#"model: haiku"` runs `init --models implementer=haiku`, then a

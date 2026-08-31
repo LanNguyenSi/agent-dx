@@ -2689,7 +2689,7 @@ clean (395 files scanned).
   with `anchor-`. The `--require-anchors-allow` allowlist uses
   `*README.md`/`*INSTALL-AGENT.md` globs rather than the bare exact
   strings: this bundle cites both docs under two different spellings
-  (bare `README.md:123` and the fully-qualified
+  (bare `README.md:121` and the fully-qualified
   `packages/orchestrator-workflow/README.md:107-112`/`INSTALL-AGENT.md:46-
   47`), and the exact-string form left the two fully-qualified citations
   reporting `anchor-required` (measured: `okf-kit check --json
@@ -6184,11 +6184,18 @@ real recorded `harnesses: []` from a missing/malformed `harnesses` field
 false`), so a damaged manifest still falls through to `apply`'s existing
 `resolveApplyHarnesses` fallback chain (target's recorded harnesses, else
 the operator defaults, else detection) unchanged. Interactive `apply` is
-unaffected in intent (it still prompts); the only behavior change for the
-interactive templates-only case is that the checkbox now starts from
-nothing pre-checked instead of the operator-default/detected candidates,
-the same as `init`'s own interactive re-run, which was not previously
-possible for `apply` since the gate never fired for it at all.
+unaffected in practice, not just in intent: `resolveInitInputs`'s
+interactive branch for this gate calls `promptHarnesses(detected, [],
+false)`, but `detected` here is `resolveApplyHarnesses`'s result, which is
+never empty for `apply` (its own fallback chain always resolves to at least
+the operator default or `["claude"]`) -- unlike `init`'s call site, where
+`detected` really is always empty in this branch. So an interactive
+`apply` re-run on a templates-only target still starts with whatever
+`resolveApplyHarnesses` returned pre-checked, and a bare Enter re-widens
+the install exactly as it did before this round; `fallbackToClaude: false`
+is live for `init` and dead code on `apply`'s interactive path. Left as a
+known residual (see the extended comment at `cli-inputs.ts:39-50` in this
+round's commit); fixing the interactive case is out of this task's scope.
 
 Tests added: a CLI-level `apply.test.ts` case chaining three `apply` runs
 against one target (an `apply --harness none` fresh install, a stray
@@ -6207,15 +6214,68 @@ turned red -- the re-run installed `claude` instead (`installed for:
 claude` printed, `.claude` written), reproducing the exact gap this round
 closes. Restored, re-ran: green again.
 
-Verification: `npm test` (all 581 tests green, including
+Verification: `npm test` (all 584 tests green, including
 `test/docs-consistency.test.ts`'s citation guard, after re-pointing every
 `cli.ts`/`cli-inputs.ts` citation shifted by this round's doc-comment
 insertions across `install-fence-mechanics.md`, `operator-install-and-
-registry.md`, and `model-preselection.md`, plus two hardcoded citation
+registry.md`, and `model-preselection.md`, plus three hardcoded citation
 strings inside `test/docs-consistency.test.ts` itself), `npm run
 typecheck` (clean). `okf-kit check --require-anchors --json` against the
-committed bundle (this round's own commit) versus the same command against
-a `git archive` of master (672932f, pre-round): the two finding lists are
-compared in this task's implementer report rather than duplicated here;
-see that report for the exact counts. No new finding beyond the baseline
-set was left unresolved by this round.
+committed bundle (this round's own commit, plus review round 1 below)
+versus the same command against a `git archive` of master (672932f,
+pre-round, re-`git init`'d so citation resolution runs inside a git work
+tree): base reports 21 findings, all severity `notice`, all
+`citations-resolve`/`unresolved-ambiguous` (a bare filename like
+`init.ts:199` matching more than one file in the monorepo); HEAD after
+review round 1 reports 22 findings, the same 21 `notice`s plus one new
+`warning` (`citations-resolve`/`blank-start-line` on `README.md:121` in
+this same log entry) -- the direct, expected result of review round 1's
+own fix below (reverting a citation this entry had drifted into
+re-pointing), not a regression introduced by anything else in this round.
+
+Review round 1 (implementer, same task): five fixes. (1) `cli.ts`'s
+"Found existing install" line no longer prints the same `none recorded`
+phrase for a real recorded `harnesses: []` and for a
+missing/malformed/all-unknown `harnesses` field; the sticky case now
+prints `none (recorded templates-only)`, and `apply.test.ts`'s sticky test
+asserts the new phrase. (2) The paragraph above claiming interactive
+`apply`'s checkbox "now starts from nothing pre-checked" was false:
+`resolveInitInputs`'s interactive branch for this gate passes `detected`
+(here, `resolveApplyHarnesses`'s result, never empty for `apply`) into
+`promptHarnesses`, which still pre-checks it regardless of
+`fallbackToClaude`; only `init`'s call site ever has a genuinely empty
+`detected` there. Corrected above; `cli-inputs.ts`'s doc comment extended
+to state the "detected is always empty there" premise holds only for
+`init`'s call site. (3) `apply.test.ts`'s stray-`CLAUDE.md` sticky test
+comment overclaimed it "proves the sticky gate wins over detection": with
+a non-empty operator default, `resolveApplyHarnesses` never even calls
+`detectHarnesses`, so that test does not exercise detection at all; the
+comment is corrected and a new test added with the operator default itself
+also `harnesses: []` (`setup --harness none`), which does force
+`resolveApplyHarnesses` to call `detectHarnesses` (the stray `CLAUDE.md`
+makes it report `["claude"]`), and confirms the sticky gate still wins.
+(4) Two more `apply.test.ts` cases: a hand-written manifest naming only an
+unknown harness (`["cursor"]`, sanitizes to `harnesses: []` but
+`harnessesRecordedEmpty: false`) asserts the fallback chain still runs
+(`installed for: claude`); an `apply --sync --yes` run on a recorded-`[]`
+target asserts `--sync` does not disturb harnesses stickiness (`templates
+only`). (5) This log entry's citation drift: the sibling entry above
+(2026-08-30, `install-fence-mechanics.md` §"anchor-required findings")
+had one bare `README.md:121` citation re-pointed to `:123` when this
+round's own README.md edits shifted the line, while its sibling citations
+in the same paragraph were left at their original numbers -- an
+inconsistent, ad hoc bump. A log entry records a past state; reverted the
+one re-point back to `:121` so the paragraph is internally consistent
+again (same rule already followed by every other historical entry in this
+file: recorded citation numbers are not bumped when a later change moves
+the cited lines). The reverted `:121` now lands on a blank line in the
+current README.md (the `okf-kit` warning noted above), which is the
+expected cost of that rule, not a defect to fix.
+
+Tests: `npm test` and `npm run typecheck` both re-run clean after review
+round 1 (see the updated counts above). Mutation probes: (a) reverted the
+phrase derivation in `cli.ts` to always print `none recorded` -- the
+sticky test's new phrase assertion turned red; restored, green again. (b)
+temporarily reapplied `previousIsRecordedManifest: false` in the `apply`
+action -- the new detection-leg test's `templates only` assertion turned
+red (installed `claude` instead); restored, green again.

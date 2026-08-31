@@ -346,9 +346,12 @@ describe("apply", () => {
     expect(first.status, first.stderr).toBe(0);
     expect(readRepoManifest(target).harnesses).toEqual([]);
 
-    // A stray .claude/ dir on disk would make detectHarnesses(targetDir)
-    // report "claude" too, so this also proves the sticky gate wins over
-    // detection, not just over the operator default.
+    // A stray CLAUDE.md on disk here is incidental: the sticky gate in
+    // `resolveApplyHarnesses` short-circuits on `previousIsRecordedManifest
+    // && harnessesRecordedEmpty` before the operator-default/detection
+    // fallback chain (and detectHarnesses) ever runs, so this file does not
+    // exercise the detection leg. See the dedicated detection-leg test
+    // below ("...even when detection would report a harness") for that.
     writeFileSync(join(target, "CLAUDE.md"), "stray, not kit-managed\n");
 
     const second = runApply("--target", target, "--yes");
@@ -366,6 +369,79 @@ describe("apply", () => {
     expect(third.stdout).toContain("installed for: claude");
     expect(readRepoManifest(target).harnesses).toEqual(["claude"]);
     expect(existsSync(join(target, ".claude"))).toBe(true);
+  });
+
+  it("a recorded harnesses: [] target stays templates-only on a flagless apply even when detection would report a harness (operator default also empty, so resolveApplyHarnesses actually calls detectHarnesses)", () => {
+    // Operator defaults are also harnesses: [] here (unlike the sticky test
+    // above, whose non-empty operator default short-circuits
+    // resolveApplyHarnesses before it ever calls detectHarnesses). With
+    // both the target's recorded harnesses and the operator default empty,
+    // resolveApplyHarnesses's fallback chain actually reaches
+    // detectHarnesses(targetDir), which the stray CLAUDE.md below makes
+    // report ["claude"] -- so this is the case that actually exercises the
+    // detection leg, and proves the sticky gate wins over it, not just
+    // over a non-empty operator default.
+    const setup = runSetup("--harness", "none", "--yes");
+    expect(setup.status, setup.stderr).toBe(0);
+
+    const first = runApply("--target", target, "--yes", "--harness", "none");
+    expect(first.status, first.stderr).toBe(0);
+    expect(readRepoManifest(target).harnesses).toEqual([]);
+
+    writeFileSync(join(target, "CLAUDE.md"), "stray, not kit-managed\n");
+
+    const second = runApply("--target", target, "--yes");
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.stdout).toContain("templates only");
+    expect(second.stdout).not.toContain("installed for: ");
+    expect(readRepoManifest(target).harnesses).toEqual([]);
+    expect(existsSync(join(target, ".claude"))).toBe(false);
+  });
+
+  it("a hand-written manifest naming only unknown harnesses (e.g. cursor) sanitizes to harnesses: [] but harnessesRecordedEmpty: false, so it is not sticky and the fallback chain runs", () => {
+    const setup = runSetup("--yes");
+    expect(setup.status, setup.stderr).toBe(0);
+
+    // The raw `harnesses` array is non-empty (["cursor"]), so
+    // `harnessesRecordedEmpty` sanitizes to false even though every entry
+    // fails the known-harness filter and `readInstalledManifest` reports
+    // `harnesses: []` -- see the `Manifest.harnessesRecordedEmpty` doc
+    // comment in init.ts.
+    mkdirSync(join(target, ".ai", "workflow"), { recursive: true });
+    writeFileSync(
+      repoManifestPath(target),
+      JSON.stringify(
+        {
+          kit: "orchestrator-workflow",
+          version: PACKAGE_VERSION,
+          harnesses: ["cursor"],
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = runApply("--target", target, "--yes");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("installed for: claude");
+    expect(readRepoManifest(target).harnesses).toEqual(["claude"]);
+    expect(existsSync(join(target, ".claude"))).toBe(true);
+  });
+
+  it("--sync on a recorded harnesses: [] target still stays templates-only (--sync only affects profile/tiers/models, never harnesses)", () => {
+    const setup = runSetup("--yes");
+    expect(setup.status, setup.stderr).toBe(0);
+
+    const first = runApply("--target", target, "--yes", "--harness", "none");
+    expect(first.status, first.stderr).toBe(0);
+    expect(readRepoManifest(target).harnesses).toEqual([]);
+
+    const synced = runApply("--target", target, "--sync", "--yes");
+    expect(synced.status, synced.stderr).toBe(0);
+    expect(synced.stdout).toContain("templates only");
+    expect(synced.stdout).not.toContain("installed for: ");
+    expect(readRepoManifest(target).harnesses).toEqual([]);
+    expect(existsSync(join(target, ".claude"))).toBe(false);
   });
 
   it("a target with a missing harnesses field keeps today's fallback chain on a flagless apply (operator default wins)", () => {
