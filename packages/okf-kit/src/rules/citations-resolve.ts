@@ -109,8 +109,8 @@ const RULE_ID = "citations-resolve";
  * citation, prose habitually repeats just the line (or range) for a later
  * reference in the same sentence rather than retyping the path, in three
  * forms:
- *   - `` `:N` `` or `` `:N-M` `` -- a bare colon-prefixed line/range
- *   - `` -`M` `` / `` –`M` `` -- a hyphen- or en-dash-led bare line, the
+ *   - `` `:N` ``/`` `:N-M` `` -- a bare colon-prefixed line/range
+ *   - `` -`M` ``/`` –`M` `` -- a hyphen- or en-dash-led bare line, the
  *     tail half of a `` `path:N`-`M` `` split range
  *   - `` (`N`) `` -- a parenthesized bare line
  * Each of these resolves against `governing`: the nearest *preceding*
@@ -2119,12 +2119,21 @@ function pushAnchorRequiredContinuation(
     return;
   }
   const governingRange = `${governing.citedPath}:${governing.startLine}${governing.endLine ? "-" + governing.endLine : ""}`;
+  // "chained to" rather than "extends": for a cont-ext that itself chains
+  // off an earlier cont-fresh (not the original full citation), the range
+  // it literally extends is the cont-fresh's own range, not `governing`'s
+  // -- `governing` (see the loop above) always carries the ORIGINAL full
+  // citation's own startLine/endLine, unchanged across intervening
+  // cont-fresh atoms. Naming it "the governing citation" is honest for
+  // every caller (cont-ext, cont-fresh, and the short-form call site
+  // below) without having to thread the true immediate antecedent range
+  // through here.
   pushDrift(
     findings,
     file,
     citation,
     "anchor-required-continuation",
-    `continuation ${raw} extends \`${governingRange}\`; a continuation cannot carry its own #anchor, lift it into a full \`path:N-M#anchor\` citation (--require-anchors is on)`,
+    `continuation ${raw} is chained to the governing citation \`${governingRange}\`; a continuation cannot carry its own #anchor, lift it into a full \`path:N-M#anchor\` citation (--require-anchors is on)`,
     path.relative(root, governing.resolvedPath),
   );
 }
@@ -2697,9 +2706,18 @@ function scanDoc(
       // anchor-required-continuation (opt-in, warning) also applies to a
       // bound short-form citation: it is just as anchor-less as a
       // backtick continuation (see the "Short-form citations" doc block
-      // above), for the identical reason -- no path of its own to hang an
-      // anchor on -- so it is included under the same D-006 decision
-      // rather than left as a silent gap in `--require-anchors`.
+      // above), for the identical reason -- a bound short form cannot
+      // carry an anchor either, so it is flagged as well, rather than
+      // left as a silent gap in `--require-anchors`.
+      //
+      // `raw` here is synthesized from the parsed startLine/endLine
+      // (`:${rangeLabel}`) rather than carried from the match itself --
+      // `ShortFormMatch` (see there) does not retain the matched text.
+      // This is exact for `SHORT_FORM_COLON_RE` (`/:(\d+)-(\d+)/`) as
+      // written today, since re-stringifying the two captured numbers
+      // reproduces the source bytes; it would stop being exact if that
+      // regex ever tolerated something re-stringifying can't round-trip
+      // (e.g. a leading zero).
       pushAnchorRequiredContinuation(
         findings,
         doc.relPath,

@@ -30,3 +30,7 @@ already flagged in default mode by the existing range-exceeds-file check:
 A short-form continuation of an anchored full range citation, resolving
 cleanly in default mode: `src/target.ts:17-19#"return 5"`, and :17-19
 later in the same sentence.
+
+A colon-form fresh continuation chained further by a dash-form extension,
+both off a single anchored full citation, resolving cleanly in default
+mode: `src/target.ts:17#"quux"`, then `:18` here, continuing to -`19`.
