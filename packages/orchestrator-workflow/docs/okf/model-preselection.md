@@ -36,7 +36,7 @@ for how `--profile` scopes which roles get an actual subagent file — since
 (`src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
 
 Defaults (`src/models.ts:80-85#"advisor:"`, documented in
-`README.md:206-212#"escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default"`):
+`README.md:208-214#"escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default"`):
 
 | Role | Default | Rationale (README) |
 |---|---|---|
@@ -149,7 +149,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`README.md:230-233#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`README.md:232-235#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:525-548#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2185-2193#"${role}.md must not contain model:"`,
@@ -163,7 +163,7 @@ below.
   `codex` harness (`src/init.ts:666-667#".agents"`); there is no `model:` surface for
   Codex because "there is no standardized project-level subagent
   definition" and the skill instructs running roles inline instead
-  (`README.md:129#"the skill instructs running the roles inline with the same contracts."`), regardless of `--profile`: Codex has no per-role
+  (`README.md:131#"the skill instructs running the roles inline with the same contracts."`), regardless of `--profile`: Codex has no per-role
   files to select from either way. `--tiers`/`--no-tiers` follow the same
   rule for the same reason: Codex gets no tier-variant files either, since
   it never gets a per-role file to render a variant of.
@@ -386,7 +386,7 @@ roles get no effort field at all, matching the pre-0.22.0 byte shape on
 that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `README.md`'s "Effort tiers" section gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`README.md:244-259#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`README.md:246-261#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. `agents-md-section.md`'s
 Scaling delegation bullet list gained a dedicated bullet (deliberately
@@ -535,7 +535,7 @@ the session's main model. Use the strongest reasoning model available,"
 plus "Per-role model preferences ... are recorded in
 `.ai/workflow/manifest.json` and, where the harness supports per-agent
 models, in the subagent definitions themselves." README states the same
-rule at `README.md:214-216#"reused as the default on later re-runs."`.
+rule at `README.md:216-218#"reused as the default on later re-runs."`.
 
 ## Docs-consistency pins (model-specific)
 

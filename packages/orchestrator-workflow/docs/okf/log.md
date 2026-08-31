@@ -2689,7 +2689,7 @@ clean (395 files scanned).
   with `anchor-`. The `--require-anchors-allow` allowlist uses
   `*README.md`/`*INSTALL-AGENT.md` globs rather than the bare exact
   strings: this bundle cites both docs under two different spellings
-  (bare `README.md:121` and the fully-qualified
+  (bare `README.md:123` and the fully-qualified
   `packages/orchestrator-workflow/README.md:107-112`/`INSTALL-AGENT.md:46-
   47`), and the exact-string form left the two fully-qualified citations
   reporting `anchor-required` (measured: `okf-kit check --json
