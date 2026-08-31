@@ -82,7 +82,9 @@ templates and the workflow itself, but no per-harness subagent files yet
 `none` combined with a real harness name (`--harness none,claude`) is
 rejected as ambiguous rather than silently picking one. A plain
 **non-interactive** re-run (no `--harness` flag) after a templates-only
-install stays templates-only; add a harness back with an explicit
+install stays templates-only, for `init` and `apply` alike, even when
+`apply`'s own operator-defaults name a harness or the target has harness
+files on disk from something else; add a harness back with an explicit
 `--harness <list>` on a later run, the same explicit-flag-wins rule
 `--profile`/`--models`/`--tiers` use, applied to the no-harness case. An
 **interactive** re-run is different: it still prompts, with nothing forced
@@ -391,7 +393,11 @@ without one it exits `1` with "No operator setup found". Option resolution
 follows one precedence order: an
 explicit flag wins, then the target's own previously recorded settings,
 then the operator's defaults (harnesses fall back one step further, to
-what `init` would have auto-detected). Pass `--sync` to invert that for
+what `init` would have auto-detected) -- except a target whose own
+manifest recorded a real `harnesses: []` (a deliberate templates-only
+install, see "Templates-only mode" above), which stays templates-only on
+a flagless run regardless of the operator's defaults or what is on disk.
+Pass `--sync` to invert that for
 profile, tiers, and models: the operator's defaults then win over whatever
 the target already had recorded. A target pinned to a kit version other
 than the one being applied is skipped rather than touched (see the pin

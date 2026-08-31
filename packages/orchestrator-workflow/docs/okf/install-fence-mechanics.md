@@ -3,7 +3,7 @@ type: module
 title: Install fence mechanics
 description: How orchestrator-workflow's installer writes, fences, updates, and removes its surface in a target repo.
 tags: [installer, marker-fence, manifest, agents-md, harness-adapters, uninstall]
-timestamp: 2026-08-30T11:08:42Z
+timestamp: 2026-08-31T16:40:00Z
 sources:
   - packages/orchestrator-workflow/src/init.ts
   - packages/orchestrator-workflow/src/uninstall.ts
@@ -33,7 +33,7 @@ sources:
 - The marker-fenced `## Agentic Coding Workflow` section in `AGENTS.md`, installed whenever at least one harness is selected, regardless of which one (init.ts:629-636#"if (options.harnesses.length > 0) {"): Codex and opencode read `AGENTS.md` natively, Claude Code gets it via an import, so the section is written for any of the three. Since agent-tasks 613316c9 (`--harness none`, templates-only mode), an empty `options.harnesses` skips this write entirely: only `.ai/workflow/**` and `.ai/runs/.gitkeep` (the bullet above) are installed, and AGENTS.md is left untouched, never created from scratch either. See "`--harness none` (templates-only mode)" below.
 - Per selected harness (`options.harnesses`), and per role `rolesForProfile(profile)` selects for that harness (0.15.0: `full` installs `{explorer,task-slicer,implementer,reviewer}`, `minimal` installs only `{implementer,reviewer}`; since 0.21.0 `full` also installs `advisor` (`{explorer,task-slicer,implementer,reviewer,advisor}`), the fifth role added purely by extending `ROLES`/`MINIMAL_PROFILE_ROLES` in `src/models.ts`, `rolesForProfile` itself unchanged, `minimal` still filters against the same two-role `MINIMAL_PROFILE_ROLES` set, so advisor is dropped from `minimal` for free, the same way explorer/task-slicer already are; see [model-preselection.md](model-preselection.md) and the manifest's `profile` field below):
   - **claude**: `.claude/skills/orchestrator-workflow/SKILL.md` and `.claude/agents/{role}.md` for each installed role (init.ts:646-651#"composeClaudeAgent(role, options.models[role]),"), plus the `CLAUDE.md` import (init.ts:663#"ensureClaudeImport(report, join(targetDir,").
-  - **codex**: only `.agents/skills/orchestrator-workflow/SKILL.md` (init.ts:666-667#".agents"). No per-role agent files are written regardless of profile; README.md:129#"the skill instructs running the roles inline with the same contracts." states Codex has no standardized project-level subagent definition, the skill instructs running the roles inline instead.
+  - **codex**: only `.agents/skills/orchestrator-workflow/SKILL.md` (init.ts:666-667#".agents"). No per-role agent files are written regardless of profile; README.md:131#"the skill instructs running the roles inline with the same contracts." states Codex has no standardized project-level subagent definition, the skill instructs running the roles inline instead.
   - **opencode**: `.opencode/skills/orchestrator-workflow/SKILL.md` and `.opencode/agents/{role}.md` for each installed role (init.ts:672-683#"composeOpencodeAgent(role, modelValue, defaultEffortLine),").
 - `.ai/workflow/manifest.json`, written last, only when the computed desired state differs from what is recorded (init.ts:720-755#"${JSON.stringify(manifest, null, 2)}\n").
 
@@ -80,7 +80,7 @@ the composer's own JSDoc both wrongly gave the skip-decision reason instead
 of this one). The fixed comment also states explicitly what is NOT skipped
 by this check: a *resolved* model with no effort line (a low/medium tier on
 a Claude-family model, or any Ollama model, or a resolved id with no
-provider prefix, R3-L4) still renders normally with just its `model:` line. The matching CLI-input-resolution half of that fix (`cli-inputs.ts:305-331#"// and need no live catalog lookup, so they are unaffected)."`)
+provider prefix, R3-L4) still renders normally with just its `model:` line. The matching CLI-input-resolution half of that fix (`cli-inputs.ts:325-351#"// and need no live catalog lookup, so they are unaffected)."`)
 warns once per unresolved model class on stderr instead of staying silent;
 fix-round-2 (review finding R2-M3) also corrected the warning's own wording,
 which had claimed "model: will be omitted" when the real, fix-round-1
@@ -175,7 +175,7 @@ nobody asked for: `resolveInitInputs` guards this on two flags together, a
 `previousIsRecordedManifest` flag, true only for `init`'s own call
 (`previous` there is `readInstalledManifest(targetDir)` itself,
 cli.ts:220-227#"previousIsRecordedManifest: true,"), and
-`previous.harnessesRecordedEmpty` (cli-inputs.ts:210-213#"previous.harnessesRecordedEmpty"),
+`previous.harnessesRecordedEmpty` (cli-inputs.ts:230-233#"previous.harnessesRecordedEmpty"),
 set from whether the raw manifest JSON's `harnesses` field was itself an
 array AND that raw array had zero elements
 (`init.ts:167-172#"rawHarnessesIsArray && rawHarnesses.length === 0;"`):
@@ -198,27 +198,36 @@ for a partial harness drop that leaves AGENTS.md/CLAUDE.md alone). An interactiv
 different: it still prompts (`promptHarnesses`,
 called with nothing pre-checked from the old recording, including on its own
 "nothing detected either" fallback since the round-3 fix to review finding
-F2, `cli-inputs.ts:243#"await promptHarnesses(detected, [], false)"`),
+F2, `cli-inputs.ts:263#"await promptHarnesses(detected, [], false)"`),
 rather than
 skipping straight to templates-only without asking (round-2 fix, review
 finding F4); the checkbox validation that used to require at least one
 selection is relaxed to allow an empty one, now that `[]` is a supported
-state. `apply` omits `previousIsRecordedManifest` (default `false`): its
-synthetic "operator defaults as floor" `previous` object
+state. Since agent-tasks 8602a952, `apply` sets `previousIsRecordedManifest`
+too, from whether the target actually has its own repo manifest rather than
+from whether its synthetic `previous` is defined (it always is:
+`Boolean(repoManifest)`, cli.ts:797#"previousIsRecordedManifest: Boolean(repoManifest),"),
+and its synthetic "operator defaults as floor" `previous` object
 (`buildApplyPrevious`, see
-[operator-install-and-registry.md](operator-install-and-registry.md)) is
-never `undefined` even for a target with no manifest of its own, so an
-empty `harnesses` there carries no such signal, and `apply` keeps its own
-pre-existing `resolveApplyHarnesses` fallback chain (target's recorded
-harnesses, else the operator defaults, else detection) unchanged: a
-target that was `apply`-installed as templates-only is not guaranteed to
-stay that way on a flagless `apply` re-run, a known gap left open by this
-task rather than silently closed. Adding a harness back to a templates-only
-`init` install just takes an explicit `--harness <list>` on that run, the
-same override-vs-persist rule `--profile`/`--models`/`--tiers` already use;
-the templates and `.gitkeep` already on disk are left untouched (not
-rewritten) since their recorded hashes in the manifest's `files` ledger are
-unaffected by which harnesses get added.
+[operator-install-and-registry.md](operator-install-and-registry.md)) now
+carries that repo manifest's own `harnessesRecordedEmpty` straight through
+(cli.ts:570#"harnessesRecordedEmpty: repoManifest?.harnessesRecordedEmpty,"),
+so the same stickiness gate now fires for `apply` too: a target `apply`-installed
+as templates-only (a real recorded `harnesses: []`) stays that way on a
+flagless, non-interactive `apply` re-run, even when the operator manifest's
+default harnesses name one and the target has harness files on disk from
+something else. `apply`'s own pre-existing `resolveApplyHarnesses` fallback
+chain (target's recorded harnesses, else the operator defaults, else
+detection) still runs first and its result is still used as `detected`,
+relevant to an interactive `apply` prompt and to any target whose manifest
+is missing or malformed rather than deliberately empty (that case still
+falls through to the fallback chain, same as `init`'s). Adding a harness
+back to a templates-only `init` or `apply` install just takes an explicit
+`--harness <list>` on that run, the same override-vs-persist rule
+`--profile`/`--models`/`--tiers` already use; the templates and `.gitkeep`
+already on disk are left untouched (not rewritten) since their recorded
+hashes in the manifest's `files` ledger are unaffected by which harnesses
+get added.
 
 The closing summary line prints `templates only` in place of `installed
 for: ` when `harnesses` is empty, for both `init` and `apply`
@@ -243,7 +252,7 @@ Claude Code reads `CLAUDE.md`, not `AGENTS.md` (writers.ts:119-121#"* imports AG
 - No `CLAUDE.md`: created verbatim as `CLAUDE_MD_BOILERPLATE`, a heading plus "Project agent instructions live in AGENTS.md." plus the `@AGENTS.md` import line (writers.ts:117#"# CLAUDE.md\n\nProject agent instructions live in AGENTS.md.\n\n${CLAUDE_IMPORT_LINE}\n").
 - `CLAUDE.md` exists: if any line's whitespace-split tokens already include the literal `@AGENTS.md` (writers.ts:130-134#".some((line) => line.split(/\s+/).includes(CLAUDE_IMPORT_LINE));"), nothing is written, an inline mention like `"Rules: see @AGENTS.md first."` already counts (init.test.ts:247-251#"expect(claudeMd).toBe("). Otherwise a blank line plus `@AGENTS.md` is appended once (writers.ts:139-144#"${base}\n\n${CLAUDE_IMPORT_LINE}\n"); a second `init` run does not duplicate it (init.test.ts:234-244#"expect(importCount).toBe(1);").
 
-Codex and opencode need no such import, both read `AGENTS.md` natively (README.md:129-130#"natively. Subagents get").
+Codex and opencode need no such import, both read `AGENTS.md` natively (README.md:131-132#"natively. Subagents get").
 
 ## manifest.json: shape and consumers
 
@@ -253,7 +262,7 @@ Consumers are mostly installer-side; nothing at agent runtime reads it. Since th
 
 - `readInstalledManifest` (init.ts:150-236#"? { pin: candidate.pin.trim() }") is the sole parser (a stored kit-version pin is trimmed on read, an empty one dropped, and its content is otherwise left to the consuming command to validate) and degrades every field independently rather than failing whole: unknown `kit` yields `undefined` (init.ts:160#"if (candidate.kit !== SKILL_NAME) return undefined;"); non-array/invalid `harnesses` entries dropped (init.ts:172-174#"(HARNESSES as string[]).includes(value as string),"; since round 3/F1, the raw array's own length -- before this filter runs -- is what `harnessesRecordedEmpty` is computed from, see above); invalid model ids dropped per role (init.ts:176-185#"// Invalid model ids are dropped; the role falls back to defaults.", init.test.ts:278-319#"expect(manifest.models.implementer).toBe(" spawns the CLI against a hand-corrupted manifest and asserts it survives); a missing `profile` field (a pre-0.15.0 manifest, which always installed every role) degrades to `"full"` rather than `"minimal"` (init.ts:201-207#": DEFAULT_PROFILE;", init.test.ts:773-802#"should exist under the full-profile fallback" pins this fallback end-to-end against a hand-written manifest so a later re-run cannot silently narrow the installed roles); since 0.19.0, a missing `tiers` field (a pre-0.19.0 manifest, which never rendered variant files) degrades to `false` the same way (init.ts:209-213#"const tiers = typeof candidate.tiers ===", init.test.ts:1459-1504#"explorer.md has no frontmatter block"); `files` keys are filtered through `isContainedRelativePath` (init.ts:196#"&& isContainedRelativePath(key)) {") inside that same pass; a stored `pin` that is an empty or whitespace-only string degrades to no recorded pin the same per-field way.
 - `init.ts` uses it as the upgrade baseline (`previous`, init.ts:432#"readInstalledManifest(targetDir)").
-- `cli.ts:205-206#", tiers: ${previous.tiers})"` prints "Found existing install" (now including the profile and, since fix-round-1, the `tiers` value too); this print stays in `cli.ts` itself, while the seeding of `harnesses`/`profile`/`models`/`tiers` from that same `previous` manifest was extracted into `resolveInitInputs` (`cli-inputs.ts`, agent-dx task T-003) so a later `apply --target` command can reuse it without duplicating the logic: `cli-inputs.ts:205-249#"fallback.length > 0"` seeds default `harnesses`, `cli-inputs.ts:254-259#"if (opts.profile) {"` seeds `profile`, `cli-inputs.ts:266-267#"...DEFAULT_MODELS,"` seeds `models`, and (since 0.19.0) `cli-inputs.ts:274-284#"const tiers = opts.tiers ?? previous?.tiers ?? false;"` seeds `tiers`, since fix-round-1 via `opts.tiers ?? previous?.tiers ?? false`, the same override-vs-persist rule for all four, still no interactive branch for `tiers` unlike the other three, which is why an `implementer=haiku` choice made once survives an unflagged second `init` (init.test.ts:1157-1176#"model: haiku"). A `full` -> `minimal` downgrade (`previous.profile === "full" && profile !== previous.profile`, init.ts:493-498#"${variantPath}: now untracked after the full -> ${profile} profile downgrade; run", the block grew since fix-round-1 to also note dropped roles' tier-variant files) additionally pushes a note onto `report.notes` naming the now-untracked `task-slicer.md`/`explorer.md` files and how to remove them (init.test.ts:812-843#"expect(existsSync(join(target, claudeExplorer))).toBe(true);" covers the note; init.test.ts:846-865#"expect(again.notes).toEqual([]);" covers its absence on a repeated no-op re-run; init.test.ts:868-883#"task-slicer.md/explorer.md are no longer in the manifest's file" covers that a later `uninstall` still completes without error; init.test.ts:894-931#"The variant files themselves are untouched, only untracked, same as" covers the fix-round-1 tier-variant-file extension specifically, pinning the note count). Since 0.21.0, `droppedRoles` (`rolesForProfile(previous.profile).filter((role) => !rolesForProfile(profile).includes(role))`, init.ts:474-475#"!rolesForProfile(profile).includes(role),") is computed generically from the two profiles' resolved role sets rather than a hardcoded pair, so a `full` -> `minimal` downgrade with the advisor role installed now also names `advisor.md` (and, with tiers on, `advisor-xhigh.md`) with no code change of its own required: the note counts in `init.test.ts:894-917#"expect(report.notes.length).toBe(8);"` moved from 6 to 8 for the base-plus-tiers case (explorer/task-slicer contribute 1+2 notes each, advisor contributes 1+1 since its only non-default tier is `xhigh`) purely from `ROLES` growing by one in `src/models.ts`. Since fix-round-1, `tiers` now has an analogous downgrade-note code path of its own (init.ts:512-522#"now untracked after tiers were turned off"); before the fix it had none. Since fix-round-2 (review finding R2-M2), both of these note code paths, and the tier-variant sub-loop inside the profile-downgrade one (init.ts:473-484#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run", review finding M3's original addition), are ledger-driven rather than enumeration-driven: see "What `init` writes" above for the full mechanics and why the prior `ROLE_TIERS`/`options.harnesses`-driven form produced both phantom and missing notes.
+- `cli.ts:205-206#", tiers: ${previous.tiers})"` prints "Found existing install" (now including the profile and, since fix-round-1, the `tiers` value too); this print stays in `cli.ts` itself, while the seeding of `harnesses`/`profile`/`models`/`tiers` from that same `previous` manifest was extracted into `resolveInitInputs` (`cli-inputs.ts`, agent-dx task T-003) so a later `apply --target` command can reuse it without duplicating the logic: `cli-inputs.ts:225-269#"fallback.length > 0"` seeds default `harnesses`, `cli-inputs.ts:274-279#"if (opts.profile) {"` seeds `profile`, `cli-inputs.ts:286-287#"...DEFAULT_MODELS,"` seeds `models`, and (since 0.19.0) `cli-inputs.ts:294-304#"const tiers = opts.tiers ?? previous?.tiers ?? false;"` seeds `tiers`, since fix-round-1 via `opts.tiers ?? previous?.tiers ?? false`, the same override-vs-persist rule for all four, still no interactive branch for `tiers` unlike the other three, which is why an `implementer=haiku` choice made once survives an unflagged second `init` (init.test.ts:1157-1176#"model: haiku"). A `full` -> `minimal` downgrade (`previous.profile === "full" && profile !== previous.profile`, init.ts:493-498#"${variantPath}: now untracked after the full -> ${profile} profile downgrade; run", the block grew since fix-round-1 to also note dropped roles' tier-variant files) additionally pushes a note onto `report.notes` naming the now-untracked `task-slicer.md`/`explorer.md` files and how to remove them (init.test.ts:812-843#"expect(existsSync(join(target, claudeExplorer))).toBe(true);" covers the note; init.test.ts:846-865#"expect(again.notes).toEqual([]);" covers its absence on a repeated no-op re-run; init.test.ts:868-883#"task-slicer.md/explorer.md are no longer in the manifest's file" covers that a later `uninstall` still completes without error; init.test.ts:894-931#"The variant files themselves are untouched, only untracked, same as" covers the fix-round-1 tier-variant-file extension specifically, pinning the note count). Since 0.21.0, `droppedRoles` (`rolesForProfile(previous.profile).filter((role) => !rolesForProfile(profile).includes(role))`, init.ts:474-475#"!rolesForProfile(profile).includes(role),") is computed generically from the two profiles' resolved role sets rather than a hardcoded pair, so a `full` -> `minimal` downgrade with the advisor role installed now also names `advisor.md` (and, with tiers on, `advisor-xhigh.md`) with no code change of its own required: the note counts in `init.test.ts:894-917#"expect(report.notes.length).toBe(8);"` moved from 6 to 8 for the base-plus-tiers case (explorer/task-slicer contribute 1+2 notes each, advisor contributes 1+1 since its only non-default tier is `xhigh`) purely from `ROLES` growing by one in `src/models.ts`. Since fix-round-1, `tiers` now has an analogous downgrade-note code path of its own (init.ts:512-522#"now untracked after tiers were turned off"); before the fix it had none. Since fix-round-2 (review finding R2-M2), both of these note code paths, and the tier-variant sub-loop inside the profile-downgrade one (init.ts:473-484#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run", review finding M3's original addition), are ledger-driven rather than enumeration-driven: see "What `init` writes" above for the full mechanics and why the prior `ROLE_TIERS`/`options.harnesses`-driven form produced both phantom and missing notes.
 
 ## Re-install / upgrade semantics
 

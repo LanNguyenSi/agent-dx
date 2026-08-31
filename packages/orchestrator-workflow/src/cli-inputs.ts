@@ -36,7 +36,19 @@ export async function promptHarnesses(
   // always empty there too, and pre-checking `claude` on Enter would
   // silently re-widen an explicit `--harness none` install -- contradicting
   // README.md's and this function's own "nothing forced pre-selected" claim
-  // (see CHANGELOG).
+  // (see CHANGELOG). That "`detected` is always empty there too" premise
+  // holds only for `init`'s own call site, where `detected` is
+  // `detectHarnesses(targetDir)` on a target with no harness files by
+  // construction. `apply`'s call site (`resolveInitInputs`'s interactive
+  // branch just below) instead passes `resolveApplyHarnesses`'s result,
+  // which is never empty (it falls back through the operator default,
+  // then detection, then `["claude"]`); there `detected` pre-checks
+  // whatever `resolveApplyHarnesses` returned regardless of
+  // `fallbackToClaude`, so an interactive apply re-run on a templates-only
+  // target still starts with that harness pre-checked and a bare Enter
+  // re-widens the install. `fallbackToClaude: false` is live for `init`
+  // and dead code on `apply`'s interactive path; noted as a known residual
+  // (see docs/okf/log.md's 2026-08-31 entry).
   const preselected =
     known.length > 0 ? known : fallbackToClaude ? ["claude" as Harness] : [];
   const { harnesses } = await inquirer.prompt<{ harnesses: Harness[] }>([
@@ -150,22 +162,30 @@ export interface ResolveInitInputsParams {
   previous: Manifest | undefined;
   opts: InitResolutionOptions;
   /**
-   * True when `previous` reflects the target's own actually-recorded
-   * manifest (`init`'s use, `readInstalledManifest(targetDir)`), as opposed
-   * to a synthetic "operator defaults as floor" object (`apply`'s
-   * `buildApplyPrevious`, which is never `undefined` even for a target with
-   * no manifest of its own). Only consulted for the harnesses-stickiness
-   * rule below, together with `previous.harnessesRecordedEmpty`: a real
-   * recorded `harnesses: []` means a deliberate `--harness none` install,
-   * and a plain re-run must not silently widen it via detection; a
-   * synthetic floor previous carries no such signal, so `apply` omits this
-   * (default `false`) and keeps its own `resolveApplyHarnesses` fallback
-   * chain unchanged. This flag alone does not distinguish a deliberate
-   * `harnesses: []` from a damaged/legacy manifest whose raw `harnesses`
-   * field was missing, malformed, or an array whose every entry failed the
-   * known-harness filter (all of which also sanitize to `harnesses: []`)
-   * -- that distinction is `harnessesRecordedEmpty`'s job; both must hold
-   * for the stickiness gate to fire.
+   * True when `previous` is backed by the target's own actually-recorded
+   * manifest, as opposed to a wholly synthetic object with no repo
+   * manifest behind it at all. `init` sets this whenever it has a
+   * `previous` (`readInstalledManifest(targetDir)` returned one). `apply`
+   * always hands `resolveInitInputs` a non-`undefined` `previous` (its
+   * `buildApplyPrevious` synthesizes one even for a target with no
+   * manifest of its own, to carry the operator-defaults floor), so it sets
+   * this flag from whether the target actually has a repo manifest
+   * (`Boolean(repoManifest)`), not from whether `previous` itself is
+   * defined. Only consulted for the harnesses-stickiness rule below,
+   * together with `previous.harnessesRecordedEmpty` (which `apply`'s
+   * `buildApplyPrevious` carries straight through from that repo
+   * manifest): a real recorded `harnesses: []` means a deliberate
+   * `--harness none` install, and a plain re-run (init or apply, no
+   * `--harness` flag) must not silently widen it via detection or the
+   * operator manifest's default harnesses. This flag alone does not
+   * distinguish a deliberate `harnesses: []` from a damaged/legacy
+   * manifest whose raw `harnesses` field was missing, malformed, or an
+   * array whose every entry failed the known-harness filter (all of which
+   * also sanitize to `harnesses: []`) -- that distinction is
+   * `harnessesRecordedEmpty`'s job; both must hold for the stickiness gate
+   * to fire, so a target with no repo manifest at all, or one with a
+   * missing/malformed `harnesses` field, still falls through to the
+   * fallback chain below unchanged.
    */
   previousIsRecordedManifest?: boolean;
 }

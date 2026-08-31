@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apply` now keeps a target whose own manifest recorded a real
+  `harnesses: []` (a deliberate `--harness none` templates-only install)
+  templates-only on a flagless, non-interactive re-run, matching `init`'s
+  existing behavior: previously, `apply` never passed
+  `previousIsRecordedManifest` to `resolveInitInputs`, so the
+  harnesses-stickiness gate that already protected `init` never fired for
+  `apply`, and a flagless `apply` could silently widen a templates-only
+  target back out to the operator's default harness or whatever
+  `detectHarnesses` found on disk. `apply` now sets
+  `previousIsRecordedManifest` from whether the target actually has its own
+  repo manifest, and `buildApplyPrevious` carries that manifest's
+  `harnessesRecordedEmpty` straight through into the synthetic `previous`
+  it hands `resolveInitInputs`. An explicit `apply --harness <list>` still
+  overrides, the same as it always could, and a target whose `harnesses`
+  field is missing or malformed (not a real recorded empty set) still falls
+  through to the existing fallback chain unchanged. Interactive `apply` is
+  unaffected in intent: it still prompts (agent-tasks 8602a952).
+
 ## [0.26.0] - 2026-08-30
 
 ### Added
