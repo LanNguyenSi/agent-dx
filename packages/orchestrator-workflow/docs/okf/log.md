@@ -6225,13 +6225,15 @@ committed bundle (this round's own commit, plus review round 1 below)
 versus the same command against a `git archive` of master (672932f,
 pre-round, re-`git init`'d so citation resolution runs inside a git work
 tree): base reports 21 findings, all severity `notice`, all
-`citations-resolve`/`unresolved-ambiguous` (a bare filename like
-`init.ts:199` matching more than one file in the monorepo); HEAD after
-review round 1 reports 22 findings, the same 21 `notice`s plus one new
-`warning` (`citations-resolve`/`blank-start-line` on `README.md:121` in
-this same log entry) -- the direct, expected result of review round 1's
-own fix below (reverting a citation this entry had drifted into
-re-pointing), not a regression introduced by anything else in this round.
+`citations-resolve`/`unresolved-ambiguous` (a bare filename matching more
+than one file in the monorepo, e.g. an unqualified init.ts or SKILL.md
+mention); HEAD after review round 1 reports 22 findings, the same 21
+`notice`s plus one new `warning` (`citations-resolve`/`blank-start-line`,
+on the reverted README.md citation two paragraphs below) -- the direct,
+expected result of
+review round 1's own fix below (reverting a citation this entry had
+drifted into re-pointing), not a regression introduced by anything else in
+this round.
 
 Review round 1 (implementer, same task): five fixes. (1) `cli.ts`'s
 "Found existing install" line no longer prints the same `none recorded`
@@ -6261,11 +6263,11 @@ unknown harness (`["cursor"]`, sanitizes to `harnesses: []` but
 target asserts `--sync` does not disturb harnesses stickiness (`templates
 only`). (5) This log entry's citation drift: the sibling entry above
 (2026-08-30, `install-fence-mechanics.md` §"anchor-required findings")
-had one bare `README.md:121` citation re-pointed to `:123` when this
-round's own README.md edits shifted the line, while its sibling citations
-in the same paragraph were left at their original numbers -- an
+had one bare README.md citation to line 121 re-pointed to line 123 when
+this round's own README.md edits shifted the line, while its sibling
+citations in the same paragraph were left at their original numbers -- an
 inconsistent, ad hoc bump. A log entry records a past state; reverted the
-one re-point back to `:121` so the paragraph is internally consistent
+one re-point back to line 121 so the paragraph is internally consistent
 again (same rule already followed by every other historical entry in this
 file: recorded citation numbers are not bumped when a later change moves
 the cited lines). The reverted `:121` now lands on a blank line in the
