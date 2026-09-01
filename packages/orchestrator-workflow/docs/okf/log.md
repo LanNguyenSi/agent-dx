@@ -2541,7 +2541,9 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`packages/orchestrator-workflow/CHANGELOG.md:57-79`) grew by a net 3
+(`packages/orchestrator-workflow/CHANGELOG.md:59-81`, re-pointed +2 lines by
+the 0.27.0 release commit inserting the `## [0.27.0]` heading above it) grew
+by a net 3
 lines relative to the pre-round-2 base commit (`5a33adb`, `git diff
 --stat 5a33adb -- CHANGELOG.md`: 17 insertions, 14 deletions), shifting
 every `## [x.y.z]` heading below it by exactly 3 lines uniformly (

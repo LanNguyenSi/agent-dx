@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-01T11:05:30Z
+timestamp: 2026-09-01T11:10:19Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -67,7 +67,7 @@ not verified from this repo). Introduced in 0.9.0
 one `run-base` marker, defaulting to `TODO`) and template-markers.test.ts:39-41#"<!-- solution-acceptance: run-base = TODO -->" (the literal line,
 wrapper included).
 
-## The `.ai/run` pointer and keyed `run-base[<repo-basename>]` markers (0.26.0-unreleased, round 2)
+## The `.ai/run` pointer and keyed `run-base[<repo-basename>]` markers (0.26.0, round 2)
 
 The run directory may live in the orchestrator's own workspace or in one of
 the repositories the run touches; either is fine. For every repository or
