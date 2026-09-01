@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-01T11:10:19Z
+timestamp: 2026-09-01T11:16:55Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -355,7 +355,7 @@ mention, packages/orchestrator-workflow/test/docs-consistency.test.ts:970-974#"a
 misfire-rule sentence, packages/orchestrator-workflow/test/docs-consistency.test.ts:985-987#"does not parse against its role's output contract, including an implementer return that omits the", and a byte-for-byte cross-copy equality
 check on the field block, packages/orchestrator-workflow/test/docs-consistency.test.ts:992-1004#"expect(skillBlock).toBe(implementerBlock);".
 `test/docs-consistency.test.ts:1024-1058#"expect(implementerMd).toContain(enumeration);"` pins the R2 additions: step 6's
-sentence and its claim-only-what-was-measured reference, test/docs-consistency.test.ts:1028-1033#"apply the mutant for real, observe the named test fail, restore, re-verify", the
+sentence and its claim-only-what-was-measured reference, test/docs-consistency.test.ts:1028-1033#"apply the mutant for real, observe the named test fail, restore, re-verify" and test/docs-consistency.test.ts:1036-1037#"expect(skillMd).toContain(", the
 not-applicable clause in both copies, test/docs-consistency.test.ts:1041-1044#"expect(implementerMd).toContain(clause);", and two exact-string pins,
 test/docs-consistency.test.ts:1047-1051#"expect(implementerMd).toContain(field);", that catch a rename applied identically to both copies — a mutant
 the cross-copy equality check above cannot catch on its own, since it only
