@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The implementer output contract gained a `commits` field: a YAML list of
+  the full commit shas produced on the task branch, in order, `commits: []`
+  when the task produced no commit. A contract field is checked by the
+  subagent misfire rule; a prose ask in the brief is not, so implementers
+  kept omitting the commit sha and the orchestrator had to re-derive it
+  from git. The misfire rule now also treats an omitted `commits` field, on
+  a task assignment that asked for a commit, as a misfire.
+
 ### Fixed
 
 - Interactive `apply` on a target whose own manifest recorded a real

@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-01T07:03:54Z
+timestamp: 2026-09-01T07:40:38Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -572,13 +572,13 @@ also covers the advisor row (`ROLE_TIERS.advisor = ["high", "xhigh"]`,
 `DEFAULT_TIER.advisor = "high"`), the test iterating `ROLES` so the new
 per-role assertions came for free from the `models.ts` addition alone, no
 test edit required. Since fix-round-1
-(review finding L4), a second, sibling `describe` (`:1534-1599`) guards
+(review finding L4), a second, sibling `describe` (`:1542-1607`) guards
 README's other tier-shaped table, Tier -> model class -> model alias ->
 requested effort, against `TIER_DEFS`/`CLASS_MODELS` directly, the same
 way; before this fix nothing guarded that second table, so it could drift
 from its source maps silently (this table is keyed by `Tier`, not `Role`,
 so it is unaffected by the role count itself). Since fix-round-2 (review finding R2-M1), a
-third, site-specific `describe` (`:1613-1659`)
+third, site-specific `describe` (`:1621-1667`)
 guards the opencode-effort prose in README's "Effort tiers" section
 directly: it isolates that prose block by its own lead-in phrase and the
 next bold lead-in that follows it, then asserts the prose contains the
@@ -590,7 +590,7 @@ claim fails a targeted assertion instead of only showing up as an
 unguarded prose diff.
 
 Since 0.22.0, a fourth, site-specific `describe`
-(`test/docs-consistency.test.ts:2097-2242#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
+(`test/docs-consistency.test.ts:2157-2302#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
 policy in `agents-md-section.md`'s Scaling delegation bullet list and
 `SKILL.md` step 6: a derivation-based check (not a hand-maintained role
 list, the same discipline the 0.20.0 tier-selection-policy guard above
