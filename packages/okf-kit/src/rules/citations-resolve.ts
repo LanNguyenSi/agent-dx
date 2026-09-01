@@ -598,7 +598,10 @@ function checkAnchor(
   return null;
 }
 
-const CITATION_RE =
+// Exported so `prose-line-references` (see src/rules/prose-line-references.ts)
+// can exclude a real citations-resolve citation span from its own
+// extraction, rather than re-deriving this grammar itself.
+export const CITATION_RE =
   /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
 
 /**
@@ -749,8 +752,13 @@ type Problem = {
   severity?: "notice";
 };
 
-/** Per-root basename index, see findByBasename. */
-type BasenameCache = Map<string, Map<string, string[]>>;
+/**
+ * Per-root basename index, see findByBasename. Exported so
+ * `prose-line-references` can build its own cache instance for
+ * `resolveCitation` calls, matching this rule's own scoping (fresh per
+ * `run(ctx)` invocation, never held at module scope).
+ */
+export type BasenameCache = Map<string, Map<string, string[]>>;
 
 type Atom =
   | {
@@ -790,7 +798,8 @@ type Atom =
       raw: string;
     };
 
-type Resolution =
+// Exported alongside resolveCitation below for prose-line-references' reuse.
+export type Resolution =
   { skip: true } | { path: string } | { ambiguous: true; candidates: string[] };
 
 function isFile(p: string): boolean {
@@ -801,8 +810,13 @@ function isFile(p: string): boolean {
   }
 }
 
-/** True when citedPath has a literal `..` path segment. */
-function hasParentSegment(citedPath: string): boolean {
+/**
+ * True when citedPath has a literal `..` path segment. Exported so
+ * `prose-line-references` rejects the same shape before ever calling
+ * `resolveCitation` on a file-mention token, matching this rule's own
+ * `path-traversal-rejected` posture.
+ */
+export function hasParentSegment(citedPath: string): boolean {
   return citedPath.split("/").includes("..");
 }
 
@@ -914,8 +928,14 @@ function resolveViaAncestorClimb(
  * plausible target exists, or `null` when nothing matches. Callers must
  * reject a citedPath with a `..` segment (see hasParentSegment) before
  * calling this; it is not re-checked here.
+ *
+ * Exported so `prose-line-references` (see
+ * src/rules/prose-line-references.ts) reuses this exact resolution order
+ * for binding a bare prose line reference to the file mention nearest it,
+ * rather than re-implementing (and risking drifting from) this rule's own
+ * path-resolution rules.
  */
-function resolveCitation(
+export function resolveCitation(
   cache: BasenameCache,
   root: string,
   docAbsPath: string,
@@ -1843,8 +1863,16 @@ function collectShortFormMatches(
  * `scanFenceLines` (see there): per-line fenced/opens/closes state is
  * converted to char-offset spans by tracking each line's `[start, end)`
  * offset in `content` alongside it.
+ *
+ * Exported (with computeIndentedCodeSpans and computeTableRowSpans below)
+ * so `prose-line-references` can build its OWN excluded-span set for file
+ * mentions that leaves out computeInlineCodeSpans -- a bare backtick-
+ * wrapped filename (`` `src/cli.ts` ``) is the normal, encouraged way to
+ * write a file mention in prose, unlike a short-form bare number, so it
+ * must NOT be excluded from mention detection the way it is excluded from
+ * short-form citation matching here.
  */
-function computeFencedSpans(content: string): Array<[number, number]> {
+export function computeFencedSpans(content: string): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
   const lines = content.split("\n");
   const states = scanFenceLines(lines);
@@ -1875,7 +1903,9 @@ function computeFencedSpans(content: string): Array<[number, number]> {
  * spec (no list-item-context awareness); adequate for this mechanical,
  * warn-only rule.
  */
-function computeIndentedCodeSpans(content: string): Array<[number, number]> {
+export function computeIndentedCodeSpans(
+  content: string,
+): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
   const lines = content.split("\n");
   let offset = 0;
@@ -1943,7 +1973,7 @@ function computeInlineCodeSpans(content: string): Array<[number, number]> {
  * and can otherwise carry a range shape the gate would not reject (e.g.
  * `| col (5-9) |`).
  */
-function computeTableRowSpans(content: string): Array<[number, number]> {
+export function computeTableRowSpans(content: string): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
   const lines = content.split("\n");
   let offset = 0;
@@ -1967,8 +1997,13 @@ function computeTableRowSpans(content: string): Array<[number, number]> {
  * per doc and combined with fullSpans (see scanDoc) via the existing
  * isWithinAnySpan helper -- the same mechanism a full citation's own span
  * already uses, not a second one.
+ *
+ * Exported so `prose-line-references` excludes the identical set of spans
+ * from its own extraction (a code-fenced or inline-code "line N" is a code
+ * example, not a live prose reference), rather than maintaining a second,
+ * possibly-drifting copy of "what counts as excluded prose".
  */
-function computeExcludedSpans(content: string): Array<[number, number]> {
+export function computeExcludedSpans(content: string): Array<[number, number]> {
   return [
     ...computeFencedSpans(content),
     ...computeIndentedCodeSpans(content),
@@ -1980,8 +2015,13 @@ function computeExcludedSpans(content: string): Array<[number, number]> {
 /**
  * Paragraph-start offsets in `content`, ascending, always including 0. A
  * paragraph boundary is a blank (empty or whitespace-only) line.
+ *
+ * Exported (with paragraphStartFor below) so `prose-line-references` binds
+ * against the same notion of "paragraph" this rule already uses for
+ * short-form citation binding, instead of a second, possibly-inconsistent
+ * definition.
  */
-function computeParagraphStarts(content: string): number[] {
+export function computeParagraphStarts(content: string): number[] {
   const starts = [0];
   const re = /\n[ \t]*\n+/g;
   let m: RegExpExecArray | null;
@@ -1992,7 +2032,7 @@ function computeParagraphStarts(content: string): number[] {
 }
 
 /** The start offset of the paragraph containing `index` (see computeParagraphStarts). */
-function paragraphStartFor(starts: number[], index: number): number {
+export function paragraphStartFor(starts: number[], index: number): number {
   let result = starts[0];
   for (const s of starts) {
     if (s > index) break;

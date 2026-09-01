@@ -31,6 +31,20 @@ export interface CheckOptions {
    * Ignored when `requireAnchors` is not set.
    */
   requireAnchorsAllow?: string[];
+  /**
+   * Opt-in for `prose-line-references`: flag a prose-embedded line
+   * reference outside `citations-resolve`'s own backtick grammar (e.g.
+   * "lines 129-132") that is drifted, unresolvable, or ambiguous. See the
+   * doc block in `src/rules/prose-line-references.ts`.
+   */
+  proseLineReferences?: boolean;
+  /**
+   * Also flag EVERY prose line reference `prose-line-references` extracts,
+   * not only a drifted one, with the remedy to lift it into a backtick
+   * citation or a symbol name. Ignored when `proseLineReferences` is not
+   * set.
+   */
+  proseLineReferencesStrict?: boolean;
   /** Test-only override for git access; production code shells out to the real `git` binary. */
   runGit?: RunGit;
 }
@@ -60,6 +74,11 @@ export function runCheck(
   const ctx = loadBundle(resolvedBundleDir, repoRoot, options.runGit);
   if (options.requireAnchors) {
     ctx.requireAnchors = { allow: options.requireAnchorsAllow ?? [] };
+  }
+  if (options.proseLineReferences) {
+    ctx.proseLineReferences = {
+      strict: Boolean(options.proseLineReferencesStrict),
+    };
   }
 
   const findings = allRules.flatMap((rule) => rule.run(ctx));
@@ -106,6 +125,16 @@ program
     "citations-resolve: citedPath glob/exact patterns (e.g. README.md) exempt from " +
       "--require-anchors' anchor-required check",
   )
+  .option(
+    "--prose-line-references",
+    "prose-line-references: flag a drifted, unresolvable, or ambiguous prose-embedded line " +
+      'reference outside citations-resolve\'s own backtick grammar, e.g. "lines 129-132" (opt-in, see README)',
+  )
+  .option(
+    "--prose-line-references-strict",
+    "prose-line-references: also flag every prose line reference, not only a drifted one, with " +
+      "the remedy to lift it into a backtick citation or a symbol name (ignored unless --prose-line-references is also passed)",
+  )
   .exitOverride()
   .action(
     (
@@ -116,6 +145,8 @@ program
         strict?: boolean;
         requireAnchors?: boolean;
         requireAnchorsAllow?: string[];
+        proseLineReferences?: boolean;
+        proseLineReferencesStrict?: boolean;
       },
     ) => {
       try {
@@ -124,6 +155,8 @@ program
           strict: opts.strict,
           requireAnchors: opts.requireAnchors,
           requireAnchorsAllow: opts.requireAnchorsAllow,
+          proseLineReferences: opts.proseLineReferences,
+          proseLineReferencesStrict: opts.proseLineReferencesStrict,
         });
         const output = opts.json
           ? renderJson(result.bundleDir, result.findings)

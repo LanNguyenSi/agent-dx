@@ -50,6 +50,25 @@ export interface RequireAnchorsOptions {
   allow: string[];
 }
 
+/**
+ * Opt-in options for `prose-line-references` (see `--prose-line-references`
+ * in `src/cli.ts` and `src/rules/prose-line-references.ts`). Absent entirely
+ * when the opt-in was not requested, matching `RequireAnchorsOptions`'
+ * single-truthiness-check discipline: a consumer that never passes
+ * `--prose-line-references` gets byte-identical `check` output to before
+ * this rule existed.
+ */
+export interface ProseLineReferencesOptions {
+  /**
+   * When true, every prose line reference the extraction grammar finds is
+   * flagged (`prose-line-reference-not-anchored`), not only a drifted one --
+   * the remedy is always the same: lift it into a backtick `path:N-M`
+   * citation, or de-precise it to a symbol name. Ignored (no effect) when
+   * `proseLineReferences` itself is absent.
+   */
+  strict?: boolean;
+}
+
 export interface BundleContext {
   bundleDir: string;
   repoRoot?: string;
@@ -58,6 +77,8 @@ export interface BundleContext {
   runGit?: RunGit;
   /** See `RequireAnchorsOptions`. Undefined when `--require-anchors` was not passed. */
   requireAnchors?: RequireAnchorsOptions;
+  /** See `ProseLineReferencesOptions`. Undefined when `--prose-line-references` was not passed. */
+  proseLineReferences?: ProseLineReferencesOptions;
 }
 
 export interface Rule {

@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A new opt-in rule, `prose-line-references` (`--prose-line-references`,
+  strict sub-flag `--prose-line-references-strict`), closes a gap
+  `citations-resolve` leaves open: a prose-embedded line reference written
+  outside its backtick grammar ("lines 496-498",
+  "generate-codex-config.ts lines 129-132") is structurally invisible to
+  `citations-resolve`'s `CITATION_RE`, which requires a literal `:` between
+  the path and the digits. A doc can be re-verified, re-stamped, and pass
+  `check` with 0 findings while its prose line numbers are drifted, because
+  nothing ever looked at them -- exactly what happened in harness task
+  ad66c43f (2026-08-30/31): review round 1 of that OKF sweep found 9 wrong
+  prose references behind a fresh `citations-resolve`-clean stamp, the fix
+  round's own sweep found more (including one citing the wrong file
+  entirely), and the verification round a third residue; both reviewers
+  named the missing mechanical guard as the structural cause. Extracts
+  `line N`/`lines N-M`/`lines N to M` (deliberately not `L N`, a
+  comma-separated list of several numbers, or a second unlabelled range
+  chained by "vs"; see the README for the full, deliberately conservative
+  grammar), binds each to the nearest named file (same sentence first,
+  then same paragraph, reusing `citations-resolve`'s own path-resolution
+  rules verbatim rather than a second, drift-prone copy), and reports
+  `out-of-bounds`, `blank-start-line`, `unresolvable`, or `ambiguous`.
+  `--prose-line-references-strict` additionally flags EVERY extracted
+  reference (resolved or not) with the remedy: lift it into a backtick
+  anchored citation, or de-precise it to a symbol name. Off by default;
+  see "Prose line references (opt-in, `--prose-line-references`)" in the
+  README for the full grammar, binding rule, and finding table.
+
+- `prose-line-references` review-round fixes, found by a reviewer pass on
+  the rule above before it shipped: a start line of `0` no longer indexes
+  `lines[-1]` and is now its own `out-of-bounds` finding rather than a
+  misclassified `blank-start-line`; `LINE_REF_RE`'s leading `\b` no longer
+  matches right after a hyphen, so "in-line 999", "multi-line 999", and
+  "command-line 999" are no longer mis-extracted as citations to line 999;
+  a reference inside an HTML comment (`` <!-- see line 5 above --> ``) or
+  on a line that is itself a Markdown ATX heading (`## Line 3 semantics`)
+  is now excluded from extraction, the same way a fenced code block's
+  example already was; and a finding now quotes the doc's own matched text
+  verbatim (an en-dash range stays an en-dash range) instead of a
+  re-rendered, always-hyphenated approximation, with the normalised
+  hyphen-ranged form folded into the message body only when it actually
+  differs from what the doc wrote. Also closes a coverage gap the
+  reviewer found: the binding rule's paragraph-level fallback
+  (`nearestPrecedingMentionInParagraph`) and its same-sentence
+  "following mention" branch had no test that could tell them apart from
+  a hypothetical "always bind to the first mention in the paragraph"
+  mutant; see "Verification" below for the fixture and the mutation
+  check.
+
 - `citations-resolve`: a fifth `--require-anchors` check,
   `anchor-required-continuation` (warning), closes a gap the four checks
   added in 0.8.0 left open: they all fire only for a "full" citation, so a
@@ -33,6 +81,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verification
 
+- `prose-line-references`: default mode (no `--prose-line-references`) is
+  byte-identical before and after this change: verified by building the
+  CLI at both the pre-change commit and this change, then running `check
+  --json` in default mode against the same three real bundles as below
+  (each repo's full real tree as `--repo-root`, not a narrow `docs/okf`-
+  only extraction, since this rule's own file-mention resolution needs the
+  rest of the repo present) and diffing the JSON output byte for byte --
+  0 bytes of diff on all three.
+- `prose-line-references` migration backlog, run with
+  `--prose-line-references` after this change against the same three
+  bundles, full real repo tree as `--repo-root`: agent-dx's own
+  orchestrator-workflow bundle 3 findings (2 `out-of-bounds`, 1
+  `blank-start-line`), harness 5 (2 `ambiguous`, 1 `blank-start-line`, 2
+  `unresolvable`), agent-grounding 0. Spot-checked, not exhaustively
+  audited: the harness `ambiguous` pair is a real collision (`intercept.ts`
+  resolves to both `src/cli/policy/intercept.ts` and
+  `src/runtime/intercept.ts`); the agent-dx `out-of-bounds`/
+  `blank-start-line` trio is a real false positive of the binding rule's
+  own stated limitation (a "test lines N-M" phrase bound to a file named
+  elsewhere in the same sentence for an unrelated reason, not the file the
+  line numbers actually belong to -- once before the reference, once
+  after) -- see the README's closing paragraph on "Prose line references"
+  for that known category. No
+  consumer CI currently selects on `[prose-line-references]` findings by
+  rule id, so no consumer pin bump is required before this rule starts
+  reporting; enabling `--prose-line-references` anywhere is itself the
+  opt-in.
+- `prose-line-references` review-round fixes above: default mode is still
+  byte-identical, re-verified the same way as above (build both commits,
+  `check --json` on the same three real bundles, diff byte for byte -- 0
+  bytes of diff on all three). The migration backlog counts are unchanged
+  by these fixes: agent-dx 3, harness 5, agent-grounding 0, identical
+  reasons to the counts above -- none of the three real bundles contained
+  a `line 0`, a hyphen-joined "-line N" word, an ATX heading naming a
+  line, or an HTML comment naming one. Four mutation probes verified
+  by hand against the new tests: replacing nearest-in-sentence binding
+  with first-in-paragraph binding, deleting the en-dash/em-dash/"to"
+  alternation from `LINE_REF_RE`, deleting the inverted-range branch in
+  `checkTarget`, and disabling the reserved-doc skip each fail a
+  dedicated new test, and pass again once reverted.
+- Regression test added for a latent `FILE_MENTION_RE` extension-matching
+  bug found while measuring the migration backlog above: the extension
+  alternation lists `js` before `json`, and `js` is a strict prefix of
+  `json`; without forcing the regex to reject a truncated match, a real
+  `config.json` mention resolved (or failed to resolve) as `config.js`
+  instead. Fixed with a trailing `(?!\w)` on the match; `citations-resolve`'s
+  own `CITATION_RE` does not have this problem, since its mandatory
+  trailing `:` already forces the same backtracking.
 - Default mode (no `--require-anchors`) is byte-identical before and
   after this change: verified by building the CLI at both the pre-change
   commit and this change, then running `check --json` in default mode
