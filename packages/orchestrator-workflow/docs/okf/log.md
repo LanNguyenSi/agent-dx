@@ -6367,16 +6367,16 @@ and out of scope.
 
 Fix: `ResolveInitInputsParams.filesystemDetected` was renamed to
 `stickyPreChecked?: Harness[]`
-(`packages/orchestrator-workflow/src/cli-inputs.ts:190-208#"stickyPreChecked?: Harness[];"`), with its doc
+(`packages/orchestrator-workflow/src/cli-inputs.ts:190-208`), with its doc
 comment rewritten to state the real semantics ("the entries pre-checked
 when the target recorded `harnesses: []`; defaults to `detected` for
 `init`; `apply` passes `[]`"). The sticky branch now reads
 `stickyPreChecked ?? detected`
-(`packages/orchestrator-workflow/src/cli-inputs.ts:307#"await promptHarnesses(stickyPreChecked ?? detected, [], false)"`)
+(`packages/orchestrator-workflow/src/cli-inputs.ts:307`)
 instead of `filesystemDetected ?? detected`; `init`'s call site still omits
 the field entirely, so its own pre-check (real on-disk detection) is
 unchanged. `apply`'s CLI action now passes a hardcoded `[]`
-(`packages/orchestrator-workflow/src/cli.ts:798#"stickyPreChecked: [],"`)
+(`packages/orchestrator-workflow/src/cli.ts:798`)
 instead of a fresh `detectHarnesses(targetDir)` call, which is removed from
 that call site entirely (nothing else there needed it). Every comment
 describing the round-1 design (`promptHarnesses`'s own comment block,
@@ -6399,7 +6399,7 @@ block above (`init`'s own sticky pre-check, unchanged since it omits
 `init`'s behaviour.
 
 Mutation probe: reverted the sticky branch's own call
-(`packages/orchestrator-workflow/src/cli-inputs.ts:307#"await promptHarnesses(stickyPreChecked ?? detected, [], false)"`)
+(`packages/orchestrator-workflow/src/cli-inputs.ts:307`)
 from `promptHarnesses(stickyPreChecked ?? detected, [], false)` back to plain
 `promptHarnesses(detected, [], false)`, ignoring `stickyPreChecked`
 entirely (equivalent in effect to `apply`'s CLI action passing `detected`
