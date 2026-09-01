@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-01
+
 ### Added
 
 - The implementer output contract gained a `commits` field: a YAML list of
