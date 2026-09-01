@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Interactive `apply` on a target whose own manifest recorded a real
+  `harnesses: []` (a deliberate `--harness none` templates-only install)
+  now starts its harnesses checkbox with nothing pre-checked, mirroring
+  `init`'s own templates-only interactive re-run: previously the prompt
+  pre-checked whatever `apply`'s harness fallback chain (the target's
+  recorded harnesses, else the operator manifest's defaults, else
+  detection, else `claude`) resolved to, which is never empty, so a bare
+  Enter silently re-widened a deliberately templates-only install. The
+  prompt now pre-checks only what is actually detected on disk; selecting
+  a harness in the prompt still adds it, same as before.
 - `apply` now keeps a target whose own manifest recorded a real
   `harnesses: []` (a deliberate `--harness none` templates-only install)
   templates-only on a flagless, non-interactive re-run, matching `init`'s

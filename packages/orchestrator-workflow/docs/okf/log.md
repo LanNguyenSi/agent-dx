@@ -6281,3 +6281,63 @@ sticky test's new phrase assertion turned red; restored, green again. (b)
 temporarily reapplied `previousIsRecordedManifest: false` in the `apply`
 action -- the new detection-leg test's `templates only` assertion turned
 red (installed `claude` instead); restored, green again.
+
+## 2026-09-01 (agent-tasks fe834823, implementer)
+
+Task: close the interactive residual the 2026-08-31 entry above left open
+(its own review round 1, point 2): `resolveInitInputs`'s
+harnesses-stickiness branch calls `promptHarnesses(detected, [], false)`
+for both `init` and `apply`, but `detected` means different things at each
+call site. For `init` it is real `detectHarnesses(targetDir)`, empty by
+construction on a templates-only target. For `apply` it is
+`resolveApplyHarnesses`'s fallback-chain result (the target's recorded
+harnesses, else the operator manifest's defaults, else detection, else
+`["claude"]`), which is never empty, so the interactive checkbox on a
+deliberately templates-only `apply` re-run still pre-checked that
+fallback, and a bare Enter re-widened the install exactly as before the
+08-31 round's non-interactive fix, `fallbackToClaude: false` doing nothing
+against it.
+
+Fix: `ResolveInitInputsParams` gained a new optional
+`filesystemDetected` field (`cli-inputs.ts:190-207`), read only by the
+stickiness branch's interactive prompt
+(`cli-inputs.ts:301-302#"await promptHarnesses(filesystemDetected ?? detected, [], false)"`);
+when omitted it defaults to `detected`, which is already real detection
+for `init`'s own call site, so `init`'s behaviour is unchanged with no
+edit needed there. `apply`'s CLI action now passes a fresh
+`detectHarnesses(targetDir)` as this field
+(`cli.ts:793#"filesystemDetected: detectHarnesses(targetDir),"`), kept
+apart from `chosenHarnesses`/`detected` (still `resolveApplyHarnesses`'s
+result, still used for the non-sticky branch's own pre-check and for the
+console/manifest fallback, unchanged). Doc comments on `promptHarnesses`,
+`ResolveInitInputsParams`, `resolveInitInputs`, and `resolveApplyHarnesses`
+were rewritten to state the fixed mechanics rather than describe the
+residual as still live.
+
+Tests added: four `cli-inputs.test.ts` cases in a new describe block
+mirroring the existing init-style interactive-prompt test harness (mocked
+`inquirer.prompt`): (1) a non-empty `detected` (simulating
+`resolveApplyHarnesses`'s fallback result) with an empty
+`filesystemDetected` pre-checks nothing, and a bare-Enter answer resolves
+to `[]`, not the fallback; (2) with `filesystemDetected: ["codex"]`, only
+`codex` is pre-checked, not the non-empty `detected`; (3) selecting
+`claude` in the mocked prompt still installs it; (4) a normal
+(non-templates-only) target is unaffected: the non-sticky branch still
+pre-checks `detected` as before, `filesystemDetected` disagreeing on
+purpose to prove it is not read there.
+
+Mutation probe: reverted the sticky branch's call back to
+`promptHarnesses(detected, [], false)` (this round's pre-fix state, the
+line the 08-31 entry's review round 1 identified as dead). Result: the
+new "nothing is pre-checked when filesystemDetected is empty" test turned
+red (`claude`, from the simulated fallback-chain `detected`, came back
+pre-checked and `result.harnesses` was `["claude"]` instead of `[]`);
+restored, re-ran green again.
+
+Verification: `npm test` (all 588 tests green, including
+`test/docs-consistency.test.ts`'s citation guard, after re-pointing every
+`cli.ts`/`cli-inputs.ts` citation this round's own doc-comment insertions
+shifted across `install-fence-mechanics.md`, `operator-install-and-
+registry.md`, and `model-preselection.md`, plus three hardcoded citation
+strings inside `test/docs-consistency.test.ts` itself, the same kind of
+drift the 08-31 entry above hit), `npm run build` (clean).

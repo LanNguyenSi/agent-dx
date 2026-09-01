@@ -37,18 +37,17 @@ export async function promptHarnesses(
   // silently re-widen an explicit `--harness none` install -- contradicting
   // README.md's and this function's own "nothing forced pre-selected" claim
   // (see CHANGELOG). That "`detected` is always empty there too" premise
-  // holds only for `init`'s own call site, where `detected` is
+  // holds for `init`'s own call site, where `detected` is
   // `detectHarnesses(targetDir)` on a target with no harness files by
   // construction. `apply`'s call site (`resolveInitInputs`'s interactive
-  // branch just below) instead passes `resolveApplyHarnesses`'s result,
-  // which is never empty (it falls back through the operator default,
-  // then detection, then `["claude"]`); there `detected` pre-checks
-  // whatever `resolveApplyHarnesses` returned regardless of
-  // `fallbackToClaude`, so an interactive apply re-run on a templates-only
-  // target still starts with that harness pre-checked and a bare Enter
-  // re-widens the install. `fallbackToClaude: false` is live for `init`
-  // and dead code on `apply`'s interactive path; noted as a known residual
-  // (see docs/okf/log.md's 2026-08-31 entry).
+  // branch just below) does not call this function with its own
+  // `resolveApplyHarnesses` result at all for this branch: that result is
+  // never empty (it falls back through the operator default, then
+  // detection, then `["claude"]`), so it passes `filesystemDetected`
+  // (real `detectHarnesses(targetDir)`) here instead, keeping the same
+  // "always empty on a true templates-only target" premise this comment
+  // relies on (agent-tasks fe834823; the residual noted in
+  // docs/okf/log.md's 2026-08-31 entry is closed).
   const preselected =
     known.length > 0 ? known : fallbackToClaude ? ["claude" as Harness] : [];
   const { harnesses } = await inquirer.prompt<{ harnesses: Harness[] }>([
@@ -188,6 +187,24 @@ export interface ResolveInitInputsParams {
    * fallback chain below unchanged.
    */
   previousIsRecordedManifest?: boolean;
+  /**
+   * Real on-disk harness detection (`detectHarnesses(targetDir)`), read
+   * only by the harnesses-stickiness gate's interactive prompt below (the
+   * branch gated on `previousIsRecordedManifest && previous.
+   * harnessesRecordedEmpty`). Defaults to `detected` when omitted, which is
+   * already real detection for `init`'s own call site (it passes
+   * `detectHarnesses(targetDir)` straight through as `detected`). `apply`'s
+   * call site must pass this separately: its own `detected` is
+   * `resolveApplyHarnesses`'s result (the target's recorded harnesses, else
+   * the operator manifest's default harnesses, else detection, else
+   * `["claude"]`), which is never empty, so reusing it here would pre-check
+   * that fallback on a deliberately templates-only target and let a bare
+   * Enter re-widen the install (agent-tasks fe834823). Only the sticky
+   * branch reads this field; the normal (non-recorded-empty) branch still
+   * prompts from `detected` unchanged, matching `apply`'s existing
+   * pre-check behaviour on a normal target.
+   */
+  filesystemDetected?: Harness[];
 }
 
 export interface ResolvedInitInputs {
@@ -217,12 +234,25 @@ export interface ResolvedInitInputs {
  * behaviour: an explicit flag always overrides; a plain re-run (flag
  * omitted) keeps the previously installed value; a fresh install with no
  * prior manifest falls back to the shipped default.
+ *
+ * `params.detected` doubles as the fallback-chain input the non-sticky
+ * "else" branch below prompts and falls back from, and (for `init`'s call
+ * site only) the real on-disk detection the harnesses-stickiness branch
+ * pre-checks from. `apply`'s call site's `detected` is not real detection
+ * (see `ResolveInitInputsParams.filesystemDetected`'s doc comment), so it
+ * passes that field separately for the sticky branch to read instead.
  */
 export async function resolveInitInputs(
   params: ResolveInitInputsParams,
 ): Promise<ResolvedInitInputs> {
-  const { detected, interactive, previous, opts, previousIsRecordedManifest } =
-    params;
+  const {
+    detected,
+    interactive,
+    previous,
+    opts,
+    previousIsRecordedManifest,
+    filesystemDetected,
+  } = params;
 
   let harnesses: Harness[];
   if (opts.harness) {
@@ -256,11 +286,21 @@ export async function resolveInitInputs(
     // as `[]` (not the recorded `previous.harnesses`) so nothing is
     // pre-checked, unlike the "else" branch below's normal re-run prompt --
     // the previous run explicitly asked for none, so the checkbox starts
-    // from that state, only `detected` entries pre-checked. `fallbackToClaude:
-    // false` closes the same gap for the case where nothing is detected
-    // either: without it, `promptHarnesses` would pre-check `claude` on its
-    // own "nothing known" fallback, re-widening the install on a bare Enter.
-    harnesses = interactive ? await promptHarnesses(detected, [], false) : [];
+    // from that state, only real on-disk detection pre-checked.
+    // `filesystemDetected ?? detected` is used here rather than plain
+    // `detected`: for `init`'s own call site the two are the same value
+    // (`detected` already is `detectHarnesses(targetDir)`), but `apply`'s
+    // `detected` is `resolveApplyHarnesses`'s fallback-chain result (never
+    // empty), so `apply` passes its own separate `detectHarnesses(targetDir)`
+    // call as `filesystemDetected` to keep this branch's pre-check limited
+    // to what is actually on disk, not the fallback (agent-tasks fe834823).
+    // `fallbackToClaude: false` closes the same gap for the case where
+    // nothing is detected either: without it, `promptHarnesses` would
+    // pre-check `claude` on its own "nothing known" fallback, re-widening
+    // the install on a bare Enter.
+    harnesses = interactive
+      ? await promptHarnesses(filesystemDetected ?? detected, [], false)
+      : [];
   } else {
     const installed = previous?.harnesses ?? [];
     const fallback = [...new Set([...detected, ...installed])];

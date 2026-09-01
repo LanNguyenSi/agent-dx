@@ -619,3 +619,161 @@ describe("resolveInitInputs: interactive re-run after a templates-only install (
     expect(result.harnesses).toEqual(["claude"]);
   });
 });
+
+describe("resolveInitInputs: apply's interactive templates-only re-run pre-checks filesystemDetected, not detected (agent-tasks fe834823)", () => {
+  // `apply`'s call site hands the sticky branch a `detected` that is NOT
+  // real on-disk detection: it is `resolveApplyHarnesses`'s fallback-chain
+  // result (the target's recorded harnesses, else the operator manifest's
+  // defaults, else detection, else `["claude"]`), which is never empty.
+  // Before this fix, the sticky branch read that value as its own
+  // `detected` and pre-checked whatever `resolveApplyHarnesses` returned
+  // regardless of `fallbackToClaude: false`, so a bare Enter re-widened a
+  // deliberate `--harness none` install. These tests pass a non-empty
+  // `detected` (simulating that fallback-chain result) alongside a
+  // separate `filesystemDetected`, mirroring how `apply`'s CLI action now
+  // calls `resolveInitInputs` (a fresh `detectHarnesses(targetDir)`, kept
+  // apart from `chosenHarnesses`).
+  function mockPrompts(harnessesAnswer: string[]) {
+    vi.mocked(inquirer.prompt).mockImplementation(async (questions) => {
+      const q = (questions as Array<Record<string, unknown>>)[0];
+      if (q.name === "harnesses") return { harnesses: harnessesAnswer };
+      if (q.name === "profile") return { profile: q.default };
+      if (q.name === "choice") return { choice: q.default };
+      throw new Error(`unmocked prompt: ${String(q.name)}`);
+    });
+  }
+
+  afterEach(() => {
+    vi.mocked(inquirer.prompt).mockReset();
+  });
+
+  it("nothing is pre-checked when filesystemDetected is empty, even though detected (the fallback-chain result) is not", async () => {
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
+    mockPrompts([]);
+
+    const result = await resolveInitInputs({
+      // Simulates resolveApplyHarnesses falling back to the operator
+      // manifest's default harnesses (never empty), which must NOT drive
+      // the sticky branch's pre-check.
+      detected: ["claude"],
+      filesystemDetected: [],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    for (const choice of choices) {
+      expect(choice.checked).toBe(false);
+    }
+    // Bare Enter (operator deselected/confirmed nothing) keeps the target
+    // templates-only, not re-widened to the fallback-chain's "claude".
+    expect(result.harnesses).toEqual([]);
+  });
+
+  it("only the harness actually detected on disk (filesystemDetected) is pre-checked, not the fallback-chain result", async () => {
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
+    mockPrompts([]);
+
+    await resolveInitInputs({
+      detected: ["claude"],
+      filesystemDetected: ["codex"],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    for (const choice of choices) {
+      expect(choice.checked).toBe(choice.value === "codex");
+    }
+  });
+
+  it("selecting claude in the prompt installs it, not stuck at []", async () => {
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
+    mockPrompts(["claude"]);
+
+    const result = await resolveInitInputs({
+      detected: ["claude"],
+      filesystemDetected: [],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    expect(result.harnesses).toEqual(["claude"]);
+  });
+
+  it("a normal target (harnessesRecordedEmpty: false) is unaffected: the non-sticky branch still pre-checks detected as before, ignoring filesystemDetected", async () => {
+    const previous = fakeManifest({
+      harnesses: ["claude"],
+      harnessesRecordedEmpty: false,
+    });
+    mockPrompts([]);
+
+    await resolveInitInputs({
+      // Simulates resolveApplyHarnesses resolving to the target's own
+      // recorded harnesses; filesystemDetected deliberately disagrees, to
+      // prove the non-sticky "else" branch never reads it.
+      detected: ["claude"],
+      filesystemDetected: ["codex"],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    // "claude" is pre-checked (from detected/previous.harnesses, unchanged
+    // apply behaviour); "codex" is NOT, proving filesystemDetected plays no
+    // part in this branch.
+    for (const choice of choices) {
+      expect(choice.checked).toBe(choice.value === "claude");
+    }
+  });
+});

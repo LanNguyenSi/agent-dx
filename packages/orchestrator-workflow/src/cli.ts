@@ -503,8 +503,17 @@ function repoManifestHasMalformedPin(targetDir: string): boolean {
  * set by the caller below from `repoManifest`) overrides whatever this
  * function returns and keeps a non-interactive re-run templates-only. This
  * function's own fallback chain still runs first and its result is still
- * used as `detected` (relevant to an interactive prompt, and to any target
- * whose manifest is missing or malformed rather than deliberately empty).
+ * used as `detected` for any target whose manifest is missing or malformed
+ * rather than deliberately empty, and for the normal (non-sticky) branch's
+ * interactive prompt pre-check on a target with real recorded harnesses.
+ * It is deliberately NOT reused as the sticky branch's own interactive
+ * pre-check: that branch reads `resolveInitInputs`'s separate
+ * `filesystemDetected` field instead, which the caller below fills with a
+ * fresh `detectHarnesses(targetDir)` call, because this function's result
+ * is never empty (it falls through the operator default and `["claude"]`
+ * fallbacks) and would otherwise pre-check that fallback on a deliberately
+ * templates-only target, letting a bare Enter re-widen the install
+ * (agent-tasks fe834823).
  */
 function resolveApplyHarnesses(
   targetDir: string,
@@ -775,6 +784,13 @@ program
         warnings,
       } = await resolveInitInputs({
         detected: chosenHarnesses,
+        // Real on-disk detection, separate from `chosenHarnesses` above:
+        // only read by `resolveInitInputs`'s harnesses-stickiness branch,
+        // whose interactive prompt must pre-check what is actually on disk,
+        // not `resolveApplyHarnesses`'s fallback-chain result (which is
+        // never empty and would re-widen a deliberate templates-only
+        // install on a bare Enter; agent-tasks fe834823).
+        filesystemDetected: detectHarnesses(targetDir),
         interactive,
         previous,
         opts,

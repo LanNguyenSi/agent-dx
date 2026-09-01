@@ -396,7 +396,11 @@ then the operator's defaults (harnesses fall back one step further, to
 what `init` would have auto-detected) -- except a target whose own
 manifest recorded a real `harnesses: []` (a deliberate templates-only
 install, see "Templates-only mode" above), which stays templates-only on
-a flagless run regardless of the operator's defaults or what is on disk.
+a flagless run regardless of the operator's defaults or what is on disk;
+an **interactive** re-run on such a target still prompts with nothing
+forced pre-selected, the same as `init`'s own templates-only re-run, not
+whatever `apply`'s harness fallback (recorded harnesses, else operator
+defaults, else detection) would otherwise have picked.
 Pass `--sync` to invert that for
 profile, tiers, and models: the operator's defaults then win over whatever
 the target already had recorded. A target pinned to a kit version other
