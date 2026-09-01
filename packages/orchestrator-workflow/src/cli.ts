@@ -508,11 +508,14 @@ function repoManifestHasMalformedPin(targetDir: string): boolean {
  * interactive prompt pre-check on a target with real recorded harnesses.
  * It is deliberately NOT reused as the sticky branch's own interactive
  * pre-check: that branch reads `resolveInitInputs`'s separate
- * `filesystemDetected` field instead, which the caller below fills with a
- * fresh `detectHarnesses(targetDir)` call, because this function's result
- * is never empty (it falls through the operator default and `["claude"]`
- * fallbacks) and would otherwise pre-check that fallback on a deliberately
- * templates-only target, letting a bare Enter re-widen the install
+ * `stickyPreChecked` field instead, which the caller below fills with `[]`,
+ * because this function's result is never empty (it falls through the
+ * operator default and `["claude"]` fallbacks) and would otherwise
+ * pre-check that fallback on a deliberately templates-only target, letting
+ * a bare Enter re-widen the install. A harness config left on disk (e.g. a
+ * stray `.claude/` directory) is not used as the pre-check either: it is a
+ * weak signal next to the target's own recorded `harnesses: []`, so the
+ * prompt starts with nothing pre-checked at all on this path
  * (agent-tasks fe834823).
  */
 function resolveApplyHarnesses(
@@ -784,13 +787,15 @@ program
         warnings,
       } = await resolveInitInputs({
         detected: chosenHarnesses,
-        // Real on-disk detection, separate from `chosenHarnesses` above:
-        // only read by `resolveInitInputs`'s harnesses-stickiness branch,
-        // whose interactive prompt must pre-check what is actually on disk,
-        // not `resolveApplyHarnesses`'s fallback-chain result (which is
-        // never empty and would re-widen a deliberate templates-only
-        // install on a bare Enter; agent-tasks fe834823).
-        filesystemDetected: detectHarnesses(targetDir),
+        // Only read by `resolveInitInputs`'s harnesses-stickiness branch,
+        // whose interactive prompt must start with nothing pre-checked on
+        // a deliberately templates-only target: neither
+        // `resolveApplyHarnesses`'s fallback-chain result (which is never
+        // empty and would re-widen the install on a bare Enter) nor a
+        // harness config left on disk (a weak signal next to the target's
+        // own recorded `harnesses: []`) drives this pre-check
+        // (agent-tasks fe834823).
+        stickyPreChecked: [],
         interactive,
         previous,
         opts,

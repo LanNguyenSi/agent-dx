@@ -6298,21 +6298,24 @@ fallback, and a bare Enter re-widened the install exactly as before the
 08-31 round's non-interactive fix, `fallbackToClaude: false` doing nothing
 against it.
 
-Fix: `ResolveInitInputsParams` gained a new optional
-`filesystemDetected` field (`cli-inputs.ts:190-207`), read only by the
-stickiness branch's interactive prompt
-(`cli-inputs.ts:301-302#"await promptHarnesses(filesystemDetected ?? detected, [], false)"`);
-when omitted it defaults to `detected`, which is already real detection
-for `init`'s own call site, so `init`'s behaviour is unchanged with no
-edit needed there. `apply`'s CLI action now passes a fresh
-`detectHarnesses(targetDir)` as this field
-(`cli.ts:793#"filesystemDetected: detectHarnesses(targetDir),"`), kept
-apart from `chosenHarnesses`/`detected` (still `resolveApplyHarnesses`'s
-result, still used for the non-sticky branch's own pre-check and for the
-console/manifest fallback, unchanged). Doc comments on `promptHarnesses`,
-`ResolveInitInputsParams`, `resolveInitInputs`, and `resolveApplyHarnesses`
-were rewritten to state the fixed mechanics rather than describe the
-residual as still live.
+Fix: `ResolveInitInputsParams` gained a new optional `filesystemDetected`
+field, read only by the stickiness branch's interactive prompt (`await
+promptHarnesses(filesystemDetected ?? detected, [], false)`); when omitted
+it defaults to `detected`, which is already real detection for `init`'s own
+call site, so `init`'s behaviour is unchanged with no edit needed there.
+`apply`'s CLI action now passes a fresh `detectHarnesses(targetDir)` as
+this field, kept apart from `chosenHarnesses`/`detected` (still
+`resolveApplyHarnesses`'s result, still used for the non-sticky branch's
+own pre-check and for the console/manifest fallback, unchanged). Doc
+comments on `promptHarnesses`, `ResolveInitInputsParams`,
+`resolveInitInputs`, and `resolveApplyHarnesses` were rewritten to state
+the fixed mechanics rather than describe the residual as still live.
+(Superseded by the 2026-09-01 fix-round-2 entry below: `filesystemDetected`
+was renamed to `stickyPreChecked` and `apply`'s call site now passes `[]`
+instead of a fresh `detectHarnesses(targetDir)` call; this paragraph is
+kept as the historical record of this round's own fix and its citations
+into `cli.ts`/`cli-inputs.ts` are intentionally left unanchored since the
+quoted lines no longer exist verbatim in either file.)
 
 Tests added: four `cli-inputs.test.ts` cases in a new describe block
 mirroring the existing init-style interactive-prompt test harness (mocked
@@ -6341,3 +6344,81 @@ shifted across `install-fence-mechanics.md`, `operator-install-and-
 registry.md`, and `model-preselection.md`, plus three hardcoded citation
 strings inside `test/docs-consistency.test.ts` itself, the same kind of
 drift the 08-31 entry above hit), `npm run build` (clean).
+
+## 2026-09-01 (agent-tasks fe834823, fix round 2, decision D-007)
+
+Task: the round above closed the non-interactive residual but its own fix
+introduced a narrower one, caught in review: it pre-checked `apply`'s
+sticky-branch prompt from a fresh `detectHarnesses(targetDir)` call (real
+on-disk detection), but a harness config left on disk from something else
+entirely (e.g. a stray `.claude/` directory that was never itself a
+recorded install) is a weak signal next to the target's own recorded
+`harnesses: []` -- the same re-widening-on-bare-Enter failure mode this
+task exists to close, just moved one layer down. Acceptance criterion 1 is
+literal: interactive `apply` on a recorded `harnesses: []` target must show
+the prompt with nothing pre-checked at all, regardless of what is on disk.
+
+Decision (D-007): `apply`'s sticky-branch pre-check is not "what
+`detectHarnesses` finds", it is "nothing" -- the operator's recorded
+`harnesses: []` is the intent that matters, and no on-disk signal should be
+able to override a bare Enter back into a widened install. `init`'s own
+sticky-branch behaviour (real on-disk detection pre-checked) is unchanged
+and out of scope.
+
+Fix: `ResolveInitInputsParams.filesystemDetected` was renamed to
+`stickyPreChecked?: Harness[]`
+(`packages/orchestrator-workflow/src/cli-inputs.ts:190-208`), with its doc
+comment rewritten to state the real semantics ("the entries pre-checked
+when the target recorded `harnesses: []`; defaults to `detected` for
+`init`; `apply` passes `[]`"). The sticky branch now reads
+`stickyPreChecked ?? detected`
+(`packages/orchestrator-workflow/src/cli-inputs.ts:307#"await promptHarnesses(stickyPreChecked ?? detected, [], false)"`)
+instead of `filesystemDetected ?? detected`; `init`'s call site still omits
+the field entirely, so its own pre-check (real on-disk detection) is
+unchanged. `apply`'s CLI action now passes a hardcoded `[]`
+(`packages/orchestrator-workflow/src/cli.ts:798#"stickyPreChecked: [],"`)
+instead of a fresh `detectHarnesses(targetDir)` call, which is removed from
+that call site entirely (nothing else there needed it). Every comment
+describing the round-1 design (`promptHarnesses`'s own comment block,
+`ResolveInitInputsParams`'s field doc, the sticky-branch comment in
+`resolveInitInputs`, and `resolveApplyHarnesses`'s doc comment in `cli.ts`)
+was rewritten so none of them describe filesystem detection as `apply`'s
+pre-check any more.
+
+Tests: the round-1 describe block in `cli-inputs.test.ts` was replaced with
+one exercising the round-2 semantics: (a) nothing is pre-checked even when
+a harness IS detected (both `resolveApplyHarnesses`'s fallback-chain result
+and the checkbox's own "(detected)" label are non-empty) -- the
+discriminating case that catches a reversion to pre-checking `detected`;
+(b) selecting `claude` in the prompt still installs it; (c) bare Enter
+still resolves to `[]`; (d) a normal (non-templates-only) target is
+unaffected, the non-sticky branch never reads `stickyPreChecked`. The
+existing "interactive re-run after a templates-only install (F4)" describe
+block above (`init`'s own sticky pre-check, unchanged since it omits
+`stickyPreChecked`) was left as-is, serving as the regression pin for
+`init`'s behaviour.
+
+Mutation probe: reverted the sticky branch's own call
+(`packages/orchestrator-workflow/src/cli-inputs.ts:307`) from
+`promptHarnesses(stickyPreChecked ?? detected, [], false)` back to plain
+`promptHarnesses(detected, [], false)`, ignoring `stickyPreChecked`
+entirely (equivalent in effect to `apply`'s CLI action passing `detected`
+straight through as its own pre-check, the same class of gap round 1 left
+open one layer down). Result: the new "nothing is pre-checked even when a
+harness IS detected" test turned red (`claude`
+came back pre-checked instead of nothing); restored, re-ran green again.
+
+Verification: `npm run build` (clean), `npm test` (587 tests green -- one
+fewer than the round-1 count since the round-2 describe block merges two
+round-1 cases into one discriminating case), and after committing,
+`npx -y okf-kit@0.8.0 check docs/okf` (0 errors, 0 warnings; notice count
+unchanged from round 1's own measurement against base commit 0960a39,
+21 notices). Every `cli.ts`/`cli-inputs.ts` citation this round's own edits
+shifted was re-pointed across `install-fence-mechanics.md`,
+`model-preselection.md`, and `operator-install-and-registry.md` (some
+ambiguous after the shift -- multiple identical anchor strings in `cli.ts`
+across different commands -- resolved by checking which command section
+of the citing doc each citation actually belongs to, not just taking the
+first match), plus the same three hardcoded citation strings inside
+`test/docs-consistency.test.ts` the round-1 entry above already names,
+re-pointed a second time.

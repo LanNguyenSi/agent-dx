@@ -620,19 +620,25 @@ describe("resolveInitInputs: interactive re-run after a templates-only install (
   });
 });
 
-describe("resolveInitInputs: apply's interactive templates-only re-run pre-checks filesystemDetected, not detected (agent-tasks fe834823)", () => {
+describe("resolveInitInputs: apply's interactive templates-only re-run pre-checks nothing (agent-tasks fe834823, round 2)", () => {
   // `apply`'s call site hands the sticky branch a `detected` that is NOT
   // real on-disk detection: it is `resolveApplyHarnesses`'s fallback-chain
   // result (the target's recorded harnesses, else the operator manifest's
   // defaults, else detection, else `["claude"]`), which is never empty.
-  // Before this fix, the sticky branch read that value as its own
+  // Before round 1's fix, the sticky branch read that value as its own
   // `detected` and pre-checked whatever `resolveApplyHarnesses` returned
   // regardless of `fallbackToClaude: false`, so a bare Enter re-widened a
-  // deliberate `--harness none` install. These tests pass a non-empty
-  // `detected` (simulating that fallback-chain result) alongside a
-  // separate `filesystemDetected`, mirroring how `apply`'s CLI action now
-  // calls `resolveInitInputs` (a fresh `detectHarnesses(targetDir)`, kept
-  // apart from `chosenHarnesses`).
+  // deliberate `--harness none` install. Round 1 fixed that by pre-checking
+  // real on-disk detection (`detectHarnesses(targetDir)`) instead, but that
+  // re-opened the same gap for any target with a stray harness config on
+  // disk (e.g. a `.claude/` directory) that was never a recorded install:
+  // it is a weak signal next to the target's own recorded `harnesses: []`.
+  // Round 2's decided behaviour (D-007) is that `apply`'s sticky prompt
+  // pre-checks nothing at all -- `apply` always passes `stickyPreChecked:
+  // []`, regardless of what `resolveApplyHarnesses` or on-disk detection
+  // report -- so these tests pass a non-empty `detected` (simulating the
+  // fallback-chain result) alongside `stickyPreChecked: []` to prove
+  // neither drives the pre-check.
   function mockPrompts(harnessesAnswer: string[]) {
     vi.mocked(inquirer.prompt).mockImplementation(async (questions) => {
       const q = (questions as Array<Record<string, unknown>>)[0];
@@ -647,7 +653,7 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
     vi.mocked(inquirer.prompt).mockReset();
   });
 
-  it("nothing is pre-checked when filesystemDetected is empty, even though detected (the fallback-chain result) is not", async () => {
+  it("nothing is pre-checked even when a harness IS detected (both the fallback-chain result and the 'detected' label are non-empty)", async () => {
     const previous = fakeManifest({
       harnesses: [],
       harnessesRecordedEmpty: true,
@@ -656,10 +662,12 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
 
     const result = await resolveInitInputs({
       // Simulates resolveApplyHarnesses falling back to the operator
-      // manifest's default harnesses (never empty), which must NOT drive
-      // the sticky branch's pre-check.
+      // manifest's default harnesses (never empty) or reporting a harness
+      // actually detected on disk. Either way, this must NOT drive the
+      // sticky branch's pre-check: apply's own `stickyPreChecked: []`
+      // wins.
       detected: ["claude"],
-      filesystemDetected: [],
+      stickyPreChecked: [],
       interactive: true,
       previous,
       opts: {},
@@ -686,39 +694,6 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
     expect(result.harnesses).toEqual([]);
   });
 
-  it("only the harness actually detected on disk (filesystemDetected) is pre-checked, not the fallback-chain result", async () => {
-    const previous = fakeManifest({
-      harnesses: [],
-      harnessesRecordedEmpty: true,
-    });
-    mockPrompts([]);
-
-    await resolveInitInputs({
-      detected: ["claude"],
-      filesystemDetected: ["codex"],
-      interactive: true,
-      previous,
-      opts: {},
-      previousIsRecordedManifest: true,
-    });
-
-    const harnessesCall = vi
-      .mocked(inquirer.prompt)
-      .mock.calls.find(
-        ([questions]) =>
-          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
-      );
-    expect(harnessesCall).toBeDefined();
-    const choices = (
-      harnessesCall![0] as Array<{
-        choices: Array<{ value: string; checked: boolean }>;
-      }>
-    )[0].choices;
-    for (const choice of choices) {
-      expect(choice.checked).toBe(choice.value === "codex");
-    }
-  });
-
   it("selecting claude in the prompt installs it, not stuck at []", async () => {
     const previous = fakeManifest({
       harnesses: [],
@@ -728,7 +703,7 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
 
     const result = await resolveInitInputs({
       detected: ["claude"],
-      filesystemDetected: [],
+      stickyPreChecked: [],
       interactive: true,
       previous,
       opts: {},
@@ -738,7 +713,7 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
     expect(result.harnesses).toEqual(["claude"]);
   });
 
-  it("a normal target (harnessesRecordedEmpty: false) is unaffected: the non-sticky branch still pre-checks detected as before, ignoring filesystemDetected", async () => {
+  it("a normal target (harnessesRecordedEmpty: false) is unaffected: the non-sticky branch still pre-checks detected as before, ignoring stickyPreChecked", async () => {
     const previous = fakeManifest({
       harnesses: ["claude"],
       harnessesRecordedEmpty: false,
@@ -747,10 +722,10 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
 
     await resolveInitInputs({
       // Simulates resolveApplyHarnesses resolving to the target's own
-      // recorded harnesses; filesystemDetected deliberately disagrees, to
+      // recorded harnesses; stickyPreChecked deliberately disagrees, to
       // prove the non-sticky "else" branch never reads it.
       detected: ["claude"],
-      filesystemDetected: ["codex"],
+      stickyPreChecked: [],
       interactive: true,
       previous,
       opts: {},
@@ -770,10 +745,16 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
       }>
     )[0].choices;
     // "claude" is pre-checked (from detected/previous.harnesses, unchanged
-    // apply behaviour); "codex" is NOT, proving filesystemDetected plays no
-    // part in this branch.
+    // apply behaviour); the non-sticky branch never reads
+    // `stickyPreChecked` at all.
     for (const choice of choices) {
       expect(choice.checked).toBe(choice.value === "claude");
     }
   });
 });
+
+// `resolveInitInputs: interactive re-run after a templates-only install
+// (F4)` above pins `init`'s own sticky-branch pre-check (real on-disk
+// detection via `detected`, since `init`'s call site omits
+// `stickyPreChecked` and it defaults to `detected`) unchanged by this
+// round-2 fix.

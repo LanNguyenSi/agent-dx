@@ -3,7 +3,7 @@ type: module
 title: Operator install and target registry
 description: The operator-level home, manifest schema, locked write API, target registry, and the setup/apply/doctor/adopt commands built on top of it.
 tags: [operator, manifest, registry, lock, doctor, adopt, pin, cli]
-timestamp: 2026-09-01T06:47:22Z
+timestamp: 2026-09-01T07:03:54Z
 sources:
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/src/doctor.ts
@@ -167,24 +167,24 @@ through `updateOperatorManifest`.
 ## `apply`: project the operator's install onto one target
 
 `apply --target <repo>` installs the kit into `<repo>` and registers it
-(cli.ts:589-591#"registers the target in the operator manifest",
-cli.ts:892#"const upserted = upsertOperatorTarget("). Its
+(cli.ts:592-594#"registers the target in the operator manifest",
+cli.ts:897#"const upserted = upsertOperatorTarget("). Its
 harnesses/profile/tiers/models precedence is layered:
 
 1. An explicit CLI flag always wins, the same override-vs-persist rule
    `resolveInitInputs` already applies to a plain `init` re-run: for
    example `--tiers`/`--no-tiers` always overrides whatever `previous`
    (the synthetic manifest built below) carries
-   (cli-inputs.ts:334-344#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
+   (cli-inputs.ts:339-349#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
 2. Absent an explicit `--harness`, harnesses fall back to the target's own
    recorded harnesses, else the operator defaults, else detection
-   (cli.ts:599-601#"else the operator defaults, else detected",
-   cli.ts:518-530#"return detected.length > 0 ? detected :").
+   (cli.ts:602-604#"else the operator defaults, else detected",
+   cli.ts:521-533#"return detected.length > 0 ? detected :").
 3. Absent an explicit flag, `profile`/`tiers`/`models` fall back to the
    target's own recorded manifest, UNLESS `--sync` is passed, in which case
    the operator defaults override the target's recording instead
-   (cli.ts:623-625#"override the target's own recorded values",
-   cli.ts:550-568#": (repoManifest?.tiers ?? operatorDefaults.tiers);").
+   (cli.ts:626-628#"override the target's own recorded values",
+   cli.ts:553-571#": (repoManifest?.tiers ?? operatorDefaults.tiers);").
    `--sync` only affects profile/tiers/models; harnesses are never widened by
    the operator defaults once the target has its own recorded set.
 
@@ -192,17 +192,17 @@ harnesses/profile/tiers/models precedence is layered:
 
 A repo manifest can carry a kit-version pin. A plain `apply` is skipped with
 no changes when the repo's recorded pin differs from the running operator
-install's version (cli.ts:743-749#"Repository is pinned at"), unless the
+install's version (cli.ts:746-752#"Repository is pinned at"), unless the
 operator explicitly overrides the gate: `--force-pin` advances an *existing*
 pin to the current kit version, with no effect on a target that has no pin
-recorded at all (cli.ts:627-629#"has no effect on a target with no pin recorded",
-cli.ts:830-835#"? PACKAGE_VERSION"); `--pin <version>` sets or replaces the
+recorded at all (cli.ts:630-632#"has no effect on a target with no pin recorded",
+cli.ts:835-840#"? PACKAGE_VERSION"); `--pin <version>` sets or replaces the
 pin regardless of any existing one
-(cli.ts:631-633#"regardless of any existing pin"); `--unpin` clears it
-(cli.ts:635-637#"clear the target's recorded kit-version pin",
-cli.ts:830-831#"? null"). `--pin` and `--unpin` are mutually exclusive at the
+(cli.ts:634-636#"regardless of any existing pin"); `--unpin` clears it
+(cli.ts:638-640#"clear the target's recorded kit-version pin",
+cli.ts:835-836#"? null"). `--pin` and `--unpin` are mutually exclusive at the
 CLI layer, a usage error rather than an implicit precedence rule
-(cli.ts:658#"if (opts.pin !== undefined && opts.unpin) {"). `runInit` itself
+(cli.ts:661#"if (opts.pin !== undefined && opts.unpin) {"). `runInit` itself
 resolves the final stored pin the same way for both `init` and `apply`: a
 `string` sets it, `null` clears it, `undefined` (the default, no flag passed)
 carries the previous manifest's pin forward unchanged
@@ -211,14 +211,14 @@ carries the previous manifest's pin forward unchanged
 Registration happens even when local edits left some files `conflicted` (the
 apply itself still ran). The pin gate returns before the install is ever
 attempted: it sits above `runInit`'s own call site
-(cli.ts:743-749#"Repository is pinned at", cli.ts:838#"const report = runInit({"),
+(cli.ts:746-752#"Repository is pinned at", cli.ts:843#"const report = runInit({"),
 so nothing runs when it fires. The same is true of every other early return:
-`--pin` and `--unpin` together (cli.ts:658-659#"cannot be used together") or
+`--pin` and `--unpin` together (cli.ts:661-662#"cannot be used together") or
 a malformed `--pin` value
-(cli.ts:664-668#"must be non-empty with no internal whitespace") are usage
+(cli.ts:667-671#"must be non-empty with no internal whitespace") are usage
 errors at exit code 2; an unreadable
-(cli.ts:684-686#"back it up and repair it, or remove it and run") or absent
-(cli.ts:691-693#"No operator setup found") operator manifest, and a target
+(cli.ts:687-689#"back it up and repair it, or remove it and run") or absent
+(cli.ts:694-696#"No operator setup found") operator manifest, and a target
 that is not a directory (cli.ts:66-69#"Target is not a directory"), are
 precondition failures at exit code 1; none of these install anything either.
 
@@ -226,12 +226,12 @@ Once the install has actually run, registration can still fail without a
 second install attempt. If the operator-manifest lock cannot be acquired,
 the kit is installed in the target but not registered, and the operator is
 told to re-run `apply` to register it
-(cli.ts:902-906#"the kit was installed but the target was not registered").
+(cli.ts:907-911#"the kit was installed but the target was not registered").
 The same outcome follows if the operator manifest turns unreadable or absent
 between this command's own top-of-run read and this later locked write:
 `applyRegistrationFailureMessage` reports it and the command exits 1 with
 the kit already installed but the target unregistered
-(cli.ts:917#"applyRegistrationFailureMessage(").
+(cli.ts:922#"applyRegistrationFailureMessage(").
 
 ## `doctor`: report every registered target's status
 
@@ -239,7 +239,7 @@ the kit already installed but the target unregistered
 each target's status against the operator's defaults; the citation below is
 the plain path, and under `--prune` the same per-target walk runs inside
 the locked read-modify-write described further down
-(cli.ts:936-937#"Report each operator-registered target's status",
+(cli.ts:941-942#"Report each operator-registered target's status",
 doctor.ts:576-578#"inspectTarget(target, state.manifest, PACKAGE_VERSION),").
 The vocabulary is a seven-member union, `TargetStatus`
 (doctor.ts:41#"export type TargetStatus ="): `clean`, `divergent`,
@@ -270,17 +270,17 @@ acquiring or writing the lock, e.g. `EACCES` in a read-only operator home):
 the manifest is left untouched and `cli.ts`'s own `catch` block prints a
 differently-shaped JSON object with `error: "operator-manifest-locked"` or
 `"operator-manifest-write-failed"` plus a `message` string, carrying no
-`unvalidatedDropped` field at all (cli.ts:963-991#"error: doctorError,").
+`unvalidatedDropped` field at all (cli.ts:968-996#"error: doctorError,").
 Otherwise: `1` if any remaining target (after an optional prune) is
 `drift`, `missing`, `no-manifest`, or `unverifiable`; else `0`
 (doctor.ts:581-589#": 0;"). Outside that thrown-lock-error path, `--json`
 prints the `DoctorReport` as one JSON object with each target projected to
 its `TargetReportJson` subset
-(cli.ts:1011#"targets: report.targets.map(targetReportToJson),"), including the
+(cli.ts:1016#"targets: report.targets.map(targetReportToJson),"), including the
 report-level `unvalidatedDropped`
 (doctor.ts:192#"unvalidatedDropped: number;") and `pruned`
 (doctor.ts:178#"pruned: string[];")
-(cli.ts:1006-1015#"report.error ? { error: report.error }"); within that
+(cli.ts:1011-1020#"report.error ? { error: report.error }"); within that
 object, `error` is set only when no manifest was evaluated, distinguishing
 "never ran `setup`" from "manifest exists but does not parse or validate"
 (doctor.ts:193-198#"(corrupt JSON, or an envelope that does not match this kit)."). That
@@ -293,7 +293,7 @@ registry before reporting, rewriting the whole manifest file in normalized
 form; `unverifiable` targets are never removed by it, since an unreadable
 target might still be perfectly fine and dropping its row on that basis would
 be an unrecoverable guess
-(cli.ts:943-945#"remove missing and no-manifest targets from the operator registry",
+(cli.ts:948-950#"remove missing and no-manifest targets from the operator registry",
 doctor.ts:399#"const REMOVE_ON_PRUNE: ReadonlySet<TargetStatus> = new Set<TargetStatus>([").
 The prune's own re-read, recompute, and write run inside
 `updateOperatorManifest`'s single locked section, the same as every other
@@ -303,16 +303,16 @@ registry write.
 
 `adopt [dir]` registers a repository that already has the kit installed,
 touching nothing in the repository itself
-(cli.ts:1193-1194#"touching nothing in the repository",
-cli.ts:1343-1354#"bootstrapped = !current;", the action's only write call,
+(cli.ts:1198-1199#"touching nothing in the repository",
+cli.ts:1348-1359#"bootstrapped = !current;", the action's only write call,
 targeting the operator manifest and never the target repository). When no
 operator manifest exists yet at all, it bootstraps one from the target's own
 recorded
 settings (harnesses/profile/tiers/models) instead of falling back to the
 shipped defaults `setup` would use
-(cli.ts:1193-1194#"bootstraps the operator manifest from the repository's own recorded settings",
-cli.ts:1153-1160#"models: { ...repoManifest.models },",
-cli.ts:1343-1354#"bootstrapped = !current;"). It then prints the one
+(cli.ts:1198-1199#"bootstraps the operator manifest from the repository's own recorded settings",
+cli.ts:1158-1165#"models: { ...repoManifest.models },",
+cli.ts:1348-1359#"bootstrapped = !current;"). It then prints the one
 target's doctor report and exits with `adoptExitCodeForStatus`'s own
 single-target mapping, a function scoped to `adopt`'s contract
 (doctor.ts:130-131#"single-target exit-code") and not something `doctor`'s
@@ -330,7 +330,7 @@ drives whether the success line is suppressed
 whether the `--json` output carries an `unexpected-target-status` error key
 (doctor.ts:615-618#"return adoptExitCodeForStatus(status) === 2"), both
 wired into `adopt`'s own action
-(cli.ts:1425-1426#"const unexpectedStatus = suppressSuccessLine(targetReport.status);").
+(cli.ts:1430-1431#"const unexpectedStatus = suppressSuccessLine(targetReport.status);").
 Every failure `adopt` can report before it has a target report to return
 (not a directory, no repo manifest, a foreign or unreadable repo manifest, a
 lock failure) is a usage/precondition error at exit code 2, unlike `apply`
