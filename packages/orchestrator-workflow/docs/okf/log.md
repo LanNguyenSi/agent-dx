@@ -6453,8 +6453,9 @@ pre-check any more.
 
 Tests: the round-1 describe block in `cli-inputs.test.ts` was replaced with
 one exercising the round-2 semantics: (a) nothing is pre-checked even when
-a harness IS detected (both `resolveApplyHarnesses`'s fallback-chain result
-and the checkbox's own "(detected)" label are non-empty) -- the
+a harness IS detected (`resolveInitInputs`'s own `detected` param, the
+simulated fallback-chain result, is non-empty; the checkbox label was empty
+in that test too, since it is driven by the same argument) -- the
 discriminating case that catches a reversion to pre-checking `detected`;
 (b) selecting `claude` in the prompt still installs it; (c) bare Enter
 still resolves to `[]`; (d) a normal (non-templates-only) target is
