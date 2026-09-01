@@ -15,7 +15,7 @@ them.
   the `.ai/runs/` directory model and the three `solution-acceptance:`
   markers (run-base fails open, acceptance-recommendation and final-status
   fail closed) plus the findings-table header that backs them; since
-  0.26.0-unreleased also the per-worktree `.ai/run` pointer and the keyed
+  0.26.0 also the per-worktree `.ai/run` pointer and the keyed
   `run-base[<repo-basename>]` marker line for multi-repo runs.
 - [Install fence mechanics](install-fence-mechanics.md), the marker-fence,
   hash-ledger, and manifest.json contract that makes `init`/`uninstall`

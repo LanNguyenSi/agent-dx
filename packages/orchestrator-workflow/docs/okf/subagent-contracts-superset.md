@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-01T07:40:38Z
+timestamp: 2026-09-01T10:39:15Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -424,7 +424,7 @@ surrounding clauses), :1094-1099, a byte-for-byte cross-copy equality check
 on the field block, :1101-1113, and the not-applicable `commits: []` clause
 in both copies, :1115-1119.
 
-Motivation, `packages/orchestrator-workflow/CHANGELOG.md:#[Unreleased]`
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:#[0.27.0]`
 (agent-tasks task 2355f144): the implementer output contract had no field
 for the commit sha produced; briefs asked for it in prose and implementers
 omitted it (twice in one session), forcing the orchestrator to re-derive it
