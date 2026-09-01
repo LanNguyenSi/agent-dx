@@ -6336,9 +6336,11 @@ red (installed `claude` instead); restored, green again.
   word. `npm run build` and `npm
   test` both clean (589/589). `npx okf-kit@0.8.0 check docs/okf`
   (plain, `--strict`, and `--require-anchors`) all report the same result:
-  0 errors, 0 warnings, 21 notices (all `unresolved-ambiguous`, the same
+  0 errors, 0 warnings, 23 notices (all `unresolved-ambiguous`: the 21
   pre-existing bare-filename collisions the bundle has carried since
-  earlier passes), matching the round-1 baseline. Item 6 of the fix
+  earlier passes, plus the two bare `SKILL.md` span citations this entry
+  itself introduces, which collide with another package's `SKILL.md`; the
+  round-1 baseline was 21). Item 6 of the fix
   brief (a derivation test asserting the superset doc enumerates every
   contract field name) was skipped: the doc's implementer section cites
   individual fields by name inside prose, it does not enumerate the full
