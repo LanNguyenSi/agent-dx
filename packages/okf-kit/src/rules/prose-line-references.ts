@@ -68,14 +68,19 @@ const RULE_ID = "prose-line-references";
  * Exemptions for the LINE REFERENCE match itself (`line N`/`lines N-M`):
  * fenced code blocks, indented code blocks, inline code spans, and
  * Markdown table rows (`computeExcludedSpans`, reused verbatim from
- * `citations-resolve`), and the char span of any real `citations-resolve`
+ * `citations-resolve`), the char span of any real `citations-resolve`
  * full citation (`CITATION_RE`, reused verbatim) -- the latter mostly
  * matters for a citation's own quoted string anchor, e.g.
  * `` `path.md:10-20#"see line 5 above"` ``, whose anchor text could
- * otherwise itself look like a bare prose line reference. A URL with a port
- * (`host:8080`), an ISO timestamp, and a version string (`1.2.3`) need no
- * special-casing: `LINE_REF_RE` requires the literal word `line`/`lines`
- * immediately before the digits, which none of those three shapes contain.
+ * otherwise itself look like a bare prose line reference -- and an HTML
+ * comment span (`` <!-- see line 5 above --> ``, `computeHtmlCommentSpans`),
+ * which narrates a past state rather than citing current content. A
+ * reference is also skipped when its own line is a Markdown ATX heading
+ * (`## Line 3 semantics`, `isAtxHeadingAt`): a heading names a section
+ * about a line, not a citation to it. A URL with a port (`host:8080`), an
+ * ISO timestamp, and a version string (`1.2.3`) need no special-casing:
+ * `LINE_REF_RE` requires the literal word `line`/`lines` immediately
+ * before the digits, which none of those three shapes contain.
  *
  * A DIFFERENT, narrower exclusion set applies to FILE MENTION detection:
  * fenced code, indented code, and table rows only -- deliberately NOT
@@ -157,8 +162,49 @@ const FILE_MENTION_RE = /[\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)(?!\w)/g;
 // "line N" / "lines N-M" / "lines N-M" (en-/em-dash) / "lines N to M".
 // Deliberately requires the literal keyword right before the digits -- see
 // the "Extraction grammar" doc block above for every shape this leaves out
-// on purpose.
-const LINE_REF_RE = /\b[Ll]ines?\s+(\d+)(?:\s*(?:-|–|—|to)\s*(\d+))?\b/g;
+// on purpose. The leading `(?<![\w-])` (rather than a plain `\b`) rejects a
+// match starting right after a hyphen: `\b` alone is a word/non-word
+// transition, and `-` is a non-word character, so `\b` still fires between
+// the `-` and the `l` of "in-line 999" / "multi-line 999" /
+// "command-line 999" -- all compound words meaning "an in-place edit" or
+// "the shell", not a citation to line 999. Node 20 supports lookbehind
+// assertions.
+const LINE_REF_RE =
+  /(?<![\w-])[Ll]ines?\s+(\d+)(?:\s*(?:-|–|—|to)\s*(\d+))?\b/g;
+
+// An HTML comment span (`<!-- ... -->`), excluded from LINE_REF_RE
+// extraction: a comment narrating a past state ("<!-- see line 5 above
+// for the earlier draft -->") is not a live prose citation any more than
+// a fenced code block's own example is. Scoped to prose-line-references'
+// own extraction only (not folded into citations-resolve's shared
+// `computeExcludedSpans`), since that function's own callers were not
+// asked to change behavior here.
+const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
+
+function computeHtmlCommentSpans(content: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const re = new RegExp(HTML_COMMENT_RE.source, HTML_COMMENT_RE.flags);
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    spans.push([m.index, m.index + m[0].length]);
+  }
+  return spans;
+}
+
+/**
+ * True when the line containing `index` is a Markdown ATX heading
+ * (`# Heading` through `###### Heading`, up to 3 leading spaces per
+ * CommonMark). A heading like "## Line 3 semantics" names a section about
+ * line 3, not a citation to it -- excluded from LINE_REF_RE extraction the
+ * same way a fenced code block's example is.
+ */
+function isAtxHeadingAt(content: string, index: number): boolean {
+  const lineStart = content.lastIndexOf("\n", index - 1) + 1;
+  let lineEnd = content.indexOf("\n", index);
+  if (lineEnd === -1) lineEnd = content.length;
+  const line = content.slice(lineStart, lineEnd);
+  return /^ {0,3}#{1,6}(?:\s|$)/.test(line);
+}
 
 type FileMention = {
   index: number;
@@ -351,10 +397,15 @@ function nearestPrecedingMentionInParagraph(
 
 /**
  * Base drift checks against an already-resolved single target: an
- * inverted or file-exceeding range (`out-of-bounds`) or a blank start
- * line (`blank-start-line`) -- one problem reported, `out-of-bounds`
+ * inverted or file-exceeding range, a start line below 1, or a blank
+ * start line (`blank-start-line`) -- one problem reported, `out-of-bounds`
  * checked first since a blank-line check on an out-of-range line number
- * is meaningless. Returns `null` (no `Problem`, not "unreadable") when the
+ * is meaningless. A start line below 1 is checked before the file-length
+ * comparison and reported as its own `out-of-bounds` message, rather than
+ * falling through to `lines[startLine - 1]` (`line 0` would otherwise
+ * index `lines[-1]`, i.e. `undefined`, and read as a blank start line
+ * instead of the invalid line number it actually is). Returns `null` (no
+ * `Problem`, not "unreadable") when the
  * target cannot be read at all; the caller folds that into `unresolvable`
  * (see the "Findings" doc block above: a fifth, `unreadable-target`
  * reason was deliberately not added, to keep to the four reasons this
@@ -379,6 +430,12 @@ function checkTarget(
       message: `range end (${endLine}) is before its start (${startLine})`,
     };
   }
+  if (startLine < 1) {
+    return {
+      reason: "out-of-bounds",
+      message: `start line (${startLine}) is not a valid line number`,
+    };
+  }
   if (startLine > lines.length || last > lines.length) {
     return {
       reason: "out-of-bounds",
@@ -392,27 +449,46 @@ function checkTarget(
   return null;
 }
 
+/** Canonical hyphen-ranged rendering, e.g. `lines 2-3` -- distinct from a
+ * doc's own matched text, which may use an en-dash, an em-dash, or "to".
+ * See `pushFinding` below for why this is kept separate from what gets
+ * quoted in a finding's message. */
 function formatRef(startLine: number, endLine: number | null): string {
   return endLine !== null
     ? `lines ${startLine}-${endLine}`
     : `line ${startLine}`;
 }
 
+/**
+ * `matchedText` is the doc's own matched text verbatim (`m[0]`, e.g.
+ * `lines 2–3` with its original en-dash, or `lines 2` for a comma-separated
+ * list like "lines 2, 99, 100-200" where only the first number is
+ * extracted -- see the "Extraction grammar" doc block above). Quoting this
+ * rather than a re-rendering means a reader can always find the exact text
+ * the doc actually contains. `normalizedRef` is `formatRef`'s canonical
+ * hyphen-ranged rendering of the same startLine/endLine; it is folded into
+ * the message body (not the leading quote) only when it differs from
+ * `matchedText`, so the overwhelming common case (a doc already using a
+ * plain hyphen) produces the identical message this rule always has.
+ */
 function pushFinding(
   findings: Finding[],
   file: string,
-  raw: string,
+  matchedText: string,
+  normalizedRef: string,
   docLine: number,
   reason: string,
   message: string,
   severity: "warning" | "notice",
   detail?: string,
 ): void {
+  const normalizedNote =
+    matchedText === normalizedRef ? "" : ` (normalized \`${normalizedRef}\`)`;
   findings.push({
     ruleId: RULE_ID,
     severity,
     file,
-    message: `\`${raw}\` (doc line ${docLine}): ${message} [${reason}]`,
+    message: `\`${matchedText}\`${normalizedNote} (doc line ${docLine}): ${message} [${reason}]`,
     ...(detail ? { detail } : {}),
   });
 }
@@ -438,7 +514,12 @@ function scanDoc(
   while ((cm = citationRe.exec(content)) !== null) {
     citationSpans.push([cm.index, cm.index + cm[0].length]);
   }
-  const protectedSpans = [...excludedSpans, ...citationSpans];
+  const htmlCommentSpans = computeHtmlCommentSpans(content);
+  const protectedSpans = [
+    ...excludedSpans,
+    ...citationSpans,
+    ...htmlCommentSpans,
+  ];
 
   // A narrower exclusion set for file-mention detection: fenced/indented
   // code and table rows, but NOT inline code -- see the "Exemptions" doc
@@ -455,10 +536,12 @@ function scanDoc(
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
     if (isWithinAnySpan(m.index, protectedSpans)) continue;
+    if (isAtxHeadingAt(content, m.index)) continue;
 
     const startLine = Number(m[1]);
     const endLine = m[2] !== undefined ? Number(m[2]) : null;
-    const raw = formatRef(startLine, endLine);
+    const matchedText = m[0];
+    const normalizedRef = formatRef(startLine, endLine);
     const docLine = lineNumberAt(content, m.index);
 
     const paragraphStart = paragraphStartFor(paragraphStarts, m.index);
@@ -495,7 +578,8 @@ function scanDoc(
       pushFinding(
         findings,
         doc.relPath,
-        raw,
+        matchedText,
+        normalizedRef,
         docLine,
         "unresolvable",
         "no file mention could be bound to this prose line reference",
@@ -515,7 +599,8 @@ function scanDoc(
         pushFinding(
           findings,
           doc.relPath,
-          raw,
+          matchedText,
+          normalizedRef,
           docLine,
           "unresolvable",
           `nearest file mention \`${mention.text}\` does not resolve to a real file`,
@@ -525,7 +610,8 @@ function scanDoc(
         pushFinding(
           findings,
           doc.relPath,
-          raw,
+          matchedText,
+          normalizedRef,
           docLine,
           "ambiguous",
           `file mention \`${mention.text}\` resolves to more than one file, not evaluated`,
@@ -539,7 +625,8 @@ function scanDoc(
           pushFinding(
             findings,
             doc.relPath,
-            raw,
+            matchedText,
+            normalizedRef,
             docLine,
             "unresolvable",
             `bound target \`${boundFile}\` exists but could not be read`,
@@ -549,7 +636,8 @@ function scanDoc(
           pushFinding(
             findings,
             doc.relPath,
-            raw,
+            matchedText,
+            normalizedRef,
             docLine,
             problem.reason,
             `bound to \`${boundFile}\`, ${problem.message}`,
@@ -565,7 +653,8 @@ function scanDoc(
       pushFinding(
         findings,
         doc.relPath,
-        raw,
+        matchedText,
+        normalizedRef,
         docLine,
         "prose-line-reference-not-anchored",
         `prose line reference; lift into a backtick anchored citation or de-precise to a symbol name${boundSuffix}`,
