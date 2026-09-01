@@ -89,7 +89,9 @@ files on disk from something else; add a harness back with an explicit
 `--profile`/`--models`/`--tiers` use, applied to the no-harness case. An
 **interactive** re-run is different: it still prompts, with nothing forced
 pre-selected, instead of silently skipping straight back to templates-only
-without asking; deselect every checkbox to stay templates-only.
+without asking; deselect every checkbox to stay templates-only. `init`
+pre-checks whatever it detects on disk; `apply` pre-checks nothing at all
+(both still annotate what is detected with a " (detected)" label).
 
 ```bash
 npx orchestrator-workflow init --harness none --yes
@@ -396,7 +398,13 @@ then the operator's defaults (harnesses fall back one step further, to
 what `init` would have auto-detected) -- except a target whose own
 manifest recorded a real `harnesses: []` (a deliberate templates-only
 install, see "Templates-only mode" above), which stays templates-only on
-a flagless run regardless of the operator's defaults or what is on disk.
+a flagless run regardless of the operator's defaults or what is on disk;
+an **interactive** re-run on such a target still prompts, but with
+nothing pre-checked at all -- neither whatever `apply`'s harness fallback
+(recorded harnesses, else operator defaults, else detection) would
+otherwise have picked, nor a harness config left on disk from something
+else, which is a weak signal next to the target's own recorded
+`harnesses: []`.
 Pass `--sync` to invert that for
 profile, tiers, and models: the operator's defaults then win over whatever
 the target already had recorded. A target pinned to a kit version other

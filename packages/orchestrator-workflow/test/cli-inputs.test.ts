@@ -619,3 +619,210 @@ describe("resolveInitInputs: interactive re-run after a templates-only install (
     expect(result.harnesses).toEqual(["claude"]);
   });
 });
+
+describe("resolveInitInputs: apply's interactive templates-only re-run pre-checks nothing (agent-tasks fe834823, round 2)", () => {
+  // `apply`'s call site hands the sticky branch a `detected` that is NOT
+  // real on-disk detection: it is `resolveApplyHarnesses`'s fallback-chain
+  // result (the target's recorded harnesses, else the operator manifest's
+  // defaults, else detection, else `["claude"]`), which is never empty.
+  // Before round 1's fix, the sticky branch read that value as its own
+  // `detected` and pre-checked whatever `resolveApplyHarnesses` returned
+  // regardless of `fallbackToClaude: false`, so a bare Enter re-widened a
+  // deliberate `--harness none` install. Round 1 fixed that by pre-checking
+  // real on-disk detection (`detectHarnesses(targetDir)`) instead, but that
+  // re-opened the same gap for any target with a stray harness config on
+  // disk (e.g. a `.claude/` directory) that was never a recorded install:
+  // it is a weak signal next to the target's own recorded `harnesses: []`.
+  // Round 2's decided behaviour (D-007) is that `apply`'s sticky prompt
+  // pre-checks nothing at all -- `apply` always passes `stickyPreChecked:
+  // []`, regardless of what `resolveApplyHarnesses` or on-disk detection
+  // report -- so these tests pass a non-empty `detected` (simulating the
+  // fallback-chain result) alongside `stickyPreChecked: []` to prove
+  // neither drives the pre-check.
+  function mockPrompts(harnessesAnswer: string[]) {
+    vi.mocked(inquirer.prompt).mockImplementation(async (questions) => {
+      const q = (questions as Array<Record<string, unknown>>)[0];
+      if (q.name === "harnesses") return { harnesses: harnessesAnswer };
+      if (q.name === "profile") return { profile: q.default };
+      if (q.name === "choice") return { choice: q.default };
+      throw new Error(`unmocked prompt: ${String(q.name)}`);
+    });
+  }
+
+  afterEach(() => {
+    vi.mocked(inquirer.prompt).mockReset();
+  });
+
+  it("nothing is pre-checked even when resolveInitInputs's own detected param is non-empty (the simulated fallback-chain result)", async () => {
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
+    mockPrompts([]);
+
+    const result = await resolveInitInputs({
+      // Simulates resolveApplyHarnesses falling back to the operator
+      // manifest's default harnesses (never empty) or reporting a harness
+      // actually detected on disk. Either way, this must NOT drive the
+      // sticky branch's pre-check: apply's own `stickyPreChecked: []`
+      // wins. `stickyAnnotateDetected` is deliberately omitted here too,
+      // so it defaults to `stickyPreChecked ?? detected` (`[]`): the
+      // checkbox's " (detected)" label is empty in this test, not driven
+      // by this non-empty `detected` param either (see the dedicated
+      // `stickyAnnotateDetected` describe block below for the label's own
+      // coverage).
+      detected: ["claude"],
+      stickyPreChecked: [],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    for (const choice of choices) {
+      expect(choice.checked).toBe(false);
+    }
+    // Bare Enter (operator deselected/confirmed nothing) keeps the target
+    // templates-only, not re-widened to the fallback-chain's "claude".
+    expect(result.harnesses).toEqual([]);
+  });
+
+  it("selecting claude in the prompt installs it, not stuck at []", async () => {
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
+    mockPrompts(["claude"]);
+
+    const result = await resolveInitInputs({
+      detected: ["claude"],
+      stickyPreChecked: [],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    expect(result.harnesses).toEqual(["claude"]);
+  });
+
+  it("a normal target (harnessesRecordedEmpty: false) is unaffected: the non-sticky branch still pre-checks detected as before, ignoring stickyPreChecked", async () => {
+    const previous = fakeManifest({
+      harnesses: ["claude"],
+      harnessesRecordedEmpty: false,
+    });
+    mockPrompts([]);
+
+    await resolveInitInputs({
+      // Simulates resolveApplyHarnesses resolving to the target's own
+      // recorded harnesses; stickyPreChecked deliberately disagrees, to
+      // prove the non-sticky "else" branch never reads it.
+      detected: ["claude"],
+      stickyPreChecked: [],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    // "claude" is pre-checked (from detected/previous.harnesses, unchanged
+    // apply behaviour); the non-sticky branch never reads
+    // `stickyPreChecked` at all.
+    for (const choice of choices) {
+      expect(choice.checked).toBe(choice.value === "claude");
+    }
+  });
+});
+
+describe("resolveInitInputs: apply's sticky prompt still shows ' (detected)' via stickyAnnotateDetected, independent of the pre-check (agent-tasks fe834823, round 3)", () => {
+  // Round 2 (D-007) made `apply`'s sticky prompt pre-check nothing, but
+  // that also silently dropped the " (detected)" label an operator relied
+  // on to see that a harness config already exists on disk. `apply`'s CLI
+  // action now passes a separate `stickyAnnotateDetected` (a fresh
+  // `detectHarnesses(targetDir)` call) purely to drive that label, leaving
+  // `stickyPreChecked: []` untouched.
+  function mockPrompts(harnessesAnswer: string[]) {
+    vi.mocked(inquirer.prompt).mockImplementation(async (questions) => {
+      const q = (questions as Array<Record<string, unknown>>)[0];
+      if (q.name === "harnesses") return { harnesses: harnessesAnswer };
+      if (q.name === "profile") return { profile: q.default };
+      if (q.name === "choice") return { choice: q.default };
+      throw new Error(`unmocked prompt: ${String(q.name)}`);
+    });
+  }
+
+  afterEach(() => {
+    vi.mocked(inquirer.prompt).mockReset();
+  });
+
+  it("labels the on-disk harness ' (detected)' while leaving every choice unchecked", async () => {
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
+    mockPrompts([]);
+
+    await resolveInitInputs({
+      detected: ["codex"],
+      stickyPreChecked: [],
+      stickyAnnotateDetected: ["claude"],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; name: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    // Nothing is pre-checked, regardless of the label.
+    for (const choice of choices) {
+      expect(choice.checked).toBe(false);
+    }
+    // "claude" carries the " (detected)" suffix even though it is not the
+    // `stickyPreChecked` value and not the `detected` param either.
+    const claudeChoice = choices.find((c) => c.value === "claude");
+    expect(claudeChoice?.name).toBe("claude (detected)");
+    const codexChoice = choices.find((c) => c.value === "codex");
+    expect(codexChoice?.name).toBe("codex");
+  });
+});
+
+// `resolveInitInputs: interactive re-run after a templates-only install
+// (F4)` above pins `init`'s own sticky-branch pre-check (real on-disk
+// detection via `detected`, since `init`'s call site omits
+// `stickyPreChecked` and it defaults to `detected`) unchanged by this
+// round-2 fix.

@@ -6,6 +6,7 @@ import { Command } from "commander";
 import inquirer from "inquirer";
 
 import { PACKAGE_VERSION } from "./assets.js";
+import { buildApplyInitInputs } from "./cli-apply.js";
 import { resolveInitInputs } from "./cli-inputs.js";
 import { HARNESSES, detectHarnesses } from "./detect.js";
 import type { Harness } from "./detect.js";
@@ -503,8 +504,20 @@ function repoManifestHasMalformedPin(targetDir: string): boolean {
  * set by the caller below from `repoManifest`) overrides whatever this
  * function returns and keeps a non-interactive re-run templates-only. This
  * function's own fallback chain still runs first and its result is still
- * used as `detected` (relevant to an interactive prompt, and to any target
- * whose manifest is missing or malformed rather than deliberately empty).
+ * used as `detected` for any target whose manifest is missing or malformed
+ * rather than deliberately empty, and for the normal (non-sticky) branch's
+ * interactive prompt pre-check on a target with real recorded harnesses.
+ * It is deliberately NOT reused as the sticky branch's own interactive
+ * pre-check: that branch reads `resolveInitInputs`'s separate
+ * `stickyPreChecked` field instead, which the caller below fills with `[]`,
+ * because this function's result is never empty (it falls through the
+ * operator default and `["claude"]` fallbacks) and would otherwise
+ * pre-check that fallback on a deliberately templates-only target, letting
+ * a bare Enter re-widen the install. A harness config left on disk (e.g. a
+ * stray `.claude/` directory) is not used as the pre-check either: it is a
+ * weak signal next to the target's own recorded `harnesses: []`, so the
+ * prompt starts with nothing pre-checked at all on this path
+ * (agent-tasks fe834823).
  */
 function resolveApplyHarnesses(
   targetDir: string,
@@ -773,29 +786,36 @@ program
         opencodeModels,
         opencodeClassModels,
         warnings,
-      } = await resolveInitInputs({
-        detected: chosenHarnesses,
-        interactive,
-        previous,
-        opts,
+      } = await resolveInitInputs(
         // `previous` is always defined here (`buildApplyPrevious` returns a
         // synthetic object even for a target with no manifest of its own),
-        // so `previousIsRecordedManifest` cannot be `Boolean(previous)`;
-        // it has to track whether the target itself actually has a
-        // recorded manifest, since only that manifest's own
-        // `harnessesRecordedEmpty` (carried into `previous` by
-        // `buildApplyPrevious`) can mean a deliberate `--harness none`
-        // install. A target with no manifest at all never sets this, and
-        // the stickiness gate in `resolveInitInputs` requires both flags
-        // together, so this alone does not by itself make anything sticky.
-        // This does overlap with `harnessesRecordedEmpty` today (both
-        // ultimately trace back to the same repo manifest being present),
-        // but the two are kept as separate flags on purpose, as defence in
-        // depth: `previousIsRecordedManifest` guards against a future
-        // caller of `resolveInitInputs` synthesizing a `previous` with
+        // so `previousIsRecordedManifest` cannot be `Boolean(previous)`; it
+        // has to track whether the target itself actually has a recorded
+        // manifest, since only that manifest's own `harnessesRecordedEmpty`
+        // (carried into `previous` by `buildApplyPrevious`) can mean a
+        // deliberate `--harness none` install. A target with no manifest at
+        // all never sets this, and the stickiness gate in
+        // `resolveInitInputs` requires both flags together, so this alone
+        // does not by itself make anything sticky. This does overlap with
+        // `harnessesRecordedEmpty` today (both ultimately trace back to the
+        // same repo manifest being present), but the two are kept as
+        // separate flags on purpose, as defence in depth:
+        // `previousIsRecordedManifest` guards against a future caller of
+        // `resolveInitInputs` synthesizing a `previous` with
         // `harnessesRecordedEmpty` set but no real repo manifest behind it.
-        previousIsRecordedManifest: Boolean(repoManifest),
-      });
+        // The sticky-branch wiring itself (`stickyPreChecked: []`,
+        // `stickyAnnotateDetected`) is pinned inside `buildApplyInitInputs`
+        // rather than inlined here (agent-tasks fe834823, fix round 3,
+        // review finding 1).
+        buildApplyInitInputs(
+          targetDir,
+          chosenHarnesses,
+          previous,
+          interactive,
+          opts,
+          Boolean(repoManifest),
+        ),
+      );
       for (const w of warnings) {
         process.stderr.write(`${w}\n`);
       }
