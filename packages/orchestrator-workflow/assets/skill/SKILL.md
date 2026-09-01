@@ -500,10 +500,11 @@ against its role's output contract, including an implementer return that
 omits the `mutation_probes` field even though the task assignment named
 mutation probes to run, or that omits the `commits` field even though the
 task assignment asked for a commit. When a subagent returns near-instantly
-with no tool activity, treat that as a misfire signal rather than proof: check the output
-against the contract with extra suspicion, and accept it only if it is
-contract-valid and the assignment was answerable from the context supplied
-with it. Treat a misfire as a failed spawn: resume or respawn the subagent,
+with no tool activity, treat that as a misfire signal rather than proof:
+check the output against the contract with extra suspicion, and accept it
+only if it is contract-valid and the assignment was answerable from the
+context supplied with it. Treat a misfire as a failed spawn: resume or
+respawn the subagent,
 and never fold the non-contract output into run state or count it as a
 completed step. For the near-instant, no-tool-activity signal specifically,
 prefer resume over a fresh respawn: send the same subagent a message that

@@ -1067,16 +1067,17 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
  * misfire rule. Pins the `commits` field (byte-identical between SKILL.md's
  * reference copy and the installed implementer.md prompt, the same rigor
  * applied to `mutation_probes` above), its not-applicable `commits: []`
- * clause, and the misfire-rule sentence that treats an omission as a
- * misfire when the task assignment asked for a commit.
+ * clause, the misfire-rule sentence that treats an omission as a misfire
+ * when the task assignment asked for a commit, and the "full sha" /
+ * "in order" semantics themselves, not only the surrounding clauses.
  */
 describe("commits field ships in the skill and the implementer prompt", () => {
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
   const implementerMd = unwrap(readAsset("agents/implementer.md"));
 
-  it("the installed implementer prompt instructs reporting every commit sha produced, in order", () => {
+  it("the installed implementer prompt instructs reporting the full sha of every commit produced, in order", () => {
     expect(implementerMd).toContain(
-      "Report every commit sha you produced on the task branch, in order, in the",
+      "Report the full sha of every commit you produced on the task branch, in",
     );
     expect(implementerMd).toContain("`commits` field");
     expect(implementerMd).toContain(
@@ -1088,6 +1089,13 @@ describe("commits field ships in the skill and the implementer prompt", () => {
     expect(skillMd).toContain(
       "or that omits the `commits` field even though the task assignment asked for a commit",
     );
+  });
+
+  it("both copies pin the full-sha, in-order semantics, not only the commits: [] clause", () => {
+    expect(skillMd).toContain("full sha");
+    expect(implementerMd).toContain("full sha");
+    expect(skillMd).toContain("in the order produced");
+    expect(implementerMd).toContain("in order");
   });
 
   it("both implementer output contracts carry an identical commits field (raw, not line-unwrapped)", () => {

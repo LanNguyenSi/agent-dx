@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-01T06:45:08Z
+timestamp: 2026-09-01T07:14:43Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -70,10 +70,12 @@ final output, nothing else" block:
 - Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:265-286#"risk: low | medium | high"`
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:47-69#"recommendation:"`.
-- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:313-340#"recommendation: accept | review | fix_required"`
-  vs. `packages/orchestrator-workflow/assets/agents/implementer.md:41-66#"recommendation: accept | review | fix_required"`.
+- Implementer: `packages/orchestrator-workflow/assets/skill/SKILL.md:313-341#"commits:"`
+  vs. `packages/orchestrator-workflow/assets/agents/implementer.md:41-67#"commits:"`.
   Both copies gained a `mutation_probes` field in 0.16.0; see
   [Mutation probes requirement](#mutation-probes-requirement-0160) below.
+  Both copies also gained a `commits` field; see
+  [Commits field](#commits-field) below.
 - Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:358-381#"matches_implementer_claim: matched | mismatched |"`
   vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:65-87#"reproduction:"`. Both
   copies gained a `reproduction` field in 0.14.0; see
@@ -126,13 +128,13 @@ but fails the exact-name pin. The explorer pair still has no dedicated
 automated drift guard today, protected only by direct read and review. The
 advisor pair started the same way — a 0.21.0
 `describe("advisor escalation policy ships in the AGENTS.md section and
-SKILL.md")` block (`test/docs-consistency.test.ts:2313-2386#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
+SKILL.md")` block (`test/docs-consistency.test.ts:2321-2394#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
 that `SKILL.md` carries an Advisor output contract block with the right
 top-level shape, a substring-presence pin, not byte-for-byte equality — but
 review round 1 (M2) closed that gap: a dedicated
 `describe("advisor output contract is byte-identical between SKILL.md and
 advisor.md (review round 1, M2)")` block
-(`test/docs-consistency.test.ts:2400-2414#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
+(`test/docs-consistency.test.ts:2408-2422#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
 both raw files and asserts equality, the same pattern the reviewer and
 implementer pairs use.
 
@@ -203,8 +205,7 @@ to parse against its role's output contract. Two detection signals:
    the `mutation_probes` field even though the task assignment named
    mutation probes to run, or that omits the `commits` field even though the
    task assignment asked for a commit (`SKILL.md:501-502#"task assignment asked for a commit. When a subagent returns"`);
-   the `commits` clause was added alongside the `commits` output field
-   itself.
+   see [Commits field](#commits-field) below for the field itself.
 2. Near-instant return with no tool activity (`SKILL.md:503#"with no tool activity, treat that as a misfire signal rather than"`). This is a
    signal, not proof: a legitimately tool-free return (e.g. a slicer
    answering entirely from context already supplied) is not automatically a
@@ -213,25 +214,25 @@ to parse against its role's output contract. Two detection signals:
 
 Response: treat a misfire as a failed spawn: resume or respawn the
 subagent; never fold the non-contract output into run state or count it as a
-completed step (`SKILL.md:506-508#"completed step. For the near-instant, no-tool-activity"`). Since 0.18.0, for the near-instant,
+completed step (`SKILL.md:507-509#"completed step. For the near-instant, no-tool-activity"`). Since 0.18.0, for the near-instant,
 no-tool-activity signal specifically, the rule states a concrete preference
 rather than leaving the resume-or-respawn choice open: prefer resume over a
 fresh respawn, sending the same subagent a message that explicitly repeats
 the original assignment rather than a generic retry, since resume keeps the
 subagent's prior turn in context while a fresh spawn starts cold
-(`SKILL.md:508-511#"since resume keeps the subagent's prior turn in context"`); fall back to a fresh respawn only if the resume
-attempt itself misfires the same way (`SKILL.md:515-516#"the resume attempt itself misfires the same way. This"`). Every incident of
+(`SKILL.md:509-512#"since resume keeps the subagent's prior turn in context"`); fall back to a fresh respawn only if the resume
+attempt itself misfires the same way (`SKILL.md:516-517#"the resume attempt itself misfires the same way. This"`). Every incident of
 this exact signal whose outcome was recorded has resolved on the first
-resume attempt (`SKILL.md:512-515#"resolved on the first resume attempt; fall back to a"`) — a same-day review-fix round (0.18.0)
+resume attempt (`SKILL.md:513-516#"resolved on the first resume attempt; fall back to a"`) — a same-day review-fix round (0.18.0)
 bound this claim to the recorded count after finding the original wording
 asserted a universal resolve rate the record did not support (see
 Motivation below). The preference is scoped away from a second,
 structurally different misfire class measured separately: a mid-run
 watchdog stall did not resolve on resume and needed a fresh, explicitly
-constrained respawn instead (`SKILL.md:516-521#"watchdog stall as outside this preference. Record every"`). Record every misfire in
-`03-decisions.md` (`SKILL.md:521-522#"This matters most for review: a misfired review is not a"`). Review-gate consequence, stated
+constrained respawn instead (`SKILL.md:517-522#"watchdog stall as outside this preference. Record every"`). Record every misfire in
+`03-decisions.md` (`SKILL.md:522-523#"This matters most for review: a misfired review is not a"`). Review-gate consequence, stated
 explicitly: a misfired review is not a review and never satisfies the review
-gate, since review is never skipped (`SKILL.md:522-523#"review and never satisfies the review gate, since"`). Review-gate
+gate, since review is never skipped (`SKILL.md:523-524#"review and never satisfies the review gate, since"`). Review-gate
 severities and waiver mechanics themselves are out of this doc's lane; see
 [review-gate-and-waivers.md](review-gate-and-waivers.md).
 
@@ -248,7 +249,7 @@ moved to `packages/orchestrator-workflow/CHANGELOG.md`'s `[0.24.0]` entry
 observed for, the recorded incident count, and the separate watchdog-stall
 incident's outcome. The watchdog-stall exception itself was reworded the
 same way, dropping "in the one measured incident of that class, it stalled
-a second time" down to just the outcome (`SKILL.md:518-520#"explicitly constrained respawn produced a"`), since the
+a second time" down to just the outcome (`SKILL.md:519-521#"explicitly constrained respawn produced a"`), since the
 incident count is now evidence rather than rule text too. `SKILL.md:114-115#"gate's documentation (grounding-mcp) for the full"`
 (the run-state paragraph, out of this section but touched by the same
 placement pass) similarly drops a pinned `grounding-mcp 0.6.0` version
@@ -392,6 +393,43 @@ No dedicated byte-for-byte drift guard existed for the findings block
 before this change (unlike the `reproduction` and `mutation_probes`
 fields above); one now does, extracting the `findings:` block from both
 raw files the same way.
+
+## Commits field
+
+The implementer output contract gained a `commits` field, added to both
+copies identically (`packages/orchestrator-workflow/assets/skill/SKILL.md:341#"commits:"`
+and `packages/orchestrator-workflow/assets/agents/implementer.md:67#"commits:"`,
+byte-identical block, the same rigor already applied to `mutation_probes`
+above). It lists the full sha of every commit the implementer produced on
+the task branch, in order (`SKILL.md:353#"produced on the task branch, in the order produced"`
+and, worded identically in substance in the installed prompt's rule bullet,
+`implementer.md:22#"Report the full sha of every commit you produced"`, with
+"in order" carried at `implementer.md:23#"order, in the"`).
+When the task produced no commit, the implementer returns `commits: []`
+rather than omitting the field, so "did not commit" is distinguishable from
+"forgot to report" (`SKILL.md:354-355#"omitting the field, so 'did not commit' is"`);
+the field is otherwise mandatory on every return, matching `mutation_probes`
+and every other contract field. An output missing the field when the task
+assignment asked for a commit is a misfire (see
+[Subagent misfire rule](#subagent-misfire-rule-0110-evidence-relocated-0240)
+above), worded identically in both copies as "treated as a misfire, not
+evidence" (`SKILL.md:502#"task assignment asked for a commit. When a subagent returns"`
+and `implementer.md:24#"assignment asked for a commit is treated as a misfire, not"`).
+
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:1074-1120#"expect(implementerMd).toContain(clause);"`
+pins the field: the installed prompt's full-sha instruction and field
+mention, :1078-1086, the misfire-rule sentence, :1088-1092, a dedicated pin
+on the "full sha" / "in order" semantics themselves (not only the
+surrounding clauses), :1094-1099, a byte-for-byte cross-copy equality check
+on the field block, :1101-1113, and the not-applicable `commits: []` clause
+in both copies, :1115-1119.
+
+Motivation, `packages/orchestrator-workflow/CHANGELOG.md:#[Unreleased]`
+(agent-tasks task 2355f144): the implementer output contract had no field
+for the commit sha produced; briefs asked for it in prose and implementers
+omitted it (twice in one session), forcing the orchestrator to re-derive it
+from git. Unlike a prose ask, a contract field is checked by the misfire
+rule.
 
 ## Cross-links
 

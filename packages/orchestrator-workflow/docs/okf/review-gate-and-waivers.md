@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-01T06:45:08Z
+timestamp: 2026-09-01T07:14:43Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -155,7 +155,7 @@ Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 reviewer output contract (`CHANGELOG.md:#[0.11.0]`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
-(`SKILL.md:522-523#"review and never satisfies the review gate, since"`), pinned by
+(`SKILL.md:523-524#"review and never satisfies the review gate, since"`), pinned by
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:521-523#"never satisfies the review gate"`. Since
 0.18.0 the rule also names resume over a fresh respawn as the preferred
 response for the near-instant, no-tool-activity signal specifically (scoped
@@ -214,7 +214,7 @@ Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
 (`CHANGELOG.md:#[0.16.0]#"as a hard-mandatory"`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:1122-1137#"the orchestrator asks the reviewer to resupply it"` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:1130-1145#"the orchestrator asks the reviewer to resupply it"` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.
 
 ## Review-round escalation budget
@@ -225,19 +225,19 @@ single defect-class recurrence within one task, but nothing previously
 forced a choice once that stopping, or `fix_required` review rounds, kept
 recurring on the same task. This budget applies in addition to the halt
 rule's split-or-redesign response, not instead of it:
-`SKILL.md:540#"## Review-round escalation budget"` triggers "by the second
+`SKILL.md:541#"## Review-round escalation budget"` triggers "by the second
 round-2 halt signal on the same task, or by the third `fix_required`
 review round on the same task, whichever comes first", at which point the
 orchestrator picks one of three named escalations
-(`SKILL.md:555#"**Tier or model escalation**"`,
-`SKILL.md:561#"**Advisor spawn**"`, `SKILL.md:564#"**Merge-hold**"`: raise
+(`SKILL.md:556#"**Tier or model escalation**"`,
+`SKILL.md:562#"**Advisor spawn**"`, `SKILL.md:565#"**Merge-hold**"`: raise
 the implementer to at least `-xhigh` where installed or to the strongest
 available model, an advisor spawn asked "redesign, split, or hold?", or an
 operator merge-hold). A counted round is a completed reviewer return whose
 `acceptance_recommendation` is `fix_required` or `reject`; a misfired
 review is not a round. Which of the three is picked is judgment; that one
 is picked and recorded is not
-(`SKILL.md:567#"Judgment governs which of the three to pick; only that one is chosen and"`).
+(`SKILL.md:568#"Judgment governs which of the three to pick; only that one is chosen and"`).
 `agents-md-section.md:106-120#"rule's split-or-redesign response, not instead of it."`
 carries the same rule in short form for repos without the full skill text
 loaded.
