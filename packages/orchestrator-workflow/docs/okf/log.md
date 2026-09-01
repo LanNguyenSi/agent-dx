@@ -6281,3 +6281,68 @@ sticky test's new phrase assertion turned red; restored, green again. (b)
 temporarily reapplied `previousIsRecordedManifest: false` in the `apply`
 action -- the new detection-leg test's `templates only` assertion turned
 red (installed `claude` instead); restored, green again.
+- 2026-09-01 (fix round 2, agent-tasks 2355f144): fix round 1
+  (274d3ea9, 4a4a7f7d) had added the implementer output contract's
+  `commits` field to SKILL.md and implementer.md, the misfire-rule clause,
+  a `commits`-field `describe` block to test/docs-consistency.test.ts, and
+  re-stamped review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
+  subagent-contracts-superset.md, and model-preselection.md against package
+  version 0.26.0+ (Unreleased). Review round 2 found the round-1 pass had
+  extended neither of the "Where each contract lives" bullet's two spans
+  (`SKILL.md:313-340` and `implementer.md:41-66`) past the newly added
+  field, so both citations' cited ranges ended one field short of the
+  block's actual last field line; fixed to `SKILL.md:313-341` and
+  `implementer.md:41-67` (the block's true last content line is the
+  `commits:` key itself, not its `- ""` placeholder value, which repeats
+  too often across the contract to serve as a unique anchor). Added a new
+  `## Commits field` section (mirroring the existing Reproduction/Mutation
+  probes/Recurrence sections) describing the field's semantics (full shas
+  in order, `[]` when no commit, mandatory, misfire clause) with citations
+  into both copies and into the new test `describe` block; replaced the
+  Subagent misfire rule section's uninformative "the `commits` clause was
+  added alongside the `commits` output field itself" sentence with a
+  cross-link to that new section. Fixed implementer.md's rule bullet to
+  say "Report the full sha of every commit ... in order" (was "every
+  commit sha ... in order"), matching SKILL.md's wording, and updated the
+  matching test assertion; added a dedicated test pinning the "full sha"
+  and "in order"/"in the order produced" substance in both copies, not
+  only the surrounding `commits: []` clause. Re-wrapped SKILL.md's
+  Subagent misfire rule paragraph to fix an 89-character rewrap artifact
+  at its old line 503 (the file's convention is ~76 columns); the fix
+  itself is a 5-line-to-6-line reflow of the paragraph's old lines
+  502-506, net +1 line at that point, plus the two test-file edits above
+  (comment rewrite, new `it` block) added a net +8 lines starting at old
+  test/docs-consistency.test.ts line ~1090 -- both shifts verified with a
+  `difflib`-based old-to-new line mapping (not assumed uniform), confirmed
+  against actual file content at every corrected citation, not just the
+  arithmetic offset. Re-anchored every `SKILL.md:` citation into the
+  Subagent misfire rule section and every downstream `## Review-round
+  escalation budget` citation in review-gate-and-waivers.md (uniform +1
+  shift past old line 506), plus every `test/docs-consistency.test.ts:`
+  citation into or past the shifted region in subagent-contracts-
+  superset.md, review-gate-and-waivers.md, and model-preselection.md,
+  including two bare continuation citations in model-preselection.md, for
+  the tier-model-class-table guard and the opencode-effort-prose guard
+  respectively, both predating this fix round and already imprecise
+  (pointing partway into a preceding helper function rather than the
+  `describe` line itself) but re-anchored on the same +8 offset so they
+  keep resolving to the same, still-imprecise-but-content-matching target
+  they did before this round. A stray backtick inside one new anchor's
+  quoted text (the implementer.md rule bullet's "in order" citation,
+  which had quoted the backtick-wrapped word "commits" as part of its
+  anchor) tripped the anchor-content regex (which excludes backticks from
+  the quoted form) and was caught by the "zero unanchored citations"
+  test, not by review; shortened the anchor to drop the backtick-wrapped
+  word. `npm run build` and `npm
+  test` both clean (589/589). `npx okf-kit@0.8.0 check docs/okf`
+  (plain, `--strict`, and `--require-anchors`) all report the same result:
+  0 errors, 0 warnings, 23 notices (all `unresolved-ambiguous`: the 21
+  pre-existing bare-filename collisions the bundle has carried since
+  earlier passes, plus the two bare `SKILL.md` span citations this entry
+  itself introduces, which collide with another package's `SKILL.md`; the
+  round-1 baseline was 21). Item 6 of the fix
+  brief (a derivation test asserting the superset doc enumerates every
+  contract field name) was skipped: the doc's implementer section cites
+  individual fields by name inside prose, it does not enumerate the full
+  field list anywhere a derivation test could walk, so there is nothing
+  to derive against.
