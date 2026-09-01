@@ -103,8 +103,8 @@ Step 1 of the Workflow carries the matching instruction to write the pointer
 in every worktree the run touches
 (SKILL.md:135-136#"in every worktree the run touches."), and each of the
 three per-harness bullets under Harness notes repeats that the pointer rule
-applies unchanged regardless of harness (SKILL.md:474-479#"applies unchanged.";
-SKILL.md:480-482#"applies unchanged."; SKILL.md:483-486#"applies unchanged.").
+applies unchanged regardless of harness (SKILL.md:482-487#"applies unchanged.";
+SKILL.md:488-490#"applies unchanged."; SKILL.md:491-494#"applies unchanged.").
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo

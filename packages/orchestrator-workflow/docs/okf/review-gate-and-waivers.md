@@ -31,7 +31,7 @@ every change; only the size of the apparatus changes."
 ## Severity ladder and what blocks
 
 Reviewer findings carry `severity: low | medium | high | critical`
-(`SKILL.md:359#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
+(`SKILL.md:367#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
@@ -42,7 +42,7 @@ waiver bookkeeping applies to them.
 Do not conflate two distinct vocabularies attached to the same review: the
 per-finding `Decision` column (below) and the whole-review
 `acceptance_recommendation: accept | accept_with_notes | fix_required |
-reject` (`SKILL.md:364#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
+reject` (`SKILL.md:372#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
 Recommendation section,
 `packages/orchestrator-workflow/assets/templates/05-review-findings.md:26#"accept | accept_with_notes | fix_required | reject"`).
 A review can recommend `fix_required` overall while individual low findings
@@ -155,7 +155,7 @@ Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 reviewer output contract (`CHANGELOG.md:#[0.11.0]`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
-(`SKILL.md:513-514#"review and never satisfies the review gate, since"`), pinned by
+(`SKILL.md:522-523#"review and never satisfies the review gate, since"`), pinned by
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:521-523#"never satisfies the review gate"`. Since
 0.18.0 the rule also names resume over a fresh respawn as the preferred
 response for the near-instant, no-tool-activity signal specifically (scoped
@@ -179,7 +179,7 @@ implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
 same rule (`reviewer.md:56-66#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`SKILL.md:369-373#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:82-85#"residual_risks:"`); `matches_implementer_claim`
+field (`SKILL.md:377-381#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:82-85#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -201,7 +201,7 @@ live, the misfire rule) are out of scope here; see
 previously forced a reviewer return to set `acceptance_recommendation` at
 all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
-`SKILL.md:376-378#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
+`SKILL.md:384-386#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing — ask the reviewer to resupply it, rather than infer one from the
 findings — and the installed `reviewer.md:35-41#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
@@ -214,7 +214,7 @@ Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
 (`CHANGELOG.md:#[0.16.0]#"as a hard-mandatory"`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:1070-1085#"the orchestrator asks the reviewer to resupply it"` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:1122-1137#"the orchestrator asks the reviewer to resupply it"` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.
 
 ## Review-round escalation budget
@@ -225,19 +225,19 @@ single defect-class recurrence within one task, but nothing previously
 forced a choice once that stopping, or `fix_required` review rounds, kept
 recurring on the same task. This budget applies in addition to the halt
 rule's split-or-redesign response, not instead of it:
-`SKILL.md:531#"## Review-round escalation budget"` triggers "by the second
+`SKILL.md:540#"## Review-round escalation budget"` triggers "by the second
 round-2 halt signal on the same task, or by the third `fix_required`
 review round on the same task, whichever comes first", at which point the
 orchestrator picks one of three named escalations
-(`SKILL.md:546#"**Tier or model escalation**"`,
-`SKILL.md:552#"**Advisor spawn**"`, `SKILL.md:555#"**Merge-hold**"`: raise
+(`SKILL.md:555#"**Tier or model escalation**"`,
+`SKILL.md:561#"**Advisor spawn**"`, `SKILL.md:564#"**Merge-hold**"`: raise
 the implementer to at least `-xhigh` where installed or to the strongest
 available model, an advisor spawn asked "redesign, split, or hold?", or an
 operator merge-hold). A counted round is a completed reviewer return whose
 `acceptance_recommendation` is `fix_required` or `reject`; a misfired
 review is not a round. Which of the three is picked is judgment; that one
 is picked and recorded is not
-(`SKILL.md:558#"Judgment governs which of the three to pick; only that one is chosen and"`).
+(`SKILL.md:567#"Judgment governs which of the three to pick; only that one is chosen and"`).
 `agents-md-section.md:106-120#"rule's split-or-redesign response, not instead of it."`
 carries the same rule in short form for repos without the full skill text
 loaded.

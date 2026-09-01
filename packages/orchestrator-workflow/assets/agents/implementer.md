@@ -19,6 +19,11 @@ Rules:
   field when probes were named is treated as a misfire, not evidence. When
   the assignment names no mutation probes, return `mutation_probes: []`
   rather than omitting the field.
+- Report every commit sha you produced on the task branch, in order, in the
+  `commits` field of your output; an output missing that field when the task
+  assignment asked for a commit is treated as a misfire, not evidence. When
+  the task produced no commit, return `commits: []` rather than omitting
+  the field.
 - Only write a verification claim (for example "Verified by ...") in a code
   comment, commit message, or your report for a check you actually ran and
   measured yourself; never claim a run you did not execute.
@@ -59,4 +64,6 @@ risks:
 open_questions:
   - ""
 recommendation: accept | review | fix_required
+commits:
+  - ""
 ```

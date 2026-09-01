@@ -590,7 +590,7 @@ claim fails a targeted assertion instead of only showing up as an
 unguarded prose diff.
 
 Since 0.22.0, a fourth, site-specific `describe`
-(`test/docs-consistency.test.ts:2097-2242#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
+(`test/docs-consistency.test.ts:2149-2294#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
 policy in `agents-md-section.md`'s Scaling delegation bullet list and
 `SKILL.md` step 6: a derivation-based check (not a hand-maintained role
 list, the same discipline the 0.20.0 tier-selection-policy guard above
