@@ -6367,7 +6367,7 @@ and out of scope.
 
 Fix: `ResolveInitInputsParams.filesystemDetected` was renamed to
 `stickyPreChecked?: Harness[]`
-(`packages/orchestrator-workflow/src/cli-inputs.ts:190-208`), with its doc
+(`packages/orchestrator-workflow/src/cli-inputs.ts:190-208#"stickyPreChecked?: Harness[];"`), with its doc
 comment rewritten to state the real semantics ("the entries pre-checked
 when the target recorded `harnesses: []`; defaults to `detected` for
 `init`; `apply` passes `[]`"). The sticky branch now reads
@@ -6399,8 +6399,8 @@ block above (`init`'s own sticky pre-check, unchanged since it omits
 `init`'s behaviour.
 
 Mutation probe: reverted the sticky branch's own call
-(`packages/orchestrator-workflow/src/cli-inputs.ts:307`) from
-`promptHarnesses(stickyPreChecked ?? detected, [], false)` back to plain
+(`packages/orchestrator-workflow/src/cli-inputs.ts:307#"await promptHarnesses(stickyPreChecked ?? detected, [], false)"`)
+from `promptHarnesses(stickyPreChecked ?? detected, [], false)` back to plain
 `promptHarnesses(detected, [], false)`, ignoring `stickyPreChecked`
 entirely (equivalent in effect to `apply`'s CLI action passing `detected`
 straight through as its own pre-check, the same class of gap round 1 left
@@ -6422,3 +6422,90 @@ of the citing doc each citation actually belongs to, not just taking the
 first match), plus the same three hardcoded citation strings inside
 `test/docs-consistency.test.ts` the round-1 entry above already names,
 re-pointed a second time.
+
+## 2026-09-01 (agent-tasks fe834823, fix round 3)
+
+Task: round 2's own reviewer pass (accept_with_notes) found the fix
+correct but under-guarded and under-documented: (1) the sticky-branch
+wiring at the CLI action's call site was unpinned by any test -- changing
+`stickyPreChecked: []` to `stickyPreChecked: chosenHarnesses` left the
+suite green; (2) `install-fence-mechanics.md` pointed
+`previous.harnessesRecordedEmpty` at JSDoc prose instead of the gate
+itself; (3) three places (a test title/comment and `log.md`'s own round-2
+Tests paragraph) claimed the checkbox's "(detected)" label was non-empty
+on the discriminating test case, when in fact nothing was labelled there
+either; (4) passing `stickyPreChecked: []` had also silently dropped the
+"(detected)" annotation from the sticky prompt, leaving an operator with
+no on-screen hint that a harness config already exists on disk; (5) two
+citations in the round-2 log entry above were bare (no anchor).
+
+Fix: `buildApplyInitInputs` is a new, side-effect-free export
+(`packages/orchestrator-workflow/src/cli-apply.ts`) that builds `apply`'s
+`resolveInitInputs` params, pinning `stickyPreChecked: []` inside a
+function `apply`'s CLI action now calls
+(`packages/orchestrator-workflow/src/cli.ts`) rather than assembling the
+params object inline; it lives in its own module (not `cli.ts` itself)
+because `cli.ts` runs `program.parseAsync(process.argv)` at import time,
+which importing it directly from a unit test would trigger. It also
+carries a new `stickyAnnotateDetected` field
+(`packages/orchestrator-workflow/src/cli-inputs.ts:220-234#"stickyAnnotateDetected?: Harness[];"`)
+that restores the "(detected)" label: `promptHarnesses` gained a fourth
+parameter, `annotateDetected` (default: its own first argument, so every
+call site that omits it is unchanged), that drives only the checkbox's
+"(detected)" suffix, independent of what is actually pre-checked
+(`packages/orchestrator-workflow/src/cli-inputs.ts:25-38#"annotateDetected: Harness[] = detected,"`).
+`apply`'s sticky-branch call passes a fresh `detectHarnesses(targetDir)`
+call as this field (`cli-apply.ts:43#"stickyAnnotateDetected: detectHarnesses(targetDir),"`)
+while still pre-checking nothing, so an operator sees which harness is on
+disk without a bare Enter re-widening the install.
+
+Docs: `install-fence-mechanics.md` re-pointed `previous.harnessesRecordedEmpty`
+from JSDoc prose to the actual gate
+(`cli-inputs.ts:290-293#"previous.harnessesRecordedEmpty"`), dropped the
+run-internal "decision D-007" label from its prose (the `agent-tasks
+fe834823` pointer alone identifies the task), and now describes the
+`buildApplyInitInputs`/`stickyAnnotateDetected` split. `CHANGELOG.md`'s
+Unreleased/Fixed entry was trimmed to the two states that matter (apply's
+sticky prompt used to pre-check a never-empty fallback chain; now it
+pre-checks nothing, still labelling what is detected), dropping the
+narration of the unshipped round-1 intermediate state.
+`README.md`'s "Templates-only mode" section now says `init` pre-checks
+what it detects and `apply` pre-checks nothing, both still annotating.
+The two bare citations in this file's round-2 entry above were anchored.
+
+Tests: `test/cli-apply.test.ts` unit-tests `buildApplyInitInputs` directly
+(pins `stickyPreChecked: []` regardless of the harnesses passed in, checks
+`interactive`/`previous`/`opts`/`previousIsRecordedManifest` pass through
+unchanged, and that `stickyAnnotateDetected` reflects real
+`detectHarnesses(targetDir)` output independent of the harnesses passed
+in). `test/cli-inputs.test.ts` gained a new describe block covering
+`stickyAnnotateDetected`: the sticky prompt labels an on-disk harness
+"(detected)" while leaving every checkbox unchecked. The existing round-2
+describe block's discriminating test title and inline comment were reworded
+to say what is actually non-empty in that case (`resolveInitInputs`'s own
+`detected` param, the simulated fallback-chain result), not the checkbox
+label, which is empty there too since `stickyAnnotateDetected` is omitted.
+
+Mutation probes:
+(A) changed `buildApplyInitInputs`'s return to
+`stickyPreChecked: chosenHarnesses` -- the new
+`test/cli-apply.test.ts` "always pins stickyPreChecked to []" test turned
+red (`result.stickyPreChecked` was `["claude", "codex"]` instead of `[]`);
+restored, re-ran green.
+(B) changed the sticky branch's own call in `resolveInitInputs` to pass
+`stickyAnnotateDetected` as the pre-check argument too
+(`promptHarnesses(stickyAnnotateDetected ?? detected, [], false,
+stickyAnnotateDetected)`) -- the round-2 "nothing is pre-checked" test
+turned red (a detected harness came back pre-checked); restored, re-ran
+green.
+
+Verification: `npm run build` (clean); `npm test` (592 tests green, up
+from round 2's 587: +4 `cli-apply.test.ts`, +1 new
+`stickyAnnotateDetected` describe block); after committing,
+`npx -y okf-kit@0.8.0 check docs/okf` (0 errors, 0 warnings; notice count
+compared against base commit 0960a39's own 21). Every `cli.ts`/
+`cli-inputs.ts` citation this round's edits shifted was re-pointed across
+`install-fence-mechanics.md`, `model-preselection.md`, and
+`operator-install-and-registry.md`, plus the hardcoded citation strings
+inside `test/docs-consistency.test.ts` the round-1/round-2 entries above
+already name, re-pointed a third time.

@@ -653,7 +653,7 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
     vi.mocked(inquirer.prompt).mockReset();
   });
 
-  it("nothing is pre-checked even when a harness IS detected (both the fallback-chain result and the 'detected' label are non-empty)", async () => {
+  it("nothing is pre-checked even when resolveInitInputs's own detected param is non-empty (the simulated fallback-chain result)", async () => {
     const previous = fakeManifest({
       harnesses: [],
       harnessesRecordedEmpty: true,
@@ -665,7 +665,12 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
       // manifest's default harnesses (never empty) or reporting a harness
       // actually detected on disk. Either way, this must NOT drive the
       // sticky branch's pre-check: apply's own `stickyPreChecked: []`
-      // wins.
+      // wins. `stickyAnnotateDetected` is deliberately omitted here too,
+      // so it defaults to `stickyPreChecked ?? detected` (`[]`): the
+      // checkbox's " (detected)" label is empty in this test, not driven
+      // by this non-empty `detected` param either (see the dedicated
+      // `stickyAnnotateDetected` describe block below for the label's own
+      // coverage).
       detected: ["claude"],
       stickyPreChecked: [],
       interactive: true,
@@ -750,6 +755,69 @@ describe("resolveInitInputs: apply's interactive templates-only re-run pre-check
     for (const choice of choices) {
       expect(choice.checked).toBe(choice.value === "claude");
     }
+  });
+});
+
+describe("resolveInitInputs: apply's sticky prompt still shows ' (detected)' via stickyAnnotateDetected, independent of the pre-check (agent-tasks fe834823, round 3)", () => {
+  // Round 2 (D-007) made `apply`'s sticky prompt pre-check nothing, but
+  // that also silently dropped the " (detected)" label an operator relied
+  // on to see that a harness config already exists on disk. `apply`'s CLI
+  // action now passes a separate `stickyAnnotateDetected` (a fresh
+  // `detectHarnesses(targetDir)` call) purely to drive that label, leaving
+  // `stickyPreChecked: []` untouched.
+  function mockPrompts(harnessesAnswer: string[]) {
+    vi.mocked(inquirer.prompt).mockImplementation(async (questions) => {
+      const q = (questions as Array<Record<string, unknown>>)[0];
+      if (q.name === "harnesses") return { harnesses: harnessesAnswer };
+      if (q.name === "profile") return { profile: q.default };
+      if (q.name === "choice") return { choice: q.default };
+      throw new Error(`unmocked prompt: ${String(q.name)}`);
+    });
+  }
+
+  afterEach(() => {
+    vi.mocked(inquirer.prompt).mockReset();
+  });
+
+  it("labels the on-disk harness ' (detected)' while leaving every choice unchecked", async () => {
+    const previous = fakeManifest({
+      harnesses: [],
+      harnessesRecordedEmpty: true,
+    });
+    mockPrompts([]);
+
+    await resolveInitInputs({
+      detected: ["codex"],
+      stickyPreChecked: [],
+      stickyAnnotateDetected: ["claude"],
+      interactive: true,
+      previous,
+      opts: {},
+      previousIsRecordedManifest: true,
+    });
+
+    const harnessesCall = vi
+      .mocked(inquirer.prompt)
+      .mock.calls.find(
+        ([questions]) =>
+          (questions as Array<Record<string, unknown>>)[0].name === "harnesses",
+      );
+    expect(harnessesCall).toBeDefined();
+    const choices = (
+      harnessesCall![0] as Array<{
+        choices: Array<{ value: string; name: string; checked: boolean }>;
+      }>
+    )[0].choices;
+    // Nothing is pre-checked, regardless of the label.
+    for (const choice of choices) {
+      expect(choice.checked).toBe(false);
+    }
+    // "claude" carries the " (detected)" suffix even though it is not the
+    // `stickyPreChecked` value and not the `detected` param either.
+    const claudeChoice = choices.find((c) => c.value === "claude");
+    expect(claudeChoice?.name).toBe("claude (detected)");
+    const codexChoice = choices.find((c) => c.value === "codex");
+    expect(codexChoice?.name).toBe("codex");
   });
 });
 

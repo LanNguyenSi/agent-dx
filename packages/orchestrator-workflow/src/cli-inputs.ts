@@ -26,6 +26,16 @@ export async function promptHarnesses(
   detected: Harness[],
   installed: Harness[],
   fallbackToClaude = true,
+  // Drives only the checkbox's " (detected)" label suffix, independent of
+  // `detected`'s own role in pre-checking a choice: defaults to `detected`
+  // so every call site that omits this parameter keeps annotating exactly
+  // what it pre-checks from, unchanged. `apply`'s sticky-branch call site
+  // is the one caller that passes a different value here: it pre-checks
+  // nothing (`stickyPreChecked ?? detected` is `[]`) but still wants the
+  // operator to see which harness is actually on disk, so it annotates
+  // from a fresh `detectHarnesses(targetDir)` call instead
+  // (agent-tasks fe834823, fix round 3).
+  annotateDetected: Harness[] = detected,
 ): Promise<Harness[]> {
   const known = [...new Set([...detected, ...installed])];
   // Nothing detected and nothing previously installed: the plain-first-run
@@ -57,7 +67,8 @@ export async function promptHarnesses(
       message:
         "Install adapters for which harnesses? (deselect all for templates only, no harness)",
       choices: HARNESSES.map((harness) => ({
-        name: harness + (detected.includes(harness) ? " (detected)" : ""),
+        name:
+          harness + (annotateDetected.includes(harness) ? " (detected)" : ""),
         value: harness,
         checked: preselected.includes(harness),
       })),
@@ -206,6 +217,21 @@ export interface ResolveInitInputsParams {
    * on a normal target.
    */
   stickyPreChecked?: Harness[];
+  /**
+   * The sticky branch's own `promptHarnesses` " (detected)" label source,
+   * independent of `stickyPreChecked` (which drives what is actually
+   * pre-checked, not what is merely labelled). Defaults to
+   * `stickyPreChecked ?? detected` when omitted, matching `promptHarnesses`'
+   * own default and `init`'s call site (which omits both fields, so its
+   * sticky prompt still labels from real on-disk detection, unchanged).
+   * `apply`'s call site passes `[]` for `stickyPreChecked` (nothing is
+   * pre-checked; see that field's doc comment) but still wants the
+   * operator to see which harness is actually on disk, so it passes a
+   * fresh `detectHarnesses(targetDir)` call here instead: labelling is a
+   * hint, not an intent signal, so it is safe to annotate what the
+   * pre-check itself must not read (agent-tasks fe834823, fix round 3).
+   */
+  stickyAnnotateDetected?: Harness[];
 }
 
 export interface ResolvedInitInputs {
@@ -255,6 +281,7 @@ export async function resolveInitInputs(
     opts,
     previousIsRecordedManifest,
     stickyPreChecked,
+    stickyAnnotateDetected,
   } = params;
 
   let harnesses: Harness[];
@@ -303,8 +330,19 @@ export async function resolveInitInputs(
     // gap for the case where nothing is pre-checked either: without it,
     // `promptHarnesses` would pre-check `claude` on its own "nothing
     // known" fallback, re-widening the install on a bare Enter.
+    // `stickyAnnotateDetected` is passed through as the fourth argument so
+    // the checkbox's " (detected)" label can still point at what is
+    // actually on disk even though nothing is pre-checked from it; when
+    // omitted (as `init`'s call site does), `promptHarnesses` defaults it
+    // to its own first argument, i.e. `stickyPreChecked ?? detected`,
+    // matching pre-round-3 labelling behaviour exactly.
     harnesses = interactive
-      ? await promptHarnesses(stickyPreChecked ?? detected, [], false)
+      ? await promptHarnesses(
+          stickyPreChecked ?? detected,
+          [],
+          false,
+          stickyAnnotateDetected,
+        )
       : [];
   } else {
     const installed = previous?.harnesses ?? [];
