@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-01T10:39:15Z
+timestamp: 2026-09-01T11:10:19Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -64,7 +64,7 @@ number from this pointer; the CHANGELOG's 0.9.0 entry above still carries
 the version-specific historical claim), so external reader internals are
 not verified from this repo). Introduced in 0.9.0
 (`CHANGELOG.md:#[0.9.0]`). Pinned by template-markers.test.ts:19#"const runBaseRe = /solution-acceptance:\s*run-base\s*=\s",33-37 (exactly
-one `run-base` marker, defaulting to `TODO`) and :39-43 (the literal line,
+one `run-base` marker, defaulting to `TODO`) and template-markers.test.ts:39-41#"<!-- solution-acceptance: run-base = TODO -->" (the literal line,
 wrapper included).
 
 ## The `.ai/run` pointer and keyed `run-base[<repo-basename>]` markers (0.26.0, round 2)
@@ -204,7 +204,7 @@ therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
 run-gate" per SKILL.md:260-261#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
-template-markers.test.ts:16-18#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and :21-31 (one marker per
+template-markers.test.ts:16-18#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:21-22#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:27-28#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
 
 ## The findings-table Severity/Decision header: the machine-read surface behind acceptance-recommendation
@@ -228,9 +228,9 @@ the completeness gate (05-review-findings.md:10#"<!-- Decision legend: a high/cr
 was deliberately narrowed to `accepted/defer` only (0.7.4,
 `CHANGELOG.md:#[0.7.4]`) so the template itself never invites `fix`/`reject`
 as if they were resolutions. Pinned by template-markers.test.ts:144-154#"decision"
-(header row carries both `severity` and `decision` cells), :157-159 (the
-load-bearing comment exists), :161-185 (example row's Decision cell is
-exactly `accepted/defer`, mutation-checked), and :187-194 (the
+(header row carries both `severity` and `decision` cells), template-markers.test.ts:157-158#"expect(reviewTemplate).toMatch(/<!--[^>]*load-bearing[^>]*-->/i);" (the
+load-bearing comment exists), template-markers.test.ts:161-184#"expect(tokens).toEqual([" (example row's Decision cell is
+exactly `accepted/defer`, mutation-checked), and template-markers.test.ts:187-193#"expect(reviewTemplate).toMatch(/arms? the (?:completeness )?gate/i);" (the
 `RESOLVED_DECISIONS = {accepted, defer}` string and "arms the ... gate"
 wording are both present verbatim).
 
@@ -307,10 +307,10 @@ the loop-closer and cites the motivating evidence: four upkeep sweeps on
 (`CHANGELOG.md:#[0.12.0]`). Pinned by
 docs-consistency.test.ts:300-305#"apply this optional guidance: when the repo carries a" (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
-"docs/okf/" also occur in the Discover-step test), :309-313 (source-overlap
-check phrase), :315-319 (both responses named), :321-324 (validator-run
-phrase, `okf-kit check` framed as an example), :326-329 (non-gate
-optionality phrase), and :331-346 (the template section, its outcome
+"docs/okf/" also occur in the Discover-step test), docs-consistency.test.ts:309-311#"whether the change touches paths any bundle doc claims as sources" (source-overlap
+check phrase), docs-consistency.test.ts:315-317#"update the affected docs (re-verify and re-stamp) or record a follow-up task" (both responses named), docs-consistency.test.ts:321-322#"run the bundle validator when one is available" (validator-run
+phrase, `okf-kit check` framed as an example), docs-consistency.test.ts:326-328#"Repos without a bundle are unaffected" (non-gate
+optionality phrase), and docs-consistency.test.ts:331-334#"Outcome: updated | not affected | follow-up filed." (the template section, its outcome
 vocabulary, and that it is marked Optional and bundle-scoped).
 
 ## Where the shapes are pinned, and what belongs to sibling docs

@@ -6578,3 +6578,59 @@ compared against base commit 0960a39's own 21). Every `cli.ts`/
 `operator-install-and-registry.md`, plus the hardcoded citation strings
 inside `test/docs-consistency.test.ts` the round-1/round-2 entries above
 already name, re-pointed a third time.
+
+## 2026-09-01 (okf-kit 0.9.0 continuation-lift, agent-dx okf-kit-pins-0.9.0)
+
+Task: okf-kit 0.9.0 (agent-tasks cc5e3d33, #153) added
+`anchor-required-continuation` under `--require-anchors`: a continuation
+citation (`:N-M` chained to a preceding full citation, or a paragraph-bound
+short-form) no longer inherits its governing citation's anchor and is
+flagged. Pinning `ci.yml`/`okf-staleness.yml` to okf-kit@0.9.0 surfaced 75
+such warnings across four bundle docs, measured with `npx -y okf-kit@0.9.0
+check --require-anchors --json docs/okf` against the pre-bump tree:
+`install-fence-mechanics.md` (15), `model-preselection.md` (21),
+`run-state-lifecycle-and-markers.md` (10), `subagent-contracts-superset.md`
+(29); `log.md` carried none of these (it is excluded from short-form/
+continuation collection entirely, per okf-kit's reserved-file carve-out)
+and its own 23 `unresolved-ambiguous` notices are unrelated. This closes
+the "Continuation-Lifting agent-dx" backlog item named in the 08-31 batch
+memory.
+
+Fix: every flagged continuation was lifted into its own full
+`path:N-M#"anchor text"` citation, matching the bundle's existing
+anchored-citation convention (each doc's own bare-vs-backtick citation
+style preserved). Where the last content line of a continuation's
+inherited range collided with a duplicate line elsewhere (file-wide
+occurrence over 3, or the anchor's exact text recurring inside its own
+range), the range was trimmed by a few lines to end on a line whose text is
+unique in-range and file-wide, per the same "last content line,
+low-collision" convention this bundle's own `docs-consistency.test.ts`
+anchor-integrity tests already enforce; two ranges each spanning two
+separate test blocks (`template-markers.test.ts`'s two marker-default
+tests) were split into two full citations instead of merged, one per
+block. Lifting three of `model-preselection.md`'s continuations to full
+citations also surfaced that their inherited line numbers had already
+drifted onto the wrong `describe` block entirely (a pre-existing
+staleness invisible to any prior check, since continuations were never
+resolved) -- re-pointed to the actual "README tier table",
+"README tier-to-model-class table", and "README opencode-effort prose"
+guard blocks in `test/docs-consistency.test.ts` after confirming each
+block's own assertions match the sentence's claim.
+
+Docs: `install-fence-mechanics.md`, `model-preselection.md`,
+`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md` all
+re-stamped; `log.md` itself carries no `timestamp:` frontmatter (append-only
+journal), so nothing to re-stamp here.
+
+Verification: `npx -y okf-kit@0.9.0 check --require-anchors --json
+docs/okf`: 75 -> 0 `anchor-required-continuation` warnings; a first pass
+introduced 8 new `test-range-straddles-block` warnings (full citations,
+unlike continuations, are checked for crossing into a sibling test block's
+head) and 2 `docs-consistency.test.ts` local-test failures (a stricter,
+AST-based "same describe/it/test block" check catching two ranges whose
+end line landed one line past their own block, plus the drifted-block
+cases above) -- all fixed in follow-up edits to the same citations; final
+measurement 0 errors, 0 warnings, 23 notices (unchanged, all
+`unresolved-ambiguous` in `log.md`), matching plain `check` (no flags).
+`npm test`: 597 tests green (12 files). `npm run build`, `npm run
+typecheck`, `npm run typecheck:test`: all clean.

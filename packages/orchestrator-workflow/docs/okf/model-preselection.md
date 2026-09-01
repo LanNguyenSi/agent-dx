@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-01T07:40:38Z
+timestamp: 2026-09-01T11:05:30Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -95,7 +95,7 @@ below.
    `readInstalledManifest` reads it back and re-validates every value with
    `assertValidModelId`; an invalid stored id is silently dropped (falling
    back to `DEFAULT_MODELS` for that role) rather than crashing
-   (`src/init.ts:150-236#"? { pin: candidate.pin.trim() }"`, specifically `:148-157`).
+   (`src/init.ts:150-236#"? { pin: candidate.pin.trim() }"`, specifically `src/init.ts:148-155#"} catch {"`).
 4. **Per-harness frontmatter.** For each selected harness, `runInit` calls a
    `compose*Agent` function per role that turns the resolved model string
    into that harness's frontmatter shape (`src/init.ts:245-306#"permission:"`,
@@ -106,7 +106,7 @@ below.
    installs that role, see
    [install-fence-mechanics.md](install-fence-mechanics.md). Since 0.19.0 a
    second, sibling pair of `compose*AgentVariant` functions
-   (`src/init.ts:325-336#"disallowedTools: Edit, Write, NotebookEdit"` Claude Code, `:362-385` opencode) composes the
+   (`src/init.ts:325-336#"disallowedTools: Edit, Write, NotebookEdit"` Claude Code, `src/init.ts:362-384#"reasoningEffort: ${TIER_DEFS[tier].effort}"` opencode) composes the
    tier-variant files from the same `readAgentAsset` body; see "Effort
    tiers" below for what differs in their frontmatter.
 
@@ -125,7 +125,7 @@ below.
   `disallowedTools: Edit, Write, NotebookEdit` right after `effort:`
   (`src/init.ts:271-272#"disallowedTools: Edit, Write, NotebookEdit"`). Test coverage:
   `test/init.test.ts:102-108#"expect(slicer).toContain("` (`model: sonnet` / `model: opus` present) and
-  `:510-555` (per-role alias mix installs correctly for Claude while
+  `test/init.test.ts:510-554#"expect(claudeSlicer).toContain("` (per-role alias mix installs correctly for Claude while
   opencode differs, see below).
 - **opencode.** opencode needs a fully-qualified `provider/model-id`.
   `opencodeModelValue` (the pure fallback used when the CLI has not already
@@ -182,13 +182,13 @@ installed `tiers: true` back off; before the fix `--tiers` was one-way and
 the only route back to `tiers: false` was hand-editing the manifest.
 
 **Tier data (`src/models.ts:157-211#"large:"`).** `Tier` is
-`"low" | "medium" | "high" | "xhigh"` (`:162`). `ROLE_TIERS` (`:169-175`) is
+`"low" | "medium" | "high" | "xhigh"` (`src/models.ts:162#"export type Tier ="`). `ROLE_TIERS` (`src/models.ts:169-174#"advisor: ["`) is
 which tiers each role gets a variant for: explorer and task-slicer
 `low, medium, high`; implementer all four; reviewer `medium, high, xhigh`;
 since 0.21.0, advisor `high, xhigh` (the smallest tier list of any role —
 its default already sits at `high`, one step below the reviewer's default
 `--tiers` ceiling, so it only ever gets one variant, `-xhigh`).
-`DEFAULT_TIER` (`:182-188`) is the tier each role's plain file already
+`DEFAULT_TIER` (`src/models.ts:182-187#"advisor:"`) is the tier each role's plain file already
 corresponds to (`medium` for explorer/task-slicer/implementer, `high` for
 reviewer and, since 0.21.0, advisor), the tier a variant is never rendered
 for since that would both collide with and duplicate the default file
@@ -196,8 +196,8 @@ for since that would both collide with and duplicate the default file
 `init.ts:687-688#"const modelClass = TIER_DEFS[tier].modelClass;"` opencode, both a `continue` guarded by
 `tier === DEFAULT_TIER[role]`, role-generic code unchanged by the role
 addition). `TIER_DEFS` (`src/models.ts:200-204#"xhigh: { modelClass:"`) maps each tier to a
-`ModelClass` (`"small" | "medium" | "large"`, `:190`) and its requested
-`effort` value (the tier's own name). `CLASS_MODELS` (`:208-212`) maps each
+`ModelClass` (`"small" | "medium" | "large"`, `src/models.ts:190#"export type ModelClass ="`) and its requested
+`effort` value (the tier's own name). `CLASS_MODELS` (`src/models.ts:208-211#"large:"`) maps each
 class to a `ModelAlias`: `small`->`haiku`, `medium`->`sonnet`,
 `large`->`opus`. `Tier`, `ModelClass`, and all four maps are re-exported
 from `src/index.ts` since fix-round-1 (review finding L2), the same
@@ -337,16 +337,16 @@ resolved class id with no provider prefix at all (no `/`) reaches the same
 no-effort-field outcome as Ollama but via `opencodeEffortLine`'s
 `provider === undefined` branch rather than its `provider === "ollama"`
 one, a case review round 3 (R3-L2/R3-L4) found missing from both this
-doc's own prose and README's, pinned separately at `:1853-1879`; the plain
+doc's own prose and README's, pinned separately at `test/init.test.ts:1853-1876#"model: local-model"`; the plain
 `reasoningEffort:` outcome for every other non-Claude-family, non-Ollama,
-provider-qualified model is pinned at `:1881-1901`. The fix-round-1
+provider-qualified model is pinned at `test/init.test.ts:1881-1899#"reasoningEffort: high"`. The fix-round-1
 family-dispatch correction adds two more cases pinning that the `variant:`
 rule follows the model regardless of provider: `github-copilot/claude-sonnet-4.6`
-(`:1903-1926`) and the nested `openrouter/anthropic/claude-sonnet-4.6`
-(`:1928-1951`) both still resolve to `variant:`, not `reasoningEffort:`. The
-unresolved-class guard is pinned at `:1953-1991` (an omitted
+(`test/init.test.ts:1903-1922#"model: github-copilot/claude-sonnet-4.6"`) and the nested `openrouter/anthropic/claude-sonnet-4.6`
+(`test/init.test.ts:1928-1950#"expect(reviewerXhigh).not.toContain("`) both still resolve to `variant:`, not `reasoningEffort:`. The
+unresolved-class guard is pinned at `test/init.test.ts:1953-1989#"Object.keys(manifest.files).some((path) => path.includes("` (an omitted
 `opencodeClassModels` renders zero variant files and leaves no ledger
-entry), and a standalone invariant test (`:1993-1997`) asserts
+entry), and a standalone invariant test (`test/init.test.ts:1993-1995#"expect(ROLE_TIERS[role], role).toContain(DEFAULT_TIER[role]);"`) asserts
 `DEFAULT_TIER[role]` is always a member of `ROLE_TIERS[role]` for every
 role: nothing in the type system enforces that relationship, so a
 hand-edited `models.ts` could otherwise define a default tier the role's
@@ -550,18 +550,18 @@ the "Solution-neutral notes" section below describes.
 - README's model-preselection table has one row per role
   (`test/docs-consistency.test.ts:37-38#"expect(readmeMd).toMatch(new RegExp("`, matches `^\| <role> \|`).
 - `INSTALL-AGENT.md`'s `--models` example names every role
-  (`:52-56`, checks for `<role>=<model>` per role).
+  (`test/docs-consistency.test.ts:52-53#"expect(installAgentMd).toContain("`, checks for `<role>=<model>` per role).
 - `INSTALL-AGENT.md`'s manifest example JSON has one `models` key per role
-  (`:58-68`, parses the fenced JSON block and compares sorted keys).
+  (`test/docs-consistency.test.ts:58-66#"expect(Object.keys(manifest.models).sort()).toEqual(sortedRoles);"`, parses the fenced JSON block and compares sorted keys).
 - `agents-md-section.md`'s "Per-role model preferences (...)" parenthetical
-  lists every role (`:70-79`).
+  lists every role (`test/docs-consistency.test.ts:70-77#"expect(listed.sort()).toEqual(sortedRoles);"`).
 
 A fifth, adjacent test guards the read-only-role brace lists
 (`agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`) in
-`INSTALL-AGENT.md` (`:43-50`); it is role-enumeration generally, not
+`INSTALL-AGENT.md` (`test/docs-consistency.test.ts:43-47#"expect(listed.sort()).toEqual(sortedRoles);"`); it is role-enumeration generally, not
 model-specific, but shares the same drift-prevention purpose.
 
-Since 0.19.0, a standalone `describe` (`:1464-1521`) guards a tier-specific
+Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1524-1557#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
 enumeration site: README's "Effort tiers" role/tier table against
 `ROLE_TIERS` and `DEFAULT_TIER` directly, per role and column
 (tiers-available list order, default-tier value, and a row-count check with
@@ -572,13 +572,13 @@ also covers the advisor row (`ROLE_TIERS.advisor = ["high", "xhigh"]`,
 `DEFAULT_TIER.advisor = "high"`), the test iterating `ROLES` so the new
 per-role assertions came for free from the `models.ts` addition alone, no
 test edit required. Since fix-round-1
-(review finding L4), a second, sibling `describe` (`:1542-1607`) guards
+(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:1594-1636#"const def = TIER_DEFS[tier];"`) guards
 README's other tier-shaped table, Tier -> model class -> model alias ->
 requested effort, against `TIER_DEFS`/`CLASS_MODELS` directly, the same
 way; before this fix nothing guarded that second table, so it could drift
 from its source maps silently (this table is keyed by `Tier`, not `Role`,
 so it is unaffected by the role count itself). Since fix-round-2 (review finding R2-M1), a
-third, site-specific `describe` (`:1621-1667`)
+third, site-specific `describe` (`test/docs-consistency.test.ts:1673-1697#"return readmeMd.slice(startIdx, endIdx);"`)
 guards the opencode-effort prose in README's "Effort tiers" section
 directly: it isolates that prose block by its own lead-in phrase and the
 next bold lead-in that follows it, then asserts the prose contains the
