@@ -6673,9 +6673,12 @@ Verification: `okf-kit check --json docs/okf` (global 0.9.0): 3
 unchanged (all pre-existing `unresolved-ambiguous`, none touched by this
 task). `npm test` in `packages/orchestrator-workflow`: 597 tests green (12
 files). `npm run build`, `npm run typecheck`, `npm run format:check`: all
-clean. Same commands re-run in `packages/okf-kit`: 270 tests green (23
-files, including the new `test/bump-okf-kit-pin.test.ts`), build,
-typecheck, format:check clean.
+clean. Same commands re-run in `packages/okf-kit`: 277 tests green (23
+files, including `test/bump-okf-kit-pin.test.ts`), build and typecheck
+clean; `npm run format:check` fails on two pre-existing files
+(`test/citations-resolve.test.ts`, `test/cli-symlink-invocation.test.ts`),
+unchanged by this task and not run at all by `.github/workflows/ci.yml`
+(no `format:check` step there).
 - 2026-09-02: `init`'s interactive harnesses prompt on a target whose own
   manifest recorded a real `harnesses: []` now pre-checks nothing, matching
   `apply`'s existing semantics, instead of pre-checking whatever
