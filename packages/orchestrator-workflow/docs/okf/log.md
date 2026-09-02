@@ -5894,7 +5894,7 @@ source are re-stamped in the commit after this one.
   Fix-round-2 (review findings F1-F7): re-pointed one citation off a wrong
   passage (README.md's orchestrator-runs-on-session-model statement is at
   `:194-196`, not the full->minimal downgrade passage the round-1 citation
-  actually named), restored `README.md:210-213` to its full range (the
+  actually named), restored `README.md:211-214` to its full range (the
   narrowing rationale in the paragraph above was wrong: an anchor may not
   contain a backtick, but a code span's backtick-free inner text is a
   legal anchor, so that citation never needed narrowing), tightened two
@@ -6682,3 +6682,16 @@ typecheck`, `npm run typecheck:test`: all clean.
   tests green (12 files, unchanged count). `npm run build`, `npm run
   typecheck`, `npm run typecheck:test`, `npm run format:check`: all clean.
   `node scripts/check-cli-flag-order.mjs` (repo root): clean.
+
+  Follow-up same day: the README.md "Templates-only mode" edit above also
+  shifted every citation into README.md at or after line 93 by +1 (net:
+  3 lines removed, 4 added). Re-pointed every affected `README.md:N[-M]`
+  citation in `install-fence-mechanics.md`, `model-preselection.md`,
+  `run-state-lifecycle-and-markers.md`, and this log's own `210-213`
+  continuation-restore citation. `review-gate-and-waivers.md` and
+  `subagent-contracts-superset.md` (both list `CHANGELOG.md` as a source,
+  neither cites `cli-inputs.ts` or `README.md`) also re-stamped for the
+  same `CHANGELOG.md` edit. Re-measured: `okf-kit@0.9.0 check --json
+  docs/okf`: 0 errors, 0 warnings, 23 notices (all `unresolved-ambiguous`
+  in `log.md`, pre-existing and unrelated to this change). `npm test`: 597
+  tests green (unchanged).
