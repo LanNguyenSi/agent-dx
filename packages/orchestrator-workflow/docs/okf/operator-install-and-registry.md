@@ -3,7 +3,7 @@ type: module
 title: Operator install and target registry
 description: The operator-level home, manifest schema, locked write API, target registry, and the setup/apply/doctor/adopt commands built on top of it.
 tags: [operator, manifest, registry, lock, doctor, adopt, pin, cli]
-timestamp: 2026-09-01T07:49:16Z
+timestamp: 2026-09-02T04:58:00Z
 sources:
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/src/doctor.ts

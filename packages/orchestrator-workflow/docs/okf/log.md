@@ -6522,7 +6522,7 @@ that restores the "(detected)" label: `promptHarnesses` gained a fourth
 parameter, `annotateDetected` (default: its own first argument, so every
 call site that omits it is unchanged), that drives only the checkbox's
 "(detected)" suffix, independent of what is actually pre-checked
-(`packages/orchestrator-workflow/src/cli-inputs.ts:25-38#"annotateDetected: Harness[] = detected,"`).
+(`packages/orchestrator-workflow/src/cli-inputs.ts:26-39#"annotateDetected: Harness[] = detected,"`).
 `apply`'s sticky-branch call passes a fresh `detectHarnesses(targetDir)`
 call as this field (`cli-apply.ts:43#"stickyAnnotateDetected: detectHarnesses(targetDir),"`)
 while still pre-checking nothing, so an operator sees which harness is on
@@ -6634,3 +6634,51 @@ measurement 0 errors, 0 warnings, 23 notices (unchanged, all
 `unresolved-ambiguous` in `log.md`), matching plain `check` (no flags).
 `npm test`: 597 tests green (12 files). `npm run build`, `npm run
 typecheck`, `npm run typecheck:test`: all clean.
+
+- 2026-09-02: `init`'s interactive harnesses prompt on a target whose own
+  manifest recorded a real `harnesses: []` now pre-checks nothing, matching
+  `apply`'s existing semantics, instead of pre-checking whatever
+  `detectHarnesses(targetDir)` found on disk (decision D-002, agent-dx
+  7669907c). `resolveInitInputs`'s sticky branch now resolves both the
+  pre-check and the " (detected)" label itself (`stickyPreChecked ?? []`,
+  `stickyAnnotateDetected ?? detected`), so neither call site needs its own
+  wiring for the new default; `apply`'s call site still passes
+  `stickyPreChecked: []`/`stickyAnnotateDetected` explicitly, as defence in
+  depth against a future edit to its own call site, unchanged from before.
+  The "interactive re-run after a templates-only install (F4)" describe
+  block in `cli-inputs.test.ts` (previously the regression pin for `init`'s
+  divergent, pre-round-3 behaviour) was updated in place rather than
+  removed: its first test now asserts nothing is pre-checked even when a
+  harness is detected on disk, and that the detected harness is still
+  labelled " (detected)".
+
+  Mutation probe: reverted `stickyPreChecked ?? []` back to
+  `stickyPreChecked ?? detected` at the sticky branch's own
+  `promptHarnesses` call. Result: the updated F4 test turned red (`checked`
+  came back `true` for `codex` instead of `false`); restored, re-ran green.
+
+  Docs: `install-fence-mechanics.md` re-pointed the F4 paragraph to state
+  the new shared semantics and the D-002 rationale, and its
+  `previous.harnessesRecordedEmpty` citation moved from `290-293` to
+  `287-290` (cli-inputs.ts comment edits above it shifted the line by -3);
+  `model-preselection.md`'s two `cli-inputs.ts` promptModels citations
+  moved from `111-153`/`111-116` to `107-149`/`107-112` (a net -4 shift
+  from the same comment edits); this log's own round-3 `annotateDetected:
+  Harness[] = detected,` citation moved from `25-38` to `26-39` (net +1).
+  `README.md`'s "Templates-only mode" section's asymmetric "`init`
+  pre-checks whatever it detects on disk; `apply` pre-checks nothing at
+  all" sentence was rewritten to state the single shared behaviour, so the
+  README states this in one place rather than two disagreeing ones.
+  `install-fence-mechanics.md`, `model-preselection.md`,
+  `operator-install-and-registry.md`, and `run-state-lifecycle-and-markers.md`
+  all re-stamped (each lists `cli-inputs.ts` and/or `README.md` as a
+  source).
+
+  Verification: `okf-kit@0.9.0 check --json docs/okf`: 0 errors (unchanged
+  from before this change), the `cli-inputs.ts:25-38` anchor-not-found
+  warning this change introduced closed by the re-point above, and the
+  four docs' `sources-fresh` STALE warnings closed by the re-stamp; final
+  measurement matches the pre-change baseline (0 errors). `npm test`: 597
+  tests green (12 files, unchanged count). `npm run build`, `npm run
+  typecheck`, `npm run typecheck:test`, `npm run format:check`: all clean.
+  `node scripts/check-cli-flag-order.mjs` (repo root): clean.
