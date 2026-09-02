@@ -502,3 +502,11 @@ organizational guidance (when to use agents at all, review depth, risk tiers)
 live in the sibling package
 [agentic-coding-playbook](../agentic-coding-playbook), which the skill
 references.
+
+## okf-kit version pin
+
+`test/docs-consistency.test.ts` pins the `okf-kit@<version>` this repo's own
+`.github/workflows/` install against the sibling `packages/okf-kit`
+package's version, so a release of `okf-kit` must bump those pins in the
+same commit as the version cut; see `CONTRIBUTING.md`'s "Releasing okf-kit"
+section (repo root) for the order.
