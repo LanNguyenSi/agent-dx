@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (every `npm install -g okf-kit@<version>` or `npx okf-kit@<version>`
   occurrence under `.github/workflows/`) in the same commit as the
   okf-kit version cut, via `scripts/bump-okf-kit-pin.mjs` (repo root,
-  supports `--dry-run`). Decision D-003: a release PR that only cuts
+  supports `--dry-run`). The reason: a release PR that only cuts
   okf-kit's own version leaves OW's docs-consistency parity guard red on
   master, and since `publish-npm.yml` runs the tests at the tag tree, the
   OW tag then cannot publish either. See CONTRIBUTING.md's "Releasing

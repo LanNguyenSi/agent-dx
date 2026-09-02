@@ -11,8 +11,8 @@
  * only cuts okf-kit's own version, without also bumping these pins,
  * turns OW's suite red on master -- and since publish-npm.yml runs the
  * tests at the tag tree, the OW tag then cannot publish either (see
- * decision D-003 and packages/okf-kit/CHANGELOG.md's [Unreleased]
- * entry). This script makes the pin bump a single mechanical step in the
+ * packages/okf-kit/CHANGELOG.md's [Unreleased] entry and CONTRIBUTING.md's
+ * "Releasing okf-kit" section). This script makes the pin bump a single mechanical step in the
  * same release commit as the version cut, instead of a manual edit that
  * is easy to forget or to only partially cover.
  *
@@ -70,7 +70,9 @@ const WORKFLOWS_DIR = join(REPO_ROOT, ".github", "workflows");
 // `npm install -g` and `npx` command forms, global so every occurrence in
 // a file is found, not just the first.
 const PIN_RE = /(?:npm install -g|npx) okf-kit@([\w.-]+)/g;
-const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/;
+// No build metadata (`+build`): the guard's capture class cannot carry a
+// `+`, so a version the guard cannot read back is rejected up front.
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/;
 
 // The two workflow files the release procedure has always expected to
 // carry at least one pin. A new workflow file adding its own pin is

@@ -342,6 +342,36 @@ describe("bump-okf-kit-pin.mjs", () => {
     expect(readWorkflow(dir, "okf-staleness.yml")).toBe(staleBefore);
   });
 
+  it("rejects a version carrying build metadata (+build) and writes nothing", () => {
+    scaffoldRepo(dir, { version: "0.9.0" });
+    const ciBefore = readWorkflow(dir, "ci.yml");
+    const staleBefore = readWorkflow(dir, "okf-staleness.yml");
+
+    // The parity guard's capture class cannot read a `+` back, so a pin
+    // written with build metadata would report success and still leave
+    // the guard red; the script refuses the version instead.
+    const result = runScript(dir, ["0.9.2+build.1"]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).not.toBe("");
+    expect(readWorkflow(dir, "ci.yml")).toBe(ciBefore);
+    expect(readWorkflow(dir, "okf-staleness.yml")).toBe(staleBefore);
+  });
+
+  it("exits non-zero when no okf-kit pin exists anywhere under .github/workflows/", () => {
+    scaffoldRepo(dir, { version: "0.9.0", noPinInCi: true });
+    writeFileSync(
+      join(dir, ".github", "workflows", "okf-staleness.yml"),
+      "name: okf-staleness\non: [schedule]\n",
+      "utf8",
+    );
+
+    const result = runScript(dir, ["0.9.1"]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("pin found");
+  });
+
   it("exits non-zero and names the file when a target workflow has no pin line to rewrite", () => {
     scaffoldRepo(dir, { version: "0.9.0", noPinInCi: true });
 

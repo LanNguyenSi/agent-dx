@@ -54,8 +54,10 @@ in an existing one is covered automatically too), and, via a separate
 assertion, `packages/okf-kit/README.md`'s own `npx okf-kit@<version>
 check path/to/bundle` CI example. `publish-npm.yml` runs each package's
 tests at the tag tree before publishing. Cutting an okf-kit release
-without also bumping both must be done in the same release commit, in
-this order:
+without also bumping both leaves that guard red on master, and since
+`publish-npm.yml` runs the tests at the tag tree, the same red suite
+then blocks the orchestrator-workflow tag from publishing. Bump both in
+the same release commit, in this order:
 
 1. `npm version --no-git-tag-version <new-version>` in `packages/okf-kit`.
 2. Move the `[Unreleased]` section of `packages/okf-kit/CHANGELOG.md` under
