@@ -89,9 +89,10 @@ files on disk from something else; add a harness back with an explicit
 `--profile`/`--models`/`--tiers` use, applied to the no-harness case. An
 **interactive** re-run is different: it still prompts, with nothing forced
 pre-selected, instead of silently skipping straight back to templates-only
-without asking; deselect every checkbox to stay templates-only. `init`
-pre-checks whatever it detects on disk; `apply` pre-checks nothing at all
-(both still annotate what is detected with a " (detected)" label).
+without asking; deselect every checkbox to stay templates-only. `init` and
+`apply` both pre-check nothing at all on this prompt, and both still
+annotate what is detected on disk with a " (detected)" label; select a
+harness to install it.
 
 ```bash
 npx orchestrator-workflow init --harness none --yes

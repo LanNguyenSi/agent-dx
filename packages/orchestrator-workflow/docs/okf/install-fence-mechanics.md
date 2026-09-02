@@ -175,7 +175,7 @@ nobody asked for: `resolveInitInputs` guards this on two flags together, a
 `previousIsRecordedManifest` flag, true only for `init`'s own call
 (`previous` there is `readInstalledManifest(targetDir)` itself,
 cli.ts:221-228#"previousIsRecordedManifest: true,"), and
-`previous.harnessesRecordedEmpty` (cli-inputs.ts:290-293#"previous.harnessesRecordedEmpty"),
+`previous.harnessesRecordedEmpty` (cli-inputs.ts:287-290#"previous.harnessesRecordedEmpty"),
 set from whether the raw manifest JSON's `harnesses` field was itself an
 array AND that raw array had zero elements
 (`init.ts:167-172#"rawHarnessesIsArray && rawHarnesses.length === 0;"`):
@@ -198,10 +198,22 @@ for a partial harness drop that leaves AGENTS.md/CLAUDE.md alone). An interactiv
 different: it still prompts (`promptHarnesses`,
 called with nothing pre-checked from the old recording, including on its own
 "nothing detected either" fallback since the round-3 fix to review finding
-F2, `cli-inputs.ts:340-344#"stickyAnnotateDetected,"`),
+F2, `cli-inputs.ts:340-344#"stickyAnnotateDetected ?? detected,"`),
 rather than
 skipping straight to templates-only without asking (round-2 fix, review
-finding F4); the checkbox validation that used to require at least one
+finding F4). `init`'s own sticky-branch pre-check originally diverged from
+`apply`'s here (F4 pinned it to real on-disk detection via `detected`,
+since `init`'s call site omitted `stickyPreChecked`); D-002 (agent-dx
+7669907c) reverses that so `init` and `apply` share one semantics: the
+weak-signal argument below (a stray harness config left on disk, e.g. a
+`.claude/` directory that was never a recorded install, is not the recorded
+intent) applies to `init` identically, and F4's own concern (ask instead of
+silently falling back to templates-only) is preserved because the prompt
+still appears and still annotates detection; only the pre-check now follows
+recorded intent instead of on-disk detection. Both call sites' resolution
+now lives in one place, `resolveInitInputs` itself (`stickyPreChecked ??
+[]`, `stickyAnnotateDetected ?? detected`, see the citation above), so
+`init`'s own call site needs no explicit wiring of its own; the checkbox validation that used to require at least one
 selection is relaxed to allow an empty one, now that `[]` is a supported
 state. Since agent-tasks 8602a952, `apply` sets `previousIsRecordedManifest`
 too, from whether the target actually has its own repo manifest rather than
@@ -236,9 +248,11 @@ fe834823) closes that residual gap too: `apply`'s CLI action passes a
 hardcoded `[]` as `resolveInitInputs`'s separate `stickyPreChecked` field
 (`cli-apply.ts:42#"stickyPreChecked: [],"`), so the templates-only branch's
 prompt starts with nothing pre-checked at all, regardless of what
-`resolveApplyHarnesses` or on-disk detection report; only the templates-only
-branch reads this field at all (`init`'s own call site omits it and keeps
-pre-checking real on-disk detection unchanged, see
+`resolveApplyHarnesses` or on-disk detection report; `resolveInitInputs`
+itself now defaults this same field to `[]` (D-002, agent-dx 7669907c), so
+`init`'s own call site needs no equivalent wiring at all -- `apply`'s CLI
+action still passes it explicitly, as defence in depth against a future
+edit to the CLI action's own call site (see
 `ResolveInitInputsParams.stickyPreChecked`'s doc comment). That wiring is
 pinned inside a dedicated, unit-tested `buildApplyInitInputs` (rather than
 inlined at the CLI action's own call site) since round 3 (agent-tasks

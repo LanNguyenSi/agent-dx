@@ -72,13 +72,13 @@ below.
    any), then applies `--models` on top; when running interactively with no
    `--models`, it prompts per role instead, defaulting each prompt to the
    already-resolved value (`src/cli-inputs.ts:369-370#"...DEFAULT_MODELS,"`, prompt UI at
-   `src/cli-inputs.ts:111-153#"return models;"`). Since agent-dx task T-003, this whole
+   `src/cli-inputs.ts:107-149#"return models;"`). Since agent-dx task T-003, this whole
    resolution step (harnesses, profile, models, tiers, and the opencode
    catalog resolution) lives in a single reusable function,
    `resolveInitInputs` (`src/cli-inputs.ts`), which `init`'s CLI action
    calls; a later `apply --target` command can call the same function
    without duplicating the logic. Since 0.15.0 the interactive prompt only asks about
-   the roles `rolesForProfile(profile)` selects (`src/cli-inputs.ts:111-116#"for (const role of roles) {"`
+   the roles `rolesForProfile(profile)` selects (`src/cli-inputs.ts:107-112#"for (const role of roles) {"`
    iterates a `roles` parameter instead of the full `ROLES` list), so a
    `minimal` install is not asked for `explorer`/`task-slicer` models (and,
    since 0.21.0, not for `advisor` either — the same `rolesForProfile`
