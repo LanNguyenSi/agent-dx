@@ -6830,3 +6830,11 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   instant, no content change). Re-measured: `okf-kit@0.9.0 check --json
   docs/okf`: 0 errors, 0 warnings, 23 notices (same pre-existing
   `unresolved-ambiguous` set as before this round).
+- 2026-09-02T05:52:50Z (agent-tasks 7d17996d, post-rebase): after rebasing onto the
+  merged init-sticky change (#162), `README.md`'s squash-merge commit time
+  moved past the frontmatter timestamps of `install-fence-mechanics.md`,
+  `model-preselection.md` and `run-state-lifecycle-and-markers.md`, so
+  sources-fresh flagged all three STALE with no content change in the
+  README beyond what #162 already re-pointed their citations against.
+  Confirmed every `README.md:N[-M]` citation in the three docs still
+  resolves (citations-resolve: 0 findings), re-stamped all three.
