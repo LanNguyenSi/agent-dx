@@ -236,6 +236,11 @@ This is advisory: don't fail the build on warnings unless you pass `--strict`. U
 
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
 
+Releasing a new okf-kit version to npm must also bump the `npm install -g
+okf-kit@<version>` pins this repo's own `orchestrator-workflow` package
+carries in `.github/workflows/`, in the same release commit; see
+`CONTRIBUTING.md`'s "Releasing okf-kit" section for the order.
+
 ## Where this fits
 
 okf-kit is the producer-side check: it validates a bundle you are authoring or maintaining. Consuming an OKF bundle at query time (loading, indexing, ranking passages for an agent) lives in [codebase-oracle](https://github.com/LanNguyenSi/codebase-oracle), a separate tool.

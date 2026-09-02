@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The release procedure now bumps orchestrator-workflow's okf-kit pins
+  (`.github/workflows/ci.yml` and `.github/workflows/okf-staleness.yml`,
+  both `npm install -g okf-kit@<version>` lines) in the same commit as the
+  okf-kit version cut, via `scripts/bump-okf-kit-pin.mjs` (repo root).
+  Decision D-003: a release PR that only cuts okf-kit's own version leaves
+  OW's docs-consistency parity guard red on master, and since
+  `publish-npm.yml` runs the tests at the tag tree, the OW tag then cannot
+  publish either. See CONTRIBUTING.md's "Releasing okf-kit" section for the
+  full order (task 7d17996d).
+
 ## [0.9.0] - 2026-09-01
 
 ### Added
