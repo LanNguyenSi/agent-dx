@@ -7,6 +7,7 @@ import inquirer from "inquirer";
 
 import { PACKAGE_VERSION } from "./assets.js";
 import { buildApplyInitInputs } from "./cli-apply.js";
+import { buildInitInitInputs } from "./cli-init.js";
 import { resolveInitInputs } from "./cli-inputs.js";
 import { HARNESSES, detectHarnesses } from "./detect.js";
 import type { Harness } from "./detect.js";
@@ -216,17 +217,14 @@ program
         opencodeModels,
         opencodeClassModels,
         warnings,
-      } = await resolveInitInputs({
-        detected,
-        interactive,
-        previous,
-        opts,
-        // `previous` here is `readInstalledManifest(targetDir)` (undefined,
-        // or the target's own actually-recorded manifest), unlike `apply`'s
-        // synthetic operator-defaults "floor" object: an empty harnesses
-        // array is a real recorded --harness none install here.
-        previousIsRecordedManifest: true,
-      });
+      } = await resolveInitInputs(
+        // The sticky-branch wiring itself (neither `stickyPreChecked` nor
+        // `stickyAnnotateDetected` overridden, so `resolveInitInputs`'s own
+        // `?? []` / `?? detected` defaults apply) is pinned inside
+        // `buildInitInitInputs` and covered by a dedicated test
+        // (`test/cli-init.test.ts`), not by this call site.
+        buildInitInitInputs(detected, previous, interactive, opts),
+      );
       for (const w of warnings) {
         process.stderr.write(`${w}\n`);
       }

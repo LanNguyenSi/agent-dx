@@ -1974,8 +1974,11 @@
   `b80c346` (via `git worktree add`, this repo's own `okf-kit` build)
   reports 39 findings (0/17/22): 13 pre-existing `install-fence-
   mechanics.md` warnings, one `blank-start-line` warning
-  (`run-state-lifecycle-and-markers.md`, the un-shifted pre-round-1
-  `CHANGELOG.md:808-815` 0.7.0 citation), and three `sources-fresh`
+  (`run-state-lifecycle-and-markers.md`, that doc's own `CHANGELOG.md:
+  808-815` 0.7.0 citation as it read at base commit `b80c346`, deliberately
+  historical: frozen to that commit's CHANGELOG.md content, not re-derived
+  against the live file on every later sweep, including T-002's own
+  fix-round-1 19-line insertion), and three `sources-fresh`
   `STALE` warnings, one per touched doc, all reading `` `packages/
   orchestrator-workflow/CHANGELOG.md` changed 2026-08-25T11:09:32.000Z
   after doc timestamp 2026-08-24T23:59:00.000Z `` -- `1d124ca`'s commit
@@ -2541,8 +2544,11 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`packages/orchestrator-workflow/CHANGELOG.md:59-81`, re-pointed +2 lines by
-the 0.27.0 release commit inserting the `## [0.27.0]` heading above it) grew
+(`CHANGELOG.md:78-100#"the keyed placeholder line's exact text,"`,
+re-pointed by 19 lines since this account was first written, by T-002's own
+fix-round-1 `[Unreleased]` insertion above it, on top of the earlier
++2-line shift from the 0.27.0 release commit inserting the `## [0.27.0]`
+heading above it) grew
 by a net 3
 lines relative to the pre-round-2 base commit (`5a33adb`, `git diff
 --stat 5a33adb -- CHANGELOG.md`: 17 insertions, 14 deletions), shifting
@@ -5894,7 +5900,7 @@ source are re-stamped in the commit after this one.
   Fix-round-2 (review findings F1-F7): re-pointed one citation off a wrong
   passage (README.md's orchestrator-runs-on-session-model statement is at
   `:194-196`, not the full->minimal downgrade passage the round-1 citation
-  actually named), restored `README.md:210-213` to its full range (the
+  actually named), restored `README.md:211-214` to its full range (the
   narrowing rationale in the paragraph above was wrong: an anchor may not
   contain a backtick, but a code span's backtick-free inner text is a
   legal anchor, so that citation never needed narrowing), tightened two
@@ -6196,7 +6202,8 @@ the operator default or `["claude"]`) -- unlike `init`'s call site, where
 `resolveApplyHarnesses` returned pre-checked, and a bare Enter re-widens
 the install exactly as it did before this round; `fallbackToClaude: false`
 is live for `init` and dead code on `apply`'s interactive path. Left as a
-known residual (see the extended comment at `cli-inputs.ts:39-50` in this
+known residual (see the extended comment at
+`cli-inputs.ts:39-50#"harnesses-stickiness branch (shared by"` in this
 round's commit); fixing the interactive case is out of this task's scope.
 
 Tests added: a CLI-level `apply.test.ts` case chaining three `apply` runs
@@ -6435,16 +6442,22 @@ and out of scope.
 
 Fix: `ResolveInitInputsParams.filesystemDetected` was renamed to
 `stickyPreChecked?: Harness[]`
-(`packages/orchestrator-workflow/src/cli-inputs.ts:190-208`), with its doc
+(deliberately historical citation, this round's own commit:
+`packages/orchestrator-workflow/src/cli-inputs.ts:190-208`; a later round,
+D-002, rewrote this same field's doc comment and default again, so these
+line numbers describe fix-round-2's landed content, not the live file),
+with its doc
 comment rewritten to state the real semantics ("the entries pre-checked
 when the target recorded `harnesses: []`; defaults to `detected` for
 `init`; `apply` passes `[]`"). The sticky branch now reads
 `stickyPreChecked ?? detected`
-(`packages/orchestrator-workflow/src/cli-inputs.ts:307`)
+(deliberately historical, same caveat:
+`packages/orchestrator-workflow/src/cli-inputs.ts:307`)
 instead of `filesystemDetected ?? detected`; `init`'s call site still omits
 the field entirely, so its own pre-check (real on-disk detection) is
 unchanged. `apply`'s CLI action now passes a hardcoded `[]`
-(`packages/orchestrator-workflow/src/cli.ts:798`)
+(`packages/orchestrator-workflow/src/cli.ts:798` at that commit; deliberately
+historical, the call site has since moved into `cli-apply.ts`)
 instead of a fresh `detectHarnesses(targetDir)` call, which is removed from
 that call site entirely (nothing else there needed it). Every comment
 describing the round-1 design (`promptHarnesses`'s own comment block,
@@ -6468,7 +6481,8 @@ block above (`init`'s own sticky pre-check, unchanged since it omits
 `init`'s behaviour.
 
 Mutation probe: reverted the sticky branch's own call
-(`packages/orchestrator-workflow/src/cli-inputs.ts:307`)
+(deliberately historical, same caveat as above:
+`packages/orchestrator-workflow/src/cli-inputs.ts:307`)
 from `promptHarnesses(stickyPreChecked ?? detected, [], false)` back to plain
 `promptHarnesses(detected, [], false)`, ignoring `stickyPreChecked`
 entirely (equivalent in effect to `apply`'s CLI action passing `detected`
@@ -6522,7 +6536,7 @@ that restores the "(detected)" label: `promptHarnesses` gained a fourth
 parameter, `annotateDetected` (default: its own first argument, so every
 call site that omits it is unchanged), that drives only the checkbox's
 "(detected)" suffix, independent of what is actually pre-checked
-(`packages/orchestrator-workflow/src/cli-inputs.ts:25-38#"annotateDetected: Harness[] = detected,"`).
+(`packages/orchestrator-workflow/src/cli-inputs.ts:26-39#"annotateDetected: Harness[] = detected,"`).
 `apply`'s sticky-branch call passes a fresh `detectHarnesses(targetDir)`
 call as this field (`cli-apply.ts:43#"stickyAnnotateDetected: detectHarnesses(targetDir),"`)
 while still pre-checking nothing, so an operator sees which harness is on
@@ -6634,3 +6648,155 @@ measurement 0 errors, 0 warnings, 23 notices (unchanged, all
 `unresolved-ambiguous` in `log.md`), matching plain `check` (no flags).
 `npm test`: 597 tests green (12 files). `npm run build`, `npm run
 typecheck`, `npm run typecheck:test`: all clean.
+
+- 2026-09-02: `init`'s interactive harnesses prompt on a target whose own
+  manifest recorded a real `harnesses: []` now pre-checks nothing, matching
+  `apply`'s existing semantics, instead of pre-checking whatever
+  `detectHarnesses(targetDir)` found on disk (decision D-002, agent-dx
+  7669907c). `resolveInitInputs`'s sticky branch now resolves both the
+  pre-check and the " (detected)" label itself (`stickyPreChecked ?? []`,
+  `stickyAnnotateDetected ?? detected`), so neither call site needs its own
+  wiring for the new default; `apply`'s call site still passes
+  `stickyPreChecked: []`/`stickyAnnotateDetected` explicitly, as defence in
+  depth against a future edit to its own call site, unchanged from before.
+  The "interactive re-run after a templates-only install (F4)" describe
+  block in `cli-inputs.test.ts` (previously the regression pin for `init`'s
+  divergent, pre-round-3 behaviour) was updated in place rather than
+  removed: its first test now asserts nothing is pre-checked even when a
+  harness is detected on disk, and that the detected harness is still
+  labelled " (detected)".
+
+  Mutation probe: reverted `stickyPreChecked ?? []` back to
+  `stickyPreChecked ?? detected` at the sticky branch's own
+  `promptHarnesses` call. Result: the updated F4 test turned red (`checked`
+  came back `true` for `codex` instead of `false`); restored, re-ran green.
+
+  Docs: `install-fence-mechanics.md` re-pointed the F4 paragraph to state
+  the new shared semantics and the D-002 rationale, and its
+  `previous.harnessesRecordedEmpty` citation moved from `290-293` to
+  `287-290` (cli-inputs.ts comment edits above it shifted the line by -3);
+  `model-preselection.md`'s two `cli-inputs.ts` promptModels citations
+  moved from `111-153`/`111-116` to `107-149`/`107-112` (a net -4 shift
+  from the same comment edits); this log's own round-3 `annotateDetected:
+  Harness[] = detected,` citation moved from `25-38` to `26-39` (net +1).
+  `README.md`'s "Templates-only mode" section's asymmetric "`init`
+  pre-checks whatever it detects on disk; `apply` pre-checks nothing at
+  all" sentence was rewritten to state the single shared behaviour, so the
+  README states this in one place rather than two disagreeing ones.
+  `install-fence-mechanics.md`, `model-preselection.md`,
+  `operator-install-and-registry.md`, and `run-state-lifecycle-and-markers.md`
+  all re-stamped (each lists `cli-inputs.ts` and/or `README.md` as a
+  source).
+
+  Verification: `okf-kit@0.9.0 check --json docs/okf`: 0 errors (unchanged
+  from before this change), the `cli-inputs.ts:25-38` anchor-not-found
+  warning this change introduced closed by the re-point above, and the
+  four docs' `sources-fresh` STALE warnings closed by the re-stamp; final
+  measurement matches the pre-change baseline (0 errors). `npm test`: 597
+  tests green (12 files, unchanged count). `npm run build`, `npm run
+  typecheck`, `npm run typecheck:test`, `npm run format:check`: all clean.
+  `node scripts/check-cli-flag-order.mjs` (repo root): clean.
+
+  Follow-up same day: the README.md "Templates-only mode" edit above also
+  shifted every citation into README.md at or after line 93 by +1 (net:
+  3 lines removed, 4 added). Re-pointed every affected `README.md:N[-M]`
+  citation in `install-fence-mechanics.md`, `model-preselection.md`,
+  `run-state-lifecycle-and-markers.md`, and this log's own `210-213`
+  continuation-restore citation. `review-gate-and-waivers.md` and
+  `subagent-contracts-superset.md` (both list `CHANGELOG.md` as a source,
+  neither cites `cli-inputs.ts` or `README.md`) also re-stamped for the
+  same `CHANGELOG.md` edit. Re-measured: `okf-kit@0.9.0 check --json
+  docs/okf`: 0 errors, 0 warnings, 23 notices (all `unresolved-ambiguous`
+  in `log.md`, pre-existing and unrelated to this change). `npm test`: 597
+  tests green (unchanged).
+
+- 2026-09-02 (agent-tasks 7669907c, fix round 2): reviewer found `init`'s
+  own `resolveInitInputs` call site in `cli.ts` was unpinned -- adding
+  `stickyPreChecked: detected` there restored the pre-fix behaviour and
+  the suite minus `test/docs-consistency.test.ts` stayed green (370/370
+  in a copy; the full 597-test suite went red only on incidental citation
+  drift, not on behaviour, and a line-count-neutral variant of the same
+  edit keeps even that green), because only
+  `apply`'s call site had a dedicated builder (`buildApplyInitInputs`,
+  `cli-apply.ts`) with its own targeted test. Fix: extracted a mirror
+  builder, `buildInitInitInputs` (`src/cli-init.ts`, new file), and
+  changed `init`'s CLI action to call it instead of building the params
+  object inline; the builder never sets `stickyPreChecked` or
+  `stickyAnnotateDetected` at all, so `resolveInitInputs`'s own `?? []`/
+  `?? detected` defaults (D-002) apply through it, the same effect as
+  `apply`'s builder gets from hardcoding `[]` explicitly. Added
+  `test/cli-init.test.ts`, asserting `"stickyPreChecked" in result` and
+  `"stickyAnnotateDetected" in result` are both `false`.
+
+  Mutation probe: added `stickyPreChecked: detected` inside
+  `buildInitInitInputs`. Result: the new "never overrides stickyPreChecked
+  or stickyAnnotateDetected" test turned red (`"stickyPreChecked" in
+  result` came back `true`); restored, re-ran green.
+
+  Docs: the `cli.ts` call-site edit (an 11-line inline object replaced by
+  a one-line builder call, plus a new `cli-init.ts` import) shifted the
+  `cli.ts` citations in two directions: +1 for lines between the new
+  import and the `init` call site (the import only), -2 from the call site
+  onward (three lines removed there), net -2 on the file (1479 to 1477
+  lines). Every affected
+  `cli.ts:N[-M]` citation in `install-fence-mechanics.md`,
+  `model-preselection.md`, and `operator-install-and-registry.md` was
+  re-pointed (mechanically, by locating each anchor's own text at its new
+  line and preserving the citation's original span); two hardcoded
+  citation strings inside `test/docs-consistency.test.ts` itself (the
+  pin-gate-before-`runInit` ordering test) were updated to match. The one
+  citation whose target moved out of `cli.ts` entirely
+  (`previousIsRecordedManifest: true,`, now inside `buildInitInitInputs`)
+  was re-pointed to `cli-init.ts:24-39` instead of merely renumbered.
+  README.md's apply-section restatement of the sticky pre-check behaviour
+  (duplicating the "Templates-only mode" section verbatim) was replaced
+  with a one-line pointer to that section, per review finding 3; this
+  README edit landed above every citation into README.md that exists in
+  this bundle, so none needed re-pointing.
+
+  Reviewed but left in place (review finding 4, doc-comment
+  consolidation): `cli-inputs.ts` restates the sticky-branch rule and
+  rationale in four doc comments (`promptHarnesses`'s `annotateDetected`
+  param, its `fallbackToClaude` inline comment, and
+  `ResolveInitInputsParams.stickyPreChecked`/`stickyAnnotateDetected`'s
+  own doc comments) plus the branch itself inside `resolveInitInputs`.
+  Reducing all four to a one-line pointer at the branch's own comment
+  would remove roughly 61 comment lines and add roughly 22, a diff of
+  about 83 changed lines against the task's own "skip if the resulting
+  diff would exceed roughly 40 lines" budget; skipped, reported instead.
+
+  Also swept the remaining bare (unanchored, sometimes not even
+  backtick-wrapped) `cli-inputs.ts:*`/`CHANGELOG.md:*` tokens the review
+  named in this log: `CHANGELOG.md:59-81` two entries above (this
+  round's own fix-round-1 19-line `[Unreleased]` insertion shifted it to
+  78-100; re-pointed and anchored, `#"the keyed placeholder line's exact
+  text,"`); `CHANGELOG.md:808-815` in the `okf-kit check` 39-findings
+  paragraph above (deliberately historical -- frozen to base commit
+  `b80c346`'s content, reworded to say so explicitly, so a later sweep
+  does not have to re-derive that judgment); `cli-inputs.ts:39-50` in the
+  "Left as a known residual" paragraph above (currently live and
+  accurate -- anchored in place, `#"harnesses-stickiness branch (shared
+  by"`); `cli-inputs.ts:190-208` and both `cli-inputs.ts:307` occurrences
+  in the D-007 entry above (deliberately historical -- that entry
+  describes fix-round-2 of a DIFFERENT, earlier task, agent-tasks
+  fe834823, whose `stickyPreChecked ?? detected` semantics were later
+  superseded by D-002's `stickyPreChecked ?? []`; reworded in place to
+  say so, numbers left as they were).
+
+  Verification: `npm test`: 600 tests green (13 files; +3 for
+  `test/cli-init.test.ts`, unchanged elsewhere). `npm run build`, `npm
+  run typecheck`, `npm run typecheck:test`, `npm run format:check`: all
+  clean. `node scripts/check-cli-flag-order.mjs` (repo root): clean.
+
+  Follow-up same session: `okf-kit@0.9.0 check --json docs/okf` against
+  the committed tree found 4 `sources-fresh` STALE warnings --
+  `review-gate-and-waivers.md` and `subagent-contracts-superset.md`
+  against `test/docs-consistency.test.ts`, and
+  `run-state-lifecycle-and-markers.md` against both
+  `test/docs-consistency.test.ts` and `README.md` -- none of which cite
+  the specific lines this round touched (confirmed by inspection: their
+  `README.md:N[-M]` citations, where any exist, all resolve above line
+  400). Re-stamped all three (`timestamp` bumped to the real verification
+  instant, no content change). Re-measured: `okf-kit@0.9.0 check --json
+  docs/okf`: 0 errors, 0 warnings, 23 notices (same pre-existing
+  `unresolved-ambiguous` set as before this round).

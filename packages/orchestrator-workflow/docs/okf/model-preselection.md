@@ -3,7 +3,7 @@ type: module
 title: Model preselection
 description: How each subagent role's model is chosen, flows through the CLI and manifest into per-harness frontmatter, and survives re-installs.
 tags: [models, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-01T11:05:30Z
+timestamp: 2026-09-02T04:58:00Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/cli.ts
@@ -36,7 +36,7 @@ for how `--profile` scopes which roles get an actual subagent file — since
 (`src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
 
 Defaults (`src/models.ts:80-85#"advisor:"`, documented in
-`README.md:210-216#"escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default"`):
+`README.md:211-217#"escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default"`):
 
 | Role | Default | Rationale (README) |
 |---|---|---|
@@ -72,13 +72,13 @@ below.
    any), then applies `--models` on top; when running interactively with no
    `--models`, it prompts per role instead, defaulting each prompt to the
    already-resolved value (`src/cli-inputs.ts:369-370#"...DEFAULT_MODELS,"`, prompt UI at
-   `src/cli-inputs.ts:111-153#"return models;"`). Since agent-dx task T-003, this whole
+   `src/cli-inputs.ts:107-149#"return models;"`). Since agent-dx task T-003, this whole
    resolution step (harnesses, profile, models, tiers, and the opencode
    catalog resolution) lives in a single reusable function,
    `resolveInitInputs` (`src/cli-inputs.ts`), which `init`'s CLI action
    calls; a later `apply --target` command can call the same function
    without duplicating the logic. Since 0.15.0 the interactive prompt only asks about
-   the roles `rolesForProfile(profile)` selects (`src/cli-inputs.ts:111-116#"for (const role of roles) {"`
+   the roles `rolesForProfile(profile)` selects (`src/cli-inputs.ts:107-112#"for (const role of roles) {"`
    iterates a `roles` parameter instead of the full `ROLES` list), so a
    `minimal` install is not asked for `explorer`/`task-slicer` models (and,
    since 0.21.0, not for `advisor` either — the same `rolesForProfile`
@@ -149,7 +149,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`README.md:234-237#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`README.md:235-238#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:525-548#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2185-2193#"${role}.md must not contain model:"`,
@@ -163,7 +163,7 @@ below.
   `codex` harness (`src/init.ts:666-667#".agents"`); there is no `model:` surface for
   Codex because "there is no standardized project-level subagent
   definition" and the skill instructs running roles inline instead
-  (`README.md:133#"the skill instructs running the roles inline with the same contracts."`), regardless of `--profile`: Codex has no per-role
+  (`README.md:134#"the skill instructs running the roles inline with the same contracts."`), regardless of `--profile`: Codex has no per-role
   files to select from either way. `--tiers`/`--no-tiers` follow the same
   rule for the same reason: Codex gets no tier-variant files either, since
   it never gets a per-role file to render a variant of.
@@ -386,7 +386,7 @@ roles get no effort field at all, matching the pre-0.22.0 byte shape on
 that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `README.md`'s "Effort tiers" section gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`README.md:248-263#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`README.md:249-264#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. `agents-md-section.md`'s
 Scaling delegation bullet list gained a dedicated bullet (deliberately
@@ -414,7 +414,7 @@ way to express an explicit "turn it off" short of hand-editing the
 manifest, since commander only ever set `opts.tiers` to `true` or left it
 `undefined` — there was no negated flag to produce `false`. commander's
 negatable-option pairing (`--tiers` / `--no-tiers` declared under the same
-`"tiers"` option name, `cli.ts:161-163#"explicitly turn effort-tier subagent variants off, overriding a previously installed --tiers value"`) resolves `opts.tiers` to `true`
+`"tiers"` option name, `cli.ts:162-164#"explicitly turn effort-tier subagent variants off, overriding a previously installed --tiers value"`) resolves `opts.tiers` to `true`
 when `--tiers` is passed, `false` when `--no-tiers` is passed, and
 `undefined` when neither is passed; verified end-to-end against the
 installed commander version rather than assuming the pairing behavior:
@@ -535,7 +535,7 @@ the session's main model. Use the strongest reasoning model available,"
 plus "Per-role model preferences ... are recorded in
 `.ai/workflow/manifest.json` and, where the harness supports per-agent
 models, in the subagent definitions themselves." README states the same
-rule at `README.md:218-220#"reused as the default on later re-runs."`.
+rule at `README.md:219-221#"reused as the default on later re-runs."`.
 
 ## Docs-consistency pins (model-specific)
 

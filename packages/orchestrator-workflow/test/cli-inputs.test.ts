@@ -503,7 +503,22 @@ describe("resolveInitInputs: interactive plain first run (no previous manifest)"
   });
 });
 
-describe("resolveInitInputs: interactive re-run after a templates-only install (F4)", () => {
+describe("resolveInitInputs: interactive re-run after a templates-only install (F4, reversed by D-002)", () => {
+  // F4 originally pinned init's sticky-branch pre-check to whatever
+  // `detectHarnesses(targetDir)` found on disk (init's call site omitted
+  // `stickyPreChecked`, which defaulted to `detected`), deliberately
+  // different from apply's fe834823 "pre-check nothing" semantics. D-002
+  // (agent-dx 7669907c) reverses that: the weak-signal argument from
+  // fe834823 (a stray harness config left on disk is not the recorded
+  // intent, the manifest is) applies to init identically, and the earlier
+  // fix's concern (ask instead of silently falling back to
+  // templates-only) is preserved because the prompt still appears and
+  // still annotates detection; only the pre-check now follows recorded
+  // intent instead of on-disk detection. init and apply now share one
+  // sticky-branch semantics (`stickyPreChecked ?? []`,
+  // `stickyAnnotateDetected ?? detected`, both resolved once inside
+  // `resolveInitInputs`).
+  //
   // resolveInitInputs prompts for more than just harnesses when
   // interactive and the corresponding opts.* flag is absent (profile,
   // then one models prompt per role): answer every prompt generically by
@@ -524,7 +539,7 @@ describe("resolveInitInputs: interactive re-run after a templates-only install (
     vi.mocked(inquirer.prompt).mockReset();
   });
 
-  it("still prompts instead of skipping straight to templates-only, with nothing pre-checked except what is detected", async () => {
+  it("still prompts instead of skipping straight to templates-only, with nothing pre-checked even though a harness is detected on disk (D-002)", async () => {
     const previous = fakeManifest({
       harnesses: [],
       harnessesRecordedEmpty: true,
@@ -532,6 +547,10 @@ describe("resolveInitInputs: interactive re-run after a templates-only install (
     mockPrompts([]);
 
     const result = await resolveInitInputs({
+      // init's own call site omits stickyPreChecked/stickyAnnotateDetected
+      // entirely, exactly like this call: the defaults inside
+      // resolveInitInputs (`stickyPreChecked ?? []`, `stickyAnnotateDetected
+      // ?? detected`) must do the pre-check/annotate split on their own.
       detected: ["codex"],
       interactive: true,
       previous,
@@ -550,15 +569,20 @@ describe("resolveInitInputs: interactive re-run after a templates-only install (
     expect(harnessesCall).toBeDefined();
     const choices = (
       harnessesCall![0] as Array<{
-        choices: Array<{ value: string; checked: boolean }>;
+        choices: Array<{ value: string; name: string; checked: boolean }>;
       }>
     )[0].choices;
-    // Only the detected harness ("codex") is pre-checked; the previous
-    // install's own recorded harnesses ([]) contribute nothing, so
-    // "claude"/"opencode" are unchecked rather than carried forward.
+    // Nothing is pre-checked, regardless of what is detected on disk
+    // (D-002: init now mirrors apply's fe834823 pre-check semantics).
     for (const choice of choices) {
-      expect(choice.checked).toBe(choice.value === "codex");
+      expect(choice.checked).toBe(false);
     }
+    // The detected harness ("codex") is still labelled, so the operator
+    // can see what is actually on disk even though it is not pre-checked.
+    const codexChoice = choices.find((c) => c.value === "codex");
+    expect(codexChoice?.name).toBe("codex (detected)");
+    const claudeChoice = choices.find((c) => c.value === "claude");
+    expect(claudeChoice?.name).toBe("claude");
     // The mocked answer (operator deselected everything) flows through.
     expect(result.harnesses).toEqual([]);
   });
@@ -822,7 +846,9 @@ describe("resolveInitInputs: apply's sticky prompt still shows ' (detected)' via
 });
 
 // `resolveInitInputs: interactive re-run after a templates-only install
-// (F4)` above pins `init`'s own sticky-branch pre-check (real on-disk
-// detection via `detected`, since `init`'s call site omits
-// `stickyPreChecked` and it defaults to `detected`) unchanged by this
-// round-2 fix.
+// (F4, reversed by D-002)` above now pins `init`'s own sticky-branch
+// pre-check to the same "pre-check nothing, still annotate detection"
+// semantics as apply's round-2/round-3 fixes, rather than the on-disk
+// detection F4 originally pinned: both call sites share one resolution
+// inside `resolveInitInputs` now (`stickyPreChecked ?? []`,
+// `stickyAnnotateDetected ?? detected`).

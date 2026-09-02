@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `init`'s interactive harnesses prompt on a target whose own manifest
+  recorded a real `harnesses: []` (a deliberate `--harness none`
+  templates-only install) now starts with nothing pre-checked, matching
+  `apply`'s existing semantics, instead of pre-checking whatever
+  `detectHarnesses(targetDir)` found on disk. Decision D-002 (agent-dx
+  7669907c): the weak-signal argument that motivated `apply`'s own fix
+  (agent-tasks fe834823, a stray harness config left on disk, e.g. a
+  `.claude/` directory, is not the recorded intent, the manifest is)
+  applies to `init` identically, and the earlier fix's concern (ask
+  instead of silently falling back to templates-only) is preserved
+  because the prompt still appears and still annotates detection with a
+  " (detected)" label; only the pre-check now follows recorded intent
+  instead of on-disk detection. `init` and `apply` now share one
+  resolution inside `resolveInitInputs` (`stickyPreChecked ?? []`,
+  `stickyAnnotateDetected ?? detected`) instead of `init`'s own call site
+  relying on a different default.
+
 ## [0.27.0] - 2026-09-01
 
 ### Added

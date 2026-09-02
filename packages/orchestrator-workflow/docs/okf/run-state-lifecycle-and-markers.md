@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-01T11:10:19Z
+timestamp: 2026-09-02T05:28:32Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -23,7 +23,7 @@ sources:
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:65-76#"05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(SKILL.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:115-120#"one directory per unit of work, newest = active";
+(SKILL.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:116-121#"one directory per unit of work, newest = active";
 packages/orchestrator-workflow/INSTALL-AGENT.md:59-60#"(new files).",173-178). The newest run
 directory is the active one unless a `.ai/run` pointer names one
 (SKILL.md:80-83#"older directories are the auditable history. Do not", see the pointer section below); older
@@ -134,7 +134,7 @@ read as-is and the verdict layer blocks it, since `<sha>` is not a commit
 sha. Unlike the pointer, this marker line is written into a
 tracked run file, not gitignored: the README and the manual-install doc both
 note the pointer is machine-local and add it to `.gitignore`
-(packages/orchestrator-workflow/README.md:124-126#"it to the repository's";
+(packages/orchestrator-workflow/README.md:125-127#"it to the repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:60-63#"repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:175-177#"repository's").
 
