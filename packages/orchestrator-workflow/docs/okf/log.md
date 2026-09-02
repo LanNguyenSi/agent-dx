@@ -6649,6 +6649,33 @@ measurement 0 errors, 0 warnings, 23 notices (unchanged, all
 `npm test`: 597 tests green (12 files). `npm run build`, `npm run
 typecheck`, `npm run typecheck:test`: all clean.
 
+## 2026-09-02 (agent-dx 7d17996d, implementer)
+
+Task: make an okf-kit release bump orchestrator-workflow's
+`.github/workflows/` okf-kit pins mechanically (`scripts/bump-okf-kit-pin.mjs`,
+CONTRIBUTING.md's new "Releasing okf-kit" section, decision D-003). The
+commit added a new `## okf-kit version pin` paragraph appended at the very
+end of `packages/orchestrator-workflow/README.md`, after every existing
+section, so no line number cited by this bundle shifted.
+
+Fix: re-verified `install-fence-mechanics.md`'s two `README.md` citations
+(lines 133, 133-134) and `model-preselection.md`'s five `README.md`
+citations (lines 39, 152, 166, 389, 538) and `run-state-lifecycle-and-
+markers.md`'s two `README.md` citations (lines 26, 137) against the
+unchanged content at those line numbers -- none needed re-pointing, only
+re-stamping. `sources-fresh` still flagged all three docs STALE because
+`README.md`'s git-log change date moved to this commit; re-stamped each
+doc's `timestamp:` frontmatter to `2026-09-02T04:52:48Z` (this commit's
+`README.md` change time).
+
+Verification: `okf-kit check --json docs/okf` (global 0.9.0): 3
+`sources-fresh` STALE warnings -> 0; 23 `citations-resolve` notices
+unchanged (all pre-existing `unresolved-ambiguous`, none touched by this
+task). `npm test` in `packages/orchestrator-workflow`: 597 tests green (12
+files). `npm run build`, `npm run typecheck`, `npm run format:check`: all
+clean. Same commands re-run in `packages/okf-kit`: 270 tests green (23
+files, including the new `test/bump-okf-kit-pin.test.ts`), build,
+typecheck, format:check clean.
 - 2026-09-02: `init`'s interactive harnesses prompt on a target whose own
   manifest recorded a real `harnesses: []` now pre-checks nothing, matching
   `apply`'s existing semantics, instead of pre-checking whatever
