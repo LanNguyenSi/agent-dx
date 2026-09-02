@@ -7,9 +7,9 @@ name: OKF staleness
 # gate, this one never is. Never mark this check as required in branch
 # protection: a PR that removes or renames the bundle goes red here by
 # design (tool-error posture, exit 2), and warn-only must stay
-# non-blocking. Canonical pattern shared with the OKF bundle repos
-# (agent-tasks, harness, triologue, agent-grounding, codebase-oracle);
-# keep them in sync. agent-dx specifics: per-package bundle granularity
+# non-blocking. Canonical pattern shared by every repo that ships a
+# docs/okf bundle (find them by this workflow's file name); keep them
+# in sync. agent-dx specifics: per-package bundle granularity
 # (see the 2026-07-16 pilot decision), so the path below targets the
 # orchestrator-workflow package bundle; additional per-package bundles
 # each get their own path here.
