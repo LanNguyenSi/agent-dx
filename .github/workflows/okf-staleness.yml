@@ -33,7 +33,7 @@ jobs:
       BUNDLE_PATH: packages/orchestrator-workflow/docs/okf
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # sources-fresh derives per-path change times from `git log %ct`;
           # a shallow clone silently reports wrong staleness verdicts.
@@ -43,7 +43,7 @@ jobs:
           # just a different commit than a naive local run.
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           # 22 = active LTS, matching ci.yml.
           node-version: 22
