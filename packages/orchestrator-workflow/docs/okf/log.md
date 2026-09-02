@@ -6456,7 +6456,8 @@ when the target recorded `harnesses: []`; defaults to `detected` for
 instead of `filesystemDetected ?? detected`; `init`'s call site still omits
 the field entirely, so its own pre-check (real on-disk detection) is
 unchanged. `apply`'s CLI action now passes a hardcoded `[]`
-(`packages/orchestrator-workflow/src/cli.ts:798`)
+(`packages/orchestrator-workflow/src/cli.ts:798` at that commit; deliberately
+historical, the call site has since moved into `cli-apply.ts`)
 instead of a fresh `detectHarnesses(targetDir)` call, which is removed from
 that call site entirely (nothing else there needed it). Every comment
 describing the round-1 design (`promptHarnesses`'s own comment block,
@@ -6712,7 +6713,10 @@ typecheck`, `npm run typecheck:test`: all clean.
 - 2026-09-02 (agent-tasks 7669907c, fix round 2): reviewer found `init`'s
   own `resolveInitInputs` call site in `cli.ts` was unpinned -- adding
   `stickyPreChecked: detected` there restored the pre-fix behaviour and
-  the whole suite stayed green (measured 370/370 in a copy), because only
+  the suite minus `test/docs-consistency.test.ts` stayed green (370/370
+  in a copy; the full 597-test suite went red only on incidental citation
+  drift, not on behaviour, and a line-count-neutral variant of the same
+  edit keeps even that green), because only
   `apply`'s call site had a dedicated builder (`buildApplyInitInputs`,
   `cli-apply.ts`) with its own targeted test. Fix: extracted a mirror
   builder, `buildInitInitInputs` (`src/cli-init.ts`, new file), and
@@ -6730,9 +6734,11 @@ typecheck`, `npm run typecheck:test`: all clean.
   result` came back `true`); restored, re-ran green.
 
   Docs: the `cli.ts` call-site edit (an 11-line inline object replaced by
-  a one-line builder call, plus a new `cli-init.ts` import) shifted every
-  citation into `cli.ts` at line 10 or later by a net -2 (one line added
-  for the import, three removed at the call site). Every affected
+  a one-line builder call, plus a new `cli-init.ts` import) shifted the
+  `cli.ts` citations in two directions: +1 for lines between the new
+  import and the `init` call site (the import only), -2 from the call site
+  onward (three lines removed there), net -2 on the file (1479 to 1477
+  lines). Every affected
   `cli.ts:N[-M]` citation in `install-fence-mechanics.md`,
   `model-preselection.md`, and `operator-install-and-registry.md` was
   re-pointed (mechanically, by locating each anchor's own text at its new

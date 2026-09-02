@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import { buildInitInitInputs } from "../src/cli-init.js";
@@ -54,5 +57,25 @@ describe("buildInitInitInputs", () => {
 
     expect(result.previous).toBeUndefined();
     expect(result.previousIsRecordedManifest).toBe(true);
+  });
+});
+
+describe("init's CLI action hands buildInitInitInputs's result straight to resolveInitInputs", () => {
+  // The builder pins the sticky-branch wiring, but a call site that spreads
+  // the builder's result into a fresh object literal (`{ ...build(...),
+  // stickyPreChecked: detected }`) could restore the pre-D-002 behaviour
+  // with every other test green. This source assertion closes that door.
+  const cliSource = readFileSync(
+    fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
+    "utf8",
+  );
+
+  it("calls resolveInitInputs with the bare builder result, no spread and no adjacent object literal", () => {
+    const direct =
+      /resolveInitInputs\(\s*(?:\/\/[^\n]*\n\s*)*buildInitInitInputs\(detected, previous, interactive, opts\),?\s*\)/;
+    expect(cliSource).toMatch(direct);
+    expect(cliSource).not.toMatch(/\.\.\.buildInitInitInputs\(/);
+    expect(cliSource).not.toMatch(/buildInitInitInputs\([^)]*\)\s*,\s*sticky/);
+    expect(cliSource).not.toMatch(/\{\s*\.\.\.\s*buildInitInitInputs/);
   });
 });
