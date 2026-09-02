@@ -6781,3 +6781,16 @@ typecheck`, `npm run typecheck:test`: all clean.
   `test/cli-init.test.ts`, unchanged elsewhere). `npm run build`, `npm
   run typecheck`, `npm run typecheck:test`, `npm run format:check`: all
   clean. `node scripts/check-cli-flag-order.mjs` (repo root): clean.
+
+  Follow-up same session: `okf-kit@0.9.0 check --json docs/okf` against
+  the committed tree found 4 `sources-fresh` STALE warnings --
+  `review-gate-and-waivers.md` and `subagent-contracts-superset.md`
+  against `test/docs-consistency.test.ts`, and
+  `run-state-lifecycle-and-markers.md` against both
+  `test/docs-consistency.test.ts` and `README.md` -- none of which cite
+  the specific lines this round touched (confirmed by inspection: their
+  `README.md:N[-M]` citations, where any exist, all resolve above line
+  400). Re-stamped all three (`timestamp` bumped to the real verification
+  instant, no content change). Re-measured: `okf-kit@0.9.0 check --json
+  docs/okf`: 0 errors, 0 warnings, 23 notices (same pre-existing
+  `unresolved-ambiguous` set as before this round).
