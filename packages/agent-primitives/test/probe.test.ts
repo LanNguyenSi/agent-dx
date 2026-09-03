@@ -187,8 +187,8 @@ describe("probe(): killed and survived", () => {
       mode: "inplace",
       path: null,
       linked: [],
-      syncedTrackedFiles: [],
-      syncedUntrackedFiles: [],
+      syncedTrackedFiles: 0,
+      syncedUntrackedFiles: 0,
     });
 
     const after = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
@@ -2703,6 +2703,10 @@ describe("installCrashHandlers(): re-entrancy", () => {
         return true;
       },
       true,
+      async () => {
+        // No worktree session in this test; a no-op cleanup mirrors what
+        // `probe()` itself passes when `wtWorktreePath` was never set.
+      },
     );
     try {
       // Both signals land in the same tick, before the handler's own

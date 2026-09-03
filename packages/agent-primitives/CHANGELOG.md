@@ -417,22 +417,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failures-first; a cut is reported via `truncated: true` and the full,
   uncapped result is written to the log directory.
 
-- `probe` subcommand (`inplace` isolation only; `-i worktree` still
-  returns `not_implemented`, a later release flips the default): the full
-  mutation-probe pipeline (lock, containment, stale-marker recovery,
-  baseline, apply, `--pre`/test, restore, hash verification, classify)
-  for all three mutant forms (`-r, --replace`, `-M, --match` with
-  `-w, --with`, `-p, --patch` via `git apply`). A per-target lock
-  (`src/lock.ts`, `O_EXCL`, stale-pid reclaim) outside the repository
-  serializes concurrent probes on the same file; an in-flight marker
-  written before mutation lets the next invocation recover automatically
-  from a `SIGKILL`/crash mid-mutation, or refuse with
-  `stale_probe_marker` naming the backup path when it cannot prove that
-  recovery is safe. Restore runs on normal completion, on any thrown
-  error, and on `SIGINT`/`SIGTERM`; a failed restore is terminal
-  (`restore_failed`, exit 2, never a `killed`/`survived` verdict).
-  `doctor`'s `checks` gained a `stale-probe-marker` entry for the current
-  repository.
+- `probe` subcommand (`inplace` isolation): the full mutation-probe
+  pipeline (lock, containment, stale-marker recovery, baseline, apply,
+  `--pre`/test, restore, hash verification, classify) for all three
+  mutant forms (`-r, --replace`, `-M, --match` with `-w, --with`,
+  `-p, --patch` via `git apply`). A per-target lock (`src/lock.ts`,
+  `O_EXCL`, stale-pid reclaim) outside the repository serializes
+  concurrent probes on the same file; an in-flight marker written before
+  mutation lets the next invocation recover automatically from a
+  `SIGKILL`/crash mid-mutation, or refuse with `stale_probe_marker`
+  naming the backup path when it cannot prove that recovery is safe.
+  Restore runs on normal completion, on any thrown error, and on
+  `SIGINT`/`SIGTERM`; a failed restore is terminal (`restore_failed`,
+  exit 2, never a `killed`/`survived` verdict). `doctor`'s `checks`
+  gained a `stale-probe-marker` entry for the current repository.
+
+- `probe`'s `worktree` isolation (now the default `-i`): the mutation
+  runs inside a detached `git worktree add --detach` under `--log-dir`
+  instead of the working tree. The worktree is synced to the actual
+  working tree state, not just `HEAD`: tracked modifications are captured
+  with `git diff HEAD --binary` (written to `<log-dir>/tracked.diff`) and
+  replayed with `git -C <worktree> apply --allow-empty` -- run
+  unconditionally, even against an empty diff, so a clean tree and a dirty
+  one exercise the same two observable exec calls -- and every untracked,
+  non-ignored file (`git ls-files --others --exclude-standard`) is copied
+  to the same relative path, including an untracked target or test file.
+  `syncedTrackedFiles`/`syncedUntrackedFiles` on `isolation` report the
+  counts (both `0` on a clean tree, and for every `inplace` run, where
+  they were previously always-empty arrays -- a breaking type change for
+  anything reading them). Every `node_modules` directory up to 3 levels
+  deep (never one nested inside another) is symlinked into the worktree
+  at the same relative path, alongside every `--link` extra, reported in
+  `isolation.linked`. Any non-zero exit while syncing, or a filesystem
+  failure while copying/linking, is `inconclusive`/`worktree_sync_failed`,
+  exit 2, never a verdict. The lock and the leftover-worktree marker are
+  keyed on the repository root instead of `--file` (two probes on one
+  repository serialize, covering the shared, linked node_modules caches);
+  the file-keyed in-flight marker from `inplace` is not written at all for
+  `worktree`, since nothing in the original tree is ever mutated -- the
+  original target's hash is still checked before and after, and a mismatch
+  is reported as `worktree_original_tree_modified` rather than silently
+  trusted. The worktree is removed (`git worktree remove --force` then
+  `git worktree prune`) on normal completion, on any thrown error, and on
+  `SIGINT`/`SIGTERM` (the signal handler and the pipeline's own cleanup
+  share one in-flight promise, so neither can let the process exit while
+  the other's `git worktree remove` is still running); a `SIGKILL` leaves
+  it registered, and the next `worktree` probe on that repository recovers
+  it automatically. Outside a git work tree, `worktree` falls back to
+  `inplace` with a warning naming the fallback. `doctor` gained a
+  `stale-worktree` check reporting a leftover worktree for the current
+  repository, naming the manual `git worktree remove`/`prune` command.
 
 - Initial package scaffold: the shared envelope module (bounded
   serialization, status-to-exit-code mapping), an `exec` runner with fixed

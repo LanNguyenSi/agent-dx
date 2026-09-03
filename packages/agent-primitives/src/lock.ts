@@ -110,14 +110,18 @@ function ensureLockDir(dir: string, deps: LockDirDeps = {}): LockDirState {
   return { ok: true };
 }
 
-/** Lock and marker files are named by the sha256 of an absolute path, so
- * two callers naming the same path always collide on the same file name
- * and two callers naming different paths never do. The two use different
- * paths on purpose: a marker is per target file (it records that one
- * file's backup and hashes), while a lock is per repository (see
- * `acquireLock`). */
-export function lockKey(absPath: string): string {
-  return createHash("sha256").update(absPath).digest("hex");
+/** Lock and marker files are named by the sha256 of a key string, so two
+ * callers sharing the same key always collide on the same file name and
+ * two callers with different keys never do. A marker is always keyed by
+ * the target file path (it records that one file's backup and hashes).
+ * A lock is keyed by the repository root when the probe is inside a git
+ * work tree (`inplace` and `worktree` probes on the same repository
+ * share the one tree, or, once linked, the same node_modules caches, so
+ * they are never independent even when their target files differ), and
+ * by the target file path itself otherwise -- nothing here assumes the
+ * key names a file. */
+export function lockKey(key: string): string {
+  return createHash("sha256").update(key).digest("hex");
 }
 
 function lockFilePath(absLockIdentity: string): string {

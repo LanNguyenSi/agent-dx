@@ -6,6 +6,11 @@ import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
 import { doctor } from "../src/doctor/index.js";
 import { doctor as doctorFromIndex } from "../src/index.js";
+import { lockKey } from "../src/lock.js";
+import {
+  containmentRoot,
+  resolveDeepestExisting,
+} from "../src/probe/containment.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -562,6 +567,84 @@ describe("doctor: stale-probe-marker check", () => {
     );
     const result = await doctor({ required: [], optional: [], cwd, lockDir });
     const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(true);
+  });
+});
+
+describe("doctor: stale-worktree check", () => {
+  it("ok when there is no worktree marker for this repository", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).toContain("no stale worktree marker");
+  });
+
+  it("ok when a worktree marker exists but its pid is still alive", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const root = resolveDeepestExisting(containmentRoot(cwd));
+    const worktreePath = path.join(makeTmpDir(), "wt");
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: worktreePath,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: process.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+  });
+
+  it("not ok when a worktree marker's pid is dead: names the leftover worktree path and a manual recovery command", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const root = resolveDeepestExisting(containmentRoot(cwd));
+    const worktreePath = path.join(makeTmpDir(), "wt");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: worktreePath,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(worktreePath);
+    expect(check?.detail).toContain("worktree remove --force");
+  });
+
+  it("does not confuse a same-key stale-probe-marker check for a different repository's worktree marker", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const elsewhereRoot = resolveDeepestExisting(containmentRoot(makeTmpDir()));
+    const worktreePath = path.join(makeTmpDir(), "wt");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(elsewhereRoot)}.marker.json`),
+      JSON.stringify({
+        targetPath: worktreePath,
+        backupPath: elsewhereRoot,
+        preHash: "",
+        mutatedHash: "",
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
     expect(check?.ok).toBe(true);
   });
 });

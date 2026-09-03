@@ -3,7 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "../envelope.js";
 import { sha256File } from "../hash.js";
-import { isPidAlive, listMarkers, type MarkerEntry } from "../lock.js";
+import {
+  isPidAlive,
+  lockKey,
+  listMarkers,
+  type MarkerEntry,
+} from "../lock.js";
 import {
   containmentRoot,
   isPathContained,
@@ -362,6 +367,30 @@ export async function doctor(
       staleMarkers.length === 0
         ? "no stale probe markers for this repository"
         : detailParts.join(" "),
+  });
+
+  // `worktree` probes key their in-flight marker on the repository root
+  // (not on `--file`) and record the worktree's own path in it, so a
+  // leftover from a SIGKILL/crash is found by looking for exactly the
+  // marker file that key would produce, rather than by scanning every
+  // marker's `targetPath` (a worktree directory, not a repo-contained
+  // file, so `isPathContained` above would never match it).
+  const worktreeMarkerFileName = `${lockKey(markerRoot)}.marker.json`;
+  const worktreeMarker = listMarkers(options.lockDir).find(
+    (m) => path.basename(m.markerPath) === worktreeMarkerFileName,
+  );
+  const staleWorktree =
+    worktreeMarker !== undefined && !isPidAlive(worktreeMarker.pid);
+  checks.push({
+    name: "stale-worktree",
+    ok: !staleWorktree,
+    detail: staleWorktree
+      ? `a worktree probe on ${markerRoot} was interrupted; leftover worktree at ` +
+        `${worktreeMarker!.targetPath}; the next \`probe -i worktree\` on this ` +
+        `repository recovers it automatically, or run \`git -C ${markerRoot} ` +
+        `worktree remove --force ${worktreeMarker!.targetPath} && git -C ` +
+        `${markerRoot} worktree prune\` manually`
+      : "no stale worktree marker for this repository",
   });
 
   const hints: string[] = [];

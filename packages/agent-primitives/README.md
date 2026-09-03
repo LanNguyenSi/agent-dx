@@ -238,25 +238,61 @@ the result.
 
 ```bash
 agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
-  -t 'npm test' -i inplace
-agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
   -t 'npm test'
+agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
+  -t 'npm test' -i inplace
 agent-primitives probe --file src/foo.js -n 1 -p mutant.patch -t 'npm test'
 ```
 
-Only `-i inplace` is implemented: it backs up the target file
-before mutating it and restores from that backup afterward (on normal
-completion, on any error, and on `SIGINT`/`SIGTERM`; on a signal the CLI
-then ends the process, while the exported `probe()` restores and returns
-control instead, unless the caller passes `exitOnSignal: true`).
-`-i worktree` (the
-eventual default, isolating the mutation in a throwaway git worktree
-instead of the working tree) returns `status: "usage_error"`,
-`reason: "not_implemented"`, exit `2`, until a later release. `--file`
-is long-only (the global `-f` is `--format`). Exactly one mutant form is
-required: `-r, --replace` (replace the whole line), `-M, --match` with
-`-w, --with` (replace the first occurrence of a substring on the line),
-or `-p, --patch` (apply a unified diff via `git apply`).
+`-i worktree` is the default: `--file` is mutated in a detached git
+worktree (`git worktree add --detach` under `--log-dir`), never in the
+working tree itself. Before the mutation runs, the worktree is synced to
+look like the actual working tree, not just `HEAD`: uncommitted tracked
+modifications are captured with `git diff HEAD --binary` (written to
+`<log-dir>/tracked.diff`) and replayed with `git -C <worktree> apply
+--allow-empty` (run unconditionally, even against an empty diff, so a
+clean tree exercises the same two exec calls as a dirty one), and every
+untracked, non-ignored file (`git ls-files --others --exclude-standard`)
+is copied to the same relative path -- including an untracked target or
+test file, which would otherwise be invisible to the probe and produce a
+false `survived`. Every `node_modules` directory found in the source tree
+up to 3 levels deep (never one nested inside another `node_modules`) is
+symlinked into the worktree at the same relative path, alongside every
+`--link` extra, so installed dependencies and tool caches are shared
+rather than reinstalled per probe. `--pre`/`-t` run with their cwd mapped
+onto the worktree at `--cwd`'s own relative offset from the containment
+root. Any non-zero exit while syncing (the worktree add, the tracked-diff
+apply, or the untracked-file listing) or a filesystem failure while
+copying/linking is `status: "inconclusive"`, `reason:
+"worktree_sync_failed"`, exit `2`, never a verdict. The worktree is
+removed (`git worktree remove --force` then `git worktree prune`) on
+normal completion, on any error, and on `SIGINT`/`SIGTERM`; a `SIGKILL`
+(or a crash) leaves it registered, and the next `probe -i worktree` run on
+the same repository recovers it automatically (a warning names
+`recovered_stale_worktree`), or `agent-primitives doctor` reports it as a
+`stale-worktree` check naming the leftover path and the manual `git
+worktree remove`/`prune` command. The lock for `worktree` is keyed on the
+repository root rather than on `--file` (two probes on the same
+repository serialize, which also covers the shared, linked node_modules
+caches); the in-flight marker and its automatic recovery described below
+apply only to `inplace`, since nothing in the original tree is ever
+mutated by a `worktree` probe -- the repository-keyed lock/marker above
+is what covers a `worktree` probe's own leftover-on-crash case instead.
+Outside a git work tree, `worktree` falls back to `inplace` with a
+warning naming the fallback, never an error.
+
+`-i inplace` backs up the target file before mutating it and restores
+from that backup afterward (on normal completion, on any error, and on
+`SIGINT`/`SIGTERM`; on a signal the CLI then ends the process, while the
+exported `probe()` restores and returns control instead, unless the
+caller passes `exitOnSignal: true`).
+
+`--file` is long-only (the global `-f` is `--format`). Exactly one mutant
+form is required: `-r, --replace` (replace the whole line), `-M, --match`
+with `-w, --with` (replace the first occurrence of a substring on the
+line), or `-p, --patch` (apply a unified diff via `git apply`, applied
+against the worktree for `-i worktree`, against the working tree itself
+for `-i inplace`).
 
 `-t` and `--pre` are shell commands, executed through `sh -c` as given,
 so neither may be filled from untrusted text (an issue body, a model's
@@ -421,8 +457,11 @@ result, restored_verified }` (paste straight into an implementer's
 `mutation_probes` output field), `baseline: { exitCode, durationMs,
 logPath, timedOut }`, `test: { command, exitCode, durationMs, timedOut,
 stdoutTail, stderrTail, logPath }`, `isolation: { mode, path, linked,
-syncedTrackedFiles, syncedUntrackedFiles }` (the `worktree`-only fields
-are empty for `inplace`).
+syncedTrackedFiles, syncedUntrackedFiles }` (`path` is the worktree
+directory for `worktree`, `null` for `inplace`; `linked` lists the
+absolute source-tree paths symlinked in; `syncedTrackedFiles` and
+`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for
+every `inplace` run).
 
 ## `init`
 

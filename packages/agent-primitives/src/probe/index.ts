@@ -19,7 +19,13 @@ import {
   isPathContained,
   resolveDeepestExisting,
 } from "./containment.js";
-import { beginInplace, type InplaceSession } from "./isolation.js";
+import {
+  beginInplace,
+  beginWorktree,
+  cleanupWorktree,
+  type InplaceSession,
+  type WorktreeSyncSuccess,
+} from "./isolation.js";
 import {
   applyPatchForReal,
   computeMutant,
@@ -106,8 +112,8 @@ export interface IsolationField {
   mode: IsolationMode;
   path: string | null;
   linked: string[];
-  syncedTrackedFiles: string[];
-  syncedUntrackedFiles: string[];
+  syncedTrackedFiles: number;
+  syncedUntrackedFiles: number;
 }
 
 export type ProbeStatus =
@@ -134,8 +140,8 @@ function emptyIsolationField(mode: IsolationMode): IsolationField {
     mode,
     path: null,
     linked: [],
-    syncedTrackedFiles: [],
-    syncedUntrackedFiles: [],
+    syncedTrackedFiles: 0,
+    syncedUntrackedFiles: 0,
   };
 }
 
@@ -245,8 +251,8 @@ export interface CrashHandlers {
 
 /**
  * Installs SIGINT/SIGTERM handlers scoped to one `probe()` call, whose
- * whole purpose is that the emergency restore is the LAST write to the
- * target. In order:
+ * whole purpose is that the emergency restore (or, for `worktree`, the
+ * worktree removal) is the LAST write this probe makes. In order:
  *
  * 1. `abortInFlight` kills whatever child is currently running (a
  *    `--pre`/`-t` command, or a `git apply`) by `SIGKILL`ing its whole
@@ -258,14 +264,22 @@ export interface CrashHandlers {
  *    every write it had in flight has landed -- not merely for its
  *    promise to settle, which can happen earlier (see `exec.ts`'s
  *    flush-grace shortcut).
- * 3. Only then, if a mutation is in flight (per `getRestoreState`), the
- *    target is restored via the session's own `restore()`. The marker
- *    is removed only when that restore verified AND step 2 confirmed
- *    true closure within the bound: a restore that failed, or one whose
- *    "last write" guarantee the bound could not confirm, leaves the
- *    marker (and the backup) for the next invocation to recover from,
- *    or for `doctor` to report. The lock is released and the process
- *    ended when `exitOnSignal` says to.
+ * 3. If a mutation is in flight (per `getRestoreState`, `inplace` only),
+ *    the target is restored via the session's own `restore()`. The
+ *    marker is removed only when that restore verified AND step 2
+ *    confirmed true closure within the bound: a restore that failed, or
+ *    one whose "last write" guarantee the bound could not confirm,
+ *    leaves the marker (and the backup) for the next invocation to
+ *    recover from, or for `doctor` to report.
+ * 4. `cleanupWtSession` removes a `worktree` session's detached
+ *    worktree (`git worktree remove --force` then `git worktree
+ *    prune`), releasing the repository-keyed marker only once that
+ *    succeeds; a no-op when no worktree session was ever started.
+ *    Best-effort: a failed cleanup leaves the marker in place for the
+ *    next probe on this repository (or `doctor`) to recover.
+ *
+ * The lock is released and the process ended when `exitOnSignal` says
+ * to, only once all of the above has settled.
  *
  * A second signal arriving while the first is still being handled is
  * ignored rather than starting a second pass beside the first.
@@ -276,6 +290,7 @@ export function installCrashHandlers(
   abortInFlight: () => void,
   waitForInFlight: () => Promise<boolean>,
   exitOnSignal: boolean,
+  cleanupWtSession: () => Promise<void>,
 ): CrashHandlers {
   let handling = false;
   let resolveHandled:
@@ -331,6 +346,13 @@ export function installCrashHandlers(
         );
         outcome = { verified, closedInTime };
         if (verified && closedInTime) removeMarkerFor(state.markerKey);
+      }
+      try {
+        await cleanupWtSession();
+      } catch {
+        // Best-effort: a failed worktree cleanup leaves the
+        // repository-keyed marker in place, which is exactly what lets
+        // the next probe on this repository (or `doctor`) recover it.
       }
       try {
         releaseLock();
@@ -490,15 +512,6 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   const warnings: string[] = [];
   const isolationField = emptyIsolationField(opts.isolation);
 
-  if (opts.isolation === "worktree") {
-    return {
-      status: "usage_error",
-      reason: "not_implemented",
-      warnings,
-      isolation: isolationField,
-    };
-  }
-
   // `--allow-outside` places the scratch copy for a `-p` dry run at
   // `--file`'s path relative to the containment root; when `--file` is
   // allowed to resolve outside that root, that relative path can carry
@@ -547,15 +560,32 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   const absFile = resolveDeepestExisting(displayFile);
   const absLinks = displayLinks.map(resolveDeepestExisting);
 
-  // The lock is keyed on the repository, not on the target file: an
-  // `inplace` probe mutates the one working tree that every probe in the
-  // same repository builds and tests in, so a second probe on a
-  // different file would run its baseline against a tree carrying the
-  // first probe's mutation. It is refused rather than queued, the same
-  // contract a second probe on the same file has always had. Outside a
-  // repository there is no shared tree, and the target file itself is
-  // the identity. The marker stays keyed on the target file: it records
-  // that one file's backup and hashes.
+  // `worktree` needs a real git work tree to branch a worktree off of;
+  // outside one there is nothing to isolate into, so the mode falls back
+  // to `inplace` (named in a warning) instead of failing outright.
+  let effectiveIsolation = opts.isolation;
+  if (effectiveIsolation === "worktree" && gitRoot === undefined) {
+    effectiveIsolation = "inplace";
+    warnings.push(
+      "not inside a git work tree; falling back to --isolation inplace",
+    );
+  }
+  isolationField.mode = effectiveIsolation;
+
+  // The lock is keyed on the repository, not on the target file, for
+  // BOTH modes, whenever one exists: an `inplace` probe mutates the one
+  // working tree that every probe in the same repository builds and
+  // tests in, and a `worktree` probe shares the same worktree machinery
+  // (and, once linked, the same node_modules caches) with every other
+  // probe on that repository, so two probes on the same repository are
+  // never independent even when their target files differ. It is
+  // refused rather than queued, the same contract a second probe on the
+  // same file has always had. Outside a repository there is no shared
+  // tree, and the target file itself is the identity. The `inplace`
+  // marker stays keyed on the target file (it records that one file's
+  // backup and hashes); the `worktree` leftover marker is keyed on this
+  // same repository-root identity (see the stale-worktree recovery
+  // below).
   const lockIdentity = gitRoot !== undefined ? realRoot : absFile;
   const lockResult = acquireLock(lockIdentity);
   if (!lockResult.ok) {
@@ -571,6 +601,43 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   }
 
   let restoreState: RestoreState | null = null;
+  // Set once `beginWorktree` succeeds; read both by the pipeline below
+  // (to route the mutation, exec cwd, and patch apply at the worktree
+  // instead of the original tree) and by `finally`/the signal handler
+  // (to clean the worktree up on every exit path).
+  let wtSession: WorktreeSyncSuccess | undefined;
+  let wtWorktreePath: string | undefined;
+  // The finally block and the SIGINT/SIGTERM handler can both reach
+  // cleanup for the same run (aborting the in-flight test unblocks the
+  // main pipeline's own `await` at roughly the same time the handler
+  // reaches its own cleanup call): both must resolve to the SAME
+  // in-flight promise rather than a flag that lets the second caller
+  // return before the first caller's real `git worktree remove`/`prune`
+  // has actually finished, which would let the process exit while that
+  // work is still running.
+  let wtCleanupPromise: Promise<void> | undefined;
+  const cleanupWtSession = (): Promise<void> => {
+    if (wtCleanupPromise) return wtCleanupPromise;
+    if (wtWorktreePath === undefined) return Promise.resolve();
+    const worktreePathForCleanup = wtWorktreePath;
+    wtCleanupPromise = (async () => {
+      const result = await cleanupWorktree(
+        realRoot,
+        worktreePathForCleanup,
+        opts.logDir,
+      ).catch(() => ({ ok: false, logPaths: [] as string[] }));
+      if (result.ok) {
+        removeMarkerFor(realRoot);
+      } else {
+        warnings.push(
+          `git worktree remove/prune did not fully succeed for ${worktreePathForCleanup}; ` +
+            `it is left registered for the next probe on this repository (or ` +
+            `\`agent-primitives doctor\`) to recover`,
+        );
+      }
+    })();
+    return wtCleanupPromise;
+  };
   // Populated inside the try block as soon as each becomes known, so the
   // `finally` block's emergency-restore path can build a full result
   // even when it is reached via a thrown error partway through.
@@ -637,6 +704,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     () => execController.abort(),
     waitForInFlight,
     opts.exitOnSignal ?? false,
+    cleanupWtSession,
   );
   const exitOnSignalFlag = opts.exitOnSignal ?? false;
   // Set by the `catch` below and read by `finally`'s emergency-restore
@@ -773,6 +841,72 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     const preHash = await sha256File(displayFile);
     const originalContent = fs.readFileSync(displayFile, "utf8");
 
+    if (effectiveIsolation === "worktree") {
+      // A leftover worktree from a previous run on this same repository
+      // that never reached its own cleanup (SIGKILL, a crash): the lock
+      // already excludes a live probe on this repository, so any marker
+      // found here is unconditionally treated as stale, mirroring the
+      // absFile marker recovery above. Recovery is a plain remove+prune;
+      // nothing in the original tree was ever touched by a worktree-mode
+      // probe, so there is no backup/hash proof to check first.
+      const staleWt = readMarkerFor(realRoot);
+      if (staleWt) {
+        await cleanupWorktree(realRoot, staleWt.targetPath, opts.logDir).catch(
+          () => undefined,
+        );
+        removeMarkerFor(realRoot);
+        warnings.push("recovered_stale_worktree");
+      }
+
+      const wt = await beginWorktree({
+        root,
+        cwd,
+        logDir: opts.logDir,
+        links: absLinks,
+      });
+      if (!wt.ok) {
+        if (wt.worktreePath) {
+          wtWorktreePath = wt.worktreePath;
+          await cleanupWtSession();
+        }
+        return {
+          status: "inconclusive",
+          reason: wt.reason,
+          warnings: [...warnings, wt.detail],
+          isolation: isolationField,
+          dryRunLogPaths: wt.logPaths,
+        };
+      }
+      wtSession = wt;
+      wtWorktreePath = wt.worktreePath;
+      writeMarker(realRoot, {
+        targetPath: wt.worktreePath,
+        backupPath: realRoot,
+        preHash: "",
+        mutatedHash: "",
+        pid: process.pid,
+        timestamp: new Date().toISOString(),
+      });
+      isolationField.path = wt.worktreePath;
+      isolationField.linked = wt.linked;
+      isolationField.syncedTrackedFiles = wt.syncedTrackedFiles;
+      isolationField.syncedUntrackedFiles = wt.syncedUntrackedFiles;
+    }
+
+    // The path actually mutated: the worktree's own copy of `--file` for
+    // `worktree` (never the original tree), `displayFile` itself for
+    // `inplace`. Every remaining step below -- backup, mutate, `--pre`/
+    // `-t`, restore, hash-verify -- operates on this path and, for the
+    // patch form and the exec env, on `applyRoot`/`execCwd` below; the
+    // sequence and its rules are otherwise identical between the two
+    // modes.
+    const mutationFilePath =
+      wtSession !== undefined
+        ? path.join(wtSession.worktreePath, path.relative(root, displayFile))
+        : displayFile;
+    const applyRoot = wtSession !== undefined ? wtSession.worktreePath : root;
+    const execCwd = wtSession !== undefined ? wtSession.mappedCwd : cwd;
+
     // Backed up immediately, before the baseline (or anything else) ever
     // runs against the target: a baseline command that itself rewrites
     // the target (a formatter, a codegen step, ...) must never end up
@@ -782,7 +916,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     // from once a mutation is actually applied. `restoreState` is set
     // right away too, so a signal landing anywhere from here on has a
     // (possibly no-op) restore to run instead of nothing.
-    const session = beginInplace(displayFile, opts.logDir);
+    const session = beginInplace(mutationFilePath, opts.logDir);
     restoreState = {
       restore: session.restore,
       targetPath: session.targetPath,
@@ -872,6 +1006,14 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       computeMutantStarted.result,
       computeMutantStarted.closed,
     );
+    // Folded in once, here, so every downstream `dryRunLogPaths:
+    // computed.logPaths` (every return from this point on) also carries
+    // the worktree setup's own exec logs (`git worktree add`, the
+    // tracked-diff sync, the untracked-file listing) without touching
+    // each of those return sites individually.
+    if (wtSession) {
+      computed.logPaths = [...wtSession.logPaths, ...computed.logPaths];
+    }
     if (!computed.applicable) {
       if (computed.reasonCode === "aborted") {
         // Ordering only: nothing has mutated the target yet at this
@@ -914,11 +1056,12 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     // `--pre`/`-t` run in the invocation cwd (where the operator ran the
     // probe from), not the containment root: a probe run from a
     // subdirectory of a monorepo must see the same cwd its test command
-    // would normally get. Containment and `git apply` (dry run and real
-    // apply) still use `root`, since a patch's paths are relative to the
-    // repository, not to wherever the probe was invoked from.
+    // would normally get. For `worktree`, that cwd is remapped onto the
+    // worktree (`execCwd`, computed above); the real apply below uses
+    // `applyRoot`, since a patch's paths are relative to the repository
+    // (or its worktree copy), not to wherever the probe was invoked from.
     const execEnv = {
-      cwd,
+      cwd: execCwd,
       logDir: opts.logDir,
       timeoutMs: opts.timeoutMs,
       signal: execController.signal,
@@ -974,7 +1117,9 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       // (a formatter, a codegen step). Re-hash before deciding what to do
       // with the backup: discarding it silently would throw away the only
       // copy of the target's pre-baseline content.
-      const postHash = await sha256File(displayFile).catch(() => undefined);
+      const postHash = await sha256File(mutationFilePath).catch(
+        () => undefined,
+      );
       if (postHash === preHash) {
         discardBackup();
       } else {
@@ -1013,7 +1158,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     // mutation or marker exists) leaves that rewrite exactly as the
     // baseline left it -- restoring from the backup would instead throw
     // away a legitimate write this probe never made.
-    const postBaselineHash = await sha256File(displayFile).catch(
+    const postBaselineHash = await sha256File(mutationFilePath).catch(
       () => undefined,
     );
     if (postBaselineHash !== preHash) {
@@ -1032,15 +1177,22 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       };
     }
 
-    // (3) marker, apply, verify the hash changed.
-    writeMarker(absFile, {
-      targetPath: displayFile,
-      backupPath: session.backupPath,
-      preHash,
-      mutatedHash: computed.mutatedHash,
-      pid: process.pid,
-      timestamp: new Date().toISOString(),
-    });
+    // (3) marker, apply, verify the hash changed. The in-flight marker
+    // is `inplace`-only: it exists to let the next invocation recover
+    // the ORIGINAL tree from a SIGKILL/crash mid-mutation, and a
+    // `worktree` probe never mutates the original tree at all (the
+    // repository-keyed worktree marker above covers the worktree's own
+    // leftover-on-crash case instead).
+    if (effectiveIsolation === "inplace") {
+      writeMarker(absFile, {
+        targetPath: displayFile,
+        backupPath: session.backupPath,
+        preHash,
+        mutatedHash: computed.mutatedHash,
+        pid: process.pid,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     if (opts.form === "patch") {
       // The one `git apply` that writes to the real target, and the only
@@ -1050,7 +1202,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       // an interrupted apply outlives this process and lands on the
       // target after the restore, with the marker already gone.
       const applyStarted = startRunArgvTracked(
-        applyPatchForReal(opts.patchPath ?? "", root, opts.logDir, {
+        applyPatchForReal(opts.patchPath ?? "", applyRoot, opts.logDir, {
           signal: execController.signal,
           timeoutMs: gitApplyTimeoutMs,
         }),
@@ -1104,10 +1256,10 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         };
       }
     } else {
-      fs.writeFileSync(displayFile, computed.newContent);
+      fs.writeFileSync(mutationFilePath, computed.newContent);
     }
 
-    const afterApplyHash = await sha256File(displayFile);
+    const afterApplyHash = await sha256File(mutationFilePath);
     if (afterApplyHash === preHash || afterApplyHash !== computed.mutatedHash) {
       const { ok, verified } = await restoreAndVerify(session, preHash);
       restoreState = null;
@@ -1250,6 +1402,41 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     // not confirm true stdio closure within its bound). Lock release
     // happens in `finally`.
 
+    // Defense in depth for `worktree`: nothing above should ever have
+    // written to `displayFile` (every mutate/backup/restore step used
+    // `mutationFilePath`, inside the worktree, instead). Re-hashing it
+    // against `preHash` here catches a wiring bug directly instead of
+    // silently shipping a verdict computed while the claim "the original
+    // tree is untouched" no longer holds.
+    if (effectiveIsolation === "worktree") {
+      const originalTreeHashAfter = await sha256File(displayFile).catch(
+        () => undefined,
+      );
+      if (originalTreeHashAfter !== preHash) {
+        return {
+          status: "inconclusive",
+          reason: "worktree_original_tree_modified",
+          warnings: [
+            ...warnings,
+            `BUG: ${displayFile} in the original tree changed during a ` +
+              `worktree-mode probe; this should be impossible and is a ` +
+              `defect in isolation, not a normal probe outcome`,
+          ],
+          mutant: mutantField,
+          mutation_probe: {
+            mutant: mutantSummary,
+            verified_applied_via: verifiedAppliedVia,
+            result: "inconclusive",
+            restored_verified: restoredVerified,
+          },
+          baseline,
+          test: testField,
+          isolation: isolationField,
+          dryRunLogPaths: computed.logPaths,
+        };
+      }
+    }
+
     let status: "killed" | "survived" | "inconclusive";
     let reason: string | undefined;
     if (testResult.aborted) {
@@ -1347,6 +1534,13 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         };
       }
     }
+    // Runs on every exit path (a normal return, a thrown error, or the
+    // emergency-restore path above) and is idempotent: a signal handler
+    // that already ran it leaves this a no-op. Cleanup happens before
+    // the lock is released, so a concurrent probe on the same repository
+    // never observes the lock as free while this run's worktree removal
+    // is still in flight.
+    await cleanupWtSession();
     crashHandlers.remove();
     lockResult.release();
     if (emergencyResult) return emergencyResult;
