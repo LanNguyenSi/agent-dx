@@ -59,6 +59,7 @@ function makeStubExec(responses: Record<string, Partial<ExecResult>> = {}): {
       aborted: r.aborted ?? false,
       logWriteFailed: false,
       outputMayBeIncomplete: r.outputMayBeIncomplete ?? false,
+      stdioClosed: r.stdioClosed ?? true,
     };
   };
   return { fn, calls };
@@ -753,6 +754,7 @@ describe("verify: exec rejection is a per-check error, not a thrown promise", ()
         aborted: false,
         logWriteFailed: false,
         outputMayBeIncomplete: false,
+        stdioClosed: true,
       };
     };
     const result = await verify({
@@ -1012,6 +1014,7 @@ describe("verify: the optional signal", () => {
         aborted: false,
         logWriteFailed: false,
         outputMayBeIncomplete: false,
+        stdioClosed: true,
       };
     };
     await verify({
@@ -1041,6 +1044,7 @@ describe("verify: the optional signal", () => {
         aborted: false,
         logWriteFailed: false,
         outputMayBeIncomplete: false,
+        stdioClosed: true,
       };
     };
     await verify({ cwd, logDir, checks: ["test"], execFn: fn });
@@ -1077,6 +1081,7 @@ describe("verify: an aborted run", () => {
         aborted,
         logWriteFailed: false,
         outputMayBeIncomplete: false,
+        stdioClosed: true,
       };
     };
 
@@ -1130,6 +1135,7 @@ describe("verify: an aborted run", () => {
         aborted,
         logWriteFailed: false,
         outputMayBeIncomplete: false,
+        stdioClosed: true,
       };
     };
 

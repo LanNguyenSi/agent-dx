@@ -6,13 +6,18 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   probe,
+  installCrashHandlers,
   type ProbeOptions,
   type ProbeResult,
 } from "../src/probe/index.js";
 import { readMarkerFor, writeMarker } from "../src/lock.js";
 import { sha256File } from "../src/hash.js";
 import { execCommand } from "../src/exec.js";
-import { applyPatchForReal, computeMutant } from "../src/probe/mutant.js";
+import {
+  applyPatchForReal,
+  computeMutant,
+  DEFAULT_GIT_APPLY_TIMEOUT_MS,
+} from "../src/probe/mutant.js";
 import { beginInplace } from "../src/probe/isolation.js";
 
 // Call-through partial mocks: every call runs the real implementation
@@ -1995,6 +2000,453 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     expect(fs.readFileSync(absFile, "utf8")).toBe(before);
   }, 40000);
 
+  it("a CLI probe whose out-of-group descendant writes the target 500-800ms after EOF (past exec's 250ms flush grace) still has that write land before the restore: exit 143, empty stdout, target at its original content well past the delay, marker and lock gone", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+    const ready = path.join(repo, "ready.txt");
+
+    // The watcher holds the test command's inherited stdout/stderr (so
+    // exec.ts cannot settle on `close`) and is spawned into a process
+    // group of its own (so the SIGKILL group-kill this probe's signal
+    // handler sends cannot reach it). It waits on its own stdin for EOF
+    // (delivered once the test command dies) and only then, after a
+    // delay comfortably past exec.ts's 250ms flush grace but well under
+    // the 2000ms default settle bound, writes the target and exits --
+    // which is what finally lets the run's stdio truly close. Before
+    // round 6's fix, the signal handler awaited the run's own promise
+    // (settled early by the flush grace) instead of true closure, so
+    // this write landed AFTER the restore and the marker was already
+    // gone.
+    fs.writeFileSync(
+      path.join(repo, "watcher.js"),
+      [
+        "const fs = require('node:fs');",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  setTimeout(() => {",
+        "    fs.writeFileSync('fixture.js', 'POISON_FROM_DELAYED_WATCHER\\n');",
+        "    process.exit(0);",
+        "  }, 650);",
+        "});",
+        "setTimeout(() => { process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const { spawn } = require('node:child_process');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "if (!content.includes('SLOW_MARKER')) { process.exit(0); }",
+        "spawn(process.execPath, ['watcher.js'], {",
+        "  detached: true,",
+        "  stdio: ['pipe', 'inherit', 'inherit'],",
+        "});",
+        "fs.writeFileSync('ready.txt', 'running');",
+        "setTimeout(() => { process.exit(0); }, 10000);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "delayed watcher",
+    ]);
+
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-r",
+        "  return false; // SLOW_MARKER",
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "inplace",
+      ],
+      {
+        cwd: repo,
+        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    const deadline = Date.now() + 15000;
+    while (!fs.existsSync(ready)) {
+      if (Date.now() > deadline) {
+        throw new Error("ready.txt never appeared before the deadline");
+      }
+      await sleep(50);
+    }
+    await sleep(150);
+
+    child.kill("SIGTERM");
+    const [code] = await new Promise<[number | null]>((resolve) => {
+      child.on("close", (c) => resolve([c]));
+    });
+
+    expect(code).toBe(143);
+    expect(stdout).toBe("");
+    // Asserted well past the watcher's 650ms delayed write: if the
+    // restore had landed before it, this would read the poison instead.
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+  }, 20000);
+
+  it("a CLI probe whose out-of-group descendant holds stdio past the signal-settle bound still restores the target at exit, but keeps the marker and backup (a recovery trail), which doctor reports and the next probe recovers from", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+    const ready = path.join(repo, "ready.txt");
+
+    // AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS shortens the bound this
+    // probe's signal handler waits for true stdio closure, purely so
+    // this test proves the past-the-bound path in milliseconds instead
+    // of the real 2000ms default. The watcher holds stdio for 3000ms --
+    // comfortably past the shortened 250ms bound -- so the handler is
+    // guaranteed to give up before it closes.
+    const shortBoundMs = 250;
+    fs.writeFileSync(
+      path.join(repo, "watcher.js"),
+      ["setTimeout(() => { process.exit(0); }, 3000);", ""].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const { spawn } = require('node:child_process');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "if (!content.includes('SLOW_MARKER')) { process.exit(0); }",
+        "spawn(process.execPath, ['watcher.js'], {",
+        "  detached: true,",
+        "  stdio: ['ignore', 'inherit', 'inherit'],",
+        "});",
+        "fs.writeFileSync('ready.txt', 'running');",
+        "setTimeout(() => { process.exit(0); }, 10000);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "past the bound",
+    ]);
+
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-r",
+        "  return false; // SLOW_MARKER",
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "inplace",
+      ],
+      {
+        cwd: repo,
+        env: {
+          ...process.env,
+          AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+          AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS: String(shortBoundMs),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    const deadline = Date.now() + 15000;
+    while (!fs.existsSync(ready)) {
+      if (Date.now() > deadline) {
+        throw new Error("ready.txt never appeared before the deadline");
+      }
+      await sleep(50);
+    }
+    await sleep(150);
+
+    child.kill("SIGTERM");
+    const [code] = await new Promise<[number | null]>((resolve) => {
+      child.on("close", (c) => resolve([c]));
+    });
+
+    // Even though the marker is kept, the CLI still ends deterministically
+    // (mutual exclusion, the round-6 finding this closes) rather than
+    // racing its own return against the handler's exit.
+    expect(code).toBe(143);
+    expect(stdout).toBe("");
+    // The restore itself still succeeded (the watcher never touched the
+    // target in this test; only its holding stdio open matters).
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+
+    const marker = readMarkerFor(fs.realpathSync(absFile));
+    expect(marker).toBeDefined();
+    expect(fs.existsSync(marker!.backupPath)).toBe(true);
+    // The lock itself is still released regardless: only the marker and
+    // backup are the deliberate exception.
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+
+    const doctorRun = await new Promise<{
+      code: number | null;
+      stdout: string;
+    }>((resolve) => {
+      const doctorChild = spawn("node", [CLI_PATH, "-C", repo, "doctor"], {
+        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      let out = "";
+      doctorChild.stdout.setEncoding("utf8");
+      doctorChild.stdout.on("data", (chunk: string) => {
+        out += chunk;
+      });
+      doctorChild.on("close", (c) => resolve({ code: c, stdout: out }));
+    });
+    const doctorEnvelope = JSON.parse(doctorRun.stdout);
+    const staleMarkerCheck = (
+      doctorEnvelope.checks as Array<{
+        name: string;
+        ok: boolean;
+        detail: string;
+      }>
+    ).find((c) => c.name === "stale-probe-marker");
+    expect(staleMarkerCheck?.ok).toBe(false);
+    expect(staleMarkerCheck?.detail).toContain("auto-recover");
+
+    // The next probe on the same file recovers: the target already
+    // matches the marker's own pre-mutation hash, so this is the
+    // "already correct" recovery branch (no backup copy needed), not a
+    // hash mismatch. Restore the real test file first: the past-the-bound
+    // probe above overwrote it with the never-passing SLOW_MARKER
+    // fixture, and this run needs a baseline that actually passes.
+    fs.writeFileSync(path.join(repo, "fixture.test.js"), FIXTURE_TEST_JS);
+    const recoveryRun = await new Promise<{
+      code: number | null;
+      stdout: string;
+    }>((resolve) => {
+      const recoveryChild = spawn(
+        "node",
+        [
+          CLI_PATH,
+          "probe",
+          "--file",
+          "fixture.js",
+          "-n",
+          "2",
+          "-r",
+          "  return false;",
+          "-t",
+          "node fixture.test.js",
+          "-i",
+          "inplace",
+        ],
+        {
+          cwd: repo,
+          env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+          stdio: ["ignore", "pipe", "ignore"],
+        },
+      );
+      let out = "";
+      recoveryChild.stdout.setEncoding("utf8");
+      recoveryChild.stdout.on("data", (chunk: string) => {
+        out += chunk;
+      });
+      recoveryChild.on("close", (c) => resolve({ code: c, stdout: out }));
+    });
+    const recoveryEnvelope = JSON.parse(recoveryRun.stdout);
+    expect(recoveryEnvelope.status).toBe("killed");
+    expect(
+      (recoveryEnvelope.warnings as string[]).some((w) =>
+        w.includes("stale probe marker"),
+      ),
+    ).toBe(true);
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+  }, 30000);
+
+  it("a SIGTERM during the baseline phase of a plain, non-trapping test command exits 143 with empty stdout: deterministic by construction (the handler sets isHandling() synchronously, before abortInFlight even runs, which strictly precedes the aborted run's own promise settling; no timing seam needed)", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      ["setTimeout(() => {}, 30000);", ""].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "plain slow baseline",
+    ]);
+
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-r",
+        "  return false;",
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "inplace",
+      ],
+      {
+        cwd: repo,
+        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    // The baseline phase has no readiness file of its own (it is the
+    // very first thing the probe runs); this fixed wait just gives the
+    // spawned node process time to actually start the test command
+    // before the signal lands. Not the source of the test's
+    // determinism: see the `it` title.
+    await sleep(800);
+
+    child.kill("SIGTERM");
+    const [code] = await new Promise<[number | null]>((resolve) => {
+      child.on("close", (c) => resolve([c]));
+    });
+
+    expect(code).toBe(143);
+    expect(stdout).toBe("");
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+  }, 15000);
+
+  it("a SIGTERM during the mutant-test phase of a plain, non-trapping test command exits 143 with empty stdout, and the target is restored: deterministic by construction, same as the baseline-phase case above", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+    const ready = path.join(repo, "ready.txt");
+
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "if (content.includes('SLOW_MARKER')) {",
+        "  fs.writeFileSync('ready.txt', 'go');",
+        "  setTimeout(() => {}, 30000);",
+        "} else { process.exit(0); }",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "plain slow mutant test",
+    ]);
+
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-r",
+        "  return false; // SLOW_MARKER",
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "inplace",
+      ],
+      {
+        cwd: repo,
+        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    const deadline = Date.now() + 15000;
+    while (!fs.existsSync(ready)) {
+      if (Date.now() > deadline) {
+        throw new Error("ready.txt never appeared before the deadline");
+      }
+      await sleep(50);
+    }
+    await sleep(150);
+
+    child.kill("SIGTERM");
+    const [code] = await new Promise<[number | null]>((resolve) => {
+      child.on("close", (c) => resolve([c]));
+    });
+
+    expect(code).toBe(143);
+    expect(stdout).toBe("");
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+  }, 20000);
+
   it("a signal during the real git apply leaves the target unmutated, and the apply never lands after the restore", async () => {
     const lockDir = useLockDir();
     const { repo } = initRepo();
@@ -2104,6 +2556,7 @@ describe("probe(): a git apply stopped by its own bound", () => {
         aborted: false,
         outputTruncated: false,
         logWriteFailed: false,
+        stdioClosed: true,
       }),
     );
 
@@ -2120,4 +2573,121 @@ describe("probe(): a git apply stopped by its own bound", () => {
     expect(fs.readFileSync(target, "utf8")).toBe(before);
     expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
   }, 20000);
+});
+
+describe("probe(): gitApplyTimeoutMs derivation at the probe entry", () => {
+  it("threads --timeout through to both computeMutant's dry run and the real apply", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const patchPath = path.join(makeTmpDir(), "single-line.patch");
+    writeSingleLinePatch(patchPath);
+    const timeoutMs = 4321;
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        timeoutMs,
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(vi.mocked(computeMutant)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ timeoutMs }),
+    );
+    expect(vi.mocked(applyPatchForReal)).toHaveBeenCalledWith(
+      patchPath,
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ timeoutMs }),
+    );
+  }, 20000);
+
+  it("falls back to DEFAULT_GIT_APPLY_TIMEOUT_MS for both calls when no --timeout is given", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const patchPath = path.join(makeTmpDir(), "single-line.patch");
+    writeSingleLinePatch(patchPath);
+
+    const result = await probe(
+      baseOptions(repo, { form: "patch", replaceText: undefined, patchPath }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(vi.mocked(computeMutant)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ timeoutMs: DEFAULT_GIT_APPLY_TIMEOUT_MS }),
+    );
+    expect(vi.mocked(applyPatchForReal)).toHaveBeenCalledWith(
+      patchPath,
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ timeoutMs: DEFAULT_GIT_APPLY_TIMEOUT_MS }),
+    );
+  }, 20000);
+});
+
+describe("installCrashHandlers(): re-entrancy", () => {
+  it("a second signal arriving within a few ms of the first, while it is still being handled, is ignored: exactly one abort, one wait, one restore attempt, one release, and one exit", async () => {
+    let abortCount = 0;
+    let waitCount = 0;
+    let restoreCount = 0;
+    let releaseCount = 0;
+    const exitCalls: number[] = [];
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+      code?: number,
+    ) => {
+      exitCalls.push(code ?? 0);
+      return undefined as never;
+    }) as never);
+
+    const crashHandlers = installCrashHandlers(
+      () => ({
+        restore: () => {
+          restoreCount += 1;
+          return true;
+        },
+        targetPath: "/dev/null",
+        markerKey: "re-entrancy-test",
+        backupPath: "/dev/null",
+        preHash: "irrelevant-since-restore-is-stubbed",
+      }),
+      () => {
+        releaseCount += 1;
+      },
+      () => {
+        abortCount += 1;
+      },
+      async () => {
+        waitCount += 1;
+        return true;
+      },
+      true,
+    );
+    try {
+      // Both signals land in the same tick, before the handler's own
+      // async body has run past its first `await`: exactly the window
+      // `handling` guards.
+      process.emit("SIGTERM" as never);
+      process.emit("SIGTERM" as never);
+      await crashHandlers.handled;
+      // The handler's own restore is stubbed to succeed synchronously,
+      // but `sha256File` against a real path still runs (`/dev/null`
+      // hashes to a fixed value, never `preHash`), so `verified` is
+      // false and the marker is deliberately kept -- irrelevant to this
+      // test, which only counts how many times each step ran.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(abortCount).toBe(1);
+      expect(waitCount).toBe(1);
+      expect(restoreCount).toBe(1);
+      expect(releaseCount).toBe(1);
+      expect(exitCalls).toEqual([143]);
+    } finally {
+      crashHandlers.remove();
+      exitSpy.mockRestore();
+    }
+  });
 });

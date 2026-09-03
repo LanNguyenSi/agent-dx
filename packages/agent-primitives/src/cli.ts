@@ -345,12 +345,16 @@ const shutdownController = new AbortController();
 
 /**
  * The one command child this process has in flight, as the promise of
- * its run, or `null`. Tracked so the signal handler can wait for the
- * child it just killed to actually settle (a run settles once its stdio
- * is closed, and therefore once every write it had in flight has landed)
- * before this process exits.
+ * its run, or `null`, together with a promise of when its stdio TRULY
+ * closes. The signal handler waits on the latter, not the former: a
+ * run's own promise can settle early on `exec.ts`'s flush-grace
+ * shortcut while a descendant that left the process group still holds
+ * the pipes, and only true closure means every write the run had in
+ * flight has actually landed (the same distinction `probe`'s own signal
+ * handler makes; see `src/probe/index.ts`).
  */
 let inFlightExec: Promise<ExecResult> | null = null;
+let inFlightExecClosed: Promise<void> | null = null;
 
 /** How long the signal handler waits for that run to settle before
  * exiting anyway. A `SIGKILL`ed process group is gone in milliseconds;
@@ -362,25 +366,33 @@ const SHUTDOWN_SETTLE_BOUND_MS = 2000;
  * `execFn` so the handler has something to wait for; the real
  * `execCommand` is what actually runs. */
 const trackingExec: ExecLike = (cmd, options) => {
-  const started = execCommand(cmd, options);
+  let resolveClosed: (() => void) | undefined;
+  const closed = new Promise<void>((res) => {
+    resolveClosed = res;
+  });
+  const started = execCommand(cmd, {
+    ...options,
+    onStdioClosed: () => resolveClosed?.(),
+  });
   inFlightExec = started;
+  inFlightExecClosed = closed;
   void started
-    .catch(() => undefined)
+    .catch(() => resolveClosed?.())
     .then(() => {
-      if (inFlightExec === started) inFlightExec = null;
+      if (inFlightExec === started) {
+        inFlightExec = null;
+        inFlightExecClosed = null;
+      }
     });
   return started;
 };
 
 async function settleInFlightExec(): Promise<void> {
-  const pending = inFlightExec;
-  if (pending === null) return;
+  const pendingClosed = inFlightExecClosed;
+  if (pendingClosed === null) return;
   let timer: NodeJS.Timeout | undefined;
   await Promise.race([
-    pending.then(
-      () => undefined,
-      () => undefined,
-    ),
+    pendingClosed,
     new Promise<void>((resolve) => {
       timer = setTimeout(resolve, SHUTDOWN_SETTLE_BOUND_MS);
     }),

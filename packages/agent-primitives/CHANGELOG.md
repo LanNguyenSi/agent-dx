@@ -143,6 +143,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SIGKILL` and no grace for this reason; the timeout path still sends
   `SIGTERM` first.
 
+- **The emergency restore waits for true stdio closure, not just for the
+  run's own promise to settle.** `exec`'s flush-grace shortcut lets that
+  promise resolve while a descendant that left the process group still
+  holds the command's stdio open, and `probe`'s signal handler used to
+  await that same promise: a write landing after the shortcut but before
+  the descendant actually closed its pipes could land after the restore,
+  with the marker already gone. The handler now waits, bounded, for the
+  pipes to genuinely close (`exec` and `runArgv` both expose this: an
+  additive `stdioClosed` field on their result, and `exec` also takes an
+  `onStdioClosed` callback fired exactly on that closure, independent of
+  when its own promise settles). When the bound expires with the pipes
+  still open, the target is still restored, but the marker and its
+  backup are deliberately kept rather than removed: `doctor` reports the
+  marker as stale, and the next `probe` on that target recovers from the
+  hash-verified backup the same way it already does for any other
+  in-flight marker, including when the target already matches the
+  marker's own pre-mutation hash. Also fixed: the signal handler's own
+  restore-then-exit no longer races the normal control flow's return.
+  Every point where the normal flow detects that a run it started was
+  aborted now checks whether the handler has already taken over; if so,
+  it defers to the handler's own outcome instead of restoring a second
+  time, and in the CLI it never returns at all, so the handler's own
+  exit is always what ends the process. Before this, an aborted run
+  could resolve fast enough that the CLI printed an inconclusive/aborted
+  envelope and exited `2` instead of ending with `130`/`143` and no
+  output, depending on how long the killed command took to actually die.
+
 - **`probe`: every `git apply` is abortable and bounded by `--timeout`.**
   The path check, the dry run, and the real apply now take the probe's
   own signal, so an interrupted apply is killed rather than left to land

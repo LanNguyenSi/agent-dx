@@ -227,6 +227,7 @@ describe("execCommand", () => {
       // Settling that way means anything still in flight on the pipes was
       // dropped, and the result says so.
       expect(result.outputMayBeIncomplete).toBe(true);
+      expect(result.stdioClosed).toBe(false);
       // The descendant really did outlive the call, so the assertions
       // above are about the flush-grace path rather than a command that
       // simply had no descendant.
@@ -242,11 +243,83 @@ describe("execCommand", () => {
     }
   }, 30000);
 
-  it("does not report outputMayBeIncomplete for a command whose stdio closes with it", async () => {
+  it("does not report outputMayBeIncomplete for a command whose stdio closes with it, and reports stdioClosed: true", async () => {
     const logDir = makeTmpDir();
     const result = await execCommand("echo hi", { logDir });
     expect(result.outputMayBeIncomplete).toBe(false);
+    expect(result.stdioClosed).toBe(true);
   });
+
+  it("reports stdioClosed: false on the flush-grace shortcut, then calls onStdioClosed once the descendant that was holding the pipes truly exits, not fabricated by this call's own cleanup", async () => {
+    const logDir = makeTmpDir();
+    const dir = makeTmpDir();
+    const pidFile = path.join(dir, "worker.pid");
+    const workerPath = path.join(dir, "worker.js");
+    const spawnerPath = path.join(dir, "spawner.js");
+
+    // Same shape as the flush-grace test above (a detached, stdio:
+    // 'inherit' grandchild the group-kill cannot reach), but this
+    // worker holds the pipes for exactly 600ms -- comfortably past the
+    // 250ms flush grace -- then exits on its own, so `onStdioClosed`
+    // firing at (and not before) that 600ms mark is proof this call
+    // waited for a genuine close rather than forcing one the moment it
+    // gave up on the flush grace.
+    fs.writeFileSync(
+      workerPath,
+      [
+        "const fs = require('node:fs');",
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+        "setTimeout(() => { process.exit(0); }, 600);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      spawnerPath,
+      [
+        "const { spawn } = require('node:child_process');",
+        `const child = spawn(process.execPath, [${JSON.stringify(workerPath)}], {`,
+        "  stdio: 'inherit',",
+        "  detached: true,",
+        "});",
+        "child.unref();",
+        "process.exit(7);",
+        "",
+      ].join("\n"),
+    );
+
+    let closedAt: number | undefined;
+    const started = Date.now();
+    const result = await execCommand(`node ${JSON.stringify(spawnerPath)}`, {
+      logDir,
+      onStdioClosed: () => {
+        closedAt = Date.now() - started;
+      },
+    });
+    const settledAt = Date.now() - started;
+
+    try {
+      expect(result.exitCode).toBe(7);
+      // Settled early, on the flush-grace shortcut, well before the
+      // worker's own 600ms lifetime.
+      expect(settledAt).toBeLessThan(500);
+      expect(result.stdioClosed).toBe(false);
+      expect(result.outputMayBeIncomplete).toBe(true);
+      // onStdioClosed has NOT fired yet at settle time: proof the early
+      // resolve did not also fabricate a close.
+      expect(closedAt).toBeUndefined();
+
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      expect(closedAt).toBeGreaterThanOrEqual(500);
+      expect(closedAt).toBeLessThan(1200);
+    } finally {
+      try {
+        const pid = Number(fs.readFileSync(pidFile, "utf8"));
+        if (Number.isInteger(pid) && pid > 0) process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone, or never started.
+      }
+    }
+  }, 10000);
 
   it("does not report aborted: true for a command that finishes on its own with a signal given", async () => {
     const logDir = makeTmpDir();

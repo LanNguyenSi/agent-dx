@@ -252,16 +252,30 @@ reach of the group signal, and the run then settles a short grace after
 the command's own process exits rather than waiting on the pipes. A run
 that settles that way may be missing whatever was still in flight on
 those pipes, and both `probe` and `verify` say so in a warning instead of
-presenting the captured tail as the whole output.
+presenting the captured tail as the whole output. On the signal path
+specifically, the restore paragraph below does not stop at this flush
+grace: it waits further, and bounded, for the pipes to actually close
+before treating the restore as final.
 
 A probe stopped by `SIGINT`/`SIGTERM` restores the target before it does
 anything else. Whatever child was in flight (a `--pre`, a `-t`, or the
 `git apply` of a `-p` mutant) is killed with `SIGKILL` on its whole
-process group, the run is given a bounded moment to settle so that
-child's last write has landed, and only then is the backup copied back,
-hash-verified, the marker removed and the lock released. The restore is
-therefore the last write to the target, including against a command that
-traps `SIGTERM` and against an interrupted `git apply`.
+process group; the handler then waits, bounded, for that child's stdio
+to truly close, not merely for the run's own promise to settle (which
+the flush grace above can do early), and only then copies the backup
+back and hash-verifies it. The restore is therefore the last write to
+the target for every process still in the command's own process group,
+including one that traps `SIGTERM` and an interrupted `git apply`. A
+descendant that left the group is covered too, for as long as it holds
+the command's stdio open: the same bounded wait applies to it. One that
+both leaves the group and detaches its own stdio, or that writes after
+the bound expires, is beyond what this wait can cover. In that bounded
+case the target is still restored, but the marker (and its backup) are
+kept rather than removed, even though the restore itself already
+landed: a write that lands later would otherwise leave no trail, so the
+marker stays, `doctor` reports it, and the next `probe` on that target
+recovers from the hash-verified backup the same way it already does for
+any other in-flight marker.
 
 What the caller sees splits by caller. The exported `probe()` (or a
 library caller's own abort) returns `status: "inconclusive"`,

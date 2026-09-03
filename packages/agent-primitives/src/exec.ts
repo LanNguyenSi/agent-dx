@@ -21,6 +21,14 @@ export interface ExecOptions {
    * is closed, so awaiting it is what makes the caller's next write the
    * last one. Additive: omitted, behavior is unchanged. */
   signal?: AbortSignal;
+  /** Called at most once, exactly when the child's stdio pipes truly
+   * close (the `close` event) -- whether or not that has already
+   * happened by the time this call's own promise settles. A caller
+   * that needs to know the run is really over (not merely that this
+   * call gave up waiting on its flush grace) awaits this instead of
+   * the returned promise: see `stdioClosed` below for why the two can
+   * differ. Additive: omitted, behavior is unchanged. */
+  onStdioClosed?: () => void;
 }
 
 export interface ExecResult {
@@ -49,6 +57,14 @@ export interface ExecResult {
    * log file. The exit code is the command's own either way; only the
    * captured output is in question. */
   outputMayBeIncomplete: boolean;
+  /** True when this call settled because the child's stdio pipes truly
+   * closed (the `close` event); false when it settled on the flush-grace
+   * shortcut instead, meaning something other than the command itself
+   * may still be holding those pipes open at this moment. A caller for
+   * whom that distinction matters (whether the very last write has
+   * actually happened) should not treat this promise's settling alone
+   * as proof; it should also consult `onStdioClosed` in `ExecOptions`. */
+  stdioClosed: boolean;
 }
 
 const TAIL_LINES = 60;
@@ -69,6 +85,30 @@ const KILL_ESCALATION_GRACE_MS = 2000;
  * the command still holds a pipe open; the normal path settles on
  * `close`, which usually arrives in the same tick as `exit`. */
 const STREAM_FLUSH_GRACE_MS = 250;
+
+/** How much longer, beyond the flush grace, this call keeps watching
+ * for the stdio pipes to close for real once it has already settled on
+ * the flush-grace shortcut. Only reached when a descendant left the
+ * process group and outlived the flush grace; comfortably above every
+ * known caller's own settle bound (`probe`'s `SIGNAL_SETTLE_BOUND_MS`
+ * and the CLI's `SHUTDOWN_SETTLE_BOUND_MS`, both 2000ms), so a caller
+ * waiting on `onStdioClosed` is never cut off by this call giving up
+ * first. Past this bound the pipes are torn down and no further close
+ * is reported; whatever was still holding them is treated as never
+ * closing. */
+const STDIO_WATCH_BOUND_MS = 10_000;
+
+/** `child.stdout`/`child.stderr` are typed as the generic `Readable`,
+ * but for `stdio: 'pipe'` (this file's only mode) Node backs them with
+ * a `net.Socket`, which does carry `unref()`; not calling it would let
+ * a lingering, undestroyed pipe (see `finish` below) keep the process
+ * alive on its own. Guarded rather than cast, so a future stdio mode
+ * that genuinely lacks `unref()` degrades to a no-op instead of a
+ * runtime crash. */
+function unrefStream(stream: NodeJS.ReadableStream): void {
+  const maybeUnref = (stream as { unref?: () => void }).unref;
+  if (typeof maybeUnref === "function") maybeUnref.call(stream);
+}
 
 class TailKeeper {
   private buf = "";
@@ -161,6 +201,9 @@ export function execCommand(
     let settled = false;
     let outputMayBeIncomplete = false;
     let flushTimer: NodeJS.Timeout | undefined;
+    let watchTimer: NodeJS.Timeout | undefined;
+    let stdioClosed = false;
+    let stdioClosedNotified = false;
 
     // `detached: true` puts the child in a new process group of its own
     // (it becomes the group leader), so every descendant it spawns lands
@@ -255,18 +298,55 @@ export function execCommand(
       logStream.write(text);
     });
 
-    const finish = (exitCode: number | null) => {
+    const notifyStdioClosed = () => {
+      if (stdioClosedNotified) return;
+      stdioClosedNotified = true;
+      options.onStdioClosed?.();
+    };
+
+    /** Forcibly ends whatever is left of the child's stdio: called once
+     * true closure has already happened (nothing left to force) or once
+     * `STDIO_WATCH_BOUND_MS` gives up on ever seeing it. Destroying our
+     * own end here, rather than at settle time, is what keeps a forced
+     * destroy from masquerading as a genuine close below. */
+    const teardownStdio = () => {
+      if (watchTimer) {
+        clearTimeout(watchTimer);
+        watchTimer = undefined;
+      }
+      child.stdout.destroy();
+      child.stderr.destroy();
+    };
+
+    const finish = (exitCode: number | null, closedNow: boolean) => {
       if (settled) return;
       settled = true;
+      stdioClosed = closedNow;
       if (timer) clearTimeout(timer);
       if (flushTimer) clearTimeout(flushTimer);
       detachAbortListener();
-      // Stop reading before the log stream is ended: when this call is
-      // settling on the flush grace rather than on `close`, a descendant
-      // still holds the pipes and any further chunk would be a write to
-      // an already-ended stream.
-      child.stdout.destroy();
-      child.stderr.destroy();
+      if (closedNow) {
+        teardownStdio();
+      } else {
+        // Settling on the flush-grace shortcut: something other than
+        // the command itself still holds the pipes open. Stop growing
+        // the tails/log from here on, but do NOT force the pipes closed
+        // -- destroying our own end would itself emit a 'close' event
+        // that says nothing about whether whatever is still writing has
+        // actually let go, exactly the false signal `onStdioClosed`
+        // exists to never give. Removing the 'data' listeners pauses
+        // the stream instead (no more reads, no forced closure);
+        // `unref` keeps the still-open handles from holding this
+        // process alive on their own. `STDIO_WATCH_BOUND_MS` bounds how
+        // long that watch is kept up before this call gives up and
+        // tears the pipes down anyway.
+        child.stdout.removeAllListeners("data");
+        child.stderr.removeAllListeners("data");
+        unrefStream(child.stdout);
+        unrefStream(child.stderr);
+        watchTimer = setTimeout(teardownStdio, STDIO_WATCH_BOUND_MS);
+        watchTimer.unref();
+      }
       // Flush any incomplete trailing multi-byte sequence held by each
       // decoder (StringDecoder#end returns the remainder, if any).
       const stdoutRemainder = stdoutDecoder.end();
@@ -294,6 +374,7 @@ export function execCommand(
             ? { logWriteError: logWriteFailed }
             : {}),
           outputMayBeIncomplete,
+          stdioClosed,
         });
       });
     };
@@ -324,13 +405,18 @@ export function execCommand(
         // flight at this instant is dropped, and the result says so
         // instead of presenting a possibly-cut tail as the whole output.
         outputMayBeIncomplete = true;
-        finish(code);
+        finish(code, false);
       }, STREAM_FLUSH_GRACE_MS);
       flushTimer.unref();
     });
 
     child.on("close", (code) => {
-      finish(code);
+      if (watchTimer) {
+        clearTimeout(watchTimer);
+        watchTimer = undefined;
+      }
+      notifyStdioClosed();
+      finish(code, true);
     });
   });
 }

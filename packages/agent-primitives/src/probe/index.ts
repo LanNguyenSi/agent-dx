@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execCommand, type ExecResult } from "../exec.js";
+import { execCommand, type ExecOptions, type ExecResult } from "../exec.js";
 import { sha256File } from "../hash.js";
 import {
   acquireLock,
@@ -179,8 +179,53 @@ interface RestoreState {
  * is gone in milliseconds, so this is only ever reached when something
  * put itself out of the group's reach; restoring under it is still
  * better than leaving the target mutated, and the restore is verified by
- * hash either way. */
-const SIGNAL_SETTLE_BOUND_MS = 2000;
+ * hash either way.
+ *
+ * Overridable via `AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS`, an
+ * internal test seam (undocumented, not a CLI flag): a real test of the
+ * past-the-bound path needs an out-of-group writer that outlives the
+ * bound, and shortening the bound itself keeps that test in
+ * milliseconds instead of seconds. Production code never sets it. */
+function signalSettleBoundMs(): number {
+  const override = process.env.AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS;
+  if (override !== undefined) {
+    const parsed = Number(override);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 2000;
+}
+
+/** What the crash handler's restore attempt found, or `null` when no
+ * mutation was in flight (nothing to restore). `closedInTime` says
+ * whether the in-flight run's stdio was confirmed truly closed within
+ * `signalSettleBoundMs()` before the restore ran: only then is the
+ * restore guaranteed to be the last write, so only then does the
+ * handler remove the marker. A `false` here with `verified: true` means
+ * the target IS back at its pre-mutation content, but the marker (and
+ * the backup) are kept anyway, leaving a recovery trail for a write
+ * that might still land from whatever never closed. Exported (like
+ * `installCrashHandlers` and `CrashHandlers` below) only for the
+ * re-entrancy unit test; `probe()` is the only production caller. */
+export interface CrashHandlerOutcome {
+  verified: boolean;
+  closedInTime: boolean;
+}
+
+export interface CrashHandlers {
+  /** Removes both signal handlers, so concurrent `probe()` calls in the
+   * same process never interfere with each other's signal handling. */
+  remove: () => void;
+  /** True once a signal has been received and the handler has started
+   * (and not yet necessarily finished) acting on it. The normal control
+   * flow checks this at every point it is about to act on an aborted
+   * run, so its own return (or restore) never races the handler's. */
+  isHandling: () => boolean;
+  /** Resolves once the handler has finished acting: it has attempted a
+   * restore if one was in flight (recording the outcome above, or
+   * `null` when there was nothing to restore) and released the lock.
+   * Settles at most once, the same as the handler itself does. */
+  handled: Promise<CrashHandlerOutcome | null>;
+}
 
 /**
  * Installs SIGINT/SIGTERM handlers scoped to one `probe()` call, whose
@@ -192,31 +237,36 @@ const SIGNAL_SETTLE_BOUND_MS = 2000;
  *    process group outright. Not `SIGTERM`: a command that traps it
  *    would sit out any grace period, and the escalation timer that would
  *    eventually reach it dies with this process.
- * 2. `waitForInFlight` waits (bounded by `SIGNAL_SETTLE_BOUND_MS`) for
- *    that child's run to settle, which happens once its stdio is closed
- *    and therefore once every write it had in flight has landed.
+ * 2. `waitForInFlight` waits (bounded by `signalSettleBoundMs()`) for
+ *    that child's run to truly close its stdio, which is also once
+ *    every write it had in flight has landed -- not merely for its
+ *    promise to settle, which can happen earlier (see `exec.ts`'s
+ *    flush-grace shortcut).
  * 3. Only then, if a mutation is in flight (per `getRestoreState`), the
- *    target is restored via the session's own `restore()` and the marker
- *    removed (only when that restore itself succeeded, so a failed
- *    emergency restore still leaves the marker for the next invocation
- *    to recover), the lock released, and the process ended when
- *    `exitOnSignal` says to.
+ *    target is restored via the session's own `restore()`. The marker
+ *    is removed only when that restore verified AND step 2 confirmed
+ *    true closure within the bound: a restore that failed, or one whose
+ *    "last write" guarantee the bound could not confirm, leaves the
+ *    marker (and the backup) for the next invocation to recover from,
+ *    or for `doctor` to report. The lock is released and the process
+ *    ended when `exitOnSignal` says to.
  *
  * A second signal arriving while the first is still being handled is
  * ignored rather than starting a second pass beside the first.
- *
- * Returns a function that removes exactly these two handlers, so
- * concurrent `probe()` calls in the same process never interfere with
- * each other's signal handling.
  */
-function installCrashHandlers(
+export function installCrashHandlers(
   getRestoreState: () => RestoreState | null,
   releaseLock: () => void,
   abortInFlight: () => void,
-  waitForInFlight: () => Promise<void>,
+  waitForInFlight: () => Promise<boolean>,
   exitOnSignal: boolean,
-): () => void {
+): CrashHandlers {
   let handling = false;
+  let resolveHandled:
+    ((outcome: CrashHandlerOutcome | null) => void) | undefined;
+  const handled = new Promise<CrashHandlerOutcome | null>((res) => {
+    resolveHandled = res;
+  });
   const handler = (signal: NodeJS.Signals) => {
     if (handling) return;
     handling = true;
@@ -227,38 +277,84 @@ function installCrashHandlers(
         // Best-effort: a failure to abort the in-flight child must never
         // block the restore/lock-release that follows.
       }
+      let closedInTime = true;
       try {
-        await waitForInFlight();
+        closedInTime = await waitForInFlight();
       } catch {
-        // Best-effort, for the same reason.
+        // Best-effort, for the same reason; treated as "did not
+        // confirm" so the marker-retention path below is the safe one.
+        closedInTime = false;
       }
       const state = getRestoreState();
+      let outcome: CrashHandlerOutcome | null = null;
       if (state) {
         // `restoreAndVerify` is the same restore-then-hash the normal
         // control flow uses: the marker is removed only for a restore
-        // that is verified to have landed on the pre-mutation content,
-        // so a restore that failed (or wrote the wrong bytes) leaves the
-        // marker for the next invocation to recover from.
+        // that is verified to have landed on the pre-mutation content
+        // AND that step 2 confirmed was truly the last write, so a
+        // restore that failed, wrote the wrong bytes, or could not be
+        // confirmed as final leaves the marker for the next invocation
+        // (or `doctor`) to act on.
         const { verified } = await restoreAndVerify(
           { restore: state.restore, targetPath: state.targetPath },
           state.preHash,
         );
-        if (verified) removeMarkerFor(state.markerKey);
+        outcome = { verified, closedInTime };
+        if (verified && closedInTime) removeMarkerFor(state.markerKey);
       }
       try {
         releaseLock();
       } catch {
         // Best-effort.
       }
+      resolveHandled?.(outcome);
       if (exitOnSignal) process.exit(signal === "SIGINT" ? 130 : 143);
     })();
   };
   process.on("SIGINT", handler);
   process.on("SIGTERM", handler);
-  return () => {
-    process.off("SIGINT", handler);
-    process.off("SIGTERM", handler);
+  return {
+    remove: () => {
+      process.off("SIGINT", handler);
+      process.off("SIGTERM", handler);
+    },
+    isHandling: () => handling,
+    handled,
   };
+}
+
+/**
+ * Called at every point the normal control flow has just detected that
+ * a phase's run was aborted, before it acts on that (restoring, or
+ * returning). When this probe's own signal handler is the one that
+ * caused the abort (`crashHandlers.isHandling()`), the normal flow must
+ * not race the handler's own restore-then-exit -- see the round-6
+ * finding this closes. Returns `undefined` when the handler is NOT
+ * active (the abort came from somewhere else, e.g. a caller's own
+ * `AbortSignal`), telling the caller to keep its existing behavior
+ * unchanged.
+ *
+ * In CLI mode (`exitOnSignal`), this call never returns when the
+ * handler is active: it awaits a promise nothing ever resolves, so the
+ * only way out is the handler's own `process.exit`, which happens
+ * before this process is ever given the chance to build and print an
+ * envelope the handler is about to make moot. In library mode, it
+ * awaits the handler's own outcome and returns that, so the caller
+ * skips a second, redundant restore against a target the handler has
+ * already (and authoritatively) restored.
+ */
+async function deferToHandlerIfActive(
+  crashHandlers: CrashHandlers,
+  exitOnSignal: boolean,
+): Promise<CrashHandlerOutcome | null | undefined> {
+  if (!crashHandlers.isHandling()) return undefined;
+  if (exitOnSignal) {
+    await new Promise<never>(() => {
+      // Deliberately never resolves: only the handler's own
+      // `process.exit` ends this process from here.
+    });
+  }
+  return crashHandlers.handled;
 }
 
 /** Records, as a warning, that a phase's captured output may be missing
@@ -281,6 +377,51 @@ function noteIncompleteOutput(
 type RunPhaseResult =
   { ok: true; test: ExecResult } | { ok: false; pre: ExecResult };
 
+/** A started run together with `closed`: a promise that resolves once
+ * that run's stdio has TRULY closed, which can be later than the run's
+ * own promise settling (`exec.ts`'s flush-grace shortcut) or, for a
+ * `runArgv`-based call, exactly when it settles (see `run.ts`'s own
+ * docblock: it never takes that shortcut). The signal handler waits on
+ * `closed`, not on `result`, so its restore is guaranteed to be the
+ * last write only once `closed` is confirmed within its bound. */
+interface TrackedRun<T> {
+  result: Promise<T>;
+  closed: Promise<void>;
+}
+
+/** Starts `cmd` through `execCommand`, wiring its `onStdioClosed` hook
+ * into `closed` above. A rejected run (the child could not even be
+ * spawned) settles `closed` too: there is no child left to wait on. */
+function startExecTracked(
+  cmd: string,
+  options: ExecOptions,
+): TrackedRun<ExecResult> {
+  let resolveClosed: (() => void) | undefined;
+  const closed = new Promise<void>((res) => {
+    resolveClosed = res;
+  });
+  const result = execCommand(cmd, {
+    ...options,
+    onStdioClosed: () => resolveClosed?.(),
+  });
+  result.catch(() => resolveClosed?.());
+  return { result, closed };
+}
+
+/** Wraps an already-started `runArgv`-based call (every `git apply`):
+ * `run.ts` only ever settles on `close` (see its own docblock), so the
+ * call's own settling already IS true stdio closure; `closed` just
+ * mirrors it instead of needing its own callback wiring. */
+function startRunArgvTracked<T>(started: Promise<T>): TrackedRun<T> {
+  return {
+    result: started,
+    closed: started.then(
+      () => undefined,
+      () => undefined,
+    ),
+  };
+}
+
 /** Runs `--pre` (if given) then the test command, both against `env`.
  * A non-zero `--pre` exit short-circuits before the test ever runs, so
  * the caller can classify it as `pre_failed` instead of quietly letting
@@ -293,15 +434,18 @@ async function runPreThenTest(
     timeoutMs?: number;
     signal?: AbortSignal;
   },
-  /** Registers each started run as the probe's one in-flight child, so
-   * the signal handler can wait for it to settle before restoring. */
-  track: <T>(started: Promise<T>) => Promise<T>,
+  /** Registers each started run (and when its stdio truly closes) as
+   * the probe's one in-flight child, so the signal handler can wait for
+   * it to settle before restoring. */
+  track: <T>(started: Promise<T>, closed: Promise<void>) => Promise<T>,
 ): Promise<RunPhaseResult> {
   if (opts.preCommand) {
-    const pre = await track(execCommand(opts.preCommand, env));
+    const started = startExecTracked(opts.preCommand, env);
+    const pre = await track(started.result, started.closed);
     if (pre.exitCode !== 0) return { ok: false, pre };
   }
-  const test = await track(execCommand(opts.testCommand, env));
+  const started = startExecTracked(opts.testCommand, env);
+  const test = await track(started.result, started.closed);
   return { ok: true, test };
 }
 
@@ -410,43 +554,60 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   // races a process still running against (and possibly still writing)
   // the target file.
   const execController = new AbortController();
-  // The one child in flight at any moment, as the promise of its run.
-  // The handler waits for it to settle after killing it: a run settles
-  // once its stdio is closed, which is also once every write it had in
-  // flight has landed, so the restore that follows is the last write.
+  // The one child in flight at any moment, as the promise of its run,
+  // together with a promise of when its stdio TRULY closes (see
+  // `TrackedRun`). The handler waits on the latter, not the former: a
+  // run's own promise can settle early (`exec.ts`'s flush-grace
+  // shortcut) while a descendant that left the process group still
+  // holds the pipes, and only true closure means every write the run
+  // had in flight has actually landed.
   let inFlight: Promise<unknown> | null = null;
-  const track = async <T>(started: Promise<T>): Promise<T> => {
+  let inFlightClosed: Promise<void> | null = null;
+  const track = async <T>(
+    started: Promise<T>,
+    closed: Promise<void>,
+  ): Promise<T> => {
     inFlight = started;
+    inFlightClosed = closed;
     try {
       return await started;
     } finally {
-      if (inFlight === started) inFlight = null;
+      if (inFlight === started) {
+        inFlight = null;
+        inFlightClosed = null;
+      }
     }
   };
-  const waitForInFlight = async (): Promise<void> => {
-    const pending = inFlight;
-    if (pending === null) return;
+  /** Waits, bounded by `signalSettleBoundMs()`, for whatever is
+   * currently in flight to truly close its stdio. Returns `true` when
+   * that closure was confirmed within the bound (or nothing was in
+   * flight at all), `false` when the bound expired first: the caller
+   * (the signal handler) uses this to decide whether removing the
+   * marker is safe. */
+  const waitForInFlight = async (): Promise<boolean> => {
+    const pendingClosed = inFlightClosed;
+    if (pendingClosed === null) return true;
     let timer: NodeJS.Timeout | undefined;
+    let closedInTime = false;
     await Promise.race([
-      // A rejected run (`exec.ts` could not spawn at all) is a settled
-      // run for this purpose: there is no child left to race.
-      pending.then(
-        () => undefined,
-        () => undefined,
-      ),
+      pendingClosed.then(() => {
+        closedInTime = true;
+      }),
       new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, SIGNAL_SETTLE_BOUND_MS);
+        timer = setTimeout(resolve, signalSettleBoundMs());
       }),
     ]);
     if (timer !== undefined) clearTimeout(timer);
+    return closedInTime;
   };
-  const removeCrashHandlers = installCrashHandlers(
+  const crashHandlers = installCrashHandlers(
     () => restoreState,
     lockResult.release,
     () => execController.abort(),
     waitForInFlight,
     opts.exitOnSignal ?? false,
   );
+  const exitOnSignalFlag = opts.exitOnSignal ?? false;
   // Set by the `catch` below and read by `finally`'s emergency-restore
   // path, so its warning can name what actually triggered the restore
   // instead of just "an unexpected error".
@@ -608,6 +769,35 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         // points at it).
       }
     };
+    /** Restores `session` and decides the marker's fate, UNLESS
+     * `phaseAborted` is true and the signal handler already did both
+     * (see `deferToHandlerIfActive`): then this reuses the handler's own
+     * outcome instead of racing it with a second, redundant restore.
+     * Every abort-adjacent restore from here on goes through this, so
+     * "the handler's restore is the last write" holds regardless of
+     * which phase the signal landed in, and the marker is only ever
+     * removed once, by whichever of the two actually decided to. */
+    const restoreOnce = async (
+      phaseAborted: boolean,
+    ): Promise<{ ok: boolean; verified: boolean }> => {
+      if (phaseAborted) {
+        const handlerOutcome = await deferToHandlerIfActive(
+          crashHandlers,
+          exitOnSignalFlag,
+        );
+        if (handlerOutcome !== undefined) {
+          restoreState = null;
+          return {
+            ok: true,
+            verified: handlerOutcome?.verified ?? false,
+          };
+        }
+      }
+      const result = await restoreAndVerify(session, preHash);
+      restoreState = null;
+      if (result.verified) removeMarkerFor(absFile);
+      return result;
+    };
     const backupHash = await sha256File(session.backupPath).catch(
       () => undefined,
     );
@@ -638,7 +828,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     // landing while one of them is running kills it and the handler
     // waits for it to settle, rather than letting an interrupted apply
     // finish writing after this process has moved on.
-    const computed = await track(
+    const computeMutantStarted = startRunArgvTracked(
       computeMutant(mutantSpec, {
         root,
         logDir: opts.logDir,
@@ -647,7 +837,19 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         timeoutMs: gitApplyTimeoutMs,
       }),
     );
+    const computed = await track(
+      computeMutantStarted.result,
+      computeMutantStarted.closed,
+    );
     if (!computed.applicable) {
+      if (computed.reasonCode === "aborted") {
+        // Ordering only: nothing has mutated the target yet at this
+        // phase, so there is nothing for a deferred restore's outcome
+        // to change here; this just keeps this call from returning (or,
+        // in CLI mode, ever returning) while the handler is still doing
+        // its own (harmless, no-op) restore and lock release.
+        await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
+      }
       discardBackup();
       return {
         status: "inconclusive",
@@ -696,11 +898,16 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     const baselineRun = await runPreThenTest(opts, execEnv, track);
     if (!baselineRun.ok) {
       noteIncompleteOutput(warnings, "baseline --pre", baselineRun.pre);
-      discardBackup();
       // An aborted `--pre` (this probe was signalled, or its caller
       // aborted it) never ran to a conclusion, so it is not a `--pre`
       // that failed: it is a run that was stopped.
       const preAborted = baselineRun.pre.aborted;
+      if (preAborted) {
+        // Nothing has mutated the target yet: ordering only, same as
+        // the computeMutant-dry-run site above.
+        await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
+      }
+      discardBackup();
       return {
         status: "inconclusive",
         reason: preAborted ? "aborted" : "pre_failed",
@@ -724,6 +931,13 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       timedOut: baselineTest.timedOut,
     };
     if (baselineTest.exitCode !== 0 || baselineTest.aborted) {
+      if (baselineTest.aborted) {
+        // If the handler is active it may already have restored the
+        // target (a no-op copy of still-original content, since nothing
+        // has mutated it yet at this phase); wait for that before
+        // re-hashing below, so the re-hash reads settled content.
+        await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
+      }
       // A failing baseline is still a baseline that ran commands against
       // the working tree, and one of them may have rewritten the target
       // (a formatter, a codegen step). Re-hash before deciding what to do
@@ -804,16 +1018,15 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       // handler waits for it to settle before restoring. Without that,
       // an interrupted apply outlives this process and lands on the
       // target after the restore, with the marker already gone.
-      const applyResult = await track(
+      const applyStarted = startRunArgvTracked(
         applyPatchForReal(opts.patchPath ?? "", root, opts.logDir, {
           signal: execController.signal,
           timeoutMs: gitApplyTimeoutMs,
         }),
       );
+      const applyResult = await track(applyStarted.result, applyStarted.closed);
       if (applyResult.exitCode !== 0) {
-        const { ok, verified } = await restoreAndVerify(session, preHash);
-        restoreState = null;
-        if (verified) removeMarkerFor(absFile);
+        const { ok, verified } = await restoreOnce(applyResult.aborted);
         if (!ok || !verified) {
           return {
             status: "inconclusive",
@@ -918,9 +1131,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     const mutantRun = await runPreThenTest(opts, execEnv, track);
     if (!mutantRun.ok) {
       noteIncompleteOutput(warnings, "mutant --pre", mutantRun.pre);
-      const { ok, verified } = await restoreAndVerify(session, preHash);
-      restoreState = null;
-      if (verified) removeMarkerFor(absFile);
+      const { ok, verified } = await restoreOnce(mutantRun.pre.aborted);
       if (!ok || !verified) {
         return {
           status: "inconclusive",
@@ -967,9 +1178,9 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     noteIncompleteOutput(warnings, "mutant", testResult);
 
     // (5) restore, (6) verify restore by hash.
-    const { ok: restoreOk, verified: restoredVerified } =
-      await restoreAndVerify(session, preHash);
-    restoreState = null;
+    const { ok: restoreOk, verified: restoredVerified } = await restoreOnce(
+      testResult.aborted,
+    );
 
     const testField: TestPhaseField = {
       command: opts.testCommand,
@@ -1003,8 +1214,10 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       };
     }
 
-    // (7) remove marker, classify. Lock release happens in `finally`.
-    removeMarkerFor(absFile);
+    // (7) classify. The marker was already removed above by `restoreOnce`
+    // (or deliberately kept, when a signal handler's own restore could
+    // not confirm true stdio closure within its bound). Lock release
+    // happens in `finally`.
 
     let status: "killed" | "survived" | "inconclusive";
     let reason: string | undefined;
@@ -1103,7 +1316,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         };
       }
     }
-    removeCrashHandlers();
+    crashHandlers.remove();
     lockResult.release();
     if (emergencyResult) return emergencyResult;
   }

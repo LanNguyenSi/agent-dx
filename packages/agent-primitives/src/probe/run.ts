@@ -47,6 +47,13 @@ export interface RunArgvResult {
   logWriteFailed: boolean;
   /** Set alongside `logWriteFailed: true`, naming what went wrong. */
   logWriteError?: string;
+  /** Always `true`: unlike `exec.ts`'s `ExecResult`, this runner (see
+   * the docblock below) only ever settles on `close`, so by the time
+   * this result exists the child's stdio has genuinely, already closed.
+   * Kept as an explicit field (rather than leaving callers to assume
+   * it) so a caller that treats the two runners uniformly can read the
+   * same field off either result. */
+  stdioClosed: true;
 }
 
 /** How long SIGTERM is given before SIGKILL follows on the timeout path,
@@ -236,6 +243,7 @@ export function runArgv(
           ...(logWriteFailed !== undefined
             ? { logWriteError: logWriteFailed }
             : {}),
+          stdioClosed: true,
         });
       });
     });
