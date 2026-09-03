@@ -989,7 +989,6 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         if (!known) leftovers.push({ path: registeredPath, fromMarker: false });
       }
       let recovered = 0;
-      let markerOwnedByLiveProbe = false;
       for (const leftover of leftovers) {
         const livePid = liveForeignOwner(leftover.path);
         if (livePid !== undefined) {
@@ -997,7 +996,6 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
             `a worktree of the probe's own scratch shape at ${leftover.path} ` +
               `belongs to a live probe (pid ${livePid}) and was left alone`,
           );
-          if (leftover.fromMarker) markerOwnedByLiveProbe = true;
           continue;
         }
         const cleanup = await cleanupWorktree(
@@ -1055,10 +1053,14 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         };
       }
       if (recovered > 0) warnings.push("recovered_stale_worktree");
-      // The marker's worktree was recovered, or the marker named nothing
-      // to recover any more; a marker whose worktree a live probe owns
-      // stays, since that probe's own cleanup is what clears it.
-      if (staleWt && !markerOwnedByLiveProbe) removeMarkerFor(realRoot);
+      // The marker's worktree was recovered, the marker named nothing
+      // to recover any more, or it named a worktree a live probe owns.
+      // That last case keeps nothing by keeping the marker: the marker
+      // is a single slot keyed by the repository, and this run's own
+      // `onWorktreeAttempt` below overwrites it before the sync starts,
+      // so the live probe's trail is git's registry listing and its
+      // scratch directory's `owner.json`, never this file.
+      if (staleWt) removeMarkerFor(realRoot);
 
       // Started, not awaited, so `wtSyncSettled` is assigned before this
       // function yields for the first time: from here on every exit path
