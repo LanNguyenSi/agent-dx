@@ -1626,6 +1626,135 @@ describe("cli: init", () => {
       expect(parsed.reason).toBe("target_not_writable");
     },
   );
+
+  it("-H all: a directory at the codex target refuses the run before any harness is written, exit 2", async () => {
+    const dir = makeTmpDir();
+    const codexFilePath = path.join(
+      dir,
+      ".agents",
+      "skills",
+      "agent-primitives",
+      "SKILL.md",
+    );
+    fs.mkdirSync(codexFilePath, { recursive: true });
+
+    const run = await spawnCli(["init", "-t", dir, "-H", "all"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("target_path_is_a_directory");
+    expect(parsed.command).toBe("init");
+    expect(
+      fs.existsSync(path.join(dir, ".claude", "skills", "agent-primitives")),
+    ).toBe(false);
+    expect(
+      fs.existsSync(path.join(dir, ".opencode", "skills", "agent-primitives")),
+    ).toBe(false);
+  });
+
+  it.skipIf(isRoot)(
+    "-H all: a read-only existing file at the codex target with --force refuses the run before any harness is written, exit 2",
+    async () => {
+      const dir = makeTmpDir();
+      const codexFilePath = path.join(
+        dir,
+        ".agents",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(codexFilePath), { recursive: true });
+      fs.writeFileSync(codexFilePath, "different content\n");
+      fs.chmodSync(codexFilePath, 0o400);
+
+      let run: Awaited<ReturnType<typeof spawnCli>>;
+      try {
+        run = await spawnCli(["init", "-t", dir, "-H", "all", "--force"]);
+      } finally {
+        fs.chmodSync(codexFilePath, 0o600);
+      }
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.reason).toBe("target_not_writable");
+      expect(parsed.command).toBe("init");
+      expect(
+        fs.existsSync(path.join(dir, ".claude", "skills", "agent-primitives")),
+      ).toBe(false);
+      expect(
+        fs.existsSync(
+          path.join(dir, ".opencode", "skills", "agent-primitives"),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it('reports reason "target_is_a_symlink" and command "init" for a symlink at the target file path', async () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(
+      dir,
+      ".claude",
+      "skills",
+      "agent-primitives",
+      "SKILL.md",
+    );
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.symlinkSync(path.join(dir, "elsewhere.md"), filePath);
+
+    const run = await spawnCli(["init", "-t", dir]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("target_is_a_symlink");
+    expect(parsed.command).toBe("init");
+  });
+
+  it('reports reason "target_escapes_directory" and command "init" for a target resolving outside -t', async () => {
+    const dir = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
+    fs.symlinkSync(outside, path.join(dir, ".claude", "skills"));
+
+    const run = await spawnCli(["init", "-t", dir]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("target_escapes_directory");
+    expect(parsed.command).toBe("init");
+  });
+
+  it.skipIf(isRoot)(
+    "--force over a strictly longer existing target overwrites it byte-identically to the packaged skill (O_TRUNC)",
+    async () => {
+      const dir = makeTmpDir();
+      const filePath = path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const packaged = fs.readFileSync(
+        path.join(
+          path.dirname(fileURLToPath(import.meta.url)),
+          "..",
+          "assets",
+          "skill",
+          "SKILL.md",
+        ),
+        "utf8",
+      );
+      const longerExisting = packaged + "x".repeat(packaged.length + 1000);
+      fs.writeFileSync(filePath, longerExisting);
+
+      const run = await spawnCli(["init", "-t", dir, "--force"]);
+      expect(run.code).toBe(0);
+      const written = fs.readFileSync(filePath, "utf8");
+      expect(written.length).toBe(packaged.length);
+      expect(written).toBe(packaged);
+    },
+  );
 });
 
 describe("cli signal handling", () => {

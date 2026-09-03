@@ -410,5 +410,221 @@ describe("init", () => {
         expect((caught as InitFsUsageError).reason).toBe("target_not_writable");
       },
     );
+
+    it('a symlink at the target file path -> reason "target_is_a_symlink"', () => {
+      const dir = makeTmpDir();
+      const filePath = path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.symlinkSync(path.join(dir, "elsewhere.md"), filePath);
+
+      let caught: unknown;
+      try {
+        init({ targetDir: dir, content: CONTENT_A });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(InitFsUsageError);
+      expect((caught as InitFsUsageError).reason).toBe("target_is_a_symlink");
+    });
+
+    it('a resolved target that escapes --target-dir -> reason "target_escapes_directory"', () => {
+      const dir = makeTmpDir();
+      const outside = makeTmpDir();
+      fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
+      fs.symlinkSync(outside, path.join(dir, ".claude", "skills"));
+
+      let caught: unknown;
+      try {
+        init({ targetDir: dir, content: CONTENT_A });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(InitFsUsageError);
+      expect((caught as InitFsUsageError).reason).toBe(
+        "target_escapes_directory",
+      );
+    });
+
+    it('ELOOP from the O_NOFOLLOW open (a symlink planted after pre-validation) -> reason "target_is_a_symlink"', () => {
+      const dir = makeTmpDir();
+      const skillDir = path.join(dir, ".claude", "skills", "agent-primitives");
+      fs.mkdirSync(skillDir, { recursive: true });
+      const filePath = path.join(skillDir, "SKILL.md");
+
+      const realLstatSync = fs.lstatSync;
+      const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
+        p: fs.PathLike,
+        opts?: unknown,
+      ) => {
+        if (p === filePath) {
+          // Simulate a race: something else plants a symlink, pointing
+          // inside the target directory at a file that does not exist,
+          // right after this process's own pre-validation lstat observed
+          // nothing there. resolveDeepestExisting cannot resolve a
+          // dangling symlink through realpath, so it falls back to the
+          // (real, contained) parent directory and containment holds;
+          // only the write's own O_NOFOLLOW open still catches this one.
+          fs.symlinkSync(path.join(skillDir, "does-not-exist.md"), filePath);
+          return undefined;
+        }
+        return (realLstatSync as (p: fs.PathLike, opts?: unknown) => unknown)(
+          p,
+          opts,
+        );
+      }) as typeof fs.lstatSync);
+
+      let caught: unknown;
+      try {
+        init({ targetDir: dir, content: CONTENT_A });
+      } catch (err) {
+        caught = err;
+      } finally {
+        spy.mockRestore();
+      }
+      expect(caught).toBeInstanceOf(InitFsUsageError);
+      expect((caught as InitFsUsageError).reason).toBe("target_is_a_symlink");
+      expect(fs.lstatSync(filePath).isSymbolicLink()).toBe(true);
+    });
+  });
+
+  describe("-H all validates every harness before writing any of them", () => {
+    it("a directory at the codex target refuses the run before claude is written", () => {
+      const dir = makeTmpDir();
+      const codexFilePath = path.join(
+        dir,
+        ".agents",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(codexFilePath, { recursive: true });
+
+      let caught: unknown;
+      try {
+        init({
+          targetDir: dir,
+          content: CONTENT_A,
+          harnesses: [...ALL_HARNESSES],
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(InitFsUsageError);
+      expect((caught as InitFsUsageError).reason).toBe(
+        "target_path_is_a_directory",
+      );
+      expect((caught as InitFsUsageError).targets).toEqual([]);
+      expect(
+        fs.existsSync(path.join(dir, ".claude", "skills", "agent-primitives")),
+      ).toBe(false);
+      expect(
+        fs.existsSync(
+          path.join(dir, ".opencode", "skills", "agent-primitives"),
+        ),
+      ).toBe(false);
+    });
+
+    it.skipIf(isRoot)(
+      "a read-only existing file at the codex target with --force refuses the run before claude is written",
+      () => {
+        const dir = makeTmpDir();
+        const codexFilePath = path.join(
+          dir,
+          ".agents",
+          "skills",
+          "agent-primitives",
+          "SKILL.md",
+        );
+        fs.mkdirSync(path.dirname(codexFilePath), { recursive: true });
+        fs.writeFileSync(codexFilePath, CONTENT_B);
+        fs.chmodSync(codexFilePath, 0o400);
+
+        let caught: unknown;
+        try {
+          init({
+            targetDir: dir,
+            content: CONTENT_A,
+            harnesses: [...ALL_HARNESSES],
+            force: true,
+          });
+        } catch (err) {
+          caught = err;
+        } finally {
+          fs.chmodSync(codexFilePath, 0o600);
+        }
+        expect(caught).toBeInstanceOf(InitFsUsageError);
+        expect((caught as InitFsUsageError).reason).toBe("target_not_writable");
+        expect((caught as InitFsUsageError).targets).toEqual([]);
+        expect(
+          fs.existsSync(
+            path.join(dir, ".claude", "skills", "agent-primitives"),
+          ),
+        ).toBe(false);
+        expect(
+          fs.existsSync(
+            path.join(dir, ".opencode", "skills", "agent-primitives"),
+          ),
+        ).toBe(false);
+      },
+    );
+  });
+
+  describe("--force over a strictly longer existing target", () => {
+    it("overwrites without leaving a trailing tail from the old content (O_TRUNC)", async () => {
+      const dir = makeTmpDir();
+      const filePath = path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const packaged = fs.readFileSync(
+        new URL("../assets/skill/SKILL.md", import.meta.url),
+        "utf8",
+      );
+      // Strictly longer than the packaged skill, so a write that opened
+      // without O_TRUNC (or with it silently dropped, e.g. by an `| 0`
+      // in place of the real flag) would leave this tail behind.
+      const longerExisting = packaged + "x".repeat(packaged.length + 1000);
+      expect(longerExisting.length).toBeGreaterThan(packaged.length);
+      fs.writeFileSync(filePath, longerExisting);
+
+      const result = await init({ targetDir: dir, force: true });
+      expect(result.status).toBe("written");
+      const written = fs.readFileSync(filePath, "utf8");
+      expect(written.length).toBe(packaged.length);
+      expect(written).toBe(packaged);
+    });
+  });
+
+  describe("the O_NOFOLLOW guard is asserted at module load", () => {
+    afterEach(() => {
+      vi.doUnmock("node:fs");
+      vi.resetModules();
+    });
+
+    it("refuses to load when fs.constants.O_NOFOLLOW is not a positive number", async () => {
+      vi.doMock("node:fs", async () => {
+        const actual =
+          await vi.importActual<typeof import("node:fs")>("node:fs");
+        const constants = { ...actual.constants, O_NOFOLLOW: undefined };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mocked: any = { ...actual, constants };
+        mocked.default = mocked;
+        return mocked;
+      });
+      vi.resetModules();
+      await expect(import("../src/init/index.js")).rejects.toThrow(
+        /O_NOFOLLOW/,
+      );
+    });
   });
 });

@@ -651,23 +651,39 @@ byte-identical content, is written (or reported `unchanged`) with no
 further action, exit `0`. A target that exists with different content
 is reported `conflicted`, exit `1`, and left untouched, unless `--force`
 is given, in which case it is overwritten and reported `written`, exit
-`0`. Every resolved target is checked against `--target-dir` before
-anything is written; one that would land outside it (for example
-because an existing `.claude` entry is a symlink pointing elsewhere) is
-refused as `status: "usage_error"`, exit `2`, and nothing is written for
-any harness in that invocation. A symlink at the target file path
-itself is refused the same way, whether it dangles, resolves inside or
-outside `--target-dir`, and whether or not `--force` is given: a target
-is never written through a symlink. `-t` naming a file instead of a
-directory, a directory sitting at the target file path, and an existing
-target that is not writable are each reported as `status:
-"usage_error"`, exit `2`, with a `reason` naming which of the three it
-was (`target_not_a_directory`, `target_path_is_a_directory`,
-`target_not_writable`) instead of a raw filesystem error message.
+`0`. Every requested harness's target is validated against
+`--target-dir` before anything is written: containment, a symlink or a
+directory already sitting at the target file path, and, under
+`--force`, an existing target's write access are all checked up front,
+so a condition of that kind on one harness (for example a pre-existing
+symlink, or `.claude` itself pointing outside `--target-dir`) refuses
+the whole invocation, exit `2`, with nothing written for any harness.
+A condition that only shows up during the write itself, such as a
+symlink planted in the gap between validation and the write, can still
+leave a prefix of the requested harnesses written; the envelope's own
+`targets` field then lists whatever was written or found unchanged
+before the failure. A symlink at the target file path itself is
+refused the same way, whether it dangles, resolves inside or outside
+`--target-dir`, and whether or not `--force` is given: a target is
+never written through a symlink. This containment guarantee is about
+symbolic links specifically; a hard link at the target path is
+indistinguishable from a plain regular file and is written through like
+one. `-t` naming a file instead of a directory, a directory sitting at
+the target file path, an existing target that is not writable, a
+symlink at the target file path, and a resolved target that escapes
+`--target-dir` are each reported as `status: "usage_error"`, exit `2`,
+with a `reason` naming which one it was (`target_not_a_directory`,
+`target_path_is_a_directory`, `target_not_writable`,
+`target_is_a_symlink`, `target_escapes_directory`) instead of a raw
+filesystem error message.
 
 Output beside the envelope: `status` (`written`, `unchanged`, or
 `conflicted`, the worst outcome across every requested harness) and
 `targets: [{ harness, path, status }]`, one entry per requested harness.
+A usage-error envelope from a filesystem condition at the target also
+carries `targets`, naming whatever harness or harnesses were already
+installed before the error (empty when the error was caught by
+validation before any write).
 
 ## Output shape
 

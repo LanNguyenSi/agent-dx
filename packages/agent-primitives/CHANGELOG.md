@@ -30,8 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target repository. Evidence for the terrain claims and design
   decisions behind `probe`, `verify`, `doctor`, and `init` lives in the
   pandora workspace run `2026-09-03-agent-tools-kit` and its memory
-  record; this package's own docs name no run, task, or memory
-  identifiers anywhere else.
+  record.
 - `verify` subcommand core: resolves each named check (`-x` override wins,
   else `package.json` `scripts[name]` as `npm run <name> --silent`, else
   `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`

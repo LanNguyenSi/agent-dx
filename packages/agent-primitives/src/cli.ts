@@ -1050,7 +1050,11 @@ program
           cwd: global.cwd,
           warnings: [],
           logs: [],
-          extra: { reason: err.reason, message: err.message },
+          extra: {
+            reason: err.reason,
+            message: err.message,
+            targets: err.targets,
+          },
           maxChars: global.maxChars,
           logDir: global.logDir,
         });
