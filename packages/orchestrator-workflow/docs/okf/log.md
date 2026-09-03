@@ -6880,5 +6880,19 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   `anchor-*`/`heading-section-*`/`test-range-straddles-block` message
   pattern) reports 0 findings; the 23 notice messages are byte-identical
   to the same check run against master (`5ae53a3`) in a separate
-  worktree, same pre-existing `unresolved-ambiguous` set. `npm test`:
-  601/601 passing.
+  worktree, same pre-existing `unresolved-ambiguous` set. `npm test`: green,
+  including the docs-consistency suite.
+
+- 2026-09-03T07:17:33Z (T-007 round 2, review notes): appended a docs-consistency block
+  pinning the four runner and structural-search sentences in `explorer.md`,
+  `reviewer.md`, `implementer.md`, and `SKILL.md` plus a tool-agnosticism
+  guard over all four assets (reviewer finding: reverting the sentences left
+  the suite green). The block sits at the end of
+  `test/docs-consistency.test.ts`, so no line cited by this bundle moved;
+  the four docs that list that test as a source were re-stamped offset-free
+  (timestamp only) after re-checking that their citations into the test
+  still resolve, and the four new pins are green with the rest of the
+  docs-consistency suite. Re-measured on the committed tree after this
+  entry: `okf-kit@0.9.0 check --json docs/okf --require-anchors`: 0 errors,
+  0 warnings, and the same pre-existing notice set as master (no
+  anchor-family finding).
