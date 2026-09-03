@@ -49,7 +49,9 @@ Every subcommand accepts:
   a `...` key in an object, a suffix on a string, a placeholder for a
   pruned subtree, each naming how much of the original is missing. Equally
   sized siblings are therefore cut alike, and a large collection is
-  trimmed entry by entry rather than deleted whole. Depth is part of the
+  trimmed entry by entry rather than deleted whole. An object key is kept
+  whole or its entry is dropped; a result keyed by very long strings
+  therefore reduces on the key count alone. Depth is part of the
   search as well, so a result too deeply nested to fit at any width comes
   back as a shallower sketch of itself, each pruned subtree naming the
   depth it was cut at, instead of vanishing; when not even the shallowest
@@ -61,7 +63,7 @@ Every subcommand accepts:
   yields the same envelope, and between processes the only thing that
   differs is the run id in the full-result path. A handful of fixed fields
   (`tool`, `version`, `command`, `status`, `durationMs`, `cwd`,
-  `truncated`, `warnings`, `logs`) are held out of the reduction entirely
+  `truncated`, `logs`, `warnings`) are held out of the reduction entirely
   and lead the serialized object, so the real bound is `max(-m, size of
   those fixed fields)`, not `-m` unconditionally; when even that cannot be
   honored, a warning names the envelope's true final length instead of

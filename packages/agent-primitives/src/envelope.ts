@@ -387,7 +387,7 @@ function baseLimitsFor(bound: number): CapLimits {
  * keeps a wide nested result (which needs a small scale for breadth) from
  * being flattened to two levels on the way there.
  */
-function depthForScale(baseDepth: number, scale: number): number {
+export function depthForScale(baseDepth: number, scale: number): number {
   return Math.max(MIN_SEARCH_DEPTH, baseDepth + Math.floor(Math.log2(scale)));
 }
 
@@ -428,8 +428,8 @@ function overrunWarning(finalLength: number, maxChars: number): string {
  * absence: a non-empty result that came back as the fixed fields alone,
  * because no structure this module can build fits the bound. Without it,
  * "the command produced no fields" and "the command's fields did not fit"
- * look identical in the envelope. It names where the whole result is when
- * a full-result file was written.
+ * look identical in the envelope. It points at `logs` for the full result
+ * rather than restating the path itself, which `logs` already carries.
  */
 function totalLossWarning(
   maxChars: number,
@@ -438,7 +438,7 @@ function totalLossWarning(
   const where =
     fullResultPath === undefined
       ? "no full result was written"
-      : `full result at ${fullResultPath}`;
+      : "the full result is in logs";
   return `result reduced to the fixed fields only: no payload structure fits within max-chars ${maxChars}; ${where}`;
 }
 
@@ -518,7 +518,7 @@ function pushOverrunWarning(
  * string, a placeholder for a pruned subtree).
  *
  * The fixed skeleton fields (tool, version, command, status, durationMs,
- * cwd, truncated, warnings, logs) are held apart from the payload for the
+ * cwd, truncated, logs, warnings) are held apart from the payload for the
  * whole reduction and lead every composed envelope (see PROTECTED_KEYS),
  * so they always survive intact, byte for byte, and a reader of the
  * serialized result meets them before any payload field. A payload key

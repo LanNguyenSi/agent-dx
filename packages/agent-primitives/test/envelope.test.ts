@@ -5,6 +5,7 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   applyCaps,
   buildEnvelope,
+  depthForScale,
   exitCodeForStatus,
   statusClass,
   type CapLimits,
@@ -418,6 +419,101 @@ describe("buildEnvelope: deeply nested results", () => {
   });
 });
 
+describe("buildEnvelope: depth-search tuning constants (round-6 pin)", () => {
+  const maxChars = 8000;
+
+  it("lands the depth-only fallback on FALLBACK_DEPTHS' second and third entries, not just its first", () => {
+    // The earlier fixture above (key length 0) lands on FALLBACK_DEPTHS[0]
+    // (3). Longer keys leave less breadth budget at MIN_SCALE, so the same
+    // shape needs a shallower fallback depth to fit: 250-character keys
+    // land on FALLBACK_DEPTHS[1] (2), and 1000-character keys on
+    // FALLBACK_DEPTHS[2] (1). A FALLBACK_DEPTHS shortened to just [3] would
+    // find nothing that fits at either length and silently fall through to
+    // the fixed fields alone.
+    for (const [keyLength, expectedDepth] of [
+      [250, 2],
+      [1000, 1],
+    ] as const) {
+      const logDir = makeTmpDir();
+      const tree = nestedTree({
+        depth: 6,
+        arity: 3,
+        key: (i) => "k".repeat(keyLength) + "-" + i,
+      });
+      const { envelope } = buildEnvelope({
+        version: "0.1.0",
+        command: "verify",
+        status: "fail",
+        durationMs: 10,
+        cwd: "/tmp",
+        extra: { tree },
+        maxChars,
+        logDir,
+      });
+      expect(
+        JSON.stringify(envelope).length,
+        `key length ${keyLength}`,
+      ).toBeLessThanOrEqual(maxChars);
+      expect(payloadKeysOf(envelope), `key length ${keyLength}`).toEqual([
+        "tree",
+      ]);
+      expect(
+        deepestContainerLevel(envelope.tree, 1),
+        `key length ${keyLength}`,
+      ).toBe(expectedDepth);
+      expect(
+        (envelope.warnings as string[]).some((w) =>
+          w.startsWith(TOTAL_LOSS_PREFIX),
+        ),
+        `key length ${keyLength}`,
+      ).toBe(false);
+    }
+  });
+
+  it("pairs the depth-only fallback with the narrowest breadth caps (MIN_SCALE), not the widest (scale 1)", () => {
+    // Ten long-keyed children at the surviving fallback level only fit
+    // three of them under the narrow MIN_SCALE breadth cap; at scale 1
+    // (unbounded relative to this tiny width) all ten would fit instead,
+    // so the kept top-level key count is the discriminator.
+    const logDir = makeTmpDir();
+    const tree = nestedTree({
+      depth: 6,
+      arity: 10,
+      key: (i) => "k".repeat(250) + "-" + i,
+    });
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { tree },
+      maxChars,
+      logDir,
+    });
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    const top = envelope.tree as Record<string, unknown>;
+    const kept = Object.keys(top).filter((k) => k !== "...");
+    expect(kept.length).toBe(3);
+    expect(objectMarkerCount(top["..."])).toBe(7);
+  });
+
+  it("depthForScale floors with Math.floor, not Math.ceil, at a non-power-of-two scale", () => {
+    // log2(0.3) is about -1.737: floor gives -2 (depth 10), ceil would give
+    // -1 (depth 11). Both stay above MIN_SEARCH_DEPTH, so the two rounding
+    // directions disagree by exactly one level here.
+    expect(depthForScale(12, 0.3)).toBe(10);
+  });
+
+  it("clamps depthForScale at MIN_SEARCH_DEPTH (4), not one level shallower", () => {
+    // MIN_SCALE is 2 ** -11 (eleven halvings below scale 1): unclamped that
+    // is baseDepth - 11 = 1, well under the floor, so the clamp is what
+    // decides the result.
+    const MIN_SCALE = 2 ** -11;
+    expect(depthForScale(12, MIN_SCALE)).toBe(4);
+  });
+});
+
 describe("buildEnvelope: a payload that fits nowhere", () => {
   const cases = [
     {
@@ -478,7 +574,7 @@ describe("buildEnvelope: a payload that fits nowhere", () => {
     }
   });
 
-  it("points the warning at the full result on disk, and says so when none was written", () => {
+  it("points the warning at logs for the full result, and says so when none was written", () => {
     const logDir = makeTmpDir();
     const extra = { tools: Array.from({ length: 20 }, (_, i) => ({ i })) };
     const { envelope } = buildEnvelope({
@@ -497,7 +593,7 @@ describe("buildEnvelope: a payload that fits nowhere", () => {
       w.startsWith(TOTAL_LOSS_PREFIX),
     );
     expect(warning).toBe(
-      `result reduced to the fixed fields only: no payload structure fits within max-chars 10; full result at ${logs[0]}`,
+      "result reduced to the fixed fields only: no payload structure fits within max-chars 10; the full result is in logs",
     );
     expect(fs.existsSync(logs[0])).toBe(true);
 
