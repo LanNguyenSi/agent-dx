@@ -269,6 +269,13 @@ describe("buildEnvelope: many-entry bound (generic reduction, not name-based)", 
     expect(envelope.truncated).toBe(true);
     const warnings = envelope.warnings as string[];
     expect(warnings.some((w) => w.includes("could not be met"))).toBe(false);
+    // The array itself must actually shrink (mutant: array-capping
+    // filtered to arrays literally named "failures" would leave this
+    // 500-element "checks" array at its full length, reaching the bound
+    // only by stripping every object's fields down to nothing instead,
+    // which is strictly worse since a caller loses which checks even ran).
+    const reducedChecks = envelope.checks as unknown[];
+    expect(reducedChecks.length).toBeLessThan(500);
   });
 });
 
