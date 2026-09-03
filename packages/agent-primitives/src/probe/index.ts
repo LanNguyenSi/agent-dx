@@ -10,7 +10,7 @@ import {
   writeMarker,
 } from "../lock.js";
 import {
-  containmentRoot,
+  findGitRoot,
   isPathContained,
   resolveDeepestExisting,
 } from "./containment.js";
@@ -219,6 +219,23 @@ function installCrashHandlers(
   };
 }
 
+/** Records, as a warning, that a phase's captured output may be missing
+ * whatever was still in flight when the run settled: the command had
+ * exited but something it spawned still held its stdout/stderr open, so
+ * `exec.ts` settled on its flush grace rather than waiting on the pipes.
+ * The exit code (and therefore the verdict) is unaffected; only the
+ * tails and the log file are. */
+function noteIncompleteOutput(
+  warnings: string[],
+  phase: string,
+  result: ExecResult,
+): void {
+  if (!result.outputMayBeIncomplete) return;
+  warnings.push(
+    `${phase}: the command exited while something it spawned still held its output pipes open; the captured output may be incomplete (see ${result.logPath})`,
+  );
+}
+
 type RunPhaseResult =
   { ok: true; test: ExecResult } | { ok: false; pre: ExecResult };
 
@@ -284,7 +301,11 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
 
   const cwd = path.resolve(opts.cwd);
   const displayFile = path.resolve(cwd, opts.file);
-  const root = containmentRoot(cwd);
+  // The git work-tree root when there is one, else `cwd`: the same value
+  // `containmentRoot` computes, kept in two variables because the lock
+  // below has to tell "in a repository" from "not in one".
+  const gitRoot = findGitRoot(cwd);
+  const root = gitRoot ?? path.resolve(cwd);
   const links = opts.links ?? [];
   const displayLinks = links.map((l) => path.resolve(cwd, l));
 
@@ -301,7 +322,17 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   const absFile = resolveDeepestExisting(displayFile);
   const absLinks = displayLinks.map(resolveDeepestExisting);
 
-  const lockResult = acquireLock(absFile);
+  // The lock is keyed on the repository, not on the target file: an
+  // `inplace` probe mutates the one working tree that every probe in the
+  // same repository builds and tests in, so a second probe on a
+  // different file would run its baseline against a tree carrying the
+  // first probe's mutation. It is refused rather than queued, the same
+  // contract a second probe on the same file has always had. Outside a
+  // repository there is no shared tree, and the target file itself is
+  // the identity. The marker stays keyed on the target file: it records
+  // that one file's backup and hashes.
+  const lockIdentity = gitRoot !== undefined ? realRoot : absFile;
+  const lockResult = acquireLock(lockIdentity);
   if (!lockResult.ok) {
     return {
       status: "inconclusive",
@@ -572,13 +603,20 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     const baselineStart = Date.now();
     const baselineRun = await runPreThenTest(opts, execEnv);
     if (!baselineRun.ok) {
+      noteIncompleteOutput(warnings, "baseline --pre", baselineRun.pre);
       discardBackup();
+      // An aborted `--pre` (this probe was signalled, or its caller
+      // aborted it) never ran to a conclusion, so it is not a `--pre`
+      // that failed: it is a run that was stopped.
+      const preAborted = baselineRun.pre.aborted;
       return {
         status: "inconclusive",
-        reason: "pre_failed",
+        reason: preAborted ? "aborted" : "pre_failed",
         warnings: [
           ...warnings,
-          `--pre exited ${baselineRun.pre.exitCode} during the baseline run; see ${baselineRun.pre.logPath}`,
+          preAborted
+            ? `--pre was aborted during the baseline run; see ${baselineRun.pre.logPath}`
+            : `--pre exited ${baselineRun.pre.exitCode} during the baseline run; see ${baselineRun.pre.logPath}`,
         ],
         mutant: mutantField,
         isolation: isolationField,
@@ -586,13 +624,14 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       };
     }
     const baselineTest = baselineRun.test;
+    noteIncompleteOutput(warnings, "baseline", baselineTest);
     baseline = {
       exitCode: baselineTest.exitCode,
       durationMs: Date.now() - baselineStart,
       logPath: baselineTest.logPath,
       timedOut: baselineTest.timedOut,
     };
-    if (baselineTest.exitCode !== 0) {
+    if (baselineTest.exitCode !== 0 || baselineTest.aborted) {
       // A failing baseline is still a baseline that ran commands against
       // the working tree, and one of them may have rewritten the target
       // (a formatter, a codegen step). Re-hash before deciding what to do
@@ -610,9 +649,18 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
           `the failing baseline run also rewrote the target; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at ${session.backupPath}`,
         );
       }
+      // An aborted baseline is not a red baseline: nothing about the
+      // test was learned, the run was stopped. Reported apart from a
+      // baseline that genuinely failed, so a caller cannot read a
+      // cancelled probe as a broken test suite.
+      if (baselineTest.aborted) {
+        warnings.push(
+          `the baseline run was aborted; see ${baselineTest.logPath}`,
+        );
+      }
       return {
         status: "inconclusive",
-        reason: "baseline_failed",
+        reason: baselineTest.aborted ? "aborted" : "baseline_failed",
         warnings,
         baseline,
         isolation: isolationField,
@@ -757,6 +805,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     // (4) --pre then -t, mutated.
     const mutantRun = await runPreThenTest(opts, execEnv);
     if (!mutantRun.ok) {
+      noteIncompleteOutput(warnings, "mutant --pre", mutantRun.pre);
       const { ok, verified } = await restoreAndVerify(session, preHash);
       restoreState = null;
       if (verified) removeMarkerFor(absFile);
@@ -780,12 +829,15 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
           dryRunLogPaths: computed.logPaths,
         };
       }
+      const preAborted = mutantRun.pre.aborted;
       return {
         status: "inconclusive",
-        reason: "pre_failed",
+        reason: preAborted ? "aborted" : "pre_failed",
         warnings: [
           ...warnings,
-          `--pre exited ${mutantRun.pre.exitCode} during the mutant run; see ${mutantRun.pre.logPath}`,
+          preAborted
+            ? `--pre was aborted during the mutant run; see ${mutantRun.pre.logPath}`
+            : `--pre exited ${mutantRun.pre.exitCode} during the mutant run; see ${mutantRun.pre.logPath}`,
         ],
         mutant: mutantField,
         mutation_probe: {
@@ -800,6 +852,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       };
     }
     const testResult = mutantRun.test;
+    noteIncompleteOutput(warnings, "mutant", testResult);
 
     // (5) restore, (6) verify restore by hash.
     const { ok: restoreOk, verified: restoredVerified } =
@@ -843,7 +896,17 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
 
     let status: "killed" | "survived" | "inconclusive";
     let reason: string | undefined;
-    if (testResult.timedOut) {
+    if (testResult.aborted) {
+      // The run was stopped (a SIGINT/SIGTERM this probe handled, or a
+      // caller's abort) before the test could say anything about the
+      // mutant. Never `killed`: an aborted test child exits non-zero,
+      // which under `--expect fail` is indistinguishable from a mutant
+      // the suite really caught, and reporting that would be a verdict
+      // nothing measured.
+      status = "inconclusive";
+      reason = "aborted";
+      warnings.push(`the mutant run was aborted; see ${testResult.logPath}`);
+    } else if (testResult.timedOut) {
       status = "inconclusive";
       reason = "timeout";
     } else {

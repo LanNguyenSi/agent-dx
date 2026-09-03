@@ -21,13 +21,16 @@ import {
   assertArgvWithinLimit,
   buildSpawnEnv,
   CLI_PATH,
+  collectCli,
   FIXED_BINARIES,
   FIXED_BIN_DIR,
   FIXED_TMPDIR,
   MAX_ARGV_ELEMENT_BYTES,
   resolveBinary,
   spawnCli,
+  spawnCliRaw,
 } from "./helpers/spawn-cli.js";
+import { signalExitCode } from "../src/cli.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -1308,4 +1311,85 @@ describe("cli: probe", () => {
     expect(run.code).toBe(2);
     expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
+});
+
+describe("cli signal handling", () => {
+  it("maps a signal to its conventional exit code", () => {
+    expect(signalExitCode("SIGINT")).toBe(130);
+    expect(signalExitCode("SIGTERM")).toBe(143);
+  });
+
+  it("SIGINT during a verify check kills the check's own worker instead of orphaning it, and exits 130", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const heartbeat = path.join(cwd, "heartbeat.txt");
+    const workerPath = path.join(cwd, "worker.js");
+    const spawnerPath = path.join(cwd, "spawner.js");
+
+    // The worker is a grandchild of the CLI: it inherits the check
+    // command's stdout and stderr, so a signal that reaches only the
+    // CLI leaves it running (and holding those pipes). Its heartbeat
+    // file says whether it is still alive: a killed worker stops
+    // incrementing, an orphaned one does not.
+    fs.writeFileSync(
+      workerPath,
+      [
+        "const fs = require('node:fs');",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        `  fs.writeFileSync(${JSON.stringify(heartbeat)}, String(n));`,
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      spawnerPath,
+      [
+        "const { spawn } = require('node:child_process');",
+        `spawn(process.execPath, [${JSON.stringify(workerPath)}], {`,
+        "  stdio: 'inherit',",
+        "});",
+        "setTimeout(() => { process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+
+    const child = spawnCliRaw([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      `hb=node ${shQuote(spawnerPath)}`,
+    ]);
+    const run = collectCli(child);
+
+    // Readiness: the check's worker is really running, not merely
+    // scheduled.
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    child.kill("SIGINT");
+    const result = await run;
+
+    // The worker is gone, not merely parentless: its heartbeat stops.
+    // Asserted first, so a regression is reported as the orphaned
+    // process it is rather than as an unexpected exit code.
+    const countAtExit = fs.readFileSync(heartbeat, "utf8");
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(fs.readFileSync(heartbeat, "utf8")).toBe(countAtExit);
+
+    expect(result.code).toBe(130);
+  }, 40000);
 });

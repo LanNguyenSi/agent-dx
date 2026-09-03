@@ -2,13 +2,17 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { probe, type ProbeOptions } from "../src/probe/index.js";
+import {
+  probe,
+  type ProbeOptions,
+  type ProbeResult,
+} from "../src/probe/index.js";
 import { readMarkerFor, writeMarker } from "../src/lock.js";
 import { sha256File } from "../src/hash.js";
 import { execCommand } from "../src/exec.js";
-import { computeMutant } from "../src/probe/mutant.js";
+import { applyPatchForReal, computeMutant } from "../src/probe/mutant.js";
 import { beginInplace } from "../src/probe/isolation.js";
 
 // Call-through partial mocks: every call runs the real implementation
@@ -27,7 +31,11 @@ vi.mock("../src/exec.js", async (importOriginal) => {
 vi.mock("../src/probe/mutant.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../src/probe/mutant.js")>();
-  return { ...actual, computeMutant: vi.fn(actual.computeMutant) };
+  return {
+    ...actual,
+    computeMutant: vi.fn(actual.computeMutant),
+    applyPatchForReal: vi.fn(actual.applyPatchForReal),
+  };
 });
 vi.mock("../src/probe/isolation.js", async (importOriginal) => {
   const actual =
@@ -37,6 +45,29 @@ vi.mock("../src/probe/isolation.js", async (importOriginal) => {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = path.join(__dirname, "..", "dist", "cli.js");
+/** The built library entry point, imported by the spawned script the
+ * signal test below uses: that script has to be a library caller in a
+ * process of its own, not this one. */
+const DIST_INDEX = path.join(__dirname, "..", "dist", "index.js");
+
+/** Every path under `dir` whose basename is `name`, recursively. Used to
+ * prove a shell payload did NOT run: the payload can only write a
+ * relative name (a filename cannot contain a path separator), so the
+ * only honest assertion is that the name appears nowhere under the
+ * directories the probe ran commands in. */
+function findByName(dir: string, name: string): string[] {
+  const hits: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) hits.push(...findByName(full, name));
+    else if (entry.name === name) hits.push(full);
+  }
+  return hits;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -420,44 +451,35 @@ describe("probe(): restore failure is terminal", () => {
       ].join("\n") + "\n",
     );
 
-    const actualExec =
-      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
-    const mockExec = vi.mocked(execCommand);
-    let callCount = 0;
-    mockExec.mockImplementation((...args: Parameters<typeof execCommand>) => {
-      callCount += 1;
-      // Call order for a -p probe with no --pre: 1) the dry-run apply,
-      // 2) its --numstat check, 3) the baseline test, 4) the REAL apply
-      // against `root`. Corrupting the target right as call 4 runs (so
-      // the emergency restore it triggers also fails) and reporting
-      // that apply as failed isolates exactly the patch-apply-failure
-      // restore site.
-      if (callCount === 4) {
+    const actualMutant = await vi.importActual<
+      typeof import("../src/probe/mutant.js")
+    >("../src/probe/mutant.js");
+    // The real apply against the real target (not the dry run against
+    // the scratch copy) is the site under test: corrupting the target
+    // exactly as it runs makes the emergency restore it triggers fail
+    // too, and a genuine `git apply` of a patch that is not there
+    // reports the failure without a hand-built result object.
+    vi.mocked(applyPatchForReal).mockImplementationOnce(
+      (_patchPath, root, logDir) => {
         fs.rmSync(target, { force: true });
         fs.mkdirSync(target);
-        return actualExec.execCommand("exit 1", {
-          cwd: args[1].cwd,
-          logDir: args[1].logDir,
-        });
-      }
-      return actualExec.execCommand(...args);
-    });
+        return actualMutant.applyPatchForReal(
+          path.join(root, "no-such-file.patch"),
+          root,
+          logDir,
+        );
+      },
+    );
 
-    try {
-      const result = await probe(
-        baseOptions(repo, { form: "patch", replaceText: undefined, patchPath }),
-      );
-      expect(result.status).toBe("inconclusive");
-      expect(result.reason).toBe("restore_failed");
-      expect(result.mutation_probe?.result).toBe("inconclusive");
-      expect(result.mutation_probe?.restored_verified).toBe(false);
-      const marker = readMarkerFor(fs.realpathSync(target));
-      expect(marker).toBeDefined();
-    } finally {
-      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
-        actualExec.execCommand(...args),
-      );
-    }
+    const result = await probe(
+      baseOptions(repo, { form: "patch", replaceText: undefined, patchPath }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("restore_failed");
+    expect(result.mutation_probe?.result).toBe("inconclusive");
+    expect(result.mutation_probe?.restored_verified).toBe(false);
+    const marker = readMarkerFor(fs.realpathSync(target));
+    expect(marker).toBeDefined();
   });
 
   it("hash-mismatch site: marker survives when the post-apply hash check fails and the resulting restore also fails (the backup vanished)", async () => {
@@ -1462,4 +1484,359 @@ describe("probe(): -p combined with --allow-outside", () => {
 
     expect(result.status).toBe("usage_error");
   });
+});
+
+describe("probe(): -p patch paths reach git apply without a shell", () => {
+  it("applies a patch whose own filename carries $(...) and a backtick, and executes neither", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const logDir = makeTmpDir();
+    const patchDir = makeTmpDir();
+    const fixtureLines = FIXTURE_JS.split("\n");
+
+    // Both shell substitution forms, in the patch file's own name. `sh
+    // -c` expands both even inside double quotes, so any scheme that
+    // quotes this path into a shell command runs them; handing git an
+    // argv array leaves no shell to expand anything. The payloads write
+    // relative names because a filename cannot contain a path
+    // separator, so the assertions below search every directory the
+    // probe ran a command in.
+    const patchPath = path.join(
+      patchDir,
+      "mutant$(touch injected-by-dollar.txt)`touch injected-by-backtick.txt`.patch",
+    );
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${fixtureLines[0]}`,
+        `-${fixtureLines[1]}`,
+        "+  return false;",
+        ` ${fixtureLines[2]}`,
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        logDir,
+      }),
+    );
+
+    // The security claim first, so a regression is reported as "the
+    // payload ran" rather than as whatever the mangled path did next.
+    for (const name of ["injected-by-dollar.txt", "injected-by-backtick.txt"]) {
+      expect(findByName(logDir, name)).toEqual([]);
+      expect(findByName(repo, name)).toEqual([]);
+      expect(findByName(patchDir, name)).toEqual([]);
+    }
+
+    // And the patch itself still works: the path is passed through
+    // intact, not sanitized into something git cannot open.
+    expect(result.status).toBe("killed");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  }, 20000);
+});
+
+describe("probe(): a signal while a library-mode probe is running", () => {
+  it("resolves inconclusive/aborted with the target restored, and leaves the calling process alive (the exitOnSignal default)", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+    const logDir = makeTmpDir();
+    const ready = path.join(repo, "ready.txt");
+
+    // The baseline (unmutated) finishes instantly; only the mutant run
+    // signals readiness and then stays alive long enough to be
+    // interrupted (self-terminating, so a run that never gets the signal
+    // cannot hang the suite).
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "if (content.includes('SLOW_MARKER')) {",
+        "  fs.writeFileSync('ready.txt', 'go');",
+        "  setTimeout(() => { process.exit(0); }, 10000);",
+        "} else { process.exit(0); }",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "slow test",
+    ]);
+
+    // A library caller: `probe()` with no `exitOnSignal`, so the SIGTERM
+    // below must not end the process that called it. It runs in a
+    // process of its own only so the signal can be aimed at exactly one
+    // probe without touching the test runner.
+    const scriptPath = path.join(makeTmpDir(), "library-probe.mjs");
+    fs.writeFileSync(
+      scriptPath,
+      [
+        `import { probe } from ${JSON.stringify(pathToFileURL(DIST_INDEX).href)};`,
+        "const result = await probe({",
+        '  file: "fixture.js",',
+        "  line: 2,",
+        '  form: "replace",',
+        '  replaceText: "  return false; // SLOW_MARKER",',
+        '  testCommand: "node fixture.test.js",',
+        '  isolation: "inplace",',
+        '  expect: "fail",',
+        `  cwd: ${JSON.stringify(repo)},`,
+        `  logDir: ${JSON.stringify(logDir)},`,
+        "});",
+        "process.stdout.write(JSON.stringify(result));",
+        "",
+      ].join("\n"),
+    );
+
+    const child = spawn(process.execPath, [scriptPath], {
+      cwd: repo,
+      env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(ready)) {
+      if (Date.now() > deadline) {
+        throw new Error("the mutant-phase test never signalled readiness");
+      }
+      await sleep(50);
+    }
+
+    child.kill("SIGTERM");
+    const [code, signal] = await new Promise<
+      [number | null, NodeJS.Signals | null]
+    >((resolve) => {
+      child.on("close", (c, sig) => resolve([c, sig]));
+    });
+
+    // The default is `exitOnSignal: false`: the process that called
+    // probe() finished normally and printed its result. With the default
+    // flipped it would be gone with 143 and an empty stdout instead.
+    expect(signal).toBeNull();
+    expect(code).toBe(0);
+
+    const result = JSON.parse(stdout) as ProbeResult;
+    // Never killed: the interrupted test child exits non-zero, which
+    // under --expect fail reads exactly like a mutant the suite caught.
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    expect(result.mutation_probe?.result).toBe("inconclusive");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+  }, 60000);
+});
+
+describe("probe(): the lock is keyed on the repository", () => {
+  it("probe_in_progress when a second probe targets a different file in the same repository while the first is still running", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const otherFile = path.join(repo, "other.js");
+    fs.writeFileSync(otherFile, "const x = 1;\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "other"]);
+    const beforeFixture = fs.readFileSync(
+      path.join(repo, "fixture.js"),
+      "utf8",
+    );
+    const beforeOther = fs.readFileSync(otherFile, "utf8");
+
+    const first = probe(
+      baseOptions(repo, { testCommand: "sleep 1 && node fixture.test.js" }),
+    );
+    // Give the first call a moment to acquire the lock before the second
+    // one starts.
+    await sleep(200);
+    const second = await probe(
+      baseOptions(repo, {
+        file: "other.js",
+        line: 1,
+        replaceText: "const x = 2;",
+      }),
+    );
+
+    // Two files, one working tree: the second probe would have built and
+    // tested a tree carrying the first probe's mutation.
+    expect(second.status).toBe("inconclusive");
+    expect(second.reason).toBe("probe_in_progress");
+
+    const firstResult = await first;
+    expect(firstResult.status).toBe("killed");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+      beforeFixture,
+    );
+    expect(fs.readFileSync(otherFile, "utf8")).toBe(beforeOther);
+  }, 20000);
+
+  it("keys the lock on the target file outside a repository: a second probe on a different file proceeds", async () => {
+    useLockDir();
+    // No `git init`: there is no shared working tree to serialize on, so
+    // the target file itself is the lock's identity.
+    const dir = makeTmpDir();
+    for (const name of ["a", "b"]) {
+      fs.writeFileSync(
+        path.join(dir, `${name}.js`),
+        [
+          "function value() {",
+          "  return 1;",
+          "}",
+          `module.exports = { value };`,
+          "",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(dir, `${name}.test.js`),
+        [
+          "const assert = require('node:assert');",
+          `const { value } = require('./${name}.js');`,
+          "assert.strictEqual(value(), 1);",
+          "",
+        ].join("\n"),
+      );
+    }
+
+    const first = probe({
+      ...baseOptions(dir),
+      file: "a.js",
+      line: 2,
+      replaceText: "  return 2;",
+      testCommand: "sleep 1 && node a.test.js",
+    });
+    await sleep(200);
+    const second = await probe({
+      ...baseOptions(dir),
+      file: "b.js",
+      line: 2,
+      replaceText: "  return 2;",
+      testCommand: "node b.test.js",
+    });
+
+    expect(second.reason).not.toBe("probe_in_progress");
+    expect(second.status).toBe("killed");
+    expect((await first).status).toBe("killed");
+  }, 20000);
+});
+
+describe("probe(): output that may be incomplete", () => {
+  it("warns, naming the phase, when a run settled on exec's flush grace with a descendant still holding its pipes", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    const mockExec = vi.mocked(execCommand);
+    let callCount = 0;
+    mockExec.mockImplementation(
+      async (...args: Parameters<typeof execCommand>) => {
+        callCount += 1;
+        const result = await actualExec.execCommand(...args);
+        // Call 1 is the baseline test, call 2 the mutant-phase test:
+        // marking only the second means the warning below can only have
+        // come from the mutant run.
+        return callCount === 2
+          ? { ...result, outputMayBeIncomplete: true }
+          : result;
+      },
+    );
+
+    try {
+      const result = await probe(baseOptions(repo));
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) => w.startsWith("mutant:") && w.includes("may be incomplete"),
+        ),
+      ).toBe(true);
+    } finally {
+      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
+        actualExec.execCommand(...args),
+      );
+    }
+  }, 20000);
+});
+
+describe("probe(): an aborted run in the baseline phase and on --pre", () => {
+  /** Runs `probe` with the nth `execCommand` call reported as aborted
+   * (the shape `exec.ts` returns once its `signal` fired: killed child,
+   * no exit code of its own), every other call running for real. */
+  async function probeWithAbortedCall(
+    nth: number,
+    overrides: Partial<ProbeOptions>,
+  ): Promise<ProbeResult> {
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    const mockExec = vi.mocked(execCommand);
+    let callCount = 0;
+    mockExec.mockImplementation(
+      async (...args: Parameters<typeof execCommand>) => {
+        callCount += 1;
+        const result = await actualExec.execCommand(...args);
+        return callCount === nth
+          ? { ...result, aborted: true, exitCode: null }
+          : result;
+      },
+    );
+    try {
+      const { repo } = initRepo();
+      return await probe(baseOptions(repo, overrides));
+    } finally {
+      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
+        actualExec.execCommand(...args),
+      );
+    }
+  }
+
+  it("an aborted baseline is inconclusive/aborted, not baseline_failed: nothing was learned about the test", async () => {
+    useLockDir();
+    // Call 1 with no --pre is the baseline test itself.
+    const result = await probeWithAbortedCall(1, {});
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    expect(result.reason).not.toBe("baseline_failed");
+  }, 20000);
+
+  it("an aborted --pre in the baseline phase is inconclusive/aborted, not pre_failed", async () => {
+    useLockDir();
+    // With a --pre, call 1 is that --pre in the baseline phase.
+    const result = await probeWithAbortedCall(1, { preCommand: "true" });
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    expect(result.reason).not.toBe("pre_failed");
+  }, 20000);
+
+  it("an aborted --pre in the mutant phase is inconclusive/aborted, and the target is restored", async () => {
+    useLockDir();
+    // Call order with a --pre: 1) baseline --pre, 2) baseline test,
+    // 3) mutant --pre.
+    const result = await probeWithAbortedCall(3, { preCommand: "true" });
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+  }, 20000);
 });

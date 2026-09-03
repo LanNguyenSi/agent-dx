@@ -2,13 +2,23 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   computeMutant,
   formatMutantSummary,
   formatVerifiedAppliedVia,
   parseNumstatPaths,
 } from "../src/probe/mutant.js";
+import { runArgv } from "../src/probe/run.js";
+
+// Call-through partial mock: every `git apply` really runs unless a test
+// overrides one call. The extra-path check below is only a check while it
+// sees the whole `--numstat` listing, and the only way to exercise a
+// listing that did not fit is to have the runner say so.
+vi.mock("../src/probe/run.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/probe/run.js")>();
+  return { ...actual, runArgv: vi.fn(actual.runArgv) };
+});
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -338,5 +348,48 @@ describe("formatMutantSummary / formatVerifiedAppliedVia", () => {
   it("formats a 3-line before/after snippet", () => {
     const snippet = formatVerifiedAppliedVia("/a/b.js", 3, "x", "y");
     expect(snippet.split("\n")).toEqual(["/a/b.js:3", "- x", "+ y"]);
+  });
+});
+
+describe("computeMutant: a --numstat listing that did not fit", () => {
+  it("is not applicable, naming the log, rather than checking the paths against a fragment", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+      ].join("\n") + "\n",
+    );
+
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    // The first call is the --numstat check: a patch whose listing was
+    // cut could hide the very path that makes it unsafe, so the whole
+    // patch is refused instead of half-checked.
+    vi.mocked(runArgv).mockImplementationOnce(async (file, args, options) => {
+      const result = await actualRun.runArgv(file, args, options);
+      return { ...result, outputTruncated: true };
+    });
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, line: 0, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.reason).toContain("more output than can be checked");
+    expect(result.logPaths.length).toBe(1);
+    expect(fs.readFileSync(absFile, "utf8")).toBe(content);
   });
 });

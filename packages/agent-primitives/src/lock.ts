@@ -110,15 +110,18 @@ function ensureLockDir(dir: string, deps: LockDirDeps = {}): LockDirState {
   return { ok: true };
 }
 
-/** Lock/marker files are named by the sha256 of the absolute target path,
- * so two probes on the same file always collide on the same name and two
- * probes on different files never do. */
-export function lockKey(absTargetPath: string): string {
-  return createHash("sha256").update(absTargetPath).digest("hex");
+/** Lock and marker files are named by the sha256 of an absolute path, so
+ * two callers naming the same path always collide on the same file name
+ * and two callers naming different paths never do. The two use different
+ * paths on purpose: a marker is per target file (it records that one
+ * file's backup and hashes), while a lock is per repository (see
+ * `acquireLock`). */
+export function lockKey(absPath: string): string {
+  return createHash("sha256").update(absPath).digest("hex");
 }
 
-function lockFilePath(absTargetPath: string): string {
-  return path.join(lockDir(), `${lockKey(absTargetPath)}.lock`);
+function lockFilePath(absLockIdentity: string): string {
+  return path.join(lockDir(), `${lockKey(absLockIdentity)}.lock`);
 }
 
 function markerFilePath(absTargetPath: string): string {
@@ -172,22 +175,29 @@ export type AcquireLockResult =
   | { ok: false; reason: "lock_unavailable"; lockPath: string; detail: string };
 
 /**
- * Acquires the per-target lock via an `O_EXCL` create (`fs.openSync(...,
- * "wx")`): the create itself either succeeds (nobody else holds the lock)
- * or fails with `EEXIST` (somebody does), with no window in between for
- * a second process to also observe "no lock" and also create one. A lock
- * whose recorded pid is no longer alive is reclaimed (removed, then
- * retried) instead of blocking forever on a crashed probe. When the lock
- * directory itself cannot be trusted (wrong owner, unwritable, or simply
- * fails to create), this returns `lock_unavailable` instead of letting a
- * raw `EACCES`/`EPERM` escape as an uncaught error.
+ * Acquires the lock named by `absLockIdentity` via an `O_EXCL` create
+ * (`fs.openSync(..., "wx")`): the create itself either succeeds (nobody
+ * else holds the lock) or fails with `EEXIST` (somebody does), with no
+ * window in between for a second process to also observe "no lock" and
+ * also create one. A lock whose recorded pid is no longer alive is
+ * reclaimed (removed, then retried) instead of blocking forever on a
+ * crashed probe. When the lock directory itself cannot be trusted (wrong
+ * owner, unwritable, or simply fails to create), this returns
+ * `lock_unavailable` instead of letting a raw `EACCES`/`EPERM` escape as
+ * an uncaught error.
+ *
+ * `absLockIdentity` is whatever the caller wants serialized, not
+ * necessarily a file being written: `probe` passes the repository root,
+ * because an `inplace` probe mutates, builds, and tests the one working
+ * tree that every other probe in the same repository shares, so two such
+ * probes are not independent even when their target files differ.
  */
 export function acquireLock(
-  absTargetPath: string,
+  absLockIdentity: string,
   deps: LockDirDeps = {},
 ): AcquireLockResult {
   const dir = lockDir();
-  const lockPath = lockFilePath(absTargetPath);
+  const lockPath = lockFilePath(absLockIdentity);
   const dirState = ensureLockDir(dir, deps);
   if (!dirState.ok) {
     return {

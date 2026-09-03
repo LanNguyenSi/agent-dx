@@ -120,6 +120,12 @@ export interface VerifyOptions {
   /** Test seam: replaces `execCommand`, e.g. to spy on invocation count
    * for a `--fail-fast` test without spawning real shells. */
   execFn?: ExecLike;
+  /** Aborts the currently running check's command (and, with it, the
+   * whole run: no further check is started once its own exec resolves).
+   * Additive and optional: omitted, behaviour is exactly as before. The
+   * CLI passes the signal its top-level SIGINT/SIGTERM handler owns, so
+   * Ctrl-C kills the check's process group instead of orphaning it. */
+  signal?: AbortSignal;
   /** Identifies this run for the purpose of nesting per-check log files
    * uniquely under `logDir/verify/<runId>/`, so two runs sharing the same
    * `logDir` never share, or silently append to, the same log file.

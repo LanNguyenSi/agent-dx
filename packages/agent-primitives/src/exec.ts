@@ -37,6 +37,13 @@ export interface ExecResult {
   logWriteFailed: boolean;
   /** Set alongside `logWriteFailed: true`, naming what went wrong. */
   logWriteError?: string;
+  /** True when the run settled on the stream flush grace instead of on
+   * `close`: the command itself had exited, but something it left behind
+   * still held the stdout/stderr pipes open, so anything still in flight
+   * on them at that moment is not in `stdoutTail`, `stderrTail`, or the
+   * log file. The exit code is the command's own either way; only the
+   * captured output is in question. */
+  outputMayBeIncomplete: boolean;
 }
 
 const TAIL_LINES = 60;
@@ -144,6 +151,7 @@ export function execCommand(
     let timedOut = false;
     let aborted = false;
     let settled = false;
+    let outputMayBeIncomplete = false;
     let flushTimer: NodeJS.Timeout | undefined;
 
     // `detached: true` puts the child in a new process group of its own
@@ -270,6 +278,7 @@ export function execCommand(
           ...(logWriteFailed !== undefined
             ? { logWriteError: logWriteFailed }
             : {}),
+          outputMayBeIncomplete,
         });
       });
     };
@@ -294,7 +303,14 @@ export function execCommand(
     // arrives.
     child.on("exit", (code) => {
       if (settled) return;
-      flushTimer = setTimeout(() => finish(code), STREAM_FLUSH_GRACE_MS);
+      flushTimer = setTimeout(() => {
+        // Settling here rather than on `close` means a descendant is
+        // still holding the pipes: whatever it (or the command) had in
+        // flight at this instant is dropped, and the result says so
+        // instead of presenting a possibly-cut tail as the whole output.
+        outputMayBeIncomplete = true;
+        finish(code);
+      }, STREAM_FLUSH_GRACE_MS);
       flushTimer.unref();
     });
 

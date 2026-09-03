@@ -316,6 +316,53 @@ function emit(
   writeAndExit(JSON.stringify(envelope) + "\n", exitCode);
 }
 
+/**
+ * The exit code convention for a process ended by a signal: 128 plus the
+ * signal number (SIGINT is 2, SIGTERM is 15). Exported so the mapping is
+ * unit-testable without sending a real signal to the test runner.
+ */
+export function signalExitCode(signal: "SIGINT" | "SIGTERM"): number {
+  return signal === "SIGINT" ? 130 : 143;
+}
+
+/**
+ * One controller for the whole process, aborted by the signal handlers
+ * below and threaded into every command that runs child processes
+ * through `exec.ts`. `exec.ts` signals the aborted child's whole process
+ * group, so a check's own worker dies with this CLI instead of being
+ * orphaned by the exit: `detached: true` puts each command in a group of
+ * its own, which means a terminal's Ctrl-C reaches this process alone.
+ *
+ * `probe` is deliberately not wired to it: it installs its own handler
+ * for the same two signals, because it has a mutated file to restore and
+ * a lock to release before the process may end, and it ends the process
+ * itself once that is done.
+ */
+const shutdownController = new AbortController();
+
+/**
+ * Installs the process-wide SIGINT/SIGTERM handling: abort whatever
+ * child is in flight, then exit with the signal's conventional code.
+ *
+ * The exit is scheduled with `setImmediate` rather than called here, so
+ * every other listener for the same signal still runs first. `probe`
+ * registers its own (later, hence after this one), and an immediate
+ * `process.exit()` would end the process before that handler could
+ * restore the file `probe` had mutated.
+ *
+ * Installed only on the real CLI entrypoint, never on import: a test
+ * importing this module for its exports must not have process-wide
+ * signal handlers installed behind its back.
+ */
+function installSignalHandlers(): void {
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      shutdownController.abort();
+      setImmediate(() => process.exit(signalExitCode(signal)));
+    });
+  }
+}
+
 const program = new Command();
 
 // Route commander's own usage errors (unknown option, missing required
@@ -452,6 +499,7 @@ program
       checks: opts.checks,
       overrides: opts.exec,
       failFast: Boolean(opts.failFast),
+      signal: shutdownController.signal,
       timeoutMs:
         opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
       maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
@@ -907,6 +955,7 @@ const isMainModule =
   import.meta.url === resolvedArgvUrl(process.argv[1]);
 
 if (isMainModule) {
+  installSignalHandlers();
   const start = Date.now();
   program.parseAsync().catch((err: unknown) => {
     // Each branch below terminates the handler (`return` after emitting):

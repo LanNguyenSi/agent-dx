@@ -312,6 +312,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
         timeoutMs: options.timeoutMs,
         logDir,
         logFileName: `${name}.log`,
+        ...(options.signal ? { signal: options.signal } : {}),
       });
     } catch (err) {
       // execFn itself rejecting (e.g. exec.ts's own `fs.mkdirSync(logDir,
@@ -344,6 +345,17 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       );
     } else {
       logs.push(execResult.logPath);
+    }
+
+    // The command exited but something it spawned still held its
+    // stdout/stderr open, so exec.ts settled on its flush grace: the
+    // detector below parsed output that may be missing whatever was
+    // still in flight. Said out loud rather than left to look like a
+    // clean parse of the whole output.
+    if (execResult.outputMayBeIncomplete) {
+      warnings.push(
+        `${name}: the command exited while something it spawned still held its output pipes open; the captured output may be incomplete`,
+      );
     }
 
     const status = classifyStatus(execResult.exitCode, execResult.timedOut);

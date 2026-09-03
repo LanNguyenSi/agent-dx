@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "../envelope.js";
-import { isPidAlive, listMarkers } from "../lock.js";
+import { sha256File } from "../hash.js";
+import { isPidAlive, listMarkers, type MarkerEntry } from "../lock.js";
 import {
   containmentRoot,
   isPathContained,
@@ -322,15 +323,18 @@ export async function doctor(
         resolveDeepestExisting(path.resolve(m.targetPath)),
       ),
   );
-  // Auto-recovery (the next `probe` on the affected file restoring from
-  // the backup) is only actually possible while that backup still
-  // exists; a marker whose backup is gone needs the manual escape
-  // (delete the marker file) named explicitly instead of a hint that
-  // promises a recovery path that will just fail.
-  const recoverable = staleMarkers.filter((m) => fs.existsSync(m.backupPath));
-  const unrecoverable = staleMarkers.filter(
-    (m) => !fs.existsSync(m.backupPath),
-  );
+  // Which of these the next `probe` would really recover is decided by
+  // `isAutoRecoverable`, which applies probe's own two proofs rather
+  // than the cheaper "the backup file is still there": a backup that
+  // exists but no longer matches, or a target that has moved on from the
+  // state the marker describes, is refused by probe, and a hint
+  // promising a recovery that will just fail is worse than no hint.
+  const recoverable: MarkerEntry[] = [];
+  const unrecoverable: MarkerEntry[] = [];
+  for (const marker of staleMarkers) {
+    if (await isAutoRecoverable(marker)) recoverable.push(marker);
+    else unrecoverable.push(marker);
+  }
   const detailParts: string[] = [];
   if (recoverable.length > 0) {
     detailParts.push(
@@ -343,8 +347,11 @@ export async function doctor(
   if (unrecoverable.length > 0) {
     detailParts.push(
       `${unrecoverable.length} stale probe marker(s) for this repository ` +
-        `whose backup is missing (auto-recovery is not possible); delete ` +
-        `the marker file(s) manually: ` +
+        `that the next probe would refuse to recover (the backup is ` +
+        `missing, or it no longer hashes to the pre-mutation content the ` +
+        `marker records, or the target is no longer in the mutated state ` +
+        `the marker describes); auto-recovery is not possible; inspect ` +
+        `the marker file(s), then delete them to clear the report: ` +
         unrecoverable.map((m) => m.markerPath).join(", "),
     );
   }
@@ -370,6 +377,28 @@ export async function doctor(
     hints,
     warnings,
   };
+}
+
+/**
+ * Whether the next `probe` on this marker's target would really recover
+ * it, decided by the same proofs `probe` requires before it copies
+ * anything: the target is still in the exact mutated state the marker
+ * records, and the recorded backup still hashes to the pre-mutation
+ * content the marker records. A target already back at that pre-mutation
+ * hash counts as recoverable too: probe clears such a marker and carries
+ * on. Everything else is a marker only a human can clear.
+ *
+ * Kept in step with `probe`'s stale-marker branch by hand; the doctor
+ * test asserting a mismatched backup is reported as unrecoverable is
+ * what holds the two together.
+ */
+async function isAutoRecoverable(marker: MarkerEntry): Promise<boolean> {
+  const targetHash = await sha256File(marker.targetPath).catch(() => undefined);
+  if (targetHash === undefined) return false;
+  if (targetHash === marker.preHash) return true;
+  if (targetHash !== marker.mutatedHash) return false;
+  const backupHash = await sha256File(marker.backupPath).catch(() => undefined);
+  return backupHash === marker.preHash;
 }
 
 function isInsideGitWorkTree(startDir: string): boolean {

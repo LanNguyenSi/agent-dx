@@ -58,6 +58,7 @@ function makeStubExec(responses: Record<string, Partial<ExecResult>> = {}): {
       timedOut: r.timedOut ?? false,
       aborted: r.aborted ?? false,
       logWriteFailed: false,
+      outputMayBeIncomplete: r.outputMayBeIncomplete ?? false,
     };
   };
   return { fn, calls };
@@ -751,6 +752,7 @@ describe("verify: exec rejection is a per-check error, not a thrown promise", ()
         timedOut: false,
         aborted: false,
         logWriteFailed: false,
+        outputMayBeIncomplete: false,
       };
     };
     const result = await verify({
@@ -961,4 +963,87 @@ describe("verify: integration against a real package.json fixture", () => {
       ),
     ).toBe(true);
   }, 20000);
+});
+
+describe("verify: output that may be incomplete", () => {
+  it("warns, naming the check, when a check's command settled on the flush grace with a descendant still holding its pipes", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    writePackageJson(cwd, { test: "run-the-suite" });
+    const { fn } = makeStubExec({
+      "npm run test --silent": { outputMayBeIncomplete: true },
+    });
+    const result = await verify({ cwd, logDir, checks: ["test"], execFn: fn });
+    expect(
+      result.warnings.some(
+        (w) => w.startsWith("test:") && w.includes("may be incomplete"),
+      ),
+    ).toBe(true);
+  });
+
+  it("says nothing when every check's output is complete", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    writePackageJson(cwd, { test: "run-the-suite" });
+    const { fn } = makeStubExec();
+    const result = await verify({ cwd, logDir, checks: ["test"], execFn: fn });
+    expect(result.warnings.some((w) => w.includes("may be incomplete"))).toBe(
+      false,
+    );
+  });
+});
+
+describe("verify: the optional signal", () => {
+  it("hands the signal it was given to every exec call, so the caller can abort an in-flight check", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    writePackageJson(cwd, { build: "b", test: "t" });
+    const controller = new AbortController();
+    const seen: (AbortSignal | undefined)[] = [];
+    const fn: ExecLike = async (_cmd, options) => {
+      seen.push(options.signal);
+      return {
+        exitCode: 0,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(options.logDir, "stub.log"),
+        timedOut: false,
+        aborted: false,
+        logWriteFailed: false,
+        outputMayBeIncomplete: false,
+      };
+    };
+    await verify({
+      cwd,
+      logDir,
+      checks: ["build", "test"],
+      execFn: fn,
+      signal: controller.signal,
+    });
+    expect(seen).toEqual([controller.signal, controller.signal]);
+  });
+
+  it("passes no signal when the caller gave none, leaving exec's behaviour unchanged", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    writePackageJson(cwd, { test: "t" });
+    const seen: (AbortSignal | undefined)[] = [];
+    const fn: ExecLike = async (_cmd, options) => {
+      seen.push(options.signal);
+      return {
+        exitCode: 0,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(options.logDir, "stub.log"),
+        timedOut: false,
+        aborted: false,
+        logWriteFailed: false,
+        outputMayBeIncomplete: false,
+      };
+    };
+    await verify({ cwd, logDir, checks: ["test"], execFn: fn });
+    expect(seen).toEqual([undefined]);
+  });
 });

@@ -158,6 +158,14 @@ Overall `status` is `error` if any check errored, else `fail` if any check
 failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
 the same way every other subcommand's does.
 
+`SIGINT` and `SIGTERM` are handled for every subcommand: the CLI aborts
+the command it is running, which signals that command's whole process
+group, and then exits `130` or `143`. Each command runs in a process
+group of its own, so a terminal's Ctrl-C reaches the CLI alone; without
+this a check's own worker would outlive the Ctrl-C that ended the CLI.
+`probe` additionally restores the file it mutated and releases its lock
+before the process ends.
+
 ## `probe`
 
 Runs one mutation probe: mutate a line (or apply a patch), confirm the
@@ -188,6 +196,13 @@ required: `-r, --replace` (replace the whole line), `-M, --match` with
 `-w, --with` (replace the first occurrence of a substring on the line),
 or `-p, --patch` (apply a unified diff via `git apply`).
 
+`-t` and `--pre` are shell commands, executed through `sh -c` as given,
+so neither may be filled from untrusted text (an issue body, a model's
+output, a file in the tree under test); `-p`'s patch path is not, and is
+handed to `git apply` as one element of an argv array with no shell
+involved, so a path containing `$(...)` or a backtick is a path and
+nothing else.
+
 `--file` and every `--link` entry must resolve inside the git work-tree
 root (or inside the cwd when not in a repo), unless `--allow-outside` is
 passed; otherwise the result is `status: "inconclusive"`,
@@ -216,17 +231,32 @@ run to the descendant's own lifetime and leave a process writing to the
 target while the restore is happening. What that does not cover is a
 descendant that puts itself in a process group of its own: it is out of
 reach of the group signal, and the run then settles a short grace after
-the command's own process exits rather than waiting on the pipes.
+the command's own process exits rather than waiting on the pipes. A run
+that settles that way may be missing whatever was still in flight on
+those pipes, and both `probe` and `verify` say so in a warning instead of
+presenting the captured tail as the whole output.
 
-A probe on one target file is serialized against any other probe on the
-same target via a lock file outside the repository
-(`$AGENT_PRIMITIVES_LOCK_DIR` or `<tmpdir>/agent-primitives-<uid>/locks/`,
-created `0700` and owned by the current user); a second probe on the same
-target while the first is running gets `status: "inconclusive"`,
-`reason: "probe_in_progress"`, exit `2`, and a lock directory this
-process cannot trust (wrong owner, unwritable, or a created level owned
-by another user) gets `reason: "lock_unavailable"`, exit `2`, instead of
-a raw filesystem error. If a probe is killed outright (`SIGKILL` or a
+A probe stopped by `SIGINT`/`SIGTERM` (or by a library caller's abort) is
+`status: "inconclusive"`, `reason: "aborted"`, exit `2`, in either phase,
+never a `killed`/`survived` verdict: the interrupted test child exits
+non-zero, which under `--expect fail` would otherwise read exactly like a
+mutant the suite caught. A baseline stopped the same way is `aborted`
+rather than `baseline_failed`, for the same reason: nothing was learned
+about the test, the run was stopped.
+
+Probes are serialized against each other by a lock file outside the
+repository (`$AGENT_PRIMITIVES_LOCK_DIR` or
+`<tmpdir>/agent-primitives-<uid>/locks/`, created `0700` and owned by the
+current user), keyed on the repository's work-tree root: an `inplace`
+probe mutates the one working tree that every probe in that repository
+builds and tests in, so two of them are not independent even when their
+target files differ. Outside a repository there is no shared tree, and
+the lock is keyed on the target file itself. A second probe started while
+one is running is refused rather than queued: `status: "inconclusive"`,
+`reason: "probe_in_progress"`, exit `2`. A lock directory this process
+cannot trust (wrong owner, unwritable, or a created level owned by
+another user) gets `reason: "lock_unavailable"`, exit `2`, instead of a
+raw filesystem error. If a probe is killed outright (`SIGKILL` or a
 crash) mid-mutation, it leaves an in-flight marker behind; the next
 probe on that same target recovers automatically (restores from the
 recorded backup, verifies by hash, adds a `recovered_stale_probe`
@@ -243,9 +273,12 @@ scratch directory, not something a crash is guaranteed to have left
 behind); when it is gone, automatic recovery is not possible and the
 warning says so and names the marker file itself instead -- delete that
 file to clear it manually. `agent-primitives doctor` also reports any
-such marker left for the current repository, with the same conditional
-wording (a hint to re-run `probe` only when the backup still exists, the
-marker file's path otherwise); it compares the marker's target against
+such marker left for the current repository, and applies the same two
+proofs before it says anything about automatic recovery: it hashes the
+recorded backup and compares the target, points at re-running `probe`
+only for a marker the next probe would really recover, and names the
+marker file and the manual delete for every other one; it compares the
+marker's target against
 the current repository with both paths fully resolved, so a symlinked
 ancestor cannot hide a marker that is really there.
 

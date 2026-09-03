@@ -96,9 +96,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a failure as `logWriteFailed`/`logWriteError` on `ExecResult` instead of
   crashing on an unhandled `'error'` event. stdout/stderr decoding uses
   `StringDecoder`, so a multi-byte character split across two chunks no
-  longer becomes a replacement character.
+  longer becomes a replacement character. A run that settles on the
+  stream flush grace rather than on `close` (something the command left
+  behind is still holding the stdio pipes) reports
+  `outputMayBeIncomplete: true`, so output dropped at that moment is
+  stated instead of silently missing; `probe` and `verify` both surface
+  it as a warning.
 
-- **Tests.** Every CLI test spawns through one shared helper that hands
+- **`probe`: patches are applied without a shell.** All three `git apply`
+  invocations (the `--numstat` path check, the dry run, and the real
+  apply) run through a small argv-array runner instead of being built as
+  `sh -c` strings. A `-p` path is caller-supplied, and `sh` expands
+  `$(...)` and backticks inside double quotes, so no quoting of such a
+  path into a shell string is safe. The `--numstat` check also reads the
+  command's whole output rather than a tail, and refuses a listing that
+  did not fit instead of checking the patch's paths against a fragment.
+
+- **`probe`: an interrupted run is `inconclusive`/`aborted`.** In both the
+  baseline and the mutant phase, a run stopped by `SIGINT`/`SIGTERM` or
+  by a caller's abort classifies as `status: "inconclusive"`,
+  `reason: "aborted"`, never `killed`/`survived` and never a plain
+  `baseline_failed`: the interrupted test child exits non-zero, which
+  under `--expect fail` is indistinguishable from a mutant the suite
+  caught.
+
+- **CLI signal handling.** `SIGINT`/`SIGTERM` are handled for every
+  subcommand: the in-flight command is aborted (which signals its whole
+  process group) and the process then exits `130`/`143`, instead of a
+  Ctrl-C ending the CLI and orphaning the worker its check had spawned.
+  `verify()` gains an optional `signal` threaded to `exec.ts`; nothing
+  else about `verify` changes. The exit is scheduled rather than
+  immediate, so `probe`'s own handler still runs first and restores the
+  file it mutated.
+
+- **`probe`: the lock is keyed on the repository.** An `inplace` probe
+  mutates the one working tree that every probe in that repository builds
+  and tests in, so two probes on different files in one repository are
+  not independent; the second is now refused with
+  `reason: "probe_in_progress"` the way a second probe on the same file
+  always was. Outside a repository the target path remains the lock's
+  identity. Markers stay keyed per target file.
+
+- **`doctor`: the stale-marker hint applies probe's own recovery rule.**
+  It hashes the recorded backup and compares the target before pointing
+  at automatic recovery, instead of splitting on whether the backup file
+  still exists. A marker whose backup no longer matches the pre-mutation
+  hash it records, or whose target has moved on from the state it
+  describes, is one the next probe refuses, and doctor now names the
+  marker file and the manual delete for it rather than promising a
+  recovery that will fail.
+
+- **Tests.** The `O_EXCL` backup-name claim in `isolation.ts` is pinned
+  through an injected `open`, which makes the name appear exactly in the
+  window between choosing it and opening it: the session claims the next
+  name and the other session's backup is left intact. `exec`'s
+  flush-grace settle path is pinned by a command whose descendant puts
+  itself in a process group of its own and holds the stdio pipes, and the
+  library-mode signal path (including `exitOnSignal`'s default) by a
+  spawned library caller that is sent `SIGTERM` mid-probe. Every CLI test
+  spawns through one shared helper that hands
   the child a PATH of exactly four resolved binaries (node, npm, git, sh),
   a fixed temp directory, and no inherited environment, and that attaches
   its readers before returning rather than after a sleep. A spawned CLI's

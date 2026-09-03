@@ -164,6 +164,90 @@ describe("execCommand", () => {
     expect(fs.readFileSync(heartbeat, "utf8")).toBe(countAtReturn);
   }, 30000);
 
+  it("settles a short grace after the command's own exit, with the command's own exit code, when a descendant in its own process group outlives it holding stdio, and says the captured output may be incomplete", async () => {
+    const logDir = makeTmpDir();
+    const dir = makeTmpDir();
+    const heartbeat = path.join(dir, "heartbeat.txt");
+    const pidFile = path.join(dir, "worker.pid");
+    const workerPath = path.join(dir, "worker.js");
+    const spawnerPath = path.join(dir, "spawner.js");
+
+    // The descendant is spawned `detached: true` (a process group of its
+    // own, so the group signal exec.ts sends on a timeout cannot reach
+    // it) with `stdio: 'inherit'` (so it holds the command's stdout and
+    // stderr open long after the command itself is gone). `close` on
+    // exec.ts's child therefore does not arrive until this worker exits;
+    // only the `exit` event plus the flush grace can settle the run.
+    // It records its own pid so this test can clean it up rather than
+    // leaving a process behind for the rest of the suite.
+    fs.writeFileSync(
+      workerPath,
+      [
+        "const fs = require('node:fs');",
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        `  fs.writeFileSync(${JSON.stringify(heartbeat)}, String(n));`,
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 12000);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      spawnerPath,
+      [
+        "const { spawn } = require('node:child_process');",
+        `const child = spawn(process.execPath, [${JSON.stringify(workerPath)}], {`,
+        "  stdio: 'inherit',",
+        "  detached: true,",
+        "});",
+        "child.unref();",
+        "process.exit(7);",
+        "",
+      ].join("\n"),
+    );
+
+    const started = Date.now();
+    const result = await execCommand(`node ${JSON.stringify(spawnerPath)}`, {
+      logDir,
+    });
+    const elapsed = Date.now() - started;
+
+    try {
+      // The command's own exit code, not a null from a kill and not the
+      // descendant's.
+      expect(result.exitCode).toBe(7);
+      expect(result.timedOut).toBe(false);
+      // Bounded by the flush grace after the command's own exit, nowhere
+      // near the descendant's 12s lifetime.
+      expect(elapsed).toBeLessThan(3000);
+      // Settling that way means anything still in flight on the pipes was
+      // dropped, and the result says so.
+      expect(result.outputMayBeIncomplete).toBe(true);
+      // The descendant really did outlive the call, so the assertions
+      // above are about the flush-grace path rather than a command that
+      // simply had no descendant.
+      expect(fs.existsSync(heartbeat)).toBe(true);
+    } finally {
+      // Never leave the worker running for the rest of the suite.
+      try {
+        const pid = Number(fs.readFileSync(pidFile, "utf8"));
+        if (Number.isInteger(pid) && pid > 0) process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone, or never started.
+      }
+    }
+  }, 30000);
+
+  it("does not report outputMayBeIncomplete for a command whose stdio closes with it", async () => {
+    const logDir = makeTmpDir();
+    const result = await execCommand("echo hi", { logDir });
+    expect(result.outputMayBeIncomplete).toBe(false);
+  });
+
   it("does not report aborted: true for a command that finishes on its own with a signal given", async () => {
     const logDir = makeTmpDir();
     const controller = new AbortController();

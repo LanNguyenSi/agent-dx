@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { execCommand } from "../exec.js";
+import { runArgv } from "./run.js";
 
 export type MutantForm = "replace" | "match" | "patch";
 
@@ -187,6 +187,12 @@ export function parseNumstatPaths(stdout: string): string[] {
  * in-flight marker is written. `git apply` does not require the scratch
  * directory to itself be a git repository.
  *
+ * Every `git apply` here runs through `run.ts`: an argv array and no
+ * shell at all. The patch path comes from the caller, and a path
+ * containing `$(...)` or a backtick is executed by `sh -c` even inside
+ * double quotes, so there is no quoting of it into a shell string that
+ * would be safe.
+ *
  * The scratch copy only ever seeds `--file`'s own relative path, so a
  * patch that also touches other paths would apply cleanly here (`git
  * apply` happily creates new files) while a real apply against the
@@ -218,8 +224,9 @@ async function computePatch(
   fs.writeFileSync(scratchFile, originalContent);
 
   const absPatchPath = path.resolve(patchPath);
-  const numstatResult = await execCommand(
-    `git apply --numstat -- ${JSON.stringify(absPatchPath)}`,
+  const numstatResult = await runArgv(
+    "git",
+    ["apply", "--numstat", "--", absPatchPath],
     {
       cwd: scratchDir,
       logDir: scratchDir,
@@ -233,7 +240,18 @@ async function computePatch(
       logPaths: [numstatResult.logPath],
     };
   }
-  const touchedPaths = parseNumstatPaths(numstatResult.stdoutTail);
+  // The extra-path check below is only a check while it sees the whole
+  // listing: a truncated one could hide the very path that makes the
+  // patch unsafe, so a patch whose numstat output does not fit is
+  // refused rather than half-checked.
+  if (numstatResult.outputTruncated) {
+    return {
+      applicable: false,
+      reason: `git apply --numstat produced more output than can be checked for paths other than --file; see ${numstatResult.logPath}`,
+      logPaths: [numstatResult.logPath],
+    };
+  }
+  const touchedPaths = parseNumstatPaths(numstatResult.stdout);
   const extraPaths = touchedPaths.filter((p) => p !== relPath);
   if (extraPaths.length > 0) {
     return {
@@ -245,14 +263,11 @@ async function computePatch(
     };
   }
 
-  const result = await execCommand(
-    `git apply -- ${JSON.stringify(absPatchPath)}`,
-    {
-      cwd: scratchDir,
-      logDir: scratchDir,
-      timeoutMs: 10_000,
-    },
-  );
+  const result = await runArgv("git", ["apply", "--", absPatchPath], {
+    cwd: scratchDir,
+    logDir: scratchDir,
+    timeoutMs: 10_000,
+  });
   const logPaths = [numstatResult.logPath, result.logPath];
   if (result.exitCode !== 0) {
     return {
@@ -322,15 +337,16 @@ export function computeMutant(
 }
 
 /** Applies an already-validated `patch` mutant to the real target file
- * via `git apply`, run through `exec.ts` so the invocation is logged
- * like every other command this package runs. */
+ * via `git apply`, run through `run.ts` (an argv array, no shell) so the
+ * invocation is logged like every other command this package runs and the
+ * patch path can never be read as shell syntax. */
 export function applyPatchForReal(
   patchPath: string,
   root: string,
   logDir: string,
 ) {
   const absPatchPath = path.resolve(patchPath);
-  return execCommand(`git apply -- ${JSON.stringify(absPatchPath)}`, {
+  return runArgv("git", ["apply", "--", absPatchPath], {
     cwd: root,
     logDir,
     timeoutMs: 10_000,

@@ -56,6 +56,41 @@ describe("beginInplace", () => {
     );
   });
 
+  it("refuses to write into a backup name that appears between choosing it and opening it, and claims the next name instead", () => {
+    const dir = makeTmpDir();
+    const logDir = makeTmpDir();
+    const target = path.join(dir, "fixture.js");
+    fs.writeFileSync(target, "original content\n");
+
+    // The window an `existsSync` check before the copy would leave open,
+    // reproduced exactly: the name is free when it is chosen and taken by
+    // the time it is opened. Only the `O_EXCL` create itself sees that,
+    // which is why the seam is at the open and not around it.
+    const racerContent = "a concurrent session's backup\n";
+    const firstBackup = path.join(logDir, "backup-fixture.js");
+    let raced = false;
+    const open = (filePath: string, flags: string): number => {
+      if (!raced) {
+        raced = true;
+        fs.writeFileSync(filePath, racerContent);
+      }
+      return fs.openSync(filePath, flags);
+    };
+
+    const session = beginInplace(target, logDir, { open });
+
+    expect(raced).toBe(true);
+    // The other session's backup is untouched: not truncated, not
+    // overwritten with this session's copy of the target. Asserted
+    // first, so a regression is reported as the data loss it is rather
+    // than as an unexpected backup name.
+    expect(fs.readFileSync(firstBackup, "utf8")).toBe(racerContent);
+    expect(session.backupPath).toBe(path.join(logDir, "backup-1-fixture.js"));
+    expect(fs.readFileSync(session.backupPath, "utf8")).toBe(
+      "original content\n",
+    );
+  });
+
   it("keeps claiming further distinct names as more of them are taken", () => {
     const dir = makeTmpDir();
     const logDir = makeTmpDir();
