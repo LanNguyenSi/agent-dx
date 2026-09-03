@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `verify` subcommand core: resolves each named check (`-x` override wins,
+  else `package.json` `scripts[name]` as `npm run <name> --silent`, else
+  `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`
+  list, in order), through `exec.ts` with a per-check timeout and log
+  file. Shell exit `126`/`127` maps to `status: "error"`, never `"fail"`.
+  `--fail-fast` stops after the first non-pass check. Detector selection
+  is by output shape first, command text only as a tiebreaker; v0 wires
+  the `generic` detector (parses no failures out of the text itself), with
+  the selection seam left open for tool-specific detectors. The failures
+  invariant is enforced once, centrally, for every detector: a `fail`
+  status with zero parsed failures always gets one synthetic failure entry
+  (exit code plus output tail) instead of shipping `status: "fail"` with
+  `failures: []`. `--max-failures` (default 20) caps each check's own
+  `failures` list, failures-first; a cut is reported via `truncated: true`
+  and the full, uncapped result is written to the log directory.
+
 ### Fixed
 
 - **Envelope bound and reduction.** The bound is met by reducing the

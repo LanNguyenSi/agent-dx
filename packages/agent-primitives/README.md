@@ -94,7 +94,47 @@ agent-primitives doctor -r git,node,npm,rg -o ast-grep,jq,yq,fd
 
 Exits `1` when a required binary is missing.
 
-## `probe`, `verify`, `init`
+## `verify`
+
+Runs a fixed set of named checks (`build`, `typecheck`, `lint`, `test` by
+default) and reports a compact, bounded summary instead of raw tool output.
+
+```bash
+agent-primitives verify
+agent-primitives verify -c typecheck,test
+agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
+```
+
+- `-c, --checks <list>` — comma-separated check names, in run order
+  (default `build,typecheck,lint,test`; build before typecheck, matching
+  the CI convention of building before typechecking against built output).
+- `-x, --exec <name=command>` — override a check's command (repeatable; a
+  name that is not in the run list is still run, appended in the order
+  given).
+- `--fail-fast` — stop after the first check that does not pass; the next
+  check's command is never invoked.
+- `--timeout <s>` — per-check timeout in seconds (no timeout by default).
+- `--max-failures <n>` — caps each check's own `failures` list (default
+  `20`); a cut sets `truncated: true` and writes the full, uncapped result
+  to the log directory.
+
+Check resolution, per name: an `-x` override wins; otherwise a matching
+`package.json` `scripts[name]` runs as `npm run <name> --silent`; a name
+with neither resolves to `status: "skipped"`. A shell exit of `126`
+(not executable) or `127` (not found) is `status: "error"`, never `"fail"`:
+it means the check itself could not run, not that it ran and found a
+problem. Every check's output is run through a detector, selected by
+output shape (command text is only ever a tiebreaker); v0 ships the
+`generic` detector only, which parses no failures out of the text itself.
+Whatever the detector, a check that ends `fail` with zero parsed failures
+always gets one synthetic failure entry (the exit code plus the output
+tail) instead of shipping `status: "fail"` with an empty `failures` list.
+
+Overall `status` is `error` if any check errored, else `fail` if any check
+failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
+the same way every other subcommand's does.
+
+## `probe`, `init`
 
 Not yet implemented. Each currently returns a JSON result with
 `status: "usage_error"` and `reason: "not_implemented"`, exit `2`, rather

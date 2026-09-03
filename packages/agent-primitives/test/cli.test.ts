@@ -118,8 +118,12 @@ describe("cli", () => {
     expect(JSON.parse(run.stdout).status).toBe("ok");
   });
 
-  it("returns not_implemented usage_error for probe, verify, and init stubs", async () => {
-    for (const sub of ["probe", "verify", "init"]) {
+  it("returns not_implemented usage_error for the probe and init stubs", async () => {
+    // `verify` is implemented (see the "verify" describe block below) and
+    // is deliberately excluded here: running it with no `-C` would target
+    // this package's own real cwd and its real `test` script, re-invoking
+    // this very test suite from inside itself.
+    for (const sub of ["probe", "init"]) {
       const run = await spawnCli([sub]);
       expect(run.code).toBe(2);
       const parsed = JSON.parse(run.stdout);
@@ -350,6 +354,97 @@ describe("boundText", () => {
       expect(out.length).toBeLessThanOrEqual(maxChars);
     }
   });
+});
+
+describe("cli verify", () => {
+  // Every case here passes an explicit -C to a fresh, empty tmp dir (never
+  // the package's own real cwd): `verify` with no package.json and no `-x`
+  // override for a default check name just skips it, so these never touch
+  // this package's own real build/typecheck/lint/test scripts.
+  it("-x mycheck='exit 1' is a fail with one synthetic failure, status fail, exit 1", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check.status).toBe("fail");
+    expect(check.failures).toHaveLength(1);
+  });
+
+  it("-x mycheck='exit 0' is a pass, exit 0", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "mycheck=exit 0",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+  });
+
+  it("-x nope=nonexistent-binary-xyz is a check error, status error, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "nope=nonexistent-binary-xyz",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "nope",
+    );
+    expect(check.status).toBe("error");
+  });
+
+  it("a check printing a multi-megabyte single line stays within --max-chars", async () => {
+    const cwd = makeTmpDir();
+    const scriptPath = path.join(cwd, "big.js");
+    fs.writeFileSync(
+      scriptPath,
+      "process.stdout.write('y'.repeat(5 * 1000 * 1000));\n",
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "-m",
+      "8000",
+      "verify",
+      "-x",
+      `big=node ${scriptPath}`,
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThan(8000 + 2000);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+  }, 20000);
 });
 
 describe("classifyStdoutError", () => {

@@ -17,6 +17,12 @@ import {
   DEFAULT_REQUIRED,
   type DoctorResult,
 } from "./doctor/index.js";
+import {
+  verify,
+  DEFAULT_CHECKS,
+  DEFAULT_MAX_FAILURES,
+  type VerifyResult,
+} from "./verify/index.js";
 
 function readVersion(): string {
   try {
@@ -70,6 +76,55 @@ function parseList(value: string): string[] {
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
+
+/** `-x name=command`, accumulated across repeated flags into an object
+ * keyed by check name (a later `-x` for the same name overrides an
+ * earlier one). Splits on the first `=` only, so a command containing
+ * `=` (e.g. `FOO=1 npm test`) is preserved intact. */
+function parseExecOverride(
+  value: string,
+  previous: Record<string, string>,
+): Record<string, string> {
+  const idx = value.indexOf("=");
+  if (idx <= 0) {
+    throw new InvalidArgumentError(
+      `-x, --exec must be name=command (got "${value}")`,
+    );
+  }
+  const name = value.slice(0, idx).trim();
+  const command = value.slice(idx + 1);
+  if (!name) {
+    throw new InvalidArgumentError(
+      `-x, --exec: empty check name in "${value}"`,
+    );
+  }
+  return { ...previous, [name]: command };
+}
+
+/** Returns the validated raw string (not a number): mirrors
+ * `parseMaxChars`'s style so a default value never has to pass back
+ * through this parser (commander does not re-run a custom parser over an
+ * option's literal default). Converted to a number where it is consumed. */
+function parseTimeoutSeconds(value: string): string {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new InvalidArgumentError(
+      `--timeout must be a positive number of seconds (got "${value}")`,
+    );
+  }
+  return value;
+}
+
+function parseMaxFailures(value: string): string {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new InvalidArgumentError(
+      `--max-failures must be a non-negative integer (got "${value}")`,
+    );
+  }
+  return value;
+}
+
 
 /** Resolves cwd/maxChars/logDir without validating that cwd exists: used
  * only for error reporting once we already know something has gone wrong
@@ -341,6 +396,123 @@ program
     },
   );
 
+interface VerifyCliOptions {
+  checks?: string[];
+  exec: Record<string, string>;
+  failFast?: boolean;
+  timeout?: string;
+  maxFailures?: string;
+}
+
+program
+  .command("verify")
+  .description(
+    "Run project verify checks (build, typecheck, lint, test by default)",
+  )
+  .option(
+    "-c, --checks <list>",
+    `comma-separated check names, in run order (default: ${DEFAULT_CHECKS.join(",")})`,
+    parseList,
+  )
+  .option(
+    "-x, --exec <name=command>",
+    "override a check's command (repeatable)",
+    parseExecOverride,
+    {},
+  )
+  .option("--fail-fast", "stop after the first non-pass check")
+  .option("--timeout <s>", "per-check timeout in seconds", parseTimeoutSeconds)
+  .option(
+    "--max-failures <n>",
+    "cap each check's own failures list",
+    parseMaxFailures,
+    String(DEFAULT_MAX_FAILURES),
+  )
+  .action(async (opts: VerifyCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    const result = await verify({
+      cwd: global.cwd,
+      logDir: global.logDir,
+      checks: opts.checks,
+      overrides: opts.exec,
+      failFast: Boolean(opts.failFast),
+      timeoutMs:
+        opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
+      maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
+    });
+
+    const logs = [...result.logs];
+    if (result.truncatedByMaxFailures) {
+      try {
+        fs.mkdirSync(global.logDir, { recursive: true });
+        const fullResultPath = path.join(global.logDir, "verify-full.json");
+        fs.writeFileSync(
+          fullResultPath,
+          JSON.stringify({ checks: result.fullChecks }, null, 2),
+        );
+        logs.push(fullResultPath);
+      } catch {
+        // Best-effort: the envelope's own overrun warning still applies
+        // if this leaves the result too large for --max-chars.
+      }
+    }
+
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "verify",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs,
+      extra: {
+        checks: result.checks,
+        totalDurationMs: result.totalDurationMs,
+      },
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    // The max-failures cap is applied before buildEnvelope ever sees the
+    // result, so its own size-triggered reduction may not fire even
+    // though real content was cut: mark truncated explicitly whenever
+    // verify() itself cut anything.
+    if (result.truncatedByMaxFailures) {
+      envelope.truncated = true;
+    }
+    emit(
+      envelope,
+      exitCode,
+      { format: global.format, maxChars: global.maxChars },
+      () => renderVerifyText(result),
+    );
+  });
+
+function renderVerifyText(result: VerifyResult): string {
+  const lines: string[] = [];
+  lines.push(`status: ${result.status}`);
+  lines.push("");
+  lines.push("checks:");
+  for (const check of result.checks) {
+    lines.push(
+      `  [${check.status}] ${check.name}${check.command ? ` (${check.command})` : ""} - ${check.durationMs}ms`,
+    );
+    for (const failure of check.failures) {
+      const where = [failure.file, failure.line].filter(Boolean).join(":");
+      lines.push(`    - ${where ? `${where}: ` : ""}${failure.message}`);
+    }
+  }
+  lines.push("");
+  lines.push(`totalDurationMs: ${result.totalDurationMs}`);
+  if (result.warnings.length > 0) {
+    lines.push("");
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 function renderDoctorText(result: DoctorResult): string {
   const lines: string[] = [];
   lines.push(`status: ${result.status}`);
@@ -407,7 +579,6 @@ function registerStub(name: string, description: string): void {
 }
 
 registerStub("probe", "Run a mutation probe");
-registerStub("verify", "Run project verify checks");
 registerStub(
   "init",
   "Install the agent-primitives skill into a harness's skill directories",
