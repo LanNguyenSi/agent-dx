@@ -1176,15 +1176,16 @@ export interface CleanupWorktreeResult {
   /** True only when the path is gone: with `verified`, `git worktree
    * list` no longer reports it AND nothing is left of it on disk, an
    * assertion of the outcome rather than an inference from a git exit
-   * code; without `verified`, nothing is left on disk AND `git worktree
-   * remove` itself exited 0, the most the outcome can be checked when
-   * the listing cannot run at all. */
+   * code; without `verified`, nothing is left on disk, judged by the
+   * disk alone, the one check left when the listing cannot run at all.
+   * `git worktree remove`'s exit status decides nothing either way: it
+   * is non-zero for a path that was never registered, which is exactly
+   * the leftover an add killed early leaves. */
   ok: boolean;
   /** True when the listing ran after the removal, so `ok` was asserted
    * against git's own registry. False when it could not run in any form
-   * and `ok` rests on the disk check plus the removal's exit code;
-   * `detail` then says so even for an `ok` result, for the caller's
-   * warning. */
+   * and `ok` rests on the disk check alone; `detail` then says so even
+   * for an `ok` result, for the caller's warning. */
   verified: boolean;
   /** True when the path failed the gate below and nothing at all was
    * run against it. */
@@ -1214,10 +1215,11 @@ export interface CleanupWorktreeResult {
  * same path, and the prune and the assertion run again. When the
  * listing still cannot run in any form (see `listRegisteredWorktrees`),
  * the registry is unknown rather than "still registered": `ok` then
- * rests on the disk check plus the removal's own exit code, `verified`
- * is false, and `detail` says so, so the caller can report the outcome
- * as unverified instead of reporting a removal that took as one that
- * did not.
+ * rests on the disk check alone (never on `remove`'s exit status,
+ * which is non-zero for a path git never registered), `verified` is
+ * false, and `detail` says so, so the caller can report the outcome as
+ * unverified instead of reporting a removal that took as one that did
+ * not.
  *
  * Nothing is run against the path before it passes a gate, because the
  * path can come from a marker file, not only from this process's own
@@ -1357,15 +1359,18 @@ export async function cleanupWorktree(
     };
   }
   // The registry is unknown, not "still registered": the outcome rests
-  // on what can still be checked, and is reported as unverified either
-  // way so the caller never presents it as asserted.
+  // on the disk alone, the one check left, and is reported as
+  // unverified either way so the caller never presents it as asserted.
+  // `remove`'s exit status is not consulted: it is non-zero for a path
+  // git never registered (an add killed before it registered anything,
+  // or a marker naming such a path), and demanding 0 here would report
+  // that leftover as not removed after its directory is gone, with no
+  // command left that could remove it any further.
   const listingFailed = `git worktree list could not run after the removal (${after.detail ?? "unknown"}; see ${after.logPath})`;
-  const ok = !stillOnDisk && removeResult.exitCode === 0;
+  const ok = !stillOnDisk;
   const detail = ok
-    ? `${listingFailed}, so the removal is unverified: the directory is gone and git worktree remove exited 0`
-    : stillOnDisk
-      ? `${listingFailed}, and something is still on disk at the path`
-      : `${listingFailed}, and git worktree remove exited ${String(removeResult.exitCode)}; see ${removeResult.logPath}`;
+    ? `${listingFailed}, so the removal is unverified: the directory is gone; the registration could not be checked`
+    : `${listingFailed}, and something is still on disk at the path`;
   return {
     ok,
     verified: false,

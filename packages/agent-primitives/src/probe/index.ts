@@ -703,13 +703,24 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         }
       } else {
         // The marker stays: it is what lets the next probe on this
-        // repository, and `doctor`, find the leftover.
+        // repository, and `doctor`, find the leftover. The manual `git
+        // worktree remove` is named only when git could list, so the
+        // registration is known; when it could not, that command cannot
+        // be relied on either (it fails for a path git never
+        // registered), and the marker file is the one escape left.
+        const kept =
+          `its marker is kept for the next probe on this repository ` +
+          `(or \`agent-primitives doctor\`) to act on`;
         warnings.push(
-          `the worktree at ${worktreePathForCleanup} was not removed ` +
-            `(${result.detail ?? "unknown"}); its marker is kept for the next ` +
-            `probe on this repository (or \`agent-primitives doctor\`) to ` +
-            `act on; run \`git -C ${realRoot} worktree remove --force --force ` +
-            `-- ${worktreePathForCleanup}\` manually`,
+          result.verified
+            ? `the worktree at ${worktreePathForCleanup} was not removed ` +
+                `(${result.detail ?? "unknown"}); ${kept}; run \`git -C ` +
+                `${realRoot} worktree remove --force --force -- ` +
+                `${worktreePathForCleanup}\` manually`
+            : `the worktree at ${worktreePathForCleanup} was not removed ` +
+                `(${result.detail ?? "unknown"}); ${kept}; inspect the path, ` +
+                `then delete the marker file to clear it: ` +
+                `${markerFilePathFor(realRoot)}`,
         );
       }
     })();
@@ -1012,7 +1023,13 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
           continue;
         }
         const detail = cleanup.detail ?? "unknown";
-        if (cleanup.refused && leftover.fromMarker) {
+        // A marker-named path the gate refused, or one whose removal
+        // could not be verified (git could not list, so whether the
+        // path was ever registered is unknown and the manual `git
+        // worktree remove` cannot be relied on), gets the marker file
+        // as its one escape; the manual command is named only for a
+        // path git could still list.
+        if (leftover.fromMarker && (cleanup.refused || !cleanup.verified)) {
           unremoved.push(
             `the stale worktree marker for ${realRoot} names ${leftover.path}, ` +
               `which was not removed (${detail}); inspect it, then delete the ` +

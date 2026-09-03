@@ -1021,7 +1021,7 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
     expect(fs.existsSync(path.join(adminDir, adminEntry))).toBe(false);
   });
 
-  it("leaves a half-written entry that names some other path alone, and reports the failed assertion", async () => {
+  it("leaves a half-written entry that names some other path alone, and reports its own removal as unverified", async () => {
     const repo = initRepo();
     const logDir = makeTmpDir();
     const other = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
@@ -1036,9 +1036,15 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
       scratchRoot: logDir,
     });
 
-    expect(cleanup.ok).toBe(false);
+    // git is stuck on the other entry, so nothing about `ours` can be
+    // listed: its removal is judged by the disk alone and said to be.
+    expect(cleanup.ok).toBe(true);
+    expect(cleanup.verified).toBe(false);
     expect(cleanup.refused).toBe(false);
     expect(cleanup.detail).toContain("could not run after the removal");
+    expect(cleanup.detail).toContain(
+      "the directory is gone; the registration could not be checked",
+    );
     expect(fs.existsSync(path.join(adminDir, adminEntry, "gitdir"))).toBe(true);
     expect(fs.existsSync(ours)).toBe(false);
   });
@@ -1348,8 +1354,39 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     expect(cleanup.verified).toBe(false);
     expect(cleanup.detail).toContain("could not run after the removal");
     expect(cleanup.detail).toContain("unverified");
-    expect(cleanup.detail).toContain("git worktree remove exited 0");
+    expect(cleanup.detail).toContain(
+      "the directory is gone; the registration could not be checked",
+    );
+    expect(cleanup.detail).not.toContain("git worktree remove exited");
     expect(fs.existsSync(wt)).toBe(false);
+    expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
+  });
+
+  it("cleanupWorktree judges a scratch directory git never registered by the disk alone when no listing form runs: ok, unverified, the directory gone, whatever git worktree remove exited", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const wt = scratchPath(logDir);
+    fs.mkdirSync(wt, { recursive: true });
+    fs.writeFileSync(path.join(wt, "stale.txt"), "leftover\n");
+
+    const cleanup = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      cleanupWorktree(repo, wt, logDir, { scratchRoot: logDir }),
+    );
+
+    expect(cleanup.ok).toBe(true);
+    expect(cleanup.verified).toBe(false);
+    expect(cleanup.refused).toBe(false);
+    expect(cleanup.detail).toContain(
+      "the directory is gone; the registration could not be checked",
+    );
+    expect(fs.existsSync(wt)).toBe(false);
+    // The removal really ran against a path git never registered and
+    // failed as git fails it; the disk check is what decided.
+    const removeLog = cleanup.logPaths.find((p) =>
+      path.basename(p).startsWith("worktree-remove-"),
+    );
+    expect(removeLog).toBeDefined();
+    expect(fs.readFileSync(removeLog as string, "utf8")).toContain("fatal:");
     expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
   });
 

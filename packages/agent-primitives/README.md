@@ -348,10 +348,15 @@ against `git worktree list` and the disk rather than read off an exit
 code, and a removal that did not take keeps the repository-keyed marker
 and adds a warning naming the path and the manual command. When that
 listing cannot run in any form, the registry is unknown rather than
-"still registered": the removal is judged by the disk and by `git
-worktree remove`'s own exit status, a warning reports it as done but
-unverified, and the marker is cleared, so a git that cannot list never
-turns a removal that took into a `stale_worktree` on every later run.
+"still registered": the removal is judged by the disk alone (never by
+`git worktree remove`'s exit status, which is non-zero for a path git
+never registered, the very leftover an add killed early leaves), a
+warning reports it as done but unverified, and the marker is cleared,
+so a git that cannot list never turns a removal that took into a
+`stale_worktree` on every later run. A leftover still on disk after
+such an unverified removal keeps the marker and is reported with the
+marker file as the escape, not with the manual `git worktree remove`,
+which cannot be relied on for a path whose registration is unknown.
 The one state git cannot recover from on its own, an entry the add
 left half-written (its `commondir` present but still empty, which
 makes every `git worktree` command in the repository fail), is cleared

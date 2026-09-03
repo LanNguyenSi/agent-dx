@@ -1897,6 +1897,13 @@ function worktreeBlocks(repo: string): string[] {
     .filter((b) => b.trim().length > 0);
 }
 
+/** The pid of a process that has already exited. */
+function deadPid(): number {
+  const pid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+  if (!pid) throw new Error("failed to obtain a dead pid for the test");
+  return pid;
+}
+
 describe("probe(): worktree isolation on a git that rejects -z (older than 2.36)", () => {
   it("removes its worktree without a false not-removed warning or a kept marker, and the next probe on the repository is not blocked", async () => {
     useLockDir();
@@ -1978,15 +1985,164 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
     expect(readMarkerFor(realRoot)).toBeUndefined();
     expect(worktreeBlocks(repo)).toHaveLength(1);
   });
+
+  it("recovers a marker-named scratch directory git never registered, reporting the removal as unverified and naming no command for it, and the next probe is not stale_worktree", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realRoot = resolveDeepestExisting(repo);
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+    const logDir = makeTmpDir();
+    // The shape an add killed before it registered anything leaves: a
+    // marker naming a scratch directory under this run's log dir that
+    // git never listed, with no listing to check it against.
+    const planted = path.join(logDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(planted, { recursive: true });
+    fs.writeFileSync(path.join(planted, "stale.txt"), "leftover\n");
+    writeMarker(realRoot, {
+      targetPath: planted,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: deadPid(),
+      timestamp: new Date().toISOString(),
+      scratchRoot: logDir,
+    });
+
+    const first = await withPathPrepended(shimDir, () =>
+      probe(baseOptions(repo, { logDir })),
+    );
+
+    expect(first.status).toBe("killed");
+    expect(first.warnings).toContain("recovered_stale_worktree");
+    expect(
+      first.warnings.filter(
+        (w) =>
+          w.includes(`the leftover worktree at ${planted} was removed, but`) &&
+          w.includes(
+            "the directory is gone; the registration could not be checked",
+          ),
+      ),
+    ).toHaveLength(1);
+    expect(first.warnings.some((w) => w.includes("was not removed"))).toBe(
+      false,
+    );
+    expect(
+      first.warnings.some((w) =>
+        w.includes(`worktree remove --force --force -- ${planted}`),
+      ),
+    ).toBe(false);
+    expect(fs.existsSync(planted)).toBe(false);
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(worktreeBlocks(repo)).toHaveLength(1);
+
+    const second = await withPathPrepended(shimDir, () =>
+      probe(baseOptions(repo, { logDir })),
+    );
+
+    expect(second.status).toBe("killed");
+    expect(second.reason).not.toBe("stale_worktree");
+    expect(second.warnings).not.toContain("recovered_stale_worktree");
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(worktreeBlocks(repo)).toHaveLength(1);
+  });
+
+  // Root deletes through a read-only parent, so the leftover cannot be
+  // made to stay on disk for it.
+  it.skipIf(process.getuid?.() === 0)(
+    "a marker-named leftover still on disk after an unverified removal keeps the marker and names the marker file as the one escape, never the manual command",
+    async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      const realRoot = resolveDeepestExisting(repo);
+      const shimDir = makeTmpDir();
+      writeGitShim(shimDir, "no-worktree-list");
+      const logDir = makeTmpDir();
+      const scratchDir = path.join(logDir, `wt-${randomUUID()}`);
+      const planted = path.join(scratchDir, "wt");
+      fs.mkdirSync(planted, { recursive: true });
+      fs.writeFileSync(path.join(planted, "stale.txt"), "leftover\n");
+      writeMarker(realRoot, {
+        targetPath: planted,
+        backupPath: realRoot,
+        preHash: "",
+        mutatedHash: "",
+        pid: deadPid(),
+        timestamp: new Date().toISOString(),
+        scratchRoot: logDir,
+      });
+      // With its parent read-only, the delete empties the directory
+      // but cannot remove the directory itself: something stays on
+      // disk, and with no listing there is no registration to consult.
+      fs.chmodSync(scratchDir, 0o555);
+      try {
+        const result = await withPathPrepended(shimDir, () =>
+          probe(baseOptions(repo, { logDir })),
+        );
+
+        expect(result.status).toBe("inconclusive");
+        expect(result.reason).toBe("stale_worktree");
+        const escape = result.warnings.filter(
+          (w) => w.includes(planted) && w.includes("was not removed"),
+        );
+        expect(escape).toHaveLength(1);
+        expect(escape[0]).toContain("still on disk");
+        expect(escape[0]).toContain(
+          `delete the marker file to clear it: ${markerFilePathFor(realRoot)}`,
+        );
+        expect(escape[0]).not.toContain("worktree remove --force --force");
+        expect(readMarkerFor(realRoot)).toBeDefined();
+        expect(fs.existsSync(planted)).toBe(true);
+      } finally {
+        fs.chmodSync(scratchDir, 0o755);
+      }
+    },
+  );
+
+  it.skipIf(process.getuid?.() === 0)(
+    "a run whose own worktree stays on disk after an unverified removal keeps its marker and names the marker file as the one escape, never the manual command",
+    async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      const realRoot = resolveDeepestExisting(repo);
+      const shimDir = makeTmpDir();
+      writeGitShim(shimDir, "no-worktree-list");
+      const logDir = makeTmpDir();
+      // The test command runs in the worktree and makes the worktree's
+      // own scratch directory read-only, so the end-of-run delete
+      // empties the worktree but cannot remove the directory itself.
+      const result = await withPathPrepended(shimDir, () =>
+        probe(
+          baseOptions(repo, {
+            logDir,
+            testCommand:
+              "node -e \"require('fs').chmodSync(require('path').dirname(process.cwd()), 0o555)\"",
+          }),
+        ),
+      );
+      const worktreePath = result.isolation.path as string;
+      try {
+        expect(result.status).toBe("survived");
+        expect(worktreePath).toBeTruthy();
+        const escape = result.warnings.filter((w) =>
+          w.includes(`the worktree at ${worktreePath} was not removed`),
+        );
+        expect(escape).toHaveLength(1);
+        expect(escape[0]).toContain("still on disk");
+        expect(escape[0]).toContain(
+          `delete the marker file to clear it: ${markerFilePathFor(realRoot)}`,
+        );
+        expect(escape[0]).not.toContain("worktree remove --force --force");
+        expect(readMarkerFor(realRoot)?.targetPath).toBe(worktreePath);
+        expect(fs.existsSync(worktreePath)).toBe(true);
+      } finally {
+        fs.chmodSync(path.dirname(worktreePath), 0o755);
+      }
+    },
+  );
 });
 
 describe("probe(): worktree isolation, a marker never certifies its own containment", () => {
-  function deadPid(): number {
-    const pid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
-    if (!pid) throw new Error("failed to obtain a dead pid for the test");
-    return pid;
-  }
-
   it("a marker naming an unregistered scratch-shaped directory under its own recorded log dir, outside this run's --log-dir, is refused: nothing is deleted and the marker stays", async () => {
     useLockDir();
     const { repo } = initRepo();

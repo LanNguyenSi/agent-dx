@@ -89,12 +89,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   newline reads as a block boundary) refused with the rest instead of
   registering a phantom path. A listing that cannot run
   in any form is an unknown registry, never "still registered": the
-  removal is then judged by the disk and by `git worktree remove`'s own
-  exit status, reported as done but unverified in a warning, and the
-  marker is cleared, so a git that cannot list no longer turns a
-  removal that took into a `stale_worktree` on every later run; the
-  recovery and `doctor` say in a warning that a leftover registration
-  could not be checked for. The worktree sync's own floor is git 2.35
+  removal is then judged by the disk alone (never by `git worktree
+  remove`'s exit status, which is non-zero for a path git never
+  registered, so a marker naming such a path is recovered instead of
+  stopping every later run), reported as done but unverified in a
+  warning, and the marker is cleared, so a git that cannot list no
+  longer turns a removal that took into a `stale_worktree` on every
+  later run; a leftover still on disk after an unverified removal is
+  reported with the marker file as the escape, since the manual `git
+  worktree remove` cannot be relied on when the registration is
+  unknown; the recovery and `doctor` say in a warning that a leftover
+  registration could not be checked for. The worktree sync's own floor
+  is git 2.35
   (`git apply --allow-empty`); both floors are documented in the README,
   and `doctor` gained a `git-version` check that reads the installed git
   against them and warns below 2.36. Each scratch directory now carries
