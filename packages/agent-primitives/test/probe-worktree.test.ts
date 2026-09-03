@@ -681,6 +681,14 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     return undefined;
   }
 
+  /** The `--pre`/`-t` exec logs this run wrote directly into `--log-dir`
+   * (the sync's own git logs live in its scratch subdirectory instead).
+   * Empty means the run never got past the sync, which is what makes an
+   * assertion about a signal landing mid-sync say what it claims. */
+  function execLogs(logDir: string): string[] {
+    return fs.readdirSync(logDir).filter((f) => f.startsWith("exec-"));
+  }
+
   /** Spawns the CLI worktree probe under a pinned lock dir and log dir,
    * with stdout captured so the signal contract (no envelope on a
    * signalled run) can be asserted. */
@@ -764,6 +772,9 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
 
     expect(exitCode).toBe(143);
     expect(stdout()).toBe("");
+    // The signal really did land inside the sync: nothing had run a
+    // baseline command yet.
+    expect(execLogs(logDir)).toEqual([]);
     // The worktree is gone from disk and from git's registry.
     expect(fs.existsSync(worktreePath)).toBe(false);
     expect(
@@ -814,6 +825,13 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
       () => fs.existsSync(path.join(worktreePath, "many", "u-00000.txt")),
       "the untracked copy started",
     );
+    // `git ls-files` sorts, so the last of the 6000 entries is copied
+    // last: its absence is this phase still being under way at the
+    // moment the signal is sent, not a run that had already finished
+    // syncing and would exit the same way for unrelated reasons.
+    expect(fs.existsSync(path.join(worktreePath, "many", "u-05999.txt"))).toBe(
+      false,
+    );
 
     child.kill("SIGTERM");
     const exitCode = await new Promise<number | null>((resolve) =>
@@ -822,6 +840,9 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
 
     expect(exitCode).toBe(143);
     expect(stdout()).toBe("");
+    // The signal really did land inside the sync: nothing had run a
+    // baseline command yet.
+    expect(execLogs(logDir)).toEqual([]);
     expect(fs.existsSync(worktreePath)).toBe(false);
     expect(
       worktreeList(repo)
@@ -865,6 +886,7 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     const marker = readMarkerFor(realRoot);
     expect(marker).toBeDefined();
     expect(marker!.targetPath).toBe(worktreePath);
+    expect(execLogs(logDir)).toEqual([]);
     // The leftover really is registered: asserted before the recovery
     // steps, so a regression that never created one reads as that.
     expect(fs.existsSync(worktreePath)).toBe(true);
