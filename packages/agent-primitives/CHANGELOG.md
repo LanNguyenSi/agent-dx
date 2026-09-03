@@ -14,23 +14,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deep-copied result is walked once per attempt and four caps derived from
   the bound are applied together: the characters kept of a string, the
   elements kept of an array, the keys kept of an object, and the depth
-  kept of a subtree. One scale factor multiplies all four, and a bounded
-  bisection over that factor (a small, fixed number of attempts, each
-  linear in the result and each re-derived from the same pristine copy,
-  never from the previous attempt's output) takes the largest scale whose
-  envelope fits; at scale zero the payload is gone and the fixed fields
-  remain. Consequences worth naming: two equally large sibling values are
+  kept of a subtree. One scale factor drives all four (the three breadth
+  caps linearly, the depth cap one level per halving of the scale), and a
+  bounded bisection over that factor (a small, fixed number of attempts,
+  each linear in the result and each re-derived from the same pristine
+  copy, never from the previous attempt's output) takes the largest scale
+  whose envelope fits; the floor of the search is the skeleton itself,
+  which fits by construction, so the search always has an answer.
+  Consequences worth naming: two equally large sibling values are
   cut alike instead of the first one consuming the whole budget; a wide
-  collection is trimmed entry by entry instead of being deleted whole; the
-  work done no longer depends on how far over the bound a result is, and
-  no clock is read at all, so the envelope is a function of the result and
-  the bound alone and the wall-clock work budget (`reductionBudgetMs`) is
-  gone with the loop it guarded. Every cut is marked in band with a count
-  taken from the original: a trailing array element, a `...` key in an
-  object, a suffix on a string, and a placeholder naming the depth a
-  subtree was pruned at, so kept plus omitted always accounts for what was
-  there. The fixed envelope fields are held apart from the payload for the
-  whole reduction, so the real invariant is
+  collection is trimmed entry by entry instead of being deleted whole; a
+  deeply nested result is reduced to a shallower sketch of itself instead
+  of being lost whole, because depth now moves with the search rather than
+  sitting at a fixed floor above the smallest structure the search can
+  reach; the work done no longer depends on how far over the bound a
+  result is, and no clock is read at all, so the envelope is a function of
+  the result, the bound, and this process's run id (which reaches it
+  through the full-result path in `logs`), and the wall-clock work budget
+  (`reductionBudgetMs`) is gone with the loop it guarded. When even the
+  shallowest structure the search reaches is over the bound, a depth-only
+  fallback tries the last few levels explicitly at the narrowest widths
+  and keeps the first sketch that fits; when nothing fits at all, a
+  warning states that the result was reduced to the fixed fields alone and
+  points at the full result on disk, so a caller can tell "the command
+  produced no fields" from "the command's fields did not fit". Every cut
+  is marked in band with a count taken from the original: a trailing array
+  element, a `...` key in an object, a suffix on a string, and a
+  placeholder naming the depth a subtree was pruned at, so kept plus
+  omitted always accounts for what was there; entries are rebuilt with
+  `Object.defineProperty`, so a result carrying an own `__proto__` key
+  (from `JSON.parse`) keeps it as an own property and in that arithmetic
+  instead of silently reassigning the rebuilt object's prototype. The
+  fixed envelope fields are held apart from the payload for the whole
+  reduction and lead the serialized object, so the real invariant is
   `serializedLength(envelope) <= max(maxChars, skeletonFloor)`; whenever
   the literal requested `-m`/`maxChars` cannot be honored, a warning names
   the envelope's true final length, solved exactly (the warning's own

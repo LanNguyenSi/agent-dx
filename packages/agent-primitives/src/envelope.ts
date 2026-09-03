@@ -68,9 +68,11 @@ let runId: string | undefined;
  * It names the full-result file (`result-full-<run-id>.json`) so two
  * invocations sharing one log directory do not overwrite each other's
  * evidence, and it is also the default log directory's own leaf name, so
- * both agree. Generated from `crypto.randomUUID`, never from a clock:
- * `buildEnvelope` reads no clock at all, and within one process this value
- * is constant, so the same input still produces the same envelope.
+ * both agree. Generated from `crypto.randomUUID`, never from a clock, and
+ * constant within one process: it is the one value in the envelope that
+ * varies between processes given the same input (it reaches the envelope
+ * through `logs`), which is exactly what the determinism claim on
+ * `buildEnvelope` is scoped to.
  */
 export function currentRunId(): string {
   if (!runId) runId = randomUUID();
@@ -116,29 +118,47 @@ export interface EnvelopeOutput {
 const DEFAULT_MAX_CHARS = 8000;
 
 /**
- * Upper bound on how many times the reduction re-derives the payload from
- * the pristine copy: one pass at scale 1, then eleven bisection steps.
+ * Upper bound on how many times the scale search re-derives the payload
+ * from the pristine copy: one pass at scale 1, then eleven bisection steps.
  * Each pass is O(n) in the payload, so the whole reduction is O(n) with a
- * constant factor of at most this many passes, whatever the shape of the
- * result. There is no wall-clock budget and no data-dependent loop: the
- * envelope is a function of its input alone.
+ * constant factor of at most this many passes plus the at most
+ * `FALLBACK_DEPTHS.length` passes of the depth-only fallback, whatever the
+ * shape of the result. There is no wall-clock budget and no data-dependent
+ * loop: the envelope is a function of its input alone.
  */
 const MAX_REDUCTION_PASSES = 12;
+
+/**
+ * Smallest scale the bisection can reach: eleven halvings below scale 1.
+ * The breadth caps at this scale are the narrowest the search itself ever
+ * applies, and they are what the depth-only fallback pairs its shallow
+ * depth limits with.
+ */
+const MIN_SCALE = 2 ** -(MAX_REDUCTION_PASSES - 1);
 
 /** Nesting depth kept at scale 1. Deeper containers are replaced by a
  * placeholder naming the depth they were pruned at. */
 const BASE_MAX_DEPTH = 12;
 
 /**
- * Floor under the scaled depth limit. Depth is the one cap that is not
- * derived from the bound: collapsing a result to two or three levels
- * destroys nearly all of its structure while saving little next to the
- * breadth caps, which do the real work. Keeping a floor here means a
- * pathologically deep graph is still bounded (a chain is cut a few levels
- * in) without an ordinary nested result being flattened at moderate
- * scales.
+ * Shallowest depth limit the scale search itself goes down to. Depth is a
+ * coarse knob: one level up or down multiplies the kept node count by the
+ * result's branching factor, so at two or three levels a candidate is
+ * mostly marker text and worth little. The search therefore stops here,
+ * and the depth-only fallback below covers the shallower settings
+ * explicitly for the results where nothing else fits at all.
  */
-const MIN_MAX_DEPTH = 6;
+const MIN_SEARCH_DEPTH = 4;
+
+/**
+ * Depth limits the depth-only fallback tries, in order, when the scale
+ * search came back with nothing but the skeleton. Paired with the
+ * narrowest breadth caps (MIN_SCALE), these are the smallest structures
+ * this module can produce that are still a structure rather than nothing:
+ * the first one that fits is kept, so a result that overflows even at
+ * MIN_SEARCH_DEPTH still says something about its own shape.
+ */
+const FALLBACK_DEPTHS: readonly number[] = [3, 2, 1];
 
 /** The object key under which a trimmed object records how many of its
  * keys were dropped. */
@@ -251,6 +271,31 @@ function capArray(
   return out;
 }
 
+/**
+ * Writes one own, enumerable, writable, configurable data property.
+ *
+ * Plain assignment would be wrong for exactly one key: `__proto__`. A
+ * result parsed with `JSON.parse` can carry it as an own property, and
+ * assigning it runs the inherited setter, which reassigns the rebuilt
+ * object's prototype instead of storing a property. The key would then
+ * vanish from the output and from the marker arithmetic (kept plus
+ * omitted would no longer equal what was there), and the rebuilt object
+ * would silently carry a caller-supplied prototype. `defineProperty`
+ * stores every key the same way, including that one.
+ */
+function defineEntry(
+  out: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Object.defineProperty(out, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
 function capObject(
   obj: Record<string, unknown>,
   limits: CapLimits,
@@ -261,13 +306,13 @@ function capObject(
   const out: Record<string, unknown> = {};
   for (let i = 0; i < keep; i++) {
     const entry = entries[i];
-    out[entry[0]] = capValue(entry[1], limits, depth + 1);
+    defineEntry(out, entry[0], capValue(entry[1], limits, depth + 1));
   }
   if (keep < entries.length) {
     // A payload that already carries a literal "..." key among the kept
     // ones loses it to the marker here. The count stays honest about how
     // many keys were dropped, which is what the marker is for.
-    out[OMITTED_KEYS_MARKER] = objectMarker(entries.length - keep);
+    defineEntry(out, OMITTED_KEYS_MARKER, objectMarker(entries.length - keep));
   }
   return out;
 }
@@ -329,35 +374,39 @@ function baseLimitsFor(bound: number): CapLimits {
   };
 }
 
-/** The base limits multiplied by one scale factor in [0, 1]. */
+/**
+ * Depth at one scale: one level shallower per halving of the breadth
+ * budget, down to MIN_SEARCH_DEPTH.
+ *
+ * Depth participates in the reduction (a result that is too deep to fit at
+ * any breadth is otherwise unreachable by the search, and used to come
+ * back as the bare skeleton), but it cannot share the breadth caps' linear
+ * scale: a level of depth costs a factor of the branching factor, a key
+ * costs one key. Halving the breadth budget and dropping one level
+ * therefore move a candidate's size by comparable amounts, which is what
+ * keeps a wide nested result (which needs a small scale for breadth) from
+ * being flattened to two levels on the way there.
+ */
+function depthForScale(baseDepth: number, scale: number): number {
+  return Math.max(MIN_SEARCH_DEPTH, baseDepth + Math.floor(Math.log2(scale)));
+}
+
+/** The base limits at one scale factor in (0, 1]. */
 function limitsForScale(base: CapLimits, scale: number): CapLimits {
   return {
     maxString: Math.floor(base.maxString * scale),
     maxArray: Math.floor(base.maxArray * scale),
     maxKeys: Math.floor(base.maxKeys * scale),
-    maxDepth: Math.max(MIN_MAX_DEPTH, Math.round(base.maxDepth * scale)),
+    maxDepth: depthForScale(base.maxDepth, scale),
   };
-}
-
-/**
- * The payload at one scale: the structural caps at `scale`, or nothing at
- * all at scale 0, which is the skeleton floor the bisection below always
- * has as a fallback.
- */
-function payloadAtScale(
-  payload: Record<string, unknown>,
-  base: CapLimits,
-  scale: number,
-): Record<string, unknown> {
-  if (scale <= 0) return {};
-  return applyCaps(payload, limitsForScale(base, scale));
 }
 
 // The fixed envelope fields: always present, and never subject to any
 // reduction. They are held apart from the payload for the whole reduction
-// and merged over it afterwards, so no cap can reach them and no payload
-// key can shadow them. This set must stay equal to the key set of `base`
-// in buildEnvelope.
+// and lead every composed envelope, so no cap can reach them and a reader
+// meets them first; a payload key named like one of them is dropped before
+// the reduction, so none can be shadowed either. This set must stay equal
+// to the key set of `base` in buildEnvelope.
 const PROTECTED_KEYS: ReadonlySet<string> = new Set([
   "tool",
   "version",
@@ -372,6 +421,25 @@ const PROTECTED_KEYS: ReadonlySet<string> = new Set([
 
 function overrunWarning(finalLength: number, maxChars: number): string {
   return `envelope is ${finalLength} characters; requested max-chars ${maxChars} could not be met`;
+}
+
+/**
+ * Warning for the one outcome a caller must never have to infer from an
+ * absence: a non-empty result that came back as the fixed fields alone,
+ * because no structure this module can build fits the bound. Without it,
+ * "the command produced no fields" and "the command's fields did not fit"
+ * look identical in the envelope. It names where the whole result is when
+ * a full-result file was written.
+ */
+function totalLossWarning(
+  maxChars: number,
+  fullResultPath: string | undefined,
+): string {
+  const where =
+    fullResultPath === undefined
+      ? "no full result was written"
+      : `full result at ${fullResultPath}`;
+  return `result reduced to the fixed fields only: no payload structure fits within max-chars ${maxChars}; ${where}`;
 }
 
 /**
@@ -413,22 +481,35 @@ function pushOverrunWarning(
 /**
  * Build the final envelope: deep-copies `extra` (the caller's object is
  * never read again after the copy, so it is never mutated by anything
- * below), merges it with the base fields (base fields win on any key
- * collision, so a subcommand's `extra` can never shadow
- * `tool`/`status`/`truncated`/`logs`/... ), and, only when the serialized
- * result exceeds `maxChars`, reduces the payload.
+ * below), composes it after the base fields (which lead the object, and
+ * which a subcommand's `extra` can never shadow: a payload key named
+ * `tool`/`status`/`truncated`/`logs`/... is dropped before anything else
+ * happens), and, only when the serialized result exceeds `maxChars`,
+ * reduces the payload.
  *
- * The reduction is deterministic and clock-free. It has exactly one knob,
- * a scale factor in [0, 1] multiplying four structural caps derived from
- * the bound: how many characters of a string, how many elements of an
- * array, how many keys of an object, and how deep a subtree is kept. One
+ * The reduction is clock-free, and deterministic given the input and this
+ * process's run id: the run id (see `currentRunId`) reaches the envelope
+ * through the full-result path in `logs` and is the only value here that
+ * differs between two processes handed the same input. Within one process,
+ * the same input always yields the same envelope, byte for byte.
+ *
+ * The search has exactly one knob, a scale factor in (0, 1] driving four
+ * structural caps derived from the bound: how many characters of a string,
+ * how many elements of an array, how many keys of an object (each the
+ * bound times the scale), and how deep a subtree is kept (one level
+ * shallower per halving of the scale, down to MIN_SEARCH_DEPTH). One
  * linear pass applies all four to the pristine payload; a bisection over
- * the scale factor, at most MAX_REDUCTION_PASSES passes in total (one at
- * scale 1, then eleven bisection steps), takes the largest scale whose
- * serialized envelope fits. Scale 0 drops the payload entirely and is
- * always available as the floor, so the search always has an answer. No
- * pass ever reads the output of another pass: every one starts from the
- * same pristine copy, which is what keeps a marker's count anchored to the
+ * the scale factor, at most MAX_REDUCTION_PASSES passes (one at scale 1,
+ * then eleven bisection steps), takes the largest scale whose serialized
+ * envelope fits. The floor of the search is not a scale at all: `best`
+ * starts as the skeleton, which fits by construction, so the search always
+ * has an answer even when no scale does. When it ends there and the
+ * payload was not empty, a depth-only fallback tries FALLBACK_DEPTHS at
+ * the narrowest breadth caps and keeps the first structure that fits, so a
+ * deep result reports its shape rather than vanishing; if even that fails,
+ * a warning says the result was reduced to the fixed fields alone. No pass
+ * ever reads the output of another pass: every one starts from the same
+ * pristine copy, which is what keeps a marker's count anchored to the
  * original and keeps siblings of the same size treated alike.
  *
  * Nothing is ever cut out of the serialized JSON string itself: what
@@ -438,9 +519,12 @@ function pushOverrunWarning(
  *
  * The fixed skeleton fields (tool, version, command, status, durationMs,
  * cwd, truncated, warnings, logs) are held apart from the payload for the
- * whole reduction and merged over it afterwards (see PROTECTED_KEYS), so
- * they always survive intact, byte for byte. Because of that floor, the
- * real invariant is:
+ * whole reduction and lead every composed envelope (see PROTECTED_KEYS),
+ * so they always survive intact, byte for byte, and a reader of the
+ * serialized result meets them before any payload field. A payload key
+ * named like one of them is dropped before the reduction, so the payload
+ * can neither shadow them nor spend a key slot on a field that would be
+ * overwritten. Because of that floor, the real invariant is:
  *
  *   serializedLength(envelope) <= max(maxChars, skeletonFloor)
  *
@@ -479,9 +563,11 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
       unusableExtra = describeSerializationFailure(err);
     }
   }
-  // A payload key named like a fixed field would be overwritten by the
-  // merge below anyway; dropping it here keeps it from consuming a slot in
-  // the object key cap and from being walked for nothing.
+  // A payload key named like a fixed field must never reach the envelope:
+  // the fixed fields lead the composition, so a later payload key of the
+  // same name would overwrite one. Dropping it here is what makes the
+  // composition order safe, and it also keeps the key from consuming a
+  // slot in the object key cap and from being walked for nothing.
   for (const key of Object.keys(payload)) {
     if (PROTECTED_KEYS.has(key)) delete payload[key];
   }
@@ -498,7 +584,12 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     warnings,
   };
 
-  let envelope: Record<string, unknown> = { ...payload, ...base };
+  // Fixed fields first, payload after: the envelope's own identity
+  // (tool, command, status, ...) is the head of the serialized object, so
+  // a reader, a log tail, or a human scanning a truncated line meets it
+  // before the result's fields. Nothing can be shadowed by the payload
+  // here, because the protected keys were dropped from it above.
+  let envelope: Record<string, unknown> = { ...base, ...payload };
 
   // The first serialization needs the same guard for a different set of
   // values: a cycle and a BigInt both survive structuredClone and then
@@ -536,15 +627,17 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   // been reduced to fit exactly, would grow it back past maxChars by
   // however many characters the path itself adds. Adding it first means
   // the reduction accounts for its size too, so the bound still holds.
+  let fullResultPath: string | undefined;
   if (input.logDir) {
     try {
       fs.mkdirSync(input.logDir, { recursive: true });
-      const fullResultPath = path.join(
+      const candidatePath = path.join(
         input.logDir,
         `result-full-${currentRunId()}.json`,
       );
-      fs.writeFileSync(fullResultPath, fullResultJson);
-      logs.push(fullResultPath);
+      fs.writeFileSync(candidatePath, fullResultJson);
+      logs.push(candidatePath);
+      fullResultPath = candidatePath;
     } catch (err) {
       // Truncation itself must not fail the command, but the failure must
       // not be silent either: name it in a warning before the reduction
@@ -566,21 +659,22 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   const effectiveMaxChars = Math.max(maxChars, skeletonFloor);
 
   const baseLimits = baseLimitsFor(effectiveMaxChars);
-  // Scale 0 (the skeleton) always fits by construction, so the search
-  // always has a fitting candidate to fall back on.
+  // The skeleton fits by construction, so initializing `best` with it is
+  // the search's floor: every candidate below is an improvement on it, and
+  // the search can never come back with nothing.
   let best = skeleton;
   let passes = 0;
 
-  const fitsAtScale = (scale: number): boolean => {
+  const fitsWithLimits = (limits: CapLimits): boolean => {
     passes++;
-    const candidate = {
-      ...payloadAtScale(payload, baseLimits, scale),
-      ...base,
-    };
+    const candidate = { ...base, ...applyCaps(payload, limits) };
     if (serializedLength(candidate) > effectiveMaxChars) return false;
     best = candidate;
     return true;
   };
+
+  const fitsAtScale = (scale: number): boolean =>
+    fitsWithLimits(limitsForScale(baseLimits, scale));
 
   if (!fitsAtScale(1)) {
     // Bisection on the scale factor. `lo` is the largest scale known to
@@ -598,7 +692,32 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
       else hi = mid;
     }
   }
+
+  // Depth-only fallback. The scale search stops at MIN_SEARCH_DEPTH, so a
+  // result whose own shape is still too big there (a deep tree whose
+  // branching, not its breadth at any one level, is what overflows) leaves
+  // `best` at the skeleton. Rather than report nothing, try the shallow
+  // depth limits explicitly at the narrowest breadth caps and keep the
+  // first structure that fits: a two-level sketch of a result says more
+  // than its absence.
+  if (best === skeleton && Object.keys(payload).length > 0) {
+    const narrowest = limitsForScale(baseLimits, MIN_SCALE);
+    for (const maxDepth of FALLBACK_DEPTHS) {
+      if (fitsWithLimits({ ...narrowest, maxDepth })) break;
+    }
+  }
   envelope = best;
+
+  // `warnings` is the very array the envelope carries (base holds it by
+  // reference, and every candidate spreads base), so appending here is
+  // visible in the returned envelope; the overrun check below then reports
+  // the true final length including this warning.
+  if (
+    Object.keys(payload).length > 0 &&
+    Object.keys(envelope).every((key) => PROTECTED_KEYS.has(key))
+  ) {
+    warnings.push(totalLossWarning(maxChars, fullResultPath));
+  }
 
   if (serializedLength(envelope) > maxChars) {
     pushOverrunWarning(envelope, maxChars);

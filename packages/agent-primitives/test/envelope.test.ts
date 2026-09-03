@@ -62,6 +62,100 @@ function stringMarkerCount(value: string): number {
   return Number(match?.[1]);
 }
 
+const DEPTH_MARKER_PREFIX = "...(subtree pruned at depth ";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+interface TreeOptions {
+  /** Levels of nesting, counted from the payload key: at `depth` the value
+   * is a leaf object, above it every level is a container. */
+  depth: number;
+  /** Children per container. */
+  arity: number;
+  /** Key of the i-th child. Longer keys matter: a key is never capped, so
+   * key length is what decides whether a level of a tree fits at all. */
+  key?: (index: number) => string;
+  leaf?: () => Record<string, unknown>;
+}
+
+/**
+ * A deep, narrow fixture: the shape no earlier fixture in this file had.
+ * Every other payload here is wide and shallow, and the breadth caps alone
+ * reduce those; a tree is reduced by the depth cap or not at all, which is
+ * how a whole nested payload came to vanish while the suite stayed green.
+ */
+function nestedTree({
+  depth,
+  arity,
+  key = (i) => `branch-${i}`,
+  leaf = () => ({ name: "leaf", covered: true, hits: 12, note: "short" }),
+}: TreeOptions): Record<string, unknown> {
+  if (depth <= 1) return leaf();
+  const node: Record<string, unknown> = {};
+  for (let i = 0; i < arity; i++) {
+    node[key(i)] = nestedTree({ depth: depth - 1, arity, key, leaf });
+  }
+  return node;
+}
+
+/**
+ * Asserts that `reduced` is an honest rendering of `original` at `depth`,
+ * and recurses, so the claim covers every surviving level rather than the
+ * first one: a pruned subtree names the depth it was pruned at, an object
+ * accounts for every key it did not keep, a cut string states how many
+ * characters went, and anything else survived verbatim.
+ */
+function assertHonestAtEveryLevel(
+  original: unknown,
+  reduced: unknown,
+  depth: number,
+): void {
+  if (typeof reduced === "string" && reduced.startsWith(DEPTH_MARKER_PREFIX)) {
+    expect(reduced).toBe(`${DEPTH_MARKER_PREFIX}${depth})`);
+    expect(isRecord(original) || Array.isArray(original)).toBe(true);
+    return;
+  }
+  if (typeof original === "string" && typeof reduced === "string") {
+    if (reduced === original) return;
+    const omitted = stringMarkerCount(reduced);
+    const suffix = `...(${omitted} more character${omitted === 1 ? "" : "s"} omitted)`;
+    expect(reduced.length - suffix.length + omitted).toBe(original.length);
+    return;
+  }
+  if (isRecord(original) && isRecord(reduced)) {
+    const kept = Object.keys(reduced).filter((k) => k !== "...");
+    const omitted = "..." in reduced ? objectMarkerCount(reduced["..."]) : 0;
+    expect(kept.length + omitted).toBe(Object.keys(original).length);
+    for (const k of kept) {
+      expect(Object.keys(original)).toContain(k);
+      assertHonestAtEveryLevel(original[k], reduced[k], depth + 1);
+    }
+    return;
+  }
+  expect(reduced).toEqual(original);
+}
+
+/** Deepest level at which `value` is still a container, counting `value`
+ * itself as `level`; 0 when it is not a container at all. */
+function deepestContainerLevel(value: unknown, level: number): number {
+  if (!isRecord(value)) return level - 1;
+  let deepest = level;
+  for (const [k, child] of Object.entries(value)) {
+    if (k === "...") continue;
+    deepest = Math.max(deepest, deepestContainerLevel(child, level + 1));
+  }
+  return deepest;
+}
+
+/** The envelope's keys that are not fixed fields. */
+function payloadKeysOf(envelope: Record<string, unknown>): string[] {
+  return Object.keys(envelope).filter((k) => !FIXED_FIELDS.includes(k));
+}
+
+const TOTAL_LOSS_PREFIX = "result reduced to the fixed fields only";
+
 describe("statusClass / exitCodeForStatus", () => {
   it("maps ok class statuses to exit 0", () => {
     expect(statusClass("ok")).toBe("ok");
@@ -222,6 +316,336 @@ describe("buildEnvelope: granular container trimming", () => {
     };
     expect(first.path).toBe(keptKeys[0]);
     expect(["covered", "partial"]).toContain(first.status);
+  });
+});
+
+describe("buildEnvelope: deeply nested results", () => {
+  const maxChars = 8000;
+
+  it("keeps four levels of a 3-ary depth-6 tree, marks every surviving level honestly, and uses at least half the budget", () => {
+    const logDir = makeTmpDir();
+    const tree = nestedTree({ depth: 6, arity: 3 });
+    const summary = { nodes: 364, leaves: 243 };
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { tree, summary },
+      maxChars,
+      logDir,
+    });
+    const length = JSON.stringify(envelope).length;
+    expect(length).toBeLessThanOrEqual(maxChars);
+    expect(envelope.truncated).toBe(true);
+    // The regression this fixture pins: a nested payload used to reduce to
+    // the fixed fields and nothing else, silently.
+    expect(payloadKeysOf(envelope)).toEqual(["tree", "summary"]);
+    expect(envelope.summary).toEqual(summary);
+    expect(deepestContainerLevel(envelope.tree, 1)).toBe(4);
+    assertHonestAtEveryLevel(tree, envelope.tree, 1);
+    // A bounded envelope that spends a tenth of the budget is bounded and
+    // useless: the caller asked for 8000 characters of evidence.
+    expect(length).toBeGreaterThanOrEqual(maxChars * 0.5);
+    expect(envelope.warnings).toEqual([]);
+  });
+
+  it("keeps the surviving keys of a nested coverage map instead of dropping the map whole", () => {
+    const logDir = makeTmpDir();
+    const coverage = nestedTree({
+      depth: 5,
+      arity: 3,
+      key: (i) => `src/module-${i}`,
+      leaf: () => ({
+        path: "src/services/billing/invoices/renderer-and-mailer.ts",
+        status: "partial",
+        missing: "12-19, 33, 47-51, 88-96, 120-134, 141-149, 158-176, 201",
+        covered: "41 of 96 statements",
+      }),
+    });
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { coverage },
+      maxChars,
+      logDir,
+    });
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    expect(payloadKeysOf(envelope)).toEqual(["coverage"]);
+    // Every module of the map is still named, at every level that survived.
+    expect(Object.keys(envelope.coverage as Record<string, unknown>)).toEqual(
+      Object.keys(coverage),
+    );
+    expect(deepestContainerLevel(envelope.coverage, 1)).toBe(4);
+    assertHonestAtEveryLevel(coverage, envelope.coverage, 1);
+  });
+
+  it("falls back to a shallower structure when no scale fits at all, instead of returning the bare skeleton", () => {
+    const logDir = makeTmpDir();
+    // An object key is never capped, so a tree keyed by long paths is
+    // still over the bound at the narrowest breadth the scale search can
+    // reach. Only the shallower depth limits below the search's own floor
+    // fit, and those are exactly what the depth-only fallback tries.
+    const tree = nestedTree({
+      depth: 6,
+      arity: 3,
+      key: (i) => `packages/agent-primitives/src/generated/module-${i}`,
+    });
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { tree },
+      maxChars,
+      logDir,
+    });
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    expect(payloadKeysOf(envelope)).toEqual(["tree"]);
+    expect(isRecord(envelope.tree)).toBe(true);
+    expect(deepestContainerLevel(envelope.tree, 1)).toBe(3);
+    assertHonestAtEveryLevel(tree, envelope.tree, 1);
+    expect(
+      (envelope.warnings as string[]).some((w) =>
+        w.startsWith(TOTAL_LOSS_PREFIX),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("buildEnvelope: a payload that fits nowhere", () => {
+  const cases = [
+    {
+      name: "a small result at a bound below the skeleton's own size",
+      extra: { tools: Array.from({ length: 20 }, (_, i) => ({ i })) },
+      maxChars: 10,
+      expectPayloadKeys: false,
+    },
+    {
+      name: "keys too long to keep even one of",
+      extra: Object.fromEntries(
+        Array.from({ length: 5 }, (_, i) => [`${"K".repeat(4000)}${i}`, i]),
+      ),
+      maxChars: 8000,
+      expectPayloadKeys: false,
+    },
+    {
+      name: "a deep tree the fallback can still sketch",
+      extra: {
+        tree: nestedTree({
+          depth: 6,
+          arity: 3,
+          key: (i) => `packages/agent-primitives/src/generated/module-${i}`,
+        }),
+      },
+      maxChars: 8000,
+      expectPayloadKeys: true,
+    },
+    {
+      name: "a wide result the scale search reduces normally",
+      extra: Object.fromEntries(
+        Array.from({ length: 5000 }, (_, i) => [`k${i}`, "v".repeat(20)]),
+      ),
+      maxChars: 8000,
+      expectPayloadKeys: true,
+    },
+  ];
+
+  it("warns exactly when a non-empty payload came back with no payload key at all", () => {
+    for (const testCase of cases) {
+      const logDir = makeTmpDir();
+      const { envelope } = buildEnvelope({
+        version: "0.1.0",
+        command: "verify",
+        status: "fail",
+        durationMs: 10,
+        cwd: "/tmp",
+        extra: testCase.extra,
+        maxChars: testCase.maxChars,
+        logDir,
+      });
+      const keptAnything = payloadKeysOf(envelope).length > 0;
+      expect(keptAnything, testCase.name).toBe(testCase.expectPayloadKeys);
+      const warned = (envelope.warnings as string[]).some((w) =>
+        w.startsWith(TOTAL_LOSS_PREFIX),
+      );
+      expect(warned, testCase.name).toBe(!keptAnything);
+    }
+  });
+
+  it("points the warning at the full result on disk, and says so when none was written", () => {
+    const logDir = makeTmpDir();
+    const extra = { tools: Array.from({ length: 20 }, (_, i) => ({ i })) };
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "doctor",
+      status: "ok",
+      durationMs: 5,
+      cwd: "/tmp",
+      extra,
+      maxChars: 10,
+      logDir,
+    });
+    const logs = envelope.logs as string[];
+    expect(logs.length).toBe(1);
+    const warning = (envelope.warnings as string[]).find((w) =>
+      w.startsWith(TOTAL_LOSS_PREFIX),
+    );
+    expect(warning).toBe(
+      `result reduced to the fixed fields only: no payload structure fits within max-chars 10; full result at ${logs[0]}`,
+    );
+    expect(fs.existsSync(logs[0])).toBe(true);
+
+    const withoutLogDir = buildEnvelope({
+      version: "0.1.0",
+      command: "doctor",
+      status: "ok",
+      durationMs: 5,
+      cwd: "/tmp",
+      extra,
+      maxChars: 10,
+    }).envelope;
+    expect((withoutLogDir.warnings as string[])[0]).toBe(
+      "result reduced to the fixed fields only: no payload structure fits within max-chars 10; no full result was written",
+    );
+  });
+
+  it("does not warn when there was no payload to lose", () => {
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "doctor",
+      status: "ok",
+      durationMs: 5,
+      cwd: "/tmp",
+      maxChars: 10,
+    });
+    expect(payloadKeysOf(envelope)).toEqual([]);
+    expect(
+      (envelope.warnings as string[]).some((w) =>
+        w.startsWith(TOTAL_LOSS_PREFIX),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("buildEnvelope: an own __proto__ key in a result", () => {
+  it("keeps it as an own property, leaves the prototype alone, and counts it in the marker arithmetic", () => {
+    const logDir = makeTmpDir();
+    const parsed = JSON.parse('{"__proto__":{"x":1},"a":1}') as Record<
+      string,
+      unknown
+    >;
+    // The fixture really is the dangerous shape: `JSON.parse` produces an
+    // own `__proto__` data property, which plain assignment would turn
+    // into a prototype reassignment on the rebuilt object.
+    expect(Object.getOwnPropertyNames(parsed)).toEqual(["__proto__", "a"]);
+    expect(Object.getPrototypeOf(parsed)).toBe(Object.prototype);
+
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { data: parsed, filler: "x".repeat(50_000) },
+      maxChars: 8000,
+      logDir,
+    });
+    expect(envelope.truncated).toBe(true);
+    const data = envelope.data as Record<string, unknown>;
+    expect(Object.getPrototypeOf(data)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(envelope)).toBe(Object.prototype);
+    const own = Object.getOwnPropertyNames(data);
+    const kept = own.filter((k) => k !== "...");
+    const omitted = own.includes("...") ? objectMarkerCount(data["..."]) : 0;
+    expect(kept).toEqual(["__proto__", "a"]);
+    expect(kept.length + omitted).toBe(
+      Object.getOwnPropertyNames(parsed).length,
+    );
+    expect(Object.getOwnPropertyDescriptor(data, "__proto__")?.value).toEqual({
+      x: 1,
+    });
+    expect(JSON.stringify(data)).toBe('{"__proto__":{"x":1},"a":1}');
+  });
+});
+
+describe("applyCaps: a cap that would grow a value leaves it alone", () => {
+  it("returns a short string whole when its own marker would be longer than it", () => {
+    const limits: CapLimits = {
+      maxString: 3,
+      maxArray: 3,
+      maxKeys: 3,
+      maxDepth: 4,
+    };
+    expect(applyCaps({ s: "abcdef" }, limits)).toEqual({ s: "abcdef" });
+  });
+
+  it("keeps tiny values whole through a full reduction, so nothing in the envelope grew", () => {
+    const value = "abcd";
+    const extra = Object.fromEntries(
+      Array.from({ length: 50 }, (_, i) => [
+        `field-${String(i).padStart(2, "0")}-${"n".repeat(80)}`,
+        value,
+      ]),
+    );
+    const maxChars = 500;
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra,
+      maxChars,
+    });
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    const kept = payloadKeysOf(envelope).filter((k) => k !== "...");
+    expect(kept.length).toBeGreaterThan(0);
+    // The kept-key count is the settled `maxKeys`, and `maxString` is the
+    // same number: fewer kept keys than the value is long means the string
+    // cap was under it and the shrink guard is what kept it whole.
+    expect(kept.length).toBeLessThan(value.length);
+    for (const key of kept) expect(envelope[key]).toBe(value);
+  });
+});
+
+describe("buildEnvelope: serialization order", () => {
+  it("puts the fixed fields first, ahead of every payload field, truncated or not", () => {
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "doctor",
+      status: "ok",
+      durationMs: 5,
+      cwd: "/tmp",
+      extra: { alpha: 1, zebra: 2 },
+    });
+    expect(Object.keys(envelope)).toEqual([...FIXED_FIELDS, "alpha", "zebra"]);
+    // A reader of the raw line, or of a head of it, meets the envelope's
+    // own identity before the result's fields.
+    expect(
+      JSON.stringify(envelope).startsWith('{"tool":"agent-primitives"'),
+    ).toBe(true);
+
+    const logDir = makeTmpDir();
+    const reduced = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { alpha: "a".repeat(50_000), zebra: 2 },
+      maxChars: 8000,
+      logDir,
+    }).envelope;
+    expect(reduced.truncated).toBe(true);
+    expect(Object.keys(reduced).slice(0, FIXED_FIELDS.length)).toEqual(
+      FIXED_FIELDS,
+    );
   });
 });
 
@@ -601,8 +1025,12 @@ describe("buildEnvelope: overrun warning names the true final length", () => {
     // The warning's own number is part of the length it reports, so the
     // sizes where the number gains a digit are exactly the ones an
     // approximate answer gets wrong. The cwd is a fixed field, never cut,
-    // so its length drives the final size one character at a time.
-    for (let cwdLength = 780; cwdLength <= 800; cwdLength++) {
+    // so its length drives the final size one character at a time. The
+    // range is where the crossing sits for this envelope: everything else
+    // the envelope carries at this bound, the total-loss warning included,
+    // shifts it, and the final assertion below fails loudly if it moved
+    // out of range rather than passing on a sweep that never crosses.
+    for (let cwdLength = 660; cwdLength <= 680; cwdLength++) {
       const { envelope } = buildEnvelope({
         version: "0.1.0",
         command: "doctor",

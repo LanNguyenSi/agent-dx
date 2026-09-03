@@ -44,23 +44,30 @@ Every subcommand accepts:
   bound (how many characters of a string, how many elements of an array,
   how many keys of an object, and how deep a subtree is kept) are applied
   in one pass over the result, and a bounded search over a single scale
-  factor multiplying all four picks the largest setting that fits. Every
+  factor driving all four picks the largest setting that fits. Every
   cut is marked in place with an honest count: a trailing array element,
   a `...` key in an object, a suffix on a string, a placeholder for a
   pruned subtree, each naming how much of the original is missing. Equally
   sized siblings are therefore cut alike, and a large collection is
-  trimmed entry by entry instead of vanishing whole. The full untruncated
+  trimmed entry by entry rather than deleted whole. Depth is part of the
+  search as well, so a result too deeply nested to fit at any width comes
+  back as a shallower sketch of itself, each pruned subtree naming the
+  depth it was cut at, instead of vanishing; when not even the shallowest
+  structure fits, a warning says the result was reduced to the fixed
+  fields alone and points at the full result on disk. The full untruncated
   result is written to the log directory and its path returned in `logs`.
   The reduction reads no clock and does no work proportional to how far
-  over the bound a result is, so the same result always yields the same
-  envelope. A handful of fixed fields (`tool`, `version`, `command`,
-  `status`, `durationMs`, `cwd`, `truncated`, `warnings`, `logs`) are held
-  out of it entirely, so the real bound is `max(-m, size of those fixed
-  fields)`, not `-m` unconditionally; when even that cannot be honored, a
-  warning names the envelope's true final length instead of silently
-  exceeding what was asked for. `-f text` output is bounded the same way
-  and never exceeds `-m`: its truncation marker names the full length, and
-  below the marker's own size the marker itself is cut short.
+  over the bound a result is: within one process the same result always
+  yields the same envelope, and between processes the only thing that
+  differs is the run id in the full-result path. A handful of fixed fields
+  (`tool`, `version`, `command`, `status`, `durationMs`, `cwd`,
+  `truncated`, `warnings`, `logs`) are held out of the reduction entirely
+  and lead the serialized object, so the real bound is `max(-m, size of
+  those fixed fields)`, not `-m` unconditionally; when even that cannot be
+  honored, a warning names the envelope's true final length instead of
+  silently exceeding what was asked for. `-f text` output is bounded the
+  same way and never exceeds `-m`: its truncation marker names the full
+  length, and below the marker's own size the marker itself is cut short.
 - `-l, --log-dir <dir>`: directory for logs and full (untruncated)
   results (defaults to `$AGENT_PRIMITIVES_LOG_DIR`, or a fresh directory
   under the OS temp dir otherwise).
@@ -94,7 +101,13 @@ than doing nothing silently or claiming success.
 ## Output shape
 
 Every result carries a common envelope (`tool`, `version`, `command`,
-`status`, `durationMs`, `cwd`, `truncated`, `logs`, `warnings`) alongside
-subcommand-specific fields. `status` classes into `ok` (exit 0), `finding`
-(exit 1), or `cannot-conclude` (exit 2, includes `usage_error`), so a
-caller can gate on the exit code alone without parsing the body.
+`status`, `durationMs`, `cwd`, `truncated`, `logs`, `warnings`) first, in
+that order, followed by the subcommand-specific fields. `status` classes
+into `ok` (exit 0), `finding` (exit 1), or `cannot-conclude` (exit 2,
+includes `usage_error`), so a caller can gate on the exit code alone
+without parsing the body.
+
+The same machinery is importable for callers building their own bounded
+output: `buildEnvelope` produces the whole envelope, and `applyCaps`
+applies the four structural caps (`CapLimits`) to a plain object in one
+pass, returning a new structure with every cut marked in place.
