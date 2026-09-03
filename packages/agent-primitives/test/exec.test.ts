@@ -271,6 +271,11 @@ describe("execCommand", () => {
     expect(at60.stdoutTail.split("\n").filter((l) => l !== "")).toHaveLength(
       60,
     );
+    // The kept tail is the buffer itself at the bound: every real line
+    // present, in order, and the trailing newline the command printed
+    // still there (it is set aside for the line count, then put back).
+    expect(at60.stdoutTail.startsWith("line 0\n")).toBe(true);
+    expect(at60.stdoutTail.endsWith("line 59\n")).toBe(true);
 
     const at61 = await execCommand(printLines(61, "log"), { logDir });
     expect(at61.exitCode).toBe(0);
