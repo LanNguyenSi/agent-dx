@@ -140,9 +140,30 @@ describe("init", () => {
     const outside = makeTmpDir();
     fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
     fs.symlinkSync(outside, path.join(dir, ".claude", "skills"));
+    await expect(init({ targetDir: dir, content: CONTENT_A })).rejects.toThrow(
+      UsageError,
+    );
+    expect(
+      fs.existsSync(path.join(outside, "agent-primitives", "SKILL.md")),
+    ).toBe(false);
+  });
+
+  it("refuses the whole run, writing nothing, when only one of several harnesses escapes", async () => {
+    const dir = makeTmpDir();
+    const outside = makeTmpDir();
+    // codex's own path (.agents/skills/...) escapes; claude's does not.
+    fs.mkdirSync(path.join(dir, ".agents"), { recursive: true });
+    fs.symlinkSync(outside, path.join(dir, ".agents", "skills"));
     await expect(
-      init({ targetDir: dir, content: CONTENT_A }),
+      init({
+        targetDir: dir,
+        content: CONTENT_A,
+        harnesses: ["claude", "codex"],
+      }),
     ).rejects.toThrow(UsageError);
+    expect(
+      fs.existsSync(path.join(dir, ".claude", "skills", "agent-primitives")),
+    ).toBe(false);
     expect(
       fs.existsSync(path.join(outside, "agent-primitives", "SKILL.md")),
     ).toBe(false);

@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `init` subcommand: installs the packaged `assets/skill/SKILL.md` into
+  one or more harnesses' skill directories (`-H claude,codex,opencode`,
+  or the single value `all`; default `claude`), writing
+  `<target>/.claude/skills/agent-primitives/SKILL.md`,
+  `<target>/.agents/skills/agent-primitives/SKILL.md`, and
+  `<target>/.opencode/skills/agent-primitives/SKILL.md` respectively.
+  Mirrors a standard kit installer's write-if-new-or-unedited semantics
+  without importing that internal module: a target that does not exist
+  yet, or exists with byte-identical content, is written or reported
+  `unchanged`; a target with different content is `conflicted`, exit
+  `1`, and left untouched, unless `--force`, which overwrites it and
+  reports `written`. Every requested harness's target path is resolved
+  and checked against `--target-dir` before any file is written, so an
+  escape on one harness (for example a pre-existing symlink) refuses the
+  whole run rather than leaving other harnesses partially written.
+  `init` never writes under `.claude/agents/`, which belongs to a
+  different installer. The skill document itself teaches the search,
+  verify, probe, and doctor conventions to an agent working in the
+  target repository. Evidence for the terrain claims and design
+  decisions behind `probe`, `verify`, `doctor`, and `init` lives in the
+  pandora workspace run `2026-09-03-agent-tools-kit` and its memory
+  record; this package's own docs name no run, task, or memory
+  identifiers anywhere else.
 - `verify` subcommand core: resolves each named check (`-x` override wins,
   else `package.json` `scripts[name]` as `npm run <name> --silent`, else
   `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`

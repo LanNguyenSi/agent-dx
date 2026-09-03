@@ -1,12 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "../envelope.js";
-import { isPathContained, resolveDeepestExisting } from "../probe/containment.js";
+import {
+  isPathContained,
+  resolveDeepestExisting,
+} from "../probe/containment.js";
 
 /** A harness whose skill directory `init` can write into. */
 export type Harness = "claude" | "codex" | "opencode";
 
-export const ALL_HARNESSES: readonly Harness[] = ["claude", "codex", "opencode"];
+export const ALL_HARNESSES: readonly Harness[] = [
+  "claude",
+  "codex",
+  "opencode",
+];
 
 /**
  * Path, relative to the target directory, of the skill file for each
@@ -67,35 +74,18 @@ function readPackagedSkill(): string {
 }
 
 /**
- * Writes `content` to `<targetDir>/<HARNESS_REL_PATH[harness]>`, mirroring
- * the write-if-new-or-identical / conflicted-otherwise semantics of
- * orchestrator-workflow's own `installFile` (not imported: that module is
- * internal to its own package): a path that does not exist yet, or exists
- * with byte-identical content, is written or reported unchanged with no
- * further action; a path that exists with different content is reported
- * `conflicted` unless `force` is set, in which case it is overwritten and
- * reported `written` (not `updated`: `init`'s own status vocabulary has no
- * third state, per the acceptance contract).
- *
- * Refuses a resolved path that would land outside `targetDir`: both the
- * target directory and the final file path are resolved to their deepest
- * existing real path (walking up past any segment that does not exist yet,
- * such as the harness's own skill subdirectory on a first run) before the
- * containment check, so a pre-existing symlink anywhere along the way
- * (e.g. `.claude` itself pointing outside `targetDir`) cannot redirect the
- * write, even though the final `SKILL.md` segment itself never exists
- * beforehand on a fresh install.
+ * Resolves `harness`'s target file under `absTargetDir` and refuses it when
+ * it would land outside that root: both the target directory and the final
+ * file path are resolved to their deepest existing real path (walking up
+ * past any segment that does not exist yet, such as the harness's own skill
+ * subdirectory on a first run) before the containment check, so a
+ * pre-existing symlink anywhere along the way (e.g. `.claude` itself
+ * pointing outside `targetDir`) cannot redirect the write, even though the
+ * final `SKILL.md` segment itself never exists beforehand on a fresh
+ * install.
  */
-function writeTarget(
-  targetDir: string,
-  harness: Harness,
-  content: string,
-  force: boolean,
-): InitTargetResult {
-  const relPath = HARNESS_REL_PATH[harness];
-  const absTargetDir = path.resolve(targetDir);
-  const filePath = path.join(absTargetDir, relPath);
-
+function resolveTargetPath(absTargetDir: string, harness: Harness): string {
+  const filePath = path.join(absTargetDir, HARNESS_REL_PATH[harness]);
   const resolvedRoot = resolveDeepestExisting(absTargetDir);
   const resolvedFile = resolveDeepestExisting(filePath);
   if (!isPathContained(resolvedRoot, resolvedFile)) {
@@ -104,7 +94,26 @@ function writeTarget(
         `(${absTargetDir}): ${filePath}`,
     );
   }
+  return filePath;
+}
 
+/**
+ * Writes `content` to `filePath`, mirroring the write-if-new-or-identical /
+ * conflicted-otherwise semantics of orchestrator-workflow's own
+ * `installFile` (not imported: that module is internal to its own
+ * package): a path that does not exist yet, or exists with byte-identical
+ * content, is written or reported unchanged with no further action; a path
+ * that exists with different content is reported `conflicted` unless
+ * `force` is set, in which case it is overwritten and reported `written`
+ * (not `updated`: `init`'s own status vocabulary has no third state, per
+ * the acceptance contract).
+ */
+function writeOne(
+  harness: Harness,
+  filePath: string,
+  content: string,
+  force: boolean,
+): InitTargetResult {
   if (!fs.existsSync(filePath)) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, content, "utf8");
@@ -123,23 +132,32 @@ function writeTarget(
 
 /**
  * Installs the packaged `assets/skill/SKILL.md` into one or more harnesses'
- * skill directories under `targetDir`. See `writeTarget` for the per-file
- * semantics; the top-level `status` here is the worst of the per-target
- * statuses in the same order the envelope's exit-code classes are ranked
- * (`conflicted` a finding, `written`/`unchanged` ok), so a caller can gate
- * on the aggregate result alone.
+ * skill directories under `targetDir`. Every requested harness's target
+ * path is resolved and containment-checked up front, before any file is
+ * written: an escape on, say, the third of three requested harnesses is
+ * therefore refused without leaving the first two written, rather than
+ * leaving the run partially applied. The top-level `status` is the worst
+ * of the per-target statuses (`conflicted` a finding, `written`/`unchanged`
+ * ok), so a caller can gate on the aggregate result alone.
  */
 export async function init(options: InitOptions = {}): Promise<InitResult> {
   const harnesses = options.harnesses ?? ["claude"];
-  const targetDir = options.targetDir ?? process.cwd();
+  const absTargetDir = path.resolve(options.targetDir ?? process.cwd());
   const force = options.force ?? false;
   const content = options.content ?? readPackagedSkill();
 
-  const targets = harnesses.map((harness) =>
-    writeTarget(targetDir, harness, content, force),
+  const filePaths = harnesses.map((harness) => ({
+    harness,
+    filePath: resolveTargetPath(absTargetDir, harness),
+  }));
+
+  const targets = filePaths.map(({ harness, filePath }) =>
+    writeOne(harness, filePath, content, force),
   );
 
-  const status: InitTargetStatus = targets.some((t) => t.status === "conflicted")
+  const status: InitTargetStatus = targets.some(
+    (t) => t.status === "conflicted",
+  )
     ? "conflicted"
     : targets.some((t) => t.status === "written")
       ? "written"

@@ -97,7 +97,9 @@ function parseList(value: string): string[] {
 function parseHarnessList(value: string): Harness[] {
   const raw = parseList(value);
   if (raw.length === 0) {
-    throw new InvalidArgumentError("-H/--harness: at least one harness is required");
+    throw new InvalidArgumentError(
+      "-H/--harness: at least one harness is required",
+    );
   }
   if (raw.includes("all")) {
     if (raw.length !== 1) {

@@ -1480,13 +1480,7 @@ describe("cli: init", () => {
     ).toBe(true);
     expect(
       fs.existsSync(
-        path.join(
-          dir,
-          ".opencode",
-          "skills",
-          "agent-primitives",
-          "SKILL.md",
-        ),
+        path.join(dir, ".opencode", "skills", "agent-primitives", "SKILL.md"),
       ),
     ).toBe(true);
   });
