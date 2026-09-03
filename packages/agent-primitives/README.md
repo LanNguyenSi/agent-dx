@@ -85,7 +85,15 @@ need a rebuild step first). Version captures share one aggregate deadline
 (default 3000ms) across every tool combined; once it is spent, remaining
 tools are still checked for presence on `PATH`, but their `--version`
 capture is skipped rather than each paying its own timeout, and one
-warning names how many were skipped.
+warning names how many were skipped. A `git-version` check reads the
+installed git against what `probe -i worktree` relies on: it is ok from
+git 2.36 on, and below that a warning names what the probe does on that
+git (below 2.35 the worktree sync cannot run at all; between 2.35 and
+2.36 the worktree listing falls back to its newline-separated form; see
+the `probe` section). The `stale-worktree` check reads the same
+listing, with the same fallback; when the listing cannot run in any
+form, a warning says that a leftover registered worktree cannot be
+reported, rather than the check reading as clean.
 
 ```bash
 agent-primitives doctor
@@ -252,6 +260,19 @@ array with no shell involved, the same as `-p`'s patch path: a `--file`,
 `--log-dir`, or `--link` value containing `$(...)` or a backtick reaches
 `git` as one opaque argument, never as something a shell could expand.
 
+`-i worktree` needs git 2.35 or newer: the sync relies on `git apply
+--allow-empty`, which an older git rejects, so the run ends in
+`inconclusive`/`worktree_sync_failed`, never a verdict (`-i inplace` has
+no such floor). From git 2.36 on, the worktree listing behind the
+removal, the leftover recovery, and `doctor` runs as `git worktree list
+--porcelain -z`; on an older git it falls back to the newline-separated
+`--porcelain` form, and a worktree path containing a newline is then
+reported as unparseable rather than misread. `git worktree remove`
+itself dates from git 2.17 and `git worktree list --porcelain` from
+2.7; 2.24 is the oldest release the fallback listing, the removal, and
+the recovery were checked against. `agent-primitives doctor` reports
+the installed git against both floors (see its `git-version` check).
+
 Each run gets its own scratch subdirectory under `--log-dir`
 (`<log-dir>/wt-<random>/`), never a fixed name reused across separate
 invocations that happen to share `--log-dir`: a fixed name plus a
@@ -320,12 +341,17 @@ leaves behind, which a single `--force` refuses and `git worktree
 prune` skips), then `git worktree prune`; the outcome is then checked
 against `git worktree list` and the disk rather than read off an exit
 code, and a removal that did not take keeps the repository-keyed marker
-and adds a warning naming the path and the manual command. The one
-state git cannot recover from on its own, an entry the add left
-half-written (its `commondir` still empty, which makes every `git
-worktree` command in the repository fail), is cleared by removing that
-entry from the repository's `worktrees` administrative directory, and
-only when it names the probe's own worktree. That marker
+and adds a warning naming the path and the manual command. When that
+listing cannot run in any form, the registry is unknown rather than
+"still registered": the removal is judged by the disk and by `git
+worktree remove`'s own exit status, a warning reports it as done but
+unverified, and the marker is cleared, so a git that cannot list never
+turns a removal that took into a `stale_worktree` on every later run.
+The one state git cannot recover from on its own, an entry the add
+left half-written (its `commondir` present but still empty, which
+makes every `git worktree` command in the repository fail), is cleared
+by removing that entry from the repository's `worktrees` administrative
+directory, and only when it names the probe's own worktree. That marker
 is written before `git worktree add` runs and records the `--log-dir`,
 so a `SIGKILL` or a crash at any point from there on leaves it, along
 with whatever git had registered by then, and `agent-primitives doctor`
@@ -334,13 +360,23 @@ the manual command. `doctor` reads git's own `git worktree list` as
 well as the marker, so a marker deleted by hand still leaves the
 registration reported, and the next `probe -i worktree` run on the same
 repository removes every such leftover before it starts (a warning
-names `recovered_stale_worktree`), marker or not. Only a path of the
-probe's own scratch shape (`<log-dir>/wt-<id>/wt`) that git reports as
-a worktree of the repository, or that sits under the `--log-dir` the
-marker recorded, is ever deleted; a marker naming anything else, or a
-leftover that cannot be removed, stops the run with `reason:
-"stale_worktree"`, keeps the marker, and names the path and either the
-manual command or the marker file to delete. The lock for `worktree`
+names `recovered_stale_worktree`), marker or not. Each scratch
+directory also carries an `owner.json` recording the pid of the probe
+that created it: a registered scratch worktree whose owner is still
+alive is a probe in flight under another `AGENT_PRIMITIVES_LOCK_DIR`
+(the lock serializes probes within one lock directory only), which the
+recovery and `doctor` name in a warning and leave alone. Only a path of
+the probe's own scratch shape (`<log-dir>/wt-<uuid>/wt`, the uuid in
+its 8-4-4-4-12 hex layout) that git reports as a worktree of the
+repository, or that sits under the recovering run's own `--log-dir`, is
+ever deleted; the `--log-dir` a marker recorded is never the directory
+a marker's path is checked against, since a marker that supplied both
+the path and the root would certify itself, and a path whose
+registration could not be checked is deleted only under the run's own
+`--log-dir` as well. A marker naming anything else, or a leftover that
+cannot be removed, stops the run with `reason: "stale_worktree"`,
+keeps the marker, and names the path and either the manual command or
+the marker file to delete. The lock for `worktree`
 is keyed on the repository root rather than on `--file` (two probes on
 the same repository serialize, which also covers the shared, linked
 node_modules caches, and matches `-i inplace`'s own lock key whenever

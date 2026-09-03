@@ -10,7 +10,11 @@ import {
   resolveDeepestExisting,
 } from "../probe/containment.js";
 import {
+  GIT_MIN_VERSION_WORKTREE_LIST_Z,
+  GIT_MIN_VERSION_WORKTREE_SYNC,
   isScratchWorktreePath,
+  liveForeignOwner,
+  parseWorktreeListLines,
   parseWorktreeListZ,
 } from "../probe/isolation.js";
 
@@ -145,6 +149,94 @@ function captureVersion(binPath: string, timeoutMs: number): VersionCapture {
   return { version: out.split("\n")[0]?.trim(), timedOut: false };
 }
 
+export interface GitVersion {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+/** The numeric version in a `git --version` line (`git version 2.36.1`,
+ * `git version 2.50.1 (Apple Git-155)`), or undefined when the line
+ * does not carry one. Exported for the tests. */
+export function parseGitVersion(line: string): GitVersion | undefined {
+  const m = /^git version (\d+)\.(\d+)(?:\.(\d+))?/.exec(line.trim());
+  if (m === null) return undefined;
+  return {
+    major: Number(m[1]),
+    minor: Number(m[2]),
+    patch: m[3] === undefined ? 0 : Number(m[3]),
+  };
+}
+
+/** True when `version` is older than the `major.minor` in `minimum`
+ * (a patch level never decides). */
+function isGitOlderThan(version: GitVersion, minimum: string): boolean {
+  const [major, minor] = minimum.split(".").map(Number);
+  return (
+    version.major < major || (version.major === major && version.minor < minor)
+  );
+}
+
+/** The `git-version` check: git's version against what `probe -i
+ * worktree` relies on (see the two minimums in `isolation.ts`). `ok`
+ * only for a version at or above `GIT_MIN_VERSION_WORKTREE_LIST_Z`;
+ * every other state names what the probe does on this git. Exported for
+ * the tests. */
+export function gitVersionCheck(
+  gitPath: string | undefined,
+  versionLine: string | undefined,
+): DoctorCheckItem {
+  const needs = `probe -i worktree needs git ${GIT_MIN_VERSION_WORKTREE_SYNC} or newer`;
+  if (gitPath === undefined) {
+    return {
+      name: "git-version",
+      ok: false,
+      detail: `git not found on PATH; ${needs}`,
+    };
+  }
+  const version =
+    versionLine === undefined ? undefined : parseGitVersion(versionLine);
+  if (version === undefined) {
+    return {
+      name: "git-version",
+      ok: false,
+      detail:
+        `could not determine the version of git at ${gitPath}` +
+        (versionLine === undefined ? "" : ` from "${versionLine}"`) +
+        `; ${needs}`,
+    };
+  }
+  const v = `${version.major}.${version.minor}.${version.patch}`;
+  if (isGitOlderThan(version, GIT_MIN_VERSION_WORKTREE_SYNC)) {
+    return {
+      name: "git-version",
+      ok: false,
+      detail:
+        `git ${v} at ${gitPath} is older than ${GIT_MIN_VERSION_WORKTREE_SYNC}: ` +
+        `probe -i worktree cannot sync the working tree on it (git apply ` +
+        `--allow-empty is unavailable) and reports worktree_sync_failed; ` +
+        `use -i inplace; below ${GIT_MIN_VERSION_WORKTREE_LIST_Z} the worktree ` +
+        `listing also falls back to the newline-separated form`,
+    };
+  }
+  if (isGitOlderThan(version, GIT_MIN_VERSION_WORKTREE_LIST_Z)) {
+    return {
+      name: "git-version",
+      ok: false,
+      detail:
+        `git ${v} at ${gitPath} is older than ${GIT_MIN_VERSION_WORKTREE_LIST_Z}: ` +
+        `git worktree list --porcelain -z is unavailable, so the worktree ` +
+        `listing falls back to the newline-separated form, and a worktree ` +
+        `path containing a newline is then reported as unparseable`,
+    };
+  }
+  return {
+    name: "git-version",
+    ok: true,
+    detail: `git ${v} at ${gitPath} meets the ${GIT_MIN_VERSION_WORKTREE_LIST_Z} minimum for probe -i worktree`,
+  };
+}
+
 /** Names that must be a plain binary basename, never a path segment,
  * so a `-r`/`-o` entry can never escape PATH via `../` traversal. */
 function assertPlainBinaryName(name: string, flag: string): void {
@@ -270,6 +362,26 @@ export async function doctor(
 
   const checks: DoctorCheckItem[] = [];
 
+  // git's own version, from the tool loop when git was among the tools
+  // (the usual case) and from one capture of its own otherwise, so the
+  // check below and the registry listing further down never depend on
+  // which `-r`/`-o` lists the caller passed.
+  const gitTool = tools.find((t) => t.name === "git");
+  let gitPath = gitTool?.path;
+  let gitVersionLine = gitTool?.version;
+  if (gitTool === undefined) {
+    const hit = findOnPath(["git"], dirs);
+    if (hit !== undefined) {
+      gitPath = hit.path;
+      gitVersionLine = captureVersion(hit.path, versionTimeoutMs).version;
+    }
+  }
+  const gitVersion = gitVersionCheck(gitPath, gitVersionLine);
+  checks.push(gitVersion);
+  if (!gitVersion.ok && gitPath !== undefined) {
+    warnings.push(gitVersion.detail ?? "git is older than the minimum");
+  }
+
   const nodeModulesPresent = fs.existsSync(path.join(cwd, "node_modules"));
   checks.push({
     name: "node_modules",
@@ -381,10 +493,22 @@ export async function doctor(
   // (a marker deleted by hand, or a run that died before writing one).
   // The registry is read BEFORE the markers: a probe starting in
   // between writes its marker before its add registers anything, so a
-  // live run is never reported as a leftover.
-  const registeredScratch = insideGitWorkTree
-    ? listScratchWorktreesSync(markerRoot)
-    : [];
+  // live run is never reported as a leftover. A live run under another
+  // lock directory has no marker here at all; its scratch directory's
+  // owner record (see `liveForeignOwner`) is what keeps it out of the
+  // leftovers. A registry that cannot be read is said so in a warning,
+  // never treated as empty.
+  const registry = insideGitWorkTree
+    ? listScratchWorktreesSync(markerRoot, gitPath)
+    : { ok: true, paths: [] as string[] };
+  if (!registry.ok) {
+    warnings.push(
+      `git worktree list could not run for ${markerRoot} ` +
+        `(${registry.detail ?? "unknown"}); a worktree a previous probe ` +
+        `left registered cannot be reported`,
+    );
+  }
+  const registeredScratch = registry.paths;
   const worktreeMarkerFileName = `${lockKey(markerRoot)}.marker.json`;
   const worktreeMarker = listMarkers(options.lockDir).find(
     (m) => path.basename(m.markerPath) === worktreeMarkerFileName,
@@ -399,8 +523,18 @@ export async function doctor(
   const manualRemove = (worktreePath: string): string =>
     `git -C ${markerRoot} worktree remove --force --force -- ${worktreePath}`;
   const worktreeProblems: string[] = [];
+  const liveWorktrees: string[] = [];
   if (worktreeMarker !== undefined && !markerAlive) {
-    if (markerTarget !== undefined && isScratchWorktreePath(markerTarget)) {
+    const markerOwner =
+      markerTarget !== undefined ? liveForeignOwner(markerTarget) : undefined;
+    if (markerOwner !== undefined) {
+      liveWorktrees.push(
+        `${String(worktreeMarker.targetPath)} (pid ${markerOwner}, named by the marker)`,
+      );
+    } else if (
+      markerTarget !== undefined &&
+      isScratchWorktreePath(markerTarget)
+    ) {
       worktreeProblems.push(
         `a worktree probe on ${markerRoot} was interrupted; leftover worktree at ` +
           `${worktreeMarker.targetPath}; the next \`probe -i worktree\` on this ` +
@@ -426,6 +560,11 @@ export async function doctor(
       // Named by the marker: live, or already reported above.
       continue;
     }
+    const owner = liveForeignOwner(registeredPath);
+    if (owner !== undefined) {
+      liveWorktrees.push(`${registeredPath} (pid ${owner})`);
+      continue;
+    }
     worktreeProblems.push(
       `a registered worktree of the probe's own scratch shape at ` +
         `${registeredPath} has no live probe behind it; the next \`probe -i ` +
@@ -433,13 +572,17 @@ export async function doctor(
         `\`${manualRemove(registeredPath)}\` manually`,
     );
   }
+  const liveNote =
+    liveWorktrees.length === 0
+      ? ""
+      : `; a live probe owns ${liveWorktrees.join(", ")}`;
   checks.push({
     name: "stale-worktree",
     ok: worktreeProblems.length === 0,
     detail:
       worktreeProblems.length === 0
-        ? "no stale worktree marker or leftover registered worktree for this repository"
-        : worktreeProblems.join(" "),
+        ? `no stale worktree marker or leftover registered worktree for this repository${liveNote}`
+        : `${worktreeProblems.join(" ")}${liveNote}`,
   });
 
   const hints: string[] = [];
@@ -479,30 +622,108 @@ async function isAutoRecoverable(marker: MarkerEntry): Promise<boolean> {
   return backupHash === marker.preHash;
 }
 
+interface ScratchWorktreeRegistry {
+  /** True when a listing ran and parsed; `paths` says nothing
+   * otherwise, and `detail` says why. */
+  ok: boolean;
+  paths: string[];
+  detail?: string;
+}
+
+/** One `git worktree list --porcelain` run at `root` through `gitPath`,
+ * with or without `-z`. */
+function runWorktreeList(
+  gitPath: string,
+  root: string,
+  nul: boolean,
+): { status: number | null; stdout: string; stderr: string; error?: string } {
+  const args = ["-C", root, "worktree", "list", "--porcelain"];
+  if (nul) args.push("-z");
+  try {
+    const result = spawnSync(gitPath, args, {
+      timeout: 5000,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+      ...(result.error !== undefined ? { error: result.error.message } : {}),
+    };
+  } catch (err) {
+    return {
+      status: null,
+      stdout: "",
+      stderr: "",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /** Every registered worktree of the repository at `root` that is of the
  * probe's own scratch shape, never the main worktree and never `root`
- * itself, each through `resolveDeepestExisting`. Empty when the listing
- * fails for any reason (not a repository, a timeout): this is a report,
- * and a listing that could not run is nothing to report on. */
-function listScratchWorktreesSync(root: string): string[] {
-  let result;
-  try {
-    result = spawnSync(
-      "git",
-      ["-C", root, "worktree", "list", "--porcelain", "-z"],
-      { timeout: 5000, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
-    );
-  } catch {
-    return [];
+ * itself, each through `resolveDeepestExisting`. The same two listing
+ * forms `listRegisteredWorktrees` in `isolation.ts` runs, through a
+ * synchronous spawn: `--porcelain -z` first, the newline-separated
+ * `--porcelain` when git rejects `-z` (exit status 129, or the
+ * unknown-switch text). Not ok when neither form ran to a parse: this is
+ * a report, and a listing that could not run is something to warn
+ * about, never an empty registry. */
+function listScratchWorktreesSync(
+  root: string,
+  gitPath: string | undefined,
+): ScratchWorktreeRegistry {
+  if (gitPath === undefined) {
+    return { ok: false, paths: [], detail: "git not found on PATH" };
   }
-  if (result.error !== undefined || result.status !== 0) return [];
-  const paths = parseWorktreeListZ(result.stdout ?? "").map((p) =>
-    resolveDeepestExisting(path.resolve(p)),
-  );
-  const main = paths[0];
-  return paths.filter(
-    (p) => p !== main && p !== root && isScratchWorktreePath(p),
-  );
+  const nul = runWorktreeList(gitPath, root, true);
+  let paths: string[];
+  if (nul.error === undefined && nul.status === 0) {
+    paths = parseWorktreeListZ(nul.stdout);
+  } else if (
+    nul.error === undefined &&
+    (nul.status === 129 || /unknown (switch|option)/.test(nul.stderr))
+  ) {
+    const newline = runWorktreeList(gitPath, root, false);
+    if (newline.error !== undefined || newline.status !== 0) {
+      return {
+        ok: false,
+        paths: [],
+        detail: `git rejected -z and git worktree list --porcelain ${
+          newline.error !== undefined
+            ? `did not run (${newline.error})`
+            : `exited ${String(newline.status)}`
+        }`,
+      };
+    }
+    const parsed = parseWorktreeListLines(newline.stdout);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        paths: [],
+        detail: `git rejected -z and the newline-separated listing could not be parsed (${parsed.detail})`,
+      };
+    }
+    paths = parsed.paths;
+  } else {
+    return {
+      ok: false,
+      paths: [],
+      detail:
+        nul.error !== undefined
+          ? `git worktree list --porcelain -z did not run (${nul.error})`
+          : `git worktree list --porcelain -z exited ${String(nul.status)}`,
+    };
+  }
+  const resolved = paths.map((p) => resolveDeepestExisting(path.resolve(p)));
+  const main = resolved[0];
+  return {
+    ok: true,
+    paths: resolved.filter(
+      (p) => p !== main && p !== root && isScratchWorktreePath(p),
+    ),
+  };
 }
 
 function isInsideGitWorkTree(startDir: string): boolean {

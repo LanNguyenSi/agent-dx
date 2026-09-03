@@ -13,7 +13,13 @@ import {
   writeMarker,
 } from "../src/lock.js";
 import { resolveDeepestExisting } from "../src/probe/containment.js";
+import {
+  isScratchWorktreePath,
+  parseWorktreeListZ,
+  readScratchOwner,
+} from "../src/probe/isolation.js";
 import { runArgv } from "../src/probe/run.js";
+import { withPathPrepended, writeGitShim } from "./helpers/git-shim.js";
 
 // Call-through mock, the same shape as the one below for
 // "../src/probe/run.js": lets a test pin the run id `beginWorktree`
@@ -1881,4 +1887,319 @@ describe("probe(): worktree isolation, the original-tree defense-in-depth guard"
       else process.env.ORIGINAL_TREE_TARGET = previousEnv;
     }
   });
+});
+
+/** The registry blocks the real git reports, never a shim. */
+function worktreeBlocks(repo: string): string[] {
+  return worktreeList(repo)
+    .split("\n\n")
+    .filter((b) => b.trim().length > 0);
+}
+
+describe("probe(): worktree isolation on a git that rejects -z (older than 2.36)", () => {
+  it("removes its worktree without a false not-removed warning or a kept marker, and the next probe on the repository is not blocked", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realRoot = resolveDeepestExisting(repo);
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "reject-z");
+    const logDir = makeTmpDir();
+
+    const first = await withPathPrepended(shimDir, () =>
+      probe(baseOptions(repo, { logDir })),
+    );
+
+    expect(first.status).toBe("killed");
+    expect(
+      first.warnings.filter(
+        (w) => w.includes("was not removed") || w.includes("could not run"),
+      ),
+    ).toEqual([]);
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(fs.existsSync(first.isolation.path as string)).toBe(false);
+    expect(worktreeBlocks(repo)).toHaveLength(1);
+
+    const second = await withPathPrepended(shimDir, () =>
+      probe(baseOptions(repo, { logDir })),
+    );
+
+    expect(second.status).toBe("killed");
+    expect(second.warnings).not.toContain("recovered_stale_worktree");
+    expect(second.warnings.filter((w) => w.includes("could not run"))).toEqual(
+      [],
+    );
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(worktreeBlocks(repo)).toHaveLength(1);
+  });
+});
+
+describe("probe(): worktree isolation when git worktree list cannot run in any form", () => {
+  it("reports the removal as done but unverified, clears its marker, and the next probe is not stale_worktree", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realRoot = resolveDeepestExisting(repo);
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+    const logDir = makeTmpDir();
+
+    const first = await withPathPrepended(shimDir, () =>
+      probe(baseOptions(repo, { logDir })),
+    );
+
+    expect(first.status).toBe("killed");
+    const worktreePath = first.isolation.path as string;
+    expect(
+      first.warnings.some(
+        (w) =>
+          w.includes(`the worktree at ${worktreePath} was removed, but`) &&
+          w.includes("unverified"),
+      ),
+    ).toBe(true);
+    expect(first.warnings.some((w) => w.includes("was not removed"))).toBe(
+      false,
+    );
+    expect(
+      first.warnings.some((w) =>
+        w.includes(`git worktree list could not run for ${realRoot}`),
+      ),
+    ).toBe(true);
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(worktreeBlocks(repo)).toHaveLength(1);
+
+    const second = await withPathPrepended(shimDir, () =>
+      probe(baseOptions(repo, { logDir })),
+    );
+
+    expect(second.status).toBe("killed");
+    expect(second.reason).not.toBe("stale_worktree");
+    expect(second.warnings).not.toContain("recovered_stale_worktree");
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(worktreeBlocks(repo)).toHaveLength(1);
+  });
+});
+
+describe("probe(): worktree isolation, a marker never certifies its own containment", () => {
+  function deadPid(): number {
+    const pid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    if (!pid) throw new Error("failed to obtain a dead pid for the test");
+    return pid;
+  }
+
+  it("a marker naming an unregistered scratch-shaped directory under its own recorded log dir, outside this run's --log-dir, is refused: nothing is deleted and the marker stays", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realRoot = resolveDeepestExisting(repo);
+    const pretendRoot = makeTmpDir();
+    const planted = path.join(pretendRoot, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(planted, { recursive: true });
+    fs.writeFileSync(path.join(planted, "precious.txt"), "keep me\n");
+    writeMarker(realRoot, {
+      targetPath: planted,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: deadPid(),
+      timestamp: new Date().toISOString(),
+      scratchRoot: pretendRoot,
+    });
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("stale_worktree");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(planted) &&
+          w.includes("not under this run's log dir") &&
+          w.includes(markerFilePathFor(realRoot)),
+      ),
+    ).toBe(true);
+    expect(fs.readFileSync(path.join(planted, "precious.txt"), "utf8")).toBe(
+      "keep me\n",
+    );
+    expect(readMarkerFor(realRoot)).toBeDefined();
+    expect(worktreeBlocks(repo)).toHaveLength(1);
+  });
+
+  it("the same marker with the directory under this run's own --log-dir is recovered, whatever log dir the marker recorded", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realRoot = resolveDeepestExisting(repo);
+    const logDir = makeTmpDir();
+    const planted = path.join(logDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(planted, { recursive: true });
+    fs.writeFileSync(path.join(planted, "stale.txt"), "leftover\n");
+    writeMarker(realRoot, {
+      targetPath: planted,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: deadPid(),
+      timestamp: new Date().toISOString(),
+      scratchRoot: makeTmpDir(),
+    });
+
+    const result = await probe(baseOptions(repo, { logDir }));
+
+    expect(result.status).toBe("killed");
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    expect(fs.existsSync(planted)).toBe(false);
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+  });
+});
+
+describe("probe(): worktree isolation, a live probe under another lock directory", () => {
+  it("a second probe under a different AGENT_PRIMITIVES_LOCK_DIR leaves the first probe's live worktree alone, and a third probe after the first finishes finds nothing to recover", async () => {
+    const lockDirFirst = makeTmpDir();
+    // This process's probes run under a different lock dir than the
+    // first (CLI) probe, so the lock cannot serialize them.
+    useLockDir();
+    const { repo } = initRepo();
+    const logDirFirst = makeTmpDir();
+    const signals = makeTmpDir();
+    const ready = path.join(signals, "ready.txt");
+    const release = path.join(signals, "release.txt");
+    // Only the first (CLI) probe gets the two signal paths in its
+    // environment: its test announces itself through `ready` and then
+    // holds until `release` exists, so the first probe provably sits in
+    // its test, worktree in use, for as long as this test wants. The
+    // in-process probes below run the same file without either path
+    // and go straight to the assertions.
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const ready = process.env.READY_ABS_PATH;",
+        "const release = process.env.RELEASE_ABS_PATH;",
+        "if (ready) fs.writeFileSync(ready, 'running');",
+        "const started = Date.now();",
+        "function run() {",
+        "  const assert = require('node:assert');",
+        "  const { isPositive } = require('./fixture.js');",
+        "  assert.strictEqual(isPositive(5), true);",
+        "  assert.strictEqual(isPositive(-5), false);",
+        "}",
+        "function wait() {",
+        "  if (!release || fs.existsSync(release) || Date.now() - started > 15000) {",
+        "    run();",
+        "    return;",
+        "  }",
+        "  setTimeout(wait, 50);",
+        "}",
+        "wait();",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "slow test",
+    ]);
+
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-r",
+        "  return false;",
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "worktree",
+      ],
+      {
+        cwd: repo,
+        env: {
+          ...process.env,
+          AGENT_PRIMITIVES_LOCK_DIR: lockDirFirst,
+          AGENT_PRIMITIVES_LOG_DIR: logDirFirst,
+          READY_ABS_PATH: ready,
+          RELEASE_ABS_PATH: release,
+        },
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
+    let firstStdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      firstStdout += chunk;
+    });
+    const firstClosed = new Promise<number | null>((resolve) => {
+      child.on("close", (code) => resolve(code));
+    });
+
+    const deadline = Date.now() + 15000;
+    while (!fs.existsSync(ready)) {
+      if (Date.now() > deadline) {
+        child.kill("SIGKILL");
+        throw new Error("the first probe's test never signalled readiness");
+      }
+      if (child.exitCode !== null) {
+        throw new Error(
+          `the first probe exited early with ${String(child.exitCode)}: ${firstStdout}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    // The first probe's worktree is registered, on disk, and owned by
+    // the CLI process, which is still running its test.
+    const scratchDuring = parseWorktreeListZ(
+      execFileSync("git", ["worktree", "list", "--porcelain", "-z"], {
+        cwd: repo,
+        encoding: "utf8",
+      }),
+    )
+      .map(resolveDeepestExisting)
+      .filter(isScratchWorktreePath);
+    expect(scratchDuring).toHaveLength(1);
+    const firstWorktree = scratchDuring[0];
+    expect(readScratchOwner(firstWorktree)?.pid).toBe(child.pid);
+
+    const second = await probe(baseOptions(repo));
+
+    expect(second.status).toBe("killed");
+    expect(
+      second.warnings.some(
+        (w) =>
+          w.includes(firstWorktree) &&
+          w.includes(`live probe (pid ${String(child.pid)})`),
+      ),
+    ).toBe(true);
+    expect(second.warnings).not.toContain("recovered_stale_worktree");
+    // The first probe is still held in its test: its worktree is intact
+    // and registered after the second probe has run to completion.
+    expect(fs.existsSync(firstWorktree)).toBe(true);
+    expect(fs.existsSync(path.join(firstWorktree, "fixture.js"))).toBe(true);
+    expect(worktreeList(repo)).toContain(firstWorktree);
+
+    fs.writeFileSync(release, "go");
+    expect(await firstClosed).toBe(0);
+    const firstResult = JSON.parse(firstStdout) as {
+      status: string;
+      warnings: string[];
+    };
+    expect(firstResult.status).toBe("killed");
+    expect(
+      firstResult.warnings.filter((w) => w.includes("was not removed")),
+    ).toEqual([]);
+    expect(fs.existsSync(firstWorktree)).toBe(false);
+
+    const third = await probe(baseOptions(repo));
+
+    expect(third.status).toBe("killed");
+    expect(third.warnings).not.toContain("recovered_stale_worktree");
+    expect(third.warnings.filter((w) => w.includes("live probe"))).toEqual([]);
+    expect(worktreeBlocks(repo)).toHaveLength(1);
+  }, 30000);
 });

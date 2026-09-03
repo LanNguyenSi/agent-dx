@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -11,10 +11,15 @@ import {
   countNumstatFiles,
   findNodeModulesDirs,
   isScratchWorktreePath,
+  listRegisteredWorktrees,
+  parseWorktreeListLines,
   parseWorktreeListZ,
+  readScratchOwner,
+  SCRATCH_OWNER_FILE,
 } from "../src/probe/isolation.js";
 import { resolveDeepestExisting } from "../src/probe/containment.js";
 import { runArgv } from "../src/probe/run.js";
+import { withPathPrepended, writeGitShim } from "./helpers/git-shim.js";
 
 // Call-through mock (the same shape probe-worktree.test.ts uses): every
 // call runs the real runner, and the recorded calls are what lets a test
@@ -704,6 +709,82 @@ describe("isScratchWorktreePath / parseWorktreeListZ", () => {
     expect(isScratchWorktreePath("/x/feature-branch")).toBe(false);
   });
 
+  it("pins the uuid layout itself (8-4-4-4-12 lowercase hex), not just the character class and length", () => {
+    const real = randomUUID();
+    expect(isScratchWorktreePath(`/x/logs/wt-${real}/wt`)).toBe(true);
+    expect(isScratchWorktreePath(`/x/logs/wt-${"-".repeat(36)}/wt`)).toBe(
+      false,
+    );
+    expect(isScratchWorktreePath(`/x/logs/wt-${"a".repeat(36)}/wt`)).toBe(
+      false,
+    );
+    expect(isScratchWorktreePath(`/x/logs/wt-${real.toUpperCase()}/wt`)).toBe(
+      false,
+    );
+    // The right groups in the wrong places: still 36 characters of the
+    // right class.
+    expect(
+      isScratchWorktreePath(
+        `/x/logs/wt-${real.slice(9)}-${real.slice(0, 8)}/wt`,
+      ),
+    ).toBe(false);
+  });
+
+  it("parses the newline-separated porcelain listing into the worktree paths, in order, with quoted lock reasons and bare entries", () => {
+    const listing = [
+      "worktree /repo",
+      "HEAD abc",
+      "branch refs/heads/main",
+      "",
+      "worktree /logs/wt-1/wt",
+      "HEAD abc",
+      "detached",
+      'locked "why\\nnot"',
+      "prunable gitdir file points to non-existent location",
+      "",
+      "worktree /bare.git",
+      "bare",
+      "",
+    ].join("\n");
+    expect(parseWorktreeListLines(listing)).toEqual({
+      ok: true,
+      paths: ["/repo", "/logs/wt-1/wt", "/bare.git"],
+    });
+    expect(parseWorktreeListLines("")).toEqual({ ok: true, paths: [] });
+  });
+
+  it("refuses a newline-separated listing whose worktree path contains a newline, however the continuation reads, rather than misreading it", () => {
+    const withTail = (tail: string): string =>
+      [
+        "worktree /repo",
+        "HEAD abc",
+        "branch refs/heads/main",
+        "",
+        `worktree /logs/wt-1/wt${tail}`,
+        "HEAD abc",
+        "detached",
+        "",
+      ].join("\n");
+    // A continuation that is no attribute at all.
+    expect(parseWorktreeListLines(withTail("\nfoo")).ok).toBe(false);
+    // Continuations that read as attributes: each lands out of order
+    // or twice, since git prints HEAD right after the path.
+    for (const tail of [
+      "\nHEAD deadbeef",
+      "\nbranch refs/heads/x",
+      "\ndetached",
+      "\nlocked",
+      "\nprunable",
+      "\nbare",
+      "\nworktree /elsewhere",
+    ]) {
+      const parsed = parseWorktreeListLines(withTail(tail));
+      expect(parsed.ok, tail).toBe(false);
+    }
+    // A block that does not start with a worktree path.
+    expect(parseWorktreeListLines("HEAD abc\ndetached\n").ok).toBe(false);
+  });
+
   it("parses the NUL-terminated porcelain records into the worktree paths, in order", () => {
     const listing =
       ["worktree /repo", "HEAD abc", "branch refs/heads/main", ""].join("\0") +
@@ -923,7 +1004,7 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
 
     expect(cleanup.ok).toBe(false);
     expect(cleanup.refused).toBe(false);
-    expect(cleanup.detail).toContain("did not run cleanly");
+    expect(cleanup.detail).toContain("could not run after the removal");
     expect(fs.existsSync(path.join(adminDir, adminEntry, "gitdir"))).toBe(true);
     expect(fs.existsSync(ours)).toBe(false);
   });
@@ -1043,5 +1124,251 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
     expect(
       fs.readFileSync(path.join(own, "work-in-progress.txt"), "utf8"),
     ).toBe("uncommitted\n");
+  });
+});
+
+describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, and on one whose listing cannot run", () => {
+  function git(cwd: string, args: string[]): string {
+    return execFileSync("git", args, { cwd, encoding: "utf8" });
+  }
+
+  function initRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return repo;
+  }
+
+  function scratchPath(logDir: string): string {
+    return path.join(logDir, `wt-${randomUUID()}`, "wt");
+  }
+
+  /** The registry as the real git (never the shim) reports it. */
+  function registeredPaths(repo: string): string[] {
+    return parseWorktreeListZ(
+      git(repo, ["worktree", "list", "--porcelain", "-z"]),
+    ).map(resolveDeepestExisting);
+  }
+
+  function addScratchWorktree(repo: string, worktreePath: string): void {
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+  }
+
+  function shimDir(mode: "reject-z" | "no-worktree-list"): string {
+    const dir = makeTmpDir();
+    writeGitShim(dir, mode);
+    return dir;
+  }
+
+  it("lists through the newline-separated --porcelain fallback when git rejects -z, reporting the paths the -z form reports", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const wt = scratchPath(logDir);
+    addScratchWorktree(repo, wt);
+
+    const listed = await withPathPrepended(shimDir("reject-z"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    expect(listed.ok).toBe(true);
+    expect(listed.form).toBe("newline");
+    expect(listed.paths).toEqual(registeredPaths(repo));
+    expect(listed.paths).toEqual([
+      resolveDeepestExisting(repo),
+      resolveDeepestExisting(wt),
+    ]);
+    // The -z form really ran first and was rejected: its log says so.
+    expect(listed.logPaths).toHaveLength(2);
+    expect(fs.readFileSync(listed.logPaths[0], "utf8")).toContain(
+      "unknown switch",
+    );
+  });
+
+  it("reports an unknown registry (ok false, the reason, no paths) when no listing form runs, never an empty one", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    addScratchWorktree(repo, scratchPath(logDir));
+
+    const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    expect(listed.ok).toBe(false);
+    expect(listed.paths).toEqual([]);
+    expect(listed.form).toBeUndefined();
+    expect(listed.detail).toContain("exited 128");
+  });
+
+  it("cleanupWorktree asserts the removal through the fallback listing on a git that rejects -z: ok, verified, nothing registered afterwards", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const wt = scratchPath(logDir);
+    addScratchWorktree(repo, wt);
+
+    const cleanup = await withPathPrepended(shimDir("reject-z"), () =>
+      cleanupWorktree(repo, wt, logDir, { scratchRoot: logDir }),
+    );
+
+    expect(cleanup.ok).toBe(true);
+    expect(cleanup.verified).toBe(true);
+    expect(cleanup.detail).toBeUndefined();
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
+  });
+
+  it("cleanupWorktree reports a removal that took as ok but unverified, naming the listing failure, when no listing form runs; the registration is really gone", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const wt = scratchPath(logDir);
+    addScratchWorktree(repo, wt);
+
+    const cleanup = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      cleanupWorktree(repo, wt, logDir, { scratchRoot: logDir }),
+    );
+
+    expect(cleanup.ok).toBe(true);
+    expect(cleanup.verified).toBe(false);
+    expect(cleanup.detail).toContain("could not run after the removal");
+    expect(cleanup.detail).toContain("unverified");
+    expect(cleanup.detail).toContain("git worktree remove exited 0");
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
+  });
+
+  it("cleanupWorktree refuses a registered scratch worktree outside the current log dir when its registration cannot be checked: nothing is deleted", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const elsewhere = scratchPath(makeTmpDir());
+    addScratchWorktree(repo, elsewhere);
+    fs.writeFileSync(path.join(elsewhere, "precious.txt"), "keep me\n");
+
+    const cleanup = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      cleanupWorktree(repo, elsewhere, logDir, { scratchRoot: logDir }),
+    );
+
+    expect(cleanup.ok).toBe(false);
+    expect(cleanup.refused).toBe(true);
+    expect(cleanup.detail).toContain("registration could not be checked");
+    expect(cleanup.detail).toContain("not under this run's log dir");
+    expect(fs.readFileSync(path.join(elsewhere, "precious.txt"), "utf8")).toBe(
+      "keep me\n",
+    );
+    expect(registeredPaths(repo)).toContain(resolveDeepestExisting(elsewhere));
+  });
+});
+
+describe("the scratch owner record", () => {
+  function git(cwd: string, args: string[]): string {
+    return execFileSync("git", args, { cwd, encoding: "utf8" });
+  }
+
+  function initRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return repo;
+  }
+
+  function registeredPaths(repo: string): string[] {
+    return parseWorktreeListZ(
+      git(repo, ["worktree", "list", "--porcelain", "-z"]),
+    ).map(resolveDeepestExisting);
+  }
+
+  it("beginWorktree writes owner.json next to wt with this process's pid and the resolved log dir, before the add runs", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    let ownerAtAttempt: ReturnType<typeof readScratchOwner>;
+
+    const result = await beginWorktree({
+      root: repo,
+      cwd: repo,
+      logDir,
+      links: [],
+      onWorktreeAttempt: (worktreePath) => {
+        ownerAtAttempt = readScratchOwner(worktreePath);
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ownerAtAttempt?.pid).toBe(process.pid);
+    const owner = readScratchOwner(result.worktreePath);
+    expect(owner?.pid).toBe(process.pid);
+    expect(owner?.logDir).toBe(path.resolve(logDir));
+    expect(
+      fs.existsSync(
+        path.join(path.dirname(result.worktreePath), SCRATCH_OWNER_FILE),
+      ),
+    ).toBe(true);
+    // This process's own record never blocks its own cleanup.
+    const cleanup = await cleanupWorktree(repo, result.worktreePath, logDir, {
+      scratchRoot: logDir,
+    });
+    expect(cleanup.ok).toBe(true);
+  });
+
+  it("cleanupWorktree refuses a scratch worktree whose owner record names another live process, and admits it once that process is gone", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const wt = path.join(logDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(wt), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", wt, "HEAD"]);
+    const sleeper = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)"],
+      {
+        stdio: "ignore",
+      },
+    );
+    const exited = new Promise<void>((resolve) => {
+      sleeper.once("exit", () => resolve());
+    });
+    try {
+      fs.writeFileSync(
+        path.join(path.dirname(wt), SCRATCH_OWNER_FILE),
+        JSON.stringify({
+          pid: sleeper.pid,
+          timestamp: new Date().toISOString(),
+          logDir,
+        }),
+      );
+
+      const refused = await cleanupWorktree(repo, wt, logDir, {
+        scratchRoot: logDir,
+      });
+
+      expect(refused.ok).toBe(false);
+      expect(refused.refused).toBe(true);
+      expect(refused.detail).toContain(
+        `a live probe (pid ${String(sleeper.pid)}) owns it`,
+      );
+      expect(fs.existsSync(wt)).toBe(true);
+      expect(registeredPaths(repo)).toContain(resolveDeepestExisting(wt));
+      // Refused before any git call beyond the listing: no remove, no prune.
+      expect(
+        gitCalls().filter((c) => c[1][0] === "worktree" && c[1][1] !== "list"),
+      ).toHaveLength(0);
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+    await exited;
+
+    const admitted = await cleanupWorktree(repo, wt, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(admitted.ok).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
   });
 });

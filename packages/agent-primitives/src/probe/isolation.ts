@@ -1,8 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { isPidAlive } from "../lock.js";
 import { isPathContained, resolveDeepestExisting } from "./containment.js";
 import { runArgv, type RunArgvResult } from "./run.js";
+
+/** The oldest git whose `git apply --allow-empty` the worktree sync
+ * relies on. An older release rejects the option, so `beginWorktree`
+ * reports `worktree_sync_failed` on it; `doctor` warns below this. */
+export const GIT_MIN_VERSION_WORKTREE_SYNC = "2.35";
+
+/** The oldest git whose `git worktree list --porcelain -z` the registry
+ * listing relies on. An older release rejects `-z`, and
+ * `listRegisteredWorktrees` then falls back to the newline-separated
+ * form (see `parseWorktreeListLines`); `doctor` warns below this. */
+export const GIT_MIN_VERSION_WORKTREE_LIST_Z = "2.36";
 
 export interface InplaceSession {
   backupPath: string;
@@ -424,8 +436,11 @@ function yieldToEventLoop(): Promise<void> {
  * can execute anything regardless of what characters they contain.
  *
  * This run's own scratch state -- the worktree itself, the tracked-diff
- * file, and the sync's own logs -- lives at `<logDir>/wt-<random>/`, a
- * fresh, never-before-seen subdirectory rather than a fixed name
+ * file, the owner record (`owner.json`: this process's pid, written
+ * before the add so a probe under another lock directory can tell a
+ * worktree in use from a leftover), and the sync's own logs -- lives at
+ * `<logDir>/wt-<random>/`, a fresh, never-before-seen subdirectory
+ * rather than a fixed name
  * directly under `logDir`. A caller commonly passes the SAME `--log-dir`
  * across separate probe invocations (the CLI's own default is one fixed
  * directory unless `--log-dir` is given per run); a fixed diff-file name
@@ -474,6 +489,21 @@ export async function beginWorktree(
   fs.mkdirSync(runDir, { recursive: true });
   const worktreePath = path.join(runDir, "wt");
   const logPaths: string[] = [];
+  // Written before anything is registered with git: from the add
+  // onward, a probe under another lock directory that finds this
+  // worktree in the registry reads this record and leaves the worktree
+  // alone while this process is alive (see `liveForeignOwner`).
+  try {
+    writeScratchOwner(runDir, logDir);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      reason: "worktree_sync_failed",
+      detail: `writing the scratch owner record failed: ${message}`,
+      logPaths,
+    };
+  }
   const runGit = (
     args: string[],
     logFileName: string,
@@ -684,15 +714,84 @@ export async function beginWorktree(
 
 /** The shape of every worktree this module creates: a directory named
  * `wt` inside a per-run scratch directory `wt-<uuid>` (see
- * `beginWorktree`). The one shape `cleanupWorktree` is ever willing to
+ * `beginWorktree`), the uuid in its 8-4-4-4-12 lowercase hex layout and
+ * nothing looser. The one shape `cleanupWorktree` is ever willing to
  * delete: an operator's own worktree, whatever it is called, never
  * matches it. Exported for `doctor` and the tests. */
 export function isScratchWorktreePath(p: string): boolean {
   const normalized = path.resolve(p);
   return (
     path.basename(normalized) === "wt" &&
-    /^wt-[0-9a-f-]{36}$/.test(path.basename(path.dirname(normalized)))
+    /^wt-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+      path.basename(path.dirname(normalized)),
+    )
   );
+}
+
+/** The file `beginWorktree` writes into the per-run scratch directory,
+ * next to `wt`, recording which process the worktree belongs to. */
+export const SCRATCH_OWNER_FILE = "owner.json";
+
+export interface ScratchOwner {
+  pid: number;
+  timestamp: string;
+  /** The resolved `--log-dir` the scratch directory was created under. */
+  logDir: string;
+}
+
+/** Where the owner record of the scratch directory holding
+ * `worktreePath` sits: `<log-dir>/wt-<uuid>/owner.json`. */
+export function scratchOwnerPath(worktreePath: string): string {
+  return path.join(
+    path.dirname(path.resolve(worktreePath)),
+    SCRATCH_OWNER_FILE,
+  );
+}
+
+function writeScratchOwner(runDir: string, logDir: string): void {
+  const owner: ScratchOwner = {
+    pid: process.pid,
+    timestamp: new Date().toISOString(),
+    logDir: path.resolve(logDir),
+  };
+  fs.writeFileSync(
+    path.join(runDir, SCRATCH_OWNER_FILE),
+    JSON.stringify(owner),
+  );
+}
+
+/** The owner record of the scratch directory holding `worktreePath`, or
+ * undefined when there is none or it does not parse. */
+export function readScratchOwner(
+  worktreePath: string,
+): ScratchOwner | undefined {
+  try {
+    const raw = fs.readFileSync(scratchOwnerPath(worktreePath), "utf8");
+    const parsed = JSON.parse(raw) as Partial<ScratchOwner>;
+    if (typeof parsed.pid !== "number") return undefined;
+    return {
+      pid: parsed.pid,
+      timestamp: String(parsed.timestamp ?? ""),
+      logDir: String(parsed.logDir ?? ""),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** The pid of a process other than this one that owns the scratch
+ * directory holding `worktreePath` and is still alive (the same
+ * liveness check the lock and marker files use), or undefined: no owner
+ * record, a dead owner, or this process itself. A live owner means the
+ * worktree is a probe in flight, never a leftover. The lock serializes
+ * probes only within one lock directory, so a probe under another
+ * `AGENT_PRIMITIVES_LOCK_DIR` finds this one's worktree in git's
+ * registry while it is still in use; this record is what tells the two
+ * apart. Exported for `doctor` and the recovery path. */
+export function liveForeignOwner(worktreePath: string): number | undefined {
+  const owner = readScratchOwner(worktreePath);
+  if (owner === undefined || owner.pid === process.pid) return undefined;
+  return isPidAlive(owner.pid) ? owner.pid : undefined;
 }
 
 /** The `worktree <path>` records of a `git worktree list --porcelain
@@ -710,45 +809,188 @@ export function parseWorktreeListZ(stdout: string): string[] {
   return paths;
 }
 
+/** The attribute lines one block of `git worktree list --porcelain`
+ * (without `-z`) can carry, each keyed by its first word and placed in
+ * the order git prints them: `worktree` first, then `bare` or `HEAD`,
+ * then `branch` or `detached`, then `locked`, then `prunable`. Lock and
+ * prune reasons are quoted onto one line in this form; only the
+ * worktree path is printed raw. */
+const PORCELAIN_LINE_ORDER: Record<string, number> = {
+  worktree: 0,
+  bare: 1,
+  HEAD: 1,
+  branch: 2,
+  detached: 2,
+  locked: 3,
+  prunable: 4,
+};
+
+export type ParsedWorktreeList =
+  { ok: true; paths: string[] } | { ok: false; detail: string };
+
+/** Parses the newline-separated `git worktree list --porcelain` output
+ * (the form every release since `worktree list` itself has, and the
+ * fallback for a git that rejects `-z`) into the worktree paths, in
+ * order, the main worktree first. A worktree path containing a newline
+ * is the one thing this form cannot represent: its continuation shows
+ * up as a line that is not an attribute, or as an attribute out of the
+ * fixed order (git always prints `bare` or `HEAD` right after
+ * `worktree`, so a continuation line can never sit between the two
+ * without breaking the order). Either way the WHOLE listing is refused,
+ * naming the line, rather than read as two paths or as a shorter one.
+ * Exported for `doctor`, which runs the same fallback through its own
+ * synchronous spawn. */
+export function parseWorktreeListLines(stdout: string): ParsedWorktreeList {
+  const paths: string[] = [];
+  const lines = stdout.split("\n");
+  // -1 between blocks: the next line must be a `worktree` line.
+  let lastOrder = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.length === 0) {
+      lastOrder = -1;
+      continue;
+    }
+    const space = line.indexOf(" ");
+    const key = space === -1 ? line : line.slice(0, space);
+    const order = PORCELAIN_LINE_ORDER[key];
+    if (order === undefined) {
+      return {
+        ok: false,
+        detail: `line ${i + 1} is not a porcelain attribute`,
+      };
+    }
+    if (lastOrder === -1 && order !== 0) {
+      return {
+        ok: false,
+        detail: `line ${i + 1} starts a block with ${key} instead of a worktree path`,
+      };
+    }
+    if (lastOrder !== -1 && order <= lastOrder) {
+      return {
+        ok: false,
+        detail: `line ${i + 1} carries ${key} out of the porcelain attribute order`,
+      };
+    }
+    lastOrder = order;
+    if (key === "worktree") paths.push(line.slice("worktree ".length));
+  }
+  return { ok: true, paths };
+}
+
+/** True when git rejected an option this call passed, which is how a
+ * release older than the one the option first appeared in answers:
+ * exit status 129 (git's usage-error status, the same in every locale)
+ * or the untranslated `unknown switch`/`unknown option` text. */
+function rejectsOption(result: RunArgvResult): boolean {
+  return (
+    result.exitCode !== 0 &&
+    (result.exitCode === 129 || /unknown (switch|option)/.test(result.stderr))
+  );
+}
+
 export interface RegisteredWorktrees {
-  /** True when the listing ran, exited 0, and was captured whole;
-   * `paths` is empty (and says nothing) otherwise. */
+  /** True when a listing ran, exited 0, was captured whole, and parsed;
+   * `paths` is empty (and says nothing) otherwise. A false here means
+   * the registry is UNKNOWN, never known to be empty, and `detail`
+   * says why. */
   ok: boolean;
   /** Every registered worktree of the repository, the main one first,
    * each through `resolveDeepestExisting` so a caller can compare it
    * with a path of its own spelling. */
   paths: string[];
+  /** Which listing produced `paths`: `nul` for `--porcelain -z`,
+   * `newline` for the fallback a git older than
+   * `GIT_MIN_VERSION_WORKTREE_LIST_Z` gets. Absent when neither ran to
+   * a parse. */
+  form?: "nul" | "newline";
+  /** Why `ok` is false. */
+  detail?: string;
+  /** The log of the last listing attempted. */
   logPath: string;
+  /** The logs of every listing attempted, the rejected `-z` form first
+   * when the fallback ran. */
+  logPaths: string[];
 }
 
 /** `git worktree list --porcelain -z` for the repository at `root`,
  * logged under `logDir` and registered through `track`, never under an
  * abort signal: this is the cleanup and recovery side (see
- * `cleanupWorktree` for why). */
+ * `cleanupWorktree` for why). When git rejects `-z` (a release older
+ * than `GIT_MIN_VERSION_WORKTREE_LIST_Z`), the newline-separated
+ * `--porcelain` listing runs instead and is parsed by
+ * `parseWorktreeListLines`. A listing that fails for any other reason,
+ * or whose fallback fails or does not parse, is reported as not ok:
+ * unknown, which the callers treat as "could not check", never as
+ * "nothing registered" and never as "still registered". */
 export async function listRegisteredWorktrees(
   root: string,
   logDir: string,
   opts: { track?: TrackGitCall } = {},
 ): Promise<RegisteredWorktrees> {
   const track: TrackGitCall = opts.track ?? ((started) => started);
-  const result = await trackGit(
-    track,
-    gitArgv(
-      ["worktree", "list", "--porcelain", "-z"],
-      logDir,
-      `worktree-list-${randomUUID()}.log`,
-      root,
-    ),
-  );
-  const ok = result.exitCode === 0 && !result.outputTruncated;
+  const list = (args: string[]): Promise<RunArgvResult> =>
+    trackGit(
+      track,
+      gitArgv(args, logDir, `worktree-list-${randomUUID()}.log`, root),
+    );
+  const resolveAll = (paths: string[]): string[] =>
+    paths.map((p) => resolveDeepestExisting(path.resolve(p)));
+  const logPaths: string[] = [];
+
+  const nul = await list(["worktree", "list", "--porcelain", "-z"]);
+  logPaths.push(nul.logPath);
+  if (nul.exitCode === 0 && !nul.outputTruncated) {
+    return {
+      ok: true,
+      paths: resolveAll(parseWorktreeListZ(nul.stdout)),
+      form: "nul",
+      logPath: nul.logPath,
+      logPaths,
+    };
+  }
+  if (!rejectsOption(nul)) {
+    return {
+      ok: false,
+      paths: [],
+      detail: nul.outputTruncated
+        ? "the listing was cut short"
+        : `git worktree list --porcelain -z exited ${String(nul.exitCode)}`,
+      logPath: nul.logPath,
+      logPaths,
+    };
+  }
+
+  const newline = await list(["worktree", "list", "--porcelain"]);
+  logPaths.push(newline.logPath);
+  if (newline.exitCode !== 0 || newline.outputTruncated) {
+    return {
+      ok: false,
+      paths: [],
+      detail: newline.outputTruncated
+        ? "git rejected -z and the newline-separated listing was cut short"
+        : `git rejected -z and git worktree list --porcelain exited ${String(newline.exitCode)}`,
+      logPath: newline.logPath,
+      logPaths,
+    };
+  }
+  const parsed = parseWorktreeListLines(newline.stdout);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      paths: [],
+      form: "newline",
+      detail: `git rejected -z and the newline-separated listing could not be parsed (${parsed.detail})`,
+      logPath: newline.logPath,
+      logPaths,
+    };
+  }
   return {
-    ok,
-    paths: ok
-      ? parseWorktreeListZ(result.stdout).map((p) =>
-          resolveDeepestExisting(path.resolve(p)),
-        )
-      : [],
-    logPath: result.logPath,
+    ok: true,
+    paths: resolveAll(parsed.paths),
+    form: "newline",
+    logPath: newline.logPath,
+    logPaths,
   };
 }
 
@@ -783,14 +1025,15 @@ async function worktreeAdminDir(
 
 /** Removes the administrative entry a `git worktree add` killed in its
  * first moments leaves half-written: `gitdir` already names `target`'s
- * own `.git` file and `locked` is present, but `commondir` is empty
- * (git creates the file before it writes the content). git itself
- * cannot act on such an entry (`list`, `remove`, and `unlock` all die
- * reading the empty `commondir`, and `prune` skips a locked entry), so
- * every `git worktree` command in the repository fails until the entry
- * is gone, and nothing short of deleting it clears it. Only an entry
- * naming the already-gated `target` is ever touched. Returns true when
- * one was removed. */
+ * own `.git` file and `locked` is present, but `commondir` exists and
+ * is empty (git creates the file before it writes the content). An
+ * absent `commondir` is harmless, since git then falls back to the
+ * main repository; only an existing empty one breaks git: `list`,
+ * `remove`, and `unlock` all die reading it, and `locked` is what keeps
+ * `prune` from clearing the entry, so every `git worktree` command in
+ * the repository fails until the entry is gone, and nothing short of
+ * deleting it clears it. Only an entry naming the already-gated
+ * `target` is ever touched. Returns true when one was removed. */
 function removeHalfWrittenAdminEntry(
   adminDir: string,
   target: string,
@@ -832,23 +1075,34 @@ function removeHalfWrittenAdminEntry(
 
 export interface CleanupWorktreeOptions {
   track?: TrackGitCall;
-  /** The `--log-dir` the worktree was created under: this session's
-   * own, or the one a leftover's marker recorded. A path git does not
-   * report as a registered worktree of the repository is deleted only
-   * when it is of the scratch shape AND sits under this directory;
-   * omitted, only a registered scratch worktree can be removed. */
+  /** The CURRENT run's own `--log-dir`, never a directory read from a
+   * marker: a marker names both the path and, if it were trusted for
+   * this, the root that path is to be checked against, which would let
+   * the marker certify itself. A path git does not report as a
+   * registered worktree of the repository is deleted only when it is of
+   * the scratch shape AND sits under this directory; omitted, only a
+   * registered scratch worktree can be removed. */
   scratchRoot?: string;
 }
 
 export interface CleanupWorktreeResult {
-  /** True only when, after the removal, `git worktree list` no longer
-   * reports the path AND nothing is left of it on disk: an assertion of
-   * the outcome, never an inference from a git exit code. */
+  /** True only when the path is gone: with `verified`, `git worktree
+   * list` no longer reports it AND nothing is left of it on disk, an
+   * assertion of the outcome rather than an inference from a git exit
+   * code; without `verified`, nothing is left on disk AND `git worktree
+   * remove` itself exited 0, the most the outcome can be checked when
+   * the listing cannot run at all. */
   ok: boolean;
+  /** True when the listing ran after the removal, so `ok` was asserted
+   * against git's own registry. False when it could not run in any form
+   * and `ok` rests on the disk check plus the removal's exit code;
+   * `detail` then says so even for an `ok` result, for the caller's
+   * warning. */
+  verified: boolean;
   /** True when the path failed the gate below and nothing at all was
    * run against it. */
   refused: boolean;
-  /** Why `ok` is false, for the caller's warning. */
+  /** Why `ok` is false, or why an `ok` result is unverified. */
   detail?: string;
   logPaths: string[];
 }
@@ -870,16 +1124,25 @@ export interface CleanupWorktreeResult {
  * When that listing itself fails, the one state git cannot recover
  * from on its own is handled here: an entry the add left half-written
  * (see `removeHalfWrittenAdminEntry`) is removed when it names this
- * same path, and the prune and the assertion run again.
+ * same path, and the prune and the assertion run again. When the
+ * listing still cannot run in any form (see `listRegisteredWorktrees`),
+ * the registry is unknown rather than "still registered": `ok` then
+ * rests on the disk check plus the removal's own exit code, `verified`
+ * is false, and `detail` says so, so the caller can report the outcome
+ * as unverified instead of reporting a removal that took as one that
+ * did not.
  *
  * Nothing is run against the path before it passes a gate, because the
  * path can come from a marker file, not only from this process's own
  * `beginWorktree`: it must be of the scratch shape (see
  * `isScratchWorktreePath`), never the repository root or its main
- * worktree, and either reported by `git worktree list` as a worktree
- * of this repository before the removal, or contained (through
- * realpath) in `scratchRoot`. Any other path is refused: neither git
- * nor the recursive delete touches it, and the result says so, so the
+ * worktree, not owned by another live process (see
+ * `liveForeignOwner`), and either reported by `git worktree list` as a
+ * worktree of this repository before the removal, or contained
+ * (through realpath) in `scratchRoot`, the current run's own log dir.
+ * Any other path is refused, and so is one whose registration could
+ * not be checked and that is not under that log dir: neither git nor
+ * the recursive delete touches it, and the result says so, so the
  * caller can keep its marker and name the path.
  *
  * The caller's abort signal is deliberately NOT threaded into these git
@@ -902,30 +1165,37 @@ export async function cleanupWorktree(
   const rootReal = resolveDeepestExisting(path.resolve(root));
 
   const before = await listRegisteredWorktrees(root, logDir, { track });
-  logPaths.push(before.logPath);
-  const registeredBefore = before.paths.includes(target);
-  const mainWorktree = before.paths[0];
+  logPaths.push(...before.logPaths);
+  const registeredBefore = before.ok && before.paths.includes(target);
+  const mainWorktree = before.ok ? before.paths[0] : undefined;
   const contained =
     opts.scratchRoot !== undefined &&
     isPathContained(
       resolveDeepestExisting(path.resolve(opts.scratchRoot)),
       target,
     );
+  const foreignOwner = liveForeignOwner(target);
   let refusal: string | undefined;
   if (!isScratchWorktreePath(target)) {
     refusal =
-      "it is not of the probe's own scratch shape (<log-dir>/wt-<id>/wt)";
+      "it is not of the probe's own scratch shape (<log-dir>/wt-<uuid>/wt)";
   } else if (target === rootReal || target === mainWorktree) {
     refusal = "it is the repository itself";
+  } else if (foreignOwner !== undefined) {
+    refusal = `a live probe (pid ${foreignOwner}) owns it`;
   } else if (!registeredBefore && !contained) {
+    const registration = before.ok
+      ? "git does not report it as a worktree of this repository"
+      : `git worktree list could not run (${before.detail ?? "unknown"}), so its registration could not be checked`;
     refusal =
       opts.scratchRoot === undefined
-        ? "git does not report it as a worktree of this repository"
-        : `git does not report it as a worktree of this repository and it is not under the recorded log dir ${opts.scratchRoot}`;
+        ? registration
+        : `${registration}, and it is not under this run's log dir ${opts.scratchRoot}`;
   }
   if (refusal !== undefined) {
     return {
       ok: false,
+      verified: false,
       refused: true,
       detail: `refusing to remove ${worktreePath}: ${refusal}`,
       logPaths,
@@ -960,7 +1230,7 @@ export async function cleanupWorktree(
   logPaths.push(pruneResult.logPath);
 
   let after = await listRegisteredWorktrees(root, logDir, { track });
-  logPaths.push(after.logPath);
+  logPaths.push(...after.logPaths);
   if (!after.ok) {
     const admin = await worktreeAdminDir(root, logDir, track);
     logPaths.push(admin.logPath);
@@ -979,23 +1249,41 @@ export async function cleanupWorktree(
       );
       logPaths.push(pruneAgain.logPath);
       after = await listRegisteredWorktrees(root, logDir, { track });
-      logPaths.push(after.logPath);
+      logPaths.push(...after.logPaths);
     }
   }
-  const stillRegistered = !after.ok || after.paths.includes(target);
   const stillOnDisk = fs.existsSync(worktreePath);
-  const ok = !stillRegistered && !stillOnDisk;
-  const detail = ok
-    ? undefined
-    : !after.ok
-      ? `git worktree list did not run cleanly after the removal; see ${after.logPath}`
+  if (after.ok) {
+    const stillRegistered = after.paths.includes(target);
+    const ok = !stillRegistered && !stillOnDisk;
+    const detail = ok
+      ? undefined
       : stillRegistered
         ? `git still reports it as a worktree after the removal; see ${removeResult.logPath}`
         : "something is still on disk at the path after the removal";
+    return {
+      ok,
+      verified: true,
+      refused: false,
+      ...(detail !== undefined ? { detail } : {}),
+      logPaths,
+    };
+  }
+  // The registry is unknown, not "still registered": the outcome rests
+  // on what can still be checked, and is reported as unverified either
+  // way so the caller never presents it as asserted.
+  const listingFailed = `git worktree list could not run after the removal (${after.detail ?? "unknown"}; see ${after.logPath})`;
+  const ok = !stillOnDisk && removeResult.exitCode === 0;
+  const detail = ok
+    ? `${listingFailed}, so the removal is unverified: the directory is gone and git worktree remove exited 0`
+    : stillOnDisk
+      ? `${listingFailed}, and something is still on disk at the path`
+      : `${listingFailed}, and git worktree remove exited ${String(removeResult.exitCode)}; see ${removeResult.logPath}`;
   return {
     ok,
+    verified: false,
     refused: false,
-    ...(detail !== undefined ? { detail } : {}),
+    detail,
     logPaths,
   };
 }

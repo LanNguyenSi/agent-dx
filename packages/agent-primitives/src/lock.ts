@@ -266,9 +266,12 @@ export interface MarkerData {
   pid: number;
   timestamp: string;
   /** Set on the repository-keyed `worktree` marker only: the `--log-dir`
-   * the worktree named by `targetPath` was created under, which is what
-   * the leftover removal checks a not-yet-registered path against
-   * before it deletes anything (see `cleanupWorktree`). */
+   * the worktree named by `targetPath` was created under. Recorded for
+   * whoever inspects the marker; never used to admit a deletion, since
+   * a marker that supplied both the path and the root to check it
+   * against would certify itself. The leftover removal checks a path
+   * git does not report against the CURRENT run's own `--log-dir`
+   * instead (see `cleanupWorktree`). */
   scratchRoot?: string;
 }
 

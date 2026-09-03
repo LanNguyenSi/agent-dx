@@ -1,16 +1,18 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
-import { doctor } from "../src/doctor/index.js";
+import { doctor, parseGitVersion } from "../src/doctor/index.js";
 import { doctor as doctorFromIndex } from "../src/index.js";
 import { lockKey } from "../src/lock.js";
 import {
   containmentRoot,
   resolveDeepestExisting,
 } from "../src/probe/containment.js";
+import { SCRATCH_OWNER_FILE } from "../src/probe/isolation.js";
+import { writeGitShim } from "./helpers/git-shim.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -797,5 +799,333 @@ describe("doctor: stale-worktree check", () => {
       expect(check?.detail?.split("was interrupted")).toHaveLength(2);
       expect(check?.detail).not.toContain("has no live probe behind it");
     });
+  });
+});
+
+describe("doctor: git-version check", () => {
+  /** A fake PATH directory whose only binary is a `git` printing
+   * `versionLine` for `--version`. */
+  function stubGitDir(versionLine: string): string {
+    const dir = makeTmpDir();
+    const stub = path.join(dir, "git");
+    fs.writeFileSync(
+      stub,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${versionLine}'; fi\n`,
+    );
+    fs.chmodSync(stub, 0o755);
+    return dir;
+  }
+
+  /** doctor with no tools requested and a cwd outside any git work tree,
+   * so the only git it touches is the one on `pathEnv`. */
+  function run(pathEnv: string) {
+    return doctor({
+      required: [],
+      optional: [],
+      cwd: makeTmpDir(),
+      pathEnv,
+      lockDir: makeTmpDir(),
+    });
+  }
+
+  it("parseGitVersion reads the numeric version and ignores a vendor suffix", () => {
+    expect(parseGitVersion("git version 2.36.1")).toEqual({
+      major: 2,
+      minor: 36,
+      patch: 1,
+    });
+    expect(parseGitVersion("git version 2.50.1 (Apple Git-155)")).toEqual({
+      major: 2,
+      minor: 50,
+      patch: 1,
+    });
+    expect(parseGitVersion("git version 2.7")).toEqual({
+      major: 2,
+      minor: 7,
+      patch: 0,
+    });
+    expect(parseGitVersion("something else")).toBeUndefined();
+  });
+
+  it("not ok, with a warning, for a git older than 2.35: names the sync it cannot run and the listing fallback", async () => {
+    const result = await run(stubGitDir("git version 2.30.2"));
+    const check = result.checks.find((c) => c.name === "git-version");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("git 2.30.2");
+    expect(check?.detail).toContain("older than 2.35");
+    expect(check?.detail).toContain("worktree_sync_failed");
+    expect(check?.detail).toContain("newline-separated");
+    expect(result.warnings.some((w) => w.includes("older than 2.35"))).toBe(
+      true,
+    );
+  });
+
+  it("not ok, with a warning naming the newline-separated listing fallback, for a git at 2.35 but older than 2.36", async () => {
+    const result = await run(stubGitDir("git version 2.35.8"));
+    const check = result.checks.find((c) => c.name === "git-version");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("git 2.35.8");
+    expect(check?.detail).toContain("older than 2.36");
+    expect(check?.detail).toContain("newline-separated");
+    expect(check?.detail).not.toContain("worktree_sync_failed");
+    expect(result.warnings.some((w) => w.includes("older than 2.36"))).toBe(
+      true,
+    );
+  });
+
+  it("ok, with no git warning, for a git at or above 2.36", async () => {
+    for (const line of [
+      "git version 2.36.0",
+      "git version 2.50.1 (Apple Git-155)",
+    ]) {
+      const result = await run(stubGitDir(line));
+      const check = result.checks.find((c) => c.name === "git-version");
+      expect(check?.ok, line).toBe(true);
+      expect(check?.detail, line).toContain("meets the 2.36 minimum");
+      expect(
+        result.warnings.filter((w) => w.includes("older than")),
+        line,
+      ).toEqual([]);
+    }
+  });
+
+  it("not ok when the version line cannot be read, and when git is not on PATH at all", async () => {
+    const unreadable = await run(stubGitDir("not a version"));
+    const unreadableCheck = unreadable.checks.find(
+      (c) => c.name === "git-version",
+    );
+    expect(unreadableCheck?.ok).toBe(false);
+    expect(unreadableCheck?.detail).toContain("could not determine");
+    expect(unreadableCheck?.detail).toContain("not a version");
+
+    const absent = await run(makeTmpDir());
+    const absentCheck = absent.checks.find((c) => c.name === "git-version");
+    expect(absentCheck?.ok).toBe(false);
+    expect(absentCheck?.detail).toContain("git not found on PATH");
+  });
+
+  it("takes the version from the tool loop when git is among the checked tools", async () => {
+    const result = await doctor({
+      required: ["git"],
+      optional: [],
+      cwd: makeTmpDir(),
+      pathEnv: stubGitDir("git version 2.30.2"),
+      lockDir: makeTmpDir(),
+    });
+    expect(result.tools.find((t) => t.name === "git")?.version).toBe(
+      "git version 2.30.2",
+    );
+    const check = result.checks.find((c) => c.name === "git-version");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("git 2.30.2");
+  });
+});
+
+describe("doctor: stale-worktree check on a git that rejects -z, and on one whose listing cannot run", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  function initRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return repo;
+  }
+
+  function addScratchWorktree(repo: string): string {
+    const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+    return resolveDeepestExisting(worktreePath);
+  }
+
+  it("still reports a registered scratch worktree with no marker, through the newline-separated fallback", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "reject-z");
+    const resolved = addScratchWorktree(repo);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      pathEnv: shimDir,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(resolved);
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.warnings.filter((w) => w.includes("could not run"))).toEqual(
+      [],
+    );
+    // The shim is the git doctor ran, not the host's.
+    expect(
+      result.checks.find((c) => c.name === "git-version")?.detail,
+    ).toContain(path.join(shimDir, "git"));
+  });
+
+  it("warns that the registry could not be read, instead of a silently clean check, when no listing form runs", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+    addScratchWorktree(repo);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      pathEnv: shimDir,
+      lockDir,
+    });
+
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(`git worktree list could not run for ${root}`) &&
+          w.includes("exited 128"),
+      ),
+    ).toBe(true);
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+  });
+});
+
+describe("doctor: stale-worktree check and the scratch owner record", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  function initRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return repo;
+  }
+
+  function addScratchWorktree(repo: string): string {
+    const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+    return resolveDeepestExisting(worktreePath);
+  }
+
+  function writeOwner(worktreePath: string, pid: number | undefined): void {
+    fs.writeFileSync(
+      path.join(path.dirname(worktreePath), SCRATCH_OWNER_FILE),
+      JSON.stringify({
+        pid,
+        timestamp: new Date().toISOString(),
+        logDir: path.dirname(path.dirname(worktreePath)),
+      }),
+    );
+  }
+
+  it("ok, naming the live probe, for a registered scratch worktree whose owner record names a live process; not ok once that process is gone", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const resolved = addScratchWorktree(repo);
+    const sleeper = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)"],
+      { stdio: "ignore" },
+    );
+    const exited = new Promise<void>((resolve) => {
+      sleeper.once("exit", () => resolve());
+    });
+    try {
+      writeOwner(resolved, sleeper.pid);
+
+      const live = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = live.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).toContain(
+        `a live probe owns ${resolved} (pid ${String(sleeper.pid)})`,
+      );
+      expect(check?.detail).not.toContain("worktree remove");
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+    await exited;
+
+    const dead = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = dead.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+  });
+
+  it("ok, naming the live probe, for a dead marker whose worktree's owner record names a live process", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const resolved = addScratchWorktree(repo);
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: resolved,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: deadPid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const sleeper = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)"],
+      { stdio: "ignore" },
+    );
+    const exited = new Promise<void>((resolve) => {
+      sleeper.once("exit", () => resolve());
+    });
+    try {
+      writeOwner(resolved, sleeper.pid);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).toContain(
+        `${resolved} (pid ${String(sleeper.pid)}, named by the marker)`,
+      );
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+    await exited;
   });
 });

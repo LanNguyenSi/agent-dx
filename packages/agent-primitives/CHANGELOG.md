@@ -78,6 +78,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`probe -i worktree` on an older git, and across lock directories.**
+  The worktree listing behind the removal's assertion, the leftover
+  recovery, and `doctor` no longer requires `git worktree list
+  --porcelain -z`: when git rejects `-z` (a release older than 2.36), the
+  newline-separated `--porcelain` form runs instead and is parsed against
+  the fixed attribute order, so a worktree path containing a newline is
+  reported as unparseable rather than misread. A listing that cannot run
+  in any form is an unknown registry, never "still registered": the
+  removal is then judged by the disk and by `git worktree remove`'s own
+  exit status, reported as done but unverified in a warning, and the
+  marker is cleared, so a git that cannot list no longer turns a
+  removal that took into a `stale_worktree` on every later run; the
+  recovery and `doctor` say in a warning that a leftover registration
+  could not be checked for. The worktree sync's own floor is git 2.35
+  (`git apply --allow-empty`); both floors are documented in the README,
+  and `doctor` gained a `git-version` check that reads the installed git
+  against them and warns below 2.36. Each scratch directory now carries
+  an `owner.json` with the creating probe's pid, written before the add
+  runs: the recovery and `doctor` skip a registered or marker-named
+  scratch worktree whose owner is still alive, naming it as a live probe
+  under another `AGENT_PRIMITIVES_LOCK_DIR` rather than removing it (the
+  lock serializes probes within one lock directory only), and the
+  removal gate refuses such a path outright. A path git does not report
+  is now checked against the recovering run's own `--log-dir`, never
+  against the log dir a marker recorded, so a marker cannot certify its
+  own containment; the scratch-shape check pins the uuid's 8-4-4-4-12
+  hex layout instead of any 36 characters of the class.
+
 - **Envelope bound and reduction.** The bound is met by reducing the
   result's structure, never by cutting the serialized JSON text. The
   deep-copied result is walked once per attempt and four caps derived from
@@ -512,10 +540,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marker deleted by hand still leaves the registration reported), and
   the next `worktree` probe on that repository removes every leftover
   of the probe's own scratch shape before it starts, marker or not.
-  Only a path of that shape (`<log-dir>/wt-<id>/wt`) that git reports
-  as a worktree of the repository, or that sits under the recorded
-  `--log-dir`, is ever deleted; a marker naming anything else, or a
-  leftover that cannot be removed, stops the run with
+  Only a path of that shape (`<log-dir>/wt-<uuid>/wt`) that git reports
+  as a worktree of the repository, or that sits under the recovering
+  run's own `--log-dir`, is ever deleted; a marker naming anything else,
+  or a leftover that cannot be removed, stops the run with
   `inconclusive`/`stale_worktree`, keeps the marker, and names the path
   and either the manual command or the marker file to delete. Outside a
   git work tree, `worktree` falls back to `inplace` with a warning

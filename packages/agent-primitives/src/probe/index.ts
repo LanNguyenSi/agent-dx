@@ -25,6 +25,7 @@ import {
   cleanupWorktree,
   isScratchWorktreePath,
   listRegisteredWorktrees,
+  liveForeignOwner,
   type InplaceSession,
   type WorktreeSyncSuccess,
 } from "./isolation.js";
@@ -572,9 +573,11 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   const absLinks = displayLinks.map(resolveDeepestExisting);
   // The `--log-dir` this run's worktree (if any) is created under,
   // recorded in the repository-keyed marker and handed to every
-  // `cleanupWorktree` call for this session: a path that git does not
-  // (yet, or any more) report as a registered worktree is only ever
-  // deleted when it sits under here.
+  // `cleanupWorktree` call for this session, the leftover recovery
+  // included: a path that git does not (yet, or any more) report as a
+  // registered worktree is only ever deleted when it sits under here.
+  // Never the log dir a marker recorded: a marker that supplied both
+  // the path and the root to check it against would certify itself.
   const wtScratchRoot = path.resolve(opts.logDir);
 
   // `worktree` needs a real git work tree to branch a worktree off of;
@@ -683,12 +686,21 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         { track, scratchRoot: wtScratchRoot },
       ).catch((err: unknown) => ({
         ok: false,
+        verified: false,
         refused: false,
         detail: err instanceof Error ? err.message : String(err),
         logPaths: [] as string[],
       }));
       if (result.ok) {
         removeMarkerFor(realRoot);
+        if (!result.verified) {
+          // Gone as far as could be checked, but not asserted against
+          // git's registry: said so, never presented as asserted.
+          warnings.push(
+            `the worktree at ${worktreePathForCleanup} was removed, but ` +
+              `${result.detail ?? "the removal could not be verified"}`,
+          );
+        }
       } else {
         // The marker stays: it is what lets the next probe on this
         // repository, and `doctor`, find the leftover.
@@ -909,39 +921,46 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     if (effectiveIsolation === "worktree") {
       // A leftover worktree from a previous run on this same repository
       // that never reached its own cleanup (SIGKILL, a crash): the lock
-      // already excludes a live probe on this repository, so any marker
-      // found here is unconditionally treated as stale, mirroring the
-      // absFile marker recovery above, and so is any registered
-      // worktree of the probe's own scratch shape whether or not a
-      // marker names it (a marker can be deleted by hand, and git
-      // registers the worktree before `git worktree add` returns).
-      // Recovery is the same gated remove-and-assert every removal goes
-      // through; nothing in the original tree was ever touched by a
-      // worktree-mode probe, so there is no backup/hash proof to check
-      // first. A leftover that cannot be removed, or a marker naming a
-      // path the gate refuses, stops this run with the marker kept:
-      // never a silent drop, and never a delete of something the gate
-      // could not vouch for.
+      // already excludes a live probe on this repository under this
+      // lock directory, so a marker found here is treated as stale,
+      // mirroring the absFile marker recovery above, and so is any
+      // registered worktree of the probe's own scratch shape whether or
+      // not a marker names it (a marker can be deleted by hand, and git
+      // registers the worktree before `git worktree add` returns). The
+      // one exception is a worktree whose scratch directory records a
+      // live owner (see `liveForeignOwner`): a probe running under
+      // another lock directory, which the lock cannot see; it is named
+      // in a warning and left alone, never removed and never treated as
+      // stale. Recovery is the same gated remove-and-assert every
+      // removal goes through, gated against THIS run's own log dir,
+      // never against a root the marker recorded; nothing in the
+      // original tree was ever touched by a worktree-mode probe, so
+      // there is no backup/hash proof to check first. A leftover that
+      // cannot be removed, or a marker naming a path the gate refuses,
+      // stops this run with the marker kept: never a silent drop, and
+      // never a delete of something the gate could not vouch for. A
+      // registry that cannot be read is said so in a warning, not
+      // treated as empty.
       const staleWt = readMarkerFor(realRoot);
       const registered = await listRegisteredWorktrees(realRoot, opts.logDir, {
         track,
       });
+      if (!registered.ok) {
+        warnings.push(
+          `git worktree list could not run for ${realRoot} ` +
+            `(${registered.detail ?? "unknown"}; see ${registered.logPath}); ` +
+            `a worktree a previous run left registered could not be checked for`,
+        );
+      }
       const leftovers: {
         path: string;
-        scratchRoot?: string;
         fromMarker: boolean;
       }[] = [];
       const unremoved: string[] = [];
       const markerFile = markerFilePathFor(realRoot);
       if (staleWt) {
         if (typeof staleWt.targetPath === "string") {
-          leftovers.push({
-            path: staleWt.targetPath,
-            ...(typeof staleWt.scratchRoot === "string"
-              ? { scratchRoot: staleWt.scratchRoot }
-              : {}),
-            fromMarker: true,
-          });
+          leftovers.push({ path: staleWt.targetPath, fromMarker: true });
         } else {
           unremoved.push(
             `the stale worktree marker for ${realRoot} names no worktree path; delete the marker file to clear it: ${markerFile}`,
@@ -957,24 +976,40 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         );
         if (!known) leftovers.push({ path: registeredPath, fromMarker: false });
       }
+      let recovered = 0;
+      let markerOwnedByLiveProbe = false;
       for (const leftover of leftovers) {
+        const livePid = liveForeignOwner(leftover.path);
+        if (livePid !== undefined) {
+          warnings.push(
+            `a worktree of the probe's own scratch shape at ${leftover.path} ` +
+              `belongs to a live probe (pid ${livePid}) and was left alone`,
+          );
+          if (leftover.fromMarker) markerOwnedByLiveProbe = true;
+          continue;
+        }
         const cleanup = await cleanupWorktree(
           realRoot,
           leftover.path,
           opts.logDir,
-          {
-            track,
-            ...(leftover.scratchRoot !== undefined
-              ? { scratchRoot: leftover.scratchRoot }
-              : {}),
-          },
+          { track, scratchRoot: wtScratchRoot },
         ).catch((err: unknown) => ({
           ok: false,
+          verified: false,
           refused: false,
           detail: err instanceof Error ? err.message : String(err),
           logPaths: [] as string[],
         }));
-        if (cleanup.ok) continue;
+        if (cleanup.ok) {
+          recovered += 1;
+          if (!cleanup.verified) {
+            warnings.push(
+              `the leftover worktree at ${leftover.path} was removed, but ` +
+                `${cleanup.detail ?? "the removal could not be verified"}`,
+            );
+          }
+          continue;
+        }
         const detail = cleanup.detail ?? "unknown";
         if (cleanup.refused && leftover.fromMarker) {
           unremoved.push(
@@ -1001,10 +1036,11 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
           isolation: isolationField,
         };
       }
-      if (leftovers.length > 0) {
-        removeMarkerFor(realRoot);
-        warnings.push("recovered_stale_worktree");
-      }
+      if (recovered > 0) warnings.push("recovered_stale_worktree");
+      // The marker's worktree was recovered, or the marker named nothing
+      // to recover any more; a marker whose worktree a live probe owns
+      // stays, since that probe's own cleanup is what clears it.
+      if (staleWt && !markerOwnedByLiveProbe) removeMarkerFor(realRoot);
 
       // Started, not awaited, so `wtSyncSettled` is assigned before this
       // function yields for the first time: from here on every exit path
@@ -1023,9 +1059,10 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         // on a signal has a cleanup that knows the path, and a
         // `SIGKILL` or a crash leaves a marker `doctor` and the next
         // probe on this repository act on; never a registered worktree
-        // with no trace of it anywhere. The marker records the scratch
-        // root the path must sit under for the cleanup to delete it
-        // while git does not report it as registered.
+        // with no trace of it anywhere. The marker records the log dir
+        // the path was created under for whoever inspects it; the
+        // cleanup checks a path git does not report against the
+        // recovering run's own log dir, never against this record.
         onWorktreeAttempt: (worktreePath) => {
           wtWorktreePath = worktreePath;
           writeMarker(realRoot, {
