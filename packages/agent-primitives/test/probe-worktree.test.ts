@@ -967,6 +967,7 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     repo: string,
     lockDir: string,
     logDir: string,
+    extraEnv: NodeJS.ProcessEnv = {},
   ): { child: ReturnType<typeof spawn>; stdout: () => string } {
     let stdout = "";
     const child = spawn(
@@ -994,6 +995,7 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
           // git's own messages are read back from its log below; a
           // fixed locale keeps them the messages this file expects.
           LC_ALL: "C",
+          ...extraEnv,
         },
         stdio: ["ignore", "pipe", "ignore"],
       },
@@ -1191,8 +1193,15 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
   }, 40000);
 
   /** A repository whose checkout has enough files that `git worktree
-   * add` runs for hundreds of milliseconds, which is the window a
-   * signal has to land in. Generated here, never checked in. */
+   * add` runs for hundreds of milliseconds, generated here and never
+   * checked in, with one more device on top: the first of those files
+   * carries a smudge filter that reports it has started (by creating
+   * the file named in `SMUDGE_STARTED`) and then blocks. A signal sent
+   * once that file exists lands while git is provably inside the
+   * checkout, with the worktree registered, locked, and partly on
+   * disk, rather than at whatever point a poll happened to catch. The
+   * next probe on the repository has to run with the filter set back
+   * to `cat` (see `releaseGate`). */
   function makeSlowAddRepo(): string {
     const { repo } = initRepo();
     const many = path.join(repo, "many");
@@ -1203,26 +1212,32 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
         "x".repeat(64),
       );
     }
+    fs.writeFileSync(
+      path.join(repo, ".gitattributes"),
+      "many/f-00000.txt filter=gate\n",
+    );
     git(repo, ["add", "-A"]);
     git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "many"]);
+    // The started-file path travels via an env var, never interpolated
+    // into the command string.
+    git(repo, [
+      "config",
+      "filter.gate.smudge",
+      'touch "$SMUDGE_STARTED" && sleep 30 && cat',
+    ]);
     return repo;
   }
 
-  /** Git creates the worktree's administrative entry under
-   * `.git/worktrees/` as the first thing `git worktree add` does, before
-   * it checks anything out: its appearance is the add being under way. */
-  function adminEntries(repo: string): string[] {
-    try {
-      return fs.readdirSync(path.join(repo, ".git", "worktrees"));
-    } catch {
-      return [];
-    }
+  function releaseGate(repo: string): void {
+    git(repo, ["config", "filter.gate.smudge", "cat"]);
   }
 
-  async function waitForAdd(repo: string): Promise<void> {
+  /** Resolves once the gated checkout has reached its blocking filter:
+   * `git worktree add` is then inside the checkout for certain. */
+  async function waitForGate(startedPath: string): Promise<void> {
     const deadline = Date.now() + 20000;
-    while (adminEntries(repo).length === 0) {
-      if (Date.now() > deadline) throw new Error("the add never started");
+    while (!fs.existsSync(startedPath)) {
+      if (Date.now() > deadline) throw new Error("the checkout never started");
       await new Promise((resolve) => setTimeout(resolve, 1));
     }
   }
@@ -1269,26 +1284,17 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
   }
 
   /** Kills the CLI and then the whole process group of its `git
-   * worktree add` child, once that add has registered the worktree: the
-   * state a crash of the whole tree leaves behind. */
+   * worktree add` child, once that add is blocked inside its checkout:
+   * the state a crash of the whole tree leaves behind. */
   async function crashDuringAdd(
-    repo: string,
     child: ReturnType<typeof spawn>,
+    startedPath: string,
   ): Promise<void> {
-    const deadline = Date.now() + 20000;
-    let gitPid: number | undefined;
-    for (;;) {
-      gitPid = gitAddChildOf(child.pid!);
-      if (gitPid !== undefined && adminEntries(repo).length > 0) break;
-      if (Date.now() > deadline) throw new Error("the add never started");
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
+    await waitForGate(startedPath);
+    const gitPid = gitAddChildOf(child.pid!);
+    expect(gitPid).toBeDefined();
     child.kill("SIGKILL");
-    try {
-      process.kill(-gitPid, "SIGKILL");
-    } catch {
-      // Already gone: the add completed between the lookup and the kill.
-    }
+    process.kill(-gitPid!, "SIGKILL");
     await new Promise<void>((resolve) => child.on("exit", () => resolve()));
   }
 
@@ -1305,8 +1311,11 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     const repo = makeSlowAddRepo();
     const logDir = makeTmpDir();
 
-    const { child, stdout } = spawnProbe(repo, lockDir, logDir);
-    await waitForAdd(repo);
+    const started = path.join(makeTmpDir(), "smudge-started");
+    const { child, stdout } = spawnProbe(repo, lockDir, logDir, {
+      SMUDGE_STARTED: started,
+    });
+    await waitForGate(started);
     child.kill("SIGTERM");
     const exitCode = await new Promise<number | null>((resolve) =>
       child.on("exit", (code) => resolve(code)),
@@ -1342,8 +1351,11 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     const logDir = makeTmpDir();
     const realRoot = resolveDeepestExisting(repo);
 
-    const { child } = spawnProbe(repo, lockDir, logDir);
-    await crashDuringAdd(repo, child);
+    const started = path.join(makeTmpDir(), "smudge-started");
+    const { child } = spawnProbe(repo, lockDir, logDir, {
+      SMUDGE_STARTED: started,
+    });
+    await crashDuringAdd(child, started);
 
     const scratch = scratchDir(logDir);
     const worktreePath = path.join(scratch, "wt");
@@ -1380,6 +1392,7 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     expect(staleWorktreeCheck?.detail).toContain(worktreePath);
     expect(staleWorktreeCheck?.detail).toContain("remove --force --force");
 
+    releaseGate(repo);
     const result = await probe(baseOptions(repo, { logDir }));
     expect(result.warnings).toContain("recovered_stale_worktree");
     expect(result.status).toBe("killed");
@@ -1398,8 +1411,11 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     const logDir = makeTmpDir();
     const realRoot = resolveDeepestExisting(repo);
 
-    const { child } = spawnProbe(repo, lockDir, logDir);
-    await crashDuringAdd(repo, child);
+    const started = path.join(makeTmpDir(), "smudge-started");
+    const { child } = spawnProbe(repo, lockDir, logDir, {
+      SMUDGE_STARTED: started,
+    });
+    await crashDuringAdd(child, started);
 
     const worktreePath = path.join(scratchDir(logDir), "wt");
     expect(readMarkerFor(realRoot)).toBeDefined();
@@ -1427,6 +1443,7 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
       resolveDeepestExisting(worktreePath),
     );
 
+    releaseGate(repo);
     const result = await probe(baseOptions(repo, { logDir }));
     expect(result.warnings).toContain("recovered_stale_worktree");
     expect(result.status).toBe("killed");
