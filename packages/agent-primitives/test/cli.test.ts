@@ -15,11 +15,13 @@ import {
 } from "../src/cli.js";
 import { UsageError } from "../src/envelope.js";
 import {
+  assertArgvWithinLimit,
   buildSpawnEnv,
   CLI_PATH,
   FIXED_BINARIES,
   FIXED_BIN_DIR,
   FIXED_TMPDIR,
+  MAX_ARGV_ELEMENT_BYTES,
   resolveBinary,
   spawnCli,
 } from "./helpers/spawn-cli.js";
@@ -35,12 +37,13 @@ function makeTmpDir(): string {
 
 /** Names that are certain not to resolve to anything on any PATH, used to
  * inflate a doctor result to a chosen size without depending on what the
- * host has installed. */
+ * host has installed. Deliberately short: doctor's per-tool JSON overhead
+ * (`{"name":...,"required":false,"found":false}`) dwarfs the name itself,
+ * so a long, large-`count` list stays well under the fixture argv limit
+ * (Linux's `MAX_ARG_STRLEN`, see spawn-cli.ts) while still producing an
+ * envelope far past the 64 KiB pipe buffer. */
 function absentNames(count: number): string {
-  return Array.from(
-    { length: count },
-    (_, i) => `definitely-not-a-binary-${i}`,
-  ).join(",");
+  return Array.from({ length: count }, (_, i) => `nb${i}`).join(",");
 }
 
 function shQuote(value: string): string {
@@ -252,6 +255,13 @@ describe("cli", () => {
     expect(run.stdout).toContain("node");
   });
 
+  it("refuses an oversized argv element instead of risking spawn E2BIG on CI", () => {
+    const oversized = "x".repeat(MAX_ARGV_ELEMENT_BYTES + 1);
+    expect(() => spawnCli(["doctor", "-r", oversized])).toThrow(
+      /MAX_ARG_STRLEN/,
+    );
+  });
+
   it("delivers an envelope larger than the pipe buffer intact through a piped stdout", async () => {
     // Regression test for the write-then-exit race: process.exit()
     // immediately after stdout.write() can truncate output larger than the
@@ -298,6 +308,10 @@ describe("cli", () => {
       `{ ${shQuote(process.execPath)} ${shQuote(CLI_PATH)} doctor -m 900000 ` +
       `-r node -o ${shQuote(absentNames(5000))}; echo $? > ${shQuote(statusFile)}; } ` +
       `| ${shQuote(headPath)} -c 100`;
+    // This spawn goes straight to node:child_process, not through
+    // spawnCli/spawnCliRaw, so it does not get that helper's automatic
+    // argv guard; assert it here explicitly.
+    assertArgvWithinLimit(["-c", script]);
     const shell = spawn(shPath, ["-c", script], {
       env: buildSpawnEnv(),
       stdio: ["ignore", "ignore", "pipe"],

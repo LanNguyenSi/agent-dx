@@ -112,6 +112,32 @@ export interface CliRun {
 /** A spawned CLI: stdin closed, stdout and stderr piped. */
 type PipedCli = ChildProcessByStdio<null, Readable, Readable>;
 
+/**
+ * Stay well under Linux's `MAX_ARG_STRLEN`, which caps any single argv
+ * element (not the whole command line, one element) at 128 KiB and is
+ * enforced on ubuntu-latest CI but not on macOS. A fixture that grows a
+ * single `-r`/`-o` argument past this threshold spawns fine locally and
+ * fails CI with `spawn E2BIG`; the fix is to shrink the fixture (more,
+ * shorter names) rather than to raise this limit.
+ */
+export const MAX_ARGV_ELEMENT_BYTES = 100 * 1024;
+
+/** Throws a clear error, naming the Linux limit, for any argv element
+ * that would risk `spawn E2BIG` on CI instead of failing silently there. */
+export function assertArgvWithinLimit(args: readonly string[]): void {
+  for (const arg of args) {
+    const bytes = Buffer.byteLength(arg, "utf8");
+    if (bytes > MAX_ARGV_ELEMENT_BYTES) {
+      throw new Error(
+        `spawn-cli helper: argv element is ${bytes} bytes, over the ` +
+          `${MAX_ARGV_ELEMENT_BYTES}-byte fixture limit kept under Linux's ` +
+          `128 KiB MAX_ARG_STRLEN; shrink the test fixture instead of ` +
+          `growing a single argv element.`,
+      );
+    }
+  }
+}
+
 /** Spawns the built CLI with the fixed environment and resolves, on the
  * child's own `close`, with its full stdout, full stderr, and its own exit
  * code. */
@@ -128,6 +154,7 @@ function spawnCliRaw(
   args: string[],
   options: { env?: NodeJS.ProcessEnv } = {},
 ): PipedCli {
+  assertArgvWithinLimit(args);
   return spawn(process.execPath, [CLI_PATH, ...args], {
     env: buildSpawnEnv(options.env),
     stdio: ["ignore", "pipe", "pipe"],
