@@ -6,14 +6,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { probe, type ProbeOptions } from "../src/probe/index.js";
-import { readMarkerFor } from "../src/lock.js";
+import {
+  markerFilePathFor,
+  readMarkerFor,
+  removeMarkerFor,
+  writeMarker,
+} from "../src/lock.js";
+import { resolveDeepestExisting } from "../src/probe/containment.js";
 import { runArgv } from "../src/probe/run.js";
 
-// Call-through mock, the same shape as the one above for
+// Call-through mock, the same shape as the one below for
 // "../src/probe/run.js": lets a test pin the run id `beginWorktree`
 // derives its scratch subdirectory name from, to reproduce a genuine
-// collision (finding #1's "refuse a pre-existing diff file" guard)
-// without waiting on an actual `randomUUID` clash.
+// run-id collision (the refusal to reuse a pre-existing tracked-diff
+// scratch file) without waiting on an actual `randomUUID` clash.
 vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:crypto")>();
   return { ...actual, randomUUID: vi.fn(actual.randomUUID) };
@@ -607,29 +613,30 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
     const { repo } = initRepo();
 
     // Build a real leftover worktree by hand (what a SIGKILL mid-run
-    // would leave: the worktree registered and on disk, a marker
-    // recording its path, keyed on the repository root, with a dead pid).
+    // would leave: the worktree registered and on disk at the probe's
+    // own scratch shape under its log dir, a marker recording its path
+    // and that log dir, keyed on the repository root, with a dead pid).
     const staleLogDir = makeTmpDir();
+    const stalePath = path.join(staleLogDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(stalePath), { recursive: true });
     const staleAdd = spawnSync(
       "git",
-      ["worktree", "add", "--detach", path.join(staleLogDir, "wt"), "HEAD"],
+      ["worktree", "add", "--detach", "--", stalePath, "HEAD"],
       { cwd: repo },
     );
     expect(staleAdd.status).toBe(0);
 
     const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
     if (!deadPid) throw new Error("failed to obtain a dead pid for the test");
-    const { writeMarker } = await import("../src/lock.js");
-    const { resolveDeepestExisting } =
-      await import("../src/probe/containment.js");
     const realRoot = resolveDeepestExisting(repo);
     writeMarker(realRoot, {
-      targetPath: path.join(staleLogDir, "wt"),
+      targetPath: stalePath,
       backupPath: realRoot,
       preHash: "",
       mutatedHash: "",
       pid: deadPid,
       timestamp: new Date().toISOString(),
+      scratchRoot: staleLogDir,
     });
 
     const result = await probe(baseOptions(repo));
@@ -638,7 +645,271 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
     expect(result.status).toBe("killed");
     expect(readMarkerFor(realRoot)).toBeUndefined();
     // The stale worktree itself is gone (removed as part of recovery).
-    expect(fs.existsSync(path.join(staleLogDir, "wt"))).toBe(false);
+    expect(fs.existsSync(stalePath)).toBe(false);
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
+  });
+
+  it("a leftover whose registration is still `locked initializing` (the add died with the process) is recovered by the next invocation", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const staleLogDir = makeTmpDir();
+    const stalePath = path.join(staleLogDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(stalePath), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", stalePath, "HEAD"]);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [adminEntry] = fs.readdirSync(adminDir);
+    fs.writeFileSync(path.join(adminDir, adminEntry, "locked"), "initializing");
+    expect(worktreeList(repo)).toContain("locked initializing");
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    if (!deadPid) throw new Error("failed to obtain a dead pid for the test");
+    const realRoot = resolveDeepestExisting(repo);
+    writeMarker(realRoot, {
+      targetPath: stalePath,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: deadPid,
+      timestamp: new Date().toISOString(),
+      scratchRoot: staleLogDir,
+    });
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    expect(result.status).toBe("killed");
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(fs.existsSync(stalePath)).toBe(false);
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
+  });
+
+  it("a registered worktree of the scratch shape with no marker at all is still recovered by the next invocation", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const stalePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(stalePath), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", stalePath, "HEAD"]);
+    const realRoot = resolveDeepestExisting(repo);
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    expect(result.status).toBe("killed");
+    expect(fs.existsSync(stalePath)).toBe(false);
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
+  });
+
+  it("a marker naming a directory outside the scratch shape is refused: nothing is deleted, the marker stays, and the run reports it", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = path.join(makeTmpDir(), "somebody-elses-directory");
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, "precious.txt"), "keep me\n");
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    if (!deadPid) throw new Error("failed to obtain a dead pid for the test");
+    const realRoot = resolveDeepestExisting(repo);
+    writeMarker(realRoot, {
+      targetPath: outside,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: deadPid,
+      timestamp: new Date().toISOString(),
+      scratchRoot: path.dirname(outside),
+    });
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("stale_worktree");
+    expect(
+      result.warnings.some(
+        (w) => w.includes(outside) && w.includes(markerFilePathFor(realRoot)),
+      ),
+    ).toBe(true);
+    expect(fs.readFileSync(path.join(outside, "precious.txt"), "utf8")).toBe(
+      "keep me\n",
+    );
+    expect(readMarkerFor(realRoot)).toBeDefined();
+    // Nothing of this run's own was started either: no worktree added.
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
+  });
+
+  it("a marker naming the operator's own registered worktree is refused: it stays registered and intact", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const own = path.join(makeTmpDir(), "feature-branch");
+    git(repo, ["worktree", "add", "--detach", "--", own, "HEAD"]);
+    fs.writeFileSync(path.join(own, "work-in-progress.txt"), "uncommitted\n");
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    if (!deadPid) throw new Error("failed to obtain a dead pid for the test");
+    const realRoot = resolveDeepestExisting(repo);
+    writeMarker(realRoot, {
+      targetPath: own,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: deadPid,
+      timestamp: new Date().toISOString(),
+      scratchRoot: path.dirname(own),
+    });
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("stale_worktree");
+    expect(worktreeList(repo)).toContain(resolveDeepestExisting(own));
+    expect(
+      fs.readFileSync(path.join(own, "work-in-progress.txt"), "utf8"),
+    ).toBe("uncommitted\n");
+    expect(readMarkerFor(realRoot)).toBeDefined();
+  });
+
+  it("a removal at the end of a run that does not take keeps the marker and warns with the path and the manual command", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realRoot = resolveDeepestExisting(repo);
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    // Neither the removal nor the prune runs: the registration is left
+    // behind on purpose, the way a git that refuses would leave it.
+    mockRun.mockImplementation(async (file, args, options) => {
+      if (
+        file === "git" &&
+        args[0] === "worktree" &&
+        (args[1] === "remove" || args[1] === "prune")
+      ) {
+        return {
+          exitCode: 128,
+          durationMs: 0,
+          stdout: "",
+          stderr: "shimmed: did not run",
+          logPath: path.join(options.logDir, "shimmed.log"),
+          timedOut: false,
+          aborted: false,
+          outputTruncated: false,
+          logWriteFailed: false,
+          stdioClosed: true,
+        };
+      }
+      return actualRun.runArgv(file, args, options);
+    });
+
+    try {
+      const result = await probe(baseOptions(repo));
+      const worktreePath = result.isolation.path as string;
+
+      // The verdict stands: the cleanup is best-effort.
+      expect(result.status).toBe("killed");
+      expect(readMarkerFor(realRoot)?.targetPath).toBe(worktreePath);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(`the worktree at ${worktreePath} was not removed`) &&
+            w.includes(
+              `git -C ${realRoot} worktree remove --force --force -- ${worktreePath}`,
+            ),
+        ),
+      ).toBe(true);
+      // Still registered (git's own removal never ran); the directory
+      // itself is gone, deleted for a path the gate admitted.
+      expect(worktreeList(repo)).toContain(
+        resolveDeepestExisting(worktreePath),
+      );
+      expect(fs.existsSync(worktreePath)).toBe(false);
+    } finally {
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
+      );
+      git(repo, ["worktree", "prune"]);
+    }
+  });
+});
+
+describe("probe(): worktree isolation, the removal waits for a sync step that outlives the handler's own settle wait", () => {
+  it("git worktree list/remove start only after the sync's in-flight git call has settled, even when the handler gave up waiting for it", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, "extra.txt"), "untracked\n");
+    const savedBound = process.env.AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS;
+    process.env.AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS = "50";
+    const events: string[] = [];
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    mockRun.mockImplementation(async (file, args, options) => {
+      if (file === "git" && args[0] === "ls-files") {
+        events.push("sync:ls-files:started");
+        // The signal lands while this call is in flight, and the call
+        // does not die with it: the abort signal is withheld from the
+        // real runner and the result reports `aborted: false`, so the
+        // sync behaves like a git child the handler's kill never
+        // reached, still running long after the handler's 50 ms wait
+        // for it has expired.
+        process.emit("SIGTERM" as never);
+        const { signal: _withheld, ...withoutSignal } = options;
+        const result = await actualRun.runArgv(file, args, withoutSignal);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        events.push("sync:ls-files:settled");
+        return { ...result, aborted: false };
+      }
+      // The recovery step lists worktrees before the sync starts; only
+      // the calls after the sync's own call are the cleanup's.
+      if (
+        file === "git" &&
+        args[0] === "worktree" &&
+        args[1] !== "add" &&
+        events.includes("sync:ls-files:started")
+      ) {
+        events.push(`cleanup:${args[1]}:started`);
+      }
+      return actualRun.runArgv(file, args, options);
+    });
+
+    try {
+      const result = await probe(baseOptions(repo));
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("aborted");
+      const settled = events.indexOf("sync:ls-files:settled");
+      const firstCleanup = events.findIndex((e) => e.startsWith("cleanup:"));
+      expect(settled).toBeGreaterThanOrEqual(0);
+      expect(firstCleanup).toBeGreaterThan(settled);
+      expect(events).toContain("cleanup:remove:started");
+      expect(
+        worktreeList(repo)
+          .split("\n\n")
+          .filter((b) => b.trim().length > 0),
+      ).toHaveLength(1);
+    } finally {
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
+      );
+      if (savedBound === undefined) {
+        delete process.env.AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS;
+      } else {
+        process.env.AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS = savedBound;
+      }
+    }
   });
 });
 
@@ -720,6 +991,9 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
           ...process.env,
           AGENT_PRIMITIVES_LOCK_DIR: lockDir,
           AGENT_PRIMITIVES_LOG_DIR: logDir,
+          // git's own messages are read back from its log below; a
+          // fixed locale keeps them the messages this file expects.
+          LC_ALL: "C",
         },
         stdio: ["ignore", "pipe", "ignore"],
       },
@@ -914,6 +1188,254 @@ describe("probe(): worktree isolation, a signal landing while the worktree is st
     expect(result.status).toBe("killed");
     expect(readMarkerFor(realRoot)).toBeUndefined();
     expect(fs.existsSync(worktreePath)).toBe(false);
+  }, 40000);
+
+  /** A repository whose checkout has enough files that `git worktree
+   * add` runs for hundreds of milliseconds, which is the window a
+   * signal has to land in. Generated here, never checked in. */
+  function makeSlowAddRepo(): string {
+    const { repo } = initRepo();
+    const many = path.join(repo, "many");
+    fs.mkdirSync(many, { recursive: true });
+    for (let i = 0; i < 3000; i += 1) {
+      fs.writeFileSync(
+        path.join(many, `f-${String(i).padStart(5, "0")}.txt`),
+        "x".repeat(64),
+      );
+    }
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "many"]);
+    return repo;
+  }
+
+  /** Git creates the worktree's administrative entry under
+   * `.git/worktrees/` as the first thing `git worktree add` does, before
+   * it checks anything out: its appearance is the add being under way. */
+  function adminEntries(repo: string): string[] {
+    try {
+      return fs.readdirSync(path.join(repo, ".git", "worktrees"));
+    } catch {
+      return [];
+    }
+  }
+
+  async function waitForAdd(repo: string): Promise<void> {
+    const deadline = Date.now() + 20000;
+    while (adminEntries(repo).length === 0) {
+      if (Date.now() > deadline) throw new Error("the add never started");
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+  }
+
+  /** The pid of the `git worktree add` child the spawned CLI has
+   * running, read from the process table (`/proc` on Linux, `ps`
+   * elsewhere). The CLI starts it in a process group of its own, so a
+   * `SIGKILL` to the CLI alone leaves it running: it then completes,
+   * and git tidies up after itself, or dies on its closed output pipe
+   * and its own junk handler does the same. A leftover of the kind a
+   * crash of the whole process tree leaves (registered, locked, on
+   * disk) needs the git child killed as well. */
+  function gitAddChildOf(cliPid: number): number | undefined {
+    if (process.platform === "linux") {
+      for (const entry of fs.readdirSync("/proc")) {
+        if (!/^[0-9]+$/.test(entry)) continue;
+        try {
+          const stat = fs.readFileSync(`/proc/${entry}/stat`, "utf8");
+          const afterComm = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+          if (Number(afterComm[1]) !== cliPid) continue;
+          const argv = fs
+            .readFileSync(`/proc/${entry}/cmdline`, "utf8")
+            .split("\0");
+          if (argv.includes("worktree") && argv.includes("add")) {
+            return Number(entry);
+          }
+        } catch {
+          // The process ended between the listing and the read.
+        }
+      }
+      return undefined;
+    }
+    const table = execFileSync("ps", ["-eo", "pid=,ppid=,args="], {
+      encoding: "utf8",
+    });
+    for (const line of table.split("\n")) {
+      const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+      if (!match || Number(match[2]) !== cliPid) continue;
+      if (/\bworktree\b/.test(match[3]) && /\badd\b/.test(match[3])) {
+        return Number(match[1]);
+      }
+    }
+    return undefined;
+  }
+
+  /** Kills the CLI and then the whole process group of its `git
+   * worktree add` child, once that add has registered the worktree: the
+   * state a crash of the whole tree leaves behind. */
+  async function crashDuringAdd(
+    repo: string,
+    child: ReturnType<typeof spawn>,
+  ): Promise<void> {
+    const deadline = Date.now() + 20000;
+    let gitPid: number | undefined;
+    for (;;) {
+      gitPid = gitAddChildOf(child.pid!);
+      if (gitPid !== undefined && adminEntries(repo).length > 0) break;
+      if (Date.now() > deadline) throw new Error("the add never started");
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    child.kill("SIGKILL");
+    try {
+      process.kill(-gitPid, "SIGKILL");
+    } catch {
+      // Already gone: the add completed between the lookup and the kill.
+    }
+    await new Promise<void>((resolve) => child.on("exit", () => resolve()));
+  }
+
+  /** This run's scratch directory under `logDir` (`wt-<random>`), which
+   * survives the cleanup: only the worktree inside it is removed. */
+  function scratchDir(logDir: string): string {
+    const entries = fs.readdirSync(logDir).filter((e) => e.startsWith("wt-"));
+    expect(entries).toHaveLength(1);
+    return path.join(logDir, entries[0]);
+  }
+
+  it("SIGTERM while git worktree add is running exits 143 with no output and leaves no registration, nothing on disk, no marker, and no lock", async () => {
+    const lockDir = useLockDir();
+    const repo = makeSlowAddRepo();
+    const logDir = makeTmpDir();
+
+    const { child, stdout } = spawnProbe(repo, lockDir, logDir);
+    await waitForAdd(repo);
+    child.kill("SIGTERM");
+    const exitCode = await new Promise<number | null>((resolve) =>
+      child.on("exit", (code) => resolve(code)),
+    );
+
+    expect(exitCode).toBe(143);
+    expect(stdout()).toBe("");
+    // The add really was cut short: git prints this line only once the
+    // checkout has completed, and the diff phase never started.
+    const scratch = scratchDir(logDir);
+    expect(
+      fs.readFileSync(path.join(scratch, "worktree-add.log"), "utf8"),
+    ).not.toContain("HEAD is now at");
+    expect(fs.existsSync(path.join(scratch, "tracked.diff"))).toBe(false);
+    expect(execLogs(logDir)).toEqual([]);
+    // Nothing registered (the locked entry an interrupted add leaves is
+    // cleared too), nothing on disk, no marker, the lock released.
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
+    expect(fs.existsSync(path.join(scratch, "wt"))).toBe(false);
+    expect(readMarkerFor(resolveDeepestExisting(repo))).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+  }, 40000);
+
+  it("a crash while git worktree add is running leaves the marker written before the add, which doctor reports and the next probe recovers", async () => {
+    const lockDir = useLockDir();
+    const repo = makeSlowAddRepo();
+    const logDir = makeTmpDir();
+    const realRoot = resolveDeepestExisting(repo);
+
+    const { child } = spawnProbe(repo, lockDir, logDir);
+    await crashDuringAdd(repo, child);
+
+    const scratch = scratchDir(logDir);
+    const worktreePath = path.join(scratch, "wt");
+    expect(
+      fs.readFileSync(path.join(scratch, "worktree-add.log"), "utf8"),
+    ).not.toContain("HEAD is now at");
+    // The marker was written before the add ran, so it is here even
+    // though the add never returned; it names the path and the log dir.
+    const marker = readMarkerFor(realRoot);
+    expect(marker).toBeDefined();
+    expect(marker!.targetPath).toBe(worktreePath);
+    expect(marker!.scratchRoot).toBe(path.resolve(logDir));
+    // The leftover really is registered (locked, as an interrupted add
+    // leaves it): asserted before the recovery steps, so a regression
+    // that never created one reads as that.
+    expect(worktreeList(repo)).toContain("locked initializing");
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(2);
+
+    const { doctor } = await import("../src/doctor/index.js");
+    const doctorResult = await doctor({
+      cwd: repo,
+      lockDir,
+      required: [],
+      optional: [],
+    });
+    const staleWorktreeCheck = doctorResult.checks.find(
+      (c) => c.name === "stale-worktree",
+    );
+    expect(staleWorktreeCheck?.ok).toBe(false);
+    expect(staleWorktreeCheck?.detail).toContain(worktreePath);
+    expect(staleWorktreeCheck?.detail).toContain("remove --force --force");
+
+    const result = await probe(baseOptions(repo, { logDir }));
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    expect(result.status).toBe("killed");
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
+  }, 40000);
+
+  it("a crash while git worktree add is running, with the marker then deleted by hand: doctor still reports the registration and the next probe still recovers", async () => {
+    const lockDir = useLockDir();
+    const repo = makeSlowAddRepo();
+    const logDir = makeTmpDir();
+    const realRoot = resolveDeepestExisting(repo);
+
+    const { child } = spawnProbe(repo, lockDir, logDir);
+    await crashDuringAdd(repo, child);
+
+    const worktreePath = path.join(scratchDir(logDir), "wt");
+    expect(readMarkerFor(realRoot)).toBeDefined();
+    removeMarkerFor(realRoot);
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(worktreeList(repo)).toContain("locked initializing");
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(2);
+
+    const { doctor } = await import("../src/doctor/index.js");
+    const doctorResult = await doctor({
+      cwd: repo,
+      lockDir,
+      required: [],
+      optional: [],
+    });
+    const staleWorktreeCheck = doctorResult.checks.find(
+      (c) => c.name === "stale-worktree",
+    );
+    expect(staleWorktreeCheck?.ok).toBe(false);
+    expect(staleWorktreeCheck?.detail).toContain(
+      resolveDeepestExisting(worktreePath),
+    );
+
+    const result = await probe(baseOptions(repo, { logDir }));
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    expect(result.status).toBe("killed");
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
   }, 40000);
 });
 

@@ -265,6 +265,11 @@ export interface MarkerData {
   mutatedHash: string;
   pid: number;
   timestamp: string;
+  /** Set on the repository-keyed `worktree` marker only: the `--log-dir`
+   * the worktree named by `targetPath` was created under, which is what
+   * the leftover removal checks a not-yet-registered path against
+   * before it deletes anything (see `cleanupWorktree`). */
+  scratchRoot?: string;
 }
 
 export function writeMarker(absTargetPath: string, data: MarkerData): void {

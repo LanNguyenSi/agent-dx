@@ -23,6 +23,8 @@ import {
   beginInplace,
   beginWorktree,
   cleanupWorktree,
+  isScratchWorktreePath,
+  listRegisteredWorktrees,
   type InplaceSession,
   type WorktreeSyncSuccess,
 } from "./isolation.js";
@@ -272,17 +274,20 @@ export interface CrashHandlers {
  *    leaves the marker (and the backup) for the next invocation to
  *    recover from, or for `doctor` to report.
  * 4. `cleanupWtSession` removes a `worktree` session's detached
- *    worktree (`git worktree remove --force`, the directory itself,
- *    then `git worktree prune`), releasing the repository-keyed marker
- *    only once that succeeds; a no-op only when `git worktree add` was
- *    never even started. It waits for the sync to settle first and then
- *    removes whatever stage it reached, so a signal landing while the
- *    worktree is still being synced (or while `git worktree add` itself
- *    is running) is cleaned up the same as one landing after it. The
- *    marker for that worktree is written as soon as the add succeeds,
- *    so even a cleanup that fails leaves a trail. Best-effort: a failed
- *    cleanup leaves the marker in place for the next probe on this
- *    repository (or `doctor`) to recover.
+ *    worktree through `cleanupWorktree` (the directory itself, then
+ *    `git worktree remove --force --force`, then `git worktree prune`,
+ *    then an assertion against `git worktree list` and the disk),
+ *    releasing the repository-keyed marker only once that assertion
+ *    holds; a no-op only when `git worktree add` was never even
+ *    started. It waits for the sync to settle first and then removes
+ *    whatever stage it reached, so a signal landing while the worktree
+ *    is still being synced (or while `git worktree add` itself is
+ *    running) is cleaned up the same as one landing after it. The
+ *    marker for that worktree is written before the add runs, so even
+ *    a cleanup that fails leaves a trail. Best-effort: a failed cleanup
+ *    keeps the marker and records a warning naming the path and the
+ *    manual command, for the next probe on this repository (or
+ *    `doctor`) to act on.
  *
  * The lock is released and the process ended when `exitOnSignal` says
  * to, only once all of the above has settled.
@@ -565,6 +570,12 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   const realRoot = resolveDeepestExisting(root);
   const absFile = resolveDeepestExisting(displayFile);
   const absLinks = displayLinks.map(resolveDeepestExisting);
+  // The `--log-dir` this run's worktree (if any) is created under,
+  // recorded in the repository-keyed marker and handed to every
+  // `cleanupWorktree` call for this session: a path that git does not
+  // (yet, or any more) report as a registered worktree is only ever
+  // deleted when it sits under here.
+  const wtScratchRoot = path.resolve(opts.logDir);
 
   // `worktree` needs a real git work tree to branch a worktree off of;
   // outside one there is nothing to isolate into, so the mode falls back
@@ -644,7 +655,11 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   // same process is still writing into. Awaited by `cleanupWtSession`
   // below, and bounded in practice by the sync's own abort handling:
   // every git call it makes dies with the abort, and its copy loop
-  // checks the abort between batches.
+  // checks the abort between batches. The wait matters exactly when
+  // that bound does not hold: a sync step that outlives the signal
+  // handler's own settle wait (`waitForInFlight` gives up after
+  // `signalSettleBoundMs()`) is still waited for here, so the removal
+  // never runs underneath a step that is still writing.
   let wtSyncSettled: Promise<void> | undefined;
   // The finally block and the SIGINT/SIGTERM handler can both reach
   // cleanup for the same run (aborting the in-flight test unblocks the
@@ -665,15 +680,24 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         realRoot,
         worktreePathForCleanup,
         opts.logDir,
-        { track },
-      ).catch(() => ({ ok: false, logPaths: [] as string[] }));
+        { track, scratchRoot: wtScratchRoot },
+      ).catch((err: unknown) => ({
+        ok: false,
+        refused: false,
+        detail: err instanceof Error ? err.message : String(err),
+        logPaths: [] as string[],
+      }));
       if (result.ok) {
         removeMarkerFor(realRoot);
       } else {
+        // The marker stays: it is what lets the next probe on this
+        // repository, and `doctor`, find the leftover.
         warnings.push(
-          `git worktree remove/prune did not fully succeed for ${worktreePathForCleanup}; ` +
-            `it is left registered for the next probe on this repository (or ` +
-            `\`agent-primitives doctor\`) to recover`,
+          `the worktree at ${worktreePathForCleanup} was not removed ` +
+            `(${result.detail ?? "unknown"}); its marker is kept for the next ` +
+            `probe on this repository (or \`agent-primitives doctor\`) to ` +
+            `act on; run \`git -C ${realRoot} worktree remove --force --force ` +
+            `-- ${worktreePathForCleanup}\` manually`,
         );
       }
     })();
@@ -887,14 +911,97 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       // that never reached its own cleanup (SIGKILL, a crash): the lock
       // already excludes a live probe on this repository, so any marker
       // found here is unconditionally treated as stale, mirroring the
-      // absFile marker recovery above. Recovery is a plain remove+prune;
-      // nothing in the original tree was ever touched by a worktree-mode
-      // probe, so there is no backup/hash proof to check first.
+      // absFile marker recovery above, and so is any registered
+      // worktree of the probe's own scratch shape whether or not a
+      // marker names it (a marker can be deleted by hand, and git
+      // registers the worktree before `git worktree add` returns).
+      // Recovery is the same gated remove-and-assert every removal goes
+      // through; nothing in the original tree was ever touched by a
+      // worktree-mode probe, so there is no backup/hash proof to check
+      // first. A leftover that cannot be removed, or a marker naming a
+      // path the gate refuses, stops this run with the marker kept:
+      // never a silent drop, and never a delete of something the gate
+      // could not vouch for.
       const staleWt = readMarkerFor(realRoot);
+      const registered = await listRegisteredWorktrees(realRoot, opts.logDir, {
+        track,
+      });
+      const leftovers: {
+        path: string;
+        scratchRoot?: string;
+        fromMarker: boolean;
+      }[] = [];
+      const unremoved: string[] = [];
+      const markerFile = markerFilePathFor(realRoot);
       if (staleWt) {
-        await cleanupWorktree(realRoot, staleWt.targetPath, opts.logDir, {
-          track,
-        }).catch(() => undefined);
+        if (typeof staleWt.targetPath === "string") {
+          leftovers.push({
+            path: staleWt.targetPath,
+            ...(typeof staleWt.scratchRoot === "string"
+              ? { scratchRoot: staleWt.scratchRoot }
+              : {}),
+            fromMarker: true,
+          });
+        } else {
+          unremoved.push(
+            `the stale worktree marker for ${realRoot} names no worktree path; delete the marker file to clear it: ${markerFile}`,
+          );
+        }
+      }
+      for (const registeredPath of registered.paths) {
+        if (!isScratchWorktreePath(registeredPath)) continue;
+        if (registeredPath === realRoot) continue;
+        const known = leftovers.some(
+          (l) =>
+            resolveDeepestExisting(path.resolve(l.path)) === registeredPath,
+        );
+        if (!known) leftovers.push({ path: registeredPath, fromMarker: false });
+      }
+      for (const leftover of leftovers) {
+        const cleanup = await cleanupWorktree(
+          realRoot,
+          leftover.path,
+          opts.logDir,
+          {
+            track,
+            ...(leftover.scratchRoot !== undefined
+              ? { scratchRoot: leftover.scratchRoot }
+              : {}),
+          },
+        ).catch((err: unknown) => ({
+          ok: false,
+          refused: false,
+          detail: err instanceof Error ? err.message : String(err),
+          logPaths: [] as string[],
+        }));
+        if (cleanup.ok) continue;
+        const detail = cleanup.detail ?? "unknown";
+        if (cleanup.refused && leftover.fromMarker) {
+          unremoved.push(
+            `the stale worktree marker for ${realRoot} names ${leftover.path}, ` +
+              `which was not removed (${detail}); inspect it, then delete the ` +
+              `marker file to clear it: ${markerFile}`,
+          );
+        } else {
+          unremoved.push(
+            `a leftover worktree at ${leftover.path} was not removed ` +
+              `(${detail}); run \`git -C ${realRoot} worktree remove --force ` +
+              `--force -- ${leftover.path}\` manually` +
+              (leftover.fromMarker
+                ? `, then delete the marker file if it persists: ${markerFile}`
+                : ""),
+          );
+        }
+      }
+      if (unremoved.length > 0) {
+        return {
+          status: "inconclusive",
+          reason: "stale_worktree",
+          warnings: [...warnings, ...unremoved],
+          isolation: isolationField,
+        };
+      }
+      if (leftovers.length > 0) {
         removeMarkerFor(realRoot);
         warnings.push("recovered_stale_worktree");
       }
@@ -910,18 +1017,17 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         links: absLinks,
         signal: execController.signal,
         track,
-        // Before `git worktree add` runs: an add killed partway can
-        // leave a registered worktree, and only a caller that already
-        // knows the path can clean that up.
+        // Before `git worktree add` runs, with the whole sync still
+        // ahead: git registers the worktree (locked, for the duration
+        // of the checkout) before the add returns, so from this point
+        // on a signal has a cleanup that knows the path, and a
+        // `SIGKILL` or a crash leaves a marker `doctor` and the next
+        // probe on this repository act on; never a registered worktree
+        // with no trace of it anywhere. The marker records the scratch
+        // root the path must sit under for the cleanup to delete it
+        // while git does not report it as registered.
         onWorktreeAttempt: (worktreePath) => {
           wtWorktreePath = worktreePath;
-        },
-        // As soon as the add succeeded, with the whole sync still
-        // ahead: a signal (or a crash) from this point on leaves either
-        // a cleanup that runs or a marker `doctor` and the next probe
-        // on this repository act on, never a registered worktree with
-        // no trace of it anywhere.
-        onWorktreeCreated: (worktreePath) => {
           writeMarker(realRoot, {
             targetPath: worktreePath,
             backupPath: realRoot,
@@ -929,6 +1035,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
             mutatedHash: "",
             pid: process.pid,
             timestamp: new Date().toISOString(),
+            scratchRoot: wtScratchRoot,
           });
         },
       });

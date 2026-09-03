@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -606,7 +606,7 @@ describe("doctor: stale-worktree check", () => {
     const lockDir = makeTmpDir();
     const cwd = makeTmpDir();
     const root = resolveDeepestExisting(containmentRoot(cwd));
-    const worktreePath = path.join(makeTmpDir(), "wt");
+    const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
     const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
     fs.writeFileSync(
       path.join(lockDir, `${lockKey(root)}.marker.json`),
@@ -623,7 +623,38 @@ describe("doctor: stale-worktree check", () => {
     const check = result.checks.find((c) => c.name === "stale-worktree");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain(worktreePath);
-    expect(check?.detail).toContain("worktree remove --force");
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${worktreePath}`,
+    );
+  });
+
+  it("a dead marker naming a path that is not of the probe's scratch shape is reported as a marker to inspect and delete, never with a removal command for that path", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const root = resolveDeepestExisting(containmentRoot(cwd));
+    const notScratch = path.join(makeTmpDir(), "somebody-elses-directory");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    const markerPath = path.join(lockDir, `${lockKey(root)}.marker.json`);
+    fs.writeFileSync(
+      markerPath,
+      JSON.stringify({
+        targetPath: notScratch,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(notScratch);
+    expect(check?.detail).toContain("delete the marker file");
+    expect(check?.detail).toContain(markerPath);
+    expect(check?.detail).not.toContain(
+      `worktree remove --force --force -- ${notScratch}`,
+    );
   });
 
   it("does not confuse a same-key stale-probe-marker check for a different repository's worktree marker", async () => {
@@ -646,5 +677,125 @@ describe("doctor: stale-worktree check", () => {
     const result = await doctor({ required: [], optional: [], cwd, lockDir });
     const check = result.checks.find((c) => c.name === "stale-worktree");
     expect(check?.ok).toBe(true);
+  });
+
+  describe("from git's own registry, marker or not", () => {
+    function git(cwd: string, args: string[]): void {
+      execFileSync("git", args, { cwd });
+    }
+
+    function initRepo(): string {
+      const repo = makeTmpDir();
+      git(repo, ["init", "-q"]);
+      git(repo, ["config", "user.email", "test@example.com"]);
+      git(repo, ["config", "user.name", "test"]);
+      fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+      git(repo, ["add", "-A"]);
+      git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+      return repo;
+    }
+
+    function writeWorktreeMarker(
+      lockDir: string,
+      root: string,
+      targetPath: string,
+      pid: number,
+    ): void {
+      fs.writeFileSync(
+        path.join(lockDir, `${lockKey(root)}.marker.json`),
+        JSON.stringify({
+          targetPath,
+          backupPath: root,
+          preHash: "",
+          mutatedHash: "",
+          pid,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+    }
+
+    it("not ok for a registered worktree of the scratch shape with no marker at all: names the path and the manual command", async () => {
+      const lockDir = makeTmpDir();
+      const repo = initRepo();
+      const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+      fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+      git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+      const resolved = resolveDeepestExisting(worktreePath);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(false);
+      expect(check?.detail).toContain(resolved);
+      expect(check?.detail).toContain(
+        `worktree remove --force --force -- ${resolved}`,
+      );
+    });
+
+    it("ok for a registered scratch worktree that a live probe's marker names", async () => {
+      const lockDir = makeTmpDir();
+      const repo = initRepo();
+      const root = resolveDeepestExisting(containmentRoot(repo));
+      const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+      fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+      git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+      writeWorktreeMarker(lockDir, root, worktreePath, process.pid);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(true);
+    });
+
+    it("ok for an operator's own registered worktree, whatever it is called", async () => {
+      const lockDir = makeTmpDir();
+      const repo = initRepo();
+      const own = path.join(makeTmpDir(), "feature-branch");
+      git(repo, ["worktree", "add", "--detach", "--", own, "HEAD"]);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).not.toContain(own);
+    });
+
+    it("reports a dead marker's leftover once even though the registry lists it too", async () => {
+      const lockDir = makeTmpDir();
+      const repo = initRepo();
+      const root = resolveDeepestExisting(containmentRoot(repo));
+      const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+      fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+      git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+      const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+      writeWorktreeMarker(lockDir, root, worktreePath, dead.pid);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(false);
+      expect(check?.detail?.split("was interrupted")).toHaveLength(2);
+      expect(check?.detail).not.toContain("has no live probe behind it");
+    });
   });
 });

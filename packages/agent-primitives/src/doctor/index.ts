@@ -9,6 +9,10 @@ import {
   isPathContained,
   resolveDeepestExisting,
 } from "../probe/containment.js";
+import {
+  isScratchWorktreePath,
+  parseWorktreeListZ,
+} from "../probe/isolation.js";
 
 export interface ToolCheck {
   name: string;
@@ -369,23 +373,73 @@ export async function doctor(
   // leftover from a SIGKILL/crash is found by looking for exactly the
   // marker file that key would produce, rather than by scanning every
   // marker's `targetPath` (a worktree directory, not a repo-contained
-  // file, so `isPathContained` above would never match it).
+  // file, so `isPathContained` above would never match it). The marker
+  // is not the only trail: git itself registers the worktree (locked,
+  // for the duration of the checkout) before `git worktree add`
+  // returns, so every registered worktree of the probe's own scratch
+  // shape is a leftover too unless a live probe owns it, marker or not
+  // (a marker deleted by hand, or a run that died before writing one).
+  // The registry is read BEFORE the markers: a probe starting in
+  // between writes its marker before its add registers anything, so a
+  // live run is never reported as a leftover.
+  const registeredScratch = insideGitWorkTree
+    ? listScratchWorktreesSync(markerRoot)
+    : [];
   const worktreeMarkerFileName = `${lockKey(markerRoot)}.marker.json`;
   const worktreeMarker = listMarkers(options.lockDir).find(
     (m) => path.basename(m.markerPath) === worktreeMarkerFileName,
   );
-  const staleWorktree =
-    worktreeMarker !== undefined && !isPidAlive(worktreeMarker.pid);
+  const markerAlive =
+    worktreeMarker !== undefined && isPidAlive(worktreeMarker.pid);
+  const markerTarget =
+    worktreeMarker !== undefined &&
+    typeof worktreeMarker.targetPath === "string"
+      ? resolveDeepestExisting(path.resolve(worktreeMarker.targetPath))
+      : undefined;
+  const manualRemove = (worktreePath: string): string =>
+    `git -C ${markerRoot} worktree remove --force --force -- ${worktreePath}`;
+  const worktreeProblems: string[] = [];
+  if (worktreeMarker !== undefined && !markerAlive) {
+    if (markerTarget !== undefined && isScratchWorktreePath(markerTarget)) {
+      worktreeProblems.push(
+        `a worktree probe on ${markerRoot} was interrupted; leftover worktree at ` +
+          `${worktreeMarker.targetPath}; the next \`probe -i worktree\` on this ` +
+          `repository recovers it automatically, or run \`${manualRemove(
+            worktreeMarker.targetPath,
+          )}\` manually`,
+      );
+    } else {
+      // Never a removal command for this one: the path is not of the
+      // shape the probe creates, so it is not the probe's to remove,
+      // by hand or otherwise.
+      worktreeProblems.push(
+        `the stale worktree marker for ${markerRoot} names ` +
+          `${String(worktreeMarker.targetPath)}, which is not a worktree of the ` +
+          `probe's own scratch shape and is never removed automatically; ` +
+          `inspect it, then delete the marker file to clear it: ` +
+          `${worktreeMarker.markerPath}`,
+      );
+    }
+  }
+  for (const registeredPath of registeredScratch) {
+    if (registeredPath === markerTarget) {
+      // Named by the marker: live, or already reported above.
+      continue;
+    }
+    worktreeProblems.push(
+      `a registered worktree of the probe's own scratch shape at ` +
+        `${registeredPath} has no live probe behind it; the next \`probe -i ` +
+        `worktree\` on this repository removes it, or run ` +
+        `\`${manualRemove(registeredPath)}\` manually`,
+    );
+  }
   checks.push({
     name: "stale-worktree",
-    ok: !staleWorktree,
-    detail: staleWorktree
-      ? `a worktree probe on ${markerRoot} was interrupted; leftover worktree at ` +
-        `${worktreeMarker!.targetPath}; the next \`probe -i worktree\` on this ` +
-        `repository recovers it automatically, or run \`git -C ${markerRoot} ` +
-        `worktree remove --force ${worktreeMarker!.targetPath} && git -C ` +
-        `${markerRoot} worktree prune\` manually`
-      : "no stale worktree marker for this repository",
+    ok: worktreeProblems.length === 0,
+    detail:
+      worktreeProblems.length === 0
+        ? "no stale worktree marker or leftover registered worktree for this repository"
+        : worktreeProblems.join(" "),
   });
 
   const hints: string[] = [];
@@ -423,6 +477,32 @@ async function isAutoRecoverable(marker: MarkerEntry): Promise<boolean> {
   if (targetHash !== marker.mutatedHash) return false;
   const backupHash = await sha256File(marker.backupPath).catch(() => undefined);
   return backupHash === marker.preHash;
+}
+
+/** Every registered worktree of the repository at `root` that is of the
+ * probe's own scratch shape, never the main worktree and never `root`
+ * itself, each through `resolveDeepestExisting`. Empty when the listing
+ * fails for any reason (not a repository, a timeout): this is a report,
+ * and a listing that could not run is nothing to report on. */
+function listScratchWorktreesSync(root: string): string[] {
+  let result;
+  try {
+    result = spawnSync(
+      "git",
+      ["-C", root, "worktree", "list", "--porcelain", "-z"],
+      { timeout: 5000, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+    );
+  } catch {
+    return [];
+  }
+  if (result.error !== undefined || result.status !== 0) return [];
+  const paths = parseWorktreeListZ(result.stdout ?? "").map((p) =>
+    resolveDeepestExisting(path.resolve(p)),
+  );
+  const main = paths[0];
+  return paths.filter(
+    (p) => p !== main && p !== root && isScratchWorktreePath(p),
+  );
 }
 
 function isInsideGitWorkTree(startDir: string): boolean {

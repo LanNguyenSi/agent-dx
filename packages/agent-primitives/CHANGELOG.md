@@ -453,7 +453,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file is copied, a symlink (dangling or not) is recreated as a
   symlink, a directory that is itself a git repository is skipped with
   a warning, any other entry is skipped with a warning naming it, and
-  a path inside `--log-dir` itself is never treated as a source.
+  a path inside `--log-dir` itself is never treated as a source (decided
+  by where the entry itself sits, so an untracked symlink that merely
+  points into `--log-dir` is recreated like any other symlink).
   `isolation.syncedUntrackedFiles` counts the `ls-files` entries acted
   on, not the files that ended up on disk. A gitignored `--file` is
   never synced by either sync step, and probing one under `worktree`
@@ -484,27 +486,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `worktree`, since nothing in the original tree is ever mutated -- the
   original target's hash is still checked before and after, and a
   mismatch is reported as `worktree_original_tree_modified` rather than
-  silently trusted. The worktree is removed (`git worktree remove
-  --force`, the directory itself, then `git worktree prune`) on normal
-  completion, on any thrown error, and on `SIGINT`/`SIGTERM` (the
-  signal handler and the pipeline's own cleanup share one in-flight
-  promise, so neither can let the process exit while the other's `git
-  worktree remove` is still running), including a signal that lands
-  while the worktree is still being synced or while `git worktree add`
-  itself is running: the path is recorded before the add runs, so a
-  registration a killed add left behind is removed too. The
-  repository-keyed marker is written as soon as the add succeeds rather
-  than after the sync, so every moment from there on has either a
-  cleanup that runs or a marker left behind; a `SIGKILL` leaves the
-  worktree registered with that marker, and `doctor` reports it and the
-  next `worktree` probe on that repository recovers it automatically.
-  Outside a git
-  work tree, `worktree` falls back to `inplace` with a warning naming
-  the fallback. `doctor` gained a `stale-worktree` check reporting a
-  leftover worktree for the current repository, naming the manual `git
-  worktree remove`/`prune` command. Submodule contents are not synced
-  by either sync step; a submodule directory is tracked as a gitlink,
-  not walked into.
+  silently trusted. The worktree is removed on normal completion, on
+  any thrown error, and on `SIGINT`/`SIGTERM` (the signal handler and
+  the pipeline's own cleanup share one in-flight promise, so neither
+  can let the process exit while the other's removal is still running),
+  including a signal that lands while the worktree is still being
+  synced or while `git worktree add` itself is running: whatever is on
+  disk at the path is deleted, then `git worktree remove --force
+  --force` runs (with the directory gone git accepts a missing
+  worktree, and the second `--force` clears the `locked` registration
+  an interrupted add leaves behind, which a single `--force` refuses
+  and `git worktree prune` skips), then `git worktree prune`, with the
+  outcome asserted against `git worktree list` and the disk rather than
+  inferred from an exit code; a removal that did not take keeps the
+  repository-keyed marker and adds a warning naming the path and the
+  manual command. The marker is written before the add runs and records
+  the `--log-dir`, so a `SIGKILL` or a crash at any point from there on
+  leaves it, along with whatever git had registered by then; `doctor`
+  reports a leftover from the marker and from `git worktree list` (a
+  marker deleted by hand still leaves the registration reported), and
+  the next `worktree` probe on that repository removes every leftover
+  of the probe's own scratch shape before it starts, marker or not.
+  Only a path of that shape (`<log-dir>/wt-<id>/wt`) that git reports
+  as a worktree of the repository, or that sits under the recorded
+  `--log-dir`, is ever deleted; a marker naming anything else, or a
+  leftover that cannot be removed, stops the run with
+  `inconclusive`/`stale_worktree`, keeps the marker, and names the path
+  and either the manual command or the marker file to delete. Outside a
+  git work tree, `worktree` falls back to `inplace` with a warning
+  naming the fallback. `doctor` gained a `stale-worktree` check
+  reporting a leftover worktree for the current repository, from the
+  marker and from `git worktree list`, naming the manual `git worktree
+  remove --force --force` command. Submodule contents are not synced by
+  either sync step; a submodule directory is tracked as a gitlink, not
+  walked into.
 
 - Initial package scaffold: the shared envelope module (bounded
   serialization, status-to-exit-code mapping), an `exec` runner with fixed

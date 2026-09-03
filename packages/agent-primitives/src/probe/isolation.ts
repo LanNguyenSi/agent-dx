@@ -260,17 +260,15 @@ export interface BeginWorktreeOptions {
    * untracked. */
   track?: TrackGitCall;
   /** Called synchronously with the path `git worktree add` is about to
-   * create, BEFORE it runs. The caller records it for cleanup: an
-   * interrupted `git worktree add` can leave a registered worktree
-   * behind, and only a caller that already knows the path can remove
-   * it. */
+   * create, BEFORE it runs. The caller records it, and writes its
+   * leftover-recovery marker, at this point rather than once the add
+   * has succeeded: git registers the worktree (`locked` for the
+   * duration of the checkout) before the add returns, so a signal, a
+   * `SIGKILL`, or a crash from here on always has either a cleanup that
+   * knows the path or a marker for `doctor` and the next probe to act
+   * on. A marker for an add that never registered anything is cleared
+   * harmlessly by that same recovery. */
   onWorktreeAttempt?: (worktreePath: string) => void;
-  /** Called synchronously once `git worktree add` has succeeded and
-   * before any sync step runs, so the caller can write its own
-   * leftover-recovery marker while the rest of the sync is still ahead:
-   * a signal from this point on always has either a cleanup to run or a
-   * marker for `doctor` and the next probe to act on. */
-  onWorktreeCreated?: (worktreePath: string) => void;
 }
 
 /** A regular file, copied byte for byte. */
@@ -385,6 +383,19 @@ function trackGit(
   );
 }
 
+/** `relPath`'s own resolved location under `root`: the parent directory
+ * through realpath, the entry's basename re-appended verbatim. Unlike
+ * resolving the whole path, this never follows the entry itself when it
+ * is a symlink, so the answer is about where the entry sits, not where
+ * it points. */
+function entryOwnPath(root: string, relPath: string): string {
+  const abs = path.join(root, relPath);
+  return path.join(
+    resolveDeepestExisting(path.dirname(abs)),
+    path.basename(abs),
+  );
+}
+
 /** How many untracked entries are copied between two yields back to the
  * event loop. The copy itself is synchronous, and a synchronous loop
  * over thousands of entries blocks the event loop, and with it this
@@ -450,12 +461,9 @@ function yieldToEventLoop(): Promise<void> {
  * untracked-file copy checks the same signal between batches. A sync
  * stopped that way returns `aborted`, never `worktree_sync_failed`: it
  * is a run that was stopped, not a sync that failed. The caller learns
- * the worktree path through `onWorktreeAttempt` (before `git worktree
- * add` runs, since an interrupted add can leave a registered worktree
- * behind) and again through `onWorktreeCreated` (once the add
- * succeeded, before any sync step), so no window between the add and
- * the end of the sync is one where an interrupted run has nothing to
- * clean up and nothing to report.
+ * the worktree path through `onWorktreeAttempt` before `git worktree
+ * add` runs, so no moment from the add onward is one where an
+ * interrupted run has nothing to clean up and nothing to report.
  */
 export async function beginWorktree(
   opts: BeginWorktreeOptions,
@@ -496,7 +504,6 @@ export async function beginWorktree(
       logPaths,
     };
   }
-  opts.onWorktreeCreated?.(worktreePath);
 
   const diffPath = path.join(runDir, "tracked.diff");
   // `runDir` was just created fresh, above, so this can only fire on a
@@ -595,19 +602,23 @@ export async function beginWorktree(
   const logDirReal = resolveDeepestExisting(path.resolve(logDir));
   const syncWarnings: string[] = [];
   const syncableRelPaths = untrackedRelPaths.filter((relPath) => {
-    const srcReal = resolveDeepestExisting(path.join(root, relPath));
     // The probe's own scratch space (this run's worktree, its
     // tracked-diff file, or a leftover from a previous run sharing this
     // --log-dir): never itself a source to sync into the very worktree
-    // it is scratch space for.
-    return !isPathContained(logDirReal, srcReal);
+    // it is scratch space for. Decided on the entry's OWN location, not
+    // on where a symlink entry points: an untracked symlink whose
+    // target resolves inside `logDir` is still a link that lives in the
+    // source tree, and `copyUntrackedEntry` recreates it as a link
+    // (never following it) the same as any other symlink.
+    return !isPathContained(logDirReal, entryOwnPath(root, relPath));
   });
   try {
     for (let i = 0; i < syncableRelPaths.length; i += 1) {
       // Checked before the first entry and once per batch (never per
       // entry: the yield, not the check, is what costs). The signal can
       // only ever have fired during a yield, so a check anywhere else
-      // in the batch would read the same value this one does.
+      // in the batch, or after the last batch (which no yield follows),
+      // would read the same value this one does.
       if (i % UNTRACKED_COPY_YIELD_EVERY === 0) {
         if (i > 0) await yieldToEventLoop();
         if (signal?.aborted) return abortedResult("the untracked-file copy");
@@ -630,8 +641,6 @@ export async function beginWorktree(
       worktreePath,
     };
   }
-
-  if (signal?.aborted) return abortedResult("the untracked-file copy");
 
   const nodeModulesDirs = findNodeModulesDirs(root);
   const linked: string[] = [];
@@ -673,55 +682,190 @@ export async function beginWorktree(
   };
 }
 
+/** The shape of every worktree this module creates: a directory named
+ * `wt` inside a per-run scratch directory `wt-<uuid>` (see
+ * `beginWorktree`). The one shape `cleanupWorktree` is ever willing to
+ * delete: an operator's own worktree, whatever it is called, never
+ * matches it. Exported for `doctor` and the tests. */
+export function isScratchWorktreePath(p: string): boolean {
+  const normalized = path.resolve(p);
+  return (
+    path.basename(normalized) === "wt" &&
+    /^wt-[0-9a-f-]{36}$/.test(path.basename(path.dirname(normalized)))
+  );
+}
+
+/** The `worktree <path>` records of a `git worktree list --porcelain
+ * -z` listing, in order (the main worktree first). `-z` ends every
+ * record with NUL (and every block with a second one), so a path with a
+ * newline in it still parses. Exported for `doctor`, which runs the
+ * same listing through its own synchronous spawn. */
+export function parseWorktreeListZ(stdout: string): string[] {
+  const paths: string[] = [];
+  for (const record of stdout.split("\0")) {
+    if (record.startsWith("worktree ")) {
+      paths.push(record.slice("worktree ".length));
+    }
+  }
+  return paths;
+}
+
+export interface RegisteredWorktrees {
+  /** True when the listing ran, exited 0, and was captured whole;
+   * `paths` is empty (and says nothing) otherwise. */
+  ok: boolean;
+  /** Every registered worktree of the repository, the main one first,
+   * each through `resolveDeepestExisting` so a caller can compare it
+   * with a path of its own spelling. */
+  paths: string[];
+  logPath: string;
+}
+
+/** `git worktree list --porcelain -z` for the repository at `root`,
+ * logged under `logDir` and registered through `track`, never under an
+ * abort signal: this is the cleanup and recovery side (see
+ * `cleanupWorktree` for why). */
+export async function listRegisteredWorktrees(
+  root: string,
+  logDir: string,
+  opts: { track?: TrackGitCall } = {},
+): Promise<RegisteredWorktrees> {
+  const track: TrackGitCall = opts.track ?? ((started) => started);
+  const result = await trackGit(
+    track,
+    gitArgv(
+      ["worktree", "list", "--porcelain", "-z"],
+      logDir,
+      `worktree-list-${randomUUID()}.log`,
+      root,
+    ),
+  );
+  const ok = result.exitCode === 0 && !result.outputTruncated;
+  return {
+    ok,
+    paths: ok
+      ? parseWorktreeListZ(result.stdout).map((p) =>
+          resolveDeepestExisting(path.resolve(p)),
+        )
+      : [],
+    logPath: result.logPath,
+  };
+}
+
+export interface CleanupWorktreeOptions {
+  track?: TrackGitCall;
+  /** The `--log-dir` the worktree was created under: this session's
+   * own, or the one a leftover's marker recorded. A path git does not
+   * report as a registered worktree of the repository is deleted only
+   * when it is of the scratch shape AND sits under this directory;
+   * omitted, only a registered scratch worktree can be removed. */
+  scratchRoot?: string;
+}
+
+export interface CleanupWorktreeResult {
+  /** True only when, after the removal, `git worktree list` no longer
+   * reports the path AND nothing is left of it on disk: an assertion of
+   * the outcome, never an inference from a git exit code. */
+  ok: boolean;
+  /** True when the path failed the gate below and nothing at all was
+   * run against it. */
+  refused: boolean;
+  /** Why `ok` is false, for the caller's warning. */
+  detail?: string;
+  logPaths: string[];
+}
+
 /**
- * Removes a worktree via `git worktree remove --force`, then deletes
- * whatever is left of its directory, then runs `git worktree prune`.
- * All three run unconditionally, because this also has to clear what an
- * INTERRUPTED `git worktree add` leaves: git creates the worktree
- * directory and its administrative entry before the checkout is
- * finished, so a killed add can leave a registration `remove` refuses
- * to act on and `prune` will not touch while the directory is still
- * there. Deleting the directory (always this probe's own scratch space
- * under `--log-dir`, never anything the operator owns) and pruning
- * afterwards clears both halves. `ok` therefore reports the outcome
- * that matters -- nothing left on disk, and the prune that unregisters
- * it succeeded -- rather than `git worktree remove`'s exit code, which
- * is non-zero for a path that was never registered in the first place.
+ * Removes one worktree of this module's own making and asserts that it
+ * is gone. The directory is deleted first, then `git worktree remove
+ * --force --force` runs, then `git worktree prune`. The directory goes
+ * first because `remove` validates it as a worktree before acting, and
+ * an add killed before it had written the worktree's own `.git` file
+ * leaves a directory that fails that validation, while a missing
+ * directory is accepted; the second `--force` is what then clears the
+ * `locked` registration an interrupted add leaves behind, which a
+ * single `--force` refuses and `prune` skips. `prune` covers a
+ * registration that was never locked. `ok` is then asserted by
+ * re-running `git worktree list` and checking the path itself, never
+ * read off an exit code: `remove` exits non-zero for a path that was
+ * never registered, and `prune` exits 0 while skipping a locked entry.
  *
- * The caller's abort signal is deliberately NOT threaded into these two
- * git calls, unlike every call in `beginWorktree`: this is the cleanup
- * a SIGINT/SIGTERM asks for, so running it under the very signal that
+ * Nothing is run against the path before it passes a gate, because the
+ * path can come from a marker file, not only from this process's own
+ * `beginWorktree`: it must be of the scratch shape (see
+ * `isScratchWorktreePath`), never the repository root or its main
+ * worktree, and either reported by `git worktree list` as a worktree
+ * of this repository before the removal, or contained (through
+ * realpath) in `scratchRoot`. Any other path is refused: neither git
+ * nor the recursive delete touches it, and the result says so, so the
+ * caller can keep its marker and name the path.
+ *
+ * The caller's abort signal is deliberately NOT threaded into these git
+ * calls, unlike every call in `beginWorktree`: this is the cleanup a
+ * SIGINT/SIGTERM asks for, so running it under the very signal that
  * triggered it would kill the removal at spawn time and leave behind
  * exactly the worktree it exists to remove. `track` still applies, so a
  * signal arriving while a normal-path cleanup is in flight waits for
  * the removal instead of exiting through the middle of it.
- *
- * Best-effort and side-effect-only otherwise: the caller decides what a
- * failure here means (a warning, and the repository-keyed marker is
- * left in place for the next invocation to recover).
  */
 export async function cleanupWorktree(
   root: string,
   worktreePath: string,
   logDir: string,
-  opts: { track?: TrackGitCall } = {},
-): Promise<{ ok: boolean; logPaths: string[] }> {
+  opts: CleanupWorktreeOptions = {},
+): Promise<CleanupWorktreeResult> {
   const track: TrackGitCall = opts.track ?? ((started) => started);
+  const logPaths: string[] = [];
+  const target = resolveDeepestExisting(path.resolve(worktreePath));
+  const rootReal = resolveDeepestExisting(path.resolve(root));
+
+  const before = await listRegisteredWorktrees(root, logDir, { track });
+  logPaths.push(before.logPath);
+  const registeredBefore = before.paths.includes(target);
+  const mainWorktree = before.paths[0];
+  const contained =
+    opts.scratchRoot !== undefined &&
+    isPathContained(
+      resolveDeepestExisting(path.resolve(opts.scratchRoot)),
+      target,
+    );
+  let refusal: string | undefined;
+  if (!isScratchWorktreePath(target)) {
+    refusal =
+      "it is not of the probe's own scratch shape (<log-dir>/wt-<id>/wt)";
+  } else if (target === rootReal || target === mainWorktree) {
+    refusal = "it is the repository itself";
+  } else if (!registeredBefore && !contained) {
+    refusal =
+      opts.scratchRoot === undefined
+        ? "git does not report it as a worktree of this repository"
+        : `git does not report it as a worktree of this repository and it is not under the recorded log dir ${opts.scratchRoot}`;
+  }
+  if (refusal !== undefined) {
+    return {
+      ok: false,
+      refused: true,
+      detail: `refusing to remove ${worktreePath}: ${refusal}`,
+      logPaths,
+    };
+  }
+
+  // Reached only for a path the gate above admitted.
+  try {
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+  } catch {
+    // Best-effort: whatever is still there fails the assertion below.
+  }
   const removeResult = await trackGit(
     track,
     gitArgv(
-      ["worktree", "remove", "--force", "--", worktreePath],
+      ["worktree", "remove", "--force", "--force", "--", worktreePath],
       logDir,
       `worktree-remove-${randomUUID()}.log`,
       root,
     ),
   );
-  try {
-    fs.rmSync(worktreePath, { recursive: true, force: true });
-  } catch {
-    // Best-effort: whatever is still there is reported through `ok`
-    // below, which re-checks the path rather than trusting this call.
-  }
+  logPaths.push(removeResult.logPath);
   const pruneResult = await trackGit(
     track,
     gitArgv(
@@ -731,8 +875,24 @@ export async function cleanupWorktree(
       root,
     ),
   );
+  logPaths.push(pruneResult.logPath);
+
+  const after = await listRegisteredWorktrees(root, logDir, { track });
+  logPaths.push(after.logPath);
+  const stillRegistered = !after.ok || after.paths.includes(target);
+  const stillOnDisk = fs.existsSync(worktreePath);
+  const ok = !stillRegistered && !stillOnDisk;
+  const detail = ok
+    ? undefined
+    : !after.ok
+      ? `git worktree list did not run cleanly after the removal; see ${after.logPath}`
+      : stillRegistered
+        ? `git still reports it as a worktree after the removal; see ${removeResult.logPath}`
+        : "something is still on disk at the path after the removal";
   return {
-    ok: pruneResult.exitCode === 0 && !fs.existsSync(worktreePath),
-    logPaths: [removeResult.logPath, pruneResult.logPath],
+    ok,
+    refused: false,
+    ...(detail !== undefined ? { detail } : {}),
+    logPaths,
   };
 }

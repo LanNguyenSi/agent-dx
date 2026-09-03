@@ -277,9 +277,11 @@ path in at all) is skipped, named in a warning, rather than pulling in
 an unrelated checkout; any other entry is skipped, named in a warning
 of its own. A path inside `--log-dir` itself (this probe's own scratch
 space, including the worktree just created) is never treated as a
-source to sync. `isolation.syncedUntrackedFiles` counts the `ls-files`
-entries this sync acted on, not the number of files that ended up on
-disk -- a skipped entry still counts as one. A gitignored
+source to sync; that is decided by where the entry itself sits, so an
+untracked symlink that merely points into `--log-dir` is recreated
+like any other symlink. `isolation.syncedUntrackedFiles` counts the
+`ls-files` entries this sync acted on, not the number of files that
+ended up on disk -- a skipped entry still counts as one. A gitignored
 `--file` is therefore never synced either way (not tracked, and
 excluded by `--exclude-standard`); probing one under `-i worktree`
 fails fast with `reason: "target_not_synced"` rather than a raw file-not-
@@ -308,29 +310,40 @@ checks the abort between batches rather than running to the end of the
 listing. A sync stopped that way is `reason: "aborted"` for a library
 caller, never `worktree_sync_failed`; on the CLI the signal handler ends
 the process first, so nothing is printed (see the signals section
-above). The worktree is removed (`git worktree remove --force`, the
-directory itself, then `git worktree prune`) on normal completion, on
-any error, and on `SIGINT`/`SIGTERM`, including a signal that lands
-while the sync is still running or while `git worktree add` itself is:
-the path is recorded before the add runs, so a registration a killed add
-left behind is removed with it, and a signal arriving before git
-registered anything leaves nothing to remove. The repository-keyed
-marker is written as soon as `git worktree add` succeeds, with the rest
-of the sync still ahead, so no moment after that point is one where an
-interrupted run leaves a registered worktree and no trace of it. A
-`SIGKILL` (or a crash) leaves it registered with that marker, and the
-next `probe -i worktree` run on the same repository recovers it
-automatically (a warning names `recovered_stale_worktree`), or
-`agent-primitives doctor` reports it as a `stale-worktree` check naming
-the leftover path and the manual `git worktree remove`/`prune` command. The lock for `worktree` is keyed on the
-repository root rather than on `--file` (two probes on the same
-repository serialize, which also covers the shared, linked node_modules
-caches, and matches `-i inplace`'s own lock key whenever `--cwd` is
-inside a repository); the in-flight marker and its automatic recovery
-described below apply only to `inplace`, since nothing in the original
-tree is ever mutated by a `worktree` probe -- the repository-keyed
-lock/marker above is what covers a `worktree` probe's own
-leftover-on-crash case instead. Outside a git work tree, `worktree`
+above). The worktree is removed on normal completion, on any error,
+and on `SIGINT`/`SIGTERM`, including a signal that lands while the sync
+is still running or while `git worktree add` itself is: whatever is on
+disk at the path is deleted, then `git worktree remove --force --force`
+runs (with the directory gone git accepts a missing worktree, and the
+second `--force` clears the `locked` registration an interrupted add
+leaves behind, which a single `--force` refuses and `git worktree
+prune` skips), then `git worktree prune`; the outcome is then checked
+against `git worktree list` and the disk rather than read off an exit
+code, and a removal that did not take keeps the repository-keyed marker
+and adds a warning naming the path and the manual command. That marker
+is written before `git worktree add` runs and records the `--log-dir`,
+so a `SIGKILL` or a crash at any point from there on leaves it, along
+with whatever git had registered by then, and `agent-primitives doctor`
+reports the leftover as a `stale-worktree` check naming the path and
+the manual command. `doctor` reads git's own `git worktree list` as
+well as the marker, so a marker deleted by hand still leaves the
+registration reported, and the next `probe -i worktree` run on the same
+repository removes every such leftover before it starts (a warning
+names `recovered_stale_worktree`), marker or not. Only a path of the
+probe's own scratch shape (`<log-dir>/wt-<id>/wt`) that git reports as
+a worktree of the repository, or that sits under the `--log-dir` the
+marker recorded, is ever deleted; a marker naming anything else, or a
+leftover that cannot be removed, stops the run with `reason:
+"stale_worktree"`, keeps the marker, and names the path and either the
+manual command or the marker file to delete. The lock for `worktree`
+is keyed on the repository root rather than on `--file` (two probes on
+the same repository serialize, which also covers the shared, linked
+node_modules caches, and matches `-i inplace`'s own lock key whenever
+`--cwd` is inside a repository); the in-flight marker and its automatic
+recovery described below apply only to `inplace`, since nothing in the
+original tree is ever mutated by a `worktree` probe -- the
+repository-keyed lock/marker above is what covers a `worktree` probe's
+own leftover-on-crash case instead. Outside a git work tree, `worktree`
 falls back to `inplace` with a warning naming the fallback, never an
 error.
 

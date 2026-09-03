@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,7 +10,10 @@ import {
   cleanupWorktree,
   countNumstatFiles,
   findNodeModulesDirs,
+  isScratchWorktreePath,
+  parseWorktreeListZ,
 } from "../src/probe/isolation.js";
+import { resolveDeepestExisting } from "../src/probe/containment.js";
 import { runArgv } from "../src/probe/run.js";
 
 // Call-through mock (the same shape probe-worktree.test.ts uses): every
@@ -302,7 +305,9 @@ describe("beginWorktree / cleanupWorktree", () => {
     expect(result.syncedTrackedFiles).toBe(0);
     expect(result.syncedUntrackedFiles).toBe(0);
 
-    const cleanup = await cleanupWorktree(repo, result.worktreePath, logDir);
+    const cleanup = await cleanupWorktree(repo, result.worktreePath, logDir, {
+      scratchRoot: logDir,
+    });
     expect(cleanup.ok).toBe(true);
     expect(fs.existsSync(result.worktreePath)).toBe(false);
     const list = execFileSync("git", ["worktree", "list", "--porcelain"], {
@@ -362,9 +367,9 @@ describe("beginWorktree / cleanupWorktree", () => {
       path.join(repo, "node_modules", "marker.txt"),
       "present\n",
     );
-    // `--link` extras are contained (per T-002): a real one lives inside
-    // the repository, just under a name `findNodeModulesDirs` would
-    // never pick up on its own.
+    // `--link` extras must sit inside the containment root, so a real
+    // one lives inside the repository, just under a name
+    // `findNodeModulesDirs` would never pick up on its own.
     const cacheDir = path.join(repo, "vendor-cache");
     fs.mkdirSync(cacheDir);
     fs.writeFileSync(path.join(cacheDir, "cache-marker.txt"), "x\n");
@@ -556,7 +561,14 @@ describe("beginWorktree / cleanupWorktree", () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
       expect(fs.statSync(diffPath).size).toBe(sizeAtAbort);
 
-      const cleanup = await cleanupWorktree(repo, result.worktreePath!, logDir);
+      const cleanup = await cleanupWorktree(
+        repo,
+        result.worktreePath!,
+        logDir,
+        {
+          scratchRoot: logDir,
+        },
+      );
       expect(cleanup.ok).toBe(true);
       expect(worktreeBlocks(repo)).toHaveLength(1);
     }, 30000);
@@ -607,7 +619,9 @@ describe("beginWorktree / cleanupWorktree", () => {
         fs.existsSync(path.join(worktreePath!, "many", "u-05999.txt")),
       ).toBe(false);
 
-      const cleanup = await cleanupWorktree(repo, worktreePath!, logDir);
+      const cleanup = await cleanupWorktree(repo, worktreePath!, logDir, {
+        scratchRoot: logDir,
+      });
       expect(cleanup.ok).toBe(true);
       expect(worktreeBlocks(repo)).toHaveLength(1);
     }, 30000);
@@ -637,10 +651,346 @@ describe("beginWorktree / cleanupWorktree", () => {
       // successfully, which is what lets it clean up a registration git
       // may already have written.
       expect(worktreePath).toBeDefined();
-      const cleanup = await cleanupWorktree(repo, worktreePath!, logDir);
+      // Nothing is registered, so the gate admits the path only through
+      // its scratch shape under the log dir it was to be created in.
+      const cleanup = await cleanupWorktree(repo, worktreePath!, logDir, {
+        scratchRoot: logDir,
+      });
       expect(cleanup.ok).toBe(true);
       expect(worktreeBlocks(repo)).toHaveLength(1);
       expect(fs.existsSync(worktreePath!)).toBe(false);
     });
+  });
+
+  it("an untracked symlink whose target resolves inside --log-dir is recreated as a symlink, while the log dir's own content is never synced", async () => {
+    const repo = initRepo();
+    // The log dir sits inside the repository, so its content is
+    // untracked too; only the link that merely points at it is a source.
+    const logDir = path.join(repo, "scratch-logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.writeFileSync(path.join(logDir, "inside.txt"), "scratch\n");
+    fs.symlinkSync("scratch-logs", path.join(repo, "log-link"));
+
+    const result = await beginWorktree({
+      root: repo,
+      cwd: repo,
+      logDir,
+      links: [],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.syncedUntrackedFiles).toBe(1);
+    const linkInWorktree = path.join(result.worktreePath, "log-link");
+    expect(fs.lstatSync(linkInWorktree).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(linkInWorktree)).toBe("scratch-logs");
+    expect(
+      fs.existsSync(
+        path.join(result.worktreePath, "scratch-logs", "inside.txt"),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("isScratchWorktreePath / parseWorktreeListZ", () => {
+  it("accepts exactly a `wt` directory inside a `wt-<uuid>` directory", () => {
+    const id = "11111111-1111-1111-1111-111111111111";
+    expect(isScratchWorktreePath(`/x/logs/wt-${id}/wt`)).toBe(true);
+    expect(isScratchWorktreePath(`/x/logs/wt-${id}/wt/`)).toBe(true);
+    expect(isScratchWorktreePath(`/x/logs/wt-${id}`)).toBe(false);
+    expect(isScratchWorktreePath(`/x/logs/wt-${id}/other`)).toBe(false);
+    expect(isScratchWorktreePath(`/x/logs/wt-short/wt`)).toBe(false);
+    expect(isScratchWorktreePath(`/x/logs/wt`)).toBe(false);
+    expect(isScratchWorktreePath("/x/feature-branch")).toBe(false);
+  });
+
+  it("parses the NUL-terminated porcelain records into the worktree paths, in order", () => {
+    const listing =
+      ["worktree /repo", "HEAD abc", "branch refs/heads/main", ""].join("\0") +
+      "\0" +
+      [
+        "worktree /logs/wt-1/wt",
+        "HEAD abc",
+        "detached",
+        "locked initializing",
+        "",
+      ].join("\0") +
+      "\0";
+    expect(parseWorktreeListZ(listing)).toEqual(["/repo", "/logs/wt-1/wt"]);
+    expect(parseWorktreeListZ("")).toEqual([]);
+  });
+});
+
+describe("cleanupWorktree: the removal is asserted, and every delete goes through the gate", () => {
+  function git(cwd: string, args: string[]): string {
+    return execFileSync("git", args, { cwd, encoding: "utf8" });
+  }
+
+  function initRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return repo;
+  }
+
+  function registeredPaths(repo: string): string[] {
+    return parseWorktreeListZ(
+      git(repo, ["worktree", "list", "--porcelain", "-z"]),
+    ).map(resolveDeepestExisting);
+  }
+
+  /** A scratch-shaped path under `logDir`, the shape `beginWorktree`
+   * itself produces. */
+  function scratchPath(logDir: string): string {
+    return path.join(logDir, `wt-${randomUUID()}`, "wt");
+  }
+
+  /** A worktree registered by hand at `worktreePath`, then marked
+   * `locked` with the reason an interrupted `git worktree add` leaves. */
+  function addLockedWorktree(repo: string, worktreePath: string): void {
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const entries = fs.readdirSync(adminDir);
+    expect(entries).toHaveLength(1);
+    fs.writeFileSync(path.join(adminDir, entries[0], "locked"), "initializing");
+    expect(
+      git(repo, ["worktree", "list", "--porcelain"]).includes(
+        "locked initializing",
+      ),
+    ).toBe(true);
+  }
+
+  /** Makes the `git worktree remove` step report failure without
+   * running, leaving every other git call real. Returns the restore. */
+  async function shimRemoveToFail(): Promise<() => void> {
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    mockRun.mockImplementation(async (file, args, options) => {
+      if (file === "git" && args[0] === "worktree" && args[1] === "remove") {
+        return {
+          exitCode: 128,
+          durationMs: 0,
+          stdout: "",
+          stderr: "shimmed: the removal did not run",
+          logPath: path.join(options.logDir, "shimmed-remove.log"),
+          timedOut: false,
+          aborted: false,
+          outputTruncated: false,
+          logWriteFailed: false,
+          stdioClosed: true,
+        };
+      }
+      return actualRun.runArgv(file, args, options);
+    });
+    return () => {
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
+      );
+    };
+  }
+
+  it("clears a `locked initializing` registration (what an interrupted add leaves) and asserts it is gone", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const worktreePath = scratchPath(logDir);
+    addLockedWorktree(repo, worktreePath);
+
+    const cleanup = await cleanupWorktree(repo, worktreePath, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.ok).toBe(true);
+    expect(cleanup.refused).toBe(false);
+    expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
+    expect(fs.existsSync(worktreePath)).toBe(false);
+  });
+
+  it("reports ok:false when the removal does not take: the locked registration survives the shimmed removal, and prune exiting 0 is not read as success", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const worktreePath = scratchPath(logDir);
+    addLockedWorktree(repo, worktreePath);
+    const restore = await shimRemoveToFail();
+
+    try {
+      const cleanup = await cleanupWorktree(repo, worktreePath, logDir, {
+        scratchRoot: logDir,
+      });
+
+      expect(cleanup.ok).toBe(false);
+      expect(cleanup.refused).toBe(false);
+      expect(cleanup.detail).toContain("still reports it as a worktree");
+      // The registration is still there (locked, so `prune` skipped it
+      // even though its directory is gone) ...
+      expect(registeredPaths(repo)).toContain(
+        resolveDeepestExisting(worktreePath),
+      );
+      // ... and nothing is left on disk: the recursive delete ran, for
+      // a path the gate had admitted, after git's own removal did not.
+      expect(fs.existsSync(worktreePath)).toBe(false);
+    } finally {
+      restore();
+      git(repo, [
+        "worktree",
+        "remove",
+        "--force",
+        "--force",
+        "--",
+        worktreePath,
+      ]);
+    }
+  });
+
+  it("clears the registration of an add that died before writing the worktree's own .git file (locked, no HEAD, a directory git refuses to validate)", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const worktreePath = scratchPath(logDir);
+    addLockedWorktree(repo, worktreePath);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [adminEntry] = fs.readdirSync(adminDir);
+    fs.rmSync(path.join(adminDir, adminEntry, "HEAD"), { force: true });
+    fs.rmSync(path.join(worktreePath, ".git"), { force: true });
+    // git refuses this one outright, the state a kill in the first
+    // milliseconds of an add leaves behind.
+    const refused = spawnSync(
+      "git",
+      ["worktree", "remove", "--force", "--force", "--", worktreePath],
+      { cwd: repo, encoding: "utf8" },
+    );
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain("validation failed");
+
+    const cleanup = await cleanupWorktree(repo, worktreePath, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.ok).toBe(true);
+    expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(fs.existsSync(adminDir) ? fs.readdirSync(adminDir) : []).toEqual([]);
+  });
+
+  it("deletes a scratch-shaped directory under the scratch root that git never registered (an add that died before registering)", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const worktreePath = scratchPath(logDir);
+    fs.mkdirSync(worktreePath, { recursive: true });
+    fs.writeFileSync(path.join(worktreePath, "half-written.txt"), "x\n");
+
+    const cleanup = await cleanupWorktree(repo, worktreePath, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.ok).toBe(true);
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(registeredPaths(repo)).toHaveLength(1);
+  });
+
+  it("clears a registration whose directory was already deleted by hand", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const worktreePath = scratchPath(logDir);
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+    expect(registeredPaths(repo)).toHaveLength(2);
+
+    const cleanup = await cleanupWorktree(repo, worktreePath, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.ok).toBe(true);
+    expect(registeredPaths(repo)).toHaveLength(1);
+  });
+
+  it("refuses a path outside the scratch shape: nothing is run against it and nothing is deleted", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const outside = path.join(makeTmpDir(), "somebody-elses-directory");
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, "precious.txt"), "keep me\n");
+
+    const cleanup = await cleanupWorktree(repo, outside, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.ok).toBe(false);
+    expect(cleanup.refused).toBe(true);
+    expect(cleanup.detail).toContain(outside);
+    expect(fs.readFileSync(path.join(outside, "precious.txt"), "utf8")).toBe(
+      "keep me\n",
+    );
+    // Refused before any git call beyond the listing: no remove, no prune.
+    expect(
+      gitCalls().filter((c) => c[1][0] === "worktree" && c[1][1] !== "list"),
+    ).toHaveLength(0);
+  });
+
+  it("refuses a scratch-shaped path that is neither registered nor under the scratch root, and one with no scratch root at all", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const elsewhere = scratchPath(makeTmpDir());
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.writeFileSync(path.join(elsewhere, "precious.txt"), "keep me\n");
+
+    const wrongRoot = await cleanupWorktree(repo, elsewhere, logDir, {
+      scratchRoot: logDir,
+    });
+    expect(wrongRoot.ok).toBe(false);
+    expect(wrongRoot.refused).toBe(true);
+    expect(fs.existsSync(path.join(elsewhere, "precious.txt"))).toBe(true);
+
+    const noRoot = await cleanupWorktree(repo, elsewhere, logDir);
+    expect(noRoot.ok).toBe(false);
+    expect(noRoot.refused).toBe(true);
+    expect(fs.existsSync(path.join(elsewhere, "precious.txt"))).toBe(true);
+  });
+
+  it("refuses the repository itself even when its own path is of the scratch shape", async () => {
+    const outer = makeTmpDir();
+    const repo = path.join(outer, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const logDir = makeTmpDir();
+
+    const cleanup = await cleanupWorktree(repo, repo, logDir, {
+      scratchRoot: outer,
+    });
+
+    expect(cleanup.ok).toBe(false);
+    expect(cleanup.refused).toBe(true);
+    expect(cleanup.detail).toContain("the repository itself");
+    expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
+  });
+
+  it("refuses an operator's own registered worktree (not the scratch shape): it stays registered and intact", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const own = path.join(makeTmpDir(), "feature-branch");
+    git(repo, ["worktree", "add", "--detach", "--", own, "HEAD"]);
+    fs.writeFileSync(path.join(own, "work-in-progress.txt"), "uncommitted\n");
+
+    const cleanup = await cleanupWorktree(repo, own, logDir, {
+      scratchRoot: path.dirname(own),
+    });
+
+    expect(cleanup.ok).toBe(false);
+    expect(cleanup.refused).toBe(true);
+    expect(registeredPaths(repo)).toContain(resolveDeepestExisting(own));
+    expect(
+      fs.readFileSync(path.join(own, "work-in-progress.txt"), "utf8"),
+    ).toBe("uncommitted\n");
   });
 });
