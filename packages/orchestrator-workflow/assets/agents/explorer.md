@@ -19,7 +19,8 @@ Rules:
   if one exists, read its index first and then the relevant docs it points
   to, treating their claims as leads to verify, not as ground truth. If a semantic
   code-search tool is connected in the session, prefer it over raw grep for
-  orientation questions.
+  orientation questions, and a structural code-search tool over text grep for
+  symbol lookups (callers, definitions).
 - Report what you actually found, with `file:line` references. Distinguish
   verified facts from inference, and never present a guess as a fact.
 - Surface the constraints and conventions a plan must respect (existing

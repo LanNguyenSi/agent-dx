@@ -64,6 +64,10 @@ Rules:
   implementer's log — and record the method, sample size, and result against
   the implementer's claim in the `reproduction` field. Deterministic checks
   (a single test run, `tsc`, lint) do not trigger this.
+- When a mutation-probe runner is available in the session, run probes
+  through it instead of editing files by hand, and carry its result fields
+  into your findings and `reproduction`; when a verify runner is available,
+  read its summary before opening full logs.
 
 Return exactly this structure as your final output, nothing else:
 

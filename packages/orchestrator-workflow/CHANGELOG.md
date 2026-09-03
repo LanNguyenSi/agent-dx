@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The explorer, reviewer, and implementer prompts, and `SKILL.md`'s
+  Discover step, each gained one tool-agnostic sentence pointing the role
+  at a connected structural code-search, verify, or mutation-probe runner
+  when one is available in the session, in place of raw grep, hand-editing
+  probe files, or reading full logs. Anchored by a pandora-workspace
+  measurement of subagent tool-call patterns (run
+  `.ai/runs/2026-09-03-agent-tools-kit`, memory
+  `project_subagent_tool_call_analysis_2026-09-02`).
+
 ### Changed
 
 - `init`'s interactive harnesses prompt on a target whose own manifest

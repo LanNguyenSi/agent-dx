@@ -6838,3 +6838,17 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   README beyond what #162 already re-pointed their citations against.
   Confirmed every `README.md:N[-M]` citation in the three docs still
   resolves (citations-resolve: 0 findings), re-stamped all three.
+- 2026-09-03T06:44:38Z (T-007, agent-primitives kit sentences): added one
+  tool-agnostic sentence each to `explorer.md`, `SKILL.md`'s Discover step,
+  `reviewer.md`, and `implementer.md`, pointing subagents at a connected
+  structural code-search, verify, and mutation-probe runner when available.
+  `explorer.md` gained 1 line, `SKILL.md` gained 1 line (both mid-sentence
+  extensions), `reviewer.md` gained 4 lines and `implementer.md` gained 4
+  lines (new bullets), shifting every downstream citation of the four
+  files in `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  and `subagent-contracts-superset.md`. Re-pointed every shifted citation
+  (mechanical line-offset shift past each insertion point, one straddling
+  range end-shifted only) and re-stamped all three docs. Re-measured:
+  `okf-kit@0.9.0 check --json docs/okf --require-anchors`: 0 errors, 0
+  warnings, 23 notices, identical to the pre-edit baseline (same
+  pre-existing `unresolved-ambiguous` set).

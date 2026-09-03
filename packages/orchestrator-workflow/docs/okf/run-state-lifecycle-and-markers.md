@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-02T05:52:50Z
+timestamp: 2026-09-03T06:44:38Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -103,8 +103,8 @@ Step 1 of the Workflow carries the matching instruction to write the pointer
 in every worktree the run touches
 (SKILL.md:135-136#"in every worktree the run touches."), and each of the
 three per-harness bullets under Harness notes repeats that the pointer rule
-applies unchanged regardless of harness (SKILL.md:482-487#"applies unchanged.";
-SKILL.md:488-490#"applies unchanged."; SKILL.md:491-494#"applies unchanged.").
+applies unchanged regardless of harness (SKILL.md:483-488#"applies unchanged.";
+SKILL.md:489-491#"applies unchanged."; SKILL.md:492-495#"applies unchanged.").
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
@@ -199,10 +199,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (SKILL.md:259-263#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (SKILL.md:260-264#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per SKILL.md:260-261#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per SKILL.md:261-262#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:21-22#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:27-28#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -252,7 +252,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and
 SKILL.md's step 7 carries the same one-sentence rule
-(SKILL.md:209-213#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(SKILL.md:210-214#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -290,12 +290,12 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (SKILL.md:246-251#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (SKILL.md:247-252#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:246-247#"guidance: when the repo carries a curated knowledge",251-252). Since 0.24.0 (placement rule) step 9 also
+(SKILL.md:247-248#"guidance: when the repo carries a curated knowledge",251-252). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (SKILL.md:254-257#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (SKILL.md:255-258#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
