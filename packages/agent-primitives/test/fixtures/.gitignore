@@ -1,0 +1,6 @@
+# Running a live integration test's fixture project (vitest-project) writes
+# a transform cache to node_modules/.vite through the symlinked/ancestor
+# node_modules it resolves against (see the tsc-vitest disjointness note
+# in verify.test.ts). The fixture ships no node_modules of its own; this
+# ignores whatever a real run leaves behind.
+node_modules/

@@ -5,6 +5,9 @@ import { execCommand } from "../exec.js";
 import type { ExecResult } from "../exec.js";
 import { UsageError } from "../envelope.js";
 import { genericDetector } from "./detectors/generic.js";
+import { vitestDetector } from "./detectors/vitest.js";
+import { tscDetector } from "./detectors/tsc.js";
+import { eslintDetector } from "./detectors/eslint.js";
 import type {
   CheckResult,
   CheckStatus,
@@ -32,10 +35,24 @@ export type {
   VerifyStatus,
 } from "./types.js";
 export { genericDetector } from "./detectors/generic.js";
+export { vitestDetector } from "./detectors/vitest.js";
+export { tscDetector } from "./detectors/tsc.js";
+export { eslintDetector } from "./detectors/eslint.js";
 
 /** Default check order, matching the CI convention: build before
  * typecheck (a suite that executes built output needs the build first). */
 export const DEFAULT_CHECKS = ["build", "typecheck", "lint", "test"];
+
+/** Default candidate detectors, in priority order (used only as a
+ * tiebreak input alongside command text when two or more candidates'
+ * shapes both match; see `selectDetector`). `generic` is never part of
+ * this list: it is the fallback (`fallbackDetector` in `VerifyOptions`),
+ * consulted when zero, or more than one ambiguous, candidate matches. */
+export const DEFAULT_DETECTORS: Detector[] = [
+  vitestDetector,
+  tscDetector,
+  eslintDetector,
+];
 
 export const DEFAULT_MAX_FAILURES = 20;
 
@@ -261,7 +278,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     );
   }
 
-  const detectors = options.detectors ?? [];
+  const detectors = options.detectors ?? DEFAULT_DETECTORS;
   const fallbackDetector = options.fallbackDetector ?? genericDetector;
   const execFn: ExecLike = options.execFn ?? execCommand;
   const runId = options.runId ?? randomUUID();

@@ -144,9 +144,22 @@ default) is used whenever none, or more than one, of them matches;
 command text is only ever a tiebreaker among two or more matching
 candidates, matched on whole-token boundaries, and only when it names
 exactly one of them, otherwise the fallback is chosen and a warning lists
-the candidate shapes seen. v0 ships no candidate detectors (the `generic`
-fallback parses no failures out of the text itself). Whatever the detector,
-a check that ends `fail`
+the candidate shapes seen. The default candidates parse `vitest` (the
+`Tests  N failed | M passed (T)` / `Tests  N passed (N)` summary line, the
+` FAIL  file > name` block with its assertion on the next line, and the
+`No test files found` case), `tsc` (`file(line,col): error TSnnnn:
+message`; `summary.errors` counts the diagnostics), and `eslint`'s stylish
+formatter (an absolute file header, then `line:col  severity  message
+rule`; `error` rows populate `failures` with the rule id appended to the
+message, `warning` rows count into `summary.warnings` alone and never
+become a failure, even on a zero-exit check). No reporter flags are
+injected: whichever of these three shapes a check's own script happens to
+print is parsed as-is; a check that emits more than one shape at once (a
+`pretest` build followed by `vitest`, say) is ambiguous and falls back to
+`generic`, same as any other ambiguous case. ANSI color codes are
+stripped before any of these three detectors matches or parses, since a
+tool run in a fully non-interactive environment can still default to
+colorized output. Whatever the detector, a check that ends `fail`
 or `error` with zero parsed failures always gets one synthetic failure
 entry (naming `timedOut`, or the exit code, plus the output tail) instead
 of shipping an empty `failures` list, and an `error` check always reports

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, afterEach } from "vitest";
 import { CommanderError } from "commander";
 import {
@@ -742,6 +743,98 @@ describe("cli verify", () => {
       fs.chmodSync(parentDir, 0o700);
     }
   });
+});
+
+// One live integration test per tool: the real binary, from this
+// package's own node_modules, run through the built CLI against a
+// minimal fixture project. `-C` is the fixture's absolute path and the
+// `-x` override's command is an absolute path into this package's own
+// node_modules (not a bare `vitest`/`tsc`/`eslint` name): spawnCli's PATH
+// is fixed to exactly git/node/npm/sh (see test/helpers/spawn-cli.ts), so
+// only "node <absolute .js/.mjs entry point>" is reachable there, never a
+// PATH lookup for the tool's own binary name. The fixture directories are
+// committed under test/fixtures/ and nest inside this package (see
+// test/fixtures/README.md), so resolving them from the worktree root via
+// __dirname is safe here: this is the one place a CLI test's cwd is
+// inside the real package tree rather than a throwaway mkdtemp, and the
+// tools it runs come from this package's own installed node_modules, not
+// from anything a repository could plant on PATH.
+describe("cli verify: live integration against real tools from node_modules", () => {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const PKG_ROOT = path.join(__dirname, "..");
+  const FIXTURES_DIR = path.join(__dirname, "fixtures");
+  const NODE_MODULES = path.join(PKG_ROOT, "node_modules");
+
+  it("vitest fixture: detector vitest, at least one failure with file and name populated", async () => {
+    const cwd = path.join(FIXTURES_DIR, "vitest-project");
+    const logDir = makeTmpDir();
+    const vitestEntry = path.join(NODE_MODULES, "vitest", "vitest.mjs");
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      `test=node ${vitestEntry} run`,
+    ]);
+    const parsed = JSON.parse(run.stdout);
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "test",
+    );
+    expect(check.detector).toBe("vitest");
+    expect(check.summary.failed).toBeGreaterThanOrEqual(1);
+    expect(check.failures[0].file).toBeTruthy();
+    expect(check.failures[0].name).toBeTruthy();
+    fs.rmSync(path.join(cwd, "node_modules"), {
+      recursive: true,
+      force: true,
+    });
+  }, 20000);
+
+  it("tsc fixture: detector tsc, at least one failure with file populated", async () => {
+    const cwd = path.join(FIXTURES_DIR, "tsc-project");
+    const logDir = makeTmpDir();
+    const tscEntry = path.join(NODE_MODULES, "typescript", "bin", "tsc");
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      `typecheck=node ${tscEntry} --noEmit --pretty false`,
+    ]);
+    const parsed = JSON.parse(run.stdout);
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "typecheck",
+    );
+    expect(check.detector).toBe("tsc");
+    expect(check.summary.errors).toBeGreaterThanOrEqual(1);
+    expect(check.failures[0].file).toBeTruthy();
+  }, 20000);
+
+  it("eslint fixture: detector eslint, at least one failure with file populated", async () => {
+    const cwd = path.join(FIXTURES_DIR, "eslint-project");
+    const logDir = makeTmpDir();
+    const eslintEntry = path.join(NODE_MODULES, "eslint", "bin", "eslint.js");
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      `lint=node ${eslintEntry} .`,
+    ]);
+    const parsed = JSON.parse(run.stdout);
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "lint",
+    );
+    expect(check.detector).toBe("eslint");
+    expect(check.summary.errors).toBeGreaterThanOrEqual(1);
+    expect(check.failures[0].file).toBeTruthy();
+  }, 20000);
 });
 
 describe("parseExecOverride", () => {

@@ -6,7 +6,11 @@ import {
   verify,
   selectDetector,
   genericDetector,
+  vitestDetector,
+  tscDetector,
+  eslintDetector,
   DEFAULT_CHECKS,
+  DEFAULT_DETECTORS,
 } from "../src/verify/index.js";
 import { UsageError } from "../src/envelope.js";
 import type {
@@ -15,6 +19,18 @@ import type {
   ExecLike,
 } from "../src/verify/types.js";
 import type { ExecResult } from "../src/exec.js";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURES_DIR = path.join(__dirname, "fixtures");
+const CAPTURED_DIR = path.join(FIXTURES_DIR, "captured");
+
+/** Reads one captured real-tool-output fixture (see
+ * test/fixtures/README.md for the tool versions these were captured
+ * from). */
+function readCaptured(name: string): string {
+  return fs.readFileSync(path.join(CAPTURED_DIR, `${name}.txt`), "utf8");
+}
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -1179,4 +1195,301 @@ describe("verify: an aborted run", () => {
     expect(result.reason).not.toBe("nothing_verified");
     expect(result.warnings.some((w) => w.includes("never started"))).toBe(true);
   });
+});
+
+describe("vitestDetector: captured real output", () => {
+  it("matches a mixed run, a green run, and the no-test-files case", () => {
+    expect(
+      vitestDetector.matches({
+        output: readCaptured("vitest-fail"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+    expect(
+      vitestDetector.matches({
+        output: readCaptured("vitest-pass"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(true);
+    expect(
+      vitestDetector.matches({
+        output: readCaptured("vitest-no-tests"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not match tsc or eslint captured output (shape disjointness)", () => {
+    for (const name of [
+      "tsc-errors",
+      "tsc-clean",
+      "eslint-errors",
+      "eslint-warnings",
+      "eslint-clean",
+    ]) {
+      expect(
+        vitestDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: name.includes("clean") ? 0 : 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("parses a mixed run: one failure with file, name, and the assertion message; summary 1 passed 1 failed", () => {
+    const parsed = vitestDetector.parse({
+      output: readCaptured("vitest-fail"),
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 1,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("sample.test.js");
+    expect(parsed.failures[0].name).toContain("is wrong");
+    expect(parsed.failures[0].message).toContain("AssertionError");
+  });
+
+  it("parses a green run: 0 failures, summary passed equals the total", () => {
+    const parsed = vitestDetector.parse({
+      output: readCaptured("vitest-pass"),
+      command: "npm run test --silent",
+      exitCode: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary.passed).toBe(2);
+    expect(parsed.summary.failed).toBe(0);
+  });
+
+  it("parses the no-test-files case: no false passed:0/failed:0 claim of its own, no failures (the failures invariant, not this detector, supplies the synthetic entry)", () => {
+    const parsed = vitestDetector.parse({
+      output: readCaptured("vitest-no-tests"),
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+  });
+});
+
+describe("tscDetector: captured real output", () => {
+  it("matches multi-error tsc output, not the clean (empty) case", () => {
+    expect(
+      tscDetector.matches({
+        output: readCaptured("tsc-errors"),
+        command: "",
+        exitCode: 2,
+      }),
+    ).toBe(true);
+    expect(
+      tscDetector.matches({
+        output: readCaptured("tsc-clean"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not match vitest or eslint captured output (shape disjointness)", () => {
+    for (const name of [
+      "vitest-fail",
+      "vitest-pass",
+      "vitest-no-tests",
+      "eslint-errors",
+      "eslint-warnings",
+      "eslint-clean",
+    ]) {
+      expect(
+        tscDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("parses every diagnostic line; summary.errors equals the count", () => {
+    const parsed = tscDetector.parse({
+      output: readCaptured("tsc-errors"),
+      command: "npm run typecheck --silent",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(3);
+    expect(parsed.summary.errors).toBe(3);
+    expect(parsed.failures[0].file).toBe("a.ts");
+    expect(parsed.failures[0].line).toBe(5);
+    expect(parsed.failures[0].message).toContain("TS2322");
+    expect(parsed.failures[2].line).toBe(11);
+    expect(parsed.failures[2].message).toContain("TS2554");
+  });
+});
+
+describe("eslintDetector: captured real output", () => {
+  it("matches an errors run and a warnings-only run, not the clean (empty) case", () => {
+    expect(
+      eslintDetector.matches({
+        output: readCaptured("eslint-errors"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+    expect(
+      eslintDetector.matches({
+        output: readCaptured("eslint-warnings"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(true);
+    expect(
+      eslintDetector.matches({
+        output: readCaptured("eslint-clean"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not match vitest or tsc captured output (shape disjointness)", () => {
+    for (const name of [
+      "vitest-fail",
+      "vitest-pass",
+      "vitest-no-tests",
+      "tsc-errors",
+      "tsc-clean",
+    ]) {
+      expect(
+        eslintDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("error rows populate failures with the rule id appended to the message", () => {
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-errors"),
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(3);
+    expect(parsed.summary.errors).toBe(3);
+    expect(parsed.summary.warnings).toBe(0);
+    expect(parsed.failures[0].file).toBe("/project/a.js");
+    expect(parsed.failures[0].line).toBe(2);
+    expect(parsed.failures[0].message).toContain("no-unused-vars");
+  });
+
+  it("warning rows count into summary.warnings and never populate failures on a zero-exit (pass) check", () => {
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-warnings"),
+      command: "npm run lint --silent",
+      exitCode: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary.warnings).toBe(1);
+    expect(parsed.summary.errors).toBe(0);
+  });
+});
+
+describe("verify: detector shapes are disjoint under real DEFAULT_DETECTORS ordering", () => {
+  it("a check whose output concatenates tsc and vitest shapes falls back to generic, naming both candidates", () => {
+    const output = readCaptured("tsc-vitest-concat");
+    const selection = selectDetector(DEFAULT_DETECTORS, genericDetector, {
+      output,
+      // A command name that is not a whole token of "tsc" or "vitest": the
+      // tiebreaker must not fire, so the ambiguity is what is exercised
+      // here, not the tiebreaker.
+      command: "npm run ci --silent",
+      exitCode: 1,
+    });
+    expect(selection.detector).toBe(genericDetector);
+    expect(selection.ambiguousCandidates).toEqual(
+      expect.arrayContaining(["tsc", "vitest"]),
+    );
+    expect(selection.ambiguousCandidates).not.toContain("eslint");
+  });
+
+  it("through verify(): the same concatenated output selects generic and warns listing tsc and vitest", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { ci: "run-both" });
+    const logDir = makeTmpDir();
+    const output = readCaptured("tsc-vitest-concat");
+    const { fn } = makeStubExec({
+      "npm run ci --silent": { exitCode: 1, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["ci"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].detector).toBe("generic");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("ambiguous") && w.includes("tsc") && w.includes("vitest"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("verify: detector selection precedence, output shape first, real tools", () => {
+  it("-c typecheck resolved to `npm run typecheck --silent` against the tsc fixture selects tsc", async () => {
+    const cwd = path.join(FIXTURES_DIR, "tsc-project");
+    const logDir = makeTmpDir();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].command).toBe("npm run typecheck --silent");
+    expect(result.checks[0].detector).toBe("tsc");
+    expect(result.checks[0].status).toBe("fail");
+    expect(result.checks[0].summary.errors).toBeGreaterThan(0);
+  }, 20000);
+
+  it("-c test resolved to `npm run test --silent` against the vitest fixture selects vitest", async () => {
+    // A dedicated copy of the vitest fixture (not test/fixtures/vitest-
+    // project, which cli.test.ts's live integration test also spawns
+    // `vitest run` against): vitest writes a transform cache to
+    // node_modules/.vite under its cwd, and two vitest processes racing
+    // on the very same cache path (this test file and cli.test.ts run as
+    // separate, concurrent vitest test files) intermittently made vitest
+    // itself error, which made its output stop matching the vitest
+    // detector's shape and fall through to generic. tsc and eslint carry
+    // no such cache and are shared safely across the two fixtures they
+    // both use.
+    const cwd = path.join(FIXTURES_DIR, "vitest-project-select");
+    const logDir = makeTmpDir();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].command).toBe("npm run test --silent");
+    expect(result.checks[0].detector).toBe("vitest");
+    expect(result.checks[0].status).toBe("fail");
+    expect(result.checks[0].failures.length).toBeGreaterThan(0);
+  }, 20000);
 });

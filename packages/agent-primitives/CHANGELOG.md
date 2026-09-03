@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `verify` subcommand core: resolves each named check (`-x` override wins,
+  else `package.json` `scripts[name]` as `npm run <name> --silent`, else
+  `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`
+  list, deduplicated preserving the first occurrence, in order), through
+  `exec.ts` with a per-check timeout and log file. Every resolved check
+  name is validated against a conservative pattern before any command is
+  built; an invalid name is `status: "usage_error"`, exit `2`, never run.
+  Shell exit `126`/`127` maps to `status: "error"`, never `"fail"`.
+  `--fail-fast` stops after the first check that fails or errors; a
+  skipped check falls through instead of stopping the run. When every
+  requested check resolves to `skipped`, the run is `status: "error"` with
+  `reason: "nothing_verified"`, never a silent pass. Detector selection is
+  by output shape first, command text only as a tiebreaker among shape
+  matches, and only when it names exactly one of them; otherwise the
+  generic detector is chosen and a warning lists the shapes seen. v0 wires
+  the `generic` detector (parses no failures out of the text itself), with
+  the selection seam left open for tool-specific detectors. The failures
+  invariant is enforced once, centrally, for every detector and for both
+  `fail` and `error` checks: a check with zero parsed failures always gets
+  one synthetic failure entry (naming `timedOut`, or the exit code, plus
+  output tail) instead of shipping an empty `failures` list, and an
+  `error` check always reports at least one `summary.errors`. A detector's
+  own warnings, and a log file the run could not write to, are merged into
+  the top-level `warnings`, prefixed with the check name. `--max-failures`
+  (a positive integer, default 20) caps each check's own `failures` list,
+  failures-first; a cut is reported via `truncated: true` and the full,
+  uncapped result is written to the log directory.
+- `verify` gains three output-shape detectors, registered as
+  `DEFAULT_DETECTORS` (the default when a caller passes none): `vitest`
+  (the `Tests  N failed | M passed (T)` / `Tests  N passed (N)` summary
+  line, ` FAIL  file > name` blocks with the assertion on the following
+  line, and the `No test files found` case), `tsc` (`file(line,col):
+  error TSnnnn: message`; `summary.errors` counts the diagnostics), and
+  `eslint`'s stylish formatter (an absolute file header, then `line:col
+  severity  message  rule`; `error` rows populate `failures` with the
+  rule id appended, `warning` rows count into `summary.warnings` alone
+  and never become a failure). No reporter flags are injected; a check
+  whose output carries more than one of these shapes at once (e.g. a
+  `pretest` build followed by `vitest`) is ambiguous and falls back to
+  `generic`, listing the shapes seen, the same as any other ambiguous
+  selection. All three strip ANSI color codes before matching or parsing,
+  since a tool can default to colorized output even outside a real
+  terminal. Captured real-tool-output fixtures and one live integration
+  test per tool (run through this package's own installed devDependency)
+  live under `test/fixtures/`.
+
 ### Fixed
 
 - **Envelope bound and reduction.** The bound is met by reducing the
