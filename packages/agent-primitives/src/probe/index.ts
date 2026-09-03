@@ -627,11 +627,15 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   }
 
   let restoreState: RestoreState | null = null;
-  // Set once `beginWorktree` succeeds; read both by the pipeline below
-  // (to route the mutation, exec cwd, and patch apply at the worktree
-  // instead of the original tree) and by `finally`/the signal handler
-  // (to clean the worktree up on every exit path).
+  // The completed sync, set once `beginWorktree` succeeds: read by the
+  // pipeline below to route the mutation, exec cwd, and patch apply at
+  // the worktree instead of the original tree.
   let wtSession: WorktreeSyncSuccess | undefined;
+  // The worktree's path, set as soon as `git worktree add` is ABOUT to
+  // create it (not once it succeeded) and read by `finally`/the signal
+  // handler to clean it up on every exit path: an add interrupted
+  // partway can leave a registered worktree, and cleanup needs the path
+  // to remove it.
   let wtWorktreePath: string | undefined;
   // Settles when `beginWorktree` has returned, however it returned. The
   // sync writes into the worktree (the tracked-diff apply, the
