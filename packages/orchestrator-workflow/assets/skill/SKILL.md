@@ -140,9 +140,10 @@ directory and the subagents.
    check for a curated knowledge bundle (for example a `docs/okf/` directory
    with an index) before mapping terrain by hand, treating any claims found
    there as leads to verify, not as ground truth, and prefer a connected
-   semantic code-search tool over raw grep for orientation questions. Fold its
-   findings into a
-   "Terrain" section of `01-plan.md`. Skip this step when the change is well
+   semantic code-search tool over raw grep for orientation questions; when a
+   structural code-search tool is available, prefer it over text grep for
+   symbol lookups (callers, definitions). Fold its findings into a "Terrain"
+   section of `01-plan.md`. Skip this step when the change is well
    understood. If the explorer surfaces a question only the operator can
    answer, ask the operator instead of guessing. Under a `minimal` profile
    there is no explorer subagent to send; run this step inline with the same
