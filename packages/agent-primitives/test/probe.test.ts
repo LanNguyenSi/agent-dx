@@ -3,10 +3,31 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { probe, type ProbeOptions } from "../src/probe/index.js";
 import { readMarkerFor, writeMarker } from "../src/lock.js";
 import { sha256File } from "../src/hash.js";
+import { execCommand } from "../src/exec.js";
+import { computeMutant } from "../src/probe/mutant.js";
+
+// Call-through partial mocks: every call runs the real implementation
+// unless a test explicitly overrides it (and always restores the
+// call-through default before it finishes). This is the only way to
+// force a specific exec call to reject, or a specific computeMutant call
+// to report a hash that does not match what it actually wrote, without
+// relying on filesystem tricks that would also corrupt the very backup
+// the restore needs to verify against (`vi.spyOn` cannot be used
+// directly on an ESM named export; Vitest throws "Module namespace is
+// not configurable").
+vi.mock("../src/exec.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/exec.js")>();
+  return { ...actual, execCommand: vi.fn(actual.execCommand) };
+});
+vi.mock("../src/probe/mutant.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/probe/mutant.js")>();
+  return { ...actual, computeMutant: vi.fn(actual.computeMutant) };
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = path.join(__dirname, "..", "dist", "cli.js");
@@ -320,7 +341,9 @@ describe("probe(): restore failure is terminal", () => {
 
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("restore_failed");
-    expect(result.mutation_probe?.result).toBe("restore_failed");
+    // `mutation_probe.result` stays within killed|survived|inconclusive;
+    // the detail lives in the top-level `reason` above.
+    expect(result.mutation_probe?.result).toBe("inconclusive");
     expect(result.mutation_probe?.restored_verified).toBe(false);
     const backupWarning = result.warnings.find((w) =>
       w.includes("backup path"),
@@ -335,8 +358,12 @@ describe("probe(): restore failure is terminal", () => {
     // Never a "killed"/"survived" (exit 0/1) verdict.
     expect(["killed", "survived"]).not.toContain(result.status);
 
-    // The marker is left in place for a human, on purpose.
-    const marker = readMarkerFor(path.join(repo, "fixture.js"));
+    // The marker is left in place for a human, on purpose. Markers are
+    // keyed by the resolved realpath (fix 5), which can differ from the
+    // repo's own display path (e.g. macOS's /var -> /private/var).
+    const marker = readMarkerFor(
+      fs.realpathSync(path.join(repo, "fixture.js")),
+    );
     expect(marker).toBeDefined();
 
     // Cleanup: the lock dir is test-scoped, but the corrupted directory
@@ -346,6 +373,32 @@ describe("probe(): restore failure is terminal", () => {
     // is required here. Referencing lockDir keeps the variable used.
     expect(fs.existsSync(lockDir)).toBe(true);
   });
+
+  it("restore_failed with restored_verified: false when the copy itself succeeds but lands on content that does not match the pre-mutation hash", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // beginInplace's backup is taken right after the baseline run; a
+    // --pre hook that appends to the target during baseline means the
+    // backup captures "original + appended" while `preHash` (recorded
+    // before baseline even starts) is the true original -- restore
+    // succeeds as a plain copy, but the two hashes disagree.
+    const appendScript = path.join(makeTmpDir(), "append.js");
+    fs.writeFileSync(
+      appendScript,
+      "require('fs').appendFileSync('fixture.js', '\\n// pre-appended\\n');\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        preCommand: `node ${JSON.stringify(appendScript)}`,
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("restore_failed");
+    expect(result.mutation_probe?.result).toBe("inconclusive");
+    expect(result.mutation_probe?.restored_verified).toBe(false);
+  });
 });
 
 describe("probe(): SIGKILL-left marker is recovered by the next invocation", () => {
@@ -353,6 +406,11 @@ describe("probe(): SIGKILL-left marker is recovered by the next invocation", () 
     useLockDir();
     const { repo } = initRepo();
     const absFile = path.join(repo, "fixture.js");
+    // Markers are keyed by the resolved realpath (fix 5), which can
+    // differ from the repo's own display path (e.g. macOS's /var ->
+    // /private/var): a test simulating a leftover marker has to key it
+    // exactly as a real probe() run would.
+    const markerKey = fs.realpathSync(absFile);
     const originalContent = fs.readFileSync(absFile, "utf8");
     const preHash = await sha256File(absFile);
 
@@ -372,7 +430,7 @@ describe("probe(): SIGKILL-left marker is recovered by the next invocation", () 
     const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
     if (!deadPid) throw new Error("failed to obtain a dead pid for the test");
 
-    writeMarker(absFile, {
+    writeMarker(markerKey, {
       targetPath: absFile,
       backupPath,
       preHash,
@@ -391,13 +449,90 @@ describe("probe(): SIGKILL-left marker is recovered by the next invocation", () 
     // by the normal flow, so the file ends up back at its true original.
     expect(result.status).toBe("survived");
     expect(fs.readFileSync(absFile, "utf8")).toBe(originalContent);
-    expect(readMarkerFor(absFile)).toBeUndefined();
+    expect(readMarkerFor(markerKey)).toBeUndefined();
+  });
+
+  it("recovers a marker whose recorded pid is alive (a live foreign process), since under the lock every marker is treated as an unfinished probe regardless of pid", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const markerKey = fs.realpathSync(absFile);
+    const originalContent = fs.readFileSync(absFile, "utf8");
+    const preHash = await sha256File(absFile);
+
+    const backupDir = makeTmpDir();
+    const backupPath = path.join(backupDir, "backup-fixture.js");
+    fs.writeFileSync(backupPath, originalContent);
+    const mutatedContent = originalContent.replace(
+      "return n > 0;",
+      "return false; // left-behind",
+    );
+    fs.writeFileSync(absFile, mutatedContent);
+    const mutatedHash = await sha256File(absFile);
+
+    // This process's own pid: genuinely alive, standing in for "a
+    // foreign process that happens to still be running". The lock
+    // already excludes a second live probe on this target, so the
+    // marker's own pid must not gate recovery.
+    writeMarker(markerKey, {
+      targetPath: absFile,
+      backupPath,
+      preHash,
+      mutatedHash,
+      pid: process.pid,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await probe(
+      baseOptions(repo, { line: 5, replaceText: "  return n * 3;" }),
+    );
+
+    expect(result.warnings).toContain("recovered_stale_probe");
+    expect(result.status).toBe("survived");
+    expect(fs.readFileSync(absFile, "utf8")).toBe(originalContent);
+    expect(readMarkerFor(markerKey)).toBeUndefined();
+  });
+
+  it("clears a marker whose target already matches its recorded pre-mutation hash, with a warning, and proceeds", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const markerKey = fs.realpathSync(absFile);
+    const originalContent = fs.readFileSync(absFile, "utf8");
+    const preHash = await sha256File(absFile);
+
+    const backupDir = makeTmpDir();
+    const backupPath = path.join(backupDir, "backup-fixture.js");
+    fs.writeFileSync(backupPath, originalContent);
+
+    // The target is already back at its pre-mutation content (e.g. a
+    // previous probe restored successfully but crashed before removing
+    // its own marker): mutatedHash matches nothing on disk, but preHash
+    // does.
+    writeMarker(markerKey, {
+      targetPath: absFile,
+      backupPath,
+      preHash,
+      mutatedHash: "f".repeat(64),
+      pid: process.pid,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.warnings.some((w) => w.includes("already matched"))).toBe(
+      true,
+    );
+    expect(result.status).toBe("killed");
+    expect(readMarkerFor(markerKey)).toBeUndefined();
+    expect(fs.readFileSync(absFile, "utf8")).toBe(originalContent);
   });
 
   it("refuses with stale_probe_marker when the marker's dead-pid content matches neither the pre nor the mutated hash", async () => {
     useLockDir();
     const { repo } = initRepo();
     const absFile = path.join(repo, "fixture.js");
+    const markerKey = fs.realpathSync(absFile);
     const originalContent = fs.readFileSync(absFile, "utf8");
 
     const backupDir = makeTmpDir();
@@ -414,7 +549,7 @@ describe("probe(): SIGKILL-left marker is recovered by the next invocation", () 
     const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
     if (!deadPid) throw new Error("failed to obtain a dead pid for the test");
 
-    writeMarker(absFile, {
+    writeMarker(markerKey, {
       targetPath: absFile,
       backupPath,
       preHash: "a".repeat(64),
@@ -428,7 +563,7 @@ describe("probe(): SIGKILL-left marker is recovered by the next invocation", () 
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("stale_probe_marker");
     // Refused: nothing is touched, the marker stays exactly as it was.
-    expect(readMarkerFor(absFile)).toBeDefined();
+    expect(readMarkerFor(markerKey)).toBeDefined();
   });
 });
 
@@ -472,9 +607,319 @@ describe("probe(): restore on SIGTERM", () => {
 
     const after = fs.readFileSync(absFile, "utf8");
     expect(after).toBe(before);
-    expect(readMarkerFor(absFile)).toBeUndefined();
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
     expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
       [],
     );
   }, 15000);
+});
+
+describe("probe(): restore in the pipeline's finally", () => {
+  it("restores via the pipeline's finally and leaves the target hash equal to the pre-mutation hash when the mutant-phase exec call rejects", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(target, "utf8");
+    const preHash = await sha256File(target);
+
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    const mockExec = vi.mocked(execCommand);
+    let callCount = 0;
+    mockExec.mockImplementation((...args: Parameters<typeof execCommand>) => {
+      callCount += 1;
+      // Call 1 is the baseline test (must succeed for the pipeline to
+      // reach the mutant phase at all); call 2 is the mutant-phase test,
+      // forced to reject the way a genuine exec-level failure would
+      // (e.g. a log dir that turned out to be a file).
+      if (callCount === 2) {
+        return Promise.reject(
+          new Error(
+            "forced rejection: simulated exec failure during the mutant-phase run",
+          ),
+        );
+      }
+      return actualExec.execCommand(...args);
+    });
+
+    try {
+      await expect(probe(baseOptions(repo))).rejects.toThrow(
+        /forced rejection/,
+      );
+      expect(fs.readFileSync(target, "utf8")).toBe(before);
+      expect(await sha256File(target)).toBe(preHash);
+      expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+    } finally {
+      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
+        actualExec.execCommand(...args),
+      );
+    }
+  });
+});
+
+describe("probe(): --pre/-t run in the invocation cwd, not the containment root", () => {
+  it("a probe from a subdirectory of a monorepo with -t 'npm test' picks up that subdirectory's own test script and yields killed", async () => {
+    useLockDir();
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    // The root package's own "test" script is deliberately mutation-blind
+    // (always exits 0): if the probe wrongly runs commands from the
+    // containment root instead of the invocation cwd, `npm test` picks
+    // up THIS script instead of the subpackage's own, and the mutant
+    // looks "survived" no matter what it does.
+    fs.writeFileSync(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        name: "root",
+        version: "1.0.0",
+        scripts: { test: 'node -e "process.exit(0)"' },
+      }),
+    );
+    const subDir = path.join(repo, "packages", "sub");
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(subDir, "package.json"),
+      JSON.stringify({
+        name: "sub",
+        version: "1.0.0",
+        scripts: { test: "node fixture.test.js" },
+      }),
+    );
+    fs.writeFileSync(path.join(subDir, "fixture.js"), FIXTURE_JS);
+    fs.writeFileSync(path.join(subDir, "fixture.test.js"), FIXTURE_TEST_JS);
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const before = fs.readFileSync(path.join(subDir, "fixture.js"), "utf8");
+
+    const result = await probe(
+      baseOptions(subDir, { testCommand: "npm test" }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(fs.readFileSync(path.join(subDir, "fixture.js"), "utf8")).toBe(
+      before,
+    );
+  }, 30000);
+});
+
+describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
+  it("pre_failed when --pre fails specifically in the mutant phase (a rebuild refusing to build broken output)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(target, "utf8");
+
+    const result = await probe(
+      baseOptions(repo, {
+        // Syntactically invalid: stands in for "the mutation broke the
+        // build" -- `--pre`'s syntax check (a stand-in for a rebuild)
+        // passes against the unmutated baseline and fails against this.
+        replaceText: "  return n > 0 !!! syntax error;",
+        preCommand: "node --check fixture.js",
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("pre_failed");
+    expect(["killed", "survived"]).not.toContain(result.status);
+    expect(fs.readFileSync(target, "utf8")).toBe(before);
+  });
+
+  it("pre_failed during the baseline run when --pre already fails unmutated", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+
+    const result = await probe(baseOptions(repo, { preCommand: "exit 1" }));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("pre_failed");
+    expect(result.baseline).toBeUndefined();
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+});
+
+describe("probe(): the post-apply hash-changed check", () => {
+  it("throws when the applied content's hash does not match what was predicted, and never leaves the mutant behind", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(target, "utf8");
+    const preHash = await sha256File(target);
+
+    // The real file write still uses the real (correct) `newContent`,
+    // so the mutation genuinely applies -- only the predicted
+    // `mutatedHash` this one call reports back is deliberately wrong.
+    // Everything else about the pipeline (the backup, the baseline run)
+    // stays completely real, so this isolates exactly the post-apply
+    // hash comparison, not restore's own verification.
+    const actualMutant = await vi.importActual<
+      typeof import("../src/probe/mutant.js")
+    >("../src/probe/mutant.js");
+    const mockComputeMutant = vi.mocked(computeMutant);
+    mockComputeMutant.mockImplementationOnce(async (spec, mutantOpts) => {
+      const real = await actualMutant.computeMutant(spec, mutantOpts);
+      if (!real.applicable) return real;
+      return { ...real, mutatedHash: "0".repeat(64) };
+    });
+
+    try {
+      await expect(probe(baseOptions(repo))).rejects.toThrow(
+        /mutation hash mismatch/,
+      );
+      expect(fs.readFileSync(target, "utf8")).toBe(before);
+      expect(await sha256File(target)).toBe(preHash);
+    } finally {
+      mockComputeMutant.mockImplementation(
+        (...args: Parameters<typeof computeMutant>) =>
+          actualMutant.computeMutant(...args),
+      );
+    }
+  });
+});
+
+describe("probe(): containment resolves symlinks before checking", () => {
+  it("file_outside_root when --file is an in-repo symlink resolving outside the containment root", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outsideDir = makeTmpDir();
+    const outsideFile = path.join(outsideDir, "outside.js");
+    fs.writeFileSync(outsideFile, "module.exports = {};\n");
+    const linkPath = path.join(repo, "link-to-outside.js");
+    fs.symlinkSync(outsideFile, linkPath);
+
+    const result = await probe(
+      baseOptions(repo, {
+        file: "link-to-outside.js",
+        line: 1,
+        replaceText: "x",
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(fs.readFileSync(outsideFile, "utf8")).toBe("module.exports = {};\n");
+  });
+});
+
+describe("probe(): -p patches touching paths other than --file", () => {
+  it("mutant_not_applicable when the patch also touches a second file, and neither file is left mutated", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const fixtureLines = FIXTURE_JS.split("\n");
+    const patchPath = path.join(makeTmpDir(), "two-file.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -2,6 +2,6 @@",
+        ` ${fixtureLines[1]}`,
+        ` ${fixtureLines[2]}`,
+        ` ${fixtureLines[3]}`,
+        `-${fixtureLines[4]}`,
+        "+  return n * 3;",
+        ` ${fixtureLines[5]}`,
+        ` ${fixtureLines[6]}`,
+        "diff --git a/extra.js b/extra.js",
+        "new file mode 100644",
+        "index 0000000..0000000",
+        "--- /dev/null",
+        "+++ b/extra.js",
+        "@@ -0,0 +1 @@",
+        "+extra file content",
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, { form: "patch", replaceText: undefined, patchPath }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("mutant_not_applicable");
+    expect(result.warnings.some((w) => w.includes("extra.js"))).toBe(true);
+    expect(fs.existsSync(path.join(repo, "extra.js"))).toBe(false);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+});
+
+describe("probe(): -p integration through probe(), and --pre in both phases", () => {
+  it("runs a -p patch mutant end to end: applies for real, tests, restores", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const fixtureLines = FIXTURE_JS.split("\n");
+    const patchPath = path.join(makeTmpDir(), "single-file.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${fixtureLines[0]}`,
+        `-${fixtureLines[1]}`,
+        "+  return false;",
+        ` ${fixtureLines[2]}`,
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, { form: "patch", replaceText: undefined, patchPath }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("runs --pre in both the baseline and mutant phases", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const counterFile = path.join(makeTmpDir(), "counter.txt");
+    fs.writeFileSync(counterFile, "0");
+    const preScript = path.join(makeTmpDir(), "count.js");
+    fs.writeFileSync(
+      preScript,
+      [
+        "const fs = require('fs');",
+        `const n = Number(fs.readFileSync(${JSON.stringify(counterFile)}, 'utf8')) + 1;`,
+        `fs.writeFileSync(${JSON.stringify(counterFile)}, String(n));`,
+        "",
+      ].join("\n"),
+    );
+
+    const result = await probe(
+      baseOptions(repo, { preCommand: `node ${JSON.stringify(preScript)}` }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(fs.readFileSync(counterFile, "utf8")).toBe("2");
+  });
+});
+
+describe("probe(): -p combined with --allow-outside", () => {
+  it("usage_error when -p is combined with --allow-outside", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const patchPath = path.join(makeTmpDir(), "unused.patch");
+    fs.writeFileSync(patchPath, "");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        allowOutside: true,
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+  });
 });

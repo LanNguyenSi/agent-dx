@@ -191,6 +191,110 @@ describe("computeMutant: patch form", () => {
     );
     expect(result.applicable).toBe(false);
   });
+
+  it("is not applicable when the patch touches a path other than --file, naming the extra path", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "two-file.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+        "diff --git a/extra.js b/extra.js",
+        "new file mode 100644",
+        "index 0000000..0000000",
+        "--- /dev/null",
+        "+++ b/extra.js",
+        "@@ -0,0 +1 @@",
+        "+extra file content",
+      ].join("\n") + "\n",
+    );
+    const result = await computeMutant(
+      { form: "patch", file: absFile, line: 0, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.reason).toContain("extra.js");
+    // The real file on disk is untouched: the dry run only ever wrote
+    // into its own scratch copy.
+    expect(fs.readFileSync(absFile, "utf8")).toBe(content);
+  });
+
+  it("reports the dry-run and numstat exec log paths in logPaths", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+      ].join("\n") + "\n",
+    );
+    const result = await computeMutant(
+      { form: "patch", file: absFile, line: 0, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    expect(result.applicable).toBe(true);
+    expect(result.logPaths.length).toBeGreaterThanOrEqual(2);
+    for (const logPath of result.logPaths) {
+      expect(fs.existsSync(logPath)).toBe(true);
+    }
+  });
+});
+
+describe("computeMutant: CRLF terminator preservation", () => {
+  const CRLF_ORIGINAL = "function isPositive(n) {\r\n  return n > 0;\r\n}\r\n";
+
+  it("replace form preserves the CRLF terminator of the replaced line", async () => {
+    const result = await computeMutant(
+      {
+        form: "replace",
+        file: "/x/fixture.js",
+        line: 2,
+        replaceText: "  return false;",
+      },
+      { root: "/x", logDir: makeTmpDir(), originalContent: CRLF_ORIGINAL },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.after).toBe("  return false;\r");
+    expect(result.newContent).toBe(
+      "function isPositive(n) {\r\n  return false;\r\n}\r\n",
+    );
+  });
+
+  it("match form preserves the CRLF terminator (the tail slice already carries it)", async () => {
+    const result = await computeMutant(
+      {
+        form: "match",
+        file: "/x/fixture.js",
+        line: 2,
+        matchText: "n > 0",
+        withText: "false",
+      },
+      { root: "/x", logDir: makeTmpDir(), originalContent: CRLF_ORIGINAL },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.newContent).toBe(
+      "function isPositive(n) {\r\n  return false;\r\n}\r\n",
+    );
+  });
 });
 
 describe("formatMutantSummary / formatVerifiedAppliedVia", () => {

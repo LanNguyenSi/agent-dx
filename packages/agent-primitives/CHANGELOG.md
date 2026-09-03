@@ -37,22 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failures-first; a cut is reported via `truncated: true` and the full,
   uncapped result is written to the log directory.
 
-- `probe` subcommand (`inplace` isolation only; `-i worktree` still
-  returns `not_implemented`, a later release flips the default): the full
-  mutation-probe pipeline — lock, containment, stale-marker recovery,
-  baseline, apply, `--pre`/test, restore, hash verification, classify —
-  for all three mutant forms (`-r, --replace`, `-M, --match` with
-  `-w, --with`, `-p, --patch` via `git apply`). A per-target lock
-  (`src/lock.ts`, `O_EXCL`, stale-pid reclaim) outside the repository
-  serializes concurrent probes on the same file; an in-flight marker
-  written before mutation lets the next invocation recover automatically
-  from a `SIGKILL`/crash mid-mutation, or refuse with
-  `stale_probe_marker` naming the backup path when it cannot prove that
-  recovery is safe. Restore runs on normal completion, on any thrown
-  error, and on `SIGINT`/`SIGTERM`; a failed restore is terminal
-  (`restore_failed`, exit 2, never a `killed`/`survived` verdict).
-  `doctor`'s `checks` gained a `stale-probe-marker` entry for the current
-  repository.
 
 ### Fixed
 
@@ -157,7 +141,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path, and the shell loops they run are POSIX constructs rather than
   `seq`.
 
+- `probe` round-2 review hardening: restore now runs in the pipeline's
+  own `finally` as a backstop, so a thrown error mid-mutation (not just
+  a normal return) still restores and hash-verifies the target before
+  re-throwing; `--pre`/`-t` run in the invocation cwd instead of the
+  containment root, so a probe from a subdirectory of a monorepo sees
+  the same cwd its test command normally would; a non-zero `--pre` exit
+  in either the baseline or the mutant run is `inconclusive`/
+  `pre_failed`, never a verdict; a marker found under the lock is always
+  treated as an unfinished probe regardless of its recorded pid (the
+  lock already excludes a second live probe, and pids recycle);
+  `--file`/`--link` are resolved with `realpath` before both the
+  containment check and the lock/marker key, so an in-repo symlink to an
+  outside file can no longer bypass containment; a `-p` patch that
+  touches any path other than `--file` (checked via `git apply
+  --numstat` after the dry run) is `mutant_not_applicable` instead of
+  silently mutating extra files with nothing to restore them; the lock
+  directory is uid-scoped (`agent-primitives-<uid>/locks`) and created
+  `0700`, and one that exists but is not owned by (or writable by) the
+  current user is `inconclusive`/`lock_unavailable` instead of a raw
+  filesystem error; `mutation_probe.result` now stays within
+  `killed`/`survived`/`inconclusive` (the detail moved to `reason`); the
+  baseline, test, and dry-run exec log paths are folded into the
+  envelope's `logs`; a whole-line `-r, --replace` mutation preserves the
+  target line's own CRLF terminator instead of silently downgrading that
+  one line to LF; and `-p` combined with `--allow-outside` is now a
+  usage error instead of a scratch-dir path that always fails.
+
 ### Added
+
+- `probe` subcommand (`inplace` isolation only; `-i worktree` still
+  returns `not_implemented`, a later release flips the default): the full
+  mutation-probe pipeline (lock, containment, stale-marker recovery,
+  baseline, apply, `--pre`/test, restore, hash verification, classify)
+  for all three mutant forms (`-r, --replace`, `-M, --match` with
+  `-w, --with`, `-p, --patch` via `git apply`). A per-target lock
+  (`src/lock.ts`, `O_EXCL`, stale-pid reclaim) outside the repository
+  serializes concurrent probes on the same file; an in-flight marker
+  written before mutation lets the next invocation recover automatically
+  from a `SIGKILL`/crash mid-mutation, or refuse with
+  `stale_probe_marker` naming the backup path when it cannot prove that
+  recovery is safe. Restore runs on normal completion, on any thrown
+  error, and on `SIGINT`/`SIGTERM`; a failed restore is terminal
+  (`restore_failed`, exit 2, never a `killed`/`survived` verdict).
+  `doctor`'s `checks` gained a `stale-probe-marker` entry for the current
+  repository.
 
 - Initial package scaffold: the shared envelope module (bounded
   serialization, status-to-exit-code mapping), an `exec` runner with fixed

@@ -161,7 +161,7 @@ the same way every other subcommand's does.
 ## `probe`
 
 Runs one mutation probe: mutate a line (or apply a patch), confirm the
-unmutated test passes first (the baseline — there is no `--no-baseline`,
+unmutated test passes first (the baseline; there is no `--no-baseline`,
 because a probe whose test was never shown to pass unmutated is not a
 probe), run the test against the mutant, restore the file, and classify
 the result.
@@ -191,16 +191,24 @@ passed; otherwise the result is `status: "inconclusive"`,
 `reason: "file_outside_root"`, exit `2`.
 
 `--pre <command>` runs (e.g. a rebuild) before each test invocation, in
-both the baseline and mutant runs — needed whenever the test executes
-built output (`dist/`) rather than the source file being mutated,
-otherwise the mutant never reaches the test and the probe reports a false
-`survived`.
+both the baseline and mutant runs, and in the invocation cwd (not the
+containment root, so a probe run from a subdirectory of a monorepo sees
+the same cwd its test command normally would): needed whenever the test
+executes built output (`dist/`) rather than the source file being
+mutated, otherwise the mutant never reaches the test and the probe
+reports a false `survived`. A non-zero `--pre` exit in either run is
+`status: "inconclusive"`, `reason: "pre_failed"`, exit `2`, never a
+verdict.
 
 A probe on one target file is serialized against any other probe on the
-same target via a lock file outside the repository (`$AGENT_PRIMITIVES_LOCK_DIR`
-or `<tmpdir>/agent-primitives/locks/`); a second probe on the same target
-while the first is running gets `status: "inconclusive"`,
-`reason: "probe_in_progress"`, exit `2`. If a probe is killed outright
+same target via a lock file outside the repository
+(`$AGENT_PRIMITIVES_LOCK_DIR` or `<tmpdir>/agent-primitives-<uid>/locks/`,
+created `0700` and owned by the current user); a second probe on the same
+target while the first is running gets `status: "inconclusive"`,
+`reason: "probe_in_progress"`, exit `2`, and a lock directory this
+process cannot trust (wrong owner, unwritable) gets
+`reason: "lock_unavailable"`, exit `2`, instead of a raw filesystem
+error. If a probe is killed outright
 (`SIGKILL`, a crash, a machine restart) mid-mutation, it leaves an
 in-flight marker behind; the next probe on that same target recovers
 automatically (restores from the recorded backup, verifies by hash, adds

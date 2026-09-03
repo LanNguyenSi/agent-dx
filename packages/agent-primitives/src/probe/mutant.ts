@@ -27,16 +27,36 @@ export interface MutantComputed {
   after: string;
   newContent: string;
   mutatedHash: string;
+  /** Exec log paths produced while computing this mutant (empty for
+   * `replace`/`match`, which do no exec calls; the dry-run `git apply`
+   * and, for `patch`, the `--numstat` check for `patch`). */
+  logPaths: string[];
 }
 
 export interface MutantNotApplicable {
   applicable: false;
+  /** Human-readable detail for the `mutant_not_applicable` warning, set
+   * when the reason is more specific than "did not apply" (e.g. a patch
+   * touching paths other than `--file`). */
+  reason?: string;
+  logPaths: string[];
 }
 
 export type MutantComputeResult = MutantComputed | MutantNotApplicable;
 
 function hashString(text: string): string {
   return createHash("sha256").update(text).digest("hex");
+}
+
+/** When `original` ends in a `\r` (a CRLF line) and `replacement` does
+ * not already carry one, appends it so the line's terminator survives
+ * the mutation instead of silently flipping that one line to LF while
+ * its neighbors stay CRLF. */
+function preserveTerminator(original: string, replacement: string): string {
+  if (original.endsWith("\r") && !replacement.endsWith("\r")) {
+    return `${replacement}\r`;
+  }
+  return replacement;
 }
 
 function computeReplace(
@@ -46,18 +66,21 @@ function computeReplace(
 ): MutantComputeResult {
   const lines = content.split("\n");
   const idx = line - 1;
-  if (idx < 0 || idx >= lines.length) return { applicable: false };
+  if (idx < 0 || idx >= lines.length)
+    return { applicable: false, logPaths: [] };
   const before = lines[idx];
-  if (before === replaceText) return { applicable: false };
+  const after = preserveTerminator(before, replaceText);
+  if (before === after) return { applicable: false, logPaths: [] };
   const newLines = lines.slice();
-  newLines[idx] = replaceText;
+  newLines[idx] = after;
   const newContent = newLines.join("\n");
   return {
     applicable: true,
     before,
-    after: replaceText,
+    after,
     newContent,
     mutatedHash: hashString(newContent),
+    logPaths: [],
   };
 }
 
@@ -69,11 +92,17 @@ function computeMatch(
 ): MutantComputeResult {
   const lines = content.split("\n");
   const idx = line - 1;
-  if (idx < 0 || idx >= lines.length) return { applicable: false };
+  if (idx < 0 || idx >= lines.length)
+    return { applicable: false, logPaths: [] };
   const original = lines[idx];
   const pos = original.indexOf(matchText);
-  if (matchText === "" || pos === -1) return { applicable: false };
-  if (withText === matchText) return { applicable: false };
+  if (matchText === "" || pos === -1)
+    return { applicable: false, logPaths: [] };
+  if (withText === matchText) return { applicable: false, logPaths: [] };
+  // The tail (`original.slice(pos + matchText.length)`) already carries
+  // whatever terminator (bare `\n` or `\r` before the join's `\n`) the
+  // original line had, so a mid-line match/replace preserves CRLF for
+  // free; only the whole-line `replace` form needs `preserveTerminator`.
   const after =
     original.slice(0, pos) + withText + original.slice(pos + matchText.length);
   const newLines = lines.slice();
@@ -85,6 +114,7 @@ function computeMatch(
     after,
     newContent,
     mutatedHash: hashString(newContent),
+    logPaths: [],
   };
 }
 
@@ -107,12 +137,36 @@ function firstDiffLine(
   return { before: "", after: "" };
 }
 
+/** Parses `git apply --numstat` output into the list of paths the patch
+ * touches (one per line: `<added>\t<deleted>\t<path>`; the path is
+ * always the last tab-separated field, which also survives the `-\t-`
+ * placeholder numstat uses for binary files). */
+function parseNumstatPaths(stdout: string): string[] {
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const parts = line.split("\t");
+      return parts[parts.length - 1];
+    });
+}
+
 /**
  * Dry-runs a unified diff against a scratch copy of the file (never the
  * real target) via `git apply`, so applicability (and the resulting
  * content/hash) is known before anything touches the real file or the
  * in-flight marker is written. `git apply` does not require the scratch
  * directory to itself be a git repository.
+ *
+ * The scratch copy only ever seeds `--file`'s own relative path, so a
+ * patch that also touches other paths would apply cleanly here (`git
+ * apply` happily creates new files) while a real apply against the
+ * repository root would go on to create/modify those other paths for
+ * real, with nothing to restore them afterward. After the dry run
+ * succeeds, `git apply --numstat` on the same patch lists every path it
+ * touches; anything other than `--file`'s own relative path makes the
+ * whole patch `mutant_not_applicable`.
  */
 async function computePatch(
   originalContent: string,
@@ -138,10 +192,39 @@ async function computePatch(
     },
   );
   if (result.exitCode !== 0) {
-    return { applicable: false };
+    return { applicable: false, logPaths: [result.logPath] };
   }
+
+  const numstatResult = await execCommand(
+    `git apply --numstat -- ${JSON.stringify(absPatchPath)}`,
+    {
+      cwd: scratchDir,
+      logDir: scratchDir,
+      timeoutMs: 10_000,
+    },
+  );
+  const logPaths = [result.logPath, numstatResult.logPath];
+  if (numstatResult.exitCode !== 0) {
+    return {
+      applicable: false,
+      reason: `git apply --numstat failed to parse the patch; see ${numstatResult.logPath}`,
+      logPaths,
+    };
+  }
+  const touchedPaths = parseNumstatPaths(numstatResult.stdoutTail);
+  const extraPaths = touchedPaths.filter((p) => p !== relPath);
+  if (extraPaths.length > 0) {
+    return {
+      applicable: false,
+      reason:
+        `patch touches paths other than --file (${relPath}): ` +
+        extraPaths.join(", "),
+      logPaths,
+    };
+  }
+
   const newContent = fs.readFileSync(scratchFile, "utf8");
-  if (newContent === originalContent) return { applicable: false };
+  if (newContent === originalContent) return { applicable: false, logPaths };
   const { before, after } = firstDiffLine(originalContent, newContent);
   return {
     applicable: true,
@@ -149,6 +232,7 @@ async function computePatch(
     after,
     newContent,
     mutatedHash: hashString(newContent),
+    logPaths,
   };
 }
 

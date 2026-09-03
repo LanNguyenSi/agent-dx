@@ -140,6 +140,50 @@ describe("acquireLock", () => {
     expect(data.pid).toBe(process.pid);
     result.release();
   });
+
+  it("creates a freshly-needed lock dir with mode 0700", () => {
+    savedLockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR;
+    const fresh = path.join(makeTmpDir(), "not-yet-created", "locks");
+    process.env.AGENT_PRIMITIVES_LOCK_DIR = fresh;
+    const target = path.join(makeTmpDir(), "target.js");
+
+    const result = acquireLock(target);
+    expect(result.ok).toBe(true);
+    if (result.ok) result.release();
+
+    const stat = fs.statSync(fresh);
+    expect(stat.isDirectory()).toBe(true);
+    expect(stat.mode & 0o777).toBe(0o700);
+  });
+
+  // Permission bits are meaningless to root (bypasses them entirely), so
+  // this only discriminates as a non-root user.
+  const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+  it.skipIf(isRoot)(
+    "returns lock_unavailable, never a raw error, when the lock dir exists but is not writable",
+    () => {
+      const parent = makeTmpDir();
+      const unwritable = path.join(parent, "locks");
+      fs.mkdirSync(unwritable, { mode: 0o500 });
+      savedLockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR;
+      process.env.AGENT_PRIMITIVES_LOCK_DIR = unwritable;
+      const target = path.join(makeTmpDir(), "target.js");
+
+      let result: ReturnType<typeof acquireLock> | undefined;
+      try {
+        result = acquireLock(target);
+      } finally {
+        // Restore write access so afterEach's rmSync can clean it up.
+        fs.chmodSync(unwritable, 0o700);
+      }
+      expect(result?.ok).toBe(false);
+      if (!result || result.ok) return;
+      expect(result.reason).toBe("lock_unavailable");
+      if (result.reason === "lock_unavailable") {
+        expect(result.detail.length).toBeGreaterThan(0);
+      }
+    },
+  );
 });
 
 describe("marker read/write/remove", () => {

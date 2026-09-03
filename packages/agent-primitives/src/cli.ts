@@ -782,7 +782,11 @@ program
       durationMs: Date.now() - start,
       cwd: global.cwd,
       warnings: result.warnings,
-      logs: [],
+      logs: [
+        ...(result.baseline !== undefined ? [result.baseline.logPath] : []),
+        ...(result.test !== undefined ? [result.test.logPath] : []),
+        ...(result.dryRunLogPaths ?? []),
+      ],
       extra: {
         ...(result.reason !== undefined ? { reason: result.reason } : {}),
         ...(result.mutant !== undefined ? { mutant: result.mutant } : {}),
