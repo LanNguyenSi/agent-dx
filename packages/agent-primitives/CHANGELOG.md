@@ -39,30 +39,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `verify` gains three output-shape detectors, registered as
   `DEFAULT_DETECTORS` (the default when a caller passes none): `vitest`
   (the `Tests` summary line, parsed segment-wise so any combination of
-  `failed`/`passed`/`skipped`/`todo` vitest prints is read correctly,
-  including an all-failing or all-skipped run; ` FAIL  file > name`
-  blocks with the assertion on the following line; and the `No test
-  files found` case), `tsc` (`file(line,col): error TSnnnn: message`;
-  `summary.errors` counts the diagnostics), and `eslint`'s stylish
-  formatter (a file header line, structurally matched so a path
+  `failed`/`passed`/`expected fail`/`skipped`/`todo` vitest prints is
+  read correctly, including an all-failing, all-skipped, or `it.fails`
+  run, `expected fail` folded into `summary.passed`; ` FAIL  file > name`
+  blocks with the assertion on the following line, or ` FAIL  file [
+  file ]` with no name for a file that fails to collect; and the `No
+  test files found` / `Tests  no tests` cases), `tsc` (`file(line,col):
+  error TSnnnn: message`, identically whether or not `--pretty false` was
+  passed; `summary.errors` counts the diagnostics), and `eslint`'s
+  stylish formatter (a file header line, structurally matched so a path
   containing a space is still recognized; `line:col  severity  message[
   rule]` rows, the rule id optional so a rule-less row such as a
   `Parsing error: ...` is still a failure; `error` rows populate
   `failures`, `warning` rows count into `summary.warnings` alone and
-  never become a failure). No reporter flags are injected; a check whose
-  output carries more than one of these shapes at once (e.g. a `pretest`
-  build followed by `vitest`) is ambiguous and falls back to `generic`,
-  listing the shapes seen, the same as any other ambiguous selection. All
-  three strip ANSI SGR color codes before matching or parsing, since a
-  tool can default to colorized output even outside a real terminal
-  (eslint 10, a devDependency, needs Node `^20.19.0 || ^22.13.0 ||
-  >=24` to develop against, narrower than this package's own `>=20`).
-  When a check's captured output tail was truncated at exec.ts's own
-  bound, the tool's own reported total is preferred where one survives
-  in the tail (eslint's `✖ N problems` line), otherwise a warning names
-  the truncation. Captured real-tool-output fixtures and one live
-  integration test per tool (run through this package's own installed
-  devDependency) live under `test/fixtures/`.
+  never become a failure). Every file-path capture across the three
+  detectors is structural (up to the shape's own separator), never
+  `\S+`. No reporter flags are injected; a check whose output carries
+  more than one of these shapes at once (e.g. a `pretest` build followed
+  by `vitest`) is ambiguous and falls back to `generic`, listing the
+  shapes seen, the same as any other ambiguous selection. All three strip
+  ANSI SGR color codes before matching or parsing, since a tool can
+  default to colorized output even outside a real terminal (the Node
+  floor eslint needs to develop against is documented once, in the
+  package README's `verify` section). When a check's captured output
+  tail was truncated at exec.ts's own bound, eslint's own reported total
+  is preferred, only when the eslint detector was selected for that
+  check, where one survives in the tail (eslint's `✖ N problems` line);
+  either way a warning names the truncation, since the `failures` list
+  itself can still be missing entries even when a trustworthy total was
+  found. The failures invariant only adds its synthetic entry's count on
+  top of a detector-reported 0, never doubling an already-correct count.
+  Captured real-tool-output fixtures and one live integration test per
+  tool (run through this package's own installed devDependency) live
+  under `test/fixtures/`.
 
 ### Fixed
 

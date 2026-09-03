@@ -14,11 +14,19 @@ function stripAnsi(text: string): string {
 
 /**
  * One `tsc` diagnostic line: `file(line,col): error TSnnnn: message`.
- * `--pretty false` (the shape this detector is written against) emits
- * exactly this, one diagnostic per line, no ANSI, no source snippet.
+ * `--pretty false` emits exactly this, one diagnostic per line, no ANSI,
+ * no source snippet; a bare `tsc --noEmit` (no explicit `--pretty
+ * false`) emits the identical shape whenever it is not connected to a
+ * TTY, which every invocation through `exec.ts` is, so the detector
+ * targets this one shape regardless of which of the two commands ran.
  * Anchored on the `(line,col): error|warning TSnnnn:` token so it never
  * matches eslint's `line:col  severity` shape (no parentheses, no `TS`
- * code) or vitest's output.
+ * code) or vitest's output. The file capture is never `\S+`: it is
+ * captured structurally up to the line's own `(line,col):` separator
+ * (greedy `.+` stops at the last `(` on the line, which is always that
+ * separator, never a `(` a path could itself contain, since a path
+ * containing a literal `(line,col):`-shaped suffix is not a diagnostic
+ * this detector is written to guard against).
  */
 const DIAGNOSTIC_LINE = /^(.+)\((\d+),(\d+)\): (error|warning) (TS\d+): (.*)$/;
 

@@ -72,13 +72,26 @@ const CHECK_NAME_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 const TAIL_LINE_BOUND = 60;
 const TAIL_CHAR_BOUND = 6000;
 
+/** Counts the real lines in a captured tail: `split("\n")` on a string
+ * that ends with a newline yields one trailing empty element that is
+ * not a line of output at all (e.g. `"a\nb\n".split("\n")` is `["a",
+ * "b", ""]`, three elements for two real lines); that phantom element
+ * is dropped before counting, so a tail of exactly `TAIL_LINE_BOUND - 1`
+ * real lines that happens to end with a newline is never reported as
+ * being at the bound. */
+function countLines(tail: string): number {
+  const lines = tail.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  return lines.length;
+}
+
 /** True when a captured tail (stdout or stderr, as returned by
  * `execCommand`) is at exec.ts's own bound. */
 function tailAtBound(tail: string): boolean {
   if (tail.length === 0) return false;
-  return (
-    tail.split("\n").length >= TAIL_LINE_BOUND || tail.length >= TAIL_CHAR_BOUND
-  );
+  return countLines(tail) >= TAIL_LINE_BOUND || tail.length >= TAIL_CHAR_BOUND;
 }
 
 /** eslint's own "✖ N problems (N errors, M warnings)" summary line: the
@@ -92,20 +105,25 @@ const ESLINT_TOTALS_LINE =
 
 /**
  * When a check's output was truncated at exec.ts's tail bound, a
- * detector's own issue-row count can undercount the real total. Prefers
- * the tool's own reported total where one can be found in the tail
- * (currently only eslint's summary line); otherwise appends a warning
- * naming the truncation so a caller does not read a partial count as
- * complete.
+ * detector's own issue-row count can undercount the real total, and its
+ * own `failures` list can be missing entries that fell outside the tail.
+ * Prefers the tool's own reported total where one can be found in the
+ * tail (currently only eslint's summary line, and only when the eslint
+ * detector was actually selected: a totals-shaped line coincidentally
+ * present in some other tool's output is not eslint's own total, and
+ * trusting it would silently substitute the wrong numbers); either way,
+ * a truncated tail always gets the truncation warning, since even a
+ * trustworthy total does not make the `failures` list itself complete.
  */
 function adjustForTruncatedTail(
   parsed: DetectorParseResult,
   output: string,
   truncated: boolean,
+  isEslint: boolean,
 ): DetectorParseResult {
   if (!truncated) return parsed;
 
-  const totals = ESLINT_TOTALS_LINE.exec(output);
+  const totals = isEslint ? ESLINT_TOTALS_LINE.exec(output) : null;
   if (totals) {
     return {
       ...parsed,
@@ -114,6 +132,10 @@ function adjustForTruncatedTail(
         errors: Number(totals[1]),
         warnings: Number(totals[2]),
       },
+      warnings: [
+        ...parsed.warnings,
+        "output_tail_truncated: failures list may be partial (counts taken from eslint's own total)",
+      ],
     };
   }
 
@@ -229,10 +251,21 @@ function applyFailuresInvariant(
     };
     failures = [synthetic];
     warnings = [...warnings, "detector_matched_nothing"];
+    // Only increments the field when the detector itself reported 0 for
+    // it: a detector can parse an empty `failures` list while its own
+    // `Tests`/totals line still states a nonzero count (e.g. a long diff
+    // pushed every `FAIL` block out of the captured tail while the
+    // summary line survived), and adding one on top of that already-
+    // correct count would double count the one synthetic entry this
+    // block just added.
     summary =
       status === "error"
-        ? { ...summary, errors: summary.errors + 1 }
-        : { ...summary, failed: summary.failed + 1 };
+        ? summary.errors === 0
+          ? { ...summary, errors: summary.errors + 1 }
+          : summary
+        : summary.failed === 0
+          ? { ...summary, failed: summary.failed + 1 }
+          : summary;
   }
 
   if (status === "error" && summary.errors === 0) {
@@ -515,7 +548,12 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       const truncated =
         tailAtBound(execResult.stdoutTail) ||
         tailAtBound(execResult.stderrTail);
-      parsed = adjustForTruncatedTail(parsed, output, truncated);
+      parsed = adjustForTruncatedTail(
+        parsed,
+        output,
+        truncated,
+        detector.name === "eslint",
+      );
 
       const tail = output.trim();
       parsed = applyFailuresInvariant(

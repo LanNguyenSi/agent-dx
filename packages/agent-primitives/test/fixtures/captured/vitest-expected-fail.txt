@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /project
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 1 expected fail (2)
+   Start at  14:08:16
+   Duration  121ms (transform 8ms, setup 0ms, import 18ms, tests 7ms, environment 0ms)
+

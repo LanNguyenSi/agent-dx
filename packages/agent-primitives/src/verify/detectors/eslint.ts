@@ -36,7 +36,10 @@ const ISSUE_LINE =
  * than requiring the rest of the line to contain no whitespace, so an
  * absolute path with a space in it (a real, if unusual, filesystem path)
  * is still recognized as a header instead of falling through and
- * leaving the previous file's rows misattributed to it. */
+ * leaving the previous file's rows misattributed to it. The file
+ * capture is never `\S+`: the whole trimmed line is the path, up to end
+ * of line (its own structural separator here, since a header carries
+ * nothing else on the line). */
 const FILE_HEADER = /^\//;
 
 export const eslintDetector: Detector = {

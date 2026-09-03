@@ -391,6 +391,41 @@ describe("verify: failures invariant", () => {
     expect(result.checks[0].status).toBe("pass");
     expect(result.checks[0].failures).toEqual([]);
   });
+
+  it("the invariant only increments the count when the detector itself reported 0 for it: a detector with an empty failures list but a nonzero failed count is left alone (never double counted)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    // Simulates a real shape: the `Tests` summary line survived the
+    // captured tail (it is the very last line eslint/vitest print), but
+    // the `FAIL` block itself was pushed out of the tail by a long diff,
+    // so the detector's own `failures` list came back empty while its
+    // `summary.failed` still correctly states 1.
+    const partialDetector: Detector = {
+      name: "partial",
+      matches: () => true,
+      parse: (): DetectorParseResult => ({
+        summary: { passed: 0, failed: 1, skipped: 0, errors: 0, warnings: 0 },
+        failures: [],
+        warnings: [],
+      }),
+    };
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 1, stdoutTail: "boom" },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [partialDetector],
+    });
+    expect(result.checks[0].status).toBe("fail");
+    // One synthetic entry is still added (the failures list was empty),
+    // but the already-correct count of 1 is not bumped to 2.
+    expect(result.checks[0].failures).toHaveLength(1);
+    expect(result.checks[0].summary.failed).toBe(1);
+  });
 });
 
 describe("verify: --max-failures", () => {
@@ -1595,6 +1630,259 @@ describe("vitestDetector: Tests-line shapes, segment-wise", () => {
   });
 });
 
+describe("vitestDetector: FAIL line structural path capture (not \\S+)", () => {
+  it("a test path with a space is captured whole, up to the ` > ` suite separator (structural match, not \\S+)", () => {
+    const output = readCaptured("vitest-fail-space-in-path");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 1 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("my dir/sample test.test.js");
+    expect(parsed.failures[0].name).toBe("sample > is wrong");
+    expect(parsed.summary.failed).toBe(1);
+  });
+});
+
+describe("vitestDetector: `expected fail` (an it.fails run)", () => {
+  it("folds the `expected fail` segment into summary.passed, and still selects vitest (not generic)", () => {
+    const output = readCaptured("vitest-expected-fail");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 0,
+    });
+    // "Tests  1 passed | 1 expected fail (2)": both segments are passes
+    // from a caller's point of view, so summary.passed is 2, not 1.
+    expect(parsed.summary).toEqual({
+      passed: 2,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+  });
+
+  it("through verify(): an it.fails run selects the vitest detector, not generic", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "run-vitest" });
+    const logDir = makeTmpDir();
+    const output = readCaptured("vitest-expected-fail");
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 0, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].detector).toBe("vitest");
+  });
+});
+
+describe("vitestDetector: collection error (a file that fails to collect, e.g. a broken import)", () => {
+  it("matches the `Tests  no tests` / ` FAIL  file [ file ]` shape (no suite, no name)", () => {
+    const output = readCaptured("vitest-collection-error");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 1 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("broken.test.js");
+    expect(parsed.failures[0].name).toBeUndefined();
+    // "Tests  no tests" carries no segment at all; the detector reports
+    // passed/failed/skipped at 0 here, same as the "no test files" case,
+    // and relies on the parsed FAIL block (not the missing Tests line)
+    // for the failure it did find.
+    expect(parsed.summary.passed).toBe(0);
+    expect(parsed.summary.skipped).toBe(0);
+  });
+
+  it("through verify(): a collection-error run still selects vitest, not generic, and the failures invariant does not override the one real parsed failure", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "run-vitest" });
+    const logDir = makeTmpDir();
+    const output = readCaptured("vitest-collection-error");
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 1, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].detector).toBe("vitest");
+    expect(result.checks[0].failures).toHaveLength(1);
+    expect(result.checks[0].failures[0].file).toBe("broken.test.js");
+  });
+});
+
+describe("tscDetector: bare `tsc --noEmit` (no --pretty false)", () => {
+  it("parses identically to the --pretty false capture: a bare invocation, run non-interactively (no TTY), emits the same non-pretty diagnostic shape", () => {
+    const output = readCaptured("tsc-errors-bare");
+    expect(tscDetector.matches({ output, command: "", exitCode: 2 })).toBe(
+      true,
+    );
+    const parsed = tscDetector.parse({
+      output,
+      command: "npm run typecheck --silent",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.summary.errors).toBe(1);
+    expect(parsed.failures[0].file).toBe("a.ts");
+    expect(parsed.failures[0].line).toBe(5);
+    expect(parsed.failures[0].message).toContain("TS2322");
+  });
+});
+
+describe("eslintDetector: blank-line reset (synthetic)", () => {
+  it("synthetic: a blank line resets currentFile, so an issue row that follows one with no recognized header in between gets file: undefined (not silently inherited from the previous file) -- this shape is not producible by the real stylish formatter (every issue row is always preceded by a header), only exercised to cover the reset", () => {
+    const output = [
+      "/project/a.js",
+      "  1:1  error  message one  rule-a",
+      "",
+      "  2:2  error  message two  rule-b",
+    ].join("\n");
+    const parsed = eslintDetector.parse({
+      output,
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(2);
+    expect(parsed.failures[0].file).toBe("/project/a.js");
+    expect(parsed.failures[1].file).toBeUndefined();
+  });
+});
+
+describe("verify: tailAtBound line-count boundary (a trailing newline is not a phantom line)", () => {
+  it("58 real lines: not truncated", async () => {
+    const stdoutTail = Array.from({ length: 58 }, (_, i) => `line ${i}`).join(
+      "\n",
+    );
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(false);
+  });
+
+  it('59 real lines with a trailing newline (60 elements from split("\\n"), one of them the phantom empty tail): not truncated -- discriminates the off-by-one on the trailing-newline split element', async () => {
+    const stdoutTail =
+      Array.from({ length: 59 }, (_, i) => `line ${i}`).join("\n") + "\n";
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(false);
+  });
+
+  it("60 real lines: truncated", async () => {
+    const stdoutTail = Array.from({ length: 60 }, (_, i) => `line ${i}`).join(
+      "\n",
+    );
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(true);
+  });
+
+  it("exactly 6000 characters: truncated (the character bound, independent of the line-count bound)", async () => {
+    const stdoutTail = "a".repeat(6000);
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(true);
+  });
+
+  it("5999 characters: not truncated", async () => {
+    const stdoutTail = "a".repeat(5999);
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("tscDetector: colorized (ANSI SGR) output", () => {
   it("parses identically to the plain capture (inline SGR sequences around `error` and the TS code)", () => {
     expect(
@@ -1679,14 +1967,55 @@ describe("verify: tail-bound counts (truncated output tail)", () => {
     expect(check.detector).toBe("eslint");
     // The fixture's own "✖ 3 problems (3 errors, 0 warnings)" line is
     // still present (it is the last line): the tool's own total (3) is
-    // used, not a possibly-wrong tail-counted number, and no truncation
-    // warning is added since the total is trustworthy.
+    // used, not a possibly-wrong tail-counted number. A truncation
+    // warning is still added, though, since the *failures list* (the
+    // individual issue rows) can still be missing entries that fell
+    // outside the tail even when the tool's own total is trustworthy.
     expect(check.summary.errors).toBe(3);
     expect(
       result.warnings.some(
         (w) => w.includes("lint") && w.includes("truncated"),
       ),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("a truncated tsc tail that happens to contain an eslint-shaped totals line: the totals-line preference is gated on the eslint detector, so the coincidental line is ignored", async () => {
+    // The totals-line preference must not fire just because some text in
+    // the tail happens to match eslint's summary shape; it is gated on
+    // the detector actually selected for this check being eslint.
+    const full = readCaptured("tsc-errors-many");
+    const fullLines = full.split("\n").filter((l) => l.length > 0);
+    const truncatedTail = [
+      ...fullLines.slice(-60),
+      "✖ 3 problems (3 errors, 0 warnings)",
+    ].join("\n");
+
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": {
+        exitCode: 2,
+        stdoutTail: truncatedTail,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    const check = result.checks[0];
+    expect(check.detector).toBe("tsc");
+    // Still the real tsc diagnostic count (60), never overridden to the
+    // coincidental eslint-shaped "3" in the tail.
+    expect(check.summary.errors).toBe(60);
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(true);
   });
 });
 

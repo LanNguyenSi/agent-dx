@@ -14,10 +14,9 @@ capture:
 
 - vitest 4.1.11
 - typescript 5.9.3 (`tsc`)
-- eslint 10.9.1 (stylish formatter, the CLI default; developing against
-  this package requires Node `^20.19.0 || ^22.13.0 || >=24` for that
-  reason, narrower than this package's own published `engines.node
-  >=20`, since eslint is a devDependency only)
+- eslint 10.9.1 (stylish formatter, the CLI default; see the package
+  README's `verify` section for the Node floor this requires to develop
+  against)
 
 `tsc-vitest-concat.txt` is the one exception: not a raw capture, but two
 of the other captures (`tsc-errors.txt` and the vitest mixed-run capture)
@@ -31,7 +30,16 @@ a real `FORCE_COLOR=1` capture (stylish colorizes by default outside a
 TTY-detected terminal); the tsc one is inline SGR sequences hand-added to
 a real capture, since `tsc --pretty false` (the shape this detector
 targets) never colorizes on its own, so there is no non-pretty colorized
-shape to capture from a real run.
+shape to capture from a real run. `vitest-fail-space-in-path.txt` is a
+real capture of a test file whose path contains a space, exercising the
+` FAIL  file > name` line's structural (not `\S+`) file capture.
+`vitest-expected-fail.txt` is a real capture of an `it.fails` run (the
+`Tests  N passed | M expected fail (T)` shape). `vitest-collection-error.txt`
+is a real capture of a broken import (a file that fails to collect: the
+` FAIL  file [ file ]` and `Tests  no tests` shapes). `tsc-errors-bare.txt`
+is a real capture of `tsc --noEmit` without `--pretty false`, run
+non-interactively (no TTY) against the same `tsc-project` sources as
+`tsc-errors.txt`, showing the shape is identical either way.
 
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 

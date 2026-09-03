@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /project
+
+ ❯ my dir/sample test.test.js (1 test | 1 failed) 7ms
+     × is wrong 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  my dir/sample test.test.js > sample > is wrong
+AssertionError: expected 2 to be 3 // Object.is equality
+
+- Expected
++ Received
+
+- 3
++ 2
+
+ ❯ my dir/sample test.test.js:5:19
+      3| describe("sample", () => {
+      4|   it("is wrong", () => {
+      5|     expect(1 + 1).toBe(3);
+       |                   ^
+      6|   });
+      7| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  14:08:11
+   Duration  112ms (transform 12ms, setup 0ms, import 20ms, tests 7ms, environment 0ms)
+

@@ -146,23 +146,33 @@ candidates, matched on whole-token boundaries, and only when it names
 exactly one of them, otherwise the fallback is chosen and a warning lists
 the candidate shapes seen. The default candidates parse `vitest` (the
 `Tests` summary line, parsed segment-wise: whichever of `failed`/
-`passed`/`skipped`/`todo` vitest included, in any combination, e.g.
-`Tests  N failed | M passed (T)`, `Tests  N passed (N)`, or `Tests  N
-skipped (N)`; `skipped` and `todo` both count into `summary.skipped`; the
-` FAIL  file > name` block with its assertion on the next line; and the
-`No test files found` case), `tsc` (`file(line,col): error TSnnnn:
-message`; `summary.errors` counts the diagnostics), and `eslint`'s stylish
-formatter (a file header line, then `line:col  severity  message[
-rule]`; `error` rows populate `failures`, with the rule id appended to
-the message when the row carries one, and omitted for a rule-less row
-such as a `Parsing error: ...`; `warning` rows count into
-`summary.warnings` alone and never become a failure, even on a zero-exit
-check). No reporter flags are injected: whichever of these three shapes a
-check's own script happens to print is parsed as-is; a check that emits
-more than one shape at once (a `pretest` build followed by `vitest`, say)
-is ambiguous and falls back to `generic`, same as any other ambiguous
-case. ANSI color codes are stripped before any of these three detectors
-matches or parses, since a tool run in a fully non-interactive
+`passed`/`expected fail`/`skipped`/`todo` vitest included, in any
+combination, e.g. `Tests  N failed | M passed (T)`, `Tests  N passed
+(N)`, or `Tests  N skipped (N)`; `expected fail` (an `it.fails` test
+that failed as expected, i.e. still a pass) is folded into
+`summary.passed`, and `skipped`/`todo` both count into
+`summary.skipped`; the ` FAIL  file > name` block with its assertion on
+the next line, or ` FAIL  file [ file ]` with no name for a file that
+failed to collect (a broken import); the `No test files found` case; and
+the `Tests  no tests` case a failed collection also prints), `tsc`
+(`file(line,col): error TSnnnn: message`, identically whether or not
+`--pretty false` was passed explicitly, since a non-interactive `tsc`
+never colorizes on its own either way; `summary.errors` counts the
+diagnostics), and `eslint`'s stylish formatter (a file header line, then
+`line:col  severity  message[  rule]`; `error` rows populate `failures`,
+with the rule id appended to the message when the row carries one, and
+omitted for a rule-less row such as a `Parsing error: ...`; `warning`
+rows count into `summary.warnings` alone and never become a failure,
+even on a zero-exit check). No reporter flags are injected: whichever of
+these three shapes a check's own script happens to print is parsed
+as-is; a check that emits more than one shape at once (a `pretest` build
+followed by `vitest`, say) is ambiguous and falls back to `generic`,
+same as any other ambiguous case. Every file-path capture across the
+three detectors is matched structurally (up to the shape's own
+separator, such as vitest's ` > ` or tsc's `(line,col):`), never merely
+up to the first whitespace, so a path containing a space is still
+captured whole. ANSI color codes are stripped before any of these three
+detectors matches or parses, since a tool run in a fully non-interactive
 environment can still default to colorized output (only SGR sequences
 are stripped; none of these three tools' default text output emits
 cursor-movement or other non-SGR escape sequences). eslint 10 (a
@@ -170,18 +180,23 @@ devDependency, used only for this package's own lint check and for the
 `eslint` detector's fixtures) requires Node `^20.19.0 || ^22.13.0 ||
 >=24`, narrower than the `>=20` this package itself requires; that floor
 applies to developing this package, not to a caller running the built
-CLI. Whatever the detector, a check that ends `fail`
-or `error` with zero parsed failures always gets one synthetic failure
-entry (naming `timedOut`, or the exit code, plus the output tail) instead
-of shipping an empty `failures` list, and an `error` check always reports
-at least one `summary.errors`. When a check's captured output tail was
-truncated at exec.ts's own bound (60 lines or 6000 characters per
-stream), a detector's own issue-row count can undercount the real total;
-the tool's own reported total is preferred where one can still be found
-in the tail (eslint's `✖ N problems (N errors, M warnings)` line, which
-survives most truncation since it is the last thing eslint prints),
-otherwise a warning names the truncation instead of a silently partial
-count. A detector's own warnings, and a log file the run could not write
+CLI. Whatever the
+detector, a check that ends `fail` or `error` with zero parsed failures
+always gets one synthetic failure entry (naming `timedOut`, or the exit
+code, plus the output tail) instead of shipping an empty `failures`
+list, and an `error` check always reports at least one `summary.errors`;
+this synthetic entry is added on top of whatever count the detector
+already reported, never doubling a count the detector already got
+right. When a check's captured output tail was truncated at exec.ts's
+own bound (60 lines or 6000 characters per stream), a detector's own
+issue-row count can undercount the real total; the eslint detector's own
+reported total is preferred, when the eslint detector was the one
+selected for this check, where one can still be found in the tail
+(eslint's `✖ N problems (N errors, M warnings)` line, which survives
+most truncation since it is the last thing eslint prints); either way a
+warning names the truncation, since the `failures` list itself can still
+be missing entries even when the total is trustworthy. A detector's own
+warnings, and a log file the run could not write
 to, are reported in the top-level `warnings`, each prefixed with the
 check name.
 
