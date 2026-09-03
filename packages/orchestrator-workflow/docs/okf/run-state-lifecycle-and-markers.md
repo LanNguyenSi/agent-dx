@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-03T06:44:38Z
+timestamp: 2026-09-03T07:01:12Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -292,7 +292,7 @@ update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
 `okf-kit check`) (SKILL.md:247-252#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:247-248#"guidance: when the repo carries a curated knowledge",251-252). Since 0.24.0 (placement rule) step 9 also
+(SKILL.md:247-248#"guidance: when the repo carries a curated knowledge",252-253). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
 to a reusable instruction file (SKILL.md:255-258#"or the consuming workspace, with a pointer left behind."); the fix is to move the

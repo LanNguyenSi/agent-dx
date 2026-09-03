@@ -2544,7 +2544,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:78-100#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:88-110#"the keyed placeholder line's exact text,"`,
 re-pointed by 19 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, on top of the earlier
 +2-line shift from the 0.27.0 release commit inserting the `## [0.27.0]`
@@ -6852,3 +6852,33 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   `okf-kit@0.9.0 check --json docs/okf --require-anchors`: 0 errors, 0
   warnings, 23 notices, identical to the pre-edit baseline (same
   pre-existing `unresolved-ambiguous` set).
+- 2026-09-03T07:01:12Z (T-007 round 2, reviewer fixes): the round-1 entry
+  above claimed "0 warnings, identical to the pre-edit baseline" but that
+  measurement was taken before the CHANGELOG.md `[Unreleased]` insertion
+  landed; at HEAD the pinned check actually reported 1 warning (the
+  `CHANGELOG.md:78-100` citation in this file, out of range by the
+  insertion). Fixed this round: reworded the explorer.md/SKILL.md clause
+  so the structural-search preference carries its own availability guard
+  instead of riding the semantic tool's conditional; dropped the private
+  memory id from the CHANGELOG pointer, keeping only the run directory;
+  re-pointed the `CHANGELOG.md:78-100` citation above to `88-110` (the
+  10-line `[Unreleased]` insertion, not 11); shifted the bare trailing
+  continuation on `run-state-lifecycle-and-markers.md:295` from `,251-252`
+  to `,252-253` to match where "Repos without a bundle are unaffected"
+  actually sits. The reword's own edits to `explorer.md` and `SKILL.md`
+  land in the same 4-line span each already occupied (lines 19-23 and
+  143-146 respectively), so no other citation into either file moved;
+  verified by diffing this round's `explorer.md`/`SKILL.md` against the
+  round-1 commit (`c2fa056`) and confirming the edited block's start and
+  end lines are unchanged. Re-stamped `run-state-lifecycle-and-markers.md`
+  again; the re-stamp is offset-only (a citation-range and timestamp
+  correction), not a re-verification of new claims -- no doc text was
+  added for the two new prompt bullets (`reviewer.md`, `implementer.md`)
+  this round. Re-measured on the committed tree:
+  `okf-kit@0.9.0 check --json docs/okf --require-anchors`: 0 errors, 0
+  warnings, 23 notices; the anchor-family jq filter from `ci.yml` (the
+  `anchor-*`/`heading-section-*`/`test-range-straddles-block` message
+  pattern) reports 0 findings; the 23 notice messages are byte-identical
+  to the same check run against master (`5ae53a3`) in a separate
+  worktree, same pre-existing `unresolved-ambiguous` set. `npm test`:
+  601/601 passing.
