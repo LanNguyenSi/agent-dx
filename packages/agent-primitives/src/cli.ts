@@ -146,7 +146,6 @@ program
     parseList,
     DEFAULT_OPTIONAL,
   )
-  .exitOverride()
   .action(
     async (
       opts: { required: string[]; optional: string[] },
@@ -215,7 +214,6 @@ function registerStub(name: string, description: string): void {
   program
     .command(name)
     .description(`${description} (not yet implemented)`)
-    .exitOverride()
     .action((_opts: object, command: Command) => {
       const start = Date.now();
       const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());

@@ -281,40 +281,43 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   // written to the log dir once we know truncation is unavoidable.
   const fullResult = JSON.parse(JSON.stringify(envelope));
 
-  let anyChange = false;
+  envelope.truncated = true;
+  // The full-result log path is appended to `logs` BEFORE the reduction
+  // ladders run (not after): appending it later, once the envelope has
+  // already been cut down to fit exactly, would grow the envelope back
+  // past maxChars by however many characters the path itself adds. Adding
+  // it first means every reduction step below - including the final hard
+  // cut - accounts for its size too, so the bound still holds afterward.
+  if (input.logDir) {
+    try {
+      fs.mkdirSync(input.logDir, { recursive: true });
+      const fullResultPath = path.join(input.logDir, "result-full.json");
+      fs.writeFileSync(fullResultPath, JSON.stringify(fullResult, null, 2));
+      logs.push(fullResultPath);
+      envelope.logs = logs;
+    } catch {
+      // Best effort: truncation itself must not fail the command.
+    }
+  }
+
   for (const cap of FAILURE_CAPS) {
-    if (capFailureLists(envelope, cap)) anyChange = true;
+    capFailureLists(envelope, cap);
     if (serializedLength(envelope) <= maxChars) break;
   }
   if (serializedLength(envelope) > maxChars) {
     for (const cap of MESSAGE_CAPS) {
-      if (capMessages(envelope, cap)) anyChange = true;
+      capMessages(envelope, cap);
       if (serializedLength(envelope) <= maxChars) break;
     }
   }
   if (serializedLength(envelope) > maxChars) {
     for (const cap of TAIL_CAPS) {
-      if (capTails(envelope, cap)) anyChange = true;
+      capTails(envelope, cap);
       if (serializedLength(envelope) <= maxChars) break;
     }
   }
   if (serializedLength(envelope) > maxChars) {
-    if (hardCut(envelope, maxChars)) anyChange = true;
-  }
-
-  if (anyChange || serializedLength(envelope) > maxChars) {
-    envelope.truncated = true;
-    if (input.logDir) {
-      try {
-        fs.mkdirSync(input.logDir, { recursive: true });
-        const fullResultPath = path.join(input.logDir, "result-full.json");
-        fs.writeFileSync(fullResultPath, JSON.stringify(fullResult, null, 2));
-        logs.push(fullResultPath);
-        envelope.logs = logs;
-      } catch {
-        // Best effort: truncation itself must not fail the command.
-      }
-    }
+    hardCut(envelope, maxChars);
   }
 
   return { envelope, exitCode: exitCodeForStatus(input.status) };

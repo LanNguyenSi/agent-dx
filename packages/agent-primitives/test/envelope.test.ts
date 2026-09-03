@@ -66,6 +66,10 @@ describe("buildEnvelope: hard bound", () => {
 
   it("caps a synthetic result carrying a 5 MB single-line tail so the serialized envelope stays under maxChars, marks truncated, and records the full-result path", () => {
     const logDir = makeTmpDir();
+    // A 5 MB single line under a field name none of the fixed reduction
+    // ladders (failures / message / *Tail) recognize, so only the final,
+    // unconditional hard cut can bring this under maxChars -- this is the
+    // pathological case the hard cut exists for.
     const hugeTail = "x".repeat(5 * 1024 * 1024);
     const maxChars = 8000;
     const { envelope } = buildEnvelope({
@@ -74,7 +78,7 @@ describe("buildEnvelope: hard bound", () => {
       status: "fail",
       durationMs: 10,
       cwd: "/tmp",
-      extra: { checks: [{ name: "test", stdoutTail: hugeTail }] },
+      extra: { checks: [{ name: "test", rawOutput: hugeTail }] },
       maxChars,
       logDir,
     });
@@ -85,7 +89,7 @@ describe("buildEnvelope: hard bound", () => {
     const fullResultPath = logs[logs.length - 1];
     expect(fs.existsSync(fullResultPath)).toBe(true);
     const fullResult = JSON.parse(fs.readFileSync(fullResultPath, "utf8"));
-    expect(fullResult.checks[0].stdoutTail.length).toBe(hugeTail.length);
+    expect(fullResult.checks[0].rawOutput.length).toBe(hugeTail.length);
   });
 });
 
