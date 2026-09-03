@@ -185,7 +185,12 @@ function checkTool(
       required,
       found: true,
       path: hit.path,
-      version: capture.version,
+      // Set only when there is a version to report. A binary that runs but
+      // prints nothing would otherwise ship `version: undefined` as an own
+      // property, which JSON.stringify drops from the object but which any
+      // per-property measurement over the result has to special-case.
+      // Shipped results carry no undefined-valued own properties.
+      ...(capture.version !== undefined ? { version: capture.version } : {}),
     },
     skippedDeadline: false,
   };

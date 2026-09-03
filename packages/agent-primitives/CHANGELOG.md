@@ -9,56 +9,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Round-3 review hardening: the envelope reduction is now one generic,
-  progress-guarded loop over the whole (deep-copied) result graph instead
-  of a fixed cascade of name-based ladders (`failures`/`message`/`*Tail`)
-  plus a 100-iteration hard cut; it caps the largest array anywhere,
-  then the longest string anywhere, then drops the largest remaining
-  subtree, repeating until the result fits or nothing makes further byte
-  progress, with no fixed iteration count. The fixed envelope fields are
-  still never touched, so the real invariant is `serializedLength(envelope)
-  <= max(maxChars, skeletonFloor)`; whenever the literal requested
-  `-m`/`maxChars` cannot be honored, a warning names the envelope's true
-  final length instead of silently exceeding it or understating it (the
-  warning is computed to a fixed point so its own stated number matches
-  what actually ships). `buildEnvelope` deep-copies `extra`
-  (`structuredClone`) before any reduction, so the caller's object -
-  and, for `doctor`, the `-f text` rendering built from that same
-  object - is never mutated by a shallow-spread aliasing bug. The
-  `AGENT_PRIMITIVES_TEST_FORCE_RUNTIME_ERROR` test-only env seam is
-  removed; the top-level error mapping is now the exported
-  `mapTopLevelError` (CommanderError/UsageError -> `usage_error`,
-  everything else -> `error`), unit-tested directly. The EPIPE guard maps
-  a non-EPIPE stdout write error to one stderr line and exit `2` instead
-  of rethrowing (an unhandled crash); `exec`'s log write stream now
-  carries an error listener and surfaces a failure as
-  `logWriteFailed`/`logWriteError` on `ExecResult` instead of crashing on
-  an unhandled `'error'` event. `doctor`'s `--version` captures now share
-  one aggregate deadline (default 3000ms) across every tool combined;
-  once spent, remaining captures are skipped
-  (`versionCheck: "skipped_deadline"`) with one summary warning, instead
-  of each tool only paying its own per-tool timeout with no overall
-  budget.
+- **Envelope bound and reduction.** The bound is enforced by one generic,
+  progress-guarded loop over the whole (deep-copied) result graph rather
+  than a fixed cascade of name-based ladders plus a hard iteration cut.
+  Each pass walks the graph once and applies the first step that makes
+  byte progress: shorten the largest array anywhere, then the longest
+  string anywhere, then drop whole keys largest-first until the remaining
+  excess is covered. Each step cuts to what the remaining excess needs
+  (bounded by halving, so progress stays geometric) instead of halving
+  unconditionally, and keys are dropped in bulk, which is what keeps a
+  wide result of thousands of small fields from costing one full traversal
+  per field. The whole loop runs under a work budget (`reductionBudgetMs`,
+  default 200ms); once it is spent, every reducible field is dropped at
+  once and a warning says so, so a pathological shape costs a worse result
+  rather than a stall. The fixed envelope fields are never touched, so the
+  real invariant is `serializedLength(envelope) <= max(maxChars,
+  skeletonFloor)`; whenever the literal requested `-m`/`maxChars` cannot be
+  honored, a warning names the envelope's true final length, solved
+  exactly (the warning's own digits are part of the length it reports)
+  instead of approximated by a loop that gave up after a fixed number of
+  tries. An array's truncation marker counts from the array's original
+  length, so a result reduced over several passes reports how many
+  elements are missing in total, not how many the last pass happened to
+  drop. Serialized lengths are total: a field whose value JSON omits
+  (`undefined`, a function) is measured as contributing nothing instead of
+  throwing mid-reduction and turning the command into `status: error`, and
+  such a field is never dropped for zero progress. A result that cannot be
+  copied or serialized at all (a function value, a BigInt, a cycle, a
+  graph too deep) yields the skeleton plus a warning naming the reason,
+  keeping the command's real status instead of reporting `status: error`.
+  `buildEnvelope` deep-copies `extra` before any reduction, so the
+  caller's object, and for `doctor` the `-f text` rendering built from
+  that same object, is never mutated by a shallow-spread aliasing bug.
 
-- Round-1 review hardening: the envelope hard bound never cuts the fixed
-  fields (`tool`, `version`, `command`, `status`, `durationMs`, `cwd`,
-  `truncated`, `warnings`, `logs`); `buildEnvelope`'s base fields win over
-  a colliding `extra` key instead of the reverse; stdout is written and
-  drained (via the write callback, with an EPIPE guard) before the
-  process exits, instead of exiting right after `write()` returns, which
-  could truncate output larger than the pipe buffer; `doctor`'s `-r`/`-o`
-  entries are rejected as a usage error when they are not a plain binary
-  name (blocks `../` traversal into an arbitrary `--version` execution);
-  an unwritable log directory now pushes a warning instead of failing
-  silently; a non-commander, non-usage-error thrown during a command now
-  reports `status: "error"` instead of being folded into `usage_error`;
-  `-f text` is now a single shared renderer with a pretty-JSON fallback
-  for commands without one, bounded by `-m`; `-C` at a missing or
-  non-directory path is now a usage error; a `--version` capture that
-  times out is recorded as `versionCheck: "timed_out"` with a warning
-  rather than read as silent, empty output; `exec`'s stdout/stderr
-  decoding uses `StringDecoder` so a multi-byte character split across
-  two chunks no longer becomes a replacement character.
+- **CLI output and error mapping.** stdout is written and drained through
+  the write callback before the process exits, instead of exiting right
+  after `write()` returns, which could truncate output larger than the
+  pipe buffer. The callback's own error argument is now honoured: a
+  non-EPIPE write failure exits `2` with one line on stderr naming it,
+  EPIPE keeps the command's own exit code and says nothing, and the
+  stream's `'error'` listener stays as defense in depth. `-f text` output
+  never exceeds `-m`: its truncation marker names the full length, and
+  below the marker's own size the marker itself is cut short instead of
+  overshooting the requested bound. Commander's usage errors are
+  intercepted and emitted as a JSON `usage_error` result with exit `2`;
+  a non-commander, non-usage error reports `status: "error"` through the
+  exported `mapTopLevelError` (no test-only env seam in shipped code);
+  `-C` at a missing or non-directory path is a usage error; `-f text` is
+  one shared renderer with a pretty-JSON fallback for commands without
+  one.
+
+- **`doctor`.** `-r`/`-o` entries are rejected as a usage error when they
+  are not a plain binary name, which blocks `../` traversal into an
+  arbitrary `--version` execution. `version` is reported only when there
+  is one, so a binary that runs but prints nothing no longer ships an
+  undefined-valued property. A `--version` capture that times out is
+  recorded as `versionCheck: "timed_out"` with a warning rather than read
+  as silent, empty output, and all captures share one aggregate deadline
+  (default 3000ms); once it is spent, remaining tools are still checked
+  for presence but their capture is skipped
+  (`versionCheck: "skipped_deadline"`) with one summary warning.
+
+- **`exec`.** The log write stream carries an error listener and surfaces
+  a failure as `logWriteFailed`/`logWriteError` on `ExecResult` instead of
+  crashing on an unhandled `'error'` event. stdout/stderr decoding uses
+  `StringDecoder`, so a multi-byte character split across two chunks no
+  longer becomes a replacement character.
+
+- **Tests.** Every CLI test spawns through one shared helper that hands
+  the child a PATH of exactly four resolved binaries (node, npm, git, sh),
+  a fixed temp directory, and no inherited environment, and that attaches
+  its readers before returning rather than after a sleep. The suite's
+  assertions are therefore about this CLI rather than about what the host
+  happens to have installed or how fast it happens to be.
 
 ### Added
 

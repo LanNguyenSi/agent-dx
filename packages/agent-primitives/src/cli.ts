@@ -130,6 +130,11 @@ let pendingExitCode = 0;
 function installEpipeGuard(): void {
   if (epipeGuardInstalled) return;
   epipeGuardInstalled = true;
+  // Defense in depth alongside the write callback below: a stream error
+  // can surface as an 'error' event rather than a callback argument
+  // (notably when the write was already queued when the pipe broke), and
+  // an unhandled 'error' event on process.stdout would end the process
+  // with a stack trace instead of a stable exit code.
   process.stdout.on("error", (err: NodeJS.ErrnoException) => {
     const { exitCode, stderrLine } = classifyStdoutError(err, pendingExitCode);
     if (stderrLine) process.stderr.write(stderrLine);
@@ -148,17 +153,78 @@ function installEpipeGuard(): void {
 function writeAndExit(data: string, exitCode: number): void {
   pendingExitCode = exitCode;
   installEpipeGuard();
-  process.stdout.write(data, () => {
-    process.exit(exitCode);
+  writeAndExitTo(
+    data,
+    exitCode,
+    process.stdout,
+    (code) => process.exit(code),
+    (line) => {
+      process.stderr.write(line);
+    },
+  );
+}
+
+/** The part of `process.stdout` this module actually uses, so the write
+ * path can be driven in a unit test by a fake that yields an error to the
+ * callback without breaking a real pipe. */
+export interface StdoutSink {
+  write(data: string, callback: (err?: Error | null) => void): boolean;
+}
+
+/**
+ * Writes `data` and reports the outcome only once the write has fully
+ * drained (via the write callback), instead of right after write()
+ * returns. Exiting immediately after write() races the write: for output
+ * larger than the pipe buffer (64 KiB on most platforms), the process can
+ * exit before the OS has drained the buffer, truncating the output the
+ * reader sees.
+ *
+ * The callback's own error argument is honoured: `write()` reports a
+ * failed write there, so ignoring it would leave the non-EPIPE branch of
+ * `classifyStdoutError` unreachable and let a genuinely failed write exit
+ * 0 with nothing said about it.
+ *
+ * `onExit`/`onStderr` are injection points so a test can observe the
+ * mapping without terminating the test process.
+ */
+export function writeAndExitTo(
+  data: string,
+  exitCode: number,
+  sink: StdoutSink,
+  onExit: (code: number) => void,
+  onStderr: (line: string) => void,
+): void {
+  sink.write(data, (err) => {
+    if (err) {
+      const classified = classifyStdoutError(err, exitCode);
+      if (classified.stderrLine) onStderr(classified.stderrLine);
+      onExit(classified.exitCode);
+      return;
+    }
+    onExit(exitCode);
   });
 }
 
-const TEXT_TRUNCATION_MARKER = "\n... [truncated]\n";
+function textTruncationMarker(totalChars: number): string {
+  return `\n... [truncated, ${totalChars} characters total]\n`;
+}
 
-function boundText(text: string, maxChars: number): string {
+/**
+ * Bounds a text rendering to `maxChars` characters, never more, and states
+ * the true full length in the marker, the same honest way the JSON path
+ * names the envelope's real size instead of only flagging that something
+ * was cut.
+ *
+ * Below the marker's own length there is no room for both content and a
+ * complete marker; the marker itself is then sliced, so a very small `-m`
+ * yields a short, truthful fragment rather than an output longer than the
+ * caller asked for.
+ */
+export function boundText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
-  const keep = Math.max(0, maxChars - TEXT_TRUNCATION_MARKER.length);
-  return text.slice(0, keep) + TEXT_TRUNCATION_MARKER;
+  const marker = textTruncationMarker(text.length);
+  if (marker.length >= maxChars) return marker.slice(0, Math.max(0, maxChars));
+  return text.slice(0, maxChars - marker.length) + marker;
 }
 
 /**

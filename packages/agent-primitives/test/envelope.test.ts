@@ -94,8 +94,8 @@ describe("buildEnvelope: hard bound", () => {
   });
 });
 
-describe("buildEnvelope: reduction order", () => {
-  it("cuts failure lists before message lengths and before tails", () => {
+describe("buildEnvelope: step order (arrays before strings)", () => {
+  it("shortens the largest array first, leaving every shorter string untouched when that alone reaches the bound", () => {
     const logDir = makeTmpDir();
     const longMessage = "m".repeat(2000);
     const failures = Array.from({ length: 30 }, (_, i) => ({
@@ -130,14 +130,14 @@ describe("buildEnvelope: reduction order", () => {
     }>;
     expect(checks[0].failures.length).toBeLessThan(30);
     expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
-    // The tails were short to begin with (well under a message cap), so a
-    // correct failures-first order should be able to fit under 5000 chars
-    // without ever touching them.
+    // Both tails were short to begin with, so shortening the one long
+    // array should be able to reach 5000 chars without the string step
+    // ever running.
     expect(checks[0].stdoutTail).toBe("tail-output\n".repeat(50));
     expect(checks[0].stderrTail).toBe("err-output\n".repeat(50));
   });
 
-  it("clamps message lengths when trimming failures alone is not enough, before touching tails", () => {
+  it("shortens the longest string when no array can be shortened, leaving the shorter strings untouched", () => {
     const logDir = makeTmpDir();
     const longMessage = "m".repeat(3000);
     const maxChars = 2000;
@@ -372,5 +372,207 @@ describe("index.js seam", () => {
     });
     expect(envelope.tool).toBe("agent-primitives");
     expect(envelope.status).toBe("ok");
+  });
+});
+
+describe("buildEnvelope: undefined-valued fields", () => {
+  it("measures a result carrying an undefined-valued field instead of throwing on it, and never drops it for zero progress", () => {
+    const logDir = makeTmpDir();
+    const maxChars = 8000;
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "doctor",
+      status: "ok",
+      durationMs: 5,
+      cwd: "/tmp",
+      // `absent` is what a subcommand produces when an optional capture
+      // came back empty (doctor's `version` for a binary that printed
+      // nothing). JSON.stringify returns undefined, not a string, for such
+      // a value, so measuring it as a reduction candidate used to throw
+      // and turn the whole command into `status: error`.
+      extra: { absent: undefined, filler: "x".repeat(50_000) },
+      maxChars,
+      logDir,
+    });
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    expect(envelope.truncated).toBe(true);
+    expect(envelope.status).toBe("ok");
+    // Deleting it would have been "progress" worth exactly zero
+    // characters, so the reduction leaves it alone.
+    expect("absent" in envelope).toBe(true);
+  });
+});
+
+describe("buildEnvelope: array truncation marker", () => {
+  it("states the count omitted from the array's ORIGINAL length after several reduction passes, not just the last pass's", () => {
+    const logDir = makeTmpDir();
+    const originalLength = 5000;
+    // ~12 serialized characters per element, so the array starts far
+    // enough above the bound that no single pass can reach it: each pass
+    // keeps at most half, and the marker has to keep counting from 5000
+    // rather than restarting at whatever the previous pass left.
+    const items = Array.from(
+      { length: originalLength },
+      (_, i) => `item-${String(i).padStart(4, "0")}`,
+    );
+    const maxChars = 8000;
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { items },
+      maxChars,
+      logDir,
+    });
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    const reduced = envelope.items as unknown[];
+    const marker = reduced[reduced.length - 1];
+    expect(typeof marker).toBe("string");
+    const omitted = Number(
+      /^\.\.\.\((\d+) more items? omitted\)$/.exec(marker as string)?.[1],
+    );
+    expect(Number.isFinite(omitted)).toBe(true);
+    // The kept real elements plus the omitted count must account for every
+    // original element, whatever the reduction had to do to get there.
+    expect(omitted + (reduced.length - 1)).toBe(originalLength);
+  });
+});
+
+/** A result whose only reachable reduction is dropping whole keys: 5,000
+ * top-level fields, no array with two or more elements, and every value
+ * too short for the string step to shorten. */
+function wideFlatExtra(): Record<string, unknown> {
+  return Object.fromEntries(
+    Array.from({ length: 5000 }, (_, i) => [`k${i}`, "ab"]),
+  );
+}
+
+describe("buildEnvelope: wide results reachable only by dropping keys", () => {
+  it("brings a 5,000-key flat result under maxChars 8000 within the default work budget", () => {
+    const logDir = makeTmpDir();
+    const maxChars = 8000;
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: wideFlatExtra(),
+      maxChars,
+      logDir,
+    });
+    // The bound is what is asserted, not the elapsed time: a loaded
+    // machine may take longer without the result being wrong, and the
+    // budget's own effect is asserted separately below, where it is
+    // deterministic.
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    expect(envelope.truncated).toBe(true);
+    const warnings = envelope.warnings as string[];
+    expect(warnings.some((w) => w.includes("could not be met"))).toBe(false);
+  });
+
+  it("drops every remaining field wholesale, with a warning saying so, once the work budget is spent", () => {
+    const logDir = makeTmpDir();
+    const maxChars = 8000;
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: wideFlatExtra(),
+      maxChars,
+      logDir,
+      // Deterministic: the budget is checked before the first pass, so a
+      // budget of 0 always ends the loop before any reduction runs.
+      reductionBudgetMs: 0,
+    });
+    const warnings = envelope.warnings as string[];
+    expect(
+      warnings.some((w) => w.includes("reduction work budget (0ms) reached")),
+    ).toBe(true);
+    expect(Object.keys(envelope).filter((k) => k.startsWith("k"))).toEqual([]);
+    expect(envelope.truncated).toBe(true);
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+  });
+});
+
+describe("buildEnvelope: results that cannot be serialized at all", () => {
+  it("emits the skeleton and a warning naming the reason for a value structuredClone refuses (a function), keeping the command's real status", () => {
+    const { envelope, exitCode } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { onDone: () => {}, name: "unit" },
+    });
+    expect(envelope.status).toBe("fail");
+    expect(exitCode).toBe(1);
+    expect(envelope.onDone).toBeUndefined();
+    expect(envelope.name).toBeUndefined();
+    expect(envelope.truncated).toBe(true);
+    const warnings = envelope.warnings as string[];
+    expect(
+      warnings.some((w) =>
+        w.startsWith("result fields dropped: not serializable"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does the same for a circular object, which structuredClone copies happily and JSON.stringify then refuses", () => {
+    const node: Record<string, unknown> = { name: "root" };
+    node.self = node;
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { graph: node },
+    });
+    expect(envelope.status).toBe("fail");
+    expect(envelope.graph).toBeUndefined();
+    expect(envelope.truncated).toBe(true);
+    const warnings = envelope.warnings as string[];
+    expect(
+      warnings.some((w) =>
+        w.startsWith("result fields dropped: not serializable"),
+      ),
+    ).toBe(true);
+    expect(() => JSON.stringify(envelope)).not.toThrow();
+  });
+});
+
+describe("buildEnvelope: overrun warning across a digit-count boundary", () => {
+  it("states the envelope's true final length at every size in a range that crosses one", () => {
+    const maxChars = 10;
+    const digitCounts = new Set<number>();
+    // The warning's own number is part of the length it reports, so the
+    // sizes where the number gains a digit are exactly the ones an
+    // approximate answer gets wrong. The cwd is a fixed field, never cut,
+    // so its length drives the final size one character at a time.
+    for (let cwdLength = 780; cwdLength <= 800; cwdLength++) {
+      const { envelope } = buildEnvelope({
+        version: "0.1.0",
+        command: "doctor",
+        status: "ok",
+        durationMs: 5,
+        cwd: `/${"c".repeat(cwdLength)}`,
+        extra: { tools: [{ name: "git", found: true }] },
+        maxChars,
+      });
+      const finalLength = JSON.stringify(envelope).length;
+      digitCounts.add(String(finalLength).length);
+      const warnings = envelope.warnings as string[];
+      expect(warnings[warnings.length - 1]).toBe(
+        `envelope is ${finalLength} characters; requested max-chars ${maxChars} could not be met`,
+      );
+    }
+    // The range really does straddle a boundary, so the assertion above is
+    // not just repeating one digit count 21 times.
+    expect(digitCounts.size).toBeGreaterThan(1);
   });
 });

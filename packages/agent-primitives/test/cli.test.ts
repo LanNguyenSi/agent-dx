@@ -1,26 +1,27 @@
-import { exec, spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import process from "node:process";
 import { describe, expect, it, afterEach } from "vitest";
 import { CommanderError } from "commander";
 import {
+  boundText,
   classifyStdoutError,
   mapTopLevelError,
+  writeAndExitTo,
   type ResolvedGlobal,
+  type StdoutSink,
 } from "../src/cli.js";
 import { UsageError } from "../src/envelope.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = path.join(__dirname, "..", "dist", "cli.js");
-
-function runCli(args: string[], env?: NodeJS.ProcessEnv) {
-  return spawnSync("node", [CLI_PATH, ...args], {
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-  });
-}
+import {
+  buildSpawnEnv,
+  CLI_PATH,
+  FIXED_BINARIES,
+  FIXED_BIN_DIR,
+  resolveBinary,
+  spawnCli,
+} from "./helpers/spawn-cli.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -31,46 +32,75 @@ function makeTmpDir(): string {
   return dir;
 }
 
+/** Names that are certain not to resolve to anything on any PATH, used to
+ * inflate a doctor result to a chosen size without depending on what the
+ * host has installed. */
+function absentNames(count: number): string {
+  return Array.from(
+    { length: count },
+    (_, i) => `definitely-not-a-binary-${i}`,
+  ).join(",");
+}
+
+function shQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 afterEach(() => {
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
+describe("cli test environment", () => {
+  it("hands every spawned CLI a PATH of exactly the four fixed binaries, not the host's", () => {
+    const env = buildSpawnEnv();
+    expect(env.PATH?.split(path.delimiter)).toEqual([FIXED_BIN_DIR]);
+    expect(fs.readdirSync(FIXED_BIN_DIR).sort()).toEqual([...FIXED_BINARIES]);
+    // Nothing from this process's own environment leaks into the child:
+    // an AGENT_PRIMITIVES_* variable in a developer's shell would
+    // otherwise silently redirect the log directory under test.
+    expect(
+      Object.keys(env).filter((key) => key.startsWith("AGENT_PRIMITIVES_")),
+    ).toEqual([]);
+  });
+});
+
 describe("cli", () => {
-  it("prints parseable JSON with status: usage_error on stdout and exits 2 for a mistyped flag", () => {
-    const result = runCli(["doctor", "--no-such-flag"]);
-    expect(result.status).toBe(2);
-    const parsed = JSON.parse(result.stdout);
+  it("prints parseable JSON with status: usage_error on stdout and exits 2 for a mistyped flag", async () => {
+    const run = await spawnCli(["doctor", "--no-such-flag"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("usage_error");
     expect(parsed.tool).toBe("agent-primitives");
   });
 
-  it("exits 0 for --help", () => {
-    const result = runCli(["--help"]);
-    expect(result.status).toBe(0);
+  it("exits 0 for --help", async () => {
+    const run = await spawnCli(["--help"]);
+    expect(run.code).toBe(0);
   });
 
-  it("exits 0 for doctor --help", () => {
-    const result = runCli(["doctor", "--help"]);
-    expect(result.status).toBe(0);
+  it("exits 0 for doctor --help", async () => {
+    const run = await spawnCli(["doctor", "--help"]);
+    expect(run.code).toBe(0);
   });
 
-  it("exits 2 with usage_error for an invalid --format value", () => {
-    const result = runCli(["doctor", "-f", "yaml"]);
-    expect(result.status).toBe(2);
-    const parsed = JSON.parse(result.stdout);
-    expect(parsed.status).toBe("usage_error");
+  it("exits 2 with usage_error for an invalid --format value", async () => {
+    const run = await spawnCli(["doctor", "-f", "yaml"]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
 
-  it("reports a missing required tool as status: missing with exit 1", () => {
-    const result = runCli([
+  it("reports a missing required tool as status: missing with exit 1", async () => {
+    const run = await spawnCli([
       "doctor",
       "-r",
-      "git,node,npm,rg,definitely-not-a-binary-xyz",
+      "node,definitely-not-a-binary-xyz",
+      "-o",
+      "",
     ]);
-    expect(result.status).toBe(1);
-    const parsed = JSON.parse(result.stdout);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("missing");
     const tool = parsed.tools.find(
       (t: { name: string }) => t.name === "definitely-not-a-binary-xyz",
@@ -78,73 +108,102 @@ describe("cli", () => {
     expect(tool.found).toBe(false);
   });
 
-  it("exits 0 with status ok for a required/optional list that does not depend on host tooling beyond node and npm", () => {
-    // Deliberately not `doctor` with its defaults (which include `rg`): a
-    // CI runner image is not guaranteed to carry ripgrep, so a test that
-    // asserts status: ok against the default required list is really
-    // asserting something about the host, not about this CLI. node and npm
-    // are the two binaries this very test process is already running
-    // under, so they are always present; the empty optional list keeps
-    // any other (also possibly-missing) optional tool out of the picture.
-    const result = runCli(["doctor", "-r", "node,npm", "-o", ""]);
-    expect(result.status).toBe(0);
-    const parsed = JSON.parse(result.stdout);
-    expect(parsed.status).toBe("ok");
+  it("exits 0 with status ok when every required binary is on the fixed PATH", async () => {
+    const run = await spawnCli(["doctor", "-r", "node,npm,git,sh", "-o", ""]);
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.stdout).status).toBe("ok");
   });
 
-  it("returns not_implemented usage_error for probe, verify, and init stubs", () => {
+  it("returns not_implemented usage_error for probe, verify, and init stubs", async () => {
     for (const sub of ["probe", "verify", "init"]) {
-      const result = runCli([sub]);
-      expect(result.status).toBe(2);
-      const parsed = JSON.parse(result.stdout);
+      const run = await spawnCli([sub]);
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
       expect(parsed.status).toBe("usage_error");
       expect(parsed.reason).toBe("not_implemented");
     }
   });
 
-  it("rejects a -r entry shaped like a path traversal as usage_error (never resolved as a real binary)", () => {
-    const result = runCli(["doctor", "-r", "../../x"]);
-    expect(result.status).toBe(2);
-    const parsed = JSON.parse(result.stdout);
-    expect(parsed.status).toBe("usage_error");
+  it("rejects a -r entry shaped like a path traversal as usage_error (never resolved as a real binary)", async () => {
+    const run = await spawnCli(["doctor", "-r", "../../x"]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
 
-  it("rejects -C at a nonexistent directory as usage_error, exit 2", () => {
-    const result = runCli(["-C", "/definitely/does/not/exist/xyz", "doctor"]);
-    expect(result.status).toBe(2);
-    const parsed = JSON.parse(result.stdout);
-    expect(parsed.status).toBe("usage_error");
+  it("rejects -C at a nonexistent directory as usage_error, exit 2", async () => {
+    const run = await spawnCli([
+      "-C",
+      "/definitely/does/not/exist/xyz",
+      "doctor",
+    ]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
 
-  it("rejects -C pointing at a file (not a directory) as usage_error, exit 2", () => {
+  it("rejects -C pointing at a file (not a directory) as usage_error, exit 2", async () => {
     const dir = makeTmpDir();
     const filePath = path.join(dir, "a-file");
     fs.writeFileSync(filePath, "x");
-    const result = runCli(["-C", filePath, "doctor"]);
-    expect(result.status).toBe(2);
-    const parsed = JSON.parse(result.stdout);
-    expect(parsed.status).toBe("usage_error");
+    const run = await spawnCli(["-C", filePath, "doctor"]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
 
-  it("prints a bounded pretty-JSON fallback for -f text on a command with no dedicated text renderer", () => {
-    const result = runCli(["-f", "text", "probe"]);
-    expect(result.status).toBe(2);
+  it("reports doctor's real status under a tight -m for a binary whose --version prints nothing", async () => {
+    // A found binary with no version output used to leave `version:
+    // undefined` as an own property of the result; measuring that property
+    // while reducing the envelope threw, and the command reported
+    // `command: unknown`, `status: error` instead of its real verdict. -m
+    // 500 is small enough that the reduction actually runs.
+    const dir = makeTmpDir();
+    const stubPath = path.join(dir, "quiet-tool");
+    fs.writeFileSync(stubPath, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(stubPath, 0o755);
+    const run = await spawnCli(
+      ["-m", "500", "doctor", "-r", "quiet-tool,node", "-o", ""],
+      { env: { PATH: `${dir}${path.delimiter}${FIXED_BIN_DIR}` } },
+    );
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.command).toBe("doctor");
+    expect(parsed.status).not.toBe("error");
+    expect(parsed.status).toBe("ok");
+    expect(run.code).toBe(0);
+  });
+
+  it("prints a bounded pretty-JSON fallback for -f text on a command with no dedicated text renderer", async () => {
+    const run = await spawnCli(["-f", "text", "probe"]);
+    expect(run.code).toBe(2);
     // Pretty-printed (multi-line, 2-space indented), unlike the single-line
     // compact JSON the default `-f json` path emits.
-    expect(result.stdout).toContain('"status": "usage_error"');
-    expect(result.stdout.split("\n").length).toBeGreaterThan(1);
-    const parsed = JSON.parse(result.stdout);
-    expect(parsed.status).toBe("usage_error");
+    expect(run.stdout).toContain('"status": "usage_error"');
+    expect(run.stdout.split("\n").length).toBeGreaterThan(1);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
 
-  it("bounds -f text output by -m and appends a truncation marker", () => {
-    const result = runCli(["-f", "text", "-m", "80", "doctor"]);
-    expect(result.stdout.length).toBeLessThanOrEqual(80 + 40);
-    expect(result.stdout).toContain("truncated");
+  it("bounds -f text output to -m exactly and names the full length in the marker", async () => {
+    const run = await spawnCli(["-f", "text", "-m", "80", "doctor"]);
+    expect(run.stdout.length).toBeLessThanOrEqual(80);
+    expect(run.stdout).toContain("truncated");
+    expect(run.stdout).toMatch(/truncated, \d+ characters total/);
   });
 
-  it("-f text -m 80 still prints the real tool name (renders from the untouched doctor result, never a reduced/mutated envelope)", () => {
-    const result = runCli([
+  it("never emits more than -m characters of text even below the truncation marker's own length", async () => {
+    const run = await spawnCli([
+      "-f",
+      "text",
+      "-m",
+      "5",
+      "doctor",
+      "-r",
+      "node",
+      "-o",
+      "",
+    ]);
+    expect(run.stdout.length).toBeLessThanOrEqual(5);
+  });
+
+  it("-f text -m 80 still prints the real tool name (renders from the untouched doctor result, never a reduced/mutated envelope)", async () => {
+    const run = await spawnCli([
       "-f",
       "text",
       "-m",
@@ -155,72 +214,92 @@ describe("cli", () => {
       "-o",
       "",
     ]);
-    expect(result.stdout).toContain("node");
+    expect(run.stdout).toContain("node");
   });
 
-  it("parses a large envelope received through a pipe with a delayed reader", async () => {
+  it("delivers an envelope larger than the pipe buffer intact through a piped stdout", async () => {
     // Regression test for the write-then-exit race: process.exit()
-    // immediately after stdout.write() can truncate output larger than
-    // the pipe buffer before the reader has drained it. Spawn with piped
-    // stdio and read only after a delay, the way a slow subagent reader
-    // would, to reproduce the race the previous implementation lost. A
-    // long -r list (each a plain, never-found name) pushes the envelope
-    // comfortably past the ~64 KiB pipe buffer so the race is reachable
-    // at all; -m 900000 keeps the envelope module from truncating it back
-    // down first.
-    const longRequiredList = Array.from(
-      { length: 5000 },
-      (_, i) => `definitely-not-a-binary-${i}`,
-    ).join(",");
-    const child = spawn(
+    // immediately after stdout.write() can truncate output larger than the
+    // pipe buffer (64 KiB on most platforms) before the reader has drained
+    // it. A long -o list of never-found names pushes the envelope well
+    // past that; -m 900000 keeps the envelope module from truncating it
+    // back down first. The helper attaches its readers before returning
+    // and resolves on the child's own `close`, so this asserts the CLI's
+    // output, not a timing window.
+    const run = await spawnCli([
+      "doctor",
+      "-m",
+      "900000",
+      "-r",
       "node",
-      [CLI_PATH, "doctor", "-m", "900000", "-r", longRequiredList],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    let stdout = "";
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-    });
-    await new Promise<void>((resolve) => setTimeout(resolve, 300));
-    await new Promise<void>((resolve) => child.on("close", () => resolve()));
-    expect(() => JSON.parse(stdout)).not.toThrow();
-    const parsed = JSON.parse(stdout);
-    expect(parsed.tool).toBe("agent-primitives");
+      "-o",
+      absentNames(5000),
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeGreaterThan(64 * 1024);
+    expect(() => JSON.parse(run.stdout)).not.toThrow();
+    expect(JSON.parse(run.stdout).tool).toBe("agent-primitives");
   });
 
-  it("exits 0 with empty stderr on a real EPIPE (reader closes early via | head -c 100), instead of an unhandled-error crash", async () => {
-    // A long -r list guarantees the default-format JSON envelope is well
-    // over 100 bytes, so `head -c 100` is certain to close the read end
-    // of the pipe before this process has finished writing, forcing a
-    // real EPIPE on a subsequent stdout write. `head -c` is portable
-    // POSIX (GNU coreutils and BSD/macOS both support it) and the pipe
-    // itself is plain POSIX shell syntax, not a dash-vs-bash difference.
-    const names = Array.from(
-      { length: 200 },
-      (_, i) => `definitely-not-a-binary-${i}`,
-    ).join(",");
-    const { code, stderr } = await new Promise<{
-      code: number;
-      stderr: string;
-    }>((resolve, reject) => {
-      exec(
-        `node ${JSON.stringify(CLI_PATH)} doctor -r ${JSON.stringify(names)} -o "" | head -c 100`,
-        (err, _stdout, stderrOut) => {
-          if (
-            err &&
-            typeof (err as NodeJS.ErrnoException).code !== "number" &&
-            err.signal
-          ) {
-            reject(err);
-            return;
-          }
-          const exitCode = err && typeof err.code === "number" ? err.code : 0;
-          resolve({ code: exitCode, stderr: stderrOut });
-        },
-      );
+  it("exits with its own success code and empty stderr on a real EPIPE (reader closes early through | head -c 100)", async () => {
+    // The reader has to close the pipe while the CLI still has output
+    // queued, so the payload must exceed the pipe buffer: below it the
+    // whole envelope lands in the buffer, the write completes, and no
+    // EPIPE is ever raised. The CLI's own exit code is recorded inside the
+    // pipeline's left-hand side (`$?` into a file) rather than read off
+    // the pipeline, whose exit code is `head`'s and is 0 no matter what
+    // the CLI did. `head -c` and `{ ...; } | ...` are plain POSIX, not a
+    // dash-vs-bash difference; the CLI itself still runs on the fixed
+    // PATH, and `head` is the one host binary this suite reaches for
+    // outside those four, by absolute path.
+    const shPath = resolveBinary("sh");
+    const headPath = resolveBinary("head");
+    if (!shPath || !headPath) {
+      throw new Error("this test needs a POSIX sh and head on the host");
+    }
+    const dir = makeTmpDir();
+    const statusFile = path.join(dir, "cli-exit");
+    const script =
+      `{ ${shQuote(process.execPath)} ${shQuote(CLI_PATH)} doctor -m 900000 ` +
+      `-r node -o ${shQuote(absentNames(5000))}; echo $? > ${shQuote(statusFile)}; } ` +
+      `| ${shQuote(headPath)} -c 100`;
+    const shell = spawn(shPath, ["-c", script], {
+      env: buildSpawnEnv(),
+      stdio: ["ignore", "ignore", "pipe"],
     });
-    expect(code).toBe(0);
+    let stderr = "";
+    shell.stderr.setEncoding("utf8");
+    shell.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    await new Promise<void>((resolve, reject) => {
+      shell.on("error", reject);
+      shell.on("close", () => resolve());
+    });
     expect(stderr).toBe("");
+    expect(fs.readFileSync(statusFile, "utf8").trim()).toBe("0");
+  });
+});
+
+describe("boundText", () => {
+  it("leaves text at or below maxChars untouched", () => {
+    expect(boundText("hello", 5)).toBe("hello");
+    expect(boundText("hello", 50)).toBe("hello");
+  });
+
+  it("cuts to exactly maxChars and states the full length in the marker", () => {
+    const text = "y".repeat(500);
+    const out = boundText(text, 120);
+    expect(out.length).toBe(120);
+    expect(out).toContain("truncated, 500 characters total");
+  });
+
+  it("slices the marker itself rather than exceeding a maxChars below the marker's length", () => {
+    const text = "y".repeat(500);
+    for (const maxChars of [1, 5, 17, 30]) {
+      const out = boundText(text, maxChars);
+      expect(out.length).toBeLessThanOrEqual(maxChars);
+    }
   });
 });
 
@@ -244,6 +323,76 @@ describe("classifyStdoutError", () => {
     expect(
       result.stderrLine?.split("\n").filter((l) => l.length > 0).length,
     ).toBe(1);
+  });
+});
+
+describe("writeAndExitTo", () => {
+  function fakeSink(err?: NodeJS.ErrnoException): {
+    sink: StdoutSink;
+    written: string[];
+  } {
+    const written: string[] = [];
+    return {
+      written,
+      sink: {
+        write(data, callback) {
+          written.push(data);
+          callback(err ?? null);
+          return true;
+        },
+      },
+    };
+  }
+
+  it("exits 2 and names the code on stderr when the write callback reports a non-EPIPE failure", () => {
+    const err: NodeJS.ErrnoException = Object.assign(
+      new Error("permission denied"),
+      { code: "EACCES" },
+    );
+    const { sink, written } = fakeSink(err);
+    const exits: number[] = [];
+    const stderr: string[] = [];
+    writeAndExitTo(
+      "payload",
+      0,
+      sink,
+      (code) => exits.push(code),
+      (line) => stderr.push(line),
+    );
+    expect(written).toEqual(["payload"]);
+    expect(exits).toEqual([2]);
+    expect(stderr.join("")).toContain("EACCES");
+  });
+
+  it("keeps the command's own exit code and says nothing on stderr when the write callback reports EPIPE", () => {
+    const err: NodeJS.ErrnoException = Object.assign(new Error("EPIPE"), {
+      code: "EPIPE",
+    });
+    const { sink } = fakeSink(err);
+    const exits: number[] = [];
+    const stderr: string[] = [];
+    writeAndExitTo(
+      "payload",
+      1,
+      sink,
+      (code) => exits.push(code),
+      (line) => stderr.push(line),
+    );
+    expect(exits).toEqual([1]);
+    expect(stderr).toEqual([]);
+  });
+
+  it("exits with the command's own code when the write succeeds", () => {
+    const { sink } = fakeSink();
+    const exits: number[] = [];
+    writeAndExitTo(
+      "payload",
+      1,
+      sink,
+      (code) => exits.push(code),
+      () => {},
+    );
+    expect(exits).toEqual([1]);
   });
 });
 
