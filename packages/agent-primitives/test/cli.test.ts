@@ -11,10 +11,12 @@ import {
   mapTopLevelError,
   writeAndExitTo,
   parseExecOverride,
+  writeFullVerifyResult,
   type ResolvedGlobal,
   type StdoutSink,
 } from "../src/cli.js";
 import { UsageError } from "../src/envelope.js";
+import type { VerifyResult, CheckResult } from "../src/verify/index.js";
 import {
   assertArgvWithinLimit,
   buildSpawnEnv,
@@ -595,6 +597,82 @@ describe("cli verify", () => {
     const check = parsed.checks.find((c: { name: string }) => c.name === "one");
     expect(check.failures).toHaveLength(1);
   });
+
+  it("-c '' resolves to an empty check list: status error, reason nothing_verified, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", cwd, "-l", logDir, "verify", "-c", ""]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    expect(parsed.reason).toBe("nothing_verified");
+    expect(parsed.checks).toEqual([]);
+  });
+
+  it("-c ',,,' resolves to an empty check list: status error, reason nothing_verified, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      ",,,",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    expect(parsed.reason).toBe("nothing_verified");
+    expect(parsed.checks).toEqual([]);
+  });
+
+  it("one exit-1 check and one exit-127 check: status error (error wins over fail), exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "f=exit 1",
+      "-x",
+      "e=exit 127",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+  });
+
+  it("an unwritable log directory parent still yields an envelope with per-check errors, not a crash", async () => {
+    const cwd = makeTmpDir();
+    const parentDir = makeTmpDir();
+    const logDir = path.join(parentDir, "logs");
+    fs.chmodSync(parentDir, 0o500);
+    try {
+      const run = await spawnCli([
+        "-C",
+        cwd,
+        "-l",
+        logDir,
+        "verify",
+        "-x",
+        "mycheck=exit 0",
+      ]);
+      const parsed = JSON.parse(run.stdout);
+      expect(Array.isArray(parsed.checks)).toBe(true);
+      const check = parsed.checks.find(
+        (c: { name: string }) => c.name === "mycheck",
+      );
+      expect(check.status).toBe("error");
+      expect(check.failures.length).toBeGreaterThan(0);
+    } finally {
+      fs.chmodSync(parentDir, 0o700);
+    }
+  });
 });
 
 describe("parseExecOverride", () => {
@@ -751,5 +829,64 @@ describe("mapTopLevelError", () => {
     expect(envelope.status).toBe("usage_error");
     expect(exitCode).toBe(2);
     expect((envelope as { message?: string }).message).toBe("unknown option");
+  });
+});
+
+describe("writeFullVerifyResult", () => {
+  function makeResult(overrides: Partial<VerifyResult> = {}): VerifyResult {
+    const fullFailures = Array.from({ length: 30 }, (_, i) => ({
+      message: `f${i}`,
+    }));
+    const fullChecks: CheckResult[] = [
+      {
+        name: "test",
+        status: "fail",
+        exitCode: 1,
+        durationMs: 1,
+        timedOut: false,
+        summary: { passed: 0, failed: 30, skipped: 0, errors: 0, warnings: 0 },
+        failures: fullFailures,
+      },
+    ];
+    return {
+      status: "fail",
+      checks: [{ ...fullChecks[0], failures: fullFailures.slice(0, 20) }],
+      totalDurationMs: 1,
+      warnings: [],
+      logs: [],
+      truncatedByMaxFailures: true,
+      fullChecks,
+      ...overrides,
+    };
+  }
+
+  it("writes the uncapped checks to verify-full.json, pushes its path onto logs, and sets envelopePatch.truncated", () => {
+    const logDir = makeTmpDir();
+    const result = makeResult();
+    const logs: string[] = [];
+    const envelopePatch: { truncated?: true } = {};
+
+    writeFullVerifyResult(result, envelopePatch, logs, logDir);
+
+    expect(envelopePatch.truncated).toBe(true);
+    expect(logs).toHaveLength(1);
+    const fullResultPath = logs[0];
+    expect(fs.existsSync(fullResultPath)).toBe(true);
+    const written = JSON.parse(fs.readFileSync(fullResultPath, "utf8")) as {
+      checks: CheckResult[];
+    };
+    expect(written.checks[0].failures).toHaveLength(30);
+  });
+
+  it("is a no-op when nothing was truncated", () => {
+    const logDir = makeTmpDir();
+    const result = makeResult({ truncatedByMaxFailures: false });
+    const logs: string[] = [];
+    const envelopePatch: { truncated?: true } = {};
+
+    writeFullVerifyResult(result, envelopePatch, logs, logDir);
+
+    expect(envelopePatch.truncated).toBeUndefined();
+    expect(logs).toEqual([]);
   });
 });

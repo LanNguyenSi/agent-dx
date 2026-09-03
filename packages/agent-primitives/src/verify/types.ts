@@ -108,11 +108,22 @@ export interface VerifyOptions {
   /** Caps each check's own `failures` list. Defaults to 20. */
   maxFailures?: number;
   env?: NodeJS.ProcessEnv;
-  /** Detector list, in priority order, generic-style fallback last.
-   * Defaults to `[genericDetector]`. Real, tool-specific detectors are
-   * prepended to this list in a later release. */
+  /** Candidate detectors only, in priority order; the fallback is never
+   * part of this list (see `fallbackDetector`). Defaults to `[]`, so
+   * every check falls back to `fallbackDetector`. Real, tool-specific
+   * detectors are added to this list in a later release. */
   detectors?: Detector[];
+  /** The detector selected when no candidate in `detectors` matches, or
+   * when two or more do and the command text does not name exactly one
+   * of them. Defaults to `genericDetector`. */
+  fallbackDetector?: Detector;
   /** Test seam: replaces `execCommand`, e.g. to spy on invocation count
    * for a `--fail-fast` test without spawning real shells. */
   execFn?: ExecLike;
+  /** Identifies this run for the purpose of nesting per-check log files
+   * uniquely under `logDir/verify/<runId>/`, so two runs sharing the same
+   * `logDir` never share, or silently append to, the same log file.
+   * Defaults to a fresh UUID; a caller that already has a run id (e.g.
+   * the CLI's envelope run id) should pass it through here instead. */
+  runId?: string;
 }

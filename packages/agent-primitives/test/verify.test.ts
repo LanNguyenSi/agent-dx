@@ -506,6 +506,230 @@ describe("verify: nothing_verified", () => {
       true,
     );
   });
+
+  it("an empty resolved check list (checks: []) is status error, reason nothing_verified, never a silent pass", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const result = await verify({ cwd, logDir, checks: [], execFn: fn });
+    expect(calls).toEqual([]);
+    expect(result.checks).toEqual([]);
+    expect(result.status).toBe("error");
+    expect(result.reason).toBe("nothing_verified");
+    expect(result.warnings.some((w) => w.includes("nothing_verified"))).toBe(
+      true,
+    );
+  });
+});
+
+describe("verify: unique per-run logs", () => {
+  it("two runs sharing one logDir keep separate log files; the second run's logPath contains only its own output", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { echoer: "x" });
+    const logDir = makeTmpDir();
+
+    const firstResult = await verify({
+      cwd,
+      logDir,
+      checks: ["echoer"],
+      overrides: { echoer: "echo first-run-output" },
+    });
+    const secondResult = await verify({
+      cwd,
+      logDir,
+      checks: ["echoer"],
+      overrides: { echoer: "echo second-run-output" },
+    });
+
+    const firstLogPath = firstResult.checks[0].logPath as string;
+    const secondLogPath = secondResult.checks[0].logPath as string;
+    expect(firstLogPath).not.toBe(secondLogPath);
+
+    const secondLogContents = fs.readFileSync(secondLogPath, "utf8");
+    expect(secondLogContents).toContain("second-run-output");
+    expect(secondLogContents).not.toContain("first-run-output");
+
+    const firstLogContents = fs.readFileSync(firstLogPath, "utf8");
+    expect(firstLogContents).toContain("first-run-output");
+    expect(firstLogContents).not.toContain("second-run-output");
+  }, 20000);
+});
+
+describe("verify: status ternary, error wins over fail", () => {
+  it("one exit-1 (fail) check and one exit-127 (error) check: top-level status is error", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { failer: "x", errorer: "y" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run failer --silent": { exitCode: 1 },
+      "npm run errorer --silent": { exitCode: 127 },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["failer", "errorer"],
+      execFn: fn,
+    });
+    expect(result.checks[0].status).toBe("fail");
+    expect(result.checks[1].status).toBe("error");
+    expect(result.status).toBe("error");
+  });
+});
+
+describe("verify: detector selection through verify()", () => {
+  function makeStubDetector(name: string, matches: boolean): Detector {
+    return {
+      name,
+      matches: () => matches,
+      parse: (): DetectorParseResult => ({
+        summary: { passed: 0, failed: 0, skipped: 0, errors: 0, warnings: 0 },
+        failures: [],
+        warnings: [],
+      }),
+    };
+  }
+
+  it("two always-matching candidates plus the default fallback: ambiguity warning names both candidates, checks[0].detector is the fallback", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({ "npm run test --silent": { exitCode: 0 } });
+    const alpha = makeStubDetector("alpha", true);
+    const beta = makeStubDetector("beta", true);
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [alpha, beta],
+    });
+    expect(result.checks[0].detector).toBe(genericDetector.name);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("ambiguous") && w.includes("alpha") && w.includes("beta"),
+      ),
+    ).toBe(true);
+  });
+
+  it("one matching candidate: checks[0].detector is that candidate's name", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({ "npm run test --silent": { exitCode: 0 } });
+    const alpha = makeStubDetector("alpha", true);
+    const beta = makeStubDetector("beta", false);
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [alpha, beta],
+    });
+    expect(result.checks[0].detector).toBe("alpha");
+  });
+});
+
+describe("verify: package.json unreadable warning", () => {
+  it("warns when a requested check needs script resolution and package.json is missing", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some((w) => w.includes("package.json not readable")),
+    ).toBe(true);
+  });
+
+  it("does not warn when every requested name is covered by an -x override, even with no package.json", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: [],
+      overrides: { mycheck: "echo hi" },
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some((w) => w.includes("package.json not readable")),
+    ).toBe(false);
+  });
+});
+
+describe("verify: summary.errors floor", () => {
+  it("a stub detector returning nonempty failures with summary.errors 0 on a 127 exit still reports summary.errors 1", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { nope: "x" });
+    const logDir = makeTmpDir();
+    const oneFailureDetector: Detector = {
+      name: "one-failure",
+      matches: () => true,
+      parse: (): DetectorParseResult => ({
+        summary: { passed: 0, failed: 1, skipped: 0, errors: 0, warnings: 0 },
+        failures: [{ message: "some parsed failure" }],
+        warnings: [],
+      }),
+    };
+    const { fn } = makeStubExec({ "npm run nope --silent": { exitCode: 127 } });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["nope"],
+      execFn: fn,
+      detectors: [oneFailureDetector],
+    });
+    expect(result.checks[0].status).toBe("error");
+    expect(result.checks[0].failures).toHaveLength(1);
+    expect(result.checks[0].failures[0].message).toBe("some parsed failure");
+    expect(result.checks[0].summary.errors).toBe(1);
+  });
+});
+
+describe("verify: exec rejection is a per-check error, not a thrown promise", () => {
+  it("an execFn that rejects records that check as status error with a synthetic failure naming the error, and the run continues", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { broken: "x", test: "te" });
+    const logDir = makeTmpDir();
+    const failingExec: ExecLike = async (cmd) => {
+      if (cmd === "npm run broken --silent") {
+        throw new Error("simulated exec failure: ENOSPC");
+      }
+      return {
+        exitCode: 0,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(logDir, "stub.log"),
+        timedOut: false,
+        logWriteFailed: false,
+      };
+    };
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["broken", "test"],
+      execFn: failingExec,
+    });
+    expect(result.checks[0].name).toBe("broken");
+    expect(result.checks[0].status).toBe("error");
+    expect(result.checks[0].failures).toHaveLength(1);
+    expect(result.checks[0].failures[0].message).toContain(
+      "simulated exec failure",
+    );
+    expect(result.checks[0].summary.errors).toBe(1);
+    // The run continues past the failed check to the next one.
+    expect(result.checks[1].name).toBe("test");
+    expect(result.checks[1].status).toBe("pass");
+    expect(result.status).toBe("error");
+  });
 });
 
 describe("verify: detector warnings merge", () => {
@@ -541,7 +765,7 @@ describe("selectDetector", () => {
     warnings: [],
   });
 
-  function makeAlphaBetaGeneric(
+  function makeAlphaBeta(
     alphaMatches: boolean,
     betaMatches: boolean,
   ): Detector[] {
@@ -555,12 +779,12 @@ describe("selectDetector", () => {
       matches: () => betaMatches,
       parse: stubParse,
     };
-    return [alpha, beta, genericDetector];
+    return [alpha, beta];
   }
 
-  it("zero candidates: selects the fallback (last, generic) detector", () => {
-    const detectors = makeAlphaBetaGeneric(false, false);
-    const selection = selectDetector(detectors, {
+  it("zero candidates: selects the fallback (generic) detector", () => {
+    const detectors = makeAlphaBeta(false, false);
+    const selection = selectDetector(detectors, genericDetector, {
       output: "anything",
       command: "npm run test --silent",
       exitCode: 1,
@@ -570,8 +794,8 @@ describe("selectDetector", () => {
   });
 
   it("one candidate: selects that candidate, never the fallback", () => {
-    const detectors = makeAlphaBetaGeneric(true, false);
-    const selection = selectDetector(detectors, {
+    const detectors = makeAlphaBeta(true, false);
+    const selection = selectDetector(detectors, genericDetector, {
       output: "anything",
       command: "npm run test --silent",
       exitCode: 1,
@@ -581,8 +805,8 @@ describe("selectDetector", () => {
   });
 
   it("two or more candidates, exactly one named by the command text: selects that one", () => {
-    const detectors = makeAlphaBetaGeneric(true, true);
-    const selection = selectDetector(detectors, {
+    const detectors = makeAlphaBeta(true, true);
+    const selection = selectDetector(detectors, genericDetector, {
       output: "anything",
       command: "npm run test --silent -- alpha",
       exitCode: 1,
@@ -592,14 +816,36 @@ describe("selectDetector", () => {
   });
 
   it("two or more candidates, none (or more than one) named by the command text: falls back to generic with the candidate shapes listed", () => {
-    const detectors = makeAlphaBetaGeneric(true, true);
-    const selection = selectDetector(detectors, {
+    const detectors = makeAlphaBeta(true, true);
+    const selection = selectDetector(detectors, genericDetector, {
       output: "anything",
       command: "npm run test --silent",
       exitCode: 1,
     });
     expect(selection.detector).toBe(genericDetector);
     expect(selection.ambiguousCandidates).toEqual(["alpha", "beta"]);
+  });
+
+  it("a candidate named by the command text only as a substring of a longer word does not count as named (token boundary)", () => {
+    const tsc: Detector = {
+      name: "tsc",
+      matches: () => true,
+      parse: stubParse,
+    };
+    const other: Detector = {
+      name: "other",
+      matches: () => true,
+      parse: stubParse,
+    };
+    const selection = selectDetector([tsc, other], genericDetector, {
+      output: "anything",
+      command: "npm run typecheck --silent -- --project tsconfig.json",
+      exitCode: 1,
+    });
+    // "tsc" is only a substring of "tsconfig.json", not a whole token, so
+    // it must not be treated as named by the command: ambiguous, fallback.
+    expect(selection.detector).toBe(genericDetector);
+    expect(selection.ambiguousCandidates).toEqual(["tsc", "other"]);
   });
 });
 
@@ -654,16 +900,18 @@ describe("verify: integration against a real package.json fixture", () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, { test: "te" });
     const logDir = makeTmpDir();
-    // exec.ts derives the log file path as `<logDir>/verify/<name>.log`;
-    // pre-creating a directory at that exact path forces the write
-    // stream `createWriteStream` opens there to fail (EISDIR) without
-    // touching exec.ts itself or relying on filesystem permission bits
-    // (which sandboxes and CI runners do not treat uniformly).
-    const verifySubdir = path.join(logDir, "verify");
-    fs.mkdirSync(verifySubdir, { recursive: true });
-    fs.mkdirSync(path.join(verifySubdir, "test.log"));
+    // exec.ts derives the log file path as
+    // `<logDir>/verify/<runId>/<name>.log`; a fixed runId makes that path
+    // predictable so pre-creating a directory at that exact path forces
+    // the write stream `createWriteStream` opens there to fail (EISDIR)
+    // without touching exec.ts itself or relying on filesystem permission
+    // bits (which sandboxes and CI runners do not treat uniformly).
+    const runId = "eisdir-test-run";
+    const runSubdir = path.join(logDir, "verify", runId);
+    fs.mkdirSync(runSubdir, { recursive: true });
+    fs.mkdirSync(path.join(runSubdir, "test.log"));
 
-    const result = await verify({ cwd, logDir, checks: ["test"] });
+    const result = await verify({ cwd, logDir, checks: ["test"], runId });
 
     expect(result.logs).toEqual([]);
     expect(

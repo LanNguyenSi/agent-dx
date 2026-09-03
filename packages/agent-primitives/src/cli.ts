@@ -434,6 +434,7 @@ program
     const result = await verify({
       cwd: global.cwd,
       logDir: global.logDir,
+      runId: currentRunId(),
       checks: opts.checks,
       overrides: opts.exec,
       failFast: Boolean(opts.failFast),
@@ -442,21 +443,13 @@ program
       maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
     });
 
+    // The log path this writes is appended to `logs` BEFORE buildEnvelope
+    // runs, so it lands in the envelope's own `logs` field (buildEnvelope
+    // copies `logs` into the envelope at call time; a push afterwards
+    // would not be reflected there).
     const logs = [...result.logs];
-    if (result.truncatedByMaxFailures) {
-      try {
-        fs.mkdirSync(global.logDir, { recursive: true });
-        const fullResultPath = path.join(global.logDir, "verify-full.json");
-        fs.writeFileSync(
-          fullResultPath,
-          JSON.stringify({ checks: result.fullChecks }, null, 2),
-        );
-        logs.push(fullResultPath);
-      } catch {
-        // Best-effort: the envelope's own overrun warning still applies
-        // if this leaves the result too large for --max-chars.
-      }
-    }
+    const pendingEnvelopePatch: { truncated?: true } = {};
+    writeFullVerifyResult(result, pendingEnvelopePatch, logs, global.logDir);
 
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
@@ -478,7 +471,7 @@ program
     // result, so its own size-triggered reduction may not fire even
     // though real content was cut: mark truncated explicitly whenever
     // verify() itself cut anything.
-    if (result.truncatedByMaxFailures) {
+    if (pendingEnvelopePatch.truncated) {
       envelope.truncated = true;
     }
     emit(
@@ -488,6 +481,45 @@ program
       () => renderVerifyText(result),
     );
   });
+
+/**
+ * When `verify()` capped a check's own `failures` list (`--max-failures`),
+ * writes the same checks with every `failures` list left uncapped to
+ * `<logDir>/verify-full.json`, pushes that path onto `logs`, and sets
+ * `envelopePatch.truncated = true` for the caller to fold into the real
+ * envelope (the envelope's own size-triggered reduction may never fire
+ * even though real content was cut, since the cap already happened
+ * before `buildEnvelope` saw the result). A no-op when nothing was
+ * truncated. Best-effort on the write itself: a failure there still sets
+ * `envelopePatch.truncated`, since real content actually was cut.
+ * Exported and unit-tested directly (with a synthetic truncated
+ * `VerifyResult`) so both effects, the truncated flag and the on-disk
+ * file, are independently verified rather than only exercised indirectly
+ * through a real CLI run (which the shipped `generic` detector alone can
+ * never actually trigger, since it never parses more failures than the
+ * invariant's own single synthetic entry per check).
+ */
+export function writeFullVerifyResult(
+  result: VerifyResult,
+  envelopePatch: { truncated?: true },
+  logs: string[],
+  logDir: string,
+): void {
+  if (!result.truncatedByMaxFailures) return;
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+    const fullResultPath = path.join(logDir, "verify-full.json");
+    fs.writeFileSync(
+      fullResultPath,
+      JSON.stringify({ checks: result.fullChecks }, null, 2),
+    );
+    logs.push(fullResultPath);
+  } catch {
+    // Best-effort: the envelope's own overrun warning still applies if
+    // this leaves the result too large for --max-chars.
+  }
+  envelopePatch.truncated = true;
+}
 
 function renderVerifyText(result: VerifyResult): string {
   const lines: string[] = [];

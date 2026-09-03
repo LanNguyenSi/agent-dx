@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { execCommand } from "../exec.js";
+import type { ExecResult } from "../exec.js";
 import { UsageError } from "../envelope.js";
 import { genericDetector } from "./detectors/generic.js";
 import type {
@@ -37,8 +39,6 @@ export const DEFAULT_CHECKS = ["build", "typecheck", "lint", "test"];
 
 export const DEFAULT_MAX_FAILURES = 20;
 
-const DEFAULT_DETECTORS: Detector[] = [genericDetector];
-
 /** A check name reaches `npm run <name> --silent` (and a log file name)
  * unquoted; this is the conservative allowlist every resolved name (from
  * `-c` and from `-x`) must match before any command is built, so a name
@@ -57,35 +57,49 @@ export interface DetectorSelection {
   ambiguousCandidates?: string[];
 }
 
+/** True when `name` appears in `command` as a whole token: bounded on
+ * both sides by the start/end of the string, whitespace, or a path
+ * separator, never merely as a substring. This keeps a detector named
+ * e.g. `tsc` from being "named by the command" when the command merely
+ * contains a longer word that happens to start with the same letters
+ * (`tsconfig.json`). */
+function commandNamesToken(command: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const boundary = "(?:^|[\\s/\\\\])";
+  const endBoundary = "(?:$|[\\s/\\\\])";
+  return new RegExp(`${boundary}${escaped}${endBoundary}`).test(command);
+}
+
 /**
  * Selects a detector for one check's output, following the plan's rule
- * (precised after review): the last entry in `detectors` is the fallback
- * (generic-shaped, always matches); every other entry is a candidate when
- * its `matches(input)` is true. Zero candidates selects the fallback; one
- * candidate selects it; two or more consult the command text as a
- * tiebreaker only when it names exactly one candidate, otherwise the
- * fallback is chosen and every candidate's name is returned so the caller
- * can warn about the ambiguity.
+ * (precised after review): `candidates` are consulted first, `fallback`
+ * is used whenever none (or more than one, ambiguously) of them applies.
+ * Every candidate is a candidate when its `matches(input)` is true. Zero
+ * matching candidates selects the fallback; one matching candidate
+ * selects it; two or more consult the command text as a tiebreaker
+ * (matched on whole-token boundaries, see `commandNamesToken`) only when
+ * it names exactly one candidate, otherwise the fallback is chosen and
+ * every candidate's name is returned so the caller can warn about the
+ * ambiguity.
  */
 export function selectDetector(
-  detectors: Detector[],
+  candidates: Detector[],
+  fallback: Detector,
   input: DetectorInput,
 ): DetectorSelection {
-  const fallback = detectors[detectors.length - 1];
-  const nonFallback = detectors.slice(0, -1);
-  const candidates = nonFallback.filter((d) => d.matches(input));
+  const matched = candidates.filter((d) => d.matches(input));
 
-  if (candidates.length === 0) return { detector: fallback };
-  if (candidates.length === 1) return { detector: candidates[0] };
+  if (matched.length === 0) return { detector: fallback };
+  if (matched.length === 1) return { detector: matched[0] };
 
-  const namedByCommand = candidates.filter((d) =>
-    input.command.includes(d.name),
+  const namedByCommand = matched.filter((d) =>
+    commandNamesToken(input.command, d.name),
   );
   if (namedByCommand.length === 1) return { detector: namedByCommand[0] };
 
   return {
     detector: fallback,
-    ambiguousCandidates: candidates.map((d) => d.name),
+    ambiguousCandidates: matched.map((d) => d.name),
   };
 }
 
@@ -184,10 +198,6 @@ function resolveCommand(
   return { command: undefined, skipped: true };
 }
 
-function sanitizeLogFileName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "check";
-}
-
 function emptySummary(): Summary {
   return { passed: 0, failed: 0, skipped: 0, errors: 0, warnings: 0 };
 }
@@ -246,9 +256,15 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     );
   }
 
-  const detectors = options.detectors ?? DEFAULT_DETECTORS;
+  const detectors = options.detectors ?? [];
+  const fallbackDetector = options.fallbackDetector ?? genericDetector;
   const execFn: ExecLike = options.execFn ?? execCommand;
-  const logDir = path.join(options.logDir, "verify");
+  const runId = options.runId ?? randomUUID();
+  // Nested under a per-run id: two verify() runs sharing the same
+  // `logDir` (e.g. a caller-supplied `-l` directory reused across
+  // invocations) never share, or silently append to, the same per-check
+  // log file (exec.ts opens each log file with `flags: 'a'`).
+  const logDir = path.join(options.logDir, "verify", runId);
 
   const scripts = readScripts(options.cwd);
   const warnings: string[] = [];
@@ -288,13 +304,39 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     }
 
     const command = resolved.command;
-    const execResult = await execFn(command, {
-      cwd: options.cwd,
-      env: options.env ?? process.env,
-      timeoutMs: options.timeoutMs,
-      logDir,
-      logFileName: `${sanitizeLogFileName(name)}.log`,
-    });
+    let execResult: ExecResult;
+    try {
+      execResult = await execFn(command, {
+        cwd: options.cwd,
+        env: options.env ?? process.env,
+        timeoutMs: options.timeoutMs,
+        logDir,
+        logFileName: `${name}.log`,
+      });
+    } catch (err) {
+      // execFn itself rejecting (e.g. exec.ts's own `fs.mkdirSync(logDir,
+      // ...)` failing because the log directory's parent is unwritable)
+      // is not a check finding: it means this check could not even be
+      // attempted. Recorded as `status: "error"` with a synthetic failure
+      // naming the error, and the run continues with every other check,
+      // exactly as any other error check would.
+      const message = err instanceof Error ? err.message : String(err);
+      const errorResult: CheckResult = {
+        name,
+        command,
+        status: "error",
+        exitCode: null,
+        durationMs: 0,
+        timedOut: false,
+        summary: { passed: 0, failed: 0, skipped: 0, errors: 1, warnings: 0 },
+        failures: [{ name, message: `exec failed: ${message}` }],
+      };
+      checks.push(errorResult);
+      fullChecks.push(errorResult);
+      warnings.push(`${name}: exec failed: ${message}`);
+      if (options.failFast) break;
+      continue;
+    }
 
     if (execResult.logWriteFailed) {
       warnings.push(
@@ -306,7 +348,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
 
     const status = classifyStatus(execResult.exitCode, execResult.timedOut);
     const output = `${execResult.stdoutTail}\n${execResult.stderrTail}`;
-    const selection = selectDetector(detectors, {
+    const selection = selectDetector(detectors, fallbackDetector, {
       output,
       command,
       exitCode: execResult.exitCode,
@@ -366,16 +408,21 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     if (options.failFast && status !== "pass") break;
   }
 
-  const allSkipped =
-    checks.length > 0 && checks.every((c) => c.status === "skipped");
+  // An empty resolved check list (e.g. `-c ''`) is just as much
+  // "nothing was verified" as every resolved check coming back skipped:
+  // both must never fall through to a silent "pass".
+  const nothingVerified =
+    checks.length === 0 || checks.every((c) => c.status === "skipped");
 
   let overallStatus: VerifyResult["status"];
   let reason: string | undefined;
-  if (allSkipped) {
+  if (nothingVerified) {
     overallStatus = "error";
     reason = "nothing_verified";
     warnings.push(
-      "nothing_verified: every requested check resolved to skipped",
+      checks.length === 0
+        ? "nothing_verified: no checks were resolved to run"
+        : "nothing_verified: every requested check resolved to skipped",
     );
   } else {
     overallStatus = checks.some((c) => c.status === "error")
