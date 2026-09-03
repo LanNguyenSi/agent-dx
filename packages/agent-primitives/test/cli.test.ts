@@ -558,9 +558,18 @@ describe("cli verify", () => {
     expect(parsed.status).toBe("usage_error");
   });
 
-  it("--timeout 1 -x 'slow=sleep 30' times out: check status error, one synthetic failure naming timedOut, summary.errors 1, exit 2", async () => {
+  it("--timeout 1 -x a busy-looping check times out: check status error, one synthetic failure naming timedOut, summary.errors 1, exit 2", async () => {
     const cwd = makeTmpDir();
     const logDir = makeTmpDir();
+    // `sleep` is not on the fixed four-binary PATH spawnCli hands the
+    // child (git, node, npm, sh). A `sh -c "sleep 30"` (or a `node -e`
+    // one-liner) would work on macOS's sh, which exec-replaces itself for
+    // a trailing simple command, but on Linux's dash `sh` forks a real
+    // child for it; exec.ts's timeout only signals the immediate child it
+    // spawned, so the grandchild survives the kill and the check never
+    // ends. A `while true; do :; done` loop is a shell builtin: dash runs
+    // it in the `sh` process itself, with no fork, so the SIGTERM
+    // exec.ts sends actually reaches the work being timed out.
     const run = await spawnCli([
       "-C",
       cwd,
@@ -570,7 +579,7 @@ describe("cli verify", () => {
       "--timeout",
       "1",
       "-x",
-      "slow=sleep 30",
+      "slow=while true; do :; done",
     ]);
     expect(run.code).toBe(2);
     const parsed = JSON.parse(run.stdout);

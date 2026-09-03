@@ -135,7 +135,6 @@ function parseMaxFailures(value: string): string {
   return value;
 }
 
-
 /** Resolves cwd/maxChars/logDir without validating that cwd exists: used
  * only for error reporting once we already know something has gone wrong
  * and a best-effort `cwd` value is all the envelope needs. */
