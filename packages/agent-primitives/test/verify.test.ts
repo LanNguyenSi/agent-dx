@@ -56,6 +56,7 @@ function makeStubExec(responses: Record<string, Partial<ExecResult>> = {}): {
       stderrTail: r.stderrTail ?? "",
       logPath: r.logPath ?? path.join(options.logDir, "stub.log"),
       timedOut: r.timedOut ?? false,
+      aborted: r.aborted ?? false,
       logWriteFailed: false,
     };
   };
@@ -748,6 +749,7 @@ describe("verify: exec rejection is a per-check error, not a thrown promise", ()
         stderrTail: "",
         logPath: path.join(logDir, "stub.log"),
         timedOut: false,
+        aborted: false,
         logWriteFailed: false,
       };
     };

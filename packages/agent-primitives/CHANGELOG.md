@@ -7,37 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `verify` subcommand core: resolves each named check (`-x` override wins,
-  else `package.json` `scripts[name]` as `npm run <name> --silent`, else
-  `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`
-  list, deduplicated preserving the first occurrence, in order), through
-  `exec.ts` with a per-check timeout and log file. Every resolved check
-  name is validated against a conservative pattern before any command is
-  built; an invalid name is `status: "usage_error"`, exit `2`, never run.
-  Shell exit `126`/`127` maps to `status: "error"`, never `"fail"`.
-  `--fail-fast` stops after the first check that fails or errors; a
-  skipped check falls through instead of stopping the run. When every
-  requested check resolves to `skipped`, the run is `status: "error"` with
-  `reason: "nothing_verified"`, never a silent pass. Detector selection is
-  by output shape first, command text only as a tiebreaker among shape
-  matches, and only when it names exactly one of them; otherwise the
-  generic detector is chosen and a warning lists the shapes seen. v0 wires
-  the `generic` detector (parses no failures out of the text itself), with
-  the selection seam left open for tool-specific detectors. The failures
-  invariant is enforced once, centrally, for every detector and for both
-  `fail` and `error` checks: a check with zero parsed failures always gets
-  one synthetic failure entry (naming `timedOut`, or the exit code, plus
-  output tail) instead of shipping an empty `failures` list, and an
-  `error` check always reports at least one `summary.errors`. A detector's
-  own warnings, and a log file the run could not write to, are merged into
-  the top-level `warnings`, prefixed with the check name. `--max-failures`
-  (a positive integer, default 20) caps each check's own `failures` list,
-  failures-first; a cut is reported via `truncated: true` and the full,
-  uncapped result is written to the log directory.
-
-
 ### Fixed
 
 - **Envelope bound and reduction.** The bound is met by reducing the
@@ -235,6 +204,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one is sitting there.
 
 ### Added
+
+- `verify` subcommand core: resolves each named check (`-x` override wins,
+  else `package.json` `scripts[name]` as `npm run <name> --silent`, else
+  `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`
+  list, deduplicated preserving the first occurrence, in order), through
+  `exec.ts` with a per-check timeout and log file. Every resolved check
+  name is validated against a conservative pattern before any command is
+  built; an invalid name is `status: "usage_error"`, exit `2`, never run.
+  Shell exit `126`/`127` maps to `status: "error"`, never `"fail"`.
+  `--fail-fast` stops after the first check that fails or errors; a
+  skipped check falls through instead of stopping the run. When every
+  requested check resolves to `skipped`, the run is `status: "error"` with
+  `reason: "nothing_verified"`, never a silent pass. Detector selection is
+  by output shape first, command text only as a tiebreaker among shape
+  matches, and only when it names exactly one of them; otherwise the
+  generic detector is chosen and a warning lists the shapes seen. v0 wires
+  the `generic` detector (parses no failures out of the text itself), with
+  the selection seam left open for tool-specific detectors. The failures
+  invariant is enforced once, centrally, for every detector and for both
+  `fail` and `error` checks: a check with zero parsed failures always gets
+  one synthetic failure entry (naming `timedOut`, or the exit code, plus
+  output tail) instead of shipping an empty `failures` list, and an
+  `error` check always reports at least one `summary.errors`. A detector's
+  own warnings, and a log file the run could not write to, are merged into
+  the top-level `warnings`, prefixed with the check name. `--max-failures`
+  (a positive integer, default 20) caps each check's own `failures` list,
+  failures-first; a cut is reported via `truncated: true` and the full,
+  uncapped result is written to the log directory.
 
 - `probe` subcommand (`inplace` isolation only; `-i worktree` still
   returns `not_implemented`, a later release flips the default): the full

@@ -632,7 +632,7 @@ interface ProbeCliOptions {
   pre?: string;
   isolation: IsolationMode;
   expect: ExpectVerdict;
-  timeout?: number;
+  timeout?: string;
   link?: string[];
   allowOutside?: boolean;
 }
@@ -663,16 +663,6 @@ function parseExpectVerdict(value: string): ExpectVerdict {
     );
   }
   return value;
-}
-
-function parseTimeoutSeconds(value: string): number {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new InvalidArgumentError(
-      `--timeout must be a positive number of seconds (got "${value}")`,
-    );
-  }
-  return n;
 }
 
 type MutantChoice =
@@ -769,7 +759,8 @@ program
       preCommand: opts.pre,
       isolation: opts.isolation,
       expect: opts.expect,
-      timeoutMs: opts.timeout !== undefined ? opts.timeout * 1000 : undefined,
+      timeoutMs:
+        opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
       links: opts.link ?? [],
       allowOutside: opts.allowOutside ?? false,
       cwd: global.cwd,
