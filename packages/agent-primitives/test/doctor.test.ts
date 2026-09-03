@@ -1,11 +1,22 @@
-import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
-import { doctor } from "../src/doctor/index.js";
+import { doctor, parseGitVersion } from "../src/doctor/index.js";
 import { doctor as doctorFromIndex } from "../src/index.js";
+import { lockKey } from "../src/lock.js";
+import {
+  containmentRoot,
+  resolveDeepestExisting,
+} from "../src/probe/containment.js";
+import {
+  SCRATCH_OWNER_FILE,
+  SCRATCH_OWNER_MAX_AGE_HOURS,
+  scratchOwnerPath,
+} from "../src/probe/isolation.js";
+import { writeGitShim } from "./helpers/git-shim.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -563,5 +574,773 @@ describe("doctor: stale-probe-marker check", () => {
     const result = await doctor({ required: [], optional: [], cwd, lockDir });
     const check = result.checks.find((c) => c.name === "stale-probe-marker");
     expect(check?.ok).toBe(true);
+  });
+});
+
+describe("doctor: stale-worktree check", () => {
+  it("ok when there is no worktree marker for this repository", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).toContain("no stale worktree marker");
+  });
+
+  it("ok when a worktree marker exists but its pid is still alive", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const root = resolveDeepestExisting(containmentRoot(cwd));
+    const worktreePath = path.join(makeTmpDir(), "wt");
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: worktreePath,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: process.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+  });
+
+  it("not ok when a worktree marker's pid is dead: names the leftover worktree path and a manual recovery command", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const root = resolveDeepestExisting(containmentRoot(cwd));
+    const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: worktreePath,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(worktreePath);
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${worktreePath}`,
+    );
+  });
+
+  it("a dead marker naming a path that is not of the probe's scratch shape is reported as a marker to inspect and delete, never with a removal command for that path", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const root = resolveDeepestExisting(containmentRoot(cwd));
+    const notScratch = path.join(makeTmpDir(), "somebody-elses-directory");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    const markerPath = path.join(lockDir, `${lockKey(root)}.marker.json`);
+    fs.writeFileSync(
+      markerPath,
+      JSON.stringify({
+        targetPath: notScratch,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(notScratch);
+    expect(check?.detail).toContain("delete the marker file");
+    expect(check?.detail).toContain(markerPath);
+    expect(check?.detail).not.toContain(
+      `worktree remove --force --force -- ${notScratch}`,
+    );
+  });
+
+  it("does not confuse a same-key stale-probe-marker check for a different repository's worktree marker", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const elsewhereRoot = resolveDeepestExisting(containmentRoot(makeTmpDir()));
+    const worktreePath = path.join(makeTmpDir(), "wt");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(elsewhereRoot)}.marker.json`),
+      JSON.stringify({
+        targetPath: worktreePath,
+        backupPath: elsewhereRoot,
+        preHash: "",
+        mutatedHash: "",
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+  });
+
+  describe("from git's own registry, marker or not", () => {
+    function git(cwd: string, args: string[]): void {
+      execFileSync("git", args, { cwd });
+    }
+
+    function initRepo(): string {
+      const repo = makeTmpDir();
+      git(repo, ["init", "-q"]);
+      git(repo, ["config", "user.email", "test@example.com"]);
+      git(repo, ["config", "user.name", "test"]);
+      fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+      git(repo, ["add", "-A"]);
+      git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+      return repo;
+    }
+
+    function writeWorktreeMarker(
+      lockDir: string,
+      root: string,
+      targetPath: string,
+      pid: number,
+    ): void {
+      fs.writeFileSync(
+        path.join(lockDir, `${lockKey(root)}.marker.json`),
+        JSON.stringify({
+          targetPath,
+          backupPath: root,
+          preHash: "",
+          mutatedHash: "",
+          pid,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+    }
+
+    it("not ok for a registered worktree of the scratch shape with no marker at all: names the path and the manual command", async () => {
+      const lockDir = makeTmpDir();
+      const repo = initRepo();
+      const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+      fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+      git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+      const resolved = resolveDeepestExisting(worktreePath);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(false);
+      expect(check?.detail).toContain(resolved);
+      expect(check?.detail).toContain(
+        `worktree remove --force --force -- ${resolved}`,
+      );
+    });
+
+    it("ok, with a hint, for a registered scratch worktree that a live probe's marker and owner record name", async () => {
+      // A live probe writes its owner record before the add and its
+      // marker at the same moment; the marker's pid alone vouches for
+      // nothing (it may have been recycled), the owner record does.
+      const lockDir = makeTmpDir();
+      const repo = initRepo();
+      const root = resolveDeepestExisting(containmentRoot(repo));
+      const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+      fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+      git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+      const alivePid = 1;
+      fs.writeFileSync(
+        path.join(path.dirname(worktreePath), SCRATCH_OWNER_FILE),
+        JSON.stringify({
+          pid: alivePid,
+          timestamp: new Date().toISOString(),
+          logDir: path.dirname(path.dirname(worktreePath)),
+        }),
+      );
+      writeWorktreeMarker(lockDir, root, worktreePath, alivePid);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(true);
+      expect(result.hints).toHaveLength(1);
+      expect(result.hints[0]).toContain(String(alivePid));
+    });
+
+    it("ok for an operator's own registered worktree, whatever it is called", async () => {
+      const lockDir = makeTmpDir();
+      const repo = initRepo();
+      const own = path.join(makeTmpDir(), "feature-branch");
+      git(repo, ["worktree", "add", "--detach", "--", own, "HEAD"]);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).not.toContain(own);
+    });
+
+    it("reports a dead marker's leftover once even though the registry lists it too", async () => {
+      const lockDir = makeTmpDir();
+      const repo = initRepo();
+      const root = resolveDeepestExisting(containmentRoot(repo));
+      const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+      fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+      git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+      const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+      writeWorktreeMarker(lockDir, root, worktreePath, dead.pid);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(false);
+      expect(check?.detail?.split("was interrupted")).toHaveLength(2);
+      expect(check?.detail).not.toContain("has no live probe behind it");
+    });
+  });
+});
+
+describe("doctor: git-version check", () => {
+  /** A fake PATH directory whose only binary is a `git` printing
+   * `versionLine` for `--version`. */
+  function stubGitDir(versionLine: string): string {
+    const dir = makeTmpDir();
+    const stub = path.join(dir, "git");
+    fs.writeFileSync(
+      stub,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${versionLine}'; fi\n`,
+    );
+    fs.chmodSync(stub, 0o755);
+    return dir;
+  }
+
+  /** doctor with no tools requested and a cwd outside any git work tree,
+   * so the only git it touches is the one on `pathEnv`. */
+  function run(pathEnv: string) {
+    return doctor({
+      required: [],
+      optional: [],
+      cwd: makeTmpDir(),
+      pathEnv,
+      lockDir: makeTmpDir(),
+    });
+  }
+
+  it("parseGitVersion reads the numeric version and ignores a vendor suffix", () => {
+    expect(parseGitVersion("git version 2.36.1")).toEqual({
+      major: 2,
+      minor: 36,
+      patch: 1,
+    });
+    expect(parseGitVersion("git version 2.50.1 (Apple Git-155)")).toEqual({
+      major: 2,
+      minor: 50,
+      patch: 1,
+    });
+    expect(parseGitVersion("git version 2.7")).toEqual({
+      major: 2,
+      minor: 7,
+      patch: 0,
+    });
+    expect(parseGitVersion("something else")).toBeUndefined();
+  });
+
+  it("not ok, with a warning, for a git older than 2.35: names the sync it cannot run and the listing fallback", async () => {
+    const result = await run(stubGitDir("git version 2.30.2"));
+    const check = result.checks.find((c) => c.name === "git-version");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("git 2.30.2");
+    expect(check?.detail).toContain("older than 2.35");
+    expect(check?.detail).toContain("worktree_sync_failed");
+    expect(check?.detail).toContain("newline-separated");
+    expect(result.warnings.some((w) => w.includes("older than 2.35"))).toBe(
+      true,
+    );
+  });
+
+  it("not ok, with a warning naming the newline-separated listing fallback, for a git at 2.35 but older than 2.36", async () => {
+    const result = await run(stubGitDir("git version 2.35.8"));
+    const check = result.checks.find((c) => c.name === "git-version");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("git 2.35.8");
+    expect(check?.detail).toContain("older than 2.36");
+    expect(check?.detail).toContain("newline-separated");
+    expect(check?.detail).not.toContain("worktree_sync_failed");
+    expect(result.warnings.some((w) => w.includes("older than 2.36"))).toBe(
+      true,
+    );
+  });
+
+  it("ok, with no git warning, for a git at or above 2.36", async () => {
+    for (const line of [
+      "git version 2.36.0",
+      "git version 2.50.1 (Apple Git-155)",
+    ]) {
+      const result = await run(stubGitDir(line));
+      const check = result.checks.find((c) => c.name === "git-version");
+      expect(check?.ok, line).toBe(true);
+      expect(check?.detail, line).toContain("meets the 2.36 minimum");
+      expect(
+        result.warnings.filter((w) => w.includes("older than")),
+        line,
+      ).toEqual([]);
+    }
+  });
+
+  it("not ok when the version line cannot be read, and when git is not on PATH at all", async () => {
+    const unreadable = await run(stubGitDir("not a version"));
+    const unreadableCheck = unreadable.checks.find(
+      (c) => c.name === "git-version",
+    );
+    expect(unreadableCheck?.ok).toBe(false);
+    expect(unreadableCheck?.detail).toContain("could not determine");
+    expect(unreadableCheck?.detail).toContain("not a version");
+
+    const absent = await run(makeTmpDir());
+    const absentCheck = absent.checks.find((c) => c.name === "git-version");
+    expect(absentCheck?.ok).toBe(false);
+    expect(absentCheck?.detail).toContain("git not found on PATH");
+  });
+
+  it("takes the version from the tool loop when git is among the checked tools", async () => {
+    const result = await doctor({
+      required: ["git"],
+      optional: [],
+      cwd: makeTmpDir(),
+      pathEnv: stubGitDir("git version 2.30.2"),
+      lockDir: makeTmpDir(),
+    });
+    expect(result.tools.find((t) => t.name === "git")?.version).toBe(
+      "git version 2.30.2",
+    );
+    const check = result.checks.find((c) => c.name === "git-version");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("git 2.30.2");
+  });
+});
+
+describe("doctor: stale-worktree check on a git that rejects -z, and on one whose listing cannot run", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  function initRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return repo;
+  }
+
+  function addScratchWorktree(repo: string): string {
+    const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+    return resolveDeepestExisting(worktreePath);
+  }
+
+  it("still reports a registered scratch worktree with no marker, through the newline-separated fallback", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "reject-z");
+    const resolved = addScratchWorktree(repo);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      pathEnv: shimDir,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(resolved);
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.warnings.filter((w) => w.includes("could not run"))).toEqual(
+      [],
+    );
+    // The shim is the git doctor ran, not the host's.
+    expect(
+      result.checks.find((c) => c.name === "git-version")?.detail,
+    ).toContain(path.join(shimDir, "git"));
+  });
+
+  it("still reports a registered scratch worktree through the fallback when git rejects -z with the usage-error status alone, nothing on stderr", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "reject-z-silent");
+    const resolved = addScratchWorktree(repo);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      pathEnv: shimDir,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.warnings.filter((w) => w.includes("could not run"))).toEqual(
+      [],
+    );
+  });
+
+  it("warns that the registry could not be read, and does not answer from the fallback, when the -z listing dies with a fatal message that names no option", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "fail-z");
+    addScratchWorktree(repo);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      pathEnv: shimDir,
+      lockDir,
+    });
+
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(`git worktree list could not run for ${root}`) &&
+          w.includes("git worktree list --porcelain -z exited 128"),
+      ),
+    ).toBe(true);
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+  });
+
+  it("warns that the registry could not be read, instead of a silently clean check, when no listing form runs", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+    addScratchWorktree(repo);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      pathEnv: shimDir,
+      lockDir,
+    });
+
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(`git worktree list could not run for ${root}`) &&
+          w.includes("exited 128"),
+      ),
+    ).toBe(true);
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+  });
+});
+
+describe("doctor: stale-worktree check and the scratch owner record", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  function initRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return repo;
+  }
+
+  function addScratchWorktree(repo: string): string {
+    const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
+    return resolveDeepestExisting(worktreePath);
+  }
+
+  function writeOwner(
+    worktreePath: string,
+    pid: number | undefined,
+    timestamp: string = new Date().toISOString(),
+  ): void {
+    fs.writeFileSync(
+      path.join(path.dirname(worktreePath), SCRATCH_OWNER_FILE),
+      JSON.stringify({
+        pid,
+        timestamp,
+        logDir: path.dirname(path.dirname(worktreePath)),
+      }),
+    );
+  }
+
+  const FAR_PAST = "2020-01-01T00:00:00.000Z";
+
+  /** A pid that is alive from any user's point of view: pid 1 always
+   * exists, and the liveness check reads the EPERM a non-root user gets
+   * from signalling it as alive. */
+  const ALIVE_PID = 1;
+
+  it("ok, naming the live probe, for a registered scratch worktree whose owner record names a live process; not ok once that process is gone", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const resolved = addScratchWorktree(repo);
+    const sleeper = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)"],
+      { stdio: "ignore" },
+    );
+    const exited = new Promise<void>((resolve) => {
+      sleeper.once("exit", () => resolve());
+    });
+    try {
+      writeOwner(resolved, sleeper.pid);
+
+      const live = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = live.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).not.toContain(resolved);
+      expect(check?.detail).not.toContain("worktree remove");
+      // The live worktree is a hint, naming what holds it and for how
+      // long, never part of the check's own detail.
+      expect(live.hints).toHaveLength(1);
+      expect(live.hints[0]).toContain(
+        `a live probe (pid ${String(sleeper.pid)}) owns the scratch worktree at ${resolved};`,
+      );
+      expect(live.hints[0]).toContain(scratchOwnerPath(resolved));
+      expect(live.hints[0]).toContain(
+        `${String(SCRATCH_OWNER_MAX_AGE_HOURS)} hours`,
+      );
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+    await exited;
+
+    const dead = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = dead.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(dead.hints).toEqual([]);
+  });
+
+  it("not ok, with the manual command and no hint, for a registered scratch worktree whose owner record names an alive pid under a timestamp past the bound", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const resolved = addScratchWorktree(repo);
+    writeOwner(resolved, ALIVE_PID, FAR_PAST);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("has no live probe behind it");
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.hints).toEqual([]);
+  });
+
+  it("ok, with a hint naming the pid, the path, the record, and the bound, for the same worktree under a fresh record naming the same alive pid", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const resolved = addScratchWorktree(repo);
+    writeOwner(resolved, ALIVE_PID);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).not.toContain(resolved);
+    expect(result.hints).toHaveLength(1);
+    expect(result.hints[0]).toContain(
+      `a live probe (pid ${String(ALIVE_PID)}) owns the scratch worktree at ${resolved};`,
+    );
+    expect(result.hints[0]).toContain(scratchOwnerPath(resolved));
+    expect(result.hints[0]).toContain(
+      `${String(SCRATCH_OWNER_MAX_AGE_HOURS)} hours`,
+    );
+    expect(result.hints[0]).not.toContain(
+      "named by this repository's worktree marker",
+    );
+  });
+
+  it("not ok, with the manual command, for a registered scratch worktree named by a marker whose pid is alive but whose owner record is past the bound: an alive marker pid vouches for nothing", async () => {
+    // A marker whose pid was recycled by an unrelated process must not
+    // hide a registered leftover: the path is judged by its own owner
+    // record like any other registered scratch worktree.
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const resolved = addScratchWorktree(repo);
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: resolved,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: ALIVE_PID,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    writeOwner(resolved, ALIVE_PID, FAR_PAST);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("has no live probe behind it");
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.hints).toEqual([]);
+  });
+
+  it("not ok, as the interrupted probe's leftover with the manual command, for a dead marker naming a scratch worktree whose owner record is past the bound", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const resolved = addScratchWorktree(repo);
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: resolved,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: deadPid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    writeOwner(resolved, ALIVE_PID, FAR_PAST);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("was interrupted");
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.hints).toEqual([]);
+  });
+
+  it("ok, naming the live probe, for a dead marker whose worktree's owner record names a live process", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const resolved = addScratchWorktree(repo);
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: resolved,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: deadPid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const sleeper = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)"],
+      { stdio: "ignore" },
+    );
+    const exited = new Promise<void>((resolve) => {
+      sleeper.once("exit", () => resolve());
+    });
+    try {
+      writeOwner(resolved, sleeper.pid);
+
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: repo,
+        lockDir,
+      });
+
+      const check = result.checks.find((c) => c.name === "stale-worktree");
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).not.toContain(resolved);
+      expect(result.hints).toHaveLength(1);
+      expect(result.hints[0]).toContain(
+        `a live probe (pid ${String(sleeper.pid)}) owns the scratch worktree at ${resolved}, named by this repository's worktree marker;`,
+      );
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+    await exited;
   });
 });

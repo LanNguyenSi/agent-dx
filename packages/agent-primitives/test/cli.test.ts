@@ -1172,10 +1172,38 @@ describe("cli: probe", () => {
     git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "x"]);
   }
 
-  it("-i worktree is usage_error/not_implemented, exit 2, for the probe command specifically", async () => {
+  it("defaults to -i worktree: killed, isolation.mode worktree, syncedTrackedFiles 0, node_modules listed in linked, and the working tree untouched (the acceptance-criterion CLI shape)", async () => {
     const repo = initRepo();
-    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    fs.mkdirSync(path.join(repo, "node_modules"));
+    fs.writeFileSync(
+      path.join(repo, "node_modules", "marker.txt"),
+      "present\n",
+    );
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
     commitAll(repo);
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+
+    // No -i: worktree is now the default.
     const run = await spawnCli([
       "-C",
       repo,
@@ -1183,19 +1211,21 @@ describe("cli: probe", () => {
       "--file",
       "fixture.js",
       "-n",
-      "1",
+      "2",
       "-r",
-      "y",
+      "  return false;",
       "-t",
-      "node -e 1",
-      "-i",
-      "worktree",
+      "node fixture.test.js",
     ]);
-    expect(run.code).toBe(2);
+
+    expect(run.code).toBe(0);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.command).toBe("probe");
-    expect(parsed.status).toBe("usage_error");
-    expect(parsed.reason).toBe("not_implemented");
+    expect(parsed.status).toBe("killed");
+    expect(parsed.isolation.mode).toBe("worktree");
+    expect(parsed.isolation.syncedTrackedFiles).toBe(0);
+    expect(parsed.isolation.linked).toContain(path.join(repo, "node_modules"));
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
   it("reports killed, exit 0, for a fixture whose test catches the mutant (the acceptance-criterion CLI shape)", async () => {

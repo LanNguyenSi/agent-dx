@@ -3,12 +3,23 @@ import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "../envelope.js";
 import { sha256File } from "../hash.js";
-import { isPidAlive, listMarkers, type MarkerEntry } from "../lock.js";
+import { isPidAlive, lockKey, listMarkers, type MarkerEntry } from "../lock.js";
 import {
   containmentRoot,
   isPathContained,
   resolveDeepestExisting,
 } from "../probe/containment.js";
+import {
+  GIT_MIN_VERSION_WORKTREE_LIST_Z,
+  GIT_MIN_VERSION_WORKTREE_SYNC,
+  isScratchWorktreePath,
+  liveForeignOwner,
+  parseWorktreeListLines,
+  parseWorktreeListZ,
+  rejectsOption,
+  SCRATCH_OWNER_MAX_AGE_HOURS,
+  scratchOwnerPath,
+} from "../probe/isolation.js";
 
 export interface ToolCheck {
   name: string;
@@ -141,6 +152,94 @@ function captureVersion(binPath: string, timeoutMs: number): VersionCapture {
   return { version: out.split("\n")[0]?.trim(), timedOut: false };
 }
 
+export interface GitVersion {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+/** The numeric version in a `git --version` line (`git version 2.36.1`,
+ * `git version 2.50.1 (Apple Git-155)`), or undefined when the line
+ * does not carry one. Exported for the tests. */
+export function parseGitVersion(line: string): GitVersion | undefined {
+  const m = /^git version (\d+)\.(\d+)(?:\.(\d+))?/.exec(line.trim());
+  if (m === null) return undefined;
+  return {
+    major: Number(m[1]),
+    minor: Number(m[2]),
+    patch: m[3] === undefined ? 0 : Number(m[3]),
+  };
+}
+
+/** True when `version` is older than the `major.minor` in `minimum`
+ * (a patch level never decides). */
+function isGitOlderThan(version: GitVersion, minimum: string): boolean {
+  const [major, minor] = minimum.split(".").map(Number);
+  return (
+    version.major < major || (version.major === major && version.minor < minor)
+  );
+}
+
+/** The `git-version` check: git's version against what `probe -i
+ * worktree` relies on (see the two minimums in `isolation.ts`). `ok`
+ * only for a version at or above `GIT_MIN_VERSION_WORKTREE_LIST_Z`;
+ * every other state names what the probe does on this git. Exported for
+ * the tests. */
+export function gitVersionCheck(
+  gitPath: string | undefined,
+  versionLine: string | undefined,
+): DoctorCheckItem {
+  const needs = `probe -i worktree needs git ${GIT_MIN_VERSION_WORKTREE_SYNC} or newer`;
+  if (gitPath === undefined) {
+    return {
+      name: "git-version",
+      ok: false,
+      detail: `git not found on PATH; ${needs}`,
+    };
+  }
+  const version =
+    versionLine === undefined ? undefined : parseGitVersion(versionLine);
+  if (version === undefined) {
+    return {
+      name: "git-version",
+      ok: false,
+      detail:
+        `could not determine the version of git at ${gitPath}` +
+        (versionLine === undefined ? "" : ` from "${versionLine}"`) +
+        `; ${needs}`,
+    };
+  }
+  const v = `${version.major}.${version.minor}.${version.patch}`;
+  if (isGitOlderThan(version, GIT_MIN_VERSION_WORKTREE_SYNC)) {
+    return {
+      name: "git-version",
+      ok: false,
+      detail:
+        `git ${v} at ${gitPath} is older than ${GIT_MIN_VERSION_WORKTREE_SYNC}: ` +
+        `probe -i worktree cannot sync the working tree on it (git apply ` +
+        `--allow-empty is unavailable) and reports worktree_sync_failed; ` +
+        `use -i inplace; below ${GIT_MIN_VERSION_WORKTREE_LIST_Z} the worktree ` +
+        `listing also falls back to the newline-separated form`,
+    };
+  }
+  if (isGitOlderThan(version, GIT_MIN_VERSION_WORKTREE_LIST_Z)) {
+    return {
+      name: "git-version",
+      ok: false,
+      detail:
+        `git ${v} at ${gitPath} is older than ${GIT_MIN_VERSION_WORKTREE_LIST_Z}: ` +
+        `git worktree list --porcelain -z is unavailable, so the worktree ` +
+        `listing falls back to the newline-separated form, and a worktree ` +
+        `path containing a newline is then reported as unparseable`,
+    };
+  }
+  return {
+    name: "git-version",
+    ok: true,
+    detail: `git ${v} at ${gitPath} meets the ${GIT_MIN_VERSION_WORKTREE_LIST_Z} minimum for probe -i worktree`,
+  };
+}
+
 /** Names that must be a plain binary basename, never a path segment,
  * so a `-r`/`-o` entry can never escape PATH via `../` traversal. */
 function assertPlainBinaryName(name: string, flag: string): void {
@@ -266,6 +365,26 @@ export async function doctor(
 
   const checks: DoctorCheckItem[] = [];
 
+  // git's own version, from the tool loop when git was among the tools
+  // (the usual case) and from one capture of its own otherwise, so the
+  // check below and the registry listing further down never depend on
+  // which `-r`/`-o` lists the caller passed.
+  const gitTool = tools.find((t) => t.name === "git");
+  let gitPath = gitTool?.path;
+  let gitVersionLine = gitTool?.version;
+  if (gitTool === undefined) {
+    const hit = findOnPath(["git"], dirs);
+    if (hit !== undefined) {
+      gitPath = hit.path;
+      gitVersionLine = captureVersion(hit.path, versionTimeoutMs).version;
+    }
+  }
+  const gitVersion = gitVersionCheck(gitPath, gitVersionLine);
+  checks.push(gitVersion);
+  if (!gitVersion.ok && gitPath !== undefined) {
+    warnings.push(gitVersion.detail ?? "git is older than the minimum");
+  }
+
   const nodeModulesPresent = fs.existsSync(path.join(cwd, "node_modules"));
   checks.push({
     name: "node_modules",
@@ -364,10 +483,131 @@ export async function doctor(
         : detailParts.join(" "),
   });
 
+  // `worktree` probes key their in-flight marker on the repository root
+  // (not on `--file`) and record the worktree's own path in it, so a
+  // leftover from a SIGKILL/crash is found by looking for exactly the
+  // marker file that key would produce, rather than by scanning every
+  // marker's `targetPath` (a worktree directory, not a repo-contained
+  // file, so `isPathContained` above would never match it). The marker
+  // is not the only trail: git itself registers the worktree (locked,
+  // for the duration of the checkout) before `git worktree add`
+  // returns, so every registered worktree of the probe's own scratch
+  // shape is a leftover too unless a live probe owns it, marker or not
+  // (a marker deleted by hand, or a run that died before writing one).
+  // The registry is read BEFORE the markers: a probe starting in
+  // between writes its marker before its add registers anything, so a
+  // live run is never reported as a leftover. A live run under another
+  // lock directory has no marker here at all; its scratch directory's
+  // owner record (see `liveForeignOwner`) is what keeps it out of the
+  // leftovers, for as long as the record is within its bound: past
+  // it the worktree is a leftover whatever the pid says, reported with
+  // the command like any other. A registry that cannot be read is said
+  // so in a warning, never treated as empty.
+  const registry = insideGitWorkTree
+    ? listScratchWorktreesSync(markerRoot, gitPath)
+    : { ok: true, paths: [] as string[] };
+  if (!registry.ok) {
+    warnings.push(
+      `git worktree list could not run for ${markerRoot} ` +
+        `(${registry.detail ?? "unknown"}); a worktree a previous probe ` +
+        `left registered cannot be reported`,
+    );
+  }
+  const registeredScratch = registry.paths;
+  const worktreeMarkerFileName = `${lockKey(markerRoot)}.marker.json`;
+  const worktreeMarker = listMarkers(options.lockDir).find(
+    (m) => path.basename(m.markerPath) === worktreeMarkerFileName,
+  );
+  const markerAlive =
+    worktreeMarker !== undefined && isPidAlive(worktreeMarker.pid);
+  const markerTarget =
+    worktreeMarker !== undefined &&
+    typeof worktreeMarker.targetPath === "string"
+      ? resolveDeepestExisting(path.resolve(worktreeMarker.targetPath))
+      : undefined;
+  const manualRemove = (worktreePath: string): string =>
+    `git -C ${markerRoot} worktree remove --force --force -- ${worktreePath}`;
+  const worktreeProblems: string[] = [];
+  // A worktree a live probe owns is never a problem for this check; each
+  // becomes a hint below, since a worktree parked behind an alive pid is
+  // still worth a line naming what holds it and for how long.
+  const liveOwned: { path: string; pid: number; fromMarker: boolean }[] = [];
+  if (worktreeMarker !== undefined && !markerAlive) {
+    const markerOwner =
+      markerTarget !== undefined ? liveForeignOwner(markerTarget) : undefined;
+    if (markerOwner !== undefined) {
+      liveOwned.push({
+        path: markerTarget ?? String(worktreeMarker.targetPath),
+        pid: markerOwner,
+        fromMarker: true,
+      });
+    } else if (
+      markerTarget !== undefined &&
+      isScratchWorktreePath(markerTarget)
+    ) {
+      worktreeProblems.push(
+        `a worktree probe on ${markerRoot} was interrupted; leftover worktree at ` +
+          `${worktreeMarker.targetPath}; the next \`probe -i worktree\` on this ` +
+          `repository recovers it automatically, or run \`${manualRemove(
+            worktreeMarker.targetPath,
+          )}\` manually`,
+      );
+    } else {
+      // Never a removal command for this one: the path is not of the
+      // shape the probe creates, so it is not the probe's to remove,
+      // by hand or otherwise.
+      worktreeProblems.push(
+        `the stale worktree marker for ${markerRoot} names ` +
+          `${String(worktreeMarker.targetPath)}, which is not a worktree of the ` +
+          `probe's own scratch shape and is never removed automatically; ` +
+          `inspect it, then delete the marker file to clear it: ` +
+          `${worktreeMarker.markerPath}`,
+      );
+    }
+  }
+  for (const registeredPath of registeredScratch) {
+    if (registeredPath === markerTarget && !markerAlive) {
+      // Named by a marker whose probe is gone: reported above, or a hint.
+      // A marker whose pid is alive proves nothing about this path (the
+      // pid may have been recycled), so the path is judged below like
+      // any other registered scratch worktree, by its own owner record.
+      continue;
+    }
+    const owner = liveForeignOwner(registeredPath);
+    if (owner !== undefined) {
+      liveOwned.push({ path: registeredPath, pid: owner, fromMarker: false });
+      continue;
+    }
+    worktreeProblems.push(
+      `a registered worktree of the probe's own scratch shape at ` +
+        `${registeredPath} has no live probe behind it; the next \`probe -i ` +
+        `worktree\` on this repository removes it, or run ` +
+        `\`${manualRemove(registeredPath)}\` manually`,
+    );
+  }
+  checks.push({
+    name: "stale-worktree",
+    ok: worktreeProblems.length === 0,
+    detail:
+      worktreeProblems.length === 0
+        ? "no stale worktree marker or leftover registered worktree for this repository"
+        : worktreeProblems.join(" "),
+  });
+
   const hints: string[] = [];
   for (const tool of missingRequired) {
     const hint = GENERIC_HINTS[tool.name];
     if (hint) hints.push(hint);
+  }
+  for (const live of liveOwned) {
+    hints.push(
+      `a live probe (pid ${String(live.pid)}) owns the scratch worktree at ` +
+        `${live.path}${live.fromMarker ? ", named by this repository's worktree marker" : ""}; ` +
+        `it is left alone while that process is alive and its owner record ` +
+        `${scratchOwnerPath(live.path)} is within ${String(SCRATCH_OWNER_MAX_AGE_HOURS)} ` +
+        `hours of the clock; past that bound the next \`probe -i worktree\` on ` +
+        `this repository removes it and this check reports it as a leftover`,
+    );
   }
 
   return {
@@ -399,6 +639,111 @@ async function isAutoRecoverable(marker: MarkerEntry): Promise<boolean> {
   if (targetHash !== marker.mutatedHash) return false;
   const backupHash = await sha256File(marker.backupPath).catch(() => undefined);
   return backupHash === marker.preHash;
+}
+
+interface ScratchWorktreeRegistry {
+  /** True when a listing ran and parsed; `paths` says nothing
+   * otherwise, and `detail` says why. */
+  ok: boolean;
+  paths: string[];
+  detail?: string;
+}
+
+/** One `git worktree list --porcelain` run at `root` through `gitPath`,
+ * with or without `-z`. */
+function runWorktreeList(
+  gitPath: string,
+  root: string,
+  nul: boolean,
+): { status: number | null; stdout: string; stderr: string; error?: string } {
+  const args = ["-C", root, "worktree", "list", "--porcelain"];
+  if (nul) args.push("-z");
+  try {
+    const result = spawnSync(gitPath, args, {
+      timeout: 5000,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+      ...(result.error !== undefined ? { error: result.error.message } : {}),
+    };
+  } catch (err) {
+    return {
+      status: null,
+      stdout: "",
+      stderr: "",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/** Every registered worktree of the repository at `root` that is of the
+ * probe's own scratch shape, never the main worktree and never `root`
+ * itself, each through `resolveDeepestExisting`. The same two listing
+ * forms `listRegisteredWorktrees` in `isolation.ts` runs, through a
+ * synchronous spawn: `--porcelain -z` first, the newline-separated
+ * `--porcelain` when git rejects `-z`, decided by the same
+ * `rejectsOption` the probe's listing uses (the one copy of that
+ * predicate). Not ok when neither form ran to a parse: this is a
+ * report, and a listing that could not run is something to warn about,
+ * never an empty registry. */
+function listScratchWorktreesSync(
+  root: string,
+  gitPath: string | undefined,
+): ScratchWorktreeRegistry {
+  if (gitPath === undefined) {
+    return { ok: false, paths: [], detail: "git not found on PATH" };
+  }
+  const nul = runWorktreeList(gitPath, root, true);
+  let paths: string[];
+  if (nul.error === undefined && nul.status === 0) {
+    paths = parseWorktreeListZ(nul.stdout);
+  } else if (
+    nul.error === undefined &&
+    rejectsOption({ exitCode: nul.status, stderr: nul.stderr })
+  ) {
+    const newline = runWorktreeList(gitPath, root, false);
+    if (newline.error !== undefined || newline.status !== 0) {
+      return {
+        ok: false,
+        paths: [],
+        detail: `git rejected -z and git worktree list --porcelain ${
+          newline.error !== undefined
+            ? `did not run (${newline.error})`
+            : `exited ${String(newline.status)}`
+        }`,
+      };
+    }
+    const parsed = parseWorktreeListLines(newline.stdout);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        paths: [],
+        detail: `git rejected -z and the newline-separated listing could not be parsed (${parsed.detail})`,
+      };
+    }
+    paths = parsed.paths;
+  } else {
+    return {
+      ok: false,
+      paths: [],
+      detail:
+        nul.error !== undefined
+          ? `git worktree list --porcelain -z did not run (${nul.error})`
+          : `git worktree list --porcelain -z exited ${String(nul.status)}`,
+    };
+  }
+  const resolved = paths.map((p) => resolveDeepestExisting(path.resolve(p)));
+  const main = resolved[0];
+  return {
+    ok: true,
+    paths: resolved.filter(
+      (p) => p !== main && p !== root && isScratchWorktreePath(p),
+    ),
+  };
 }
 
 function isInsideGitWorkTree(startDir: string): boolean {

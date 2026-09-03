@@ -85,7 +85,23 @@ need a rebuild step first). Version captures share one aggregate deadline
 (default 3000ms) across every tool combined; once it is spent, remaining
 tools are still checked for presence on `PATH`, but their `--version`
 capture is skipped rather than each paying its own timeout, and one
-warning names how many were skipped.
+warning names how many were skipped. A `git-version` check reads the
+installed git against what `probe -i worktree` relies on: it is ok from
+git 2.36 on, and below that a warning names what the probe does on that
+git (below 2.35 the worktree sync cannot run at all; between 2.35 and
+2.36 the worktree listing falls back to its newline-separated form; see
+the `probe` section). The `stale-worktree` check reads the same
+listing, with the same fallback; when the listing cannot run in any
+form, a warning says that a leftover registered worktree cannot be
+reported, rather than the check reading as clean. A scratch worktree a
+live probe owns (its `owner.json` names an alive pid and is within 24
+hours of the clock) is not a leftover: the check stays ok and a hint
+names the worktree, the pid, the record, and the bound; past that
+bound the worktree is reported as a leftover with the manual command.
+The bound cuts both ways: a probe whose own run outlives it, or a clock
+that moves by more than it, can have its worktree removed by a
+concurrent probe under another lock directory, and that run then ends
+with `baseline_failed` rather than a verdict.
 
 ```bash
 agent-primitives doctor
@@ -238,25 +254,172 @@ the result.
 
 ```bash
 agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
-  -t 'npm test' -i inplace
-agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
   -t 'npm test'
+agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
+  -t 'npm test' -i inplace
 agent-primitives probe --file src/foo.js -n 1 -p mutant.patch -t 'npm test'
 ```
 
-Only `-i inplace` is implemented: it backs up the target file
-before mutating it and restores from that backup afterward (on normal
-completion, on any error, and on `SIGINT`/`SIGTERM`; on a signal the CLI
-then ends the process, while the exported `probe()` restores and returns
-control instead, unless the caller passes `exitOnSignal: true`).
-`-i worktree` (the
-eventual default, isolating the mutation in a throwaway git worktree
-instead of the working tree) returns `status: "usage_error"`,
-`reason: "not_implemented"`, exit `2`, until a later release. `--file`
-is long-only (the global `-f` is `--format`). Exactly one mutant form is
-required: `-r, --replace` (replace the whole line), `-M, --match` with
-`-w, --with` (replace the first occurrence of a substring on the line),
-or `-p, --patch` (apply a unified diff via `git apply`).
+`-i worktree` is the default: `--file` is mutated in a detached git
+worktree, never in the working tree itself. Every git invocation this
+mode makes (the worktree add, the tracked-diff capture and apply, the
+untracked-file listing, and the worktree removal) runs through an argv
+array with no shell involved, the same as `-p`'s patch path: a `--file`,
+`--log-dir`, or `--link` value containing `$(...)` or a backtick reaches
+`git` as one opaque argument, never as something a shell could expand.
+
+`-i worktree` needs git 2.35 or newer: the sync relies on `git apply
+--allow-empty`, which an older git rejects, so the run ends in
+`inconclusive`/`worktree_sync_failed`, never a verdict (`-i inplace` has
+no such floor). From git 2.36 on, the worktree listing behind the
+removal, the leftover recovery, and `doctor` runs as `git worktree list
+--porcelain -z`; on an older git it falls back to the newline-separated
+`--porcelain` form, and a worktree path containing a newline is then
+reported as unparseable rather than misread. `git worktree remove`
+itself dates from git 2.17 and `git worktree list --porcelain` from
+2.7; 2.20 is the oldest release the fallback listing, the removal, the
+leftover recovery, and `doctor`'s report were checked against.
+`agent-primitives doctor` reports the installed git against both floors
+(see its `git-version` check).
+
+Each run gets its own scratch subdirectory under `--log-dir`
+(`<log-dir>/wt-<random>/`), never a fixed name reused across separate
+invocations that happen to share `--log-dir`: a fixed name plus a
+previous run's leftover content is exactly how a stale diff would get
+replayed into a fresh, clean-tree worktree. Before the mutation runs,
+the worktree is synced to look like the actual working tree, not just
+`HEAD`: uncommitted tracked modifications are captured with `git diff
+HEAD --binary --output=<scratch file>` (written by `git` directly to
+that file, never through this process's own output capture, so a
+binary hunk's bytes are never at risk of UTF-8 decoding) and replayed
+with `git -C <worktree> apply --allow-empty` (run unconditionally, even
+against an empty diff, so a clean tree exercises the same steps as a
+dirty one); the file count in `isolation.syncedTrackedFiles` comes from
+a separate `git diff HEAD --numstat -z`, never from scanning the diff's
+own text.
+
+Every untracked, non-ignored path (`git ls-files --others
+--exclude-standard`) is synced by its own type: a regular file is
+copied; a symlink (including a dangling one) is recreated as a symlink
+pointing at the same target, never followed; a directory that is itself
+a git repository (the only shape `git ls-files` reports a directory
+path in at all) is skipped, named in a warning, rather than pulling in
+an unrelated checkout; any other entry is skipped, named in a warning
+of its own. A path inside `--log-dir` itself (this probe's own scratch
+space, including the worktree just created) is never treated as a
+source to sync; that is decided by where the entry itself sits, so an
+untracked symlink that merely points into `--log-dir` is recreated
+like any other symlink. `isolation.syncedUntrackedFiles` counts the
+`ls-files` entries this sync acted on, not the number of files that
+ended up on disk -- a skipped entry still counts as one. A gitignored
+`--file` is therefore never synced either way (not tracked, and
+excluded by `--exclude-standard`); probing one under `-i worktree`
+fails fast with `reason: "target_not_synced"` rather than a raw file-not-
+found further into the run. `--allow-outside` is rejected outright as a
+usage error (`reason: "worktree_allow_outside_unsupported"`) when
+combined with `-i worktree`: its placement is relative to the
+containment root, which has no meaning once re-based onto a worktree
+copy. Submodule contents are not synced by any of the above; a
+submodule directory is tracked as a gitlink, not walked into.
+
+Every `node_modules` directory or directory symlink (e.g. a hoisted or
+workspace-linked install) found in the source tree up to 3 levels deep
+(never one nested inside another `node_modules`) is symlinked into the
+worktree at the same relative path, alongside every `--link` extra, so
+installed dependencies and tool caches are shared rather than
+reinstalled per probe. `--pre`/`-t` run with their cwd mapped onto the
+worktree at `--cwd`'s own relative offset from the containment root.
+Any non-zero exit while syncing, or a genuine filesystem failure while
+copying/linking, is `status: "inconclusive"`, `reason:
+"worktree_sync_failed"`, exit `2`, never a verdict.
+
+The sync runs under the same abort machinery as `--pre`/`-t`: every git
+call it makes is killed on `SIGINT`/`SIGTERM` and waited for before
+anything removes the worktree underneath it, and the untracked-file copy
+checks the abort between batches rather than running to the end of the
+listing. A sync stopped that way is `reason: "aborted"` for a library
+caller, never `worktree_sync_failed`; on the CLI the signal handler ends
+the process first, so nothing is printed (see the signals section
+above). The worktree is removed on normal completion, on any error,
+and on `SIGINT`/`SIGTERM`, including a signal that lands while the sync
+is still running or while `git worktree add` itself is: whatever is on
+disk at the path is deleted, then `git worktree remove --force --force`
+runs (with the directory gone git accepts a missing worktree, and the
+second `--force` clears the `locked` registration an interrupted add
+leaves behind, which a single `--force` refuses and `git worktree
+prune` skips), then `git worktree prune`; the outcome is then checked
+against `git worktree list` and the disk rather than read off an exit
+code, and a removal that did not take keeps the repository-keyed marker
+and adds a warning naming the path and the manual command. When that
+listing cannot run in any form, the registry is unknown rather than
+"still registered": the removal is judged by the disk alone (never by
+`git worktree remove`'s exit status, which is non-zero for a path git
+never registered, the very leftover an add killed early leaves), a
+warning reports it as done but unverified, and the marker is cleared,
+so a git that cannot list never turns a removal that took into a
+`stale_worktree` on every later run. A leftover still on disk after
+such an unverified removal keeps the marker and is reported with the
+marker file as the escape, not with the manual `git worktree remove`,
+which cannot be relied on for a path whose registration is unknown.
+The one state git cannot recover from on its own, an entry the add
+left half-written (its `commondir` present but still empty, which
+makes every `git worktree` command in the repository fail), is cleared
+by removing that entry from the repository's `worktrees` administrative
+directory, and only when it names the probe's own worktree. That marker
+is written before `git worktree add` runs and records the `--log-dir`,
+so a `SIGKILL` or a crash at any point from there on leaves it, along
+with whatever git had registered by then, and `agent-primitives doctor`
+reports the leftover as a `stale-worktree` check naming the path and
+the manual command. `doctor` reads git's own `git worktree list` as
+well as the marker, so a marker deleted by hand still leaves the
+registration reported, and the next `probe -i worktree` run on the same
+repository removes every such leftover before it starts (a warning
+names `recovered_stale_worktree`), marker or not. Each scratch
+directory also carries an `owner.json` recording the pid of the probe
+that created it and when: a registered scratch worktree whose owner is
+still alive under a record within 24 hours of the clock is a probe in
+flight under another `AGENT_PRIMITIVES_LOCK_DIR` (the lock serializes
+probes within one lock directory only), which the recovery names in a
+warning and leaves alone and `doctor` names in a hint (the pid, the
+path, the record, and the bound). A record older than that no longer
+vouches for its worktree whatever its pid says, since a probe's
+worktree lives for one run and a pid can be recycled: the worktree is
+a leftover again, removed by the next run and reported by `doctor`
+with the manual command. Only a path of
+the probe's own scratch shape (`<log-dir>/wt-<uuid>/wt`, the uuid in
+its 8-4-4-4-12 hex layout) that git reports as a worktree of the
+repository, or that sits under the recovering run's own `--log-dir`, is
+ever deleted; the `--log-dir` a marker recorded is never the directory
+a marker's path is checked against, since a marker that supplied both
+the path and the root would certify itself, and a path whose
+registration could not be checked is deleted only under the run's own
+`--log-dir` as well. A marker naming anything else, or a leftover that
+cannot be removed, stops the run with `reason: "stale_worktree"`,
+keeps the marker, and names the path and either the manual command or
+the marker file to delete. The lock for `worktree`
+is keyed on the repository root rather than on `--file` (two probes on
+the same repository serialize, which also covers the shared, linked
+node_modules caches, and matches `-i inplace`'s own lock key whenever
+`--cwd` is inside a repository); the in-flight marker and its automatic
+recovery described below apply only to `inplace`, since nothing in the
+original tree is ever mutated by a `worktree` probe -- the
+repository-keyed lock/marker above is what covers a `worktree` probe's
+own leftover-on-crash case instead. Outside a git work tree, `worktree`
+falls back to `inplace` with a warning naming the fallback, never an
+error.
+
+`-i inplace` backs up the target file before mutating it and restores
+from that backup afterward (on normal completion, on any error, and on
+`SIGINT`/`SIGTERM`; on a signal the CLI then ends the process, while the
+exported `probe()` restores and returns control instead, unless the
+caller passes `exitOnSignal: true`).
+
+`--file` is long-only (the global `-f` is `--format`). Exactly one mutant
+form is required: `-r, --replace` (replace the whole line), `-M, --match`
+with `-w, --with` (replace the first occurrence of a substring on the
+line), or `-p, --patch` (apply a unified diff via `git apply`, applied
+against the worktree for `-i worktree`, against the working tree itself
+for `-i inplace`).
 
 `-t` and `--pre` are shell commands, executed through `sh -c` as given,
 so neither may be filled from untrusted text (an issue body, a model's
@@ -309,8 +472,9 @@ grace: it waits further, and bounded, for the pipes to actually close
 before treating the restore as final.
 
 A probe stopped by `SIGINT`/`SIGTERM` restores the target before it does
-anything else. Whatever child was in flight (a `--pre`, a `-t`, or the
-`git apply` of a `-p` mutant) is killed with `SIGKILL` on its whole
+anything else. Whatever child was in flight (a `--pre`, a `-t`, the
+`git apply` of a `-p` mutant, or one of the git calls the `worktree`
+sync makes) is killed with `SIGKILL` on its whole
 process group; the handler then waits, bounded, for that child's stdio
 to truly close, not merely for the run's own promise to settle (which
 the flush grace above can do early), and only then copies the backup
@@ -421,8 +585,11 @@ result, restored_verified }` (paste straight into an implementer's
 `mutation_probes` output field), `baseline: { exitCode, durationMs,
 logPath, timedOut }`, `test: { command, exitCode, durationMs, timedOut,
 stdoutTail, stderrTail, logPath }`, `isolation: { mode, path, linked,
-syncedTrackedFiles, syncedUntrackedFiles }` (the `worktree`-only fields
-are empty for `inplace`).
+syncedTrackedFiles, syncedUntrackedFiles }` (`path` is the worktree
+directory for `worktree`, `null` for `inplace`; `linked` lists the
+absolute source-tree paths symlinked in; `syncedTrackedFiles` and
+`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for
+every `inplace` run).
 
 ## `init`
 

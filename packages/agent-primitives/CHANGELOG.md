@@ -78,6 +78,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`probe -i worktree` on an older git, and across lock directories.** The
+  worktree listing behind the removal's assertion, the leftover recovery,
+  and `doctor` no longer requires `git worktree list --porcelain -z`: when
+  git rejects `-z` (a release older than 2.36), the newline-separated
+  `--porcelain` form runs instead and is parsed against the fixed attribute
+  order, so a worktree path containing a newline is reported as unparseable
+  rather than misread, a block that ends after its `worktree` line alone
+  (the shape such a path takes when its newline reads as a block boundary)
+  refused with the rest instead of registering a phantom path. A listing
+  that cannot run in any form is an unknown registry, never "still
+  registered": the removal is then judged by the disk alone (never by `git
+  worktree remove`'s exit status, which is non-zero for a path git never
+  registered, so a marker naming such a path is recovered instead of
+  stopping every later run), reported as done but unverified in a warning,
+  and the marker is cleared, so a git that cannot list no longer turns a
+  removal that took into a `stale_worktree` on every later run; a leftover
+  still on disk after an unverified removal is reported with the marker file
+  as the escape, since the manual `git worktree remove` cannot be relied on
+  when the registration is unknown; the recovery and `doctor` say in a
+  warning that a leftover registration could not be checked for. The
+  worktree sync's own floor is git 2.35 (`git apply --allow-empty`); both
+  floors are documented in the README, and `doctor` gained a `git-version`
+  check that reads the installed git against them and warns below 2.36. Each
+  scratch directory now carries an `owner.json` with the creating probe's
+  pid and a timestamp, written before the add runs: the recovery and
+  `doctor` skip a registered or marker-named scratch worktree whose owner is
+  still alive under a record within 24 hours of the clock, the recovery
+  naming it as a live probe under another `AGENT_PRIMITIVES_LOCK_DIR` in a
+  warning and `doctor` in a hint (the pid, the path, the record, and the
+  bound) rather than removing it (the lock serializes probes within one lock
+  directory only), and the removal gate refuses such a path outright; a
+  record past that bound no longer vouches for its worktree whatever its pid
+  says, so the worktree is a leftover again, removed by the next run and
+  reported by `doctor` with the manual command. A path git does not report
+  is now checked against the recovering run's own `--log-dir`, never against
+  the log dir a marker recorded, so a marker cannot certify its own
+  containment; the scratch-shape check pins the uuid's 8-4-4-4-12 hex layout
+  instead of any 36 characters of the class.
+
 - **Envelope bound and reduction.** The bound is met by reducing the
   result's structure, never by cutting the serialized JSON text. The
   deep-copied result is walked once per attempt and four caps derived from
@@ -417,22 +456,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failures-first; a cut is reported via `truncated: true` and the full,
   uncapped result is written to the log directory.
 
-- `probe` subcommand (`inplace` isolation only; `-i worktree` still
-  returns `not_implemented`, a later release flips the default): the full
-  mutation-probe pipeline (lock, containment, stale-marker recovery,
-  baseline, apply, `--pre`/test, restore, hash verification, classify)
-  for all three mutant forms (`-r, --replace`, `-M, --match` with
-  `-w, --with`, `-p, --patch` via `git apply`). A per-target lock
-  (`src/lock.ts`, `O_EXCL`, stale-pid reclaim) outside the repository
-  serializes concurrent probes on the same file; an in-flight marker
-  written before mutation lets the next invocation recover automatically
-  from a `SIGKILL`/crash mid-mutation, or refuse with
-  `stale_probe_marker` naming the backup path when it cannot prove that
-  recovery is safe. Restore runs on normal completion, on any thrown
-  error, and on `SIGINT`/`SIGTERM`; a failed restore is terminal
-  (`restore_failed`, exit 2, never a `killed`/`survived` verdict).
-  `doctor`'s `checks` gained a `stale-probe-marker` entry for the current
-  repository.
+- `probe` subcommand (`inplace` isolation): the full mutation-probe
+  pipeline (lock, containment, stale-marker recovery, baseline, apply,
+  `--pre`/test, restore, hash verification, classify) for all three
+  mutant forms (`-r, --replace`, `-M, --match` with `-w, --with`,
+  `-p, --patch` via `git apply`). A per-target lock (`src/lock.ts`,
+  `O_EXCL`, stale-pid reclaim) outside the repository serializes
+  concurrent probes on the same file; an in-flight marker written before
+  mutation lets the next invocation recover automatically from a
+  `SIGKILL`/crash mid-mutation, or refuse with `stale_probe_marker`
+  naming the backup path when it cannot prove that recovery is safe.
+  Restore runs on normal completion, on any thrown error, and on
+  `SIGINT`/`SIGTERM`; a failed restore is terminal (`restore_failed`,
+  exit 2, never a `killed`/`survived` verdict). `doctor`'s `checks`
+  gained a `stale-probe-marker` entry for the current repository.
+
+- `probe`'s `worktree` isolation (now the default `-i`): the mutation
+  runs inside a detached git worktree, never the working tree itself.
+  Every git invocation this mode makes runs through an argv array with
+  no shell involved (the same runner `-p, --patch` already used), so a
+  `--file`, `--log-dir`, or `--link` value reaches `git` as one opaque
+  argument regardless of its characters. Each run gets its own scratch
+  subdirectory under `--log-dir` (`<log-dir>/wt-<random>/`), never a
+  fixed name reused across invocations that happen to share `--log-dir`.
+  The worktree is synced to the actual working tree state, not just
+  `HEAD`: tracked modifications are captured with `git diff HEAD
+  --binary --output=<scratch file>` (written by git directly to that
+  file, never through this process's own output capture) and replayed
+  with `git -C <worktree> apply --allow-empty` -- run unconditionally,
+  even against an empty diff, so a clean tree and a dirty one exercise
+  the same steps; the file count reported in `isolation.syncedTrackedFiles`
+  comes from a separate `git diff HEAD --numstat -z`, never from the
+  diff's own text. Every untracked, non-ignored path (`git ls-files
+  --others --exclude-standard`) is synced by its own type: a regular
+  file is copied, a symlink (dangling or not) is recreated as a
+  symlink, a directory that is itself a git repository is skipped with
+  a warning, any other entry is skipped with a warning naming it, and
+  a path inside `--log-dir` itself is never treated as a source (decided
+  by where the entry itself sits, so an untracked symlink that merely
+  points into `--log-dir` is recreated like any other symlink).
+  `isolation.syncedUntrackedFiles` counts the `ls-files` entries acted
+  on, not the files that ended up on disk. A gitignored `--file` is
+  never synced by either sync step, and probing one under `worktree`
+  fails fast with `reason: "target_not_synced"`. `--allow-outside`
+  combined with `-i worktree` is a usage error
+  (`worktree_allow_outside_unsupported`) rather than a raw path or hash
+  failure. Every `node_modules` directory or directory symlink (a
+  hoisted or workspace-linked install included) up to 3 levels deep
+  (never one nested inside another) is symlinked into the worktree at
+  the same relative path, alongside every `--link` extra, reported in
+  `isolation.linked`. Any non-zero exit while syncing, or a genuine
+  filesystem failure while copying/linking, is
+  `inconclusive`/`worktree_sync_failed`, exit 2, never a verdict. The
+  whole sync runs under the probe's own abort signal and in-flight
+  accounting: every git call it makes is killed when `SIGINT`/`SIGTERM`
+  arrives and is waited for before anything removes the worktree
+  underneath it, and the untracked-file copy checks the same abort
+  between batches instead of running to the end of the listing. A sync
+  stopped that way reports `inconclusive`/`aborted`, never
+  `worktree_sync_failed`: it is a run that was stopped, not a sync that
+  failed (on the CLI the signal handler ends the process first, so the
+  result is what a library caller sees). The
+  lock and the leftover-worktree marker are keyed on the repository
+  root instead of `--file` (two probes on one repository serialize,
+  covering the shared, linked node_modules caches, and matching
+  `inplace`'s own key whenever `--cwd` is inside a repository); the
+  file-keyed in-flight marker from `inplace` is not written at all for
+  `worktree`, since nothing in the original tree is ever mutated -- the
+  original target's hash is still checked before and after, and a
+  mismatch is reported as `worktree_original_tree_modified` rather than
+  silently trusted. The worktree is removed on normal completion, on
+  any thrown error, and on `SIGINT`/`SIGTERM` (the signal handler and
+  the pipeline's own cleanup share one in-flight promise, so neither
+  can let the process exit while the other's removal is still running),
+  including a signal that lands while the worktree is still being
+  synced or while `git worktree add` itself is running: whatever is on
+  disk at the path is deleted, then `git worktree remove --force
+  --force` runs (with the directory gone git accepts a missing
+  worktree, and the second `--force` clears the `locked` registration
+  an interrupted add leaves behind, which a single `--force` refuses
+  and `git worktree prune` skips), then `git worktree prune`, with the
+  outcome asserted against `git worktree list` and the disk rather than
+  inferred from an exit code; a removal that did not take keeps the
+  repository-keyed marker and adds a warning naming the path and the
+  manual command. The one state git cannot recover from on its own, an
+  entry the add left half-written (its `commondir` still empty, which
+  makes every `git worktree` command in the repository fail), is
+  cleared by removing that entry from the repository's `worktrees`
+  administrative directory, only when it names the probe's own
+  worktree. The marker is written before the add runs and records
+  the `--log-dir`, so a `SIGKILL` or a crash at any point from there on
+  leaves it, along with whatever git had registered by then; `doctor`
+  reports a leftover from the marker and from `git worktree list` (a
+  marker deleted by hand still leaves the registration reported), and
+  the next `worktree` probe on that repository removes every leftover
+  of the probe's own scratch shape before it starts, marker or not.
+  Only a path of that shape (`<log-dir>/wt-<uuid>/wt`) that git reports
+  as a worktree of the repository, or that sits under the recovering
+  run's own `--log-dir`, is ever deleted; a marker naming anything else,
+  or a leftover that cannot be removed, stops the run with
+  `inconclusive`/`stale_worktree`, keeps the marker, and names the path
+  and either the manual command or the marker file to delete. Outside a
+  git work tree, `worktree` falls back to `inplace` with a warning
+  naming the fallback. `doctor` gained a `stale-worktree` check
+  reporting a leftover worktree for the current repository, from the
+  marker and from `git worktree list`, naming the manual `git worktree
+  remove --force --force` command. Submodule contents are not synced by
+  either sync step; a submodule directory is tracked as a gitlink, not
+  walked into.
 
 - Initial package scaffold: the shared envelope module (bounded
   serialization, status-to-exit-code mapping), an `exec` runner with fixed

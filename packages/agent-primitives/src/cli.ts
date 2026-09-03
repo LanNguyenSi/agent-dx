@@ -858,9 +858,9 @@ program
   )
   .option(
     "-i, --isolation <mode>",
-    "worktree or inplace (default inplace; worktree is not yet implemented)",
+    "worktree (default; mutates a detached git worktree, leaving the working tree untouched) or inplace",
     parseIsolationMode,
-    "inplace",
+    "worktree",
   )
   .option(
     "--expect <verdict>",
