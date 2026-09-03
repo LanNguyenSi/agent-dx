@@ -68,3 +68,11 @@ export type {
   ProbeStatus,
   TestPhaseField,
 } from "./probe/index.js";
+export { init, ALL_HARNESSES } from "./init/index.js";
+export type {
+  Harness,
+  InitOptions,
+  InitResult,
+  InitTargetResult,
+  InitTargetStatus,
+} from "./init/index.js";

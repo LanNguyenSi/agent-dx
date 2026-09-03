@@ -125,21 +125,6 @@ describe("cli", () => {
     expect(JSON.parse(run.stdout).status).toBe("ok");
   });
 
-  it("returns not_implemented usage_error for the init stub", async () => {
-    // `probe` and `verify` are both implemented (see their own describe
-    // blocks below), so `init` is the only stub left. `verify` would in
-    // any case be excluded here: running it with no `-C` would target
-    // this package's own real cwd and its real `test` script, re-invoking
-    // this very test suite from inside itself.
-    for (const sub of ["init"]) {
-      const run = await spawnCli([sub]);
-      expect(run.code).toBe(2);
-      const parsed = JSON.parse(run.stdout);
-      expect(parsed.status).toBe("usage_error");
-      expect(parsed.reason).toBe("not_implemented");
-    }
-  });
-
   it("probe is no longer a stub: missing required flags is a normal commander usage_error", async () => {
     const run = await spawnCli(["probe"]);
     expect(run.code).toBe(2);
@@ -1440,6 +1425,90 @@ describe("cli: probe", () => {
     ]);
     expect(run.code).toBe(2);
     expect(JSON.parse(run.stdout).status).toBe("usage_error");
+  });
+});
+
+describe("cli: init", () => {
+  it("the four-step smoke sequence: written, then unchanged, then conflicted, then --force written", async () => {
+    const dir = makeTmpDir();
+
+    const first = await spawnCli(["init", "-t", dir]);
+    expect(first.code).toBe(0);
+    expect(JSON.parse(first.stdout).status).toBe("written");
+
+    const second = await spawnCli(["init", "-t", dir]);
+    expect(second.code).toBe(0);
+    expect(JSON.parse(second.stdout).status).toBe("unchanged");
+
+    const skillPath = path.join(
+      dir,
+      ".claude",
+      "skills",
+      "agent-primitives",
+      "SKILL.md",
+    );
+    fs.writeFileSync(skillPath, "corrupted\n");
+
+    const third = await spawnCli(["init", "-t", dir]);
+    expect(third.code).toBe(1);
+    expect(JSON.parse(third.stdout).status).toBe("conflicted");
+    expect(fs.readFileSync(skillPath, "utf8")).toBe("corrupted\n");
+
+    const fourth = await spawnCli(["init", "-t", dir, "--force"]);
+    expect(fourth.code).toBe(0);
+    expect(JSON.parse(fourth.stdout).status).toBe("written");
+    expect(fs.readFileSync(skillPath, "utf8")).not.toBe("corrupted\n");
+  });
+
+  it("never writes under .claude/agents", async () => {
+    const dir = makeTmpDir();
+    const run = await spawnCli(["init", "-t", dir, "-H", "all"]);
+    expect(run.code).toBe(0);
+    expect(fs.existsSync(path.join(dir, ".claude", "agents"))).toBe(false);
+  });
+
+  it("writes every harness under -H all", async () => {
+    const dir = makeTmpDir();
+    const run = await spawnCli(["init", "-t", dir, "-H", "all"]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.targets).toHaveLength(3);
+    expect(
+      fs.existsSync(
+        path.join(dir, ".agents", "skills", "agent-primitives", "SKILL.md"),
+      ),
+    ).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(
+          dir,
+          ".opencode",
+          "skills",
+          "agent-primitives",
+          "SKILL.md",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects an unknown -H value as usage_error, exit 2", async () => {
+    const dir = makeTmpDir();
+    const run = await spawnCli(["init", "-t", dir, "-H", "not-a-harness"]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+  });
+
+  it("rejects a target that resolves outside -t via a pre-existing symlink, exit 2", async () => {
+    const dir = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
+    fs.symlinkSync(outside, path.join(dir, ".claude", "skills"));
+    const run = await spawnCli(["init", "-t", dir]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+    expect(
+      fs.existsSync(path.join(outside, "agent-primitives", "SKILL.md")),
+    ).toBe(false);
   });
 });
 
