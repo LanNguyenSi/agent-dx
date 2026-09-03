@@ -524,6 +524,23 @@ describe("cli verify", () => {
     expect(parsed.reason).toBe("nothing_verified");
   });
 
+  it("--timeout above the millisecond ceiling (2147483647ms) is a usage_error, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--timeout",
+      "3000000",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+  });
+
   it("--max-failures 0 is a usage_error, exit 2", async () => {
     const cwd = makeTmpDir();
     const logDir = makeTmpDir();
@@ -645,6 +662,36 @@ describe("cli verify", () => {
     expect(run.code).toBe(2);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("error");
+  });
+
+  it("checks[].logPath all nest under one verify/<id>/ parent whose <id> is the same run id embedded in the default log dir", async () => {
+    const cwd = makeTmpDir();
+    // No -l: the default log dir is <tmpdir>/agent-primitives/<runId>, and
+    // verify() nests its own logs under <logDir>/verify/<runId> using
+    // that same run id, so the id appears twice in each check's logPath.
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "verify",
+      "-x",
+      "a=exit 0",
+      "-x",
+      "b=exit 0",
+      "-c",
+      "a,b",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    const logPaths = parsed.checks.map((c: { logPath: string }) => c.logPath);
+    expect(logPaths).toHaveLength(2);
+    const parents = logPaths.map((p: string) => path.dirname(p));
+    expect(parents[0]).toBe(parents[1]);
+    expect(path.basename(path.dirname(parents[0]))).toBe("verify");
+    const idFromVerifyNesting = path.basename(parents[0]);
+    const idFromDefaultLogDir = path.basename(
+      path.dirname(path.dirname(parents[0])),
+    );
+    expect(idFromVerifyNesting).toBe(idFromDefaultLogDir);
   });
 
   it("an unwritable log directory parent still yields an envelope with per-check errors, not a crash", async () => {
@@ -860,33 +907,127 @@ describe("writeFullVerifyResult", () => {
     };
   }
 
-  it("writes the uncapped checks to verify-full.json, pushes its path onto logs, and sets envelopePatch.truncated", () => {
+  it("writes the uncapped checks to verify-full-<runId>.json, pushes its path onto logs, and sets envelopePatch.truncated", () => {
     const logDir = makeTmpDir();
     const result = makeResult();
     const logs: string[] = [];
+    const warnings: string[] = [];
     const envelopePatch: { truncated?: true } = {};
 
-    writeFullVerifyResult(result, envelopePatch, logs, logDir);
+    writeFullVerifyResult(
+      result,
+      envelopePatch,
+      logs,
+      warnings,
+      logDir,
+      "run-a",
+    );
 
     expect(envelopePatch.truncated).toBe(true);
     expect(logs).toHaveLength(1);
     const fullResultPath = logs[0];
+    expect(fullResultPath).toContain("verify-full-run-a.json");
     expect(fs.existsSync(fullResultPath)).toBe(true);
     const written = JSON.parse(fs.readFileSync(fullResultPath, "utf8")) as {
       checks: CheckResult[];
     };
     expect(written.checks[0].failures).toHaveLength(30);
+    expect(warnings).toEqual([]);
   });
 
   it("is a no-op when nothing was truncated", () => {
     const logDir = makeTmpDir();
     const result = makeResult({ truncatedByMaxFailures: false });
     const logs: string[] = [];
+    const warnings: string[] = [];
     const envelopePatch: { truncated?: true } = {};
 
-    writeFullVerifyResult(result, envelopePatch, logs, logDir);
+    writeFullVerifyResult(
+      result,
+      envelopePatch,
+      logs,
+      warnings,
+      logDir,
+      "run-a",
+    );
 
     expect(envelopePatch.truncated).toBeUndefined();
     expect(logs).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("two calls with different run ids produce different paths, each holding its own checks", () => {
+    const logDir = makeTmpDir();
+    const resultA = makeResult();
+    const resultB = makeResult({
+      fullChecks: [
+        {
+          name: "lint",
+          status: "fail",
+          exitCode: 1,
+          durationMs: 1,
+          timedOut: false,
+          summary: {
+            passed: 0,
+            failed: 5,
+            skipped: 0,
+            errors: 0,
+            warnings: 0,
+          },
+          failures: Array.from({ length: 5 }, (_, i) => ({
+            message: `lint-f${i}`,
+          })),
+        },
+      ],
+    });
+    const logsA: string[] = [];
+    const logsB: string[] = [];
+    const warningsA: string[] = [];
+    const warningsB: string[] = [];
+    const patchA: { truncated?: true } = {};
+    const patchB: { truncated?: true } = {};
+
+    writeFullVerifyResult(resultA, patchA, logsA, warningsA, logDir, "run-a");
+    writeFullVerifyResult(resultB, patchB, logsB, warningsB, logDir, "run-b");
+
+    expect(logsA[0]).not.toBe(logsB[0]);
+    const writtenA = JSON.parse(fs.readFileSync(logsA[0], "utf8")) as {
+      checks: CheckResult[];
+    };
+    const writtenB = JSON.parse(fs.readFileSync(logsB[0], "utf8")) as {
+      checks: CheckResult[];
+    };
+    expect(writtenA.checks[0].name).toBe("test");
+    expect(writtenB.checks[0].name).toBe("lint");
+    expect(writtenB.checks[0].failures).toHaveLength(5);
+  });
+
+  it("an unwritable log directory never swallows the write failure: truncated is still set and a warning names the directory and error", () => {
+    const parentDir = makeTmpDir();
+    const logDir = path.join(parentDir, "unwritable");
+    fs.mkdirSync(logDir);
+    fs.chmodSync(logDir, 0o500);
+    try {
+      const result = makeResult();
+      const logs: string[] = [];
+      const warnings: string[] = [];
+      const envelopePatch: { truncated?: true } = {};
+
+      writeFullVerifyResult(
+        result,
+        envelopePatch,
+        logs,
+        warnings,
+        path.join(logDir, "nested"),
+        "run-a",
+      );
+
+      expect(envelopePatch.truncated).toBe(true);
+      expect(logs).toEqual([]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(path.join(logDir, "nested"));
+    } finally {
+      fs.chmodSync(logDir, 0o700);
+    }
   });
 });

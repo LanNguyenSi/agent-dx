@@ -105,11 +105,21 @@ export function parseExecOverride(
  * `parseMaxChars`'s style so a default value never has to pass back
  * through this parser (commander does not re-run a custom parser over an
  * option's literal default). Converted to a number where it is consumed. */
+// setTimeout's delay is coerced to a signed 32-bit int internally; a
+// millisecond value above this rolls over instead of waiting, which would
+// make --timeout silently fire (near-)immediately rather than usefully.
+const MAX_TIMEOUT_MS = 2147483647;
+
 function parseTimeoutSeconds(value: string): string {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) {
     throw new InvalidArgumentError(
       `--timeout must be a positive number of seconds (got "${value}")`,
+    );
+  }
+  if (n * 1000 > MAX_TIMEOUT_MS) {
+    throw new InvalidArgumentError(
+      `--timeout in milliseconds must not exceed ${MAX_TIMEOUT_MS} (got "${value}" seconds)`,
     );
   }
   return value;
@@ -446,10 +456,19 @@ program
     // The log path this writes is appended to `logs` BEFORE buildEnvelope
     // runs, so it lands in the envelope's own `logs` field (buildEnvelope
     // copies `logs` into the envelope at call time; a push afterwards
-    // would not be reflected there).
+    // would not be reflected there). Same for `warnings`: a write failure
+    // is folded in before buildEnvelope reads it, not pushed after.
     const logs = [...result.logs];
+    const warnings = [...result.warnings];
     const pendingEnvelopePatch: { truncated?: true } = {};
-    writeFullVerifyResult(result, pendingEnvelopePatch, logs, global.logDir);
+    writeFullVerifyResult(
+      result,
+      pendingEnvelopePatch,
+      logs,
+      warnings,
+      global.logDir,
+      currentRunId(),
+    );
 
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
@@ -457,7 +476,7 @@ program
       status: result.status,
       durationMs: Date.now() - start,
       cwd: global.cwd,
-      warnings: result.warnings,
+      warnings,
       logs,
       extra: {
         checks: result.checks,
@@ -485,13 +504,19 @@ program
 /**
  * When `verify()` capped a check's own `failures` list (`--max-failures`),
  * writes the same checks with every `failures` list left uncapped to
- * `<logDir>/verify-full.json`, pushes that path onto `logs`, and sets
- * `envelopePatch.truncated = true` for the caller to fold into the real
- * envelope (the envelope's own size-triggered reduction may never fire
- * even though real content was cut, since the cap already happened
+ * `<logDir>/verify-full-<runId>.json`, pushes that path onto `logs`, and
+ * sets `envelopePatch.truncated = true` for the caller to fold into the
+ * real envelope (the envelope's own size-triggered reduction may never
+ * fire even though real content was cut, since the cap already happened
  * before `buildEnvelope` saw the result). A no-op when nothing was
- * truncated. Best-effort on the write itself: a failure there still sets
- * `envelopePatch.truncated`, since real content actually was cut.
+ * truncated. `runId` is a required parameter (the caller passes the same
+ * run id used for the verify() call's own log nesting) so that two
+ * verify runs sharing a `logDir` never collide on, or silently overwrite,
+ * each other's full-result file. A write failure is never swallowed: it
+ * still sets `envelopePatch.truncated` (real content actually was cut),
+ * and pushes a warning onto `warnings` naming the directory and the
+ * error's code (or message when there is no code) so the caller surfaces
+ * it instead of silently losing the uncapped detail.
  * Exported and unit-tested directly (with a synthetic truncated
  * `VerifyResult`) so both effects, the truncated flag and the on-disk
  * file, are independently verified rather than only exercised indirectly
@@ -503,20 +528,27 @@ export function writeFullVerifyResult(
   result: VerifyResult,
   envelopePatch: { truncated?: true },
   logs: string[],
+  warnings: string[],
   logDir: string,
+  runId: string,
 ): void {
   if (!result.truncatedByMaxFailures) return;
   try {
     fs.mkdirSync(logDir, { recursive: true });
-    const fullResultPath = path.join(logDir, "verify-full.json");
+    const fullResultPath = path.join(logDir, `verify-full-${runId}.json`);
     fs.writeFileSync(
       fullResultPath,
       JSON.stringify({ checks: result.fullChecks }, null, 2),
     );
     logs.push(fullResultPath);
-  } catch {
-    // Best-effort: the envelope's own overrun warning still applies if
-    // this leaves the result too large for --max-chars.
+  } catch (err) {
+    const code =
+      err instanceof Error && "code" in err
+        ? ((err as NodeJS.ErrnoException).code ?? err.message)
+        : String(err);
+    warnings.push(
+      `writeFullVerifyResult: failed to write full result to ${logDir}: ${code}`,
+    );
   }
   envelopePatch.truncated = true;
 }

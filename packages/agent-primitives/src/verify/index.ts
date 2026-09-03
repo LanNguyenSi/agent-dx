@@ -71,9 +71,9 @@ function commandNamesToken(command: string, name: string): boolean {
 }
 
 /**
- * Selects a detector for one check's output, following the plan's rule
- * (precised after review): `candidates` are consulted first, `fallback`
- * is used whenever none (or more than one, ambiguously) of them applies.
+ * Selects a detector for one check's output: `candidates` are consulted
+ * first, `fallback` is used whenever none (or more than one, ambiguously)
+ * of them applies.
  * Every candidate is a candidate when its `matches(input)` is true. Zero
  * matching candidates selects the fallback; one matching candidate
  * selects it; two or more consult the command text as a tiebreaker

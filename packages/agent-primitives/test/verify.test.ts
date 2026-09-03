@@ -197,6 +197,45 @@ describe("verify: --fail-fast", () => {
     expect(result.status).toBe("fail");
   });
 
+  it("stops on an error (exit 127) status too, not only on fail; the next check's command is never invoked", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {
+      build: "b",
+      typecheck: "t",
+      lint: "l",
+      test: "te",
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec({
+      "npm run build --silent": { exitCode: 127 },
+    });
+    const result = await verify({ cwd, logDir, failFast: true, execFn: fn });
+    expect(calls).toEqual(["npm run build --silent"]);
+    expect(result.checks.map((c) => c.name)).toEqual(["build"]);
+    expect(result.checks[0].status).toBe("error");
+    expect(result.status).toBe("error");
+  });
+
+  it("stops on a timed-out first check too; the next check's command is never invoked", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {
+      build: "b",
+      typecheck: "t",
+      lint: "l",
+      test: "te",
+    });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec({
+      "npm run build --silent": { timedOut: true },
+    });
+    const result = await verify({ cwd, logDir, failFast: true, execFn: fn });
+    expect(calls).toEqual(["npm run build --silent"]);
+    expect(result.checks.map((c) => c.name)).toEqual(["build"]);
+    expect(result.checks[0].status).toBe("error");
+    expect(result.checks[0].timedOut).toBe(true);
+    expect(result.status).toBe("error");
+  });
+
   it("without --fail-fast, every check still runs after an earlier failure", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, {
