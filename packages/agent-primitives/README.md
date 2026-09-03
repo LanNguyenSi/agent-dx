@@ -269,9 +269,10 @@ removal, the leftover recovery, and `doctor` runs as `git worktree list
 `--porcelain` form, and a worktree path containing a newline is then
 reported as unparseable rather than misread. `git worktree remove`
 itself dates from git 2.17 and `git worktree list --porcelain` from
-2.7; 2.24 is the oldest release the fallback listing, the removal, and
-the recovery were checked against. `agent-primitives doctor` reports
-the installed git against both floors (see its `git-version` check).
+2.7; 2.20 is the oldest release the fallback listing, the removal, the
+leftover recovery, and `doctor`'s report were checked against.
+`agent-primitives doctor` reports the installed git against both floors
+(see its `git-version` check).
 
 Each run gets its own scratch subdirectory under `--log-dir`
 (`<log-dir>/wt-<random>/`), never a fixed name reused across separate
