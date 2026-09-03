@@ -1,0 +1,3 @@
+a.ts(5,7): [91merror[0m [90mTS2322[0m: Type 'string' is not assignable to type 'number'.
+a.ts(6,7): [91merror[0m [90mTS2322[0m: Type 'number' is not assignable to type 'string'.
+a.ts(11,1): [91merror[0m [90mTS2554[0m: Expected 2 arguments, but got 1.

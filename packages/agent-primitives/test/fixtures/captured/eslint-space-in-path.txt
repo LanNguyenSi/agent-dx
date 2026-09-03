@@ -1,0 +1,8 @@
+
+/project/my file.js
+  1:7   error  'unused' is assigned a value but never used  no-unused-vars
+  2:1   error  'console' is not defined                     no-undef
+  2:13  error  'notDefined' is not defined                  no-undef
+
+✖ 3 problems (3 errors, 0 warnings)
+

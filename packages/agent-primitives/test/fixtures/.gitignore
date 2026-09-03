@@ -1,0 +1,10 @@
+# Running a live integration test's fixture project (vitest-project or
+# vitest-project-select) writes a transform cache to node_modules/.vite
+# through the symlinked/ancestor node_modules it resolves against (see
+# the tsc-vitest disjointness note in verify.test.ts). Neither fixture
+# ships a node_modules of its own; this ignores whatever a real run
+# leaves behind for either one. Both tests clean this up themselves
+# (try/finally around the run), so a leftover directory here means a
+# prior run was interrupted before its cleanup ran, not a required
+# artifact.
+node_modules/

@@ -5,6 +5,9 @@ import { execCommand } from "../exec.js";
 import type { ExecResult } from "../exec.js";
 import { UsageError } from "../envelope.js";
 import { genericDetector } from "./detectors/generic.js";
+import { vitestDetector } from "./detectors/vitest.js";
+import { tscDetector } from "./detectors/tsc.js";
+import { eslintDetector } from "./detectors/eslint.js";
 import type {
   CheckResult,
   CheckStatus,
@@ -32,10 +35,24 @@ export type {
   VerifyStatus,
 } from "./types.js";
 export { genericDetector } from "./detectors/generic.js";
+export { vitestDetector } from "./detectors/vitest.js";
+export { tscDetector } from "./detectors/tsc.js";
+export { eslintDetector } from "./detectors/eslint.js";
 
 /** Default check order, matching the CI convention: build before
  * typecheck (a suite that executes built output needs the build first). */
 export const DEFAULT_CHECKS = ["build", "typecheck", "lint", "test"];
+
+/** Default candidate detectors, in priority order (used only as a
+ * tiebreak input alongside command text when two or more candidates'
+ * shapes both match; see `selectDetector`). `generic` is never part of
+ * this list: it is the fallback (`fallbackDetector` in `VerifyOptions`),
+ * consulted when zero, or more than one ambiguous, candidate matches. */
+export const DEFAULT_DETECTORS: Detector[] = [
+  vitestDetector,
+  tscDetector,
+  eslintDetector,
+];
 
 export const DEFAULT_MAX_FAILURES = 20;
 
@@ -45,6 +62,60 @@ export const DEFAULT_MAX_FAILURES = 20;
  * carrying shell metacharacters is rejected as a usage error instead of
  * being interpolated into a shell command. */
 const CHECK_NAME_PATTERN = /^[A-Za-z0-9_.:-]+$/;
+
+/** eslint's own "✖ N problems (N errors, M warnings)" summary line: the
+ * tool's own total, always more trustworthy than a count of issue rows
+ * out of a tail that may have been cut before every row reached it. This
+ * line is the very last thing eslint prints, so it typically survives a
+ * truncated tail (the tail keeps the *end* of the output) even when
+ * earlier issue rows did not. */
+const ESLINT_TOTALS_LINE =
+  /✖\s*\d+\s*problems?\s*\(\s*(\d+)\s*errors?,\s*(\d+)\s*warnings?\s*\)/;
+
+/**
+ * When a check's output was truncated at exec.ts's tail bound, a
+ * detector's own issue-row count can undercount the real total, and its
+ * own `failures` list can be missing entries that fell outside the tail.
+ * Prefers the tool's own reported total where one can be found in the
+ * tail (currently only eslint's summary line, and only when the eslint
+ * detector was actually selected: a totals-shaped line coincidentally
+ * present in some other tool's output is not eslint's own total, and
+ * trusting it would silently substitute the wrong numbers); either way,
+ * a truncated tail always gets the truncation warning, since even a
+ * trustworthy total does not make the `failures` list itself complete.
+ */
+function adjustForTruncatedTail(
+  parsed: DetectorParseResult,
+  output: string,
+  truncated: boolean,
+  isEslint: boolean,
+): DetectorParseResult {
+  if (!truncated) return parsed;
+
+  const totals = isEslint ? ESLINT_TOTALS_LINE.exec(output) : null;
+  if (totals) {
+    return {
+      ...parsed,
+      summary: {
+        ...parsed.summary,
+        errors: Number(totals[1]),
+        warnings: Number(totals[2]),
+      },
+      warnings: [
+        ...parsed.warnings,
+        "output_tail_truncated: failures list may be partial (counts taken from eslint's own total)",
+      ],
+    };
+  }
+
+  return {
+    ...parsed,
+    warnings: [
+      ...parsed.warnings,
+      "output_tail_truncated: counts may be undercounted",
+    ],
+  };
+}
 
 /**
  * One detector selection outcome. `ambiguousCandidates` is populated only
@@ -149,10 +220,21 @@ function applyFailuresInvariant(
     };
     failures = [synthetic];
     warnings = [...warnings, "detector_matched_nothing"];
+    // Only increments the field when the detector itself reported 0 for
+    // it: a detector can parse an empty `failures` list while its own
+    // `Tests`/totals line still states a nonzero count (e.g. a long diff
+    // pushed every `FAIL` block out of the captured tail while the
+    // summary line survived), and adding one on top of that already-
+    // correct count would double count the one synthetic entry this
+    // block just added.
     summary =
       status === "error"
-        ? { ...summary, errors: summary.errors + 1 }
-        : { ...summary, failed: summary.failed + 1 };
+        ? summary.errors === 0
+          ? { ...summary, errors: summary.errors + 1 }
+          : summary
+        : summary.failed === 0
+          ? { ...summary, failed: summary.failed + 1 }
+          : summary;
   }
 
   if (status === "error" && summary.errors === 0) {
@@ -261,7 +343,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     );
   }
 
-  const detectors = options.detectors ?? [];
+  const detectors = options.detectors ?? DEFAULT_DETECTORS;
   const fallbackDetector = options.fallbackDetector ?? genericDetector;
   const execFn: ExecLike = options.execFn ?? execCommand;
   const runId = options.runId ?? randomUUID();
@@ -432,6 +514,15 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     });
 
     if (status === "fail" || status === "error") {
+      const truncated =
+        execResult.stdoutTruncated || execResult.stderrTruncated;
+      parsed = adjustForTruncatedTail(
+        parsed,
+        output,
+        truncated,
+        detector === eslintDetector,
+      );
+
       const tail = output.trim();
       parsed = applyFailuresInvariant(
         parsed,

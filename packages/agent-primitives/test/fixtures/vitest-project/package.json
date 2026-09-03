@@ -1,0 +1,8 @@
+{
+  "name": "vitest-project-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  }
+}

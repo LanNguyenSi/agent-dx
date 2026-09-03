@@ -1,0 +1,7 @@
+
+ RUN  v4.1.11 /project
+
+
+ Test Files  1 skipped (1)
+      Tests  2 skipped (2)
+   Duration [elided]

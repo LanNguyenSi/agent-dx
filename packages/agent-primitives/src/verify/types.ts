@@ -12,9 +12,9 @@ export interface Failure {
 }
 
 /** Per-check tallies. `warnings` counts detector-level findings that are
- * not failures (e.g. eslint `warning`-severity entries in a future
- * detector); it is unrelated to the top-level envelope `warnings` array,
- * which carries free-text notices such as `detector_matched_nothing`. */
+ * not failures (e.g. eslint `warning`-severity entries); it is unrelated
+ * to the top-level envelope `warnings` array, which carries free-text
+ * notices such as `detector_matched_nothing`. */
 export interface Summary {
   passed: number;
   failed: number;
@@ -111,9 +111,8 @@ export interface VerifyOptions {
   maxFailures?: number;
   env?: NodeJS.ProcessEnv;
   /** Candidate detectors only, in priority order; the fallback is never
-   * part of this list (see `fallbackDetector`). Defaults to `[]`, so
-   * every check falls back to `fallbackDetector`. Real, tool-specific
-   * detectors are added to this list in a later release. */
+   * part of this list (see `fallbackDetector`). Defaults to
+   * `DEFAULT_DETECTORS` (vitest, tsc, eslint, in that priority order). */
   detectors?: Detector[];
   /** The detector selected when no candidate in `detectors` matches, or
    * when two or more do and the command text does not name exactly one

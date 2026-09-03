@@ -1,0 +1,24 @@
+
+ RUN  v4.1.11 /project
+
+ ❯ broken.test.js (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  broken.test.js [ broken.test.js ]
+Error: Cannot find module './does-not-exist.js' imported from /project/broken.test.js
+ ❯ broken.test.js:2:1
+      1| import { it } from "vitest";
+      2| import { nothingHere } from "./does-not-exist.js";
+       | ^
+      3|
+      4| it("never runs", () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  14:08:20
+   Duration  127ms (transform 12ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+

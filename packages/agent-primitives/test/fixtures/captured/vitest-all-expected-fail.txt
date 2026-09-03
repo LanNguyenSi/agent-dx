@@ -1,0 +1,7 @@
+ RUN  v4.1.11 /project
+
+ ✓ sample.test.js (1 test) 3ms
+
+ Test Files  1 passed (1)
+      Tests  1 expected fail (1)
+   Duration [elided]

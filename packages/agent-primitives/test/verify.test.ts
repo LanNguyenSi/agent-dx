@@ -6,7 +6,11 @@ import {
   verify,
   selectDetector,
   genericDetector,
+  vitestDetector,
+  tscDetector,
+  eslintDetector,
   DEFAULT_CHECKS,
+  DEFAULT_DETECTORS,
 } from "../src/verify/index.js";
 import { UsageError } from "../src/envelope.js";
 import type {
@@ -14,7 +18,20 @@ import type {
   DetectorParseResult,
   ExecLike,
 } from "../src/verify/types.js";
+import { execCommand } from "../src/exec.js";
 import type { ExecResult } from "../src/exec.js";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURES_DIR = path.join(__dirname, "fixtures");
+const CAPTURED_DIR = path.join(FIXTURES_DIR, "captured");
+
+/** Reads one captured real-tool-output fixture (see
+ * test/fixtures/README.md for the tool versions these were captured
+ * from). */
+function readCaptured(name: string): string {
+  return fs.readFileSync(path.join(CAPTURED_DIR, `${name}.txt`), "utf8");
+}
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -60,6 +77,8 @@ function makeStubExec(responses: Record<string, Partial<ExecResult>> = {}): {
       logWriteFailed: false,
       outputMayBeIncomplete: r.outputMayBeIncomplete ?? false,
       stdioClosed: r.stdioClosed ?? true,
+      stdoutTruncated: r.stdoutTruncated ?? false,
+      stderrTruncated: r.stderrTruncated ?? false,
     };
   };
   return { fn, calls };
@@ -374,6 +393,41 @@ describe("verify: failures invariant", () => {
     });
     expect(result.checks[0].status).toBe("pass");
     expect(result.checks[0].failures).toEqual([]);
+  });
+
+  it("the invariant only increments the count when the detector itself reported 0 for it: a detector with an empty failures list but a nonzero failed count is left alone (never double counted)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    // Simulates a real shape: the `Tests` summary line survived the
+    // captured tail (it is the very last line eslint/vitest print), but
+    // the `FAIL` block itself was pushed out of the tail by a long diff,
+    // so the detector's own `failures` list came back empty while its
+    // `summary.failed` still correctly states 1.
+    const partialDetector: Detector = {
+      name: "partial",
+      matches: () => true,
+      parse: (): DetectorParseResult => ({
+        summary: { passed: 0, failed: 1, skipped: 0, errors: 0, warnings: 0 },
+        failures: [],
+        warnings: [],
+      }),
+    };
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 1, stdoutTail: "boom" },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [partialDetector],
+    });
+    expect(result.checks[0].status).toBe("fail");
+    // One synthetic entry is still added (the failures list was empty),
+    // but the already-correct count of 1 is not bumped to 2.
+    expect(result.checks[0].failures).toHaveLength(1);
+    expect(result.checks[0].summary.failed).toBe(1);
   });
 });
 
@@ -755,6 +809,8 @@ describe("verify: exec rejection is a per-check error, not a thrown promise", ()
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
     const result = await verify({
@@ -1015,6 +1071,8 @@ describe("verify: the optional signal", () => {
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
     await verify({
@@ -1045,6 +1103,8 @@ describe("verify: the optional signal", () => {
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
     await verify({ cwd, logDir, checks: ["test"], execFn: fn });
@@ -1082,6 +1142,8 @@ describe("verify: an aborted run", () => {
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
 
@@ -1136,6 +1198,8 @@ describe("verify: an aborted run", () => {
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
 
@@ -1179,4 +1243,1021 @@ describe("verify: an aborted run", () => {
     expect(result.reason).not.toBe("nothing_verified");
     expect(result.warnings.some((w) => w.includes("never started"))).toBe(true);
   });
+});
+
+describe("vitestDetector: captured real output", () => {
+  it("matches a mixed run, a green run, and the no-test-files case", () => {
+    expect(
+      vitestDetector.matches({
+        output: readCaptured("vitest-fail"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+    expect(
+      vitestDetector.matches({
+        output: readCaptured("vitest-pass"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(true);
+    expect(
+      vitestDetector.matches({
+        output: readCaptured("vitest-no-tests"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not match tsc or eslint captured output (shape disjointness)", () => {
+    for (const name of [
+      "tsc-errors",
+      "tsc-clean",
+      "eslint-errors",
+      "eslint-warnings",
+      "eslint-clean",
+    ]) {
+      expect(
+        vitestDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: name.includes("clean") ? 0 : 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("parses a mixed run: one failure with file, name, and the assertion message; summary 1 passed 1 failed", () => {
+    const parsed = vitestDetector.parse({
+      output: readCaptured("vitest-fail"),
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 1,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("sample.test.js");
+    expect(parsed.failures[0].name).toContain("is wrong");
+    expect(parsed.failures[0].message).toContain("AssertionError");
+  });
+
+  it("parses a green run: 0 failures, summary passed equals the total", () => {
+    const parsed = vitestDetector.parse({
+      output: readCaptured("vitest-pass"),
+      command: "npm run test --silent",
+      exitCode: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary.passed).toBe(2);
+    expect(parsed.summary.failed).toBe(0);
+  });
+
+  it("parses the no-test-files case: no false passed:0/failed:0 claim of its own, no failures (the failures invariant, not this detector, supplies the synthetic entry)", () => {
+    const parsed = vitestDetector.parse({
+      output: readCaptured("vitest-no-tests"),
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+  });
+});
+
+describe("tscDetector: captured real output", () => {
+  it("matches multi-error tsc output, not the clean (empty) case", () => {
+    expect(
+      tscDetector.matches({
+        output: readCaptured("tsc-errors"),
+        command: "",
+        exitCode: 2,
+      }),
+    ).toBe(true);
+    expect(
+      tscDetector.matches({
+        output: readCaptured("tsc-clean"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not match vitest or eslint captured output (shape disjointness)", () => {
+    for (const name of [
+      "vitest-fail",
+      "vitest-pass",
+      "vitest-no-tests",
+      "eslint-errors",
+      "eslint-warnings",
+      "eslint-clean",
+    ]) {
+      expect(
+        tscDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("parses every diagnostic line; summary.errors equals the count", () => {
+    const parsed = tscDetector.parse({
+      output: readCaptured("tsc-errors"),
+      command: "npm run typecheck --silent",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(3);
+    expect(parsed.summary.errors).toBe(3);
+    expect(parsed.failures[0].file).toBe("a.ts");
+    expect(parsed.failures[0].line).toBe(5);
+    expect(parsed.failures[0].message).toContain("TS2322");
+    expect(parsed.failures[2].line).toBe(11);
+    expect(parsed.failures[2].message).toContain("TS2554");
+  });
+});
+
+describe("eslintDetector: captured real output", () => {
+  it("matches an errors run and a warnings-only run, not the clean (empty) case", () => {
+    expect(
+      eslintDetector.matches({
+        output: readCaptured("eslint-errors"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+    expect(
+      eslintDetector.matches({
+        output: readCaptured("eslint-warnings"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(true);
+    expect(
+      eslintDetector.matches({
+        output: readCaptured("eslint-clean"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not match vitest or tsc captured output (shape disjointness)", () => {
+    for (const name of [
+      "vitest-fail",
+      "vitest-pass",
+      "vitest-no-tests",
+      "tsc-errors",
+      "tsc-clean",
+    ]) {
+      expect(
+        eslintDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("error rows populate failures with the rule id appended to the message", () => {
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-errors"),
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(3);
+    expect(parsed.summary.errors).toBe(3);
+    expect(parsed.summary.warnings).toBe(0);
+    expect(parsed.failures[0].file).toBe("/project/a.js");
+    expect(parsed.failures[0].line).toBe(2);
+    expect(parsed.failures[0].message).toContain("no-unused-vars");
+  });
+
+  it("warning rows count into summary.warnings and never populate failures on a zero-exit (pass) check", () => {
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-warnings"),
+      command: "npm run lint --silent",
+      exitCode: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary.warnings).toBe(1);
+    expect(parsed.summary.errors).toBe(0);
+  });
+
+  it("a row with no rule column (a parsing error) is still a failure, and still counted", () => {
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-parsing-error"),
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.summary.errors).toBe(1);
+    expect(parsed.failures[0].file).toBe("/project/bad.js");
+    expect(parsed.failures[0].line).toBe(2);
+    expect(parsed.failures[0].message).toBe(
+      "Parsing error: Unexpected keyword 'return'",
+    );
+  });
+
+  it("a scoped plugin rule id (`@typescript-eslint/no-unused-vars`) is captured whole, and the message's own inline regex-literal token just before it is never mistaken for the rule id", () => {
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-scoped-rule-id"),
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.summary.errors).toBe(1);
+    expect(parsed.failures[0].file).toBe("/project/a.ts");
+    expect(parsed.failures[0].message).toContain(
+      "@typescript-eslint/no-unused-vars",
+    );
+    expect(parsed.failures[0].message).toContain("/^_/u");
+  });
+
+  it("a file header with a space in its path is recognized (structural match, not \\S*)", () => {
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-space-in-path"),
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(3);
+    for (const failure of parsed.failures) {
+      expect(failure.file).toBe("/project/my file.js");
+    }
+  });
+
+  it("two files, only the second with a space in its path: every row attributed to its own file, no bleed from the first", () => {
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-two-files-second-has-space"),
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(6);
+    const firstFileFailures = parsed.failures.filter(
+      (f) => f.file === "/project/plain.js",
+    );
+    const secondFileFailures = parsed.failures.filter(
+      (f) => f.file === "/project/with space.js",
+    );
+    expect(firstFileFailures).toHaveLength(3);
+    expect(secondFileFailures).toHaveLength(3);
+  });
+
+  it("colorized (ANSI SGR) output parses identically to the plain capture", () => {
+    expect(
+      eslintDetector.matches({
+        output: readCaptured("eslint-errors-colorized"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-errors-colorized"),
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(3);
+    expect(parsed.summary.errors).toBe(3);
+    expect(parsed.failures[0].file).toBe("/project/a.js");
+    expect(parsed.failures[0].line).toBe(2);
+    expect(parsed.failures[0].message).toContain("no-unused-vars");
+  });
+});
+
+describe("vitestDetector: Tests-line shapes, segment-wise", () => {
+  it("an all-failing run (`Tests  N failed (N)`, no `passed` segment): summary.failed is the count", () => {
+    expect(
+      vitestDetector.matches({
+        output: readCaptured("vitest-all-failed"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+    const parsed = vitestDetector.parse({
+      output: readCaptured("vitest-all-failed"),
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 2,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toHaveLength(2);
+  });
+
+  it("a four-segment run (`failed | passed | skipped | todo`): every count populated, skipped and todo folded into summary.skipped", () => {
+    const parsed = vitestDetector.parse({
+      output: readCaptured("vitest-mixed-shapes"),
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 1,
+      skipped: 2,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toHaveLength(1);
+  });
+
+  it("an all-skipped run (`Tests  N skipped (N)`) still selects vitest, with summary.skipped populated and no failures", () => {
+    expect(
+      vitestDetector.matches({
+        output: readCaptured("vitest-all-skipped"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(true);
+    const parsed = vitestDetector.parse({
+      output: readCaptured("vitest-all-skipped"),
+      command: "npm run test --silent",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 2,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+  });
+
+  it("through verify(): an all-skipped Tests line selects the vitest detector, not generic", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "run-vitest" });
+    const logDir = makeTmpDir();
+    const output = readCaptured("vitest-all-skipped");
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 0, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].detector).toBe("vitest");
+  });
+
+  it("a Tests line with no `failed` segment but parsed FAIL blocks falls back to failures.length (synthetic: this shape is not producible by a real vitest run, only exercised to cover the fallback)", () => {
+    const output = [
+      " FAIL  sample.test.js > sample > is wrong",
+      "AssertionError: expected 2 to be 3",
+      "",
+      " Test Files  1 failed (1)",
+      "      Tests  1 passed (1)",
+    ].join("\n");
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.summary.failed).toBe(1);
+  });
+
+  it("colorized (ANSI SGR) output does not break the Tests-line or FAIL-line regexes", () => {
+    const colorized = [
+      "\x1b[1m RUN \x1b[22m v4.1.11 /project",
+      "",
+      " \x1b[31mFAIL\x1b[39m  sample.test.js > sample > is wrong",
+      "AssertionError: expected 2 to be 3",
+      "",
+      " Test Files  1 failed (1)",
+      "      Tests  \x1b[31m1 failed\x1b[39m | \x1b[32m1 passed\x1b[39m (2)",
+    ].join("\n");
+    expect(
+      vitestDetector.matches({ output: colorized, command: "", exitCode: 1 }),
+    ).toBe(true);
+    const parsed = vitestDetector.parse({
+      output: colorized,
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.summary.failed).toBe(1);
+    expect(parsed.summary.passed).toBe(1);
+    expect(parsed.failures).toHaveLength(1);
+  });
+});
+
+describe("vitestDetector: FAIL line structural path capture (not \\S+)", () => {
+  it("a test path with a space is captured whole, up to the ` > ` suite separator (structural match, not \\S+)", () => {
+    const output = readCaptured("vitest-fail-space-in-path");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 1 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("my dir/sample test.test.js");
+    expect(parsed.failures[0].name).toBe("sample > is wrong");
+    expect(parsed.summary.failed).toBe(1);
+  });
+
+  it("a test name ending in a bracketed segment is captured whole, never truncated by the collection-error shape's bracket handling", () => {
+    const output = readCaptured("vitest-fail-bracket-name");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 1 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("sample.test.js");
+    expect(parsed.failures[0].name).toBe("parses row [1,2,3]");
+    expect(parsed.summary.failed).toBe(1);
+  });
+});
+
+describe("vitestDetector: `expected fail` (an it.fails run)", () => {
+  it("folds the `expected fail` segment into summary.passed, and still selects vitest (not generic)", () => {
+    const output = readCaptured("vitest-expected-fail");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 0,
+    });
+    // "Tests  1 passed | 1 expected fail (2)": both segments are passes
+    // from a caller's point of view, so summary.passed is 2, not 1.
+    expect(parsed.summary).toEqual({
+      passed: 2,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+  });
+
+  it("through verify(): an it.fails run selects the vitest detector, not generic", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "run-vitest" });
+    const logDir = makeTmpDir();
+    const output = readCaptured("vitest-expected-fail");
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 0, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].detector).toBe("vitest");
+  });
+
+  it("an all-`expected fail` run (`Tests  1 expected fail (1)`, no `passed`/`failed` segment at all) still selects vitest and folds into summary.passed -- unlike the mixed fixture above, no other segment is present to select the detector on its own, so this discriminates the `expected fail` alternative in SUMMARY_LINE itself", () => {
+    const output = readCaptured("vitest-all-expected-fail");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+  });
+});
+
+describe("vitestDetector: collection error (a file that fails to collect, e.g. a broken import)", () => {
+  it("matches the `Tests  no tests` / ` FAIL  file [ file ]` shape (no suite, no name)", () => {
+    const output = readCaptured("vitest-collection-error");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 1 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("broken.test.js");
+    expect(parsed.failures[0].name).toBeUndefined();
+    // "Tests  no tests" carries no segment at all; the detector reports
+    // passed/failed/skipped at 0 here, same as the "no test files" case,
+    // and relies on the parsed FAIL block (not the missing Tests line)
+    // for the failure it did find.
+    expect(parsed.summary.passed).toBe(0);
+    expect(parsed.summary.skipped).toBe(0);
+  });
+
+  it("through verify(): a collection-error run still selects vitest, not generic, and the failures invariant does not override the one real parsed failure", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "run-vitest" });
+    const logDir = makeTmpDir();
+    const output = readCaptured("vitest-collection-error");
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 1, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].detector).toBe("vitest");
+    expect(result.checks[0].failures).toHaveLength(1);
+    expect(result.checks[0].failures[0].file).toBe("broken.test.js");
+  });
+});
+
+describe("tscDetector: bare `tsc --noEmit` (no --pretty false)", () => {
+  it("parses identically to the --pretty false capture: a bare invocation, run non-interactively (no TTY), emits the same non-pretty diagnostic shape", () => {
+    const output = readCaptured("tsc-errors-bare");
+    expect(tscDetector.matches({ output, command: "", exitCode: 2 })).toBe(
+      true,
+    );
+    const parsed = tscDetector.parse({
+      output,
+      command: "npm run typecheck --silent",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.summary.errors).toBe(1);
+    expect(parsed.failures[0].file).toBe("a.ts");
+    expect(parsed.failures[0].line).toBe(5);
+    expect(parsed.failures[0].message).toContain("TS2322");
+  });
+});
+
+describe("tscDetector: a path with a space (structural file capture, not \\S+)", () => {
+  it("captures the whole relative path up to the diagnostic's own `(line,col):` separator, space included", () => {
+    const output = readCaptured("tsc-space-in-path");
+    expect(tscDetector.matches({ output, command: "", exitCode: 2 })).toBe(
+      true,
+    );
+    const parsed = tscDetector.parse({
+      output,
+      command: "npm run typecheck --silent",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("my dir/a.ts");
+    expect(parsed.failures[0].line).toBe(5);
+    expect(parsed.failures[0].message).toContain("TS2322");
+  });
+});
+
+describe("eslintDetector: blank-line reset (synthetic)", () => {
+  it("synthetic: a blank line resets currentFile, so an issue row that follows one with no recognized header in between gets file: undefined (not silently inherited from the previous file) -- this shape is not producible by the real stylish formatter (every issue row is always preceded by a header), only exercised to cover the reset", () => {
+    const output = [
+      "/project/a.js",
+      "  1:1  error  message one  rule-a",
+      "",
+      "  2:2  error  message two  rule-b",
+    ].join("\n");
+    const parsed = eslintDetector.parse({
+      output,
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(2);
+    expect(parsed.failures[0].file).toBe("/project/a.js");
+    expect(parsed.failures[1].file).toBeUndefined();
+  });
+});
+
+describe("verify: truncation is read from exec's own stdoutTruncated/stderrTruncated flags", () => {
+  // Every stub tail here carries a trailing newline (the shape real
+  // command output almost always has) precisely because that shape is
+  // what hid the earlier bug: verify used to recompute truncation itself
+  // by counting lines in the tail text, and a trailing newline made a
+  // truncated tail always look one line short of its own bound. verify
+  // now only ever reads exec's own flags, so what the tail text itself
+  // looks like is no longer load-bearing for this decision; these flags
+  // are set the same way exec.ts's TailKeeper.wasTruncated() would set
+  // them for the stated shape, not left at a value convenient for the
+  // test.
+  it("stdoutTruncated: false and stderrTruncated: false: no truncation warning", async () => {
+    const stdoutTail =
+      Array.from({ length: 59 }, (_, i) => `line ${i}`).join("\n") + "\n";
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": {
+        exitCode: 2,
+        stdoutTail,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(false);
+  });
+
+  it("stdoutTruncated: true: warns naming the check as truncated", async () => {
+    const stdoutTail =
+      Array.from({ length: 60 }, (_, i) => `line ${i}`).join("\n") + "\n";
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": {
+        exitCode: 2,
+        stdoutTail,
+        stdoutTruncated: true,
+        stderrTruncated: false,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(true);
+  });
+
+  it("stderrTruncated: true alone (stdout untouched) still warns: either stream truncated is enough", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": {
+        exitCode: 2,
+        stdoutTail: "line 0\n",
+        stderrTail:
+          Array.from({ length: 60 }, (_, i) => `err ${i}`).join("\n") + "\n",
+        stdoutTruncated: false,
+        stderrTruncated: true,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+    });
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("verify: truncation detection end-to-end through the real execCommand (not a stub)", () => {
+  it("a real command printing more than exec's line bound, with a trailing newline, is reported truncated by exec's own flags and by verify's warning", async () => {
+    // 90 lines, comfortably past exec.ts's 60-line TAIL_LINES bound, with
+    // the trailing newline `echo` always adds: the exact real-tool shape
+    // the earlier line-counting heuristic in verify/index.ts could never
+    // detect as truncated (see the describe block above). Run twice: once
+    // directly through execCommand (the flags themselves), once through
+    // verify() with the same command as a check (the warning that a
+    // caller actually sees).
+    const cmd =
+      "i=1; while [ $i -le 90 ]; do echo line-$i; i=$((i+1)); done; exit 1";
+
+    const execLogDir = makeTmpDir();
+    const execResult = await execCommand(cmd, { logDir: execLogDir });
+    expect(execResult.exitCode).toBe(1);
+    expect(execResult.stdoutTruncated).toBe(true);
+    expect(execResult.stderrTruncated).toBe(false);
+
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const verifyLogDir = makeTmpDir();
+    const result = await verify({
+      cwd,
+      logDir: verifyLogDir,
+      checks: [],
+      overrides: { test: cmd },
+    });
+    expect(result.checks[0].status).toBe("fail");
+    expect(
+      result.warnings.some(
+        (w) => w.includes("test") && w.includes("truncated"),
+      ),
+    ).toBe(true);
+  }, 20000);
+});
+
+describe("tscDetector: colorized (ANSI SGR) output", () => {
+  it("parses identically to the plain capture (inline SGR sequences around `error` and the TS code)", () => {
+    expect(
+      tscDetector.matches({
+        output: readCaptured("tsc-errors-colorized"),
+        command: "",
+        exitCode: 2,
+      }),
+    ).toBe(true);
+    const parsed = tscDetector.parse({
+      output: readCaptured("tsc-errors-colorized"),
+      command: "npm run typecheck --silent",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(3);
+    expect(parsed.summary.errors).toBe(3);
+    expect(parsed.failures[0].file).toBe("a.ts");
+    expect(parsed.failures[0].line).toBe(5);
+    expect(parsed.failures[0].message).toContain("TS2322");
+  });
+});
+
+describe("verify: tail-bound counts (truncated output tail)", () => {
+  it("a >60-line captured tsc fixture, tail-truncated to 60 lines: warns that counts may be undercounted", async () => {
+    const full = readCaptured("tsc-errors-many");
+    const fullLines = full.split("\n").filter((l) => l.length > 0);
+    expect(fullLines.length).toBeGreaterThan(60);
+    // Mirrors exec.ts's own TailKeeper.tail(): keep only the last 60
+    // lines, simulating what a real captured tail would have delivered.
+    const truncatedTail = fullLines.slice(-60).join("\n");
+
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": {
+        exitCode: 2,
+        stdoutTail: truncatedTail,
+        stdoutTruncated: true,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    const check = result.checks[0];
+    expect(check.detector).toBe("tsc");
+    expect(check.summary.errors).toBe(60);
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(true);
+  });
+
+  it("a truncated eslint tail whose own totals line survives: the tool's own total wins over the tail-counted rows", async () => {
+    // Pads the captured errors fixture with filler lines ahead of the
+    // real content, past exec.ts's 60-line tail bound, so the earliest
+    // issue rows are exactly what a real truncation would have cut,
+    // while the summary line (the very end of the output) survives.
+    const filler = Array.from({ length: 65 }, (_, i) => `// filler ${i}`);
+    const real = readCaptured("eslint-errors").split("\n");
+    const stdoutTail = [...filler, ...real].join("\n");
+    expect(stdoutTail.split("\n").length).toBeGreaterThan(60);
+
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { lint: "run-eslint" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run lint --silent": {
+        exitCode: 1,
+        stdoutTail,
+        stdoutTruncated: true,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["lint"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    const check = result.checks[0];
+    expect(check.detector).toBe("eslint");
+    // The fixture's own "✖ 3 problems (3 errors, 0 warnings)" line is
+    // still present (it is the last line): the tool's own total (3) is
+    // used, not a possibly-wrong tail-counted number. A truncation
+    // warning is still added, though, since the *failures list* (the
+    // individual issue rows) can still be missing entries that fell
+    // outside the tail even when the tool's own total is trustworthy.
+    expect(check.summary.errors).toBe(3);
+    expect(
+      result.warnings.some(
+        (w) => w.includes("lint") && w.includes("truncated"),
+      ),
+    ).toBe(true);
+  });
+
+  it("a truncated tsc tail that happens to contain an eslint-shaped totals line: the totals-line preference is gated on the eslint detector, so the coincidental line is ignored", async () => {
+    // The totals-line preference must not fire just because some text in
+    // the tail happens to match eslint's summary shape; it is gated on
+    // the detector actually selected for this check being eslint.
+    const full = readCaptured("tsc-errors-many");
+    const fullLines = full.split("\n").filter((l) => l.length > 0);
+    const truncatedTail = [
+      ...fullLines.slice(-60),
+      "✖ 3 problems (3 errors, 0 warnings)",
+    ].join("\n");
+
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-tsc" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": {
+        exitCode: 2,
+        stdoutTail: truncatedTail,
+        stdoutTruncated: true,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    const check = result.checks[0];
+    expect(check.detector).toBe("tsc");
+    // Still the real tsc diagnostic count (60), never overridden to the
+    // coincidental eslint-shaped "3" in the tail.
+    expect(check.summary.errors).toBe(60);
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("truncated"),
+      ),
+    ).toBe(true);
+  });
+
+  it('a custom, non-default detector also named "eslint" (a different object from the real eslintDetector) does not get the totals-line preference: gated on detector identity, not the name string', async () => {
+    // A detector object that shares eslintDetector's `name` but is a
+    // distinct object: were the totals-line preference gated on
+    // `detector.name === "eslint"` instead of `detector === eslintDetector`,
+    // this fake detector's own, already-correct summary would be
+    // silently overwritten by a coincidentally eslint-shaped totals line
+    // in the tail that belongs to a different tool entirely.
+    const fakeEslintNamedDetector: Detector = {
+      name: "eslint",
+      matches: () => true,
+      parse: () => ({
+        summary: { passed: 0, failed: 0, skipped: 0, errors: 5, warnings: 0 },
+        failures: Array.from({ length: 5 }, (_, i) => ({
+          message: `fake failure ${i}`,
+        })),
+        warnings: [],
+      }),
+    };
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-fake" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": {
+        exitCode: 1,
+        stdoutTail: "✖ 1 problem (1 error, 0 warnings)",
+        stdoutTruncated: true,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+      detectors: [fakeEslintNamedDetector],
+    });
+    const check = result.checks[0];
+    expect(check.detector).toBe("eslint");
+    // The fake detector's own count (5), never the coincidental
+    // eslint-shaped totals line's "1".
+    expect(check.summary.errors).toBe(5);
+  });
+});
+
+describe("verify: detector shapes are disjoint under real DEFAULT_DETECTORS ordering", () => {
+  it("a check whose output concatenates tsc and vitest shapes falls back to generic, naming both candidates", () => {
+    const output = readCaptured("tsc-vitest-concat");
+    const selection = selectDetector(DEFAULT_DETECTORS, genericDetector, {
+      output,
+      // A command name that is not a whole token of "tsc" or "vitest": the
+      // tiebreaker must not fire, so the ambiguity is what is exercised
+      // here, not the tiebreaker.
+      command: "npm run ci --silent",
+      exitCode: 1,
+    });
+    expect(selection.detector).toBe(genericDetector);
+    expect(selection.ambiguousCandidates).toEqual(
+      expect.arrayContaining(["tsc", "vitest"]),
+    );
+    expect(selection.ambiguousCandidates).not.toContain("eslint");
+  });
+
+  it("through verify(): the same concatenated output selects generic and warns listing tsc and vitest", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { ci: "run-both" });
+    const logDir = makeTmpDir();
+    const output = readCaptured("tsc-vitest-concat");
+    const { fn } = makeStubExec({
+      "npm run ci --silent": { exitCode: 1, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["ci"],
+      execFn: fn,
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].detector).toBe("generic");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("ambiguous") && w.includes("tsc") && w.includes("vitest"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("verify: detector selection precedence, output shape first, real tools", () => {
+  it("-c typecheck resolved to `npm run typecheck --silent` against the tsc fixture selects tsc", async () => {
+    const cwd = path.join(FIXTURES_DIR, "tsc-project");
+    const logDir = makeTmpDir();
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      detectors: DEFAULT_DETECTORS,
+    });
+    expect(result.checks[0].command).toBe("npm run typecheck --silent");
+    expect(result.checks[0].detector).toBe("tsc");
+    expect(result.checks[0].status).toBe("fail");
+    expect(result.checks[0].summary.errors).toBeGreaterThan(0);
+  }, 20000);
+
+  it("-c test resolved to `npm run test --silent` against the vitest fixture selects vitest", async () => {
+    // A dedicated copy of the vitest fixture (not test/fixtures/vitest-
+    // project, which cli.test.ts's live integration test also spawns
+    // `vitest run` against): vitest writes a transform cache to
+    // node_modules/.vite under its cwd, and two vitest processes racing
+    // on the very same cache path (this test file and cli.test.ts run as
+    // separate, concurrent vitest test files) intermittently made vitest
+    // itself error, which made its output stop matching the vitest
+    // detector's shape and fall through to generic. tsc and eslint carry
+    // no such cache and are shared safely across the two fixtures they
+    // both use.
+    const cwd = path.join(FIXTURES_DIR, "vitest-project-select");
+    const logDir = makeTmpDir();
+    // try/finally, not an in-body cleanup at the end of the test: an
+    // assertion failure above would otherwise skip the rmSync and leave
+    // the transform cache node_modules/.vite behind under this fixture,
+    // which ships no node_modules of its own (see test/fixtures/.gitignore).
+    try {
+      const result = await verify({
+        cwd,
+        logDir,
+        checks: ["test"],
+        detectors: DEFAULT_DETECTORS,
+      });
+      expect(result.checks[0].command).toBe("npm run test --silent");
+      expect(result.checks[0].detector).toBe("vitest");
+      expect(result.checks[0].status).toBe("fail");
+      expect(result.checks[0].failures.length).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(path.join(cwd, "node_modules"), {
+        recursive: true,
+        force: true,
+      });
+    }
+  }, 20000);
 });

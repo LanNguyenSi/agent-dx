@@ -65,6 +65,19 @@ export interface ExecResult {
    * actually happened) should not treat this promise's settling alone
    * as proof; it should also consult `onStdioClosed` in `ExecOptions`. */
   stdioClosed: boolean;
+  /** True when `stdoutTail` is missing real output that this run
+   * actually saw: either more than `TAIL_LINES` real lines were pushed,
+   * or the tail text (after any line trim) still exceeded `TAIL_CHARS`.
+   * Computed by `TailKeeper.wasTruncated()` on the real line count (the
+   * phantom empty element `split("\n")` produces for output ending in a
+   * newline is not a line, so it is never counted as one, on either side
+   * of the comparison); a truncated tail that happens to end with a
+   * newline is therefore never missed the way counting `stdoutTail`'s
+   * own split length after the fact would miss it. Additive: a caller
+   * that ignores this field sees unchanged behavior. */
+  stdoutTruncated: boolean;
+  /** Same as `stdoutTruncated`, for stderr. */
+  stderrTruncated: boolean;
 }
 
 const TAIL_LINES = 60;
@@ -139,16 +152,47 @@ class TailKeeper {
     }
   }
 
-  tail(): string {
+  /**
+   * The kept tail together with whether keeping it dropped anything: a
+   * real line, or a byte of the kept text. One computation serves both
+   * `tail()` and `wasTruncated()`, so the two can never disagree about
+   * what was kept.
+   *
+   * The two-stage bound (line count, then character count) runs on the
+   * *real* line count: `split("\n")` on output that ends with a newline
+   * yields one trailing empty element that is not a line at all (e.g.
+   * `"a\nb\n".split("\n")` is `["a", "b", ""]`, three elements for two
+   * real lines). That phantom element is dropped before the line bound
+   * is applied and its newline put back afterwards; otherwise exactly
+   * `TAIL_LINES` real lines would count as one too many, the first real
+   * line would be dropped from the tail, and output ending in a newline
+   * (nearly all of it) would look one real line short of the bound when
+   * deciding whether anything was dropped.
+   */
+  private keep(): { text: string; truncated: boolean } {
     let lines = this.buf.split("\n");
+    const endsWithNewline = lines.length > 1 && lines[lines.length - 1] === "";
+    if (endsWithNewline) lines.pop();
+    let truncated = false;
     if (lines.length > TAIL_LINES) {
       lines = lines.slice(-TAIL_LINES);
+      truncated = true;
     }
-    let text = lines.join("\n");
+    let text = lines.join("\n") + (endsWithNewline ? "\n" : "");
     if (text.length > TAIL_CHARS) {
       text = text.slice(-TAIL_CHARS);
+      truncated = true;
     }
-    return text;
+    return { text, truncated };
+  }
+
+  tail(): string {
+    return this.keep().text;
+  }
+
+  /** True when the buffered output holds more than `tail()` keeps. */
+  wasTruncated(): boolean {
+    return this.keep().truncated;
   }
 }
 
@@ -407,6 +451,8 @@ export function execCommand(
             : {}),
           outputMayBeIncomplete,
           stdioClosed,
+          stdoutTruncated: stdoutTail.wasTruncated(),
+          stderrTruncated: stderrTail.wasTruncated(),
         });
       });
     };

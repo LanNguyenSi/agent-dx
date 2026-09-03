@@ -1,0 +1,8 @@
+{
+  "name": "eslint-project-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint ."
+  }
+}

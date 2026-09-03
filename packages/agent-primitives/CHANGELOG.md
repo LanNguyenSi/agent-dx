@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `verify` subcommand core: resolves each named check (`-x` override wins,
+  else `package.json` `scripts[name]` as `npm run <name> --silent`, else
+  `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`
+  list, deduplicated preserving the first occurrence, in order), through
+  `exec.ts` with a per-check timeout and log file. Every resolved check
+  name is validated against a conservative pattern before any command is
+  built; an invalid name is `status: "usage_error"`, exit `2`, never run.
+  Shell exit `126`/`127` maps to `status: "error"`, never `"fail"`.
+  `--fail-fast` stops after the first check that fails or errors; a
+  skipped check falls through instead of stopping the run. When every
+  requested check resolves to `skipped`, the run is `status: "error"` with
+  `reason: "nothing_verified"`, never a silent pass. Detector selection is
+  by output shape first, command text only as a tiebreaker among shape
+  matches, and only when it names exactly one of them; otherwise the
+  generic detector is chosen and a warning lists the shapes seen. v0 wires
+  the `generic` detector (parses no failures out of the text itself), with
+  the selection seam left open for tool-specific detectors. The failures
+  invariant is enforced once, centrally, for every detector and for both
+  `fail` and `error` checks: a check with zero parsed failures always gets
+  one synthetic failure entry (naming `timedOut`, or the exit code, plus
+  output tail) instead of shipping an empty `failures` list, and an
+  `error` check always reports at least one `summary.errors`. A detector's
+  own warnings, and a log file the run could not write to, are merged into
+  the top-level `warnings`, prefixed with the check name. `--max-failures`
+  (a positive integer, default 20) caps each check's own `failures` list,
+  failures-first; a cut is reported via `truncated: true` and the full,
+  uncapped result is written to the log directory.
+- `verify` gains three output-shape detectors, registered as
+  `DEFAULT_DETECTORS` (the default when a caller passes none): `vitest`
+  (the `Tests` summary line, parsed segment-wise so any combination of
+  `failed`/`passed`/`expected fail`/`skipped`/`todo` vitest prints is
+  read correctly, including an all-failing, all-skipped, or `it.fails`
+  run, `expected fail` folded into `summary.passed`; ` FAIL  file > name`
+  blocks with the assertion on the following line, or ` FAIL  file [
+  file ]` with no name for a file that fails to collect; and the `No
+  test files found` / `Tests  no tests` cases), `tsc` (`file(line,col):
+  error TSnnnn: message`, identically whether or not `--pretty false` was
+  passed; `summary.errors` counts the diagnostics), and `eslint`'s
+  stylish formatter (a file header line, structurally matched so a path
+  containing a space is still recognized; `line:col  severity  message[
+  rule]` rows, the rule id optional so a rule-less row such as a
+  `Parsing error: ...` is still a failure; `error` rows populate
+  `failures`, `warning` rows count into `summary.warnings` alone and
+  never become a failure). Every file-path capture across the three
+  detectors is structural (up to the shape's own separator), never
+  `\S+`. No reporter flags are injected; a check whose output carries
+  more than one of these shapes at once (e.g. a `pretest` build followed
+  by `vitest`) is ambiguous and falls back to `generic`, listing the
+  shapes seen, the same as any other ambiguous selection. All three strip
+  ANSI SGR color codes before matching or parsing, since a tool can
+  default to colorized output even outside a real terminal (the Node
+  floor eslint needs to develop against is documented once, in the
+  package README's `verify` section). Truncation is read from exec.ts's
+  own `stdoutTruncated`/`stderrTruncated` flags, never recomputed from
+  the tail text itself (a tail that happens to end with a trailing
+  newline is not a reliable way to tell a truncated tail from an
+  untruncated one). When either flag is set, eslint's own reported total
+  is preferred, only when the eslint detector was selected for that
+  check, where one survives in the tail (eslint's `✖ N problems` line);
+  either way a warning names the truncation, since the `failures` list
+  itself can still be missing entries even when a trustworthy total was
+  found. The failures invariant only adds its synthetic entry's count on
+  top of a detector-reported 0, never doubling an already-correct count.
+  Captured real-tool-output fixtures and one live integration test per
+  tool (run through this package's own installed devDependency) live
+  under `test/fixtures/`.
+
 ### Fixed
 
 - **Envelope bound and reduction.** The bound is met by reducing the

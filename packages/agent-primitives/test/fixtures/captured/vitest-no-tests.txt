@@ -1,0 +1,8 @@
+
+ RUN  v4.1.11 /project
+
+No test files found, exiting with code 1
+
+include: **/*.{test,spec}.?(c|m)[jt]s?(x)
+exclude:  **/node_modules/**, **/.git/**
+

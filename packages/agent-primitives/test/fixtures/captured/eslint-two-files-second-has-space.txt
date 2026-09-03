@@ -1,0 +1,13 @@
+
+/project/plain.js
+  1:7   error  'unused' is assigned a value but never used  no-unused-vars
+  2:1   error  'console' is not defined                     no-undef
+  2:13  error  'notDefined' is not defined                  no-undef
+
+/project/with space.js
+  1:7   error  'other' is assigned a value but never used  no-unused-vars
+  2:1   error  'console' is not defined                    no-undef
+  2:13  error  'notDefined2' is not defined                no-undef
+
+✖ 6 problems (6 errors, 0 warnings)
+
