@@ -105,19 +105,24 @@ function emptyIsolationField(mode: IsolationMode): IsolationField {
 }
 
 interface RestoreState {
-  backupPath: string;
+  /** The same `InplaceSession.restore` used by the normal (non-signal)
+   * control flow: the signal path must reuse it rather than duplicate
+   * the copy logic, so a bug in the restore implementation breaks both
+   * paths identically (and is caught by mutating just the one place). */
+  restore: () => boolean;
   targetPath: string;
 }
 
 /**
  * Installs SIGINT/SIGTERM handlers scoped to one `probe()` call: on
  * either signal, if a mutation is currently in flight (per
- * `getRestoreState`), restores the target from its backup and removes
- * the marker (only when the restore copy itself succeeded, so a failed
- * emergency restore still leaves the marker for the next invocation to
- * recover), releases the lock, then exits. Returns a function that
- * removes exactly these two handlers, so concurrent `probe()` calls in
- * the same process never interfere with each other's signal handling.
+ * `getRestoreState`), restores the target via the session's own
+ * `restore()` and removes the marker (only when that restore itself
+ * succeeded, so a failed emergency restore still leaves the marker for
+ * the next invocation to recover), releases the lock, then exits.
+ * Returns a function that removes exactly these two handlers, so
+ * concurrent `probe()` calls in the same process never interfere with
+ * each other's signal handling.
  */
 function installCrashHandlers(
   getRestoreState: () => RestoreState | null,
@@ -128,8 +133,7 @@ function installCrashHandlers(
     if (state) {
       let restored = false;
       try {
-        fs.copyFileSync(state.backupPath, state.targetPath);
-        restored = true;
+        restored = state.restore();
       } catch {
         // Best-effort: a failed emergency restore leaves the marker in
         // place, which is exactly what lets the next invocation recover.
@@ -324,7 +328,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       pid: process.pid,
       timestamp: new Date().toISOString(),
     });
-    restoreState = { backupPath: session.backupPath, targetPath: absFile };
+    restoreState = { restore: session.restore, targetPath: absFile };
 
     if (opts.form === "patch") {
       const applyResult = await applyPatchForReal(
