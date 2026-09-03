@@ -158,9 +158,76 @@ Overall `status` is `error` if any check errored, else `fail` if any check
 failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
 the same way every other subcommand's does.
 
-## `probe`, `init`
+## `probe`
 
-Not yet implemented. Each currently returns a JSON result with
+Runs one mutation probe: mutate a line (or apply a patch), confirm the
+unmutated test passes first (the baseline — there is no `--no-baseline`,
+because a probe whose test was never shown to pass unmutated is not a
+probe), run the test against the mutant, restore the file, and classify
+the result.
+
+```bash
+agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
+  -t 'npm test' -i inplace
+agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
+  -t 'npm test'
+agent-primitives probe --file src/foo.js -n 1 -p mutant.patch -t 'npm test'
+```
+
+Only `-i inplace` is implemented: it backs up the target file
+before mutating it and restores from that backup afterward (on normal
+completion, on any error, and on `SIGINT`/`SIGTERM`). `-i worktree` (the
+eventual default, isolating the mutation in a throwaway git worktree
+instead of the working tree) returns `status: "usage_error"`,
+`reason: "not_implemented"`, exit `2`, until a later release. `--file`
+is long-only (the global `-f` is `--format`). Exactly one mutant form is
+required: `-r, --replace` (replace the whole line), `-M, --match` with
+`-w, --with` (replace the first occurrence of a substring on the line),
+or `-p, --patch` (apply a unified diff via `git apply`).
+
+`--file` and every `--link` entry must resolve inside the git work-tree
+root (or inside the cwd when not in a repo), unless `--allow-outside` is
+passed; otherwise the result is `status: "inconclusive"`,
+`reason: "file_outside_root"`, exit `2`.
+
+`--pre <command>` runs (e.g. a rebuild) before each test invocation, in
+both the baseline and mutant runs — needed whenever the test executes
+built output (`dist/`) rather than the source file being mutated,
+otherwise the mutant never reaches the test and the probe reports a false
+`survived`.
+
+A probe on one target file is serialized against any other probe on the
+same target via a lock file outside the repository (`$AGENT_PRIMITIVES_LOCK_DIR`
+or `<tmpdir>/agent-primitives/locks/`); a second probe on the same target
+while the first is running gets `status: "inconclusive"`,
+`reason: "probe_in_progress"`, exit `2`. If a probe is killed outright
+(`SIGKILL`, a crash, a machine restart) mid-mutation, it leaves an
+in-flight marker behind; the next probe on that same target recovers
+automatically (restores from the recorded backup, verifies by hash, adds
+a `recovered_stale_probe` warning) when it can prove the file is still in
+the exact mutated state the marker describes, and otherwise refuses with
+`reason: "stale_probe_marker"`, naming the backup path for a human to
+inspect. `agent-primitives doctor` also reports any such marker left for
+the current repository.
+
+A failed restore (the backup or the target became unwritable) is
+terminal: `status: "inconclusive"`, `reason: "restore_failed"`, exit `2`,
+never a `killed`/`survived` verdict, with a warning naming the absolute
+backup path.
+
+Output beside the envelope: `status` (`killed`, `survived`, or
+`inconclusive`), `reason` (when inconclusive), `mutant: { file, line,
+before, after, form }`, `mutation_probe: { mutant, verified_applied_via,
+result, restored_verified }` (paste straight into an implementer's
+`mutation_probes` output field), `baseline: { exitCode, durationMs,
+logPath }`, `test: { command, exitCode, durationMs, timedOut, stdoutTail,
+stderrTail, logPath }`, `isolation: { mode, path, linked,
+syncedTrackedFiles, syncedUntrackedFiles }` (the `worktree`-only fields
+are empty for `inplace`).
+
+## `init`
+
+Not yet implemented. It currently returns a JSON result with
 `status: "usage_error"` and `reason: "not_implemented"`, exit `2`, rather
 than doing nothing silently or claiming success.
 

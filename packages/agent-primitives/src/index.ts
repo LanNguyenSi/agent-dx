@@ -43,3 +43,18 @@ export type {
   VerifyResult,
   VerifyStatus,
 } from "./verify/index.js";
+export { acquireLock, isPidAlive, listMarkers } from "./lock.js";
+export type { AcquireLockResult, MarkerData } from "./lock.js";
+export { probe } from "./probe/index.js";
+export type {
+  ExpectVerdict,
+  ExecPhaseField,
+  IsolationField,
+  IsolationMode,
+  MutantField,
+  MutationProbeField,
+  ProbeOptions,
+  ProbeResult,
+  ProbeStatus,
+  TestPhaseField,
+} from "./probe/index.js";

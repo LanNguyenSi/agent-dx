@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "../envelope.js";
+import { isPidAlive, listMarkers } from "../lock.js";
+import { containmentRoot, isPathContained } from "../probe/containment.js";
 
 export interface ToolCheck {
   name: string;
@@ -46,6 +48,9 @@ export interface DoctorOptions {
    * (a filesystem stat, not a spawn) is never skipped by this deadline.
    * Defaults to 3000. */
   versionDeadlineMs?: number;
+  /** Test seam: overrides the probe lock/marker directory (defaults to
+   * `lock.ts`'s own `$AGENT_PRIMITIVES_LOCK_DIR` / tmpdir resolution). */
+  lockDir?: string;
 }
 
 export const DEFAULT_REQUIRED = ["git", "node", "npm", "rg"];
@@ -296,6 +301,23 @@ export async function doctor(
         : hasSrc
           ? `${distDir} exists next to ${srcDir}`
           : "no src/ directory in cwd",
+  });
+
+  const staleMarkers = listMarkers(options.lockDir).filter(
+    (m) =>
+      !isPidAlive(m.pid) &&
+      isPathContained(containmentRoot(cwd), path.resolve(m.targetPath)),
+  );
+  checks.push({
+    name: "stale-probe-marker",
+    ok: staleMarkers.length === 0,
+    detail:
+      staleMarkers.length === 0
+        ? "no stale probe markers for this repository"
+        : `${staleMarkers.length} stale probe marker(s) for this repository; ` +
+          `run \`agent-primitives probe\` again on the affected file to ` +
+          `auto-recover, or inspect the backup(s): ` +
+          staleMarkers.map((m) => m.backupPath).join(", "),
   });
 
   const hints: string[] = [];

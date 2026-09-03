@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -121,18 +121,27 @@ describe("cli", () => {
     expect(JSON.parse(run.stdout).status).toBe("ok");
   });
 
-  it("returns not_implemented usage_error for the probe and init stubs", async () => {
-    // `verify` is implemented (see the "verify" describe block below) and
-    // is deliberately excluded here: running it with no `-C` would target
+  it("returns not_implemented usage_error for the init stub", async () => {
+    // `probe` and `verify` are both implemented (see their own describe
+    // blocks below), so `init` is the only stub left. `verify` would in
+    // any case be excluded here: running it with no `-C` would target
     // this package's own real cwd and its real `test` script, re-invoking
     // this very test suite from inside itself.
-    for (const sub of ["probe", "init"]) {
+    for (const sub of ["init"]) {
       const run = await spawnCli([sub]);
       expect(run.code).toBe(2);
       const parsed = JSON.parse(run.stdout);
       expect(parsed.status).toBe("usage_error");
       expect(parsed.reason).toBe("not_implemented");
     }
+  });
+
+  it("probe is no longer a stub: missing required flags is a normal commander usage_error", async () => {
+    const run = await spawnCli(["probe"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).not.toBe("not_implemented");
   });
 
   it("rejects a -r entry shaped like a path traversal as usage_error (never resolved as a real binary)", async () => {
@@ -1038,5 +1047,189 @@ describe("writeFullVerifyResult", () => {
     } finally {
       fs.chmodSync(logDir, 0o700);
     }
+  });
+});
+
+describe("cli: probe", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  function initRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    return repo;
+  }
+
+  function commitAll(repo: string): void {
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "x"]);
+  }
+
+  it("-i worktree is usage_error/not_implemented, exit 2, for the probe command specifically", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-r",
+      "y",
+      "-t",
+      "node -e 1",
+      "-i",
+      "worktree",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.command).toBe("probe");
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("not_implemented");
+  });
+
+  it("reports killed, exit 0, for a fixture whose test catches the mutant (the acceptance-criterion CLI shape)", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "node fixture.test.js",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("reports survived, exit 1, for a fixture whose test does not catch the mutant", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "function unused(n) {",
+        "  return n * 2;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "5",
+      "-r",
+      "  return n * 3;",
+      "-t",
+      "node fixture.test.js",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("survived");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("exactly one mutant form is required: none given is usage_error, exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-t",
+      "node -e 1",
+    ]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+  });
+
+  it("exactly one mutant form is required: two given (-r and -p) is usage_error, exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-r",
+      "y",
+      "-p",
+      "/dev/null",
+      "-t",
+      "node -e 1",
+    ]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
 });

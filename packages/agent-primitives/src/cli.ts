@@ -23,6 +23,11 @@ import {
   DEFAULT_MAX_FAILURES,
   type VerifyResult,
 } from "./verify/index.js";
+import {
+  probe,
+  type ExpectVerdict,
+  type IsolationMode,
+} from "./probe/index.js";
 
 function readVersion(): string {
   try {
@@ -616,6 +621,187 @@ function renderDoctorText(result: DoctorResult): string {
   return lines.join("\n");
 }
 
+interface ProbeCliOptions {
+  file: string;
+  line: number;
+  replace?: string;
+  match?: string;
+  with?: string;
+  patch?: string;
+  test: string;
+  pre?: string;
+  isolation: IsolationMode;
+  expect: ExpectVerdict;
+  timeout?: number;
+  link?: string[];
+  allowOutside?: boolean;
+}
+
+function parseLine(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new InvalidArgumentError(
+      `-n/--line must be a positive integer (got "${value}")`,
+    );
+  }
+  return n;
+}
+
+function parseIsolationMode(value: string): IsolationMode {
+  if (value !== "worktree" && value !== "inplace") {
+    throw new InvalidArgumentError(
+      `-i/--isolation must be "worktree" or "inplace" (got "${value}")`,
+    );
+  }
+  return value;
+}
+
+function parseExpectVerdict(value: string): ExpectVerdict {
+  if (value !== "fail" && value !== "pass") {
+    throw new InvalidArgumentError(
+      `--expect must be "fail" or "pass" (got "${value}")`,
+    );
+  }
+  return value;
+}
+
+function parseTimeoutSeconds(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new InvalidArgumentError(
+      `--timeout must be a positive number of seconds (got "${value}")`,
+    );
+  }
+  return n;
+}
+
+type MutantChoice =
+  | { form: "replace"; replaceText: string }
+  | { form: "match"; matchText: string; withText: string }
+  | { form: "patch"; patchPath: string };
+
+/**
+ * Exactly one mutant form is required: `-r`, or `-M` together with `-w`,
+ * or `-p`. Anything else (none, more than one, or `-M`/`-w` given
+ * without its pair) is a usage error, thrown here so it flows through
+ * the same top-level `mapTopLevelError` path as every other usage error
+ * in this CLI.
+ */
+function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
+  const hasReplace = opts.replace !== undefined;
+  const hasMatchPair = opts.match !== undefined || opts.with !== undefined;
+  const hasPatch = opts.patch !== undefined;
+  const formCount = [hasReplace, hasMatchPair, hasPatch].filter(Boolean).length;
+  if (formCount !== 1) {
+    throw new UsageError(
+      "probe: exactly one mutant form is required: -r/--replace, or " +
+        "-M/--match together with -w/--with, or -p/--patch",
+    );
+  }
+  if (hasMatchPair) {
+    if (opts.match === undefined || opts.with === undefined) {
+      throw new UsageError(
+        "probe: -M/--match and -w/--with must be given together",
+      );
+    }
+    return { form: "match", matchText: opts.match, withText: opts.with };
+  }
+  if (hasReplace) {
+    return { form: "replace", replaceText: opts.replace as string };
+  }
+  return { form: "patch", patchPath: opts.patch as string };
+}
+
+program
+  .command("probe")
+  .description(
+    "Apply one mutant, confirm the test fails on baseline and (per --expect) reacts to the mutant, then restore",
+  )
+  .requiredOption(
+    "--file <path>",
+    "path to the file to mutate (long-only: the global -f is --format)",
+  )
+  .requiredOption("-n, --line <n>", "1-indexed line number", parseLine)
+  .option("-r, --replace <text>", "replace the whole line with this text")
+  .option("-M, --match <substr>", "substring to find on the line (requires -w)")
+  .option("-w, --with <text>", "replacement for the first match of -M")
+  .option("-p, --patch <path>", "path to a unified diff, applied via git apply")
+  .requiredOption("-t, --test <command>", "shell command that runs the test")
+  .option(
+    "--pre <command>",
+    "shell command (e.g. a rebuild) run before each test invocation",
+  )
+  .option(
+    "-i, --isolation <mode>",
+    "worktree or inplace (default inplace; worktree is not yet implemented)",
+    parseIsolationMode,
+    "inplace",
+  )
+  .option(
+    "--expect <verdict>",
+    "fail (default, mutant should break the test) or pass",
+    parseExpectVerdict,
+    "fail",
+  )
+  .option(
+    "--timeout <seconds>",
+    "timeout for --pre and -t",
+    parseTimeoutSeconds,
+  )
+  .option(
+    "--link <dirs>",
+    "comma-separated extra directories checked for containment",
+    parseList,
+  )
+  .option(
+    "--allow-outside",
+    "allow --file/--link to resolve outside the containment root",
+  )
+  .action(async (opts: ProbeCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    const mutantChoice = resolveMutantForm(opts);
+    const result = await probe({
+      file: opts.file,
+      line: opts.line,
+      ...mutantChoice,
+      testCommand: opts.test,
+      preCommand: opts.pre,
+      isolation: opts.isolation,
+      expect: opts.expect,
+      timeoutMs: opts.timeout !== undefined ? opts.timeout * 1000 : undefined,
+      links: opts.link ?? [],
+      allowOutside: opts.allowOutside ?? false,
+      cwd: global.cwd,
+      logDir: global.logDir,
+    });
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "probe",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs: [],
+      extra: {
+        ...(result.reason !== undefined ? { reason: result.reason } : {}),
+        ...(result.mutant !== undefined ? { mutant: result.mutant } : {}),
+        ...(result.mutation_probe !== undefined
+          ? { mutation_probe: result.mutation_probe }
+          : {}),
+        ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
+        ...(result.test !== undefined ? { test: result.test } : {}),
+        isolation: result.isolation,
+      },
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(envelope, exitCode, {
+      format: global.format,
+      maxChars: global.maxChars,
+    });
+  });
+
 function registerStub(name: string, description: string): void {
   program
     .command(name)
@@ -642,7 +828,6 @@ function registerStub(name: string, description: string): void {
     });
 }
 
-registerStub("probe", "Run a mutation probe");
 registerStub(
   "init",
   "Install the agent-primitives skill into a harness's skill directories",

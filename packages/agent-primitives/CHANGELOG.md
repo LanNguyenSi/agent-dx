@@ -37,6 +37,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failures-first; a cut is reported via `truncated: true` and the full,
   uncapped result is written to the log directory.
 
+- `probe` subcommand (`inplace` isolation only; `-i worktree` still
+  returns `not_implemented`, a later release flips the default): the full
+  mutation-probe pipeline — lock, containment, stale-marker recovery,
+  baseline, apply, `--pre`/test, restore, hash verification, classify —
+  for all three mutant forms (`-r, --replace`, `-M, --match` with
+  `-w, --with`, `-p, --patch` via `git apply`). A per-target lock
+  (`src/lock.ts`, `O_EXCL`, stale-pid reclaim) outside the repository
+  serializes concurrent probes on the same file; an in-flight marker
+  written before mutation lets the next invocation recover automatically
+  from a `SIGKILL`/crash mid-mutation, or refuse with
+  `stale_probe_marker` naming the backup path when it cannot prove that
+  recovery is safe. Restore runs on normal completion, on any thrown
+  error, and on `SIGINT`/`SIGTERM`; a failed restore is terminal
+  (`restore_failed`, exit 2, never a `killed`/`survived` verdict).
+  `doctor`'s `checks` gained a `stale-probe-marker` entry for the current
+  repository.
+
 ### Fixed
 
 - **Envelope bound and reduction.** The bound is met by reducing the
