@@ -974,6 +974,58 @@ describe("doctor: stale-worktree check on a git that rejects -z, and on one whos
     ).toContain(path.join(shimDir, "git"));
   });
 
+  it("still reports a registered scratch worktree through the fallback when git rejects -z with the usage-error status alone, nothing on stderr", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "reject-z-silent");
+    const resolved = addScratchWorktree(repo);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      pathEnv: shimDir,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.warnings.filter((w) => w.includes("could not run"))).toEqual(
+      [],
+    );
+  });
+
+  it("warns that the registry could not be read, and does not answer from the fallback, when the -z listing dies with a fatal message that names no option", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "fail-z");
+    addScratchWorktree(repo);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      pathEnv: shimDir,
+      lockDir,
+    });
+
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(`git worktree list could not run for ${root}`) &&
+          w.includes("git worktree list --porcelain -z exited 128"),
+      ),
+    ).toBe(true);
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+  });
+
   it("warns that the registry could not be read, instead of a silently clean check, when no listing form runs", async () => {
     const lockDir = makeTmpDir();
     const repo = initRepo();

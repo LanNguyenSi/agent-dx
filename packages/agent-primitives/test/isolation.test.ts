@@ -15,11 +15,16 @@ import {
   parseWorktreeListLines,
   parseWorktreeListZ,
   readScratchOwner,
+  rejectsOption,
   SCRATCH_OWNER_FILE,
 } from "../src/probe/isolation.js";
 import { resolveDeepestExisting } from "../src/probe/containment.js";
 import { runArgv } from "../src/probe/run.js";
-import { withPathPrepended, writeGitShim } from "./helpers/git-shim.js";
+import {
+  withPathPrepended,
+  writeGitShim,
+  type GitShimMode,
+} from "./helpers/git-shim.js";
 
 // Call-through mock (the same shape probe-worktree.test.ts uses): every
 // call runs the real runner, and the recorded calls are what lets a test
@@ -1127,6 +1132,38 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
   });
 });
 
+describe("rejectsOption", () => {
+  it("is true on the usage-error status alone, with nothing on stderr", () => {
+    expect(rejectsOption({ exitCode: 129, stderr: "" })).toBe(true);
+  });
+
+  it("is true on the unknown-switch or unknown-option text alone, whatever the non-zero status", () => {
+    expect(
+      rejectsOption({ exitCode: 128, stderr: "error: unknown switch `z'\n" }),
+    ).toBe(true);
+    expect(
+      rejectsOption({
+        exitCode: 1,
+        stderr: "error: unknown option `porcelain'\n",
+      }),
+    ).toBe(true);
+  });
+
+  it("is false for a failure that names no option, for a call that never exited, and for one that succeeded", () => {
+    expect(
+      rejectsOption({
+        exitCode: 128,
+        stderr: "fatal: not a git repository\n",
+      }),
+    ).toBe(false);
+    expect(rejectsOption({ exitCode: 1, stderr: "" })).toBe(false);
+    expect(rejectsOption({ exitCode: null, stderr: "" })).toBe(false);
+    expect(
+      rejectsOption({ exitCode: 0, stderr: "error: unknown switch `z'\n" }),
+    ).toBe(false);
+  });
+});
+
 describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, and on one whose listing cannot run", () => {
   function git(cwd: string, args: string[]): string {
     return execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -1159,11 +1196,58 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
   }
 
-  function shimDir(mode: "reject-z" | "no-worktree-list"): string {
+  function shimDir(mode: GitShimMode): string {
     const dir = makeTmpDir();
     writeGitShim(dir, mode);
     return dir;
   }
+
+  /** The `git worktree list` calls made so far, in order. */
+  function listCalls(): Parameters<typeof runArgv>[] {
+    return gitCalls().filter(
+      (c) => c[1][0] === "worktree" && c[1][1] === "list",
+    );
+  }
+
+  it("lists through the fallback when git rejects -z with the usage-error status alone, nothing on stderr", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const wt = scratchPath(logDir);
+    addScratchWorktree(repo, wt);
+
+    const listed = await withPathPrepended(shimDir("reject-z-silent"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    expect(listed.ok).toBe(true);
+    expect(listed.form).toBe("newline");
+    expect(listed.paths).toEqual([
+      resolveDeepestExisting(repo),
+      resolveDeepestExisting(wt),
+    ]);
+    expect(listed.logPaths).toHaveLength(2);
+    expect(fs.readFileSync(listed.logPaths[0], "utf8")).not.toContain(
+      "unknown switch",
+    );
+    expect(listCalls()).toHaveLength(2);
+  });
+
+  it("does not fall back when the -z listing dies with a fatal message and any other status: the registry is unknown, and the newline-separated listing never runs", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    addScratchWorktree(repo, scratchPath(logDir));
+
+    const listed = await withPathPrepended(shimDir("fail-z"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    expect(listed.ok).toBe(false);
+    expect(listed.form).toBeUndefined();
+    expect(listed.paths).toEqual([]);
+    expect(listed.detail).toBe("git worktree list --porcelain -z exited 128");
+    expect(listed.logPaths).toHaveLength(1);
+    expect(listCalls()).toHaveLength(1);
+  });
 
   it("lists through the newline-separated --porcelain fallback when git rejects -z, reporting the paths the -z form reports", async () => {
     const repo = initRepo();

@@ -37,25 +37,51 @@ export type GitShimMode =
    * stderr. Every other call, `worktree list --porcelain` without `-z`
    * included, reaches the real git. */
   | "reject-z"
+  /** A `worktree list` call carrying `-z` exits 129 and prints nothing
+   * at all: the usage-error status with no text to go with it. Every
+   * other call reaches the real git. */
+  | "reject-z-silent"
+  /** A `worktree list` call carrying `-z` dies the way any git command
+   * dies of its own: exit status 128 and a `fatal:` line naming no
+   * option, while the same call without `-z` would reach the real git
+   * and succeed. A listing that failed for a reason of its own, never
+   * one to fall back from. */
+  | "fail-z"
   /** Every `worktree list` call fails (exit status 128), whatever its
    * options: a registry that cannot be read in any form. Every other
    * call reaches the real git. */
   | "no-worktree-list";
 
+/** The lines run for every argument after `worktree list`, per mode. */
+function inListLines(mode: GitShimMode): string[] {
+  switch (mode) {
+    case "reject-z":
+      return [
+        '    if [ "$a" = "-z" ]; then',
+        "      printf '%s\\n' \"error: unknown switch \\`z'\" >&2",
+        "      printf '%s\\n' 'usage: git worktree list [--porcelain]' >&2",
+        "      exit 129",
+        "    fi",
+      ];
+    case "reject-z-silent":
+      return ['    if [ "$a" = "-z" ]; then', "      exit 129", "    fi"];
+    case "fail-z":
+      return [
+        '    if [ "$a" = "-z" ]; then',
+        "      printf '%s\\n' 'fatal: shimmed: the listing died' >&2",
+        "      exit 128",
+        "    fi",
+      ];
+    case "no-worktree-list":
+      return [];
+  }
+}
+
 /** Writes the executable `git` script for `mode` into `binDir` and
  * returns its path. */
 export function writeGitShim(binDir: string, mode: GitShimMode): string {
   const real = realGitPath();
-  const inList =
-    mode === "reject-z"
-      ? [
-          '    if [ "$a" = "-z" ]; then',
-          "      printf '%s\\n' \"error: unknown switch \\`z'\" >&2",
-          "      printf '%s\\n' 'usage: git worktree list [--porcelain]' >&2",
-          "      exit 129",
-          "    fi",
-        ]
-      : [];
+  const inList = inListLines(mode);
   const onList =
     mode === "no-worktree-list"
       ? [

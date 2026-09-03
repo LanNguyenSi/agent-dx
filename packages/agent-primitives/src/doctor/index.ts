@@ -16,6 +16,7 @@ import {
   liveForeignOwner,
   parseWorktreeListLines,
   parseWorktreeListZ,
+  rejectsOption,
 } from "../probe/isolation.js";
 
 export interface ToolCheck {
@@ -666,10 +667,11 @@ function runWorktreeList(
  * itself, each through `resolveDeepestExisting`. The same two listing
  * forms `listRegisteredWorktrees` in `isolation.ts` runs, through a
  * synchronous spawn: `--porcelain -z` first, the newline-separated
- * `--porcelain` when git rejects `-z` (exit status 129, or the
- * unknown-switch text). Not ok when neither form ran to a parse: this is
- * a report, and a listing that could not run is something to warn
- * about, never an empty registry. */
+ * `--porcelain` when git rejects `-z`, decided by the same
+ * `rejectsOption` the probe's listing uses (the one copy of that
+ * predicate). Not ok when neither form ran to a parse: this is a
+ * report, and a listing that could not run is something to warn about,
+ * never an empty registry. */
 function listScratchWorktreesSync(
   root: string,
   gitPath: string | undefined,
@@ -683,7 +685,7 @@ function listScratchWorktreesSync(
     paths = parseWorktreeListZ(nul.stdout);
   } else if (
     nul.error === undefined &&
-    (nul.status === 129 || /unknown (switch|option)/.test(nul.stderr))
+    rejectsOption({ exitCode: nul.status, stderr: nul.stderr })
   ) {
     const newline = runWorktreeList(gitPath, root, false);
     if (newline.error !== undefined || newline.status !== 0) {

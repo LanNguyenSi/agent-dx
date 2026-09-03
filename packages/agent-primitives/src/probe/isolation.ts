@@ -878,11 +878,25 @@ export function parseWorktreeListLines(stdout: string): ParsedWorktreeList {
   return { ok: true, paths };
 }
 
+/** What `rejectsOption` reads of a finished git call: the exit status
+ * (`null` when the call never ran to an exit) and the captured stderr.
+ * `RunArgvResult` fits it, and so does the synchronous spawn `doctor`
+ * runs its own listing through. */
+export interface GitCallOutcome {
+  exitCode: number | null;
+  stderr: string;
+}
+
 /** True when git rejected an option this call passed, which is how a
  * release older than the one the option first appeared in answers:
  * exit status 129 (git's usage-error status, the same in every locale)
- * or the untranslated `unknown switch`/`unknown option` text. */
-function rejectsOption(result: RunArgvResult): boolean {
+ * or the untranslated `unknown switch`/`unknown option` text. Either
+ * signal alone is enough. Any other non-zero exit is a listing that
+ * failed for a reason of its own, never one to fall back from: the
+ * fallback form would answer for a git that could not list at all. The
+ * one copy of this predicate; `doctor` calls it through this export
+ * rather than carrying its own. */
+export function rejectsOption(result: GitCallOutcome): boolean {
   return (
     result.exitCode !== 0 &&
     (result.exitCode === 129 || /unknown (switch|option)/.test(result.stderr))
