@@ -51,6 +51,25 @@ describe("doctor", () => {
     expect(result.status).toBe("ok");
   });
 
+  it("ships no version key at all for a binary that runs but prints nothing", async () => {
+    const dir = makeTmpDir();
+    const stubPath = path.join(dir, "quiet-tool");
+    fs.writeFileSync(stubPath, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(stubPath, 0o755);
+    const result = await doctor({
+      required: ["quiet-tool"],
+      optional: [],
+      pathEnv: dir,
+    });
+    const tool = result.tools.find((t) => t.name === "quiet-tool");
+    expect(tool?.found).toBe(true);
+    // Not `version: undefined` as an own property: a shipped result must
+    // carry no undefined-valued own properties, which `in` sees and
+    // `toBeUndefined()` would not.
+    expect(tool && "version" in tool).toBe(false);
+    expect(tool?.versionCheck).toBeUndefined();
+  });
+
   it("reports status missing and found: false for a binary that does not exist anywhere on PATH", async () => {
     const result = await doctor({
       required: ["git", "definitely-not-a-binary-xyz"],

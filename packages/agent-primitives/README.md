@@ -39,21 +39,28 @@ Every subcommand accepts:
 - `-f, --format <format>`: `json` (default) or `text`.
 - `-C, --cwd <dir>`: working directory (defaults to the process cwd).
 - `-m, --max-chars <n>`: requested bound on the serialized result
-  (default `8000`); when a result would exceed it, the largest arrays,
-  then the longest strings, then the largest remaining subtrees are cut
-  down (in that priority order, repeated as needed) until it fits, and the
-  full untruncated result is written to the log directory instead. A
-  handful of fixed fields (`tool`, `version`, `command`, `status`,
-  `durationMs`, `cwd`, `truncated`, `warnings`, `logs`) are never cut, so
-  the real bound is `max(-m, size of those fixed fields)`, not `-m`
-  unconditionally; on the rare input where even that cannot be honored, a
+  (default `8000`). A result that would exceed it is reduced
+  structurally, never by cutting the JSON text: four caps derived from the
+  bound (how many characters of a string, how many elements of an array,
+  how many keys of an object, and how deep a subtree is kept) are applied
+  in one pass over the result, and a bounded search over a single scale
+  factor multiplying all four picks the largest setting that fits. Every
+  cut is marked in place with an honest count: a trailing array element,
+  a `...` key in an object, a suffix on a string, a placeholder for a
+  pruned subtree, each naming how much of the original is missing. Equally
+  sized siblings are therefore cut alike, and a large collection is
+  trimmed entry by entry instead of vanishing whole. The full untruncated
+  result is written to the log directory and its path returned in `logs`.
+  The reduction reads no clock and does no work proportional to how far
+  over the bound a result is, so the same result always yields the same
+  envelope. A handful of fixed fields (`tool`, `version`, `command`,
+  `status`, `durationMs`, `cwd`, `truncated`, `warnings`, `logs`) are held
+  out of it entirely, so the real bound is `max(-m, size of those fixed
+  fields)`, not `-m` unconditionally; when even that cannot be honored, a
   warning names the envelope's true final length instead of silently
-  exceeding what was asked for. Reduction runs under a fixed work budget
-  (200ms); a result whose shape defeats it loses every reducible field at
-  once, with a warning saying so, rather than stalling. `-f text` output
-  is bounded the same way and never exceeds `-m`: its truncation marker
-  names the full length, and below the marker's own size the marker itself
-  is cut short.
+  exceeding what was asked for. `-f text` output is bounded the same way
+  and never exceeds `-m`: its truncation marker names the full length, and
+  below the marker's own size the marker itself is cut short.
 - `-l, --log-dir <dir>`: directory for logs and full (untruncated)
   results (defaults to `$AGENT_PRIMITIVES_LOG_DIR`, or a fresh directory
   under the OS temp dir otherwise).

@@ -7,19 +7,18 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 /**
- * CLI tests never depend on the host beyond four binaries: node, npm, git
- * and sh.
+ * The environment of a spawned CLI is fixed here, not inherited: PATH is a
+ * single directory of symlinks to exactly four resolved binaries (node,
+ * npm, git, sh), TMPDIR is a fresh directory, and nothing else reaches the
+ * child (no AGENT_PRIMITIVES_* variable from the developer's shell, no
+ * ripgrep or jq that happens to sit on the host, no ambient log
+ * directory). What those tests assert is therefore about this CLI rather
+ * than about what the host has installed.
  *
- * Every CLI test spawns through this helper, and the helper hands the
- * child an environment built from scratch: PATH is a single directory of
- * symlinks to exactly those four resolved binaries, TMPDIR is a fresh
- * directory, and nothing else is inherited (no AGENT_PRIMITIVES_* variable
- * from the developer's shell, no ripgrep or jq that happens to sit on the
- * host, no ambient log directory). Three rounds of review found host
- * coupling in these tests -- ripgrep assumed present, a `printf` escape
- * only bash understands, a timing assumption that held only on a long
- * PATH -- and each was fixed one test at a time; the environment being
- * fixed here instead is what stops the class.
+ * That claim covers the spawned CLI's own environment. It is not a claim
+ * about the whole suite: the exec tests drive commands through the shell
+ * and the EPIPE test reaches for `head`, so those use POSIX utilities as
+ * well, through `sh` or by absolute path.
  *
  * The helper also takes no timing arguments and contains no sleeps:
  * listeners are attached before the function returns, so a child that has

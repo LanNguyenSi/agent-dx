@@ -4,9 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import { randomUUID } from "node:crypto";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
-import { buildEnvelope, UsageError, type EnvelopeOutput } from "./envelope.js";
+import {
+  buildEnvelope,
+  currentRunId,
+  UsageError,
+  type EnvelopeOutput,
+} from "./envelope.js";
 import {
   doctor,
   DEFAULT_OPTIONAL,
@@ -65,12 +69,6 @@ function parseList(value: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-}
-
-let runId: string | undefined;
-function currentRunId(): string {
-  if (!runId) runId = randomUUID();
-  return runId;
 }
 
 /** Resolves cwd/maxChars/logDir without validating that cwd exists: used

@@ -19,6 +19,7 @@ import {
   CLI_PATH,
   FIXED_BINARIES,
   FIXED_BIN_DIR,
+  FIXED_TMPDIR,
   resolveBinary,
   spawnCli,
 } from "./helpers/spawn-cli.js";
@@ -168,6 +169,40 @@ describe("cli", () => {
     expect(parsed.status).not.toBe("error");
     expect(parsed.status).toBe("ok");
     expect(run.code).toBe(0);
+  });
+
+  it("keeps a 2,000-tool doctor result under the default -m with an honest array marker", async () => {
+    const run = await spawnCli(["doctor", "-r", absentNames(2000), "-o", ""]);
+    expect(run.code).toBe(1);
+    const body = run.stdout.trim();
+    expect(body.length).toBeLessThanOrEqual(8000);
+    const parsed = JSON.parse(body);
+    expect(parsed.command).toBe("doctor");
+    expect(parsed.status).toBe("missing");
+    expect(parsed.truncated).toBe(true);
+    const tools = parsed.tools as unknown[];
+    const marker = tools[tools.length - 1];
+    expect(typeof marker).toBe("string");
+    const omitted = Number(
+      /^\.\.\.\((\d+) more items? omitted\)$/.exec(marker as string)?.[1],
+    );
+    // Honest: what is reported missing plus what is reported kept has to
+    // account for every tool that was actually checked.
+    expect(omitted + (tools.length - 1)).toBe(2000);
+    expect(tools.length - 1).toBeGreaterThan(0);
+  });
+
+  it("writes the full result under the helper's fixed TMPDIR, not the host's, when a run truncates", async () => {
+    const run = await spawnCli(["doctor", "-r", absentNames(2000), "-o", ""]);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.truncated).toBe(true);
+    const logs = parsed.logs as string[];
+    expect(logs.length).toBeGreaterThan(0);
+    // The child resolves its default log directory from TMPDIR; if the
+    // helper's TMPDIR did not reach it, this path lands in the host's temp
+    // directory instead.
+    expect(logs[0].startsWith(FIXED_TMPDIR)).toBe(true);
+    expect(path.basename(logs[0])).toMatch(/^result-full-.+\.json$/);
   });
 
   it("prints a bounded pretty-JSON fallback for -f text on a command with no dedicated text renderer", async () => {

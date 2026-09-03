@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 export const TOOL_NAME = "agent-primitives";
 
@@ -59,6 +60,23 @@ export function exitCodeForStatus(status: string): number {
   }
 }
 
+let runId: string | undefined;
+
+/**
+ * A random identifier for this process, generated once and reused.
+ *
+ * It names the full-result file (`result-full-<run-id>.json`) so two
+ * invocations sharing one log directory do not overwrite each other's
+ * evidence, and it is also the default log directory's own leaf name, so
+ * both agree. Generated from `crypto.randomUUID`, never from a clock:
+ * `buildEnvelope` reads no clock at all, and within one process this value
+ * is constant, so the same input still produces the same envelope.
+ */
+export function currentRunId(): string {
+  if (!runId) runId = randomUUID();
+  return runId;
+}
+
 export interface EnvelopeInput {
   version: string;
   command: string;
@@ -88,16 +106,6 @@ export interface EnvelopeInput {
    * `truncated: true` marker is set).
    */
   logDir?: string;
-  /**
-   * Wall-clock budget, in milliseconds, for the whole reduction loop.
-   * Defaults to 200. A result whose shape defeats the reducers (very many
-   * small keys, say) must not turn a bounded-output helper into a
-   * multi-second stall: once the budget is spent, every reducible field is
-   * dropped wholesale and a warning says so, which is a worse result but a
-   * fast and honest one. Exposed mainly so tests can drive that path
-   * deterministically.
-   */
-  reductionBudgetMs?: number;
 }
 
 export interface EnvelopeOutput {
@@ -106,13 +114,35 @@ export interface EnvelopeOutput {
 }
 
 const DEFAULT_MAX_CHARS = 8000;
-const DEFAULT_REDUCTION_BUDGET_MS = 200;
 
-/** Strings at or below this length can never be shortened by the
- * string-capping step: head-plus-marker would be no shorter than the
- * original. */
-const MIN_CAPPABLE_STRING = 4;
-const STRING_TRUNCATION_MARKER = "...";
+/**
+ * Upper bound on how many times the reduction re-derives the payload from
+ * the pristine copy: one pass at scale 1, then eleven bisection steps.
+ * Each pass is O(n) in the payload, so the whole reduction is O(n) with a
+ * constant factor of at most this many passes, whatever the shape of the
+ * result. There is no wall-clock budget and no data-dependent loop: the
+ * envelope is a function of its input alone.
+ */
+const MAX_REDUCTION_PASSES = 12;
+
+/** Nesting depth kept at scale 1. Deeper containers are replaced by a
+ * placeholder naming the depth they were pruned at. */
+const BASE_MAX_DEPTH = 12;
+
+/**
+ * Floor under the scaled depth limit. Depth is the one cap that is not
+ * derived from the bound: collapsing a result to two or three levels
+ * destroys nearly all of its structure while saving little next to the
+ * breadth caps, which do the real work. Keeping a floor here means a
+ * pathologically deep graph is still bounded (a chain is cut a few levels
+ * in) without an ordinary nested result being flattened at moderate
+ * scales.
+ */
+const MIN_MAX_DEPTH = 6;
+
+/** The object key under which a trimmed object records how many of its
+ * keys were dropped. */
+const OMITTED_KEYS_MARKER = "...";
 
 /**
  * Serialized length of `obj`, total over every input.
@@ -143,274 +173,191 @@ function describeSerializationFailure(err: unknown): string {
   return firstLine.length > 200 ? `${firstLine.slice(0, 200)}...` : firstLine;
 }
 
-function getAtPath(obj: unknown, keyPath: Array<string | number>): unknown {
-  let cursor: unknown = obj;
-  for (const key of keyPath) {
-    cursor = (cursor as Record<string | number, unknown>)[key];
-  }
-  return cursor;
+/**
+ * The four structural caps applied in one pass over the payload. Every
+ * limit is a maximum that is kept, so "cut" always means "the excess
+ * beyond this, and the marker says how much that was".
+ */
+export interface CapLimits {
+  /** Characters kept of a longer string, before its suffix. */
+  maxString: number;
+  /** Elements kept of a longer array, before its trailing marker. */
+  maxArray: number;
+  /** Keys kept of a wider object, before its `...` key. */
+  maxKeys: number;
+  /** Deepest container level kept; a container below this is replaced by a
+   * placeholder naming its depth. */
+  maxDepth: number;
 }
 
-/** Like `getAtPath`, but reports `undefined` instead of throwing when a
- * step along the path is missing. Bulk key drops can invalidate a path
- * collected earlier in the same pass (dropping a parent removes every
- * descendant), so the drop step resolves parents through this. */
-function tryGetAtPath(obj: unknown, keyPath: Array<string | number>): unknown {
-  let cursor: unknown = obj;
-  for (const key of keyPath) {
-    if (cursor === null || typeof cursor !== "object") return undefined;
-    cursor = (cursor as Record<string | number, unknown>)[key];
-  }
-  return cursor;
+function pluralize(count: number, noun: string): string {
+  return `${count} more ${noun}${count === 1 ? "" : "s"} omitted`;
 }
 
-function setAtPath(
-  obj: unknown,
-  keyPath: Array<string | number>,
-  value: unknown,
-): void {
-  let cursor: unknown = obj;
-  for (let i = 0; i < keyPath.length - 1; i++) {
-    cursor = (cursor as Record<string | number, unknown>)[keyPath[i]];
-  }
-  const last = keyPath[keyPath.length - 1];
-  (cursor as Record<string | number, unknown>)[last] = value;
+/** Trailing element appended to a trimmed array. */
+function arrayMarker(omitted: number): string {
+  return `...(${pluralize(omitted, "item")})`;
 }
 
-interface ArrayCandidate {
-  path: Array<string | number>;
-  serializedLen: number;
+/** Value of the `...` key added to a trimmed object. */
+function objectMarker(omitted: number): string {
+  return pluralize(omitted, "key");
 }
 
-interface StringCandidate {
-  path: Array<string | number>;
-  length: number;
+/** Suffix appended to a shortened string. */
+function stringMarker(omitted: number): string {
+  return `...(${pluralize(omitted, "character")})`;
 }
 
-interface EntryCandidate {
-  parentPath: Array<string | number>;
-  key: string;
-  /** Characters the enclosing object's serialization loses when this key is
-   * deleted: the quoted key, the colon, the value, and one separating
-   * comma. */
-  saving: number;
-}
-
-interface Candidates {
-  /** Largest array (by its own serialized size) with at least 2 elements:
-   * a shorter one cannot be usefully halved. */
-  largestArray?: ArrayCandidate;
-  /** Longest string above the floor below which capping cannot shorten. */
-  longestString?: StringCandidate;
-  /** Every deletable object entry in the graph. */
-  entries: EntryCandidate[];
+/** Replacement for a container below the depth limit. */
+function depthMarker(depth: number): string {
+  return `...(subtree pruned at depth ${depth})`;
 }
 
 /**
- * Characters `value` contributes as an object property's value.
- *
- * A string is sized by its own length plus its quotes rather than by
- * serializing it: JSON escaping only ever makes a string longer, so this
- * under-estimates instead of over-estimating, and it keeps a
- * multi-megabyte tail from being serialized once per reduction pass merely
- * to be measured.
- *
- * Reports 0 for exactly the values JSON omits from an enclosing object
- * (undefined, a function, a symbol), which is what lets the caller test
- * "contributes nothing" as a number comparison.
+ * True only for a bare object literal (or a null-prototype object). A
+ * Date, Map, Set or RegExp survives `structuredClone` as itself; rebuilding
+ * one from its own enumerable properties would turn it into `{}` and
+ * change what the caller's result says. Those pass through uncapped: their
+ * serialized size is small and fixed, so they never drive the bound.
  */
-function valueSerializedLength(value: unknown): number {
-  if (typeof value === "string") return value.length + 2;
-  return serializedLength(value);
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value) as object | null;
+  return proto === Object.prototype || proto === null;
 }
 
-/**
- * One walk of the whole graph collecting every reduction candidate at
- * once: the largest array, the longest string, and every deletable object
- * entry. Walking once per reduction pass rather than once per reduction
- * step is what keeps a wide result (thousands of keys) from costing three
- * full traversals per pass.
- *
- * `skipTopLevelKeys` is applied at the top level only, so this never has
- * to inspect a `logs`/`warnings` key nested somewhere inside a
- * subcommand's own `extra` data.
- */
-function collectCandidates(
-  root: unknown,
-  skipTopLevelKeys: ReadonlySet<string> | undefined,
-): Candidates {
-  const out: Candidates = { entries: [] };
-  const visit = (value: unknown, keyPath: Array<string | number>): void => {
-    if (Array.isArray(value)) {
-      if (value.length >= 2) {
-        const serializedLen = serializedLength(value);
-        if (!out.largestArray || serializedLen > out.largestArray.serializedLen)
-          out.largestArray = { path: keyPath, serializedLen };
-      }
-      for (let i = 0; i < value.length; i++) visit(value[i], [...keyPath, i]);
-      return;
-    }
-    if (typeof value === "string") {
-      if (
-        value.length > MIN_CAPPABLE_STRING &&
-        (!out.longestString || value.length > out.longestString.length)
-      ) {
-        out.longestString = { path: keyPath, length: value.length };
-      }
-      return;
-    }
-    if (value !== null && typeof value === "object") {
-      for (const [key, child] of Object.entries(
-        value as Record<string, unknown>,
-      )) {
-        if (keyPath.length === 0 && skipTopLevelKeys?.has(key)) continue;
-        // An undefined-valued property serializes to nothing at all, so
-        // deleting it saves no characters. Skipping it here keeps it out
-        // of the drop step, where it would otherwise count as "progress"
-        // that shrinks the envelope by zero. Measuring it at all is only
-        // safe because `serializedLength` is total: JSON.stringify returns
-        // undefined, not a string, for precisely these values.
-        const valueLen = valueSerializedLength(child);
-        if (valueLen === 0) continue;
-        // `"key":<value>,` -- the quoted key, the colon, the value, and
-        // the separating comma.
-        out.entries.push({
-          parentPath: keyPath,
-          key,
-          saving: key.length + 3 + valueLen + 1,
-        });
-        visit(child, [...keyPath, key]);
-      }
-    }
-  };
-  visit(root, []);
+function capString(value: string, maxString: number): string {
+  if (value.length <= maxString) return value;
+  const capped =
+    value.slice(0, maxString) + stringMarker(value.length - maxString);
+  // Below a certain length the suffix is longer than what it replaces.
+  // Leaving the string whole is then both smaller and more informative,
+  // and it keeps a marker from being the only thing a tiny string says.
+  return capped.length < value.length ? capped : value;
+}
+
+function capArray(
+  items: unknown[],
+  limits: CapLimits,
+  depth: number,
+): unknown[] {
+  const keep = Math.min(items.length, Math.max(0, limits.maxArray));
+  const out: unknown[] = new Array<unknown>(keep);
+  for (let i = 0; i < keep; i++) {
+    out[i] = capValue(items[i], limits, depth + 1);
+  }
+  if (keep < items.length) out.push(arrayMarker(items.length - keep));
   return out;
 }
 
-/**
- * Reduction step 1: shortens the single largest array in the graph,
- * keeping a head plus one marker string naming how many elements were
- * omitted.
- *
- * The marker counts from the array's ORIGINAL length, not from this pass's
- * input: `originalLengths` remembers what an array held before it was
- * first capped, so a second pass over the same array reports "N of the
- * original N+kept omitted" rather than restarting the count at whatever
- * the first pass left behind.
- *
- * How much is cut is driven by `excess` (how many characters the envelope
- * is still over budget) rather than by halving unconditionally: a 5,000
- * element list otherwise costs one full re-walk and re-serialization per
- * halving. Halving is kept as an upper bound on what is retained, so every
- * successful pass still makes geometric progress even when the estimate is
- * too small. Applied only when it is a genuine byte-size improvement (a
- * short array of short elements next to a longer marker could otherwise
- * grow); returns false and leaves the graph untouched when it is not, so
- * the caller falls through to the next step.
- */
-function capLargestArray(
-  root: unknown,
-  candidates: Candidates,
-  excess: number,
-  originalLengths: WeakMap<object, number>,
-): boolean {
-  const target = candidates.largestArray;
-  if (!target) return false;
-  const arr = getAtPath(root, target.path) as unknown[];
-  const before = target.serializedLen;
-  const tracked = originalLengths.get(arr);
-  // A previously capped array carries this step's marker as its last
-  // element; strip it so the marker is never itself halved into the kept
-  // elements and the counts below are always about real elements.
-  const items = tracked === undefined ? arr : arr.slice(0, -1);
-  const originalLength = tracked ?? arr.length;
-  if (items.length < 2) return false;
-  const perElement = Math.max(1, Math.ceil(before / arr.length));
-  const mustDrop = Math.max(1, Math.ceil(Math.max(excess, 1) / perElement));
-  const keep = Math.max(
-    1,
-    Math.min(items.length - mustDrop, Math.floor(items.length / 2)),
-  );
-  if (keep >= items.length) return false;
-  const dropped = originalLength - keep;
-  const marker = `...(${dropped} more item${dropped === 1 ? "" : "s"} omitted)`;
-  const next = [...items.slice(0, keep), marker];
-  if (serializedLength(next) >= before) return false;
-  originalLengths.set(next, originalLength);
-  setAtPath(root, target.path, next);
-  return true;
-}
-
-/**
- * Reduction step 2: shortens the single longest string in the graph,
- * keeping a head plus a `...` marker. Cut to what `excess` needs (bounded
- * below by halving, so progress stays geometric) for the same reason as
- * the array step, and with the same byte-progress guard.
- */
-function capLongestString(
-  root: unknown,
-  candidates: Candidates,
-  excess: number,
-): boolean {
-  const target = candidates.longestString;
-  if (!target) return false;
-  const cur = getAtPath(root, target.path) as string;
-  const needed = Math.max(excess, 1) + STRING_TRUNCATION_MARKER.length;
-  const keep = Math.min(
-    Math.max(0, cur.length - needed),
-    Math.floor(cur.length / 2),
-  );
-  const next = cur.slice(0, keep) + STRING_TRUNCATION_MARKER;
-  if (next.length >= cur.length) return false;
-  setAtPath(root, target.path, next);
-  return true;
-}
-
-/**
- * Reduction step 3 (unconditional fallback): deletes whole object keys,
- * largest first, until the estimated saving covers `excess`. Deleting a
- * key always strictly reduces the serialized size (undefined-valued
- * properties, the one exception, are never collected as candidates), so
- * this is what guarantees the reduction loop below terminates even when no
- * array or string reduction can make further byte progress.
- *
- * Dropping in bulk rather than one key per pass is what keeps a result
- * with thousands of small keys from costing thousands of full traversals.
- * Candidates are sorted largest-first, so a graph where one big subtree
- * covers the whole excess still loses exactly that one subtree, as a
- * single-drop step would have done. Dropping a parent also removes its
- * descendants, which may appear later in the same sorted list; those are
- * skipped rather than followed into a missing parent.
- */
-function dropLargestSubtrees(
-  root: unknown,
-  candidates: Candidates,
-  excess: number,
-): boolean {
-  if (candidates.entries.length === 0) return false;
-  const sorted = [...candidates.entries].sort((a, b) => b.saving - a.saving);
-  let saved = 0;
-  let dropped = 0;
-  for (const candidate of sorted) {
-    if (dropped > 0 && saved >= excess) break;
-    const parent =
-      candidate.parentPath.length === 0
-        ? root
-        : tryGetAtPath(root, candidate.parentPath);
-    if (parent === null || typeof parent !== "object") continue;
-    const parentObj = parent as Record<string, unknown>;
-    if (!(candidate.key in parentObj)) continue;
-    delete parentObj[candidate.key];
-    saved += candidate.saving;
-    dropped++;
+function capObject(
+  obj: Record<string, unknown>,
+  limits: CapLimits,
+  depth: number,
+): Record<string, unknown> {
+  const entries = Object.entries(obj);
+  const keep = Math.min(entries.length, Math.max(0, limits.maxKeys));
+  const out: Record<string, unknown> = {};
+  for (let i = 0; i < keep; i++) {
+    const entry = entries[i];
+    out[entry[0]] = capValue(entry[1], limits, depth + 1);
   }
-  return dropped > 0;
+  if (keep < entries.length) {
+    // A payload that already carries a literal "..." key among the kept
+    // ones loses it to the marker here. The count stays honest about how
+    // many keys were dropped, which is what the marker is for.
+    out[OMITTED_KEYS_MARKER] = objectMarker(entries.length - keep);
+  }
+  return out;
+}
+
+function capValue(value: unknown, limits: CapLimits, depth: number): unknown {
+  if (typeof value === "string") return capString(value, limits.maxString);
+  const isArray = Array.isArray(value);
+  if (!isArray && !isPlainObject(value)) return value;
+  // Only containers are pruned by depth: replacing a number or a short
+  // string with a placeholder would make the result bigger, not smaller.
+  // Because the depth limit is finite, this also terminates on a cyclic
+  // graph, though `buildEnvelope` rejects one before reduction ever runs.
+  if (depth > limits.maxDepth) return depthMarker(depth);
+  return isArray
+    ? capArray(value, limits, depth)
+    : capObject(value as Record<string, unknown>, limits, depth);
+}
+
+/**
+ * One linear pass over `payload`, returning a NEW structure with the four
+ * structural caps in `limits` applied. Pure: the input is never mutated
+ * and never read again by the caller's own reduction, so every pass starts
+ * from the same pristine payload rather than from the previous pass's
+ * already-marked output (which would make the markers count from the wrong
+ * baseline).
+ *
+ * Every cut is marked in band with an honest count derived from the
+ * original: kept plus omitted always equals what was there.
+ *
+ * Cost is O(n) in the payload: a kept value is visited once, and a dropped
+ * value is not visited at all.
+ */
+export function applyCaps(
+  payload: Record<string, unknown>,
+  limits: CapLimits,
+): Record<string, unknown> {
+  return capObject(payload, limits, 0);
+}
+
+/**
+ * The caps at scale 1: everything a bound of `bound` characters could
+ * conceivably hold along each dimension.
+ *
+ * Each breadth limit is the bound itself rather than a fraction of it, so
+ * that scale 1 is never the binding constraint for a result that is only
+ * a little too large: an array of `bound` elements needs at least two
+ * characters per element and an object of `bound` keys at least six per
+ * key, so any payload that overflows the bound is still reachable by
+ * scaling down from here. A fraction (bound/4, say) would instead put a
+ * hard ceiling on a single long string at a quarter of the budget and
+ * leave three quarters of it unused.
+ */
+function baseLimitsFor(bound: number): CapLimits {
+  return {
+    maxString: bound,
+    maxArray: bound,
+    maxKeys: bound,
+    maxDepth: BASE_MAX_DEPTH,
+  };
+}
+
+/** The base limits multiplied by one scale factor in [0, 1]. */
+function limitsForScale(base: CapLimits, scale: number): CapLimits {
+  return {
+    maxString: Math.floor(base.maxString * scale),
+    maxArray: Math.floor(base.maxArray * scale),
+    maxKeys: Math.floor(base.maxKeys * scale),
+    maxDepth: Math.max(MIN_MAX_DEPTH, Math.round(base.maxDepth * scale)),
+  };
+}
+
+/**
+ * The payload at one scale: the structural caps at `scale`, or nothing at
+ * all at scale 0, which is the skeleton floor the bisection below always
+ * has as a fallback.
+ */
+function payloadAtScale(
+  payload: Record<string, unknown>,
+  base: CapLimits,
+  scale: number,
+): Record<string, unknown> {
+  if (scale <= 0) return {};
+  return applyCaps(payload, limitsForScale(base, scale));
 }
 
 // The fixed envelope fields: always present, and never subject to any
-// reduction step. `extra` is spread first so these win on any key
-// collision, and every reduction step is told to skip them by name (at
-// the top level only, see collectCandidates).
+// reduction. They are held apart from the payload for the whole reduction
+// and merged over it afterwards, so no cap can reach them and no payload
+// key can shadow them. This set must stay equal to the key set of `base`
+// in buildEnvelope.
 const PROTECTED_KEYS: ReadonlySet<string> = new Set([
   "tool",
   "version",
@@ -422,25 +369,6 @@ const PROTECTED_KEYS: ReadonlySet<string> = new Set([
   "warnings",
   "logs",
 ]);
-
-function skeletonOnly(
-  envelope: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const key of PROTECTED_KEYS) {
-    if (key in envelope) out[key] = envelope[key];
-  }
-  return out;
-}
-
-/** Deletes every reducible (non-fixed) top-level field, leaving the
- * skeleton. Used by the two wholesale paths: an unserializable result, and
- * an exhausted reduction budget. */
-function dropAllReducibleKeys(envelope: Record<string, unknown>): void {
-  for (const key of Object.keys(envelope)) {
-    if (!PROTECTED_KEYS.has(key)) delete envelope[key];
-  }
-}
 
 function overrunWarning(finalLength: number, maxChars: number): string {
   return `envelope is ${finalLength} characters; requested max-chars ${maxChars} could not be met`;
@@ -488,19 +416,31 @@ function pushOverrunWarning(
  * below), merges it with the base fields (base fields win on any key
  * collision, so a subcommand's `extra` can never shadow
  * `tool`/`status`/`truncated`/`logs`/... ), and, only when the serialized
- * result exceeds `maxChars`, runs a progress-guarded reduction loop over
- * the whole graph. Each pass walks the graph once to collect candidates,
- * then applies the first step that makes byte progress: shorten the
- * largest array anywhere (head plus a marker naming the original count),
- * then the longest string anywhere (head plus `...`), then drop whole keys
- * largest-first until the remaining excess is covered. There is no fixed
- * iteration count; the loop's stopping conditions are "fits now", "no step
- * reduced anything", and "the work budget is spent".
+ * result exceeds `maxChars`, reduces the payload.
+ *
+ * The reduction is deterministic and clock-free. It has exactly one knob,
+ * a scale factor in [0, 1] multiplying four structural caps derived from
+ * the bound: how many characters of a string, how many elements of an
+ * array, how many keys of an object, and how deep a subtree is kept. One
+ * linear pass applies all four to the pristine payload; a bisection over
+ * the scale factor, at most MAX_REDUCTION_PASSES passes in total (one at
+ * scale 1, then eleven bisection steps), takes the largest scale whose
+ * serialized envelope fits. Scale 0 drops the payload entirely and is
+ * always available as the floor, so the search always has an answer. No
+ * pass ever reads the output of another pass: every one starts from the
+ * same pristine copy, which is what keeps a marker's count anchored to the
+ * original and keeps siblings of the same size treated alike.
+ *
+ * Nothing is ever cut out of the serialized JSON string itself: what
+ * shrinks is the structure, and every cut is marked in band with an honest
+ * count (a trailing array element, a `...` key in an object, a suffix on a
+ * string, a placeholder for a pruned subtree).
  *
  * The fixed skeleton fields (tool, version, command, status, durationMs,
- * cwd, truncated, warnings, logs) are excluded from every reduction step
- * (by name, at the top level, see PROTECTED_KEYS), so they always survive
- * intact, byte for byte. Because of that floor, the real invariant is:
+ * cwd, truncated, warnings, logs) are held apart from the payload for the
+ * whole reduction and merged over it afterwards (see PROTECTED_KEYS), so
+ * they always survive intact, byte for byte. Because of that floor, the
+ * real invariant is:
  *
  *   serializedLength(envelope) <= max(maxChars, skeletonFloor)
  *
@@ -518,32 +458,35 @@ function pushOverrunWarning(
  */
 export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   const maxChars = input.maxChars ?? DEFAULT_MAX_CHARS;
-  const budgetMs = input.reductionBudgetMs ?? DEFAULT_REDUCTION_BUDGET_MS;
   const logs = [...(input.logs ?? [])];
   const warnings = [...(input.warnings ?? [])];
 
-  // Deep-copy `extra` up front: every reduction step below mutates this
-  // copy in place, and the caller's object must never be touched (a
-  // shallow spread would leave nested arrays/objects shared by reference,
-  // so mutating them here would silently mutate the caller's data too).
+  // Deep-copy `extra` up front: this copy is the pristine payload every
+  // reduction pass reads, and the caller's object must never be touched (a
+  // shallow spread would leave nested arrays/objects shared by reference).
   //
   // structuredClone throws for values it cannot copy (a function, a
   // symbol, some host objects). That is a caller mistake, not a reason for
   // this process to report `status: error` and lose the command's real
   // verdict: the skeleton still carries the status, and a warning names
   // what went wrong.
-  let extraCopy: Record<string, unknown> = {};
+  let payload: Record<string, unknown> = {};
   let unusableExtra: string | undefined;
   if (input.extra) {
     try {
-      extraCopy = structuredClone(input.extra);
+      payload = structuredClone(input.extra);
     } catch (err) {
       unusableExtra = describeSerializationFailure(err);
     }
   }
+  // A payload key named like a fixed field would be overwritten by the
+  // merge below anyway; dropping it here keeps it from consuming a slot in
+  // the object key cap and from being walked for nothing.
+  for (const key of Object.keys(payload)) {
+    if (PROTECTED_KEYS.has(key)) delete payload[key];
+  }
 
-  const envelope: Record<string, unknown> = {
-    ...extraCopy,
+  const base: Record<string, unknown> = {
     tool: TOOL_NAME,
     version: input.version,
     command: input.command,
@@ -554,6 +497,8 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     logs,
     warnings,
   };
+
+  let envelope: Record<string, unknown> = { ...payload, ...base };
 
   // The first serialization needs the same guard for a different set of
   // values: a cycle and a BigInt both survive structuredClone and then
@@ -568,8 +513,8 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   }
 
   if (unusableExtra !== undefined) {
-    dropAllReducibleKeys(envelope);
-    envelope.truncated = true;
+    base.truncated = true;
+    envelope = { ...base };
     warnings.push(`result fields dropped: not serializable (${unusableExtra})`);
     if (serializedLength(envelope) > maxChars) {
       pushOverrunWarning(envelope, maxChars);
@@ -581,78 +526,79 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     return { envelope, exitCode: exitCodeForStatus(input.status) };
   }
 
-  // A full, untruncated copy is captured before any reduction so it can be
-  // written to the log dir once we know truncation is unavoidable.
-  const fullResult = structuredClone(envelope);
+  // Rendered before the full-result path joins `logs`, so the file on disk
+  // does not claim to contain itself.
+  const fullResultJson = JSON.stringify(envelope, null, 2);
 
-  envelope.truncated = true;
+  base.truncated = true;
   // The full-result log path is appended to `logs` BEFORE the reduction
-  // loop runs (not after): appending it later, once the envelope has
-  // already been cut down to fit exactly, would grow the envelope back
-  // past maxChars by however many characters the path itself adds. Adding
-  // it first means the reduction loop below accounts for its size too, so
-  // the bound still holds afterward.
+  // runs (not after): appending it later, once the envelope has already
+  // been reduced to fit exactly, would grow it back past maxChars by
+  // however many characters the path itself adds. Adding it first means
+  // the reduction accounts for its size too, so the bound still holds.
   if (input.logDir) {
     try {
       fs.mkdirSync(input.logDir, { recursive: true });
-      const fullResultPath = path.join(input.logDir, "result-full.json");
-      fs.writeFileSync(fullResultPath, JSON.stringify(fullResult, null, 2));
+      const fullResultPath = path.join(
+        input.logDir,
+        `result-full-${currentRunId()}.json`,
+      );
+      fs.writeFileSync(fullResultPath, fullResultJson);
       logs.push(fullResultPath);
-      envelope.logs = logs;
     } catch (err) {
       // Truncation itself must not fail the command, but the failure must
       // not be silent either: name it in a warning before the reduction
-      // loop runs, so it is never itself a candidate for later cutting.
+      // runs, so its own size is accounted for too.
       const detail =
         err instanceof Error
           ? ((err as NodeJS.ErrnoException).code ?? err.message)
           : String(err);
       warnings.push(`full result not written to ${input.logDir}: ${detail}`);
-      envelope.warnings = warnings;
     }
   }
 
   // The skeleton (fixed fields only) is never cut, so it is a hard floor
-  // on what the reduction loop can achieve: aim for max(maxChars,
-  // skeletonFloor), not maxChars itself, so the loop below has an
-  // achievable target instead of spinning until "no progress" against an
-  // unreachable one.
-  const skeletonFloor = serializedLength(skeletonOnly(envelope));
+  // on what the reduction can achieve: aim for max(maxChars,
+  // skeletonFloor), not maxChars itself, so the search has an achievable
+  // target instead of rejecting every scale against an unreachable one.
+  const skeleton: Record<string, unknown> = { ...base };
+  const skeletonFloor = serializedLength(skeleton);
   const effectiveMaxChars = Math.max(maxChars, skeletonFloor);
 
-  const originalLengths = new WeakMap<object, number>();
-  const reductionStart = Date.now();
-  let budgetExhausted = false;
-  // Defensive, not reachable by any input this module accepts: every
-  // collected candidate strictly shrinks the envelope when applied (the
-  // one zero-saving case, an undefined-valued property, is never
-  // collected), and the drop step always has a candidate while any
-  // reducible field remains, so the loop's real exits are "fits" and
-  // "budget spent". The guard is kept as a termination proof that does not
-  // depend on that argument staying true as further reducers are added.
-  let progressed = true;
-  currentLen = serializedLength(envelope);
-  while (progressed && currentLen > effectiveMaxChars) {
-    if (Date.now() - reductionStart >= budgetMs) {
-      budgetExhausted = true;
-      break;
-    }
-    const excess = currentLen - effectiveMaxChars;
-    const candidates = collectCandidates(envelope, PROTECTED_KEYS);
-    progressed =
-      capLargestArray(envelope, candidates, excess, originalLengths) ||
-      capLongestString(envelope, candidates, excess) ||
-      dropLargestSubtrees(envelope, candidates, excess);
-    currentLen = serializedLength(envelope);
-  }
+  const baseLimits = baseLimitsFor(effectiveMaxChars);
+  // Scale 0 (the skeleton) always fits by construction, so the search
+  // always has a fitting candidate to fall back on.
+  let best = skeleton;
+  let passes = 0;
 
-  if (budgetExhausted) {
-    dropAllReducibleKeys(envelope);
-    warnings.push(
-      `reduction work budget (${budgetMs}ms) reached; remaining result fields were dropped wholesale`,
-    );
-    envelope.warnings = warnings;
+  const fitsAtScale = (scale: number): boolean => {
+    passes++;
+    const candidate = {
+      ...payloadAtScale(payload, baseLimits, scale),
+      ...base,
+    };
+    if (serializedLength(candidate) > effectiveMaxChars) return false;
+    best = candidate;
+    return true;
+  };
+
+  if (!fitsAtScale(1)) {
+    // Bisection on the scale factor. `lo` is the largest scale known to
+    // fit and `hi` the smallest known not to, so every mid that fits is
+    // strictly larger than the current `best`'s scale and replacing
+    // `best` is always an improvement. Marker text means "fits" is not
+    // perfectly monotone in the scale (a marker can be longer than the
+    // one tiny element it replaces), which costs at most some utilization,
+    // never the bound: an unfitting candidate is simply not kept.
+    let lo = 0;
+    let hi = 1;
+    while (passes < MAX_REDUCTION_PASSES) {
+      const mid = (lo + hi) / 2;
+      if (fitsAtScale(mid)) lo = mid;
+      else hi = mid;
+    }
   }
+  envelope = best;
 
   if (serializedLength(envelope) > maxChars) {
     pushOverrunWarning(envelope, maxChars);

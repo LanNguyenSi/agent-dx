@@ -41,8 +41,11 @@ describe("execCommand", () => {
   it("caps tails to the last 60 lines and at most 6000 characters per stream", async () => {
     const logDir = makeTmpDir();
     // 200 lines, each well under 6000 chars alone, to test the line cap.
+    // Counted with a `while` loop and `$(( ))` arithmetic (both POSIX shell)
+    // rather than `seq`, which is not in POSIX and is absent on some
+    // minimal images.
     const result = await execCommand(
-      "for i in $(seq 1 200); do echo line-$i; done",
+      "i=1; while [ $i -le 200 ]; do echo line-$i; i=$((i+1)); done",
       {
         logDir,
       },
