@@ -10,6 +10,7 @@ export {
   statusClass,
   exitCodeForStatus,
   TOOL_NAME,
+  UsageError,
 } from "./envelope.js";
 export type { EnvelopeInput, EnvelopeOutput, StatusClass } from "./envelope.js";
 export { execCommand } from "./exec.js";

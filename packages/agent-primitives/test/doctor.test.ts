@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
 import { doctor } from "../src/doctor/index.js";
+import { doctor as doctorFromIndex } from "../src/index.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -75,5 +76,176 @@ describe("doctor", () => {
     const tool = result.tools.find((t) => t.name === "ast-grep");
     expect(tool?.found).toBe(true);
     expect(tool?.path).toBe(stubPath);
+  });
+
+  it("re-exports doctor from ../src/index.js with identical behavior", async () => {
+    const result = await doctorFromIndex({ required: ["node"], optional: [] });
+    expect(result.tools.find((t) => t.name === "node")?.found).toBe(true);
+  });
+});
+
+describe("doctor: binary name validation", () => {
+  it("rejects a required entry shaped like a path traversal, before looking anything up", async () => {
+    await expect(
+      doctor({ required: ["../../x"], optional: [] }),
+    ).rejects.toThrow(/plain binary name/);
+  });
+
+  it("rejects an optional entry containing a path separator", async () => {
+    await expect(doctor({ required: [], optional: ["a/b"] })).rejects.toThrow(
+      /plain binary name/,
+    );
+  });
+
+  it('rejects "." and ".." as entries', async () => {
+    await expect(doctor({ required: ["."], optional: [] })).rejects.toThrow();
+    await expect(doctor({ required: [], optional: [".."] })).rejects.toThrow();
+  });
+});
+
+describe("doctor: version capture timeout", () => {
+  it("records versionCheck: timed_out and a warning when --version does not return in time", async () => {
+    const dir = makeTmpDir();
+    const stubPath = path.join(dir, "slow-tool");
+    fs.writeFileSync(stubPath, "#!/bin/sh\nsleep 2\n");
+    fs.chmodSync(stubPath, 0o755);
+    const result = await doctor({
+      required: ["slow-tool"],
+      optional: [],
+      pathEnv: dir,
+      versionTimeoutMs: 100,
+    });
+    const tool = result.tools.find((t) => t.name === "slow-tool");
+    expect(tool?.found).toBe(true);
+    expect(tool?.versionCheck).toBe("timed_out");
+    expect(result.warnings.some((w) => w.includes("slow-tool"))).toBe(true);
+  }, 10000);
+});
+
+describe("doctor: checks, in both states", () => {
+  it("node_modules: ok when present, not ok when absent", async () => {
+    const withoutModules = makeTmpDir();
+    const resultWithout = await doctor({
+      required: [],
+      optional: [],
+      cwd: withoutModules,
+    });
+    const checkWithout = resultWithout.checks.find(
+      (c) => c.name === "node_modules",
+    );
+    expect(checkWithout?.ok).toBe(false);
+
+    const withModules = makeTmpDir();
+    fs.mkdirSync(path.join(withModules, "node_modules"));
+    const resultWith = await doctor({
+      required: [],
+      optional: [],
+      cwd: withModules,
+    });
+    const checkWith = resultWith.checks.find((c) => c.name === "node_modules");
+    expect(checkWith?.ok).toBe(true);
+  });
+
+  it("git-work-tree: ok inside a git work tree, not ok outside one", async () => {
+    const outsideDir = makeTmpDir();
+    const resultOutside = await doctor({
+      required: [],
+      optional: [],
+      cwd: outsideDir,
+    });
+    const checkOutside = resultOutside.checks.find(
+      (c) => c.name === "git-work-tree",
+    );
+    expect(checkOutside?.ok).toBe(false);
+
+    // This package's own directory is inside the agent-dx git work tree
+    // (an ancestor carries .git), so it exercises the "inside" branch
+    // without depending on any fixture repo.
+    const packageDir = path.resolve(
+      path.dirname(new URL(import.meta.url).pathname),
+      "..",
+    );
+    const resultInside = await doctor({
+      required: [],
+      optional: [],
+      cwd: packageDir,
+    });
+    const checkInside = resultInside.checks.find(
+      (c) => c.name === "git-work-tree",
+    );
+    expect(checkInside?.ok).toBe(true);
+  });
+
+  it("BASH_MAX_OUTPUT_LENGTH: reports the value when set, restoring env afterward", async () => {
+    const before = process.env.BASH_MAX_OUTPUT_LENGTH;
+    process.env.BASH_MAX_OUTPUT_LENGTH = "12345";
+    try {
+      const result = await doctor({ required: [], optional: [] });
+      const check = result.checks.find(
+        (c) => c.name === "BASH_MAX_OUTPUT_LENGTH",
+      );
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).toContain("12345");
+    } finally {
+      if (before === undefined) delete process.env.BASH_MAX_OUTPUT_LENGTH;
+      else process.env.BASH_MAX_OUTPUT_LENGTH = before;
+    }
+  });
+
+  it("BASH_MAX_OUTPUT_LENGTH: reports not set when absent, restoring env afterward", async () => {
+    const before = process.env.BASH_MAX_OUTPUT_LENGTH;
+    delete process.env.BASH_MAX_OUTPUT_LENGTH;
+    try {
+      const result = await doctor({ required: [], optional: [] });
+      const check = result.checks.find(
+        (c) => c.name === "BASH_MAX_OUTPUT_LENGTH",
+      );
+      expect(check?.detail).toBe("BASH_MAX_OUTPUT_LENGTH is not set");
+    } finally {
+      if (before !== undefined) process.env.BASH_MAX_OUTPUT_LENGTH = before;
+    }
+  });
+
+  it("dist-next-to-src: ok with no src/ directory", async () => {
+    const dir = makeTmpDir();
+    const result = await doctor({ required: [], optional: [], cwd: dir });
+    const check = result.checks.find((c) => c.name === "dist-next-to-src");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).toBe("no src/ directory in cwd");
+  });
+
+  it("dist-next-to-src: not ok when src/ exists without dist/", async () => {
+    const dir = makeTmpDir();
+    fs.mkdirSync(path.join(dir, "src"));
+    const result = await doctor({ required: [], optional: [], cwd: dir });
+    const check = result.checks.find((c) => c.name === "dist-next-to-src");
+    expect(check?.ok).toBe(false);
+  });
+
+  it("dist-next-to-src: ok when both src/ and dist/ exist", async () => {
+    const dir = makeTmpDir();
+    fs.mkdirSync(path.join(dir, "src"));
+    fs.mkdirSync(path.join(dir, "dist"));
+    const result = await doctor({ required: [], optional: [], cwd: dir });
+    const check = result.checks.find((c) => c.name === "dist-next-to-src");
+    expect(check?.ok).toBe(true);
+  });
+});
+
+describe("doctor: hints", () => {
+  it("is non-empty when a required tool with a generic hint is missing", async () => {
+    const dir = makeTmpDir();
+    const result = await doctor({
+      required: ["git"],
+      optional: [],
+      pathEnv: dir,
+    });
+    expect(result.hints.length).toBeGreaterThan(0);
+    expect(result.hints.some((h) => h.includes("git-scm.com"))).toBe(true);
+  });
+
+  it("is empty when no required tool is missing", async () => {
+    const result = await doctor({ required: ["node"], optional: [] });
+    expect(result.hints.length).toBe(0);
   });
 });

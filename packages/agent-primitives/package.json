@@ -18,8 +18,8 @@
     "dev": "node --import tsx src/cli.ts",
     "pretest": "npm run build",
     "test": "vitest run",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
+    "format": "prettier --write \"*.ts\" \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"*.ts\" \"src/**/*.ts\" \"test/**/*.ts\""
   },
   "keywords": [
     "ai",

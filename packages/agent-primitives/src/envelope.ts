@@ -4,6 +4,15 @@ import path from "node:path";
 export const TOOL_NAME = "agent-primitives";
 
 /**
+ * Thrown by a caller-supplied validation (e.g. doctor's binary-name check)
+ * for input that should be reported as `status: usage_error` rather than
+ * `status: error`. The CLI's top-level catch distinguishes this from a
+ * generic runtime error by instanceof, so callers anywhere in the package
+ * can signal a usage error without threading a status code back up.
+ */
+export class UsageError extends Error {}
+
+/**
  * Every subcommand's status maps to one of three classes, which in turn
  * maps to a stable exit code: a subagent can gate on `&&` without parsing
  * the JSON body, and a typo in a flag never reads as a "survived" finding.
@@ -179,6 +188,7 @@ function capTails(obj: unknown, cap: number): boolean {
 function findLargestString(
   obj: unknown,
   path: Array<string | number> = [],
+  skipTopLevelKeys?: ReadonlySet<string>,
 ): { path: Array<string | number>; length: number } | undefined {
   let best: { path: Array<string | number>; length: number } | undefined;
   if (typeof obj === "string") {
@@ -186,7 +196,11 @@ function findLargestString(
   }
   if (Array.isArray(obj)) {
     for (let i = 0; i < obj.length; i++) {
-      const candidate = findLargestString(obj[i], [...path, i]);
+      const candidate = findLargestString(
+        obj[i],
+        [...path, i],
+        skipTopLevelKeys,
+      );
       if (candidate && (!best || candidate.length > best.length))
         best = candidate;
     }
@@ -194,7 +208,12 @@ function findLargestString(
   }
   if (obj !== null && typeof obj === "object") {
     for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
-      const candidate = findLargestString(val, [...path, key]);
+      if (path.length === 0 && skipTopLevelKeys?.has(key)) continue;
+      const candidate = findLargestString(
+        val,
+        [...path, key],
+        skipTopLevelKeys,
+      );
       if (candidate && (!best || candidate.length > best.length))
         best = candidate;
     }
@@ -220,15 +239,22 @@ function setAtPath(
  * Final, unconditional hard cut: repeatedly shorten the single largest
  * string field until the serialized object fits maxChars, or no string
  * field remains. Guarantees `serializedLength(obj) <= maxChars` whenever
- * the non-string skeleton itself fits in that budget.
+ * the non-string skeleton itself fits in that budget. `skipTopLevelKeys`
+ * excludes the fixed envelope fields (tool, version, command, status, cwd,
+ * truncated, warnings, logs) from ever being cut, at the top level only:
+ * those fields must survive intact no matter how tight maxChars is.
  */
-function hardCut(obj: unknown, maxChars: number): boolean {
+function hardCut(
+  obj: unknown,
+  maxChars: number,
+  skipTopLevelKeys?: ReadonlySet<string>,
+): boolean {
   let changed = false;
   let guard = 0;
   while (serializedLength(obj) > maxChars && guard < 100) {
     guard++;
     const overBy = serializedLength(obj) - maxChars;
-    const target = findLargestString(obj);
+    const target = findLargestString(obj, [], skipTopLevelKeys);
     if (!target || target.length === 0) break;
     const newLength = Math.max(0, target.length - overBy - 16);
     const newValue = getAtPath(obj, target.path).slice(0, newLength);
@@ -246,19 +272,57 @@ function getAtPath(obj: unknown, keyPath: Array<string | number>): string {
   return cursor as string;
 }
 
+// The fixed envelope fields: always present, and never subject to any
+// reduction step. `extra` is spread first so these win on any key
+// collision, and the hard cut below is told to skip them by name.
+const PROTECTED_KEYS: ReadonlySet<string> = new Set([
+  "tool",
+  "version",
+  "command",
+  "status",
+  "durationMs",
+  "cwd",
+  "truncated",
+  "warnings",
+  "logs",
+]);
+
+function skeletonOnly(
+  envelope: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of PROTECTED_KEYS) {
+    if (key in envelope) out[key] = envelope[key];
+  }
+  return out;
+}
+
 /**
- * Build the final envelope: merges the base fields with `extra`, then
- * applies the reduction order (failure lists, then message lengths, then
- * output tails, then a final hard cut of the largest remaining string)
- * until `JSON.stringify(envelope).length <= maxChars`. Sets `truncated:
- * true` and appends the full-result path to `logs` whenever anything was
- * cut. Returns the envelope plus the exit code implied by `status`.
+ * Build the final envelope: merges `extra` with the base fields (base
+ * fields win on any key collision, so a subcommand's `extra` can never
+ * shadow `tool`/`status`/`truncated`/`logs`/... ), then applies the
+ * reduction order (failure lists, then message lengths, then output
+ * tails, then a final hard cut of the largest remaining string) until
+ * `JSON.stringify(envelope).length <= maxChars`. Sets `truncated: true`
+ * and appends the full-result path to `logs` whenever anything was cut.
+ *
+ * The fixed skeleton fields (tool, version, command, status, durationMs,
+ * cwd, truncated, warnings, and every string inside `logs`) are excluded
+ * from every reduction step, so they always survive intact. When
+ * `maxChars` is below the serialized size of that skeleton, the effective
+ * bound is clamped to the skeleton's size (plus the warning below) and a
+ * warning names the clamp: the invariant is therefore
+ * `JSON.stringify(envelope).length <= max(maxChars, skeletonFloor)`, not
+ * an unconditional `<= maxChars`.
+ *
+ * Returns the envelope plus the exit code implied by `status`.
  */
 export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   const maxChars = input.maxChars ?? DEFAULT_MAX_CHARS;
   const logs = [...(input.logs ?? [])];
 
   const envelope: Record<string, unknown> = {
+    ...(input.extra ?? {}),
     tool: TOOL_NAME,
     version: input.version,
     command: input.command,
@@ -268,10 +332,7 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     truncated: false,
     logs,
     warnings: input.warnings ?? [],
-    ...(input.extra ?? {}),
   };
-  // `extra` must not be able to shadow `logs`/`truncated` after the fact.
-  envelope.logs = logs;
 
   if (serializedLength(envelope) <= maxChars) {
     return { envelope, exitCode: exitCodeForStatus(input.status) };
@@ -295,29 +356,54 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
       fs.writeFileSync(fullResultPath, JSON.stringify(fullResult, null, 2));
       logs.push(fullResultPath);
       envelope.logs = logs;
-    } catch {
-      // Best effort: truncation itself must not fail the command.
+    } catch (err) {
+      // Truncation itself must not fail the command, but the failure must
+      // not be silent either: name it in a warning before the reduction
+      // ladders run, so it is never itself a candidate for later cutting.
+      const detail =
+        err instanceof Error
+          ? ((err as NodeJS.ErrnoException).code ?? err.message)
+          : String(err);
+      const warnings = [...(envelope.warnings as string[])];
+      warnings.push(`full result not written to ${input.logDir}: ${detail}`);
+      envelope.warnings = warnings;
     }
+  }
+
+  // The skeleton (fixed fields only) is never cut. When maxChars is below
+  // its serialized size, clamp the effective bound to that size instead
+  // of pretending the fixed fields could ever be reduced further, and say
+  // so in a warning (which is itself part of the skeleton, so the floor
+  // is recomputed once more with the warning included).
+  const floorBeforeWarning = serializedLength(skeletonOnly(envelope));
+  let effectiveMaxChars = maxChars;
+  if (maxChars < floorBeforeWarning) {
+    const warnings = [...(envelope.warnings as string[])];
+    warnings.push(
+      `max-chars (${maxChars}) is below the fixed envelope's minimum size (${floorBeforeWarning}); clamped to the minimum`,
+    );
+    envelope.warnings = warnings;
+    effectiveMaxChars = serializedLength(skeletonOnly(envelope));
   }
 
   for (const cap of FAILURE_CAPS) {
     capFailureLists(envelope, cap);
-    if (serializedLength(envelope) <= maxChars) break;
+    if (serializedLength(envelope) <= effectiveMaxChars) break;
   }
-  if (serializedLength(envelope) > maxChars) {
+  if (serializedLength(envelope) > effectiveMaxChars) {
     for (const cap of MESSAGE_CAPS) {
       capMessages(envelope, cap);
-      if (serializedLength(envelope) <= maxChars) break;
+      if (serializedLength(envelope) <= effectiveMaxChars) break;
     }
   }
-  if (serializedLength(envelope) > maxChars) {
+  if (serializedLength(envelope) > effectiveMaxChars) {
     for (const cap of TAIL_CAPS) {
       capTails(envelope, cap);
-      if (serializedLength(envelope) <= maxChars) break;
+      if (serializedLength(envelope) <= effectiveMaxChars) break;
     }
   }
-  if (serializedLength(envelope) > maxChars) {
-    hardCut(envelope, maxChars);
+  if (serializedLength(envelope) > effectiveMaxChars) {
+    hardCut(envelope, effectiveMaxChars, PROTECTED_KEYS);
   }
 
   return { envelope, exitCode: exitCodeForStatus(input.status) };

@@ -17,13 +17,18 @@ its primary caller is another agent, not a terminal.
 
 ## Install
 
-```bash
-# one-off, no install
-npx agent-primitives doctor
+This package is not published yet. Build it from source:
 
-# or install it
-npm install -g agent-primitives
+```bash
+git clone https://github.com/LanNguyenSi/agent-dx.git
+cd agent-dx/packages/agent-primitives
+npm install
+npm run build
+node dist/cli.js doctor
 ```
+
+Once published, the usual `npx agent-primitives doctor` / `npm install -g
+agent-primitives` paths will work too.
 
 Requires Node >= 20.
 

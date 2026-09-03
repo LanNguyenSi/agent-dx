@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 export interface ExecOptions {
   cwd?: string;
@@ -73,6 +74,13 @@ export function execCommand(
 
     const stdoutTail = new TailKeeper();
     const stderrTail = new TailKeeper();
+    // A StringDecoder (not Buffer#toString) per stream: a multi-byte UTF-8
+    // character can land split across two `data` chunks, and decoding each
+    // chunk independently would turn the split bytes into replacement
+    // characters ("�") on each side of the split. StringDecoder holds
+    // back incomplete trailing bytes until the next chunk completes them.
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
 
     const start = Date.now();
     let timedOut = false;
@@ -97,12 +105,12 @@ export function execCommand(
     }
 
     child.stdout.on("data", (data: Buffer) => {
-      const text = data.toString("utf8");
+      const text = stdoutDecoder.write(data);
       stdoutTail.push(text);
       logStream.write(text);
     });
     child.stderr.on("data", (data: Buffer) => {
-      const text = data.toString("utf8");
+      const text = stderrDecoder.write(data);
       stderrTail.push(text);
       logStream.write(text);
     });
@@ -111,6 +119,18 @@ export function execCommand(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      // Flush any incomplete trailing multi-byte sequence held by each
+      // decoder (StringDecoder#end returns the remainder, if any).
+      const stdoutRemainder = stdoutDecoder.end();
+      if (stdoutRemainder) {
+        stdoutTail.push(stdoutRemainder);
+        logStream.write(stdoutRemainder);
+      }
+      const stderrRemainder = stderrDecoder.end();
+      if (stderrRemainder) {
+        stderrTail.push(stderrRemainder);
+        logStream.write(stderrRemainder);
+      }
       logStream.end(() => {
         resolve({
           exitCode,

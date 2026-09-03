@@ -6,7 +6,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
-import { buildEnvelope } from "./envelope.js";
+import { buildEnvelope, UsageError } from "./envelope.js";
 import {
   doctor,
   DEFAULT_OPTIONAL,
@@ -32,6 +32,13 @@ interface GlobalOptions {
   cwd?: string;
   maxChars: string;
   logDir?: string;
+}
+
+interface ResolvedGlobal {
+  format: "json" | "text";
+  cwd: string;
+  maxChars: number;
+  logDir: string;
 }
 
 function parseFormat(value: string): "json" | "text" {
@@ -66,12 +73,10 @@ function currentRunId(): string {
   return runId;
 }
 
-function resolveGlobal(opts: GlobalOptions): {
-  format: "json" | "text";
-  cwd: string;
-  maxChars: number;
-  logDir: string;
-} {
+/** Resolves cwd/maxChars/logDir without validating that cwd exists: used
+ * only for error reporting once we already know something has gone wrong
+ * and a best-effort `cwd` value is all the envelope needs. */
+function bestEffortGlobal(opts: GlobalOptions): ResolvedGlobal {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
   const maxChars = Number(opts.maxChars);
   const logDir =
@@ -81,12 +86,83 @@ function resolveGlobal(opts: GlobalOptions): {
   return { format: opts.format, cwd, maxChars, logDir };
 }
 
-function writeEnvelope(
+/** Resolves and validates the global options. Throws UsageError when `-C`
+ * names a path that does not exist or is not a directory. */
+function resolveGlobal(opts: GlobalOptions): ResolvedGlobal {
+  const global = bestEffortGlobal(opts);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(global.cwd);
+  } catch {
+    throw new UsageError(`cwd does not exist: ${global.cwd}`);
+  }
+  if (!stat.isDirectory()) {
+    throw new UsageError(`cwd is not a directory: ${global.cwd}`);
+  }
+  return global;
+}
+
+// Guards process.stdout against an EPIPE (the reader closed the pipe early,
+// e.g. `| head`) so a write mid-flight does not surface as an unhandled
+// 'error' event and crash the process with a stack trace instead of the
+// intended exit code.
+let epipeGuardInstalled = false;
+let pendingExitCode = 0;
+function installEpipeGuard(): void {
+  if (epipeGuardInstalled) return;
+  epipeGuardInstalled = true;
+  process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE") {
+      process.exit(pendingExitCode);
+    }
+    throw err;
+  });
+}
+
+/**
+ * Writes `data` to stdout and exits only once the write has fully drained
+ * (via the write callback), instead of calling process.exit() right after
+ * write() returns. Exiting immediately after write() races the write: for
+ * output larger than the pipe buffer (64 KiB on most platforms), the
+ * process can exit before the OS has drained the buffer, truncating the
+ * output the reader sees.
+ */
+function writeAndExit(data: string, exitCode: number): void {
+  pendingExitCode = exitCode;
+  installEpipeGuard();
+  process.stdout.write(data, () => {
+    process.exit(exitCode);
+  });
+}
+
+const TEXT_TRUNCATION_MARKER = "\n... [truncated]\n";
+
+function boundText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const keep = Math.max(0, maxChars - TEXT_TRUNCATION_MARKER.length);
+  return text.slice(0, keep) + TEXT_TRUNCATION_MARKER;
+}
+
+/**
+ * Shared output path for every command: JSON envelope by default, or a
+ * bounded text rendering when `-f text` is set. A command without its own
+ * text renderer falls back to pretty-printed JSON rather than erroring or
+ * silently ignoring `-f text`.
+ */
+function emit(
   envelope: Record<string, unknown>,
   exitCode: number,
-): never {
-  process.stdout.write(JSON.stringify(envelope) + "\n");
-  process.exit(exitCode);
+  global: { format: "json" | "text"; maxChars: number },
+  textRenderer?: () => string,
+): void {
+  if (global.format === "text") {
+    const raw = textRenderer
+      ? textRenderer()
+      : JSON.stringify(envelope, null, 2) + "\n";
+    writeAndExit(boundText(raw, global.maxChars), exitCode);
+    return;
+  }
+  writeAndExit(JSON.stringify(envelope) + "\n", exitCode);
 }
 
 const program = new Command();
@@ -153,6 +229,13 @@ program
     ) => {
       const start = Date.now();
       const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+      // Test-only seam: lets cli.test.ts force a genuine runtime error
+      // (as opposed to a usage error) through the real CLI entrypoint, to
+      // exercise the non-commander/non-UsageError -> status: "error" path
+      // without depending on any real, host-specific failure condition.
+      if (process.env.AGENT_PRIMITIVES_TEST_FORCE_RUNTIME_ERROR === "1") {
+        throw new Error("forced runtime error for testing");
+      }
       const result = await doctor({
         required: opts.required,
         optional: opts.optional,
@@ -164,7 +247,7 @@ program
         status: result.status,
         durationMs: Date.now() - start,
         cwd: global.cwd,
-        warnings: [],
+        warnings: result.warnings,
         logs: [],
         extra: {
           tools: result.tools,
@@ -174,11 +257,12 @@ program
         maxChars: global.maxChars,
         logDir: global.logDir,
       });
-      if (global.format === "text") {
-        process.stdout.write(renderDoctorText(result));
-        process.exit(exitCode);
-      }
-      writeEnvelope(envelope, exitCode);
+      emit(
+        envelope,
+        exitCode,
+        { format: global.format, maxChars: global.maxChars },
+        () => renderDoctorText(result),
+      );
     },
   );
 
@@ -190,7 +274,11 @@ function renderDoctorText(result: DoctorResult): string {
   for (const tool of result.tools) {
     const marker = tool.found ? "OK" : "MISSING";
     const req = tool.required ? "required" : "optional";
-    const version = tool.version ? ` (${tool.version})` : "";
+    const version = tool.version
+      ? ` (${tool.version})`
+      : tool.versionCheck === "timed_out"
+        ? " (version check timed out)"
+        : "";
     const at = tool.path ? ` at ${tool.path}` : "";
     lines.push(`  [${marker}] ${tool.name} (${req})${at}${version}`);
   }
@@ -205,6 +293,11 @@ function renderDoctorText(result: DoctorResult): string {
     lines.push("");
     lines.push("hints:");
     for (const hint of result.hints) lines.push(`  - ${hint}`);
+  }
+  if (result.warnings.length > 0) {
+    lines.push("");
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
   }
   lines.push("");
   return lines.join("\n");
@@ -229,7 +322,10 @@ function registerStub(name: string, description: string): void {
         maxChars: global.maxChars,
         logDir: global.logDir,
       });
-      writeEnvelope(envelope, exitCode);
+      emit(envelope, exitCode, {
+        format: global.format,
+        maxChars: global.maxChars,
+      });
     });
 }
 
@@ -248,9 +344,9 @@ const PASSTHROUGH_EXIT_CODES = new Set([
   "commander.version",
 ]);
 
-function emitUsageError(message: string, start: number): never {
+function emitTopLevelUsageError(message: string, start: number): void {
   const opts = program.opts<GlobalOptions>();
-  const global = resolveGlobal(opts);
+  const global = bestEffortGlobal(opts);
   const { envelope, exitCode } = buildEnvelope({
     version: VERSION,
     command: "unknown",
@@ -263,7 +359,31 @@ function emitUsageError(message: string, start: number): never {
     maxChars: global.maxChars,
     logDir: global.logDir,
   });
-  writeEnvelope(envelope, exitCode);
+  emit(envelope, exitCode, {
+    format: global.format,
+    maxChars: global.maxChars,
+  });
+}
+
+function emitTopLevelError(message: string, start: number): void {
+  const opts = program.opts<GlobalOptions>();
+  const global = bestEffortGlobal(opts);
+  const { envelope, exitCode } = buildEnvelope({
+    version: VERSION,
+    command: "unknown",
+    status: "error",
+    durationMs: Date.now() - start,
+    cwd: global.cwd,
+    warnings: [],
+    logs: [],
+    extra: { reason: "error", message },
+    maxChars: global.maxChars,
+    logDir: global.logDir,
+  });
+  emit(envelope, exitCode, {
+    format: global.format,
+    maxChars: global.maxChars,
+  });
 }
 
 // Only run the CLI (and its process.exit calls) when this file is executed
@@ -291,13 +411,25 @@ const isMainModule =
 if (isMainModule) {
   const start = Date.now();
   program.parseAsync().catch((err: unknown) => {
+    // Each branch below terminates the handler (`return` after emitting):
+    // emitting now drains asynchronously (writeAndExit waits for the
+    // stdout write callback before calling process.exit), so falling
+    // through to a later branch would emit a second envelope on the same
+    // stdout instead of being a no-op the way an immediate process.exit()
+    // used to make it.
     if (err instanceof CommanderError) {
       if (PASSTHROUGH_EXIT_CODES.has(err.code)) {
         process.exit(err.exitCode);
+        return;
       }
-      emitUsageError(err.message, start);
+      emitTopLevelUsageError(err.message, start);
+      return;
     }
-    emitUsageError(err instanceof Error ? err.message : String(err), start);
+    if (err instanceof UsageError) {
+      emitTopLevelUsageError(err.message, start);
+      return;
+    }
+    emitTopLevelError(err instanceof Error ? err.message : String(err), start);
   });
 }
 

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
 import { sha256File } from "../src/hash.js";
+import { sha256File as sha256FileFromIndex } from "../src/index.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -50,5 +51,13 @@ describe("sha256File", () => {
   it("rejects with an error for a directory", async () => {
     const dir = makeTmpDir();
     await expect(sha256File(dir)).rejects.toThrow(/not a regular file/);
+  });
+
+  it("re-exports sha256File from ../src/index.js with identical behavior", async () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, "a.txt");
+    fs.writeFileSync(filePath, "hello world");
+    const hash = await sha256FileFromIndex(filePath);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
   });
 });

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
 import { execCommand } from "../src/exec.js";
+import { execCommand as execCommandFromIndex } from "../src/index.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -73,5 +74,28 @@ describe("execCommand", () => {
     const cwd = makeTmpDir();
     const result = await execCommand("pwd", { logDir, cwd });
     expect(result.stdoutTail.trim()).toBe(fs.realpathSync(cwd));
+  });
+
+  it("decodes a multi-byte UTF-8 character split across two data chunks without producing replacement characters", async () => {
+    const logDir = makeTmpDir();
+    // "é" is 0xC3 0xA9 in UTF-8; emitting the two bytes as separate writes
+    // with a pause between them forces two separate stdout `data` chunks,
+    // each landing mid-character. Decoding each chunk independently (e.g.
+    // Buffer#toString) would turn each lone byte into U+FFFD.
+    const result = await execCommand(
+      "printf '\\xc3'; sleep 0.1; printf '\\xa9'",
+      {
+        logDir,
+      },
+    );
+    expect(result.stdoutTail).toBe("é");
+    expect(result.stdoutTail).not.toContain("�");
+  });
+
+  it("re-exports execCommand from ../src/index.js with identical behavior", async () => {
+    const logDir = makeTmpDir();
+    const result = await execCommandFromIndex("echo hi", { logDir });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdoutTail.trim()).toBe("hi");
   });
 });

@@ -7,6 +7,7 @@ import {
   exitCodeForStatus,
   statusClass,
 } from "../src/envelope.js";
+import { buildEnvelope as buildEnvelopeFromIndex } from "../src/index.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -167,5 +168,109 @@ describe("buildEnvelope: reduction order", () => {
     );
     expect(checks[0].stdoutTail).toBe("short-tail");
     expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+  });
+});
+
+describe("buildEnvelope: fixed fields survive an impossibly small maxChars", () => {
+  it("clamps to the skeleton floor at maxChars 50, keeping status/tool/version/command/cwd/logs and warning about the clamp", () => {
+    const logDir = makeTmpDir();
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "doctor",
+      status: "ok",
+      durationMs: 5,
+      cwd: "/tmp/some/cwd",
+      extra: {
+        tools: [{ name: "git", found: true }],
+        checks: [{ name: "node_modules", ok: true }],
+      },
+      maxChars: 50,
+      logDir,
+    });
+    expect(envelope.status).toBe("ok");
+    expect(envelope.tool).toBe("agent-primitives");
+    expect(envelope.version).toBe("0.1.0");
+    expect(envelope.command).toBe("doctor");
+    expect(envelope.cwd).toBe("/tmp/some/cwd");
+    expect(envelope.truncated).toBe(true);
+    const logs = envelope.logs as string[];
+    expect(logs.length).toBeGreaterThan(0);
+    expect(fs.existsSync(logs[logs.length - 1])).toBe(true);
+    const warnings = envelope.warnings as string[];
+    expect(warnings.some((w) => w.includes("clamped to the minimum"))).toBe(
+      true,
+    );
+  });
+});
+
+describe("buildEnvelope: base fields win over extra", () => {
+  it("does not let extra's status/truncated/tool keys shadow the real ones", () => {
+    const { envelope, exitCode } = buildEnvelope({
+      version: "0.1.0",
+      command: "doctor",
+      status: "ok",
+      durationMs: 5,
+      cwd: "/tmp",
+      extra: {
+        status: "hijacked",
+        truncated: true,
+        tool: "not-agent-primitives",
+        command: "hijacked-command",
+        version: "9.9.9",
+        cwd: "/hijacked",
+      },
+    });
+    expect(envelope.status).toBe("ok");
+    expect(envelope.truncated).toBe(false);
+    expect(envelope.tool).toBe("agent-primitives");
+    expect(envelope.command).toBe("doctor");
+    expect(envelope.version).toBe("0.1.0");
+    expect(envelope.cwd).toBe("/tmp");
+    expect(exitCode).toBe(0);
+  });
+});
+
+describe("buildEnvelope: unwritable log dir", () => {
+  it("pushes a warning naming the failure instead of silently swallowing it", () => {
+    const parentDir = makeTmpDir();
+    // A regular file where a directory is expected: mkdirSync(recursive)
+    // fails with ENOTDIR trying to create a subdirectory under it.
+    const blockerFile = path.join(parentDir, "blocker");
+    fs.writeFileSync(blockerFile, "not a directory");
+    const unwritableLogDir = path.join(blockerFile, "sub");
+
+    const hugeTail = "x".repeat(1024 * 1024);
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { checks: [{ name: "test", rawOutput: hugeTail }] },
+      maxChars: 8000,
+      logDir: unwritableLogDir,
+    });
+    expect(envelope.truncated).toBe(true);
+    const warnings = envelope.warnings as string[];
+    expect(
+      warnings.some((w) =>
+        w.startsWith(`full result not written to ${unwritableLogDir}:`),
+      ),
+    ).toBe(true);
+    expect(envelope.logs).toEqual([]);
+  });
+});
+
+describe("index.js seam", () => {
+  it("re-exports buildEnvelope with identical behavior", () => {
+    const { envelope } = buildEnvelopeFromIndex({
+      version: "0.1.0",
+      command: "doctor",
+      status: "ok",
+      durationMs: 1,
+      cwd: "/tmp",
+    });
+    expect(envelope.tool).toBe("agent-primitives");
+    expect(envelope.status).toBe("ok");
   });
 });

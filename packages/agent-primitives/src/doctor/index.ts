@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { UsageError } from "../envelope.js";
 
 export interface ToolCheck {
   name: string;
@@ -8,6 +9,9 @@ export interface ToolCheck {
   found: boolean;
   path?: string;
   version?: string;
+  /** Set when the `--version` capture itself timed out, distinct from a
+   *  binary that ran but printed nothing. */
+  versionCheck?: "timed_out";
 }
 
 export interface DoctorCheckItem {
@@ -21,6 +25,7 @@ export interface DoctorResult {
   tools: ToolCheck[];
   checks: DoctorCheckItem[];
   hints: string[];
+  warnings: string[];
 }
 
 export interface DoctorOptions {
@@ -90,20 +95,39 @@ function findOnPath(
   return undefined;
 }
 
-function captureVersion(
-  binPath: string,
-  timeoutMs: number,
-): string | undefined {
+interface VersionCapture {
+  version?: string;
+  timedOut: boolean;
+}
+
+function captureVersion(binPath: string, timeoutMs: number): VersionCapture {
+  let result;
   try {
-    const result = spawnSync(binPath, ["--version"], {
+    result = spawnSync(binPath, ["--version"], {
       timeout: timeoutMs,
       encoding: "utf8",
     });
-    const out = (result.stdout || result.stderr || "").trim();
-    if (!out) return undefined;
-    return out.split("\n")[0]?.trim();
   } catch {
-    return undefined;
+    return { timedOut: false };
+  }
+  const timedOutError =
+    result.error !== undefined &&
+    (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+  if (timedOutError || result.signal) {
+    return { timedOut: true };
+  }
+  const out = (result.stdout || result.stderr || "").trim();
+  if (!out) return { timedOut: false };
+  return { version: out.split("\n")[0]?.trim(), timedOut: false };
+}
+
+/** Names that must be a plain binary basename, never a path segment,
+ * so a `-r`/`-o` entry can never escape PATH via `../` traversal. */
+function assertPlainBinaryName(name: string, flag: string): void {
+  if (name === "." || name === ".." || path.basename(name) !== name) {
+    throw new UsageError(
+      `${flag}: not a plain binary name (must not contain a path separator or be "." / ".."): "${name}"`,
+    );
   }
 }
 
@@ -112,18 +136,33 @@ function checkTool(
   required: boolean,
   dirs: string[],
   versionTimeoutMs: number,
-): ToolCheck {
+): { tool: ToolCheck; warning?: string } {
   const names = ALIASES[name] ?? [name];
   const hit = findOnPath(names, dirs);
   if (!hit) {
-    return { name, required, found: false };
+    return { tool: { name, required, found: false } };
+  }
+  const capture = captureVersion(hit.path, versionTimeoutMs);
+  if (capture.timedOut) {
+    return {
+      tool: {
+        name,
+        required,
+        found: true,
+        path: hit.path,
+        versionCheck: "timed_out",
+      },
+      warning: `version check timed out for ${name} (${hit.path})`,
+    };
   }
   return {
-    name,
-    required,
-    found: true,
-    path: hit.path,
-    version: captureVersion(hit.path, versionTimeoutMs),
+    tool: {
+      name,
+      required,
+      found: true,
+      path: hit.path,
+      version: capture.version,
+    },
   };
 }
 
@@ -143,10 +182,23 @@ export async function doctor(
   const versionTimeoutMs = options.versionTimeoutMs ?? 1000;
   const dirs = pathDirs(pathEnv);
 
-  const tools: ToolCheck[] = [
-    ...required.map((name) => checkTool(name, true, dirs, versionTimeoutMs)),
-    ...optional.map((name) => checkTool(name, false, dirs, versionTimeoutMs)),
-  ];
+  // Reject any traversal-shaped name before anything is looked up or
+  // executed: a name like "../../x" must never reach findOnPath/spawnSync.
+  for (const name of required) assertPlainBinaryName(name, "-r/--required");
+  for (const name of optional) assertPlainBinaryName(name, "-o/--optional");
+
+  const warnings: string[] = [];
+  const tools: ToolCheck[] = [];
+  for (const name of required) {
+    const { tool, warning } = checkTool(name, true, dirs, versionTimeoutMs);
+    tools.push(tool);
+    if (warning) warnings.push(warning);
+  }
+  for (const name of optional) {
+    const { tool, warning } = checkTool(name, false, dirs, versionTimeoutMs);
+    tools.push(tool);
+    if (warning) warnings.push(warning);
+  }
 
   const missingRequired = tools.filter((t) => t.required && !t.found);
 
@@ -205,6 +257,7 @@ export async function doctor(
     tools,
     checks,
     hints,
+    warnings,
   };
 }
 
