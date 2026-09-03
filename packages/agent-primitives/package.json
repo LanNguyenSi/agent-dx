@@ -1,0 +1,52 @@
+{
+  "name": "agent-primitives",
+  "version": "0.1.0",
+  "description": "Agent-first CLI primitives (bounded JSON envelopes, a mutation-probe runner, a verify runner, a PATH doctor) for narrow subagents",
+  "type": "module",
+  "bin": {
+    "agent-primitives": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "dev": "node --import tsx src/cli.ts",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "format": "prettier --write \"*.ts\" \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"*.ts\" \"src/**/*.ts\" \"test/**/*.ts\""
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "mutation-testing",
+    "verify",
+    "dx"
+  ],
+  "author": "Lan Nguyen Si",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LanNguyenSi/agent-dx.git",
+    "directory": "packages/agent-primitives"
+  },
+  "dependencies": {
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.22.4",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.6"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
