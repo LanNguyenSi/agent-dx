@@ -22,6 +22,7 @@ import {
   assertArgvWithinLimit,
   buildSpawnEnv,
   CLI_PATH,
+  type CliRun,
   collectCli,
   FIXED_BINARIES,
   FIXED_BIN_DIR,
@@ -1428,6 +1429,51 @@ describe("cli: probe", () => {
   });
 });
 
+/**
+ * Spawns the CLI and, if it has not exited within `boundMs`, kills it and
+ * says so on the result. Local to these tests rather than part of the
+ * shared helper, which deliberately takes no timing arguments: this is a
+ * watchdog, not a timing assumption. It exists for the one case where a
+ * regression would block the CLI forever instead of failing (a read of a
+ * FIFO sitting at the target path), so that the test fails inside its own
+ * budget rather than stalling the suite.
+ */
+async function spawnCliBounded(
+  args: string[],
+  boundMs: number,
+): Promise<CliRun & { timedOut: boolean }> {
+  const child = spawnCliRaw(args);
+  const done = collectCli(child);
+  let timedOut = false;
+  const watchdog = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGKILL");
+  }, boundMs);
+  try {
+    const run = await done;
+    return { ...run, timedOut };
+  } finally {
+    clearTimeout(watchdog);
+  }
+}
+
+/** Whether this host can create a FIFO. Node has no `mkfifo` binding, so
+ * the test that needs one shells out; where the binary is absent the test
+ * is skipped rather than silently weakened. */
+const HAS_MKFIFO = (() => {
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "agent-primitives-mkfifo-probe-"),
+  );
+  try {
+    execFileSync("mkfifo", [path.join(dir, "fifo")], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+})();
+
 describe("cli: init", () => {
   it("the four-step smoke sequence: written, then unchanged, then conflicted, then --force written", async () => {
     const dir = makeTmpDir();
@@ -1755,6 +1801,135 @@ describe("cli: init", () => {
       expect(written).toBe(packaged);
     },
   );
+
+  it.skipIf(isRoot)(
+    "--force over a read-only target already holding the packaged skill reports unchanged, exit 0",
+    async () => {
+      const dir = makeTmpDir();
+      const first = await spawnCli(["init", "-t", dir]);
+      expect(first.code).toBe(0);
+      const filePath = path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.chmodSync(filePath, 0o400);
+
+      let run: Awaited<ReturnType<typeof spawnCli>>;
+      try {
+        run = await spawnCli(["init", "-t", dir, "--force"]);
+      } finally {
+        fs.chmodSync(filePath, 0o600);
+      }
+      expect(run.code).toBe(0);
+      expect(JSON.parse(run.stdout).status).toBe("unchanged");
+    },
+  );
+
+  it.skipIf(!HAS_MKFIFO)(
+    'refuses a FIFO at the target file path with reason "target_not_a_regular_file", exit 2, and does not block on it (needs mkfifo; skipped where the host has none)',
+    async () => {
+      const dir = makeTmpDir();
+      const filePath = path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      execFileSync("mkfifo", [filePath]);
+
+      // Opening a writer-less FIFO for reading blocks forever, so a
+      // regression that reads the entry instead of refusing it by type
+      // never returns; the watchdog turns that into a failed assertion
+      // here rather than a stalled suite.
+      const run = await spawnCliBounded(["init", "-t", dir], 5000);
+      expect(run.timedOut).toBe(false);
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.reason).toBe("target_not_a_regular_file");
+      expect(parsed.command).toBe("init");
+    },
+    20000,
+  );
+
+  it.skipIf(isRoot)(
+    "-H all: a write-phase failure reports the harnesses already installed in the usage_error envelope's targets",
+    async () => {
+      const dir = makeTmpDir();
+      // `.opencode` exists but cannot be written into, so opencode's own
+      // directory creation fails during the write phase, after claude and
+      // codex have already landed. Pre-validation cannot see this one: the
+      // target path itself is still absent and contained.
+      const opencodeDir = path.join(dir, ".opencode");
+      fs.mkdirSync(opencodeDir);
+      fs.chmodSync(opencodeDir, 0o500);
+
+      let run: Awaited<ReturnType<typeof spawnCli>>;
+      try {
+        run = await spawnCli(["init", "-t", dir, "-H", "all"]);
+      } finally {
+        fs.chmodSync(opencodeDir, 0o700);
+      }
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.reason).toBe("target_not_writable");
+      expect(parsed.targets.map((t: { harness: string }) => t.harness)).toEqual(
+        ["claude", "codex"],
+      );
+      expect(parsed.targets.map((t: { status: string }) => t.status)).toEqual([
+        "written",
+        "written",
+      ]);
+      expect(
+        fs.existsSync(
+          path.join(dir, ".claude", "skills", "agent-primitives", "SKILL.md"),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("-H all: reports each target's own status and the worst of them when one harness conflicts and a later one is written", async () => {
+    const dir = makeTmpDir();
+    const first = await spawnCli(["init", "-t", dir]);
+    expect(first.code).toBe(0);
+    const claudePath = path.join(
+      dir,
+      ".claude",
+      "skills",
+      "agent-primitives",
+      "SKILL.md",
+    );
+    fs.writeFileSync(claudePath, "corrupted\n");
+
+    const run = await spawnCli(["init", "-t", dir, "-H", "all"]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("conflicted");
+    expect(
+      Object.fromEntries(
+        parsed.targets.map((t: { harness: string; status: string }) => [
+          t.harness,
+          t.status,
+        ]),
+      ),
+    ).toEqual({
+      claude: "conflicted",
+      codex: "written",
+      opencode: "written",
+    });
+    expect(fs.readFileSync(claudePath, "utf8")).toBe("corrupted\n");
+    expect(
+      fs.existsSync(
+        path.join(dir, ".opencode", "skills", "agent-primitives", "SKILL.md"),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("cli signal handling", () => {

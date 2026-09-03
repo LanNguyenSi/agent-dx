@@ -62,20 +62,27 @@ export interface InitResult {
   warnings: string[];
 }
 
-/** The filesystem conditions `init` maps to a named usage-error reason
- * instead of letting the raw errno message through: `-t`, or a path
- * segment above the target, is a file (`ENOTDIR`); a directory sits at
- * the target file path itself (`EISDIR`); the target is not writable
- * (`EACCES`, e.g. a read-only file with `--force`); a symlink sits at the
- * target file path, whether caught by pre-validation or, for one planted
- * after pre-validation ran, by the write's own `O_NOFOLLOW` open
- * (`ELOOP`); the resolved target falls outside `--target-dir`. */
+/** The conditions `init` maps to a named usage-error reason instead of
+ * letting a raw errno message (or a bare `Error`) through: `-t`, or a path
+ * segment above the target, is a file (`ENOTDIR`); a directory sits at the
+ * target file path itself (`EISDIR`); an entry that is neither a regular
+ * file nor a directory (a FIFO, a socket, a device node) sits at the
+ * target file path, which `init` refuses to read or write rather than
+ * blocking on it; the target is not writable (`EACCES`, e.g. a read-only
+ * file with `--force` whose content differs from the skill being
+ * installed); a symlink sits at the target file path, whether caught by
+ * pre-validation or, for one planted after pre-validation ran, by the
+ * write's own `O_NOFOLLOW` open (`ELOOP`); the resolved target falls
+ * outside `--target-dir`; the platform does not offer the `O_NOFOLLOW`
+ * constant the write's symlink guard is built from. */
 export type InitFsErrorReason =
   | "target_not_a_directory"
   | "target_path_is_a_directory"
+  | "target_not_a_regular_file"
   | "target_not_writable"
   | "target_is_a_symlink"
-  | "target_escapes_directory";
+  | "target_escapes_directory"
+  | "platform_unsupported";
 
 /** A `UsageError` carrying one of `InitFsErrorReason`, so the CLI action
  * can report it on the envelope's own `reason` field instead of the
@@ -127,8 +134,8 @@ function mapInitFsError(
   }
   if (code === "ELOOP") {
     return new InitFsUsageError(
-      `init: the target for harness "${harness}" is a symbolic link and ` +
-        `will not be followed: ${filePath}`,
+      `init: a symbolic link was encountered resolving the target for ` +
+        `harness "${harness}" and will not be followed: ${filePath}`,
       "target_is_a_symlink",
     );
   }
@@ -149,28 +156,82 @@ function readPackagedSkill(): string {
 }
 
 /**
+ * `O_NOFOLLOW` gates `writeOne`'s own `open()` against a symlink planted
+ * after pre-validation ran (see `resolveTargetPath`'s docblock). It is
+ * combined into the open flags with a bitwise OR, which silently drops an
+ * operand that turns out to be `0` or `undefined` instead of failing
+ * loudly, so a platform without the constant is refused rather than
+ * quietly written through a symlink from then on.
+ *
+ * Checked at the start of every `init()` call rather than at module load:
+ * this module is imported unconditionally by the CLI and by the package's
+ * barrel, so a module-scope throw would take `probe`, `verify`, and
+ * `doctor` down with it on such a platform. As a call-time
+ * `InitFsUsageError` the refusal instead reaches the caller through the
+ * envelope contract every other `init` refusal uses, as `usage_error` with
+ * reason `platform_unsupported`, exit `2`, and only for `init`.
+ */
+function assertNoFollowSupported(): void {
+  const flag: unknown = fs.constants.O_NOFOLLOW;
+  if (typeof flag !== "number" || flag <= 0) {
+    throw new InitFsUsageError(
+      "init: fs.constants.O_NOFOLLOW is not a positive number on this " +
+        "platform; refusing to write a skill file whose symlink guard " +
+        "would be silently dropped from the write's open flags",
+      "platform_unsupported",
+    );
+  }
+}
+
+/** One requested harness after pre-validation: where its skill file goes,
+ * and what is already there. */
+interface ValidatedTarget {
+  harness: Harness;
+  filePath: string;
+  /** Content of the regular file already sitting at `filePath`, or
+   * `undefined` when nothing is there yet. Read once, during validation,
+   * so the write phase never has to read an entry whose type it would
+   * have to re-check first. */
+  existing: string | undefined;
+}
+
+/**
  * Resolves `harness`'s target file under `absTargetDir` and refuses it
  * before anything is written when the refusal can be known without
- * writing anything: a symlink at the literal target path is refused
- * outright, whether it dangles, resolves inside `absTargetDir`, or
- * escapes it, and whether or not `--force` was given, since a target file
- * is never written through a symlink; a directory already sitting at the
- * target file path is refused the same way `EISDIR` from the write itself
- * would be, but before any write happens; an existing regular file that
- * `--force` would overwrite is checked for write access up front so an
- * unwritable target is refused before any write happens too; the final
- * path is then resolved (walking up past any segment that does not exist
- * yet, such as the harness's own skill subdirectory on a first run) and
- * checked for containment, so a pre-existing symlink anywhere further up
- * the path (e.g. `.claude` itself pointing outside `targetDir`) cannot
- * redirect the write either.
+ * writing anything.
+ *
+ * A symlink at the literal target path is refused outright, whether it
+ * dangles, resolves inside `absTargetDir`, or escapes it, and whether or
+ * not `--force` was given, since a target file is never written through a
+ * symlink. A directory already sitting at the target file path is refused
+ * the same way `EISDIR` from the write itself would be, but before any
+ * write happens. Any other entry that is not a regular file (a FIFO, a
+ * socket, a device node) is refused too, and refused here, before the
+ * content read below: opening a FIFO for reading blocks until a writer
+ * appears, so an entry of that kind must be rejected by its type rather
+ * than discovered by reading it.
+ *
+ * An existing regular file is then read, once, and compared with the
+ * content that would be installed. The comparison decides both the
+ * outcome the write phase reports (identical content is `unchanged`, with
+ * no write at all) and whether write access matters: `access(W_OK)` is
+ * checked only when a write is actually due, so a read-only target that
+ * already holds exactly the packaged skill is reported `unchanged` under
+ * `--force` instead of being refused as unwritable.
+ *
+ * The final path is then resolved (walking up past any segment that does
+ * not exist yet, such as the harness's own skill subdirectory on a first
+ * run) and checked for containment, so a pre-existing symlink anywhere
+ * further up the path (e.g. `.claude` itself pointing outside
+ * `targetDir`) cannot redirect the write either.
  */
 function resolveTargetPath(
   absTargetDir: string,
   resolvedTargetDir: string,
   harness: Harness,
   force: boolean,
-): string {
+  content: string,
+): ValidatedTarget {
   const filePath = path.join(absTargetDir, HARNESS_REL_PATH[harness]);
 
   // `throwIfNoEntry: false` only suppresses ENOENT (nothing there yet, the
@@ -184,27 +245,47 @@ function resolveTargetPath(
     throw mapInitFsError(err, harness, filePath);
   }
 
-  if (lst !== undefined && lst.isSymbolicLink()) {
-    throw new InitFsUsageError(
-      `init: resolved target for harness "${harness}" is a symbolic link ` +
-        `and will not be followed (--target-dir ${absTargetDir}): ${filePath}`,
-      "target_is_a_symlink",
-    );
-  }
+  let existing: string | undefined;
+  if (lst !== undefined) {
+    if (lst.isSymbolicLink()) {
+      throw new InitFsUsageError(
+        `init: resolved target for harness "${harness}" is a symbolic link ` +
+          `and will not be followed (--target-dir ${absTargetDir}): ${filePath}`,
+        "target_is_a_symlink",
+      );
+    }
 
-  if (lst !== undefined && lst.isDirectory()) {
-    throw new InitFsUsageError(
-      `init: the target for harness "${harness}" is a directory, not a ` +
-        `file: ${filePath}`,
-      "target_path_is_a_directory",
-    );
-  }
+    if (lst.isDirectory()) {
+      throw new InitFsUsageError(
+        `init: the target for harness "${harness}" is a directory, not a ` +
+          `file: ${filePath}`,
+        "target_path_is_a_directory",
+      );
+    }
 
-  if (lst !== undefined && lst.isFile() && force) {
+    if (!lst.isFile()) {
+      throw new InitFsUsageError(
+        `init: the target for harness "${harness}" is neither a regular ` +
+          `file nor a directory (a FIFO, a socket, or a device node, say) ` +
+          `and will be neither read nor written: ${filePath}`,
+        "target_not_a_regular_file",
+      );
+    }
+
     try {
-      fs.accessSync(filePath, fs.constants.W_OK);
+      existing = fs.readFileSync(filePath, "utf8");
     } catch (err) {
       throw mapInitFsError(err, harness, filePath);
+    }
+
+    // A target that already holds exactly this content is `unchanged`: no
+    // write is due, so its write permissions are none of init's business.
+    if (existing !== content && force) {
+      try {
+        fs.accessSync(filePath, fs.constants.W_OK);
+      } catch (err) {
+        throw mapInitFsError(err, harness, filePath);
+      }
     }
   }
 
@@ -216,36 +297,21 @@ function resolveTargetPath(
       "target_escapes_directory",
     );
   }
-  return filePath;
-}
-
-// `O_NOFOLLOW` gates writeOne's own open() against a symlink planted after
-// resolveTargetPath's pre-validation ran (see that function's own
-// docblock). It is combined into the open flags below with a bitwise OR,
-// which silently drops an operand that turns out to be `0` or
-// `undefined` instead of failing loudly; asserted once, at module load,
-// so a platform where the constant is missing or falsy is refused outright
-// rather than quietly writing through a symlink from then on.
-const O_NOFOLLOW_IS_VALID =
-  typeof fs.constants.O_NOFOLLOW === "number" && fs.constants.O_NOFOLLOW > 0;
-if (!O_NOFOLLOW_IS_VALID) {
-  throw new Error(
-    "init: fs.constants.O_NOFOLLOW is not a positive number on this " +
-      "platform; refusing to load a module whose symlink guard would be " +
-      "silently dropped from the write's open flags",
-  );
+  return { harness, filePath, existing };
 }
 
 /**
- * Writes `content` to `filePath`, mirroring the write-if-new-or-identical /
- * conflicted-otherwise semantics of orchestrator-workflow's own
- * `installFile` (not imported: that module is internal to its own
- * package): a path that does not exist yet, or exists with byte-identical
- * content, is written or reported unchanged with no further action; a path
- * that exists with different content is reported `conflicted` unless
- * `force` is set, in which case it is overwritten and reported `written`
- * (not `updated`: `init`'s own status vocabulary has no third state, per
- * the acceptance contract).
+ * Writes `content` to `target.filePath`, mirroring the
+ * write-if-new-or-identical / conflicted-otherwise semantics of
+ * orchestrator-workflow's own `installFile` (not imported: that module is
+ * internal to its own package): a path that does not exist yet, or exists
+ * with byte-identical content, is written or reported unchanged with no
+ * further action; a path that exists with different content is reported
+ * `conflicted` unless `force` is set, in which case it is overwritten and
+ * reported `written` (not `updated`: `init`'s own status vocabulary has no
+ * third state, per the acceptance contract). What is already at the path
+ * comes from `target.existing`, read once during pre-validation behind the
+ * type check there, so nothing here reads an entry of unknown type.
  *
  * `dir` is created (`mkdirSync` with `recursive: true`) unconditionally
  * before anything else, which is also documented behavior: a missing `-t`
@@ -264,13 +330,13 @@ if (!O_NOFOLLOW_IS_VALID) {
  * pre-validation check).
  */
 function writeOne(
-  harness: Harness,
-  filePath: string,
+  target: ValidatedTarget,
   content: string,
   force: boolean,
   absTargetDir: string,
   resolvedTargetDir: string,
 ): InitTargetResult {
+  const { harness, filePath, existing } = target;
   const dir = path.dirname(filePath);
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -284,8 +350,7 @@ function writeOne(
       );
     }
 
-    if (fs.existsSync(filePath)) {
-      const existing = fs.readFileSync(filePath, "utf8");
+    if (existing !== undefined) {
       if (existing === content) {
         return { harness, path: filePath, status: "unchanged" };
       }
@@ -316,11 +381,12 @@ function writeOne(
 /**
  * Installs the packaged `assets/skill/SKILL.md` into one or more harnesses'
  * skill directories under `targetDir`. Every requested harness's target is
- * validated up front, before any file is written: containment, a symlink
- * or a directory already at the target path, and (under `--force`) an
- * existing target's write access are all conditions knowable without
- * writing anything, and all are checked before the first write, so an
- * escape or a pre-existing conflict of that kind on, say, the third of
+ * validated up front, before any file is written: containment, a symlink,
+ * a directory or another non-regular entry already at the target path,
+ * and, for a target whose content differs from the skill being installed
+ * under `--force`, that target's write access are all conditions knowable
+ * without writing anything, and all are checked before the first write, so
+ * an escape or a pre-existing conflict of that kind on, say, the third of
  * three requested harnesses is refused without leaving the first two
  * written. A condition that only surfaces during the write itself (a race
  * between validation and the write, such as a symlink planted in that
@@ -333,34 +399,23 @@ function writeOne(
  * there is nothing here for `async`/`await` to buy.
  */
 export function init(options: InitOptions = {}): InitResult {
+  assertNoFollowSupported();
+
   const harnesses = options.harnesses ?? ["claude"];
   const absTargetDir = path.resolve(options.targetDir ?? process.cwd());
   const resolvedTargetDir = resolveDeepestExisting(absTargetDir);
   const force = options.force ?? false;
   const content = options.content ?? readPackagedSkill();
 
-  const filePaths = harnesses.map((harness) => ({
-    harness,
-    filePath: resolveTargetPath(
-      absTargetDir,
-      resolvedTargetDir,
-      harness,
-      force,
-    ),
-  }));
+  const validated = harnesses.map((harness) =>
+    resolveTargetPath(absTargetDir, resolvedTargetDir, harness, force, content),
+  );
 
   const targets: InitTargetResult[] = [];
-  for (const { harness, filePath } of filePaths) {
+  for (const target of validated) {
     try {
       targets.push(
-        writeOne(
-          harness,
-          filePath,
-          content,
-          force,
-          absTargetDir,
-          resolvedTargetDir,
-        ),
+        writeOne(target, content, force, absTargetDir, resolvedTargetDir),
       );
     } catch (err) {
       if (err instanceof InitFsUsageError) {

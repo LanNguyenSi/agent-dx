@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { init, ALL_HARNESSES, InitFsUsageError } from "../src/init/index.js";
-import { init as initFromIndex } from "../src/index.js";
+import {
+  init as initFromIndex,
+  InitFsUsageError as InitFsUsageErrorFromIndex,
+} from "../src/index.js";
+import type { InitFsErrorReason as InitFsErrorReasonFromIndex } from "../src/index.js";
 import { UsageError } from "../src/envelope.js";
 
 // Permission bits are meaningless to root (bypasses them entirely), so the
@@ -29,13 +33,19 @@ const CONTENT_A = "# skill A\n";
 const CONTENT_B = "# skill B (different)\n";
 
 describe("init", () => {
-  it("is re-exported from the package's index", () => {
+  it("is re-exported from the package's index, error class included", () => {
     expect(initFromIndex).toBe(init);
+    expect(InitFsUsageErrorFromIndex).toBe(InitFsUsageError);
+    // The reason type travels with the class: a caller narrowing on
+    // `reason` imports both from the barrel, and this assignment is the
+    // typecheck's own witness that the type export exists.
+    const reason: InitFsErrorReasonFromIndex = "target_not_a_regular_file";
+    expect(reason).toBe("target_not_a_regular_file");
   });
 
-  it("writes a fresh file for the default harness (claude)", async () => {
+  it("writes a fresh file for the default harness (claude)", () => {
     const dir = makeTmpDir();
-    const result = await init({ targetDir: dir, content: CONTENT_A });
+    const result = init({ targetDir: dir, content: CONTENT_A });
     expect(result.status).toBe("written");
     expect(result.targets).toHaveLength(1);
     expect(result.targets[0]?.harness).toBe("claude");
@@ -50,18 +60,18 @@ describe("init", () => {
     expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_A);
   });
 
-  it("reports unchanged when the existing content is byte-identical", async () => {
+  it("reports unchanged when the existing content is byte-identical", () => {
     const dir = makeTmpDir();
-    await init({ targetDir: dir, content: CONTENT_A });
-    const result = await init({ targetDir: dir, content: CONTENT_A });
+    init({ targetDir: dir, content: CONTENT_A });
+    const result = init({ targetDir: dir, content: CONTENT_A });
     expect(result.status).toBe("unchanged");
     expect(result.targets[0]?.status).toBe("unchanged");
   });
 
-  it("reports conflicted, and leaves the file untouched, when the content differs", async () => {
+  it("reports conflicted, and leaves the file untouched, when the content differs", () => {
     const dir = makeTmpDir();
-    await init({ targetDir: dir, content: CONTENT_A });
-    const result = await init({ targetDir: dir, content: CONTENT_B });
+    init({ targetDir: dir, content: CONTENT_A });
+    const result = init({ targetDir: dir, content: CONTENT_B });
     expect(result.status).toBe("conflicted");
     expect(result.targets[0]?.status).toBe("conflicted");
     const filePath = path.join(
@@ -74,11 +84,11 @@ describe("init", () => {
     expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_A);
   });
 
-  it("overwrites and reports written when --force resolves a conflict", async () => {
+  it("overwrites and reports written when --force resolves a conflict", () => {
     const dir = makeTmpDir();
-    await init({ targetDir: dir, content: CONTENT_A });
-    await init({ targetDir: dir, content: CONTENT_B }); // conflicted, untouched
-    const result = await init({
+    init({ targetDir: dir, content: CONTENT_A });
+    init({ targetDir: dir, content: CONTENT_B }); // conflicted, untouched
+    const result = init({
       targetDir: dir,
       content: CONTENT_B,
       force: true,
@@ -94,9 +104,9 @@ describe("init", () => {
     expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_B);
   });
 
-  it("writes every requested harness to its own path, and never under .claude/agents", async () => {
+  it("writes every requested harness to its own path, and never under .claude/agents", () => {
     const dir = makeTmpDir();
-    const result = await init({
+    const result = init({
       targetDir: dir,
       content: CONTENT_A,
       harnesses: [...ALL_HARNESSES],
@@ -124,10 +134,10 @@ describe("init", () => {
     expect(fs.existsSync(path.join(dir, ".claude", "agents"))).toBe(false);
   });
 
-  it("aggregates to conflicted when any one of several harnesses conflicts", async () => {
+  it("aggregates to conflicted when any one of several harnesses conflicts", () => {
     const dir = makeTmpDir();
-    await init({ targetDir: dir, content: CONTENT_A, harnesses: ["claude"] });
-    const result = await init({
+    init({ targetDir: dir, content: CONTENT_A, harnesses: ["claude"] });
+    const result = init({
       targetDir: dir,
       content: CONTENT_B,
       harnesses: [...ALL_HARNESSES],
@@ -173,9 +183,9 @@ describe("init", () => {
     ).toBe(false);
   });
 
-  it("defaults to the packaged assets/skill/SKILL.md when no content override is given", async () => {
+  it("defaults to the packaged assets/skill/SKILL.md when no content override is given", () => {
     const dir = makeTmpDir();
-    const result = await init({ targetDir: dir });
+    const result = init({ targetDir: dir });
     expect(result.status).toBe("written");
     const written = fs.readFileSync(result.targets[0]!.path, "utf8");
     expect(written).toMatch(/^---\nname: agent-primitives\n/);
@@ -575,8 +585,156 @@ describe("init", () => {
     );
   });
 
+  describe("a read-only target that already holds the content being installed", () => {
+    function writeReadOnly(filePath: string, content: string): void {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, content);
+      fs.chmodSync(filePath, 0o400);
+    }
+
+    it.skipIf(isRoot)(
+      "reports unchanged under --force instead of refusing it as unwritable",
+      () => {
+        const dir = makeTmpDir();
+        const filePath = path.join(
+          dir,
+          ".claude",
+          "skills",
+          "agent-primitives",
+          "SKILL.md",
+        );
+        writeReadOnly(filePath, CONTENT_A);
+
+        let result;
+        try {
+          result = init({ targetDir: dir, content: CONTENT_A, force: true });
+        } finally {
+          fs.chmodSync(filePath, 0o600);
+        }
+        expect(result.status).toBe("unchanged");
+        expect(result.targets[0]?.status).toBe("unchanged");
+        expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_A);
+      },
+    );
+
+    it.skipIf(isRoot)(
+      "-H all: the other harnesses are still installed alongside it",
+      () => {
+        const dir = makeTmpDir();
+        const codexFilePath = path.join(
+          dir,
+          ".agents",
+          "skills",
+          "agent-primitives",
+          "SKILL.md",
+        );
+        writeReadOnly(codexFilePath, CONTENT_A);
+
+        let result;
+        try {
+          result = init({
+            targetDir: dir,
+            content: CONTENT_A,
+            harnesses: [...ALL_HARNESSES],
+            force: true,
+          });
+        } finally {
+          fs.chmodSync(codexFilePath, 0o600);
+        }
+        expect(result.status).toBe("written");
+        expect(result.targets.find((t) => t.harness === "codex")?.status).toBe(
+          "unchanged",
+        );
+        expect(result.targets.find((t) => t.harness === "claude")?.status).toBe(
+          "written",
+        );
+        expect(
+          fs.readFileSync(
+            path.join(dir, ".claude", "skills", "agent-primitives", "SKILL.md"),
+            "utf8",
+          ),
+        ).toBe(CONTENT_A);
+        expect(
+          fs.readFileSync(
+            path.join(
+              dir,
+              ".opencode",
+              "skills",
+              "agent-primitives",
+              "SKILL.md",
+            ),
+            "utf8",
+          ),
+        ).toBe(CONTENT_A);
+      },
+    );
+  });
+
+  describe("a failure during the write phase, after earlier harnesses landed", () => {
+    it("carries the completed prefix on the error's own targets", () => {
+      const dir = makeTmpDir();
+      const opencodeFilePath = path.join(
+        dir,
+        ".opencode",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(opencodeFilePath), { recursive: true });
+
+      const realLstatSync = fs.lstatSync;
+      const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
+        p: fs.PathLike,
+        opts?: unknown,
+      ) => {
+        if (p === opencodeFilePath) {
+          // Simulate a race on the last of the three harnesses: something
+          // else plants a symlink right after this process's own
+          // pre-validation lstat observed nothing there, so claude and
+          // codex are written before opencode's own O_NOFOLLOW open fails.
+          fs.symlinkSync(
+            path.join(path.dirname(opencodeFilePath), "does-not-exist.md"),
+            opencodeFilePath,
+          );
+          return undefined;
+        }
+        return (realLstatSync as (p: fs.PathLike, opts?: unknown) => unknown)(
+          p,
+          opts,
+        );
+      }) as typeof fs.lstatSync);
+
+      let caught: unknown;
+      try {
+        init({
+          targetDir: dir,
+          content: CONTENT_A,
+          harnesses: [...ALL_HARNESSES],
+        });
+      } catch (err) {
+        caught = err;
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(caught).toBeInstanceOf(InitFsUsageError);
+      const err = caught as InitFsUsageError;
+      expect(err.reason).toBe("target_is_a_symlink");
+      // Exactly the harnesses that completed before the failure, in order,
+      // and no entry for the one that failed.
+      expect(err.targets.map((t) => t.harness)).toEqual(["claude", "codex"]);
+      expect(err.targets.map((t) => t.status)).toEqual(["written", "written"]);
+      expect(
+        fs.readFileSync(
+          path.join(dir, ".claude", "skills", "agent-primitives", "SKILL.md"),
+          "utf8",
+        ),
+      ).toBe(CONTENT_A);
+    });
+  });
+
   describe("--force over a strictly longer existing target", () => {
-    it("overwrites without leaving a trailing tail from the old content (O_TRUNC)", async () => {
+    it("overwrites without leaving a trailing tail from the old content (O_TRUNC)", () => {
       const dir = makeTmpDir();
       const filePath = path.join(
         dir,
@@ -597,7 +755,7 @@ describe("init", () => {
       expect(longerExisting.length).toBeGreaterThan(packaged.length);
       fs.writeFileSync(filePath, longerExisting);
 
-      const result = await init({ targetDir: dir, force: true });
+      const result = init({ targetDir: dir, force: true });
       expect(result.status).toBe("written");
       const written = fs.readFileSync(filePath, "utf8");
       expect(written.length).toBe(packaged.length);
@@ -605,13 +763,15 @@ describe("init", () => {
     });
   });
 
-  describe("the O_NOFOLLOW guard is asserted at module load", () => {
+  describe("the O_NOFOLLOW guard is checked by init(), not at module load", () => {
     afterEach(() => {
       vi.doUnmock("node:fs");
       vi.resetModules();
     });
 
-    it("refuses to load when fs.constants.O_NOFOLLOW is not a positive number", async () => {
+    /** Re-imports the module graph with `fs.constants.O_NOFOLLOW` removed,
+     * standing in for a platform that does not offer the constant. */
+    function mockFsWithoutONoFollow(): void {
       vi.doMock("node:fs", async () => {
         const actual =
           await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -622,9 +782,38 @@ describe("init", () => {
         return mocked;
       });
       vi.resetModules();
-      await expect(import("../src/init/index.js")).rejects.toThrow(
-        /O_NOFOLLOW/,
+    }
+
+    it('init() refuses with reason "platform_unsupported" when fs.constants.O_NOFOLLOW is not a positive number', async () => {
+      const dir = makeTmpDir();
+      mockFsWithoutONoFollow();
+      const mod = await import("../src/init/index.js");
+
+      let caught: unknown;
+      try {
+        mod.init({ targetDir: dir, content: CONTENT_A });
+      } catch (err) {
+        caught = err;
+      }
+      // The re-imported module has its own class identity, so the reason
+      // and the message carry the assertion rather than `instanceof`.
+      expect((caught as { reason?: string } | undefined)?.reason).toBe(
+        "platform_unsupported",
       );
+      expect((caught as Error | undefined)?.message).toMatch(/O_NOFOLLOW/);
+      expect(
+        fs.existsSync(
+          path.join(dir, ".claude", "skills", "agent-primitives", "SKILL.md"),
+        ),
+      ).toBe(false);
+    });
+
+    it("probe, verify, and doctor stay loadable on the same platform", async () => {
+      mockFsWithoutONoFollow();
+      const barrel = await import("../src/index.js");
+      expect(typeof barrel.probe).toBe("function");
+      expect(typeof barrel.verify).toBe("function");
+      expect(typeof barrel.doctor).toBe("function");
     });
   });
 });

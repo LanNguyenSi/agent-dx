@@ -652,12 +652,17 @@ further action, exit `0`. A target that exists with different content
 is reported `conflicted`, exit `1`, and left untouched, unless `--force`
 is given, in which case it is overwritten and reported `written`, exit
 `0`. Every requested harness's target is validated against
-`--target-dir` before anything is written: containment, a symlink or a
-directory already sitting at the target file path, and, under
-`--force`, an existing target's write access are all checked up front,
-so a condition of that kind on one harness (for example a pre-existing
-symlink, or `.claude` itself pointing outside `--target-dir`) refuses
-the whole invocation, exit `2`, with nothing written for any harness.
+`--target-dir` before anything is written: containment, a symlink, a
+directory or another entry that is not a regular file already sitting
+at the target file path, and, under `--force`, write access to a target
+whose content differs from the skill being installed are all checked up
+front, so a condition of that kind on one harness (for example a
+pre-existing symlink, or `.claude` itself pointing outside
+`--target-dir`) refuses the whole invocation, exit `2`, with nothing
+written for any harness. Write access is checked only where a write is
+actually due: a read-only target that already holds exactly this skill
+needs no write and is reported `unchanged`, exit `0`, under `--force`
+as well, and the other requested harnesses are installed alongside it.
 A condition that only shows up during the write itself, such as a
 symlink planted in the gap between validation and the write, can still
 leave a prefix of the requested harnesses written; the envelope's own
@@ -668,14 +673,22 @@ refused the same way, whether it dangles, resolves inside or outside
 never written through a symlink. This containment guarantee is about
 symbolic links specifically; a hard link at the target path is
 indistinguishable from a plain regular file and is written through like
-one. `-t` naming a file instead of a directory, a directory sitting at
-the target file path, an existing target that is not writable, a
-symlink at the target file path, and a resolved target that escapes
-`--target-dir` are each reported as `status: "usage_error"`, exit `2`,
-with a `reason` naming which one it was (`target_not_a_directory`,
-`target_path_is_a_directory`, `target_not_writable`,
-`target_is_a_symlink`, `target_escapes_directory`) instead of a raw
-filesystem error message.
+one. An entry that is neither a regular file nor a directory (a FIFO, a
+socket, a device node) is refused by its type instead of being read or
+written, so a FIFO at the target path cannot block the run. `-t` naming
+a file instead of a directory, a directory sitting at the target file
+path, an entry there that is not a regular file, an existing target
+that is not writable, a symlink at the target file path, a resolved
+target that escapes `--target-dir`, and a platform whose `fs.constants`
+offers no usable `O_NOFOLLOW` for the write's symlink guard are each
+reported as `status: "usage_error"`, exit `2`, with a `reason` naming
+which one it was (`target_not_a_directory`,
+`target_path_is_a_directory`, `target_not_a_regular_file`,
+`target_not_writable`, `target_is_a_symlink`,
+`target_escapes_directory`, `platform_unsupported`) instead of a raw
+filesystem error message. The platform check is scoped to `init` and
+runs when `init` is called, so `probe`, `verify`, and `doctor` stay
+usable on such a platform.
 
 Output beside the envelope: `status` (`written`, `unchanged`, or
 `conflicted`, the worst outcome across every requested harness) and
