@@ -541,10 +541,18 @@ describe("beginWorktree / cleanupWorktree", () => {
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.reason).toBe("aborted");
-      expect(result.detail).toContain("tracked-diff");
-      // The killed git child wrote nothing more after the abort: the
-      // diff of a 40 MB change is far from finished this early.
+      // The step named is the diff capture itself, not a later call
+      // that inherited the abort: a diff left running to completion
+      // would report the numstat count instead.
+      expect(result.detail).toContain("the tracked-diff capture");
+      // The capture really was cut short: a finished `git diff HEAD
+      // --binary` of a 40 MB change writes more than the 40 MB itself
+      // (the literal hunk is base85-encoded), and this file is a
+      // fraction of that. Asserted before the no-growth check below,
+      // which a completed diff would also satisfy.
       const sizeAtAbort = fs.statSync(diffPath).size;
+      expect(sizeAtAbort).toBeLessThan(40 * 1024 * 1024);
+      // ... and the killed git child wrote nothing more after the abort.
       await new Promise((resolve) => setTimeout(resolve, 500));
       expect(fs.statSync(diffPath).size).toBe(sizeAtAbort);
 
