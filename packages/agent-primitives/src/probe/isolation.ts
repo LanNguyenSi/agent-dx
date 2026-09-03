@@ -752,6 +752,84 @@ export async function listRegisteredWorktrees(
   };
 }
 
+/** The `worktrees/` administrative directory of the repository at
+ * `root`: under the common git dir, which is `.git` for a main worktree
+ * and the main repository's `.git` for a linked one. `git rev-parse`
+ * does not enumerate worktrees, so it still answers when `git worktree
+ * list` cannot. */
+async function worktreeAdminDir(
+  root: string,
+  logDir: string,
+  track: TrackGitCall,
+): Promise<{ dir?: string; logPath: string }> {
+  const result = await trackGit(
+    track,
+    gitArgv(
+      ["rev-parse", "--git-common-dir"],
+      logDir,
+      `git-common-dir-${randomUUID()}.log`,
+      root,
+    ),
+  );
+  const out = result.stdout.trim();
+  if (result.exitCode !== 0 || out.length === 0) {
+    return { logPath: result.logPath };
+  }
+  return {
+    dir: path.join(path.resolve(root, out), "worktrees"),
+    logPath: result.logPath,
+  };
+}
+
+/** Removes the administrative entry a `git worktree add` killed in its
+ * first moments leaves half-written: `gitdir` already names `target`'s
+ * own `.git` file and `locked` is present, but `commondir` is empty
+ * (git creates the file before it writes the content). git itself
+ * cannot act on such an entry (`list`, `remove`, and `unlock` all die
+ * reading the empty `commondir`, and `prune` skips a locked entry), so
+ * every `git worktree` command in the repository fails until the entry
+ * is gone, and nothing short of deleting it clears it. Only an entry
+ * naming the already-gated `target` is ever touched. Returns true when
+ * one was removed. */
+function removeHalfWrittenAdminEntry(
+  adminDir: string,
+  target: string,
+): boolean {
+  let ids: string[];
+  try {
+    ids = fs.readdirSync(adminDir);
+  } catch {
+    return false;
+  }
+  let removed = false;
+  for (const id of ids) {
+    const entry = path.join(adminDir, id);
+    let gitdir: string;
+    try {
+      gitdir = fs.readFileSync(path.join(entry, "gitdir"), "utf8").trim();
+    } catch {
+      continue;
+    }
+    if (gitdir.length === 0) continue;
+    if (!fs.existsSync(path.join(entry, "locked"))) continue;
+    let commondirBytes: number;
+    try {
+      commondirBytes = fs.statSync(path.join(entry, "commondir")).size;
+    } catch {
+      continue;
+    }
+    if (commondirBytes > 0) continue;
+    if (resolveDeepestExisting(path.dirname(gitdir)) !== target) continue;
+    try {
+      fs.rmSync(entry, { recursive: true, force: true });
+      removed = true;
+    } catch {
+      // Best-effort: reported through the assertion that follows.
+    }
+  }
+  return removed;
+}
+
 export interface CleanupWorktreeOptions {
   track?: TrackGitCall;
   /** The `--log-dir` the worktree was created under: this session's
@@ -789,6 +867,10 @@ export interface CleanupWorktreeResult {
  * re-running `git worktree list` and checking the path itself, never
  * read off an exit code: `remove` exits non-zero for a path that was
  * never registered, and `prune` exits 0 while skipping a locked entry.
+ * When that listing itself fails, the one state git cannot recover
+ * from on its own is handled here: an entry the add left half-written
+ * (see `removeHalfWrittenAdminEntry`) is removed when it names this
+ * same path, and the prune and the assertion run again.
  *
  * Nothing is run against the path before it passes a gate, because the
  * path can come from a marker file, not only from this process's own
@@ -877,8 +959,29 @@ export async function cleanupWorktree(
   );
   logPaths.push(pruneResult.logPath);
 
-  const after = await listRegisteredWorktrees(root, logDir, { track });
+  let after = await listRegisteredWorktrees(root, logDir, { track });
   logPaths.push(after.logPath);
+  if (!after.ok) {
+    const admin = await worktreeAdminDir(root, logDir, track);
+    logPaths.push(admin.logPath);
+    if (
+      admin.dir !== undefined &&
+      removeHalfWrittenAdminEntry(admin.dir, target)
+    ) {
+      const pruneAgain = await trackGit(
+        track,
+        gitArgv(
+          ["worktree", "prune"],
+          logDir,
+          `worktree-prune-${randomUUID()}.log`,
+          root,
+        ),
+      );
+      logPaths.push(pruneAgain.logPath);
+      after = await listRegisteredWorktrees(root, logDir, { track });
+      logPaths.push(after.logPath);
+    }
+  }
   const stillRegistered = !after.ok || after.paths.includes(target);
   const stillOnDisk = fs.existsSync(worktreePath);
   const ok = !stillRegistered && !stillOnDisk;

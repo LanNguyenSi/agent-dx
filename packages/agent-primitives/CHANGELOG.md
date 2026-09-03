@@ -500,7 +500,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outcome asserted against `git worktree list` and the disk rather than
   inferred from an exit code; a removal that did not take keeps the
   repository-keyed marker and adds a warning naming the path and the
-  manual command. The marker is written before the add runs and records
+  manual command. The one state git cannot recover from on its own, an
+  entry the add left half-written (its `commondir` still empty, which
+  makes every `git worktree` command in the repository fail), is
+  cleared by removing that entry from the repository's `worktrees`
+  administrative directory, only when it names the probe's own
+  worktree. The marker is written before the add runs and records
   the `--log-dir`, so a `SIGKILL` or a crash at any point from there on
   leaves it, along with whatever git had registered by then; `doctor`
   reports a leftover from the marker and from `git worktree list` (a

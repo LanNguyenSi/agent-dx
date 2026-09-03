@@ -877,6 +877,57 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
     expect(fs.existsSync(adminDir) ? fs.readdirSync(adminDir) : []).toEqual([]);
   });
 
+  it("clears the half-written entry of an add killed while its commondir was still empty, which makes every git worktree command in the repository fail", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const worktreePath = scratchPath(logDir);
+    addLockedWorktree(repo, worktreePath);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [adminEntry] = fs.readdirSync(adminDir);
+    // git creates `commondir` before it writes the content, so a kill
+    // in between leaves it empty (never missing, which git tolerates).
+    fs.writeFileSync(path.join(adminDir, adminEntry, "commondir"), "");
+    fs.rmSync(path.join(adminDir, adminEntry, "HEAD"), { force: true });
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+    // git is stuck on this entry: even the listing dies on it.
+    const listing = spawnSync("git", ["worktree", "list", "--porcelain"], {
+      cwd: repo,
+      encoding: "utf8",
+    });
+    expect(listing.status).not.toBe(0);
+    expect(listing.stderr).toContain("commondir");
+
+    const cleanup = await cleanupWorktree(repo, worktreePath, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.ok).toBe(true);
+    expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
+    expect(fs.existsSync(path.join(adminDir, adminEntry))).toBe(false);
+  });
+
+  it("leaves a half-written entry that names some other path alone, and reports the failed assertion", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const other = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    addLockedWorktree(repo, other);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [adminEntry] = fs.readdirSync(adminDir);
+    fs.writeFileSync(path.join(adminDir, adminEntry, "commondir"), "");
+    const ours = scratchPath(logDir);
+    fs.mkdirSync(ours, { recursive: true });
+
+    const cleanup = await cleanupWorktree(repo, ours, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.ok).toBe(false);
+    expect(cleanup.refused).toBe(false);
+    expect(cleanup.detail).toContain("did not run cleanly");
+    expect(fs.existsSync(path.join(adminDir, adminEntry, "gitdir"))).toBe(true);
+    expect(fs.existsSync(ours)).toBe(false);
+  });
+
   it("deletes a scratch-shaped directory under the scratch root that git never registered (an add that died before registering)", async () => {
     const repo = initRepo();
     const logDir = makeTmpDir();
