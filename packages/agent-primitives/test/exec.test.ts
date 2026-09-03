@@ -88,6 +88,82 @@ describe("execCommand", () => {
     expect(result.exitCode).not.toBe(0);
   }, 10000);
 
+  it("kills the child straight away, and reports aborted: true, for a signal that is already aborted when the call starts", async () => {
+    const logDir = makeTmpDir();
+    const controller = new AbortController();
+    controller.abort();
+    const started = Date.now();
+    const result = await execCommand("sleep 10", {
+      logDir,
+      signal: controller.signal,
+    });
+    expect(result.aborted).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).not.toBe(0);
+    // The pre-check runs before the command could plausibly finish: an
+    // already-aborted signal must not be noticed only once the child has
+    // run to completion.
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 15000);
+
+  it("bounds a run whose command leaves a descendant holding stdio: --timeout kills the whole process group", async () => {
+    const logDir = makeTmpDir();
+    const dir = makeTmpDir();
+    const heartbeat = path.join(dir, "heartbeat.txt");
+    const workerPath = path.join(dir, "worker.js");
+    const spawnerPath = path.join(dir, "spawner.js");
+
+    // The worker is a descendant that inherits the command's stdout and
+    // stderr and outlives the command's own process unless the whole
+    // group is signalled. It would run far longer than the timeout, and
+    // its heartbeat file says whether it is still running.
+    fs.writeFileSync(
+      workerPath,
+      [
+        "const fs = require('node:fs');",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        `  fs.writeFileSync(${JSON.stringify(heartbeat)}, String(n));`,
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 12000);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      spawnerPath,
+      [
+        "const { spawn } = require('node:child_process');",
+        `spawn(process.execPath, [${JSON.stringify(workerPath)}], {`,
+        "  stdio: 'inherit',",
+        "});",
+        "setTimeout(() => { process.exit(0); }, 12000);",
+        "",
+      ].join("\n"),
+    );
+
+    const started = Date.now();
+    const result = await execCommand(`node ${JSON.stringify(spawnerPath)}`, {
+      logDir,
+      timeoutMs: 2000,
+    });
+    const elapsed = Date.now() - started;
+
+    expect(result.timedOut).toBe(true);
+    // Bounded by the timeout plus the kill and flush grace, not by the
+    // descendant's own 12s lifetime.
+    expect(elapsed).toBeLessThan(8000);
+    // The descendant really started, so the assertion below is about a
+    // process that existed rather than one that never ran.
+    expect(fs.existsSync(heartbeat)).toBe(true);
+    // And it is gone, not merely orphaned: its heartbeat stops.
+    const countAtReturn = fs.readFileSync(heartbeat, "utf8");
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(fs.readFileSync(heartbeat, "utf8")).toBe(countAtReturn);
+  }, 30000);
+
   it("does not report aborted: true for a command that finishes on its own with a signal given", async () => {
     const logDir = makeTmpDir();
     const controller = new AbortController();

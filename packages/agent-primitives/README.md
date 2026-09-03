@@ -176,7 +176,10 @@ agent-primitives probe --file src/foo.js -n 1 -p mutant.patch -t 'npm test'
 
 Only `-i inplace` is implemented: it backs up the target file
 before mutating it and restores from that backup afterward (on normal
-completion, on any error, and on `SIGINT`/`SIGTERM`). `-i worktree` (the
+completion, on any error, and on `SIGINT`/`SIGTERM`; on a signal the CLI
+then ends the process, while the exported `probe()` restores and returns
+control instead, unless the caller passes `exitOnSignal: true`).
+`-i worktree` (the
 eventual default, isolating the mutation in a throwaway git worktree
 instead of the working tree) returns `status: "usage_error"`,
 `reason: "not_implemented"`, exit `2`, until a later release. `--file`
@@ -204,6 +207,17 @@ reported as `timedOut: true` on that run's own phase (`baseline` or
 `test`), so a killed baseline is distinguishable from one that genuinely
 failed.
 
+Every `--pre`/`-t` invocation runs in a process group of its own, and the
+timeout, `SIGINT`, and `SIGTERM` all signal that whole group (`SIGTERM`,
+then `SIGKILL` after a short grace). A worker the command spawned
+therefore dies with it instead of outliving the run while still holding
+its stdout and stderr, which is what would otherwise stretch a bounded
+run to the descendant's own lifetime and leave a process writing to the
+target while the restore is happening. What that does not cover is a
+descendant that puts itself in a process group of its own: it is out of
+reach of the group signal, and the run then settles a short grace after
+the command's own process exits rather than waiting on the pipes.
+
 A probe on one target file is serialized against any other probe on the
 same target via a lock file outside the repository
 (`$AGENT_PRIMITIVES_LOCK_DIR` or `<tmpdir>/agent-primitives-<uid>/locks/`,
@@ -216,9 +230,14 @@ a raw filesystem error. If a probe is killed outright (`SIGKILL` or a
 crash) mid-mutation, it leaves an in-flight marker behind; the next
 probe on that same target recovers automatically (restores from the
 recorded backup, verifies by hash, adds a `recovered_stale_probe`
-warning) when it can prove the file is still in the exact mutated state
-the marker describes, and otherwise refuses with
-`reason: "stale_probe_marker"`, naming the backup path for a human to
+warning) when it can prove two things: that the file is still in the
+exact mutated state the marker describes, and that the recorded backup
+still hashes to the pre-mutation content the marker recorded. That second
+check happens before any copy, because the copy is destructive: a backup
+that no longer matches would otherwise be written over the target,
+destroying the only remaining copy of the mutated file. When either proof
+fails, the probe refuses with `reason: "stale_probe_marker"`, leaves the
+target exactly as it found it, and names the backup path for a human to
 inspect. The backup lives under the probe's own `--log-dir` (a per-run
 scratch directory, not something a crash is guaranteed to have left
 behind); when it is gone, automatic recovery is not possible and the
@@ -226,10 +245,17 @@ warning says so and names the marker file itself instead -- delete that
 file to clear it manually. `agent-primitives doctor` also reports any
 such marker left for the current repository, with the same conditional
 wording (a hint to re-run `probe` only when the backup still exists, the
-marker file's path otherwise).
+marker file's path otherwise); it compares the marker's target against
+the current repository with both paths fully resolved, so a symlinked
+ancestor cannot hide a marker that is really there.
 
 The target file is backed up immediately, before the baseline ever runs,
-and the backup is verified against the file's pre-mutation hash. After
+and the backup is verified against the file's pre-mutation hash; a backup
+that does not match is `status: "inconclusive"`,
+`reason: "backup_verification_failed"`, exit `2`, before anything is
+mutated. If the baseline itself fails and also rewrote the target, the
+backup is kept rather than discarded, and a warning names it: it holds
+the only remaining copy of the target's pre-baseline content. After
 the baseline passes, the target is re-hashed; if it no longer matches
 (a formatter or codegen step run as part of the baseline rewrote it),
 the probe aborts with `status: "inconclusive"`,
@@ -244,6 +270,13 @@ never a `killed`/`survived` verdict, with a warning naming the absolute
 backup path; the in-flight marker is left in place on a failed restore
 (deliberately, for the same manual recovery described above) and removed
 only once a restore is hash-verified.
+
+A mutant whose applied content does not hash to what the dry run
+predicted is `status: "inconclusive"`, `reason: "apply_hash_mismatch"`,
+exit `2`, carrying `mutation_probe` with its real `restored_verified`:
+the mutation is undone and the restore verified first, and the mismatch
+is reported as a verdict the caller can read rather than raised as an
+error.
 
 `--file` naming a path that does not exist is `status: "usage_error"`,
 `reason: "file_not_found"`, exit `2`, with the resolved path in a

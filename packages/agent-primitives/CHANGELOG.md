@@ -196,6 +196,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file for a manual delete instead. The baseline phase now reports its
   own `timedOut`, so a killed baseline is distinguishable from one that
   genuinely failed.
+- `probe`: stale-marker recovery now hashes the recorded backup and
+  requires it to match the marker's own pre-mutation hash BEFORE copying
+  anything over the target. A corrupt, truncated, or foreign backup was
+  previously written over the target first and only found out afterward,
+  destroying the only remaining copy of the mutated file while reporting
+  `stale_probe_marker` as though nothing had been touched; the refusal now
+  names both the backup and the marker file and leaves the target alone.
+  A failing baseline that also rewrote the target keeps its backup (named
+  in a warning) instead of discarding the only copy of the pre-baseline
+  content silently. A post-apply hash mismatch is
+  `inconclusive`/`apply_hash_mismatch` carrying `mutation_probe` with its
+  real `restored_verified`, instead of throwing out of `probe()` and
+  surfacing as `status: "error"` under an unknown command. A `-p` patch
+  that touches a second path is now diagnosed by `git apply --numstat`
+  before the scratch dry run, so a patch modifying another file that
+  exists in the repository is reported as touching paths other than
+  `--file` rather than as a patch that did not apply. The exported
+  `probe()` no longer ends the host process on `SIGINT`/`SIGTERM` unless
+  the caller opts in with `exitOnSignal` (the CLI does); the emergency
+  restore and lock release happen either way.
+
+- `exec`: commands run in a process group of their own (`detached`), and
+  both `--timeout` and `options.signal` signal that whole group (`SIGTERM`,
+  then `SIGKILL` after a grace). A worker the command spawned no longer
+  survives the kill while holding the run's stdout and stderr open, which
+  stretched a bounded run to the descendant's own lifetime and left a
+  process writing to a probe's target during the restore. Settling is
+  driven by the command's own `exit` plus a bounded flush grace rather
+  than unconditionally by `close`, so a descendant in a process group of
+  its own cannot hold the call open either. `ExecResult` is unchanged
+  apart from the additive `aborted`.
+
+- `doctor`: the stale-probe-marker check resolves both the current
+  repository's containment root and the marker's target path before
+  comparing them, so a symlinked ancestor (`/tmp` against `/private/tmp`,
+  a symlinked checkout) no longer reports "no stale probe markers" while
+  one is sitting there.
+
 ### Added
 
 - `probe` subcommand (`inplace` isolation only; `-i worktree` still

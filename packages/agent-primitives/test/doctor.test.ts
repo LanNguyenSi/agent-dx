@@ -398,6 +398,46 @@ describe("doctor: stale-probe-marker check", () => {
     expect(check?.detail).toContain("auto-recover");
   });
 
+  it("not ok when cwd reaches the marker's target through a symlinked ancestor: the same directory under two spellings is one repository", async () => {
+    const lockDir = makeTmpDir();
+    // Two spellings of one directory: `<parent>/real` and the symlink
+    // `<parent>/link` pointing at it, the way macOS's `/tmp` and
+    // `/private/tmp` name the same place. A marker records the target
+    // resolved; doctor may well be invoked under the other spelling.
+    const parent = makeTmpDir();
+    const realDir = path.join(parent, "real");
+    const linkDir = path.join(parent, "link");
+    fs.mkdirSync(realDir);
+    fs.symlinkSync(realDir, linkDir);
+    const target = path.join(realDir, "target.js");
+    fs.writeFileSync(target, "x");
+    const backupPath = path.join(lockDir, "backup-target.js");
+    fs.writeFileSync(backupPath, "original content");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, "abc.marker.json"),
+      JSON.stringify({
+        // Recorded the way probe() records it: fully resolved.
+        targetPath: fs.realpathSync(target),
+        backupPath,
+        preHash: "a".repeat(64),
+        mutatedHash: "b".repeat(64),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: linkDir,
+      lockDir,
+    });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(backupPath);
+  });
+
   it("ok when a dead-pid marker's target is outside cwd (a different repository)", async () => {
     const lockDir = makeTmpDir();
     const cwd = makeTmpDir();

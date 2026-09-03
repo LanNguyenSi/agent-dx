@@ -30,3 +30,31 @@ export function isPathContained(root: string, absTarget: string): boolean {
   const rel = path.relative(root, absTarget);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
+
+/**
+ * Resolves `p` to its realpath. When `p` itself does not exist yet (a
+ * missing `--file`, or a marker naming a target that has since been
+ * deleted), resolves as much of the path as does exist (walking up to the
+ * deepest existing ancestor) and re-appends the missing tail verbatim,
+ * instead of returning `p` unresolved: a symlinked ancestor (macOS's
+ * `/tmp` -> `/private/tmp`, or any symlinked checkout path) would
+ * otherwise make `isPathContained` compare a resolved root against an
+ * unresolved file path, so the same file reads as inside the root under
+ * one spelling and outside it under another. Falls back to `p` itself
+ * only when nothing above it resolves either (the filesystem root, or a
+ * whole ancestor chain that does not exist).
+ *
+ * Both consumers of `isPathContained` must pass paths through this
+ * function on both sides, or the comparison is spelling-dependent again:
+ * `probe`'s containment and lock/marker key, and `doctor`'s stale-marker
+ * check.
+ */
+export function resolveDeepestExisting(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    const parent = path.dirname(p);
+    if (parent === p) return p; // filesystem root
+    return path.join(resolveDeepestExisting(parent), path.basename(p));
+  }
+}

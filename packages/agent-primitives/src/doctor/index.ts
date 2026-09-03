@@ -3,7 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "../envelope.js";
 import { isPidAlive, listMarkers } from "../lock.js";
-import { containmentRoot, isPathContained } from "../probe/containment.js";
+import {
+  containmentRoot,
+  isPathContained,
+  resolveDeepestExisting,
+} from "../probe/containment.js";
 
 export interface ToolCheck {
   name: string;
@@ -303,10 +307,20 @@ export async function doctor(
           : "no src/ directory in cwd",
   });
 
+  // Both sides go through `resolveDeepestExisting` before the comparison,
+  // the same way `probe` resolves its own containment check: a marker
+  // records the target under one spelling of the path and `doctor` may be
+  // invoked under another (a symlinked ancestor, e.g. macOS's `/tmp` ->
+  // `/private/tmp`), and comparing the two unresolved reports "no stale
+  // markers" while one is sitting right there.
+  const markerRoot = resolveDeepestExisting(containmentRoot(cwd));
   const staleMarkers = listMarkers(options.lockDir).filter(
     (m) =>
       !isPidAlive(m.pid) &&
-      isPathContained(containmentRoot(cwd), path.resolve(m.targetPath)),
+      isPathContained(
+        markerRoot,
+        resolveDeepestExisting(path.resolve(m.targetPath)),
+      ),
   );
   // Auto-recovery (the next `probe` on the affected file restoring from
   // the backup) is only actually possible while that backup still

@@ -47,6 +47,17 @@ const TAIL_CHARS = 6000;
 const TRIM_SLACK_MULTIPLE = 8;
 const TRIM_KEEP_MULTIPLE = 4;
 
+/** How long SIGTERM is given before SIGKILL follows, on both the timeout
+ * and the abort path. */
+const KILL_ESCALATION_GRACE_MS = 2000;
+
+/** How long the stdio pipes are given to deliver what is already in
+ * flight once the command itself has exited, before this call settles
+ * without waiting for `close`. Only reached when something other than
+ * the command still holds a pipe open; the normal path settles on
+ * `close`, which usually arrives in the same tick as `exit`. */
+const STREAM_FLUSH_GRACE_MS = 250;
+
 class TailKeeper {
   private buf = "";
 
@@ -75,6 +86,13 @@ class TailKeeper {
  * and stderr to one interleaved log file under `logDir`, keeps fixed tails
  * (last 60 lines and at most 6000 characters per stream), and resolves with
  * the exit code, duration, tails, log path, and whether the timeout fired.
+ *
+ * The command runs in its own process group, and both the timeout and
+ * `options.signal` signal that whole group, so a descendant the command
+ * spawned dies with it instead of outliving the run and holding its stdio
+ * pipes open. A descendant that puts itself in a process group of its own
+ * is out of that reach; the run still settles a short grace after the
+ * command itself exits rather than waiting on the pipes.
  */
 export function execCommand(
   cmd: string,
@@ -126,21 +144,61 @@ export function execCommand(
     let timedOut = false;
     let aborted = false;
     let settled = false;
+    let flushTimer: NodeJS.Timeout | undefined;
 
+    // `detached: true` puts the child in a new process group of its own
+    // (it becomes the group leader), so every descendant it spawns lands
+    // in that same group and `signalGroup` below can reach all of them
+    // with one signal. Without it, a timeout or an abort kills only the
+    // direct child and any grandchild survives: it keeps running, and,
+    // because it inherited the stdout/stderr pipes, it also keeps the
+    // pipes open, so the run's own bound is not a bound at all.
     const child = spawn("sh", ["-c", cmd], {
       cwd: options.cwd,
       env: options.env ?? process.env,
+      detached: true,
     });
+
+    /**
+     * Signals the child's whole process group (the negated pid), so a
+     * descendant holding the stdio pipes open dies with the command it
+     * belongs to. Falls back to signalling the direct child alone when
+     * the group cannot be signalled: the group does not exist yet (an
+     * abort landing in the window between `spawn` returning and the
+     * child's own `setsid`), it is already gone, or the platform refuses
+     * a negated pid.
+     */
+    const signalGroup = (signal: NodeJS.Signals): void => {
+      const pid = child.pid;
+      if (pid !== undefined) {
+        try {
+          process.kill(-pid, signal);
+          return;
+        } catch {
+          // Fall through to the direct child below.
+        }
+      }
+      try {
+        child.kill(signal);
+      } catch {
+        // The child is already gone; nothing left to signal.
+      }
+    };
+
+    /** SIGTERM first, then SIGKILL once this grace has passed without the
+     * run settling, for a command (or a descendant) that ignores SIGTERM. */
+    const terminateGroup = () => {
+      signalGroup("SIGTERM");
+      setTimeout(() => {
+        if (!settled) signalGroup("SIGKILL");
+      }, KILL_ESCALATION_GRACE_MS).unref();
+    };
 
     let timer: NodeJS.Timeout | undefined;
     if (options.timeoutMs && options.timeoutMs > 0) {
       timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
-        // Escalate if the process ignores SIGTERM.
-        setTimeout(() => {
-          if (!settled) child.kill("SIGKILL");
-        }, 2000).unref();
+        terminateGroup();
       }, options.timeoutMs);
       timer.unref();
     }
@@ -153,10 +211,7 @@ export function execCommand(
     const onAbort = () => {
       if (settled) return;
       aborted = true;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (!settled) child.kill("SIGKILL");
-      }, 2000).unref();
+      terminateGroup();
     };
     if (options.signal) {
       if (options.signal.aborted) onAbort();
@@ -181,7 +236,14 @@ export function execCommand(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (flushTimer) clearTimeout(flushTimer);
       detachAbortListener();
+      // Stop reading before the log stream is ended: when this call is
+      // settling on the flush grace rather than on `close`, a descendant
+      // still holds the pipes and any further chunk would be a write to
+      // an already-ended stream.
+      child.stdout.destroy();
+      child.stderr.destroy();
       // Flush any incomplete trailing multi-byte sequence held by each
       // decoder (StringDecoder#end returns the remainder, if any).
       const stdoutRemainder = stdoutDecoder.end();
@@ -216,9 +278,24 @@ export function execCommand(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (flushTimer) clearTimeout(flushTimer);
       detachAbortListener();
       logStream.end();
       logStreamDone.then(() => reject(err));
+    });
+
+    // `exit` fires when the command itself has exited; `close`
+    // additionally waits for every stdio pipe to be closed, which a
+    // surviving descendant holding stdout or stderr open can delay for as
+    // long as it likes. Settling is therefore driven by `exit` plus a
+    // bounded grace for whatever is still in flight on the pipes, and
+    // `close` (the normal case, and the only one that can report the
+    // stream-accurate code) short-circuits that grace as soon as it
+    // arrives.
+    child.on("exit", (code) => {
+      if (settled) return;
+      flushTimer = setTimeout(() => finish(code), STREAM_FLUSH_GRACE_MS);
+      flushTimer.unref();
     });
 
     child.on("close", (code) => {

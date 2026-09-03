@@ -9,7 +9,11 @@ import {
   removeMarkerFor,
   writeMarker,
 } from "../lock.js";
-import { containmentRoot, isPathContained } from "./containment.js";
+import {
+  containmentRoot,
+  isPathContained,
+  resolveDeepestExisting,
+} from "./containment.js";
 import { beginInplace, type InplaceSession } from "./isolation.js";
 import {
   applyPatchForReal,
@@ -42,6 +46,18 @@ export interface ProbeOptions {
   allowOutside?: boolean;
   cwd: string;
   logDir: string;
+  /**
+   * Whether the SIGINT/SIGTERM handler ends the host process once it has
+   * restored the target and released the lock. `true` is right for the
+   * CLI, where this call owns the process and the signal means "stop
+   * now"; the default `false` is right for a library caller, whose
+   * process must not be terminated by a function it called. With `false`
+   * the handler still does the emergency restore and lock release, and
+   * the pipeline then unwinds normally through its own restore points
+   * (restoring an already-restored target from the same backup is a
+   * no-op that still verifies).
+   */
+  exitOnSignal?: boolean;
 }
 
 export interface MutantField {
@@ -159,14 +175,16 @@ interface RestoreState {
  * restores the target via the session's own `restore()` and removes the
  * marker (only when that restore itself succeeded, so a failed
  * emergency restore still leaves the marker for the next invocation to
- * recover), releases the lock, then exits. Returns a function that
- * removes exactly these two handlers, so concurrent `probe()` calls in
- * the same process never interfere with each other's signal handling.
+ * recover), releases the lock, then exits when `exitOnSignal` says to.
+ * Returns a function that removes exactly these two handlers, so
+ * concurrent `probe()` calls in the same process never interfere with
+ * each other's signal handling.
  */
 function installCrashHandlers(
   getRestoreState: () => RestoreState | null,
   releaseLock: () => void,
   abortInFlight: () => void,
+  exitOnSignal: boolean,
 ): () => void {
   const handler = (signal: NodeJS.Signals) => {
     try {
@@ -191,7 +209,7 @@ function installCrashHandlers(
     } catch {
       // Best-effort.
     }
-    process.exit(signal === "SIGINT" ? 130 : 143);
+    if (exitOnSignal) process.exit(signal === "SIGINT" ? 130 : 143);
   };
   process.on("SIGINT", handler);
   process.on("SIGTERM", handler);
@@ -199,28 +217,6 @@ function installCrashHandlers(
     process.off("SIGINT", handler);
     process.off("SIGTERM", handler);
   };
-}
-
-/** Resolves `p` to its realpath. When `p` itself does not exist yet (a
- * missing `--file`), resolves as much of the path as does exist (walking
- * up to the deepest existing ancestor) and re-appends the missing tail
- * verbatim, instead of returning `p` unresolved: a symlinked ancestor
- * (e.g. macOS's `/var` -> `/private/var`) would otherwise make the
- * containment check compare a resolved root against an unresolved file
- * path and wrongly report `file_outside_root` for a target that is
- * actually inside the root, just missing. A missing `--file` still fails
- * at the intended point (the `file_not_found` check, or ultimately
- * `sha256File`), never opaquely misclassified here. Falls back to `p`
- * itself only when nothing above it resolves either (the filesystem
- * root, or a whole ancestor chain that does not exist). */
-function tryRealpath(p: string): string {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    const parent = path.dirname(p);
-    if (parent === p) return p; // filesystem root
-    return path.join(tryRealpath(parent), path.basename(p));
-  }
 }
 
 type RunPhaseResult =
@@ -301,9 +297,9 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   // showing the user's own path (rather than a resolved realpath, which
   // can differ even with no symlink involved, e.g. macOS's `/var` ->
   // `/private/var`) is what "display the user path" means here.
-  const realRoot = tryRealpath(root);
-  const absFile = tryRealpath(displayFile);
-  const absLinks = displayLinks.map(tryRealpath);
+  const realRoot = resolveDeepestExisting(root);
+  const absFile = resolveDeepestExisting(displayFile);
+  const absLinks = displayLinks.map(resolveDeepestExisting);
 
   const lockResult = acquireLock(absFile);
   if (!lockResult.ok) {
@@ -335,6 +331,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     () => restoreState,
     lockResult.release,
     () => execController.abort(),
+    opts.exitOnSignal ?? false,
   );
   // Set by the `catch` below and read by `finally`'s emergency-restore
   // path, so its warning can name what actually triggered the restore
@@ -393,6 +390,27 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         };
       }
       if (currentHash !== undefined && currentHash === marker.mutatedHash) {
+        // The backup is hashed and required to match the marker's own
+        // recorded pre-mutation hash BEFORE it is copied anywhere. The
+        // copy is destructive and irreversible: a backup that is corrupt,
+        // truncated, or simply not this target's content would otherwise
+        // be written over the target, destroying the only remaining copy
+        // of the mutated file and reporting `stale_probe_marker` as if
+        // the target had been left alone.
+        const backupHash = await sha256File(marker.backupPath).catch(
+          () => undefined,
+        );
+        if (backupHash !== marker.preHash) {
+          return {
+            status: "inconclusive",
+            reason: "stale_probe_marker",
+            warnings: [
+              ...warnings,
+              `stale probe marker found for ${displayFile}, but its backup does not match the pre-mutation hash the marker records (${marker.backupPath}); the target was left untouched; inspect the backup, then delete the marker file to clear it: ${markerFilePathFor(absFile)}`,
+            ],
+            isolation: isolationField,
+          };
+        }
         let restored = false;
         try {
           fs.copyFileSync(marker.backupPath, displayFile);
@@ -575,7 +593,23 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       timedOut: baselineTest.timedOut,
     };
     if (baselineTest.exitCode !== 0) {
-      discardBackup();
+      // A failing baseline is still a baseline that ran commands against
+      // the working tree, and one of them may have rewritten the target
+      // (a formatter, a codegen step). Re-hash before deciding what to do
+      // with the backup: discarding it silently would throw away the only
+      // copy of the target's pre-baseline content.
+      const postHash = await sha256File(displayFile).catch(() => undefined);
+      if (postHash === preHash) {
+        discardBackup();
+      } else {
+        // Keep the backup file itself, and stop treating a mutation as in
+        // flight: nothing was mutated, so there is nothing to restore, and
+        // the target is deliberately left as the baseline wrote it.
+        restoreState = null;
+        warnings.push(
+          `the failing baseline run also rewrote the target; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at ${session.backupPath}`,
+        );
+      }
       return {
         status: "inconclusive",
         reason: "baseline_failed",
@@ -694,9 +728,30 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
           dryRunLogPaths: computed.logPaths,
         };
       }
-      throw new Error(
-        `probe: mutation hash mismatch after apply for ${displayFile} (expected ${computed.mutatedHash}, got ${afterApplyHash})`,
-      );
+      // The restore above succeeded and verified, so this is a structured
+      // "cannot conclude" for the caller, not an exception: throwing here
+      // would surface through the CLI as `status: "error"` under an
+      // unknown command, losing both the reason and the `mutation_probe`
+      // evidence that the target really is back at its pre-mutation
+      // content.
+      return {
+        status: "inconclusive",
+        reason: "apply_hash_mismatch",
+        warnings: [
+          ...warnings,
+          `the applied mutant's hash does not match what the dry run predicted for ${displayFile} (expected ${computed.mutatedHash}, got ${afterApplyHash}); the target was restored and the restore verified`,
+        ],
+        mutant: mutantField,
+        mutation_probe: {
+          mutant: mutantSummary,
+          verified_applied_via: verifiedAppliedVia,
+          result: "inconclusive",
+          restored_verified: verified,
+        },
+        baseline,
+        isolation: isolationField,
+        dryRunLogPaths: computed.logPaths,
+      };
     }
 
     // (4) --pre then -t, mutated.
@@ -821,10 +876,11 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     if (restoreState) {
       // Reached only when something unwound the stack (a thrown error)
       // while a mutation was still in flight and never went through one
-      // of the explicit restore points above: the backstop for "restore
-      // in the finally" (fix 1). A restore failure here still has to
-      // surface as `inconclusive`/`restore_failed`, never silently as
-      // whatever exception triggered this path.
+      // of the explicit restore points above. The rule this backstop
+      // enforces: no path out of this function may leave the target
+      // mutated, whether it returns or throws. A restore failure here
+      // still has to surface as `inconclusive`/`restore_failed`, never
+      // silently as whatever exception triggered this path.
       const state = restoreState;
       restoreState = null;
       let restored = false;

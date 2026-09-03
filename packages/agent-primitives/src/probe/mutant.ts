@@ -191,10 +191,17 @@ export function parseNumstatPaths(stdout: string): string[] {
  * patch that also touches other paths would apply cleanly here (`git
  * apply` happily creates new files) while a real apply against the
  * repository root would go on to create/modify those other paths for
- * real, with nothing to restore them afterward. After the dry run
- * succeeds, `git apply --numstat` on the same patch lists every path it
- * touches; anything other than `--file`'s own relative path makes the
- * whole patch `mutant_not_applicable`.
+ * real, with nothing to restore them afterward. `git apply --numstat`
+ * lists every path the patch touches; anything other than `--file`'s own
+ * relative path makes the whole patch `mutant_not_applicable`.
+ *
+ * That check runs BEFORE the dry run, because it is the more specific
+ * diagnosis and it does not depend on the scratch directory's contents.
+ * A patch that modifies a second file which exists in the repository but
+ * was never seeded into the scratch copy fails the dry run outright, and
+ * running the dry run first would report that as "the patch did not
+ * apply" when the real answer is that it touches paths other than
+ * `--file`.
  */
 async function computePatch(
   originalContent: string,
@@ -211,22 +218,6 @@ async function computePatch(
   fs.writeFileSync(scratchFile, originalContent);
 
   const absPatchPath = path.resolve(patchPath);
-  const result = await execCommand(
-    `git apply -- ${JSON.stringify(absPatchPath)}`,
-    {
-      cwd: scratchDir,
-      logDir: scratchDir,
-      timeoutMs: 10_000,
-    },
-  );
-  if (result.exitCode !== 0) {
-    return {
-      applicable: false,
-      reason: `patch did not apply cleanly; see ${result.logPath}`,
-      logPaths: [result.logPath],
-    };
-  }
-
   const numstatResult = await execCommand(
     `git apply --numstat -- ${JSON.stringify(absPatchPath)}`,
     {
@@ -235,12 +226,11 @@ async function computePatch(
       timeoutMs: 10_000,
     },
   );
-  const logPaths = [result.logPath, numstatResult.logPath];
   if (numstatResult.exitCode !== 0) {
     return {
       applicable: false,
       reason: `git apply --numstat failed to parse the patch; see ${numstatResult.logPath}`,
-      logPaths,
+      logPaths: [numstatResult.logPath],
     };
   }
   const touchedPaths = parseNumstatPaths(numstatResult.stdoutTail);
@@ -251,6 +241,23 @@ async function computePatch(
       reason:
         `patch touches paths other than --file (${relPath}): ` +
         extraPaths.join(", "),
+      logPaths: [numstatResult.logPath],
+    };
+  }
+
+  const result = await execCommand(
+    `git apply -- ${JSON.stringify(absPatchPath)}`,
+    {
+      cwd: scratchDir,
+      logDir: scratchDir,
+      timeoutMs: 10_000,
+    },
+  );
+  const logPaths = [numstatResult.logPath, result.logPath];
+  if (result.exitCode !== 0) {
+    return {
+      applicable: false,
+      reason: `patch did not apply cleanly; see ${result.logPath}`,
       logPaths,
     };
   }

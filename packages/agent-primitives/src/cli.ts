@@ -774,6 +774,11 @@ program
       allowOutside: opts.allowOutside ?? false,
       cwd: global.cwd,
       logDir: global.logDir,
+      // This process exists to run exactly this probe, so a SIGINT or
+      // SIGTERM means "stop now": the handler restores, releases the
+      // lock, and ends the process with the signal's own conventional
+      // exit code. Library callers get the opposite default.
+      exitOnSignal: true,
     });
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
