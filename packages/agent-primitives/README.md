@@ -98,6 +98,10 @@ live probe owns (its `owner.json` names an alive pid and is within 24
 hours of the clock) is not a leftover: the check stays ok and a hint
 names the worktree, the pid, the record, and the bound; past that
 bound the worktree is reported as a leftover with the manual command.
+The bound cuts both ways: a probe whose own run outlives it, or a clock
+that moves by more than it, can have its worktree removed by a
+concurrent probe under another lock directory, and that run then ends
+with `baseline_failed` rather than a verdict.
 
 ```bash
 agent-primitives doctor

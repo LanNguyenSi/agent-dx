@@ -743,14 +743,26 @@ describe("doctor: stale-worktree check", () => {
       );
     });
 
-    it("ok for a registered scratch worktree that a live probe's marker names", async () => {
+    it("ok, with a hint, for a registered scratch worktree that a live probe's marker and owner record name", async () => {
+      // A live probe writes its owner record before the add and its
+      // marker at the same moment; the marker's pid alone vouches for
+      // nothing (it may have been recycled), the owner record does.
       const lockDir = makeTmpDir();
       const repo = initRepo();
       const root = resolveDeepestExisting(containmentRoot(repo));
       const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
       fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
       git(repo, ["worktree", "add", "--detach", "--", worktreePath, "HEAD"]);
-      writeWorktreeMarker(lockDir, root, worktreePath, process.pid);
+      const alivePid = 1;
+      fs.writeFileSync(
+        path.join(path.dirname(worktreePath), SCRATCH_OWNER_FILE),
+        JSON.stringify({
+          pid: alivePid,
+          timestamp: new Date().toISOString(),
+          logDir: path.dirname(path.dirname(worktreePath)),
+        }),
+      );
+      writeWorktreeMarker(lockDir, root, worktreePath, alivePid);
 
       const result = await doctor({
         required: [],
@@ -761,6 +773,8 @@ describe("doctor: stale-worktree check", () => {
 
       const check = result.checks.find((c) => c.name === "stale-worktree");
       expect(check?.ok).toBe(true);
+      expect(result.hints).toHaveLength(1);
+      expect(result.hints[0]).toContain(String(alivePid));
     });
 
     it("ok for an operator's own registered worktree, whatever it is called", async () => {
@@ -1208,6 +1222,43 @@ describe("doctor: stale-worktree check and the scratch owner record", () => {
     expect(result.hints[0]).not.toContain(
       "named by this repository's worktree marker",
     );
+  });
+
+  it("not ok, with the manual command, for a registered scratch worktree named by a marker whose pid is alive but whose owner record is past the bound: an alive marker pid vouches for nothing", async () => {
+    // A marker whose pid was recycled by an unrelated process must not
+    // hide a registered leftover: the path is judged by its own owner
+    // record like any other registered scratch worktree.
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const resolved = addScratchWorktree(repo);
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: resolved,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: ALIVE_PID,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    writeOwner(resolved, ALIVE_PID, FAR_PAST);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("has no live probe behind it");
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.hints).toEqual([]);
   });
 
   it("not ok, as the interrupted probe's leftover with the manual command, for a dead marker naming a scratch worktree whose owner record is past the bound", async () => {

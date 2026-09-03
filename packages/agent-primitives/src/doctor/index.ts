@@ -537,7 +537,7 @@ export async function doctor(
       markerTarget !== undefined ? liveForeignOwner(markerTarget) : undefined;
     if (markerOwner !== undefined) {
       liveOwned.push({
-        path: String(worktreeMarker.targetPath),
+        path: markerTarget ?? String(worktreeMarker.targetPath),
         pid: markerOwner,
         fromMarker: true,
       });
@@ -566,8 +566,11 @@ export async function doctor(
     }
   }
   for (const registeredPath of registeredScratch) {
-    if (registeredPath === markerTarget) {
-      // Named by the marker: live, or already reported above.
+    if (registeredPath === markerTarget && !markerAlive) {
+      // Named by a marker whose probe is gone: reported above, or a hint.
+      // A marker whose pid is alive proves nothing about this path (the
+      // pid may have been recycled), so the path is judged below like
+      // any other registered scratch worktree, by its own owner record.
       continue;
     }
     const owner = liveForeignOwner(registeredPath);

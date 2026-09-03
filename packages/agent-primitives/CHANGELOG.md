@@ -78,48 +78,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`probe -i worktree` on an older git, and across lock directories.**
-  The worktree listing behind the removal's assertion, the leftover
-  recovery, and `doctor` no longer requires `git worktree list
-  --porcelain -z`: when git rejects `-z` (a release older than 2.36), the
-  newline-separated `--porcelain` form runs instead and is parsed against
-  the fixed attribute order, so a worktree path containing a newline is
-  reported as unparseable rather than misread, a block that ends after
-  its `worktree` line alone (the shape such a path takes when its
-  newline reads as a block boundary) refused with the rest instead of
-  registering a phantom path. A listing that cannot run
-  in any form is an unknown registry, never "still registered": the
-  removal is then judged by the disk alone (never by `git worktree
-  remove`'s exit status, which is non-zero for a path git never
+- **`probe -i worktree` on an older git, and across lock directories.** The
+  worktree listing behind the removal's assertion, the leftover recovery,
+  and `doctor` no longer requires `git worktree list --porcelain -z`: when
+  git rejects `-z` (a release older than 2.36), the newline-separated
+  `--porcelain` form runs instead and is parsed against the fixed attribute
+  order, so a worktree path containing a newline is reported as unparseable
+  rather than misread, a block that ends after its `worktree` line alone
+  (the shape such a path takes when its newline reads as a block boundary)
+  refused with the rest instead of registering a phantom path. A listing
+  that cannot run in any form is an unknown registry, never "still
+  registered": the removal is then judged by the disk alone (never by `git
+  worktree remove`'s exit status, which is non-zero for a path git never
   registered, so a marker naming such a path is recovered instead of
-  stopping every later run), reported as done but unverified in a
-  warning, and the marker is cleared, so a git that cannot list no
-  longer turns a removal that took into a `stale_worktree` on every
-  later run; a leftover still on disk after an unverified removal is
-  reported with the marker file as the escape, since the manual `git
-  worktree remove` cannot be relied on when the registration is
-  unknown; the recovery and `doctor` say in a warning that a leftover
-  registration could not be checked for. The worktree sync's own floor
-  is git 2.35
-  (`git apply --allow-empty`); both floors are documented in the README,
-  and `doctor` gained a `git-version` check that reads the installed git
-  against them and warns below 2.36. Each scratch directory now carries
-  an `owner.json` with the creating probe's pid and a timestamp, written
-  before the add runs: the recovery and `doctor` skip a registered or
-  marker-named scratch worktree whose owner is still alive under a
-  record within 24 hours of the clock, the recovery naming it as a live
-  probe under another `AGENT_PRIMITIVES_LOCK_DIR` in a warning and
-  `doctor` in a hint (the pid, the path, the record, and the bound)
-  rather than removing it (the lock serializes probes within one lock
+  stopping every later run), reported as done but unverified in a warning,
+  and the marker is cleared, so a git that cannot list no longer turns a
+  removal that took into a `stale_worktree` on every later run; a leftover
+  still on disk after an unverified removal is reported with the marker file
+  as the escape, since the manual `git worktree remove` cannot be relied on
+  when the registration is unknown; the recovery and `doctor` say in a
+  warning that a leftover registration could not be checked for. The
+  worktree sync's own floor is git 2.35 (`git apply --allow-empty`); both
+  floors are documented in the README, and `doctor` gained a `git-version`
+  check that reads the installed git against them and warns below 2.36. Each
+  scratch directory now carries an `owner.json` with the creating probe's
+  pid and a timestamp, written before the add runs: the recovery and
+  `doctor` skip a registered or marker-named scratch worktree whose owner is
+  still alive under a record within 24 hours of the clock, the recovery
+  naming it as a live probe under another `AGENT_PRIMITIVES_LOCK_DIR` in a
+  warning and `doctor` in a hint (the pid, the path, the record, and the
+  bound) rather than removing it (the lock serializes probes within one lock
   directory only), and the removal gate refuses such a path outright; a
-  record past that bound no longer vouches for its worktree whatever its
-  pid says, so the worktree is a leftover again, removed by the next run
-  and reported by `doctor` with the manual command. A path git does not
-  report
-  is now checked against the recovering run's own `--log-dir`, never
-  against the log dir a marker recorded, so a marker cannot certify its
-  own containment; the scratch-shape check pins the uuid's 8-4-4-4-12
-  hex layout instead of any 36 characters of the class.
+  record past that bound no longer vouches for its worktree whatever its pid
+  says, so the worktree is a leftover again, removed by the next run and
+  reported by `doctor` with the manual command. A path git does not report
+  is now checked against the recovering run's own `--log-dir`, never against
+  the log dir a marker recorded, so a marker cannot certify its own
+  containment; the scratch-shape check pins the uuid's 8-4-4-4-12 hex layout
+  instead of any 36 characters of the class.
 
 - **Envelope bound and reduction.** The bound is met by reducing the
   result's structure, never by cutting the serialized JSON text. The

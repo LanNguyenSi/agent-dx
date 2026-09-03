@@ -738,7 +738,9 @@ export interface ScratchOwner {
   /** When the record was written (ISO 8601): what `scratchOwnerState`
    * measures `SCRATCH_OWNER_MAX_AGE_HOURS` against. */
   timestamp: string;
-  /** The resolved `--log-dir` the scratch directory was created under. */
+  /** The resolved `--log-dir` the scratch directory was created under: a
+   * breadcrumb for a human reading `owner.json`, never read by the gate,
+   * which checks containment against the recovering run's own log dir. */
   logDir: string;
 }
 
