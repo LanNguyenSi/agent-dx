@@ -6,7 +6,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
-import { buildEnvelope, UsageError } from "./envelope.js";
+import { buildEnvelope, UsageError, type EnvelopeOutput } from "./envelope.js";
 import {
   doctor,
   DEFAULT_OPTIONAL,
@@ -34,7 +34,7 @@ interface GlobalOptions {
   logDir?: string;
 }
 
-interface ResolvedGlobal {
+export interface ResolvedGlobal {
   format: "json" | "text";
   cwd: string;
   maxChars: number;
@@ -102,20 +102,38 @@ function resolveGlobal(opts: GlobalOptions): ResolvedGlobal {
   return global;
 }
 
-// Guards process.stdout against an EPIPE (the reader closed the pipe early,
-// e.g. `| head`) so a write mid-flight does not surface as an unhandled
-// 'error' event and crash the process with a stack trace instead of the
-// intended exit code.
+/**
+ * Pure classification of a stdout write error, kept separate from
+ * `installEpipeGuard` so it can be unit-tested without spawning a process
+ * or breaking a real pipe. EPIPE (the reader closed the pipe early, e.g.
+ * `| head`) is not a failure of this process: it maps to the exit code
+ * the command was already going to use, with nothing on stderr. Any other
+ * write error is a genuine failure: one line on stderr naming it, exit 2,
+ * and (critically) no throw, so it never surfaces as an unhandled 'error'
+ * event with a raw stack trace instead of a stable exit code.
+ */
+export function classifyStdoutError(
+  err: NodeJS.ErrnoException,
+  successExitCode: number,
+): { exitCode: number; stderrLine?: string } {
+  if (err.code === "EPIPE") {
+    return { exitCode: successExitCode };
+  }
+  return {
+    exitCode: 2,
+    stderrLine: `agent-primitives: stdout write failed: ${err.code ?? err.message}\n`,
+  };
+}
+
 let epipeGuardInstalled = false;
 let pendingExitCode = 0;
 function installEpipeGuard(): void {
   if (epipeGuardInstalled) return;
   epipeGuardInstalled = true;
   process.stdout.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EPIPE") {
-      process.exit(pendingExitCode);
-    }
-    throw err;
+    const { exitCode, stderrLine } = classifyStdoutError(err, pendingExitCode);
+    if (stderrLine) process.stderr.write(stderrLine);
+    process.exit(exitCode);
   });
 }
 
@@ -229,13 +247,6 @@ program
     ) => {
       const start = Date.now();
       const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
-      // Test-only seam: lets cli.test.ts force a genuine runtime error
-      // (as opposed to a usage error) through the real CLI entrypoint, to
-      // exercise the non-commander/non-UsageError -> status: "error" path
-      // without depending on any real, host-specific failure condition.
-      if (process.env.AGENT_PRIMITIVES_TEST_FORCE_RUNTIME_ERROR === "1") {
-        throw new Error("forced runtime error for testing");
-      }
       const result = await doctor({
         required: opts.required,
         optional: opts.optional,
@@ -278,7 +289,9 @@ function renderDoctorText(result: DoctorResult): string {
       ? ` (${tool.version})`
       : tool.versionCheck === "timed_out"
         ? " (version check timed out)"
-        : "";
+        : tool.versionCheck === "skipped_deadline"
+          ? " (version check skipped: aggregate deadline reached)"
+          : "";
     const at = tool.path ? ` at ${tool.path}` : "";
     lines.push(`  [${marker}] ${tool.name} (${req})${at}${version}`);
   }
@@ -344,45 +357,46 @@ const PASSTHROUGH_EXIT_CODES = new Set([
   "commander.version",
 ]);
 
-function emitTopLevelUsageError(message: string, start: number): void {
-  const opts = program.opts<GlobalOptions>();
-  const global = bestEffortGlobal(opts);
-  const { envelope, exitCode } = buildEnvelope({
-    version: VERSION,
-    command: "unknown",
-    status: "usage_error",
-    durationMs: Date.now() - start,
-    cwd: global.cwd,
-    warnings: [],
-    logs: [],
-    extra: { reason: "usage_error", message },
-    maxChars: global.maxChars,
-    logDir: global.logDir,
-  });
-  emit(envelope, exitCode, {
-    format: global.format,
-    maxChars: global.maxChars,
-  });
-}
-
-function emitTopLevelError(message: string, start: number): void {
-  const opts = program.opts<GlobalOptions>();
-  const global = bestEffortGlobal(opts);
-  const { envelope, exitCode } = buildEnvelope({
+/**
+ * Maps any error thrown out of `program.parseAsync()` to an envelope:
+ * a CommanderError or UsageError becomes `status: "usage_error"`, anything
+ * else becomes `status: "error"`. Exported and unit-tested directly (with
+ * a plain Error, a UsageError, and a CommanderError) instead of relying on
+ * a process-env test seam to force a runtime error through the real CLI
+ * entrypoint.
+ */
+export function mapTopLevelError(
+  err: unknown,
+  global: ResolvedGlobal,
+  start: number,
+): EnvelopeOutput {
+  const durationMs = Date.now() - start;
+  if (err instanceof CommanderError || err instanceof UsageError) {
+    return buildEnvelope({
+      version: VERSION,
+      command: "unknown",
+      status: "usage_error",
+      durationMs,
+      cwd: global.cwd,
+      warnings: [],
+      logs: [],
+      extra: { reason: "usage_error", message: err.message },
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return buildEnvelope({
     version: VERSION,
     command: "unknown",
     status: "error",
-    durationMs: Date.now() - start,
+    durationMs,
     cwd: global.cwd,
     warnings: [],
     logs: [],
     extra: { reason: "error", message },
     maxChars: global.maxChars,
     logDir: global.logDir,
-  });
-  emit(envelope, exitCode, {
-    format: global.format,
-    maxChars: global.maxChars,
   });
 }
 
@@ -417,19 +431,16 @@ if (isMainModule) {
     // through to a later branch would emit a second envelope on the same
     // stdout instead of being a no-op the way an immediate process.exit()
     // used to make it.
-    if (err instanceof CommanderError) {
-      if (PASSTHROUGH_EXIT_CODES.has(err.code)) {
-        process.exit(err.exitCode);
-        return;
-      }
-      emitTopLevelUsageError(err.message, start);
+    if (err instanceof CommanderError && PASSTHROUGH_EXIT_CODES.has(err.code)) {
+      process.exit(err.exitCode);
       return;
     }
-    if (err instanceof UsageError) {
-      emitTopLevelUsageError(err.message, start);
-      return;
-    }
-    emitTopLevelError(err instanceof Error ? err.message : String(err), start);
+    const global = bestEffortGlobal(program.opts<GlobalOptions>());
+    const { envelope, exitCode } = mapTopLevelError(err, global, start);
+    emit(envelope, exitCode, {
+      format: global.format,
+      maxChars: global.maxChars,
+    });
   });
 }
 

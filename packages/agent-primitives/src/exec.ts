@@ -21,6 +21,13 @@ export interface ExecResult {
   stderrTail: string;
   logPath: string;
   timedOut: boolean;
+  /** True when the log file write stream reported an error (e.g. the
+   * disk filled, or a path collision like a directory where a file was
+   * expected). The command's own exit code and tails are still reported;
+   * only the on-disk log is unreliable. */
+  logWriteFailed: boolean;
+  /** Set alongside `logWriteFailed: true`, naming what went wrong. */
+  logWriteError?: string;
 }
 
 const TAIL_LINES = 60;
@@ -71,6 +78,30 @@ export function execCommand(
       `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.log`;
     const logPath = path.join(options.logDir, logFileName);
     const logStream = fs.createWriteStream(logPath, { flags: "a" });
+
+    // A WriteStream with no 'error' listener crashes the process on a
+    // write failure (an unhandled 'error' event) instead of surfacing it.
+    // Registered immediately, before any write, so no failure window is
+    // ever unguarded; `logStreamSettled`/`logStreamDone` let `finish`
+    // below wait for the stream to actually close (or fail) instead of
+    // relying on `.end(callback)`'s 'finish' event, which an errored
+    // stream may never emit.
+    let logWriteFailed: string | undefined;
+    let logStreamSettled = false;
+    let resolveLogStreamDone: (() => void) | undefined;
+    const logStreamDone = new Promise<void>((res) => {
+      resolveLogStreamDone = res;
+    });
+    const settleLogStream = () => {
+      if (logStreamSettled) return;
+      logStreamSettled = true;
+      resolveLogStreamDone?.();
+    };
+    logStream.on("finish", settleLogStream);
+    logStream.on("error", (err) => {
+      logWriteFailed = err instanceof Error ? err.message : String(err);
+      settleLogStream();
+    });
 
     const stdoutTail = new TailKeeper();
     const stderrTail = new TailKeeper();
@@ -131,7 +162,8 @@ export function execCommand(
         stderrTail.push(stderrRemainder);
         logStream.write(stderrRemainder);
       }
-      logStream.end(() => {
+      logStream.end();
+      logStreamDone.then(() => {
         resolve({
           exitCode,
           durationMs: Date.now() - start,
@@ -139,6 +171,10 @@ export function execCommand(
           stderrTail: stderrTail.tail(),
           logPath,
           timedOut,
+          logWriteFailed: logWriteFailed !== undefined,
+          ...(logWriteFailed !== undefined
+            ? { logWriteError: logWriteFailed }
+            : {}),
         });
       });
     };
@@ -147,7 +183,8 @@ export function execCommand(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      logStream.end(() => reject(err));
+      logStream.end();
+      logStreamDone.then(() => reject(err));
     });
 
     child.on("close", (code) => {

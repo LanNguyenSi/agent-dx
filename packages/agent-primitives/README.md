@@ -38,9 +38,17 @@ Every subcommand accepts:
 
 - `-f, --format <format>` — `json` (default) or `text`.
 - `-C, --cwd <dir>` — working directory (defaults to the process cwd).
-- `-m, --max-chars <n>` — hard bound on the serialized result (default
-  `8000`); when a result would exceed it, fields are trimmed in a fixed
-  order and the full result is written to the log directory instead.
+- `-m, --max-chars <n>` — requested bound on the serialized result
+  (default `8000`); when a result would exceed it, the largest arrays,
+  then the longest strings, then the largest remaining subtrees are cut
+  down (in that priority order, repeated as needed) until it fits, and the
+  full untruncated result is written to the log directory instead. A
+  handful of fixed fields (`tool`, `version`, `command`, `status`,
+  `durationMs`, `cwd`, `truncated`, `warnings`, `logs`) are never cut, so
+  the real bound is `max(-m, size of those fixed fields)`, not `-m`
+  unconditionally; on the rare input where even that cannot be honored, a
+  warning names the envelope's true final length instead of silently
+  exceeding what was asked for.
 - `-l, --log-dir <dir>` — directory for logs and full (untruncated)
   results (defaults to `$AGENT_PRIMITIVES_LOG_DIR`, or a fresh directory
   under the OS temp dir otherwise).
@@ -52,7 +60,11 @@ captures each found binary's `--version`, and reports a few environment
 checks (an installed `node_modules`, whether the cwd is inside a git work
 tree, `BASH_MAX_OUTPUT_LENGTH` if set, and whether a `dist/` directory sits
 next to `src/`, which hints that a test suite executing built output may
-need a rebuild step first).
+need a rebuild step first). Version captures share one aggregate deadline
+(default 3000ms) across every tool combined; once it is spent, remaining
+tools are still checked for presence on `PATH`, but their `--version`
+capture is skipped rather than each paying its own timeout, and one
+warning names how many were skipped.
 
 ```bash
 agent-primitives doctor

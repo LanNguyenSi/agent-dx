@@ -10,8 +10,11 @@ export interface ToolCheck {
   path?: string;
   version?: string;
   /** Set when the `--version` capture itself timed out, distinct from a
-   *  binary that ran but printed nothing. */
-  versionCheck?: "timed_out";
+   *  binary that ran but printed nothing. Or set to `skipped_deadline`
+   *  when the aggregate version-capture deadline (see `DoctorOptions`)
+   *  was already spent by earlier tools, so this one's capture never ran
+   *  at all. */
+  versionCheck?: "timed_out" | "skipped_deadline";
 }
 
 export interface DoctorCheckItem {
@@ -36,6 +39,13 @@ export interface DoctorOptions {
   pathEnv?: string;
   /** Timeout (ms) for each `<bin> --version` capture. */
   versionTimeoutMs?: number;
+  /** Aggregate deadline (ms), across ALL `--version` captures combined,
+   * measured from the start of doctor's tool loop. Once spent, remaining
+   * tools skip their own capture (`versionCheck: "skipped_deadline"`)
+   * instead of each paying its own per-tool timeout; findOnPath itself
+   * (a filesystem stat, not a spawn) is never skipped by this deadline.
+   * Defaults to 3000. */
+  versionDeadlineMs?: number;
 }
 
 export const DEFAULT_REQUIRED = ["git", "node", "npm", "rg"];
@@ -136,11 +146,24 @@ function checkTool(
   required: boolean,
   dirs: string[],
   versionTimeoutMs: number,
-): { tool: ToolCheck; warning?: string } {
+  aggregateDeadline: number,
+): { tool: ToolCheck; warning?: string; skippedDeadline: boolean } {
   const names = ALIASES[name] ?? [name];
   const hit = findOnPath(names, dirs);
   if (!hit) {
-    return { tool: { name, required, found: false } };
+    return { tool: { name, required, found: false }, skippedDeadline: false };
+  }
+  if (Date.now() >= aggregateDeadline) {
+    return {
+      tool: {
+        name,
+        required,
+        found: true,
+        path: hit.path,
+        versionCheck: "skipped_deadline",
+      },
+      skippedDeadline: true,
+    };
   }
   const capture = captureVersion(hit.path, versionTimeoutMs);
   if (capture.timedOut) {
@@ -153,6 +176,7 @@ function checkTool(
         versionCheck: "timed_out",
       },
       warning: `version check timed out for ${name} (${hit.path})`,
+      skippedDeadline: false,
     };
   }
   return {
@@ -163,6 +187,7 @@ function checkTool(
       path: hit.path,
       version: capture.version,
     },
+    skippedDeadline: false,
   };
 }
 
@@ -180,6 +205,8 @@ export async function doctor(
   const cwd = options.cwd ?? process.cwd();
   const pathEnv = options.pathEnv ?? process.env.PATH ?? "";
   const versionTimeoutMs = options.versionTimeoutMs ?? 1000;
+  const versionDeadlineMs = options.versionDeadlineMs ?? 3000;
+  const aggregateDeadline = Date.now() + versionDeadlineMs;
   const dirs = pathDirs(pathEnv);
 
   // Reject any traversal-shaped name before anything is looked up or
@@ -189,15 +216,35 @@ export async function doctor(
 
   const warnings: string[] = [];
   const tools: ToolCheck[] = [];
+  let skippedCount = 0;
   for (const name of required) {
-    const { tool, warning } = checkTool(name, true, dirs, versionTimeoutMs);
+    const { tool, warning, skippedDeadline } = checkTool(
+      name,
+      true,
+      dirs,
+      versionTimeoutMs,
+      aggregateDeadline,
+    );
     tools.push(tool);
     if (warning) warnings.push(warning);
+    if (skippedDeadline) skippedCount++;
   }
   for (const name of optional) {
-    const { tool, warning } = checkTool(name, false, dirs, versionTimeoutMs);
+    const { tool, warning, skippedDeadline } = checkTool(
+      name,
+      false,
+      dirs,
+      versionTimeoutMs,
+      aggregateDeadline,
+    );
     tools.push(tool);
     if (warning) warnings.push(warning);
+    if (skippedDeadline) skippedCount++;
+  }
+  if (skippedCount > 0) {
+    warnings.push(
+      `aggregate --version deadline (${versionDeadlineMs}ms) reached; ${skippedCount} tool(s) skipped their version capture`,
+    );
   }
 
   const missingRequired = tools.filter((t) => t.required && !t.found);

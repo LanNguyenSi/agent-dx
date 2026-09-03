@@ -78,18 +78,54 @@ describe("execCommand", () => {
 
   it("decodes a multi-byte UTF-8 character split across two data chunks without producing replacement characters", async () => {
     const logDir = makeTmpDir();
-    // "é" is 0xC3 0xA9 in UTF-8; emitting the two bytes as separate writes
-    // with a pause between them forces two separate stdout `data` chunks,
-    // each landing mid-character. Decoding each chunk independently (e.g.
-    // Buffer#toString) would turn each lone byte into U+FFFD.
+    // "é" is 0xC3 0xA9 in UTF-8; emitting the two bytes as separate `node
+    // -e` writes with a pause between them forces two separate stdout
+    // `data` chunks, each landing mid-character. Decoding each chunk
+    // independently (e.g. Buffer#toString) would turn each lone byte into
+    // U+FFFD. Bytes are emitted from node rather than a shell `printf`
+    // escape (`\xNN`), which dash (the default /bin/sh on Debian/Ubuntu,
+    // including the ubuntu-24.04 CI image) does not interpret the way
+    // bash does.
     const result = await execCommand(
-      "printf '\\xc3'; sleep 0.1; printf '\\xa9'",
+      `node -e "process.stdout.write(Buffer.from([0xc3]))" && sleep 0.1 && node -e "process.stdout.write(Buffer.from([0xa9]))"`,
       {
         logDir,
       },
     );
     expect(result.stdoutTail).toBe("é");
     expect(result.stdoutTail).not.toContain("�");
+  });
+
+  it("flushes an incomplete trailing multi-byte sequence via decoder.end() instead of dropping it silently", async () => {
+    const logDir = makeTmpDir();
+    // A single 0xC3 byte (the start of a 2-byte UTF-8 sequence for "é")
+    // with no continuation byte ever sent: the command exits while the
+    // decoder is still holding it back. Without the decoder.end() flush
+    // in exec.ts's `finish`, this byte is simply lost and stdoutTail is
+    // empty.
+    const result = await execCommand(
+      `node -e "process.stdout.write(Buffer.from([0xc3]))"`,
+      { logDir },
+    );
+    expect(result.stdoutTail.length).toBeGreaterThan(0);
+  });
+
+  it("surfaces a log write failure in ExecResult instead of crashing the process", async () => {
+    const logDir = makeTmpDir();
+    // Pre-create a directory at the exact path execCommand will try to
+    // open as the log FILE: fs.createWriteStream trying to open a
+    // directory for writing fails with EISDIR, asynchronously, on the
+    // stream's 'error' event -- exactly the class of failure the log
+    // stream's error listener exists to catch instead of crashing.
+    fs.mkdirSync(path.join(logDir, "a-directory"));
+    const result = await execCommand("echo hi", {
+      logDir,
+      logFileName: "a-directory",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdoutTail.trim()).toBe("hi");
+    expect(result.logWriteFailed).toBe(true);
+    expect(result.logWriteError).toBeTruthy();
   });
 
   it("re-exports execCommand from ../src/index.js with identical behavior", async () => {

@@ -122,6 +122,48 @@ describe("doctor: version capture timeout", () => {
   }, 10000);
 });
 
+describe("doctor: aggregate version-capture deadline", () => {
+  it("skips remaining --version captures once the aggregate deadline is spent, warning once with a count", async () => {
+    const dir = makeTmpDir();
+    // Each stub sleeps 150ms before printing its version, with a generous
+    // per-tool timeout (5000ms) so the per-tool timeout never fires on its
+    // own. The aggregate deadline (100ms) is spent well before the first
+    // capture (150ms) even returns, so the first tool's capture -- already
+    // in flight when the deadline check runs, at the start of each tool --
+    // still completes normally, and every tool after it is skipped
+    // outright without ever spawning.
+    const names = ["stub-a", "stub-b", "stub-c"];
+    for (const name of names) {
+      const stubPath = path.join(dir, name);
+      fs.writeFileSync(
+        stubPath,
+        `#!/bin/sh\nsleep 0.15\necho '${name} 1.0.0'\n`,
+      );
+      fs.chmodSync(stubPath, 0o755);
+    }
+    const result = await doctor({
+      required: names,
+      optional: [],
+      pathEnv: dir,
+      versionTimeoutMs: 5000,
+      versionDeadlineMs: 100,
+    });
+    const tools = names.map((name) =>
+      result.tools.find((t) => t.name === name),
+    );
+    expect(tools.every((t) => t?.found)).toBe(true);
+    expect(tools[0]?.versionCheck).not.toBe("skipped_deadline");
+    expect(tools[0]?.version).toBe("stub-a 1.0.0");
+    const skipped = tools.filter((t) => t?.versionCheck === "skipped_deadline");
+    expect(skipped.length).toBeGreaterThan(0);
+    expect(
+      result.warnings.some(
+        (w) => w.includes("deadline") && w.includes(String(skipped.length)),
+      ),
+    ).toBe(true);
+  }, 10000);
+});
+
 describe("doctor: checks, in both states", () => {
   it("node_modules: ok when present, not ok when absent", async () => {
     const withoutModules = makeTmpDir();
@@ -158,17 +200,17 @@ describe("doctor: checks, in both states", () => {
     );
     expect(checkOutside?.ok).toBe(false);
 
-    // This package's own directory is inside the agent-dx git work tree
-    // (an ancestor carries .git), so it exercises the "inside" branch
-    // without depending on any fixture repo.
-    const packageDir = path.resolve(
-      path.dirname(new URL(import.meta.url).pathname),
-      "..",
-    );
+    // A fixture built in mkdtemp, not an assertion on the real checkout:
+    // isInsideGitWorkTree only checks for a `.git` entry (file or
+    // directory) at the cwd or an ancestor, so a bare `.git` directory is
+    // enough to exercise the "inside" branch without depending on this
+    // package's own directory being inside a real git work tree.
+    const insideDir = makeTmpDir();
+    fs.mkdirSync(path.join(insideDir, ".git"));
     const resultInside = await doctor({
       required: [],
       optional: [],
-      cwd: packageDir,
+      cwd: insideDir,
     });
     const checkInside = resultInside.checks.find(
       (c) => c.name === "git-work-tree",

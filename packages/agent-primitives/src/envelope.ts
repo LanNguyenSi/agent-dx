@@ -70,7 +70,16 @@ export interface EnvelopeInput {
   logs?: string[];
   /** Subcommand-specific fields, merged into the envelope alongside the base fields. */
   extra?: Record<string, unknown>;
-  /** Serialized envelope hard bound. Defaults to 8000. */
+  /**
+   * Requested serialized-envelope bound. Defaults to 8000. This is a
+   * request, not an unconditional guarantee: the fixed envelope fields
+   * (see PROTECTED_KEYS below) are never cut, so the real floor is
+   * `skeletonFloor` (their own serialized size). The actual guarantee is
+   * `serializedLength(envelope) <= max(maxChars, skeletonFloor)`; when
+   * `maxChars` itself could not be met (because the skeleton alone is
+   * already bigger), a warning names the true final length instead of
+   * silently exceeding the request.
+   */
   maxChars?: number;
   /**
    * Directory to write the full, untruncated result to when reduction is
@@ -88,138 +97,16 @@ export interface EnvelopeOutput {
 
 const DEFAULT_MAX_CHARS = 8000;
 
-// Fixed reduction ladders, applied in order, each stopping as soon as the
-// envelope fits under maxChars.
-// Never cut a failure list all the way to 0 here: at least one failure
-// entry is kept for the message-length and tail steps below to act on,
-// and (if the skeleton itself is still too large) for the final hard cut
-// to shrink further. A caller that truly wants zero failures should not
-// pass a failures list to begin with.
-const FAILURE_CAPS = [10, 5, 2, 1];
-const MESSAGE_CAPS = [1000, 300, 100, 20];
-const TAIL_CAPS = [6000, 2000, 500, 100, 0];
-
 function serializedLength(obj: unknown): number {
   return JSON.stringify(obj).length;
 }
 
-/** Recursively find and cap every array field named `failures`. */
-function capFailureLists(obj: unknown, cap: number): boolean {
-  let changed = false;
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      if (capFailureLists(item, cap)) changed = true;
-    }
-    return changed;
+function getAtPath(obj: unknown, keyPath: Array<string | number>): unknown {
+  let cursor: unknown = obj;
+  for (const key of keyPath) {
+    cursor = (cursor as Record<string | number, unknown>)[key];
   }
-  if (obj !== null && typeof obj === "object") {
-    const rec = obj as Record<string, unknown>;
-    for (const key of Object.keys(rec)) {
-      if (key === "failures" && Array.isArray(rec[key])) {
-        const arr = rec[key] as unknown[];
-        if (arr.length > cap) {
-          rec[key] = arr.slice(0, cap);
-          changed = true;
-        }
-      } else if (capFailureLists(rec[key], cap)) {
-        changed = true;
-      }
-    }
-  }
-  return changed;
-}
-
-/** Recursively find and cap the length of every string field named `message`. */
-function capMessages(obj: unknown, cap: number): boolean {
-  let changed = false;
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      if (capMessages(item, cap)) changed = true;
-    }
-    return changed;
-  }
-  if (obj !== null && typeof obj === "object") {
-    const rec = obj as Record<string, unknown>;
-    for (const key of Object.keys(rec)) {
-      const val = rec[key];
-      if (key === "message" && typeof val === "string" && val.length > cap) {
-        rec[key] = val.slice(0, cap);
-        changed = true;
-      } else if (capMessages(val, cap)) {
-        changed = true;
-      }
-    }
-  }
-  return changed;
-}
-
-/** Recursively find and cap the length of every string field whose key ends in "Tail". */
-function capTails(obj: unknown, cap: number): boolean {
-  let changed = false;
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      if (capTails(item, cap)) changed = true;
-    }
-    return changed;
-  }
-  if (obj !== null && typeof obj === "object") {
-    const rec = obj as Record<string, unknown>;
-    for (const key of Object.keys(rec)) {
-      const val = rec[key];
-      if (key.endsWith("Tail") && typeof val === "string" && val.length > cap) {
-        rec[key] = val.slice(0, cap);
-        changed = true;
-      } else if (capTails(val, cap)) {
-        changed = true;
-      }
-    }
-  }
-  return changed;
-}
-
-/**
- * Find the largest string value anywhere in the object (recursively) and
- * return a path to reach it plus its current length, or undefined when no
- * string field is present. Used as the final, unconditional hard cut so
- * `JSON.stringify(result).length <= maxChars` always holds, even for a
- * pathological single field (e.g. a multi-megabyte one-line tail) that the
- * fixed ladders above did not fully reduce.
- */
-function findLargestString(
-  obj: unknown,
-  path: Array<string | number> = [],
-  skipTopLevelKeys?: ReadonlySet<string>,
-): { path: Array<string | number>; length: number } | undefined {
-  let best: { path: Array<string | number>; length: number } | undefined;
-  if (typeof obj === "string") {
-    return { path, length: obj.length };
-  }
-  if (Array.isArray(obj)) {
-    for (let i = 0; i < obj.length; i++) {
-      const candidate = findLargestString(
-        obj[i],
-        [...path, i],
-        skipTopLevelKeys,
-      );
-      if (candidate && (!best || candidate.length > best.length))
-        best = candidate;
-    }
-    return best;
-  }
-  if (obj !== null && typeof obj === "object") {
-    for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
-      if (path.length === 0 && skipTopLevelKeys?.has(key)) continue;
-      const candidate = findLargestString(
-        val,
-        [...path, key],
-        skipTopLevelKeys,
-      );
-      if (candidate && (!best || candidate.length > best.length))
-        best = candidate;
-    }
-    return best;
-  }
-  return undefined;
+  return cursor;
 }
 
 function setAtPath(
@@ -236,45 +123,210 @@ function setAtPath(
 }
 
 /**
- * Final, unconditional hard cut: repeatedly shorten the single largest
- * string field until the serialized object fits maxChars, or no string
- * field remains. Guarantees `serializedLength(obj) <= maxChars` whenever
- * the non-string skeleton itself fits in that budget. `skipTopLevelKeys`
- * excludes the fixed envelope fields (tool, version, command, status, cwd,
- * truncated, warnings, logs) from ever being cut, at the top level only:
- * those fields must survive intact no matter how tight maxChars is.
+ * Walks `obj` (arrays and plain objects), skipping the named keys at the
+ * top level only (`path.length === 0`), and calls `visit` for every array
+ * and every string found anywhere else in the graph. Shared traversal for
+ * the three reducers below so each only needs to define what to do with a
+ * candidate, not how to walk the tree.
  */
-function hardCut(
+function walk(
   obj: unknown,
-  maxChars: number,
-  skipTopLevelKeys?: ReadonlySet<string>,
-): boolean {
-  let changed = false;
-  let guard = 0;
-  while (serializedLength(obj) > maxChars && guard < 100) {
-    guard++;
-    const overBy = serializedLength(obj) - maxChars;
-    const target = findLargestString(obj, [], skipTopLevelKeys);
-    if (!target || target.length === 0) break;
-    const newLength = Math.max(0, target.length - overBy - 16);
-    const newValue = getAtPath(obj, target.path).slice(0, newLength);
-    setAtPath(obj, target.path, newValue);
-    changed = true;
+  path: Array<string | number>,
+  skipTopLevelKeys: ReadonlySet<string> | undefined,
+  visitArray: (path: Array<string | number>, arr: unknown[]) => void,
+  visitString: (path: Array<string | number>, str: string) => void,
+  visitEntry?: (
+    parentPath: Array<string | number>,
+    key: string,
+    value: unknown,
+  ) => void,
+): void {
+  if (Array.isArray(obj)) {
+    visitArray(path, obj);
+    for (let i = 0; i < obj.length; i++) {
+      walk(
+        obj[i],
+        [...path, i],
+        skipTopLevelKeys,
+        visitArray,
+        visitString,
+        visitEntry,
+      );
+    }
+    return;
   }
-  return changed;
+  if (typeof obj === "string") {
+    visitString(path, obj);
+    return;
+  }
+  if (obj !== null && typeof obj === "object") {
+    for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
+      if (path.length === 0 && skipTopLevelKeys?.has(key)) continue;
+      visitEntry?.(path, key, val);
+      walk(
+        val,
+        [...path, key],
+        skipTopLevelKeys,
+        visitArray,
+        visitString,
+        visitEntry,
+      );
+    }
+  }
 }
 
-function getAtPath(obj: unknown, keyPath: Array<string | number>): string {
-  let cursor: unknown = obj;
-  for (const key of keyPath) {
-    cursor = (cursor as Record<string | number, unknown>)[key];
-  }
-  return cursor as string;
+/**
+ * Finds the array (anywhere in the graph, at least 2 elements so there is
+ * something to drop while keeping at least one real element) with the
+ * largest own serialized length. Only arrays with >= 2 elements are
+ * considered: a 1-element or empty array cannot be usefully shortened by
+ * this reducer and is left to the string-cap or subtree-drop steps.
+ */
+function findLargestArray(
+  root: unknown,
+  skipTopLevelKeys: ReadonlySet<string> | undefined,
+): { path: Array<string | number>; serializedLen: number } | undefined {
+  let best: { path: Array<string | number>; serializedLen: number } | undefined;
+  walk(
+    root,
+    [],
+    skipTopLevelKeys,
+    (path, arr) => {
+      if (arr.length < 2) return;
+      const serializedLen = serializedLength(arr);
+      if (!best || serializedLen > best.serializedLen) {
+        best = { path, serializedLen };
+      }
+    },
+    () => {},
+  );
+  return best;
+}
+
+/** Finds the longest string anywhere in the graph, above a small floor
+ * (4 chars) below which halving-plus-marker can never be shorter than the
+ * original. */
+function findLongestString(
+  root: unknown,
+  skipTopLevelKeys: ReadonlySet<string> | undefined,
+): { path: Array<string | number>; length: number } | undefined {
+  let best: { path: Array<string | number>; length: number } | undefined;
+  walk(
+    root,
+    [],
+    skipTopLevelKeys,
+    () => {},
+    (path, str) => {
+      if (str.length <= 4) return;
+      if (!best || str.length > best.length) {
+        best = { path, length: str.length };
+      }
+    },
+  );
+  return best;
+}
+
+/**
+ * Finds the single object key (anywhere in the graph, including nested
+ * objects and objects inside arrays) whose value has the largest
+ * serialized length. This is the final, unconditional fallback: deleting
+ * a whole key always strictly reduces the serialized size, so it is what
+ * guarantees the reduction loop below terminates even when no array or
+ * string reduction can make further byte progress.
+ */
+function findLargestSubtreeKey(
+  root: unknown,
+  skipTopLevelKeys: ReadonlySet<string> | undefined,
+):
+  | { parentPath: Array<string | number>; key: string; serializedLen: number }
+  | undefined {
+  let best:
+    | { parentPath: Array<string | number>; key: string; serializedLen: number }
+    | undefined;
+  walk(
+    root,
+    [],
+    skipTopLevelKeys,
+    () => {},
+    () => {},
+    (parentPath, key, value) => {
+      const serializedLen = serializedLength(value);
+      if (!best || serializedLen > best.serializedLen) {
+        best = { parentPath, key, serializedLen };
+      }
+    },
+  );
+  return best;
+}
+
+/**
+ * Reduction step 1: halves the single largest array in the graph (by its
+ * own serialized size), keeping the first half and appending one marker
+ * string noting how many elements were dropped. Only applied when it is a
+ * genuine byte-size improvement (a small array of small elements next to a
+ * long marker could otherwise grow); returns false and leaves the graph
+ * untouched when it is not, so the caller falls through to the next step.
+ */
+function capLargestArray(
+  root: unknown,
+  skipTopLevelKeys: ReadonlySet<string> | undefined,
+): boolean {
+  const target = findLargestArray(root, skipTopLevelKeys);
+  if (!target) return false;
+  const arr = getAtPath(root, target.path) as unknown[];
+  const before = serializedLength(arr);
+  const keep = Math.max(1, Math.floor(arr.length / 2));
+  const dropped = arr.length - keep;
+  if (dropped <= 0) return false;
+  const marker = `...(${dropped} more item${dropped === 1 ? "" : "s"} omitted)`;
+  const next = [...arr.slice(0, keep), marker];
+  if (serializedLength(next) >= before) return false;
+  setAtPath(root, target.path, next);
+  return true;
+}
+
+/**
+ * Reduction step 2: halves the single longest string in the graph,
+ * keeping the head and appending a `...` marker. Same byte-progress guard
+ * as `capLargestArray`.
+ */
+function capLongestString(
+  root: unknown,
+  skipTopLevelKeys: ReadonlySet<string> | undefined,
+): boolean {
+  const target = findLongestString(root, skipTopLevelKeys);
+  if (!target) return false;
+  const cur = getAtPath(root, target.path) as string;
+  const keep = Math.floor(cur.length / 2);
+  const next = cur.slice(0, keep) + "...";
+  if (next.length >= cur.length) return false;
+  setAtPath(root, target.path, next);
+  return true;
+}
+
+/**
+ * Reduction step 3 (unconditional fallback): deletes the single largest
+ * remaining subtree (an object key, anywhere in the graph) entirely.
+ * Always makes real progress when a candidate exists, so the reduction
+ * loop can never truly stall while `extra` still has content.
+ */
+function dropLargestSubtree(
+  root: unknown,
+  skipTopLevelKeys: ReadonlySet<string> | undefined,
+): boolean {
+  const target = findLargestSubtreeKey(root, skipTopLevelKeys);
+  if (!target) return false;
+  const parent =
+    target.parentPath.length === 0 ? root : getAtPath(root, target.parentPath);
+  delete (parent as Record<string, unknown>)[target.key];
+  return true;
 }
 
 // The fixed envelope fields: always present, and never subject to any
 // reduction step. `extra` is spread first so these win on any key
-// collision, and the hard cut below is told to skip them by name.
+// collision, and every reduction step is told to skip them by name (at
+// the top level only, so this never has to inspect a `logs`/`warnings`
+// key nested somewhere inside a subcommand's own `extra` data).
 const PROTECTED_KEYS: ReadonlySet<string> = new Set([
   "tool",
   "version",
@@ -298,31 +350,89 @@ function skeletonOnly(
 }
 
 /**
- * Build the final envelope: merges `extra` with the base fields (base
- * fields win on any key collision, so a subcommand's `extra` can never
- * shadow `tool`/`status`/`truncated`/`logs`/... ), then applies the
- * reduction order (failure lists, then message lengths, then output
- * tails, then a final hard cut of the largest remaining string) until
- * `JSON.stringify(envelope).length <= maxChars`. Sets `truncated: true`
- * and appends the full-result path to `logs` whenever anything was cut.
+ * Pushes the "could not be met" warning and makes its own stated length
+ * match the envelope's true final serialized size, including the warning
+ * itself. Since the warning's own text contributes to that size, this is
+ * a small fixed point: compute a candidate length, render the warning
+ * with it, re-measure, and repeat until stable (converges in at most a
+ * couple of iterations; the only way it would not is the warning's
+ * stated number crossing a digit-count boundary because of its own
+ * length, which a few iterations always settle).
+ */
+function pushOverrunWarning(
+  envelope: Record<string, unknown>,
+  maxChars: number,
+): void {
+  const baseWarnings = envelope.warnings as string[];
+  let n = serializedLength(envelope);
+  for (let i = 0; i < 5; i++) {
+    const message = `envelope is ${n} characters; requested max-chars ${maxChars} could not be met`;
+    const candidateWarnings = [...baseWarnings, message];
+    const candidateLen = serializedLength({
+      ...envelope,
+      warnings: candidateWarnings,
+    });
+    if (candidateLen === n) {
+      envelope.warnings = candidateWarnings;
+      return;
+    }
+    n = candidateLen;
+  }
+  envelope.warnings = [
+    ...baseWarnings,
+    `envelope is ${n} characters; requested max-chars ${maxChars} could not be met`,
+  ];
+}
+
+/**
+ * Build the final envelope: deep-copies `extra` (the caller's object is
+ * never read again after the copy, so it is never mutated by anything
+ * below), merges it with the base fields (base fields win on any key
+ * collision, so a subcommand's `extra` can never shadow
+ * `tool`/`status`/`truncated`/`logs`/... ), and, only when the serialized
+ * result exceeds `maxChars`, runs a single progress-guarded reduction loop
+ * over the whole graph: cap the largest array anywhere (keeping the first
+ * half plus a marker), then the longest string anywhere (keeping the head
+ * plus a `...` marker), then drop the largest remaining subtree entirely,
+ * repeating in that priority order until the envelope fits or nothing
+ * makes further byte progress. There is no fixed iteration count; the
+ * loop's only stopping conditions are "fits now" and "no step reduced
+ * anything".
  *
  * The fixed skeleton fields (tool, version, command, status, durationMs,
- * cwd, truncated, warnings, and every string inside `logs`) are excluded
- * from every reduction step, so they always survive intact. When
- * `maxChars` is below the serialized size of that skeleton, the effective
- * bound is clamped to the skeleton's size (plus the warning below) and a
- * warning names the clamp: the invariant is therefore
- * `JSON.stringify(envelope).length <= max(maxChars, skeletonFloor)`, not
- * an unconditional `<= maxChars`.
+ * cwd, truncated, warnings, logs) are excluded from every reduction step
+ * (by name, at the top level, see PROTECTED_KEYS), so they always survive
+ * intact, byte for byte. Because of that floor, the real invariant is:
+ *
+ *   serializedLength(envelope) <= max(maxChars, skeletonFloor)
+ *
+ * not an unconditional `<= maxChars`. Whenever the caller's literal
+ * `maxChars` request could not be honored (skeletonFloor alone exceeds
+ * it), a warning is appended naming the envelope's true final length and
+ * the max-chars that could not be met, so a caller can tell the
+ * difference between "bounded as requested" and "bounded, but bigger than
+ * asked for, honestly reported".
+ *
+ * Sets `truncated: true` and appends the full, untruncated result's path
+ * to `logs` whenever anything was cut.
  *
  * Returns the envelope plus the exit code implied by `status`.
  */
 export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   const maxChars = input.maxChars ?? DEFAULT_MAX_CHARS;
   const logs = [...(input.logs ?? [])];
+  const warnings = [...(input.warnings ?? [])];
+
+  // Deep-copy `extra` up front: every reduction step below mutates this
+  // copy in place, and the caller's object must never be touched (a
+  // shallow spread would leave nested arrays/objects shared by reference,
+  // so mutating them here would silently mutate the caller's data too).
+  const extraCopy: Record<string, unknown> = input.extra
+    ? structuredClone(input.extra)
+    : {};
 
   const envelope: Record<string, unknown> = {
-    ...(input.extra ?? {}),
+    ...extraCopy,
     tool: TOOL_NAME,
     version: input.version,
     command: input.command,
@@ -331,7 +441,7 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     cwd: input.cwd,
     truncated: false,
     logs,
-    warnings: input.warnings ?? [],
+    warnings,
   };
 
   if (serializedLength(envelope) <= maxChars) {
@@ -340,15 +450,15 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
 
   // A full, untruncated copy is captured before any reduction so it can be
   // written to the log dir once we know truncation is unavoidable.
-  const fullResult = JSON.parse(JSON.stringify(envelope));
+  const fullResult = structuredClone(envelope);
 
   envelope.truncated = true;
   // The full-result log path is appended to `logs` BEFORE the reduction
-  // ladders run (not after): appending it later, once the envelope has
+  // loop runs (not after): appending it later, once the envelope has
   // already been cut down to fit exactly, would grow the envelope back
   // past maxChars by however many characters the path itself adds. Adding
-  // it first means every reduction step below - including the final hard
-  // cut - accounts for its size too, so the bound still holds afterward.
+  // it first means the reduction loop below accounts for its size too, so
+  // the bound still holds afterward.
   if (input.logDir) {
     try {
       fs.mkdirSync(input.logDir, { recursive: true });
@@ -359,51 +469,34 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     } catch (err) {
       // Truncation itself must not fail the command, but the failure must
       // not be silent either: name it in a warning before the reduction
-      // ladders run, so it is never itself a candidate for later cutting.
+      // loop runs, so it is never itself a candidate for later cutting.
       const detail =
         err instanceof Error
           ? ((err as NodeJS.ErrnoException).code ?? err.message)
           : String(err);
-      const warnings = [...(envelope.warnings as string[])];
       warnings.push(`full result not written to ${input.logDir}: ${detail}`);
       envelope.warnings = warnings;
     }
   }
 
-  // The skeleton (fixed fields only) is never cut. When maxChars is below
-  // its serialized size, clamp the effective bound to that size instead
-  // of pretending the fixed fields could ever be reduced further, and say
-  // so in a warning (which is itself part of the skeleton, so the floor
-  // is recomputed once more with the warning included).
-  const floorBeforeWarning = serializedLength(skeletonOnly(envelope));
-  let effectiveMaxChars = maxChars;
-  if (maxChars < floorBeforeWarning) {
-    const warnings = [...(envelope.warnings as string[])];
-    warnings.push(
-      `max-chars (${maxChars}) is below the fixed envelope's minimum size (${floorBeforeWarning}); clamped to the minimum`,
-    );
-    envelope.warnings = warnings;
-    effectiveMaxChars = serializedLength(skeletonOnly(envelope));
+  // The skeleton (fixed fields only) is never cut, so it is a hard floor
+  // on what the reduction loop can achieve: aim for max(maxChars,
+  // skeletonFloor), not maxChars itself, so the loop below has an
+  // achievable target instead of spinning until "no progress" against an
+  // unreachable one.
+  const skeletonFloor = serializedLength(skeletonOnly(envelope));
+  const effectiveMaxChars = Math.max(maxChars, skeletonFloor);
+
+  let progressed = true;
+  while (progressed && serializedLength(envelope) > effectiveMaxChars) {
+    progressed =
+      capLargestArray(envelope, PROTECTED_KEYS) ||
+      capLongestString(envelope, PROTECTED_KEYS) ||
+      dropLargestSubtree(envelope, PROTECTED_KEYS);
   }
 
-  for (const cap of FAILURE_CAPS) {
-    capFailureLists(envelope, cap);
-    if (serializedLength(envelope) <= effectiveMaxChars) break;
-  }
-  if (serializedLength(envelope) > effectiveMaxChars) {
-    for (const cap of MESSAGE_CAPS) {
-      capMessages(envelope, cap);
-      if (serializedLength(envelope) <= effectiveMaxChars) break;
-    }
-  }
-  if (serializedLength(envelope) > effectiveMaxChars) {
-    for (const cap of TAIL_CAPS) {
-      capTails(envelope, cap);
-      if (serializedLength(envelope) <= effectiveMaxChars) break;
-    }
-  }
-  if (serializedLength(envelope) > effectiveMaxChars) {
-    hardCut(envelope, effectiveMaxChars, PROTECTED_KEYS);
+  if (serializedLength(envelope) > maxChars) {
+    pushOverrunWarning(envelope, maxChars);
   }
 
   return { envelope, exitCode: exitCodeForStatus(input.status) };
