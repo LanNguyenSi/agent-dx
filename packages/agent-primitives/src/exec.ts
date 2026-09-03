@@ -90,13 +90,32 @@ const STREAM_FLUSH_GRACE_MS = 250;
  * for the stdio pipes to close for real once it has already settled on
  * the flush-grace shortcut. Only reached when a descendant left the
  * process group and outlived the flush grace; comfortably above every
- * known caller's own settle bound (`probe`'s `SIGNAL_SETTLE_BOUND_MS`
- * and the CLI's `SHUTDOWN_SETTLE_BOUND_MS`, both 2000ms), so a caller
- * waiting on `onStdioClosed` is never cut off by this call giving up
- * first. Past this bound the pipes are torn down and no further close
- * is reported; whatever was still holding them is treated as never
- * closing. */
-const STDIO_WATCH_BOUND_MS = 10_000;
+ * known caller's own settle bound (`probe`'s `signalSettleBoundMs()`
+ * and the CLI's `shutdownSettleBoundMs()`, both 2000ms by default and
+ * both clamped below this bound through `stdioWatchBoundMs()`), so a
+ * caller waiting on `onStdioClosed` is never cut off by this call
+ * giving up first. Past this bound the pipes are torn down; the `close`
+ * event that teardown itself produces is never reported through
+ * `onStdioClosed` (see `stdioGivenUp` below), so whatever was still
+ * holding the pipes is treated as never closing.
+ *
+ * Overridable via `AGENT_PRIMITIVES_STDIO_WATCH_BOUND_MS`, an internal
+ * test seam (undocumented, not a CLI flag) that lets a test of the
+ * give-up path run in milliseconds. Production code never sets it. */
+const DEFAULT_STDIO_WATCH_BOUND_MS = 10_000;
+
+/** The effective stdio watch bound: `DEFAULT_STDIO_WATCH_BOUND_MS`
+ * unless the test seam above shortens it. Exported so a caller that
+ * waits on `onStdioClosed` can clamp its own settle bound below this
+ * one instead of duplicating the assumption. */
+export function stdioWatchBoundMs(): number {
+  const override = process.env.AGENT_PRIMITIVES_STDIO_WATCH_BOUND_MS;
+  if (override !== undefined) {
+    const parsed = Number(override);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_STDIO_WATCH_BOUND_MS;
+}
 
 /** `child.stdout`/`child.stderr` are typed as the generic `Readable`,
  * but for `stdio: 'pipe'` (this file's only mode) Node backs them with
@@ -204,6 +223,10 @@ export function execCommand(
     let watchTimer: NodeJS.Timeout | undefined;
     let stdioClosed = false;
     let stdioClosedNotified = false;
+    // Set once the watch bound expired and this call tore the pipes
+    // down itself: the `close` that teardown produces is then not a
+    // genuine closure and must not reach `onStdioClosed`.
+    let stdioGivenUp = false;
 
     // `detached: true` puts the child in a new process group of its own
     // (it becomes the group leader), so every descendant it spawns lands
@@ -306,7 +329,7 @@ export function execCommand(
 
     /** Forcibly ends whatever is left of the child's stdio: called once
      * true closure has already happened (nothing left to force) or once
-     * `STDIO_WATCH_BOUND_MS` gives up on ever seeing it. Destroying our
+     * `giveUpOnStdio` below stops waiting for it. Destroying our
      * own end here, rather than at settle time, is what keeps a forced
      * destroy from masquerading as a genuine close below. */
     const teardownStdio = () => {
@@ -316,6 +339,14 @@ export function execCommand(
       }
       child.stdout.destroy();
       child.stderr.destroy();
+    };
+
+    /** The watch bound expired without a genuine close: mark the
+     * give-up BEFORE destroying the pipes, so the `close` event that
+     * destroy itself produces is not reported as true closure below. */
+    const giveUpOnStdio = () => {
+      stdioGivenUp = true;
+      teardownStdio();
     };
 
     const finish = (exitCode: number | null, closedNow: boolean) => {
@@ -337,14 +368,15 @@ export function execCommand(
         // exists to never give. Removing the 'data' listeners pauses
         // the stream instead (no more reads, no forced closure);
         // `unref` keeps the still-open handles from holding this
-        // process alive on their own. `STDIO_WATCH_BOUND_MS` bounds how
+        // process alive on their own. `stdioWatchBoundMs()` bounds how
         // long that watch is kept up before this call gives up and
-        // tears the pipes down anyway.
+        // tears the pipes down anyway (without reporting that as a
+        // close).
         child.stdout.removeAllListeners("data");
         child.stderr.removeAllListeners("data");
         unrefStream(child.stdout);
         unrefStream(child.stderr);
-        watchTimer = setTimeout(teardownStdio, STDIO_WATCH_BOUND_MS);
+        watchTimer = setTimeout(giveUpOnStdio, stdioWatchBoundMs());
         watchTimer.unref();
       }
       // Flush any incomplete trailing multi-byte sequence held by each
@@ -415,7 +447,9 @@ export function execCommand(
         clearTimeout(watchTimer);
         watchTimer = undefined;
       }
-      notifyStdioClosed();
+      // A close produced by this call's own give-up teardown says
+      // nothing about whatever still held the pipes: not a true closure.
+      if (!stdioGivenUp) notifyStdioClosed();
       finish(code, true);
     });
   });

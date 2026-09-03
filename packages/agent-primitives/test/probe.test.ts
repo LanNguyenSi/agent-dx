@@ -7,11 +7,13 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   probe,
   installCrashHandlers,
+  signalSettleBoundMs,
   type ProbeOptions,
   type ProbeResult,
 } from "../src/probe/index.js";
 import { readMarkerFor, writeMarker } from "../src/lock.js";
 import { sha256File } from "../src/hash.js";
+import { stdioWatchBoundMs } from "../src/exec.js";
 import { execCommand } from "../src/exec.js";
 import {
   applyPatchForReal,
@@ -2724,6 +2726,61 @@ describe("installCrashHandlers(): re-entrancy", () => {
     } finally {
       crashHandlers.remove();
       exitSpy.mockRestore();
+    }
+  });
+});
+
+describe("signalSettleBoundMs(): clamped below exec's stdio watch bound", () => {
+  const SETTLE = "AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS";
+  const WATCH = "AGENT_PRIMITIVES_STDIO_WATCH_BOUND_MS";
+  const saved: Record<string, string | undefined> = {};
+
+  function setEnv(name: string, value: string | undefined): void {
+    if (!(name in saved)) saved[name] = process.env[name];
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+
+  afterEach(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    for (const name of Object.keys(saved)) delete saved[name];
+  });
+
+  it("defaults to 2000ms, below the default 10s watch bound", () => {
+    setEnv(SETTLE, undefined);
+    setEnv(WATCH, undefined);
+    expect(signalSettleBoundMs()).toBe(2000);
+    expect(signalSettleBoundMs()).toBeLessThan(stdioWatchBoundMs());
+  });
+
+  it("honours a shorter override as given", () => {
+    setEnv(SETTLE, "150");
+    setEnv(WATCH, undefined);
+    expect(signalSettleBoundMs()).toBe(150);
+  });
+
+  it("clamps an override at or above the watch bound to just below it, so a settle wait can never outlast exec's give-up", () => {
+    setEnv(WATCH, undefined);
+    setEnv(SETTLE, "10000");
+    expect(signalSettleBoundMs()).toBe(stdioWatchBoundMs() - 1);
+    setEnv(SETTLE, "600000");
+    expect(signalSettleBoundMs()).toBe(stdioWatchBoundMs() - 1);
+  });
+
+  it("clamps the default too when the watch bound itself is shortened", () => {
+    setEnv(SETTLE, undefined);
+    setEnv(WATCH, "300");
+    expect(signalSettleBoundMs()).toBe(299);
+  });
+
+  it("falls back to the default for a garbage override", () => {
+    setEnv(WATCH, undefined);
+    for (const garbage of ["", "abc", "-5", "0", "NaN", "Infinity"]) {
+      setEnv(SETTLE, garbage);
+      expect(signalSettleBoundMs()).toBe(2000);
     }
   });
 });

@@ -17,7 +17,7 @@ import {
   DEFAULT_REQUIRED,
   type DoctorResult,
 } from "./doctor/index.js";
-import { execCommand, type ExecResult } from "./exec.js";
+import { execCommand, stdioWatchBoundMs, type ExecResult } from "./exec.js";
 import {
   verify,
   DEFAULT_CHECKS,
@@ -360,7 +360,14 @@ let inFlightExecClosed: Promise<void> | null = null;
  * exiting anyway. A `SIGKILL`ed process group is gone in milliseconds;
  * this bound only matters for something that put itself out of the
  * group's reach, where exiting is still the right answer. */
-const SHUTDOWN_SETTLE_BOUND_MS = 2000;
+const DEFAULT_SHUTDOWN_SETTLE_BOUND_MS = 2000;
+
+/** Always below `exec.ts`'s stdio watch bound, for the same reason as
+ * `probe`'s `signalSettleBoundMs()`: past that bound no genuine close
+ * can arrive any more. */
+function shutdownSettleBoundMs(): number {
+  return Math.min(DEFAULT_SHUTDOWN_SETTLE_BOUND_MS, stdioWatchBoundMs() - 1);
+}
 
 /** `execCommand` plus the tracking above. Handed to `verify` as its
  * `execFn` so the handler has something to wait for; the real
@@ -394,7 +401,7 @@ async function settleInFlightExec(): Promise<void> {
   await Promise.race([
     pendingClosed,
     new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, SHUTDOWN_SETTLE_BOUND_MS);
+      timer = setTimeout(resolve, shutdownSettleBoundMs());
     }),
   ]);
   if (timer !== undefined) clearTimeout(timer);

@@ -321,6 +321,84 @@ describe("execCommand", () => {
     }
   }, 10000);
 
+  it("never reports a true closure for the close its own watch-bound give-up produces: onStdioClosed stays silent when the pipes are torn down at the bound", async () => {
+    const logDir = makeTmpDir();
+    const dir = makeTmpDir();
+    const pidFile = path.join(dir, "worker.pid");
+    const workerPath = path.join(dir, "worker.js");
+    const spawnerPath = path.join(dir, "spawner.js");
+
+    // Same detached, stdio-inheriting grandchild as above, but this one
+    // holds the pipes for 1500ms: past the 250ms flush grace AND past
+    // the watch bound, shortened to 400ms through the test seam. At
+    // 400ms this call gives up and destroys its own end of the pipes,
+    // which makes the child process object emit a `close` of its own
+    // making. That close must not reach `onStdioClosed`: nothing about
+    // the worker has changed, it is still holding (and could still be
+    // writing through) whatever it inherited.
+    fs.writeFileSync(
+      workerPath,
+      [
+        "const fs = require('node:fs');",
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+        "setTimeout(() => { process.exit(0); }, 1500);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      spawnerPath,
+      [
+        "const { spawn } = require('node:child_process');",
+        `const child = spawn(process.execPath, [${JSON.stringify(workerPath)}], {`,
+        "  stdio: 'inherit',",
+        "  detached: true,",
+        "});",
+        "child.unref();",
+        "process.exit(7);",
+        "",
+      ].join("\n"),
+    );
+
+    const previous = process.env.AGENT_PRIMITIVES_STDIO_WATCH_BOUND_MS;
+    process.env.AGENT_PRIMITIVES_STDIO_WATCH_BOUND_MS = "400";
+    let closedAt: number | undefined;
+    const started = Date.now();
+    try {
+      const result = await execCommand(`node ${JSON.stringify(spawnerPath)}`, {
+        logDir,
+        onStdioClosed: () => {
+          closedAt = Date.now() - started;
+        },
+      });
+      expect(result.exitCode).toBe(7);
+      expect(result.stdioClosed).toBe(false);
+      expect(closedAt).toBeUndefined();
+
+      // Well past the 400ms give-up: the forced teardown has happened
+      // and produced its close, and onStdioClosed must still be silent.
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      expect(closedAt).toBeUndefined();
+
+      // And past the worker's own exit too: the pipes this call held
+      // are gone, so the worker's genuine exit can no longer be
+      // observed either; "treated as never closing" means exactly that.
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      expect(closedAt).toBeUndefined();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGENT_PRIMITIVES_STDIO_WATCH_BOUND_MS;
+      } else {
+        process.env.AGENT_PRIMITIVES_STDIO_WATCH_BOUND_MS = previous;
+      }
+      try {
+        const pid = Number(fs.readFileSync(pidFile, "utf8"));
+        if (Number.isInteger(pid) && pid > 0) process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone, or never started.
+      }
+    }
+  }, 10000);
+
   it("does not report aborted: true for a command that finishes on its own with a signal given", async () => {
     const logDir = makeTmpDir();
     const controller = new AbortController();

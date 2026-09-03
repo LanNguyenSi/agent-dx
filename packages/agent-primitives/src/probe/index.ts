@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execCommand, type ExecOptions, type ExecResult } from "../exec.js";
+import {
+  execCommand,
+  stdioWatchBoundMs,
+  type ExecOptions,
+  type ExecResult,
+} from "../exec.js";
 import { sha256File } from "../hash.js";
 import {
   acquireLock,
@@ -174,6 +179,8 @@ interface RestoreState {
   preHash: string;
 }
 
+const DEFAULT_SIGNAL_SETTLE_BOUND_MS = 2000;
+
 /** How long the signal handler waits for the child it just killed to
  * actually settle before it restores anyway. A `SIGKILL`ed process group
  * is gone in milliseconds, so this is only ever reached when something
@@ -185,14 +192,23 @@ interface RestoreState {
  * internal test seam (undocumented, not a CLI flag): a real test of the
  * past-the-bound path needs an out-of-group writer that outlives the
  * bound, and shortening the bound itself keeps that test in
- * milliseconds instead of seconds. Production code never sets it. */
-function signalSettleBoundMs(): number {
+ * milliseconds instead of seconds. Production code never sets it.
+ *
+ * Whatever the source, the bound always stays below `exec.ts`'s stdio
+ * watch bound: past that bound `exec.ts` tears the pipes down itself
+ * and reports no close for it, so a settle bound at or beyond it would
+ * only wait into a window where no genuine close can arrive any more.
+ * Exported only for the unit test of that clamp. */
+export function signalSettleBoundMs(): number {
+  const ceiling = stdioWatchBoundMs() - 1;
   const override = process.env.AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS;
   if (override !== undefined) {
     const parsed = Number(override);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.min(parsed, ceiling);
+    }
   }
-  return 2000;
+  return Math.min(DEFAULT_SIGNAL_SETTLE_BOUND_MS, ceiling);
 }
 
 /** What the crash handler's restore attempt found, or `null` when no
@@ -342,8 +358,9 @@ export function installCrashHandlers(
  * a phase's run was aborted, before it acts on that (restoring, or
  * returning). When this probe's own signal handler is the one that
  * caused the abort (`crashHandlers.isHandling()`), the normal flow must
- * not race the handler's own restore-then-exit -- see the round-6
- * finding this closes. Returns `undefined` when the handler is NOT
+ * not race the handler's own restore-then-exit (the CLI would otherwise
+ * print an envelope and exit 2 while the handler is about to exit 130 or
+ * 143 with no output). Returns `undefined` when the handler is NOT
  * active (the abort came from somewhere else, e.g. a caller's own
  * `AbortSignal`), telling the caller to keep its existing behavior
  * unchanged.
