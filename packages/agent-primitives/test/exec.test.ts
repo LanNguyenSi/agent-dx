@@ -250,6 +250,39 @@ describe("execCommand", () => {
     expect(result.stdioClosed).toBe(true);
   });
 
+  it("flags stdoutTruncated exactly when more than the line bound of real lines was printed: false at 59 and at 60 newline-terminated lines, true at 61", async () => {
+    // Every line ends in a newline, so `split("\n")` yields one phantom
+    // empty element past the real lines; the bound must be applied to
+    // the real count, not to the split length, or 60 real lines would
+    // read as 61 and the bound would be off by one at the boundary.
+    const logDir = makeTmpDir();
+    const printLines = (n: number, stream: "log" | "error") =>
+      `node -e "for(let i=0;i<${n};i++)console.${stream}('line '+i)"`;
+
+    const at59 = await execCommand(printLines(59, "log"), { logDir });
+    expect(at59.exitCode).toBe(0);
+    expect(at59.stdoutTruncated).toBe(false);
+    expect(at59.stderrTruncated).toBe(false);
+
+    const at60 = await execCommand(printLines(60, "log"), { logDir });
+    expect(at60.exitCode).toBe(0);
+    expect(at60.stdoutTruncated).toBe(false);
+    expect(at60.stderrTruncated).toBe(false);
+    expect(at60.stdoutTail.split("\n").filter((l) => l !== "")).toHaveLength(
+      60,
+    );
+
+    const at61 = await execCommand(printLines(61, "log"), { logDir });
+    expect(at61.exitCode).toBe(0);
+    expect(at61.stdoutTruncated).toBe(true);
+    expect(at61.stderrTruncated).toBe(false);
+
+    const err61 = await execCommand(printLines(61, "error"), { logDir });
+    expect(err61.exitCode).toBe(0);
+    expect(err61.stdoutTruncated).toBe(false);
+    expect(err61.stderrTruncated).toBe(true);
+  });
+
   it("reports stdioClosed: false on the flush-grace shortcut, then calls onStdioClosed once the descendant that was holding the pipes truly exits, not fabricated by this call's own cleanup", async () => {
     const logDir = makeTmpDir();
     const dir = makeTmpDir();

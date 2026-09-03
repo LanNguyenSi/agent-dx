@@ -152,45 +152,47 @@ class TailKeeper {
     }
   }
 
-  tail(): string {
+  /**
+   * The kept tail together with whether keeping it dropped anything: a
+   * real line, or a byte of the kept text. One computation serves both
+   * `tail()` and `wasTruncated()`, so the two can never disagree about
+   * what was kept.
+   *
+   * The two-stage bound (line count, then character count) runs on the
+   * *real* line count: `split("\n")` on output that ends with a newline
+   * yields one trailing empty element that is not a line at all (e.g.
+   * `"a\nb\n".split("\n")` is `["a", "b", ""]`, three elements for two
+   * real lines). That phantom element is dropped before the line bound
+   * is applied and its newline put back afterwards; otherwise exactly
+   * `TAIL_LINES` real lines would count as one too many, the first real
+   * line would be dropped from the tail, and output ending in a newline
+   * (nearly all of it) would look one real line short of the bound when
+   * deciding whether anything was dropped.
+   */
+  private keep(): { text: string; truncated: boolean } {
     let lines = this.buf.split("\n");
+    const endsWithNewline = lines.length > 1 && lines[lines.length - 1] === "";
+    if (endsWithNewline) lines.pop();
+    let truncated = false;
     if (lines.length > TAIL_LINES) {
       lines = lines.slice(-TAIL_LINES);
+      truncated = true;
     }
-    let text = lines.join("\n");
+    let text = lines.join("\n") + (endsWithNewline ? "\n" : "");
     if (text.length > TAIL_CHARS) {
       text = text.slice(-TAIL_CHARS);
+      truncated = true;
     }
-    return text;
+    return { text, truncated };
   }
 
-  /**
-   * True when the buffered output holds more than `tail()` can keep: a
-   * real line, or a byte of the kept lines' own text, was dropped.
-   * Mirrors `tail()`'s own two-stage bound (line count, then character
-   * count) but on the *real* line count first: `split("\n")` on output
-   * that ends with a newline yields one trailing empty element that is
-   * not a line at all (e.g. `"a\nb\n".split("\n")` is `["a", "b", ""]`,
-   * three elements for two real lines), so that phantom element is
-   * dropped before comparing against `TAIL_LINES`. Without this
-   * correction, output ending in a newline (nearly all of it) always
-   * looks one real line short of the bound and truncation is never
-   * detected. Computed independently of, and without altering, what
-   * `tail()` itself returns.
-   */
+  tail(): string {
+    return this.keep().text;
+  }
+
+  /** True when the buffered output holds more than `tail()` keeps. */
   wasTruncated(): boolean {
-    let lines = this.buf.split("\n");
-    if (lines.length > 0 && lines[lines.length - 1] === "") {
-      lines.pop();
-    }
-    let lineTruncated = false;
-    if (lines.length > TAIL_LINES) {
-      lines = lines.slice(-TAIL_LINES);
-      lineTruncated = true;
-    }
-    const text = lines.join("\n");
-    const charTruncated = text.length > TAIL_CHARS;
-    return lineTruncated || charTruncated;
+    return this.keep().truncated;
   }
 }
 
