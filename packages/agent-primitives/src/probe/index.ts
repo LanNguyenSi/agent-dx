@@ -272,11 +272,17 @@ export interface CrashHandlers {
  *    leaves the marker (and the backup) for the next invocation to
  *    recover from, or for `doctor` to report.
  * 4. `cleanupWtSession` removes a `worktree` session's detached
- *    worktree (`git worktree remove --force` then `git worktree
- *    prune`), releasing the repository-keyed marker only once that
- *    succeeds; a no-op when no worktree session was ever started.
- *    Best-effort: a failed cleanup leaves the marker in place for the
- *    next probe on this repository (or `doctor`) to recover.
+ *    worktree (`git worktree remove --force`, the directory itself,
+ *    then `git worktree prune`), releasing the repository-keyed marker
+ *    only once that succeeds; a no-op only when `git worktree add` was
+ *    never even started. It waits for the sync to settle first and then
+ *    removes whatever stage it reached, so a signal landing while the
+ *    worktree is still being synced (or while `git worktree add` itself
+ *    is running) is cleaned up the same as one landing after it. The
+ *    marker for that worktree is written as soon as the add succeeds,
+ *    so even a cleanup that fails leaves a trail. Best-effort: a failed
+ *    cleanup leaves the marker in place for the next probe on this
+ *    repository (or `doctor`) to recover.
  *
  * The lock is released and the process ended when `exitOnSignal` says
  * to, only once all of the above has settled.
@@ -627,6 +633,15 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   // (to clean the worktree up on every exit path).
   let wtSession: WorktreeSyncSuccess | undefined;
   let wtWorktreePath: string | undefined;
+  // Settles when `beginWorktree` has returned, however it returned. The
+  // sync writes into the worktree (the tracked-diff apply, the
+  // untracked-file copy), so a cleanup that started while the sync was
+  // still running would be removing a directory another part of this
+  // same process is still writing into. Awaited by `cleanupWtSession`
+  // below, and bounded in practice by the sync's own abort handling:
+  // every git call it makes dies with the abort, and its copy loop
+  // checks the abort between batches.
+  let wtSyncSettled: Promise<void> | undefined;
   // The finally block and the SIGINT/SIGTERM handler can both reach
   // cleanup for the same run (aborting the in-flight test unblocks the
   // main pipeline's own `await` at roughly the same time the handler
@@ -641,10 +656,12 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     if (wtWorktreePath === undefined) return Promise.resolve();
     const worktreePathForCleanup = wtWorktreePath;
     wtCleanupPromise = (async () => {
+      await wtSyncSettled;
       const result = await cleanupWorktree(
         realRoot,
         worktreePathForCleanup,
         opts.logDir,
+        { track },
       ).catch(() => ({ ok: false, logPaths: [] as string[] }));
       if (result.ok) {
         removeMarkerFor(realRoot);
@@ -871,24 +888,60 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       // probe, so there is no backup/hash proof to check first.
       const staleWt = readMarkerFor(realRoot);
       if (staleWt) {
-        await cleanupWorktree(realRoot, staleWt.targetPath, opts.logDir).catch(
-          () => undefined,
-        );
+        await cleanupWorktree(realRoot, staleWt.targetPath, opts.logDir, {
+          track,
+        }).catch(() => undefined);
         removeMarkerFor(realRoot);
         warnings.push("recovered_stale_worktree");
       }
 
-      const wt = await beginWorktree({
+      // Started, not awaited, so `wtSyncSettled` is assigned before this
+      // function yields for the first time: from here on every exit path
+      // (this one, `finally`, the signal handler) can wait for the sync
+      // before touching the worktree it is writing into.
+      const wtStarted = beginWorktree({
         root,
         cwd,
         logDir: opts.logDir,
         links: absLinks,
+        signal: execController.signal,
+        track,
+        // Before `git worktree add` runs: an add killed partway can
+        // leave a registered worktree, and only a caller that already
+        // knows the path can clean that up.
+        onWorktreeAttempt: (worktreePath) => {
+          wtWorktreePath = worktreePath;
+        },
+        // As soon as the add succeeded, with the whole sync still
+        // ahead: a signal (or a crash) from this point on leaves either
+        // a cleanup that runs or a marker `doctor` and the next probe
+        // on this repository act on, never a registered worktree with
+        // no trace of it anywhere.
+        onWorktreeCreated: (worktreePath) => {
+          writeMarker(realRoot, {
+            targetPath: worktreePath,
+            backupPath: realRoot,
+            preHash: "",
+            mutatedHash: "",
+            pid: process.pid,
+            timestamp: new Date().toISOString(),
+          });
+        },
       });
+      wtSyncSettled = wtStarted.then(
+        () => undefined,
+        () => undefined,
+      );
+      const wt = await wtStarted;
       if (!wt.ok) {
-        if (wt.worktreePath) {
-          wtWorktreePath = wt.worktreePath;
-          await cleanupWtSession();
+        if (wt.reason === "aborted") {
+          // The signal handler owns the cleanup and the exit from here
+          // (in CLI mode this call never returns); racing it with this
+          // path's own cleanup-and-return would print an envelope for a
+          // run the handler is about to end with no output at all.
+          await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
         }
+        await cleanupWtSession();
         return {
           status: "inconclusive",
           reason: wt.reason,
@@ -898,15 +951,6 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         };
       }
       wtSession = wt;
-      wtWorktreePath = wt.worktreePath;
-      writeMarker(realRoot, {
-        targetPath: wt.worktreePath,
-        backupPath: realRoot,
-        preHash: "",
-        mutatedHash: "",
-        pid: process.pid,
-        timestamp: new Date().toISOString(),
-      });
       isolationField.path = wt.worktreePath;
       isolationField.linked = wt.linked;
       isolationField.syncedTrackedFiles = wt.syncedTrackedFiles;

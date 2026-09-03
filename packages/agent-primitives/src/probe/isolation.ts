@@ -196,23 +196,27 @@ export interface WorktreeSyncSuccess {
    * sync acted on (attempted to copy, recreate as a symlink, or skip
    * with a warning) -- not the number of files that ended up on disk in
    * the worktree. A nested-repository entry counts as one here even
-   * though it is skipped entirely (0 files copied), and a plain
-   * directory entry (rare; see `warnings`) counts as one even though it
-   * may expand into several copied files. Entries inside `logDir` itself
+   * though it is skipped entirely (0 files copied), the same as any
+   * other skipped entry (see `warnings`). Entries inside `logDir` itself
    * (this probe's own scratch space) are excluded from this count
    * entirely, the same as they are excluded from the sync. */
   syncedUntrackedFiles: number;
   /** Non-fatal notes from the untracked-file sync: a nested repository
    * directory skipped, or an untracked entry that was neither a regular
-   * file, a directory, nor a symlink. Empty on a sync with nothing to
-   * report. */
+   * file, a symlink, nor a nested repository. Empty on a sync with
+   * nothing to report. */
   warnings: string[];
   logPaths: string[];
 }
 
 export interface WorktreeSyncFailure {
   ok: false;
-  reason: "worktree_sync_failed";
+  /** `aborted` when the caller's `signal` stopped the sync (a
+   * SIGINT/SIGTERM this probe is handling, or a library caller's own
+   * abort): a run that was stopped, never a sync that failed, and never
+   * a verdict. `worktree_sync_failed` is every other non-zero git exit
+   * or filesystem failure. */
+  reason: "worktree_sync_failed" | "aborted";
   detail: string;
   logPaths: string[];
   /** Set once `git worktree add` itself succeeded, so a failure in a
@@ -222,6 +226,16 @@ export interface WorktreeSyncFailure {
 }
 
 export type BeginWorktreeResult = WorktreeSyncSuccess | WorktreeSyncFailure;
+
+/** Registers one started child run, together with a promise of when its
+ * stdio has truly closed, as the caller's one in-flight run. The same
+ * hook `probe/index.ts` passes its `--pre`, `-t`, and `git apply` calls,
+ * so a signal handler can wait for whatever this function has running
+ * before it acts. */
+export type TrackGitCall = <T>(
+  started: Promise<T>,
+  closed: Promise<void>,
+) => Promise<T>;
 
 export interface BeginWorktreeOptions {
   /** The repository root (display path, not necessarily a realpath). */
@@ -235,6 +249,28 @@ export interface BeginWorktreeOptions {
    * worktree in addition to the `node_modules` directories this
    * function finds on its own. */
   links: string[];
+  /** The caller's abort signal, threaded into every git call this
+   * function makes and checked between batches of the untracked-file
+   * copy. Without it a SIGINT/SIGTERM landing mid-sync would leave the
+   * git child running (and this function copying) while the caller has
+   * already decided to stop. Omitted, the sync is uninterruptible. */
+  signal?: AbortSignal;
+  /** Registers every git call this function makes as the caller's one
+   * in-flight run (see `TrackGitCall`). Omitted, the calls run
+   * untracked. */
+  track?: TrackGitCall;
+  /** Called synchronously with the path `git worktree add` is about to
+   * create, BEFORE it runs. The caller records it for cleanup: an
+   * interrupted `git worktree add` can leave a registered worktree
+   * behind, and only a caller that already knows the path can remove
+   * it. */
+  onWorktreeAttempt?: (worktreePath: string) => void;
+  /** Called synchronously once `git worktree add` has succeeded and
+   * before any sync step runs, so the caller can write its own
+   * leftover-recovery marker while the rest of the sync is still ahead:
+   * a signal from this point on always has either a cleanup to run or a
+   * marker for `doctor` and the next probe to act on. */
+  onWorktreeCreated?: (worktreePath: string) => void;
 }
 
 /** A regular file, copied byte for byte. */
@@ -268,13 +304,12 @@ function copySymlink(src: string, dest: string): void {
  *   skipped outright, named in `warnings`, rather than copying an
  *   unrelated repository's checkout (and its own `.git`) into this one's
  *   worktree;
- * - any other directory is walked and its contents copied entry by
- *   entry, the same as this function would handle any of them one level
- *   up;
- * - anything else (a FIFO, a socket, a device node -- none of which
- *   `git ls-files` should ever report) is skipped, named in `warnings`,
- *   rather than failing the whole sync over content that was never a
- *   file to begin with.
+ * - anything else (a plain directory, a FIFO, a socket, a device node
+ *   -- none of which `git ls-files --others --exclude-standard` reports)
+ *   is skipped, named in `warnings`, rather than failing the whole sync
+ *   over content that was never a file to begin with. A plain directory
+ *   is deliberately not walked: recursing would be an unbounded descent
+ *   for a shape this listing does not produce.
  *
  * A missing entry (reported by `git ls-files` a moment ago, gone by the
  * time this runs) is silently skipped: a best-effort sync over a race,
@@ -299,50 +334,70 @@ function copyUntrackedEntry(
     copySymlink(srcAbs, destAbs);
     return;
   }
-  if (st.isDirectory()) {
-    if (fs.existsSync(path.join(srcAbs, ".git"))) {
-      warnings.push(
-        `skipped a nested repository directory in the untracked sync: ${displayRelPath}`,
-      );
-      return;
-    }
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(srcAbs, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      copyUntrackedEntry(
-        path.join(srcAbs, entry.name),
-        path.join(destAbs, entry.name),
-        path.join(displayRelPath, entry.name),
-        warnings,
-      );
-    }
+  if (st.isDirectory() && fs.existsSync(path.join(srcAbs, ".git"))) {
+    warnings.push(
+      `skipped a nested repository directory in the untracked sync: ${displayRelPath}`,
+    );
     return;
   }
   if (!st.isFile()) {
     warnings.push(
-      `skipped an untracked entry that is not a regular file, a directory, or a symlink: ${displayRelPath}`,
+      `skipped an untracked entry that is neither a regular file, a symlink, nor a nested repository: ${displayRelPath}`,
     );
     return;
   }
   copyRegularFile(srcAbs, destAbs);
 }
 
-/** Runs `git argv...` in `cwd`, logging into `runDir` under `logFileName`. */
+/** Runs `git argv...` in `cwd`, logging into `runDir` under
+ * `logFileName`, under `signal` when one is given. */
 function gitArgv(
   args: string[],
   runDir: string,
   logFileName: string,
   cwd: string,
+  signal?: AbortSignal,
 ): Promise<RunArgvResult> {
   return runArgv("git", args, {
     cwd,
     logDir: runDir,
     logFileName,
     timeoutMs: 30_000,
+    ...(signal ? { signal } : {}),
+  });
+}
+
+/** Registers one already-started git call with the caller's tracking
+ * hook. `run.ts` settles only on `close`, so the call's own settling
+ * already IS true stdio closure and `closed` just mirrors it (the same
+ * reasoning `probe/index.ts`'s `startRunArgvTracked` states for the
+ * `git apply` calls). */
+function trackGit(
+  track: TrackGitCall,
+  started: Promise<RunArgvResult>,
+): Promise<RunArgvResult> {
+  return track(
+    started,
+    started.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+}
+
+/** How many untracked entries are copied between two yields back to the
+ * event loop. The copy itself is synchronous, and a synchronous loop
+ * over thousands of entries blocks the event loop, and with it this
+ * process's own SIGINT/SIGTERM handler: the abort would only be seen
+ * once the whole phase had finished, which is exactly the window a
+ * probe interrupted mid-sync must not have. */
+const UNTRACKED_COPY_YIELD_EVERY = 32;
+
+/** Yields to the event loop, giving a pending signal handler (and the
+ * abort it triggers) a turn to run before the next batch. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
   });
 }
 
@@ -378,33 +433,61 @@ function gitArgv(
  *
  * Untracked, non-ignored files (`git ls-files --others --exclude-standard
  * -z`) are copied by relative path via `copyUntrackedEntry` (regular
- * files, symlinks, and nested-repository or plain directories each
- * handled by type; see its own docblock), except any entry that falls
- * inside `logDir` itself -- this probe's own scratch space, including
- * the worktree this call just created -- which is never a source file to
- * sync into the very worktree it is scratch space for. Every
- * `node_modules` directory (or directory symlink) up to
+ * files, symlinks, and nested repositories each handled by type, any
+ * other entry skipped with a warning; see its own docblock), except any
+ * entry that falls inside `logDir` itself -- this probe's own scratch
+ * space, including the worktree this call just created -- which is never
+ * a source file to sync into the very worktree it is scratch space for.
+ * Every `node_modules` directory (or directory symlink) up to
  * `NODE_MODULES_LINK_DEPTH` plus every `--link` extra is symlinked. Any
  * non-zero git exit, or a genuine I/O failure while copying, is
  * `worktree_sync_failed`; the caller (`probe/index.ts`) never treats a
  * sync failure as a verdict.
+ *
+ * The whole sync runs under the caller's `signal` and through its
+ * `track` hook: every git call below is killed when the signal fires
+ * and is the caller's registered in-flight run while it lasts, and the
+ * untracked-file copy checks the same signal between batches. A sync
+ * stopped that way returns `aborted`, never `worktree_sync_failed`: it
+ * is a run that was stopped, not a sync that failed. The caller learns
+ * the worktree path through `onWorktreeAttempt` (before `git worktree
+ * add` runs, since an interrupted add can leave a registered worktree
+ * behind) and again through `onWorktreeCreated` (once the add
+ * succeeded, before any sync step), so no window between the add and
+ * the end of the sync is one where an interrupted run has nothing to
+ * clean up and nothing to report.
  */
 export async function beginWorktree(
   opts: BeginWorktreeOptions,
 ): Promise<BeginWorktreeResult> {
-  const { root, cwd, logDir, links } = opts;
+  const { root, cwd, logDir, links, signal } = opts;
+  const track: TrackGitCall = opts.track ?? ((started) => started);
   const runDir = path.join(logDir, `wt-${randomUUID()}`);
   fs.mkdirSync(runDir, { recursive: true });
   const worktreePath = path.join(runDir, "wt");
   const logPaths: string[] = [];
+  const runGit = (
+    args: string[],
+    logFileName: string,
+    gitCwd: string,
+  ): Promise<RunArgvResult> =>
+    trackGit(track, gitArgv(args, runDir, logFileName, gitCwd, signal));
+  const abortedResult = (step: string): WorktreeSyncFailure => ({
+    ok: false,
+    reason: "aborted",
+    detail: `the worktree sync was aborted during ${step}`,
+    logPaths,
+    ...(fs.existsSync(worktreePath) ? { worktreePath } : {}),
+  });
 
-  const addResult = await gitArgv(
+  opts.onWorktreeAttempt?.(worktreePath);
+  const addResult = await runGit(
     ["worktree", "add", "--detach", "--", worktreePath, "HEAD"],
-    runDir,
     "worktree-add.log",
     root,
   );
   logPaths.push(addResult.logPath);
+  if (addResult.aborted) return abortedResult("git worktree add");
   if (addResult.exitCode !== 0) {
     return {
       ok: false,
@@ -413,6 +496,7 @@ export async function beginWorktree(
       logPaths,
     };
   }
+  opts.onWorktreeCreated?.(worktreePath);
 
   const diffPath = path.join(runDir, "tracked.diff");
   // `runDir` was just created fresh, above, so this can only fire on a
@@ -429,13 +513,13 @@ export async function beginWorktree(
       worktreePath,
     };
   }
-  const diffResult = await gitArgv(
+  const diffResult = await runGit(
     ["diff", "HEAD", "--binary", `--output=${diffPath}`],
-    runDir,
     "tracked-diff.log",
     root,
   );
   logPaths.push(diffResult.logPath);
+  if (diffResult.aborted) return abortedResult("the tracked-diff capture");
   if (diffResult.exitCode !== 0) {
     return {
       ok: false,
@@ -446,13 +530,14 @@ export async function beginWorktree(
     };
   }
 
-  const numstatResult = await gitArgv(
+  const numstatResult = await runGit(
     ["diff", "HEAD", "--numstat", "-z"],
-    runDir,
     "tracked-diff-numstat.log",
     root,
   );
   logPaths.push(numstatResult.logPath);
+  if (numstatResult.aborted)
+    return abortedResult("the tracked-diff file count");
   if (numstatResult.exitCode !== 0) {
     return {
       ok: false,
@@ -468,13 +553,13 @@ export async function beginWorktree(
   // exactly the case `--allow-empty` exists for (a bare `git apply`
   // exits 128 on empty input), and the clean-tree path has to exercise
   // the same exec call as every other tree state.
-  const applyResult = await gitArgv(
+  const applyResult = await runGit(
     ["-C", worktreePath, "apply", "--allow-empty", "--", diffPath],
-    runDir,
     "worktree-apply.log",
     root,
   );
   logPaths.push(applyResult.logPath);
+  if (applyResult.aborted) return abortedResult("the tracked-diff apply");
   if (applyResult.exitCode !== 0) {
     return {
       ok: false,
@@ -485,13 +570,15 @@ export async function beginWorktree(
     };
   }
 
-  const untrackedResult = await gitArgv(
+  const untrackedResult = await runGit(
     ["ls-files", "--others", "--exclude-standard", "-z"],
-    runDir,
     "untracked-files.log",
     root,
   );
   logPaths.push(untrackedResult.logPath);
+  if (untrackedResult.aborted) {
+    return abortedResult("the untracked-file listing");
+  }
   if (untrackedResult.exitCode !== 0) {
     return {
       ok: false,
@@ -516,7 +603,16 @@ export async function beginWorktree(
     return !isPathContained(logDirReal, srcReal);
   });
   try {
-    for (const relPath of syncableRelPaths) {
+    for (let i = 0; i < syncableRelPaths.length; i += 1) {
+      // Checked before the first entry and once per batch (never per
+      // entry: the yield, not the check, is what costs). The signal can
+      // only ever have fired during a yield, so a check anywhere else
+      // in the batch would read the same value this one does.
+      if (i % UNTRACKED_COPY_YIELD_EVERY === 0) {
+        if (i > 0) await yieldToEventLoop();
+        if (signal?.aborted) return abortedResult("the untracked-file copy");
+      }
+      const relPath = syncableRelPaths[i];
       copyUntrackedEntry(
         path.join(root, relPath),
         path.join(worktreePath, relPath),
@@ -534,6 +630,8 @@ export async function beginWorktree(
       worktreePath,
     };
   }
+
+  if (signal?.aborted) return abortedResult("the untracked-file copy");
 
   const nodeModulesDirs = findNodeModulesDirs(root);
   const linked: string[] = [];
@@ -576,32 +674,65 @@ export async function beginWorktree(
 }
 
 /**
- * Removes a worktree via `git worktree remove --force` followed by `git
- * worktree prune`, both run unconditionally (prune also clears any
- * administrative state a partial or already-gone worktree left behind).
- * Best-effort and side-effect-only: the caller decides what a failure
- * here means (a warning, and the repository-keyed marker is left in
- * place for the next invocation to recover).
+ * Removes a worktree via `git worktree remove --force`, then deletes
+ * whatever is left of its directory, then runs `git worktree prune`.
+ * All three run unconditionally, because this also has to clear what an
+ * INTERRUPTED `git worktree add` leaves: git creates the worktree
+ * directory and its administrative entry before the checkout is
+ * finished, so a killed add can leave a registration `remove` refuses
+ * to act on and `prune` will not touch while the directory is still
+ * there. Deleting the directory (always this probe's own scratch space
+ * under `--log-dir`, never anything the operator owns) and pruning
+ * afterwards clears both halves. `ok` therefore reports the outcome
+ * that matters -- nothing left on disk, and the prune that unregisters
+ * it succeeded -- rather than `git worktree remove`'s exit code, which
+ * is non-zero for a path that was never registered in the first place.
+ *
+ * The caller's abort signal is deliberately NOT threaded into these two
+ * git calls, unlike every call in `beginWorktree`: this is the cleanup
+ * a SIGINT/SIGTERM asks for, so running it under the very signal that
+ * triggered it would kill the removal at spawn time and leave behind
+ * exactly the worktree it exists to remove. `track` still applies, so a
+ * signal arriving while a normal-path cleanup is in flight waits for
+ * the removal instead of exiting through the middle of it.
+ *
+ * Best-effort and side-effect-only otherwise: the caller decides what a
+ * failure here means (a warning, and the repository-keyed marker is
+ * left in place for the next invocation to recover).
  */
 export async function cleanupWorktree(
   root: string,
   worktreePath: string,
   logDir: string,
+  opts: { track?: TrackGitCall } = {},
 ): Promise<{ ok: boolean; logPaths: string[] }> {
-  const removeResult = await gitArgv(
-    ["worktree", "remove", "--force", "--", worktreePath],
-    logDir,
-    `worktree-remove-${randomUUID()}.log`,
-    root,
+  const track: TrackGitCall = opts.track ?? ((started) => started);
+  const removeResult = await trackGit(
+    track,
+    gitArgv(
+      ["worktree", "remove", "--force", "--", worktreePath],
+      logDir,
+      `worktree-remove-${randomUUID()}.log`,
+      root,
+    ),
   );
-  const pruneResult = await gitArgv(
-    ["worktree", "prune"],
-    logDir,
-    `worktree-prune-${randomUUID()}.log`,
-    root,
+  try {
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+  } catch {
+    // Best-effort: whatever is still there is reported through `ok`
+    // below, which re-checks the path rather than trusting this call.
+  }
+  const pruneResult = await trackGit(
+    track,
+    gitArgv(
+      ["worktree", "prune"],
+      logDir,
+      `worktree-prune-${randomUUID()}.log`,
+      root,
+    ),
   );
   return {
-    ok: removeResult.exitCode === 0 && pruneResult.exitCode === 0,
+    ok: pruneResult.exitCode === 0 && !fs.existsSync(worktreePath),
     logPaths: [removeResult.logPath, pruneResult.logPath],
   };
 }

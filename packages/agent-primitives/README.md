@@ -274,13 +274,12 @@ copied; a symlink (including a dangling one) is recreated as a symlink
 pointing at the same target, never followed; a directory that is itself
 a git repository (the only shape `git ls-files` reports a directory
 path in at all) is skipped, named in a warning, rather than pulling in
-an unrelated checkout; any other directory is walked and copied file by
-file. A path inside `--log-dir` itself (this probe's own scratch
+an unrelated checkout; any other entry is skipped, named in a warning
+of its own. A path inside `--log-dir` itself (this probe's own scratch
 space, including the worktree just created) is never treated as a
 source to sync. `isolation.syncedUntrackedFiles` counts the `ls-files`
 entries this sync acted on, not the number of files that ended up on
-disk -- a skipped nested-repository entry still counts as one, and a
-plain directory entry can expand into several copied files. A gitignored
+disk -- a skipped entry still counts as one. A gitignored
 `--file` is therefore never synced either way (not tracked, and
 excluded by `--exclude-standard`); probing one under `-i worktree`
 fails fast with `reason: "target_not_synced"` rather than a raw file-not-
@@ -300,14 +299,30 @@ reinstalled per probe. `--pre`/`-t` run with their cwd mapped onto the
 worktree at `--cwd`'s own relative offset from the containment root.
 Any non-zero exit while syncing, or a genuine filesystem failure while
 copying/linking, is `status: "inconclusive"`, `reason:
-"worktree_sync_failed"`, exit `2`, never a verdict. The worktree is
-removed (`git worktree remove --force` then `git worktree prune`) on
-normal completion, on any error, and on `SIGINT`/`SIGTERM`; a `SIGKILL`
-(or a crash) leaves it registered, and the next `probe -i worktree` run on
-the same repository recovers it automatically (a warning names
-`recovered_stale_worktree`), or `agent-primitives doctor` reports it as a
-`stale-worktree` check naming the leftover path and the manual `git
-worktree remove`/`prune` command. The lock for `worktree` is keyed on the
+"worktree_sync_failed"`, exit `2`, never a verdict.
+
+The sync runs under the same abort machinery as `--pre`/`-t`: every git
+call it makes is killed on `SIGINT`/`SIGTERM` and waited for before
+anything removes the worktree underneath it, and the untracked-file copy
+checks the abort between batches rather than running to the end of the
+listing. A sync stopped that way is `reason: "aborted"` for a library
+caller, never `worktree_sync_failed`; on the CLI the signal handler ends
+the process first, so nothing is printed (see the signals section
+above). The worktree is removed (`git worktree remove --force`, the
+directory itself, then `git worktree prune`) on normal completion, on
+any error, and on `SIGINT`/`SIGTERM`, including a signal that lands
+while the sync is still running or while `git worktree add` itself is:
+the path is recorded before the add runs, so a registration a killed add
+left behind is removed with it, and a signal arriving before git
+registered anything leaves nothing to remove. The repository-keyed
+marker is written as soon as `git worktree add` succeeds, with the rest
+of the sync still ahead, so no moment after that point is one where an
+interrupted run leaves a registered worktree and no trace of it. A
+`SIGKILL` (or a crash) leaves it registered with that marker, and the
+next `probe -i worktree` run on the same repository recovers it
+automatically (a warning names `recovered_stale_worktree`), or
+`agent-primitives doctor` reports it as a `stale-worktree` check naming
+the leftover path and the manual `git worktree remove`/`prune` command. The lock for `worktree` is keyed on the
 repository root rather than on `--file` (two probes on the same
 repository serialize, which also covers the shared, linked node_modules
 caches, and matches `-i inplace`'s own lock key whenever `--cwd` is
@@ -383,8 +398,9 @@ grace: it waits further, and bounded, for the pipes to actually close
 before treating the restore as final.
 
 A probe stopped by `SIGINT`/`SIGTERM` restores the target before it does
-anything else. Whatever child was in flight (a `--pre`, a `-t`, or the
-`git apply` of a `-p` mutant) is killed with `SIGKILL` on its whole
+anything else. Whatever child was in flight (a `--pre`, a `-t`, the
+`git apply` of a `-p` mutant, or one of the git calls the `worktree`
+sync makes) is killed with `SIGKILL` on its whole
 process group; the handler then waits, bounded, for that child's stdio
 to truly close, not merely for the run's own promise to settle (which
 the flush grace above can do early), and only then copies the backup

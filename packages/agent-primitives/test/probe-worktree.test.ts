@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -642,6 +642,259 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
   });
 });
 
+describe("probe(): worktree isolation, a signal landing while the worktree is still being synced", () => {
+  /** sha256 of every file in the original tree that this section
+   * asserts is left untouched, keyed by relative path. */
+  function treeHashes(
+    repo: string,
+    relPaths: string[],
+  ): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const rel of relPaths) {
+      out[rel] = createHash("sha256")
+        .update(fs.readFileSync(path.join(repo, rel)))
+        .digest("hex");
+    }
+    return out;
+  }
+
+  async function waitFor(
+    predicate: () => boolean,
+    what: string,
+    timeoutMs = 20000,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error(`${what} never happened`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  /** The path of this run's scratch subdirectory content, once it
+   * exists: `<logDir>/wt-<random>/<name>`. */
+  function scratchPath(logDir: string, name: string): string | undefined {
+    for (const entry of fs.readdirSync(logDir)) {
+      if (!entry.startsWith("wt-")) continue;
+      const candidate = path.join(logDir, entry, name);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    return undefined;
+  }
+
+  /** Spawns the CLI worktree probe under a pinned lock dir and log dir,
+   * with stdout captured so the signal contract (no envelope on a
+   * signalled run) can be asserted. */
+  function spawnProbe(
+    repo: string,
+    lockDir: string,
+    logDir: string,
+  ): { child: ReturnType<typeof spawn>; stdout: () => string } {
+    let stdout = "";
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-r",
+        "  return false;",
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "worktree",
+      ],
+      {
+        cwd: repo,
+        env: {
+          ...process.env,
+          AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+          AGENT_PRIMITIVES_LOG_DIR: logDir,
+        },
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
+    child.stdout!.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    return { child, stdout: () => stdout };
+  }
+
+  /** A repository with a tracked change big enough that `git diff HEAD
+   * --binary` runs for hundreds of milliseconds. The committed blob is
+   * one byte; the incompressible content is written into the working
+   * tree here, never checked in. */
+  function makeSlowDiffRepo(): string {
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, "big.bin"), "x");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "big"]);
+    fs.writeFileSync(path.join(repo, "big.bin"), randomBytes(40 * 1024 * 1024));
+    return repo;
+  }
+
+  it("SIGTERM during the tracked-diff capture exits 143 with no output, removes the worktree, and leaves no marker, no lock, and the original tree untouched", async () => {
+    const lockDir = useLockDir();
+    const repo = makeSlowDiffRepo();
+    const logDir = makeTmpDir();
+    const before = treeHashes(repo, [
+      "fixture.js",
+      "fixture.test.js",
+      "big.bin",
+    ]);
+
+    const { child, stdout } = spawnProbe(repo, lockDir, logDir);
+    // `git diff --output=<path>` creates that file as it starts, so its
+    // appearance is the sync's diff phase actually running: no fixed
+    // sleep decides when the signal lands.
+    await waitFor(
+      () => scratchPath(logDir, "tracked.diff") !== undefined,
+      "the tracked diff started",
+    );
+    const diffPath = scratchPath(logDir, "tracked.diff")!;
+    const worktreePath = path.join(path.dirname(diffPath), "wt");
+    expect(fs.existsSync(worktreePath)).toBe(true);
+
+    child.kill("SIGTERM");
+    const exitCode = await new Promise<number | null>((resolve) =>
+      child.on("exit", (code) => resolve(code)),
+    );
+
+    expect(exitCode).toBe(143);
+    expect(stdout()).toBe("");
+    // The worktree is gone from disk and from git's registry.
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
+    const { resolveDeepestExisting } =
+      await import("../src/probe/containment.js");
+    const realRoot = resolveDeepestExisting(repo);
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+    expect(
+      treeHashes(repo, ["fixture.js", "fixture.test.js", "big.bin"]),
+    ).toEqual(before);
+    // No git child outlived the exit: the interrupted diff of a 40 MB
+    // change would still be writing into this file if it had.
+    const sizeAtExit = fs.statSync(diffPath).size;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(fs.statSync(diffPath).size).toBe(sizeAtExit);
+  }, 40000);
+
+  it("SIGTERM during the untracked-file copy exits 143 with no output, removes the worktree, and leaves no marker, no lock, and the original tree untouched", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const many = path.join(repo, "many");
+    fs.mkdirSync(many, { recursive: true });
+    for (let i = 0; i < 6000; i += 1) {
+      fs.writeFileSync(
+        path.join(many, `u-${String(i).padStart(5, "0")}.txt`),
+        "x".repeat(64),
+      );
+    }
+    const logDir = makeTmpDir();
+    const before = treeHashes(repo, ["fixture.js", "fixture.test.js"]);
+
+    const { child, stdout } = spawnProbe(repo, lockDir, logDir);
+    // The first of the 6000 entries appearing inside the worktree is the
+    // copy phase being under way, with the rest of it still ahead.
+    await waitFor(
+      () => scratchPath(logDir, "wt") !== undefined,
+      "the worktree was created",
+    );
+    const worktreePath = scratchPath(logDir, "wt")!;
+    await waitFor(
+      () => fs.existsSync(path.join(worktreePath, "many", "u-00000.txt")),
+      "the untracked copy started",
+    );
+
+    child.kill("SIGTERM");
+    const exitCode = await new Promise<number | null>((resolve) =>
+      child.on("exit", (code) => resolve(code)),
+    );
+
+    expect(exitCode).toBe(143);
+    expect(stdout()).toBe("");
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
+    const { resolveDeepestExisting } =
+      await import("../src/probe/containment.js");
+    const realRoot = resolveDeepestExisting(repo);
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+    expect(treeHashes(repo, ["fixture.js", "fixture.test.js"])).toEqual(before);
+  }, 40000);
+
+  it("SIGKILL during the tracked-diff capture leaves a marker at the repository key that doctor reports and the next probe recovers", async () => {
+    const lockDir = useLockDir();
+    const repo = makeSlowDiffRepo();
+    const logDir = makeTmpDir();
+
+    const { child } = spawnProbe(repo, lockDir, logDir);
+    await waitFor(
+      () => scratchPath(logDir, "tracked.diff") !== undefined,
+      "the tracked diff started",
+    );
+    const worktreePath = path.join(
+      path.dirname(scratchPath(logDir, "tracked.diff")!),
+      "wt",
+    );
+
+    // SIGKILL, not SIGTERM: no handler runs, so nothing cleans up. The
+    // marker written right after `git worktree add` succeeded is the
+    // only trail left, and this is what it is for.
+    child.kill("SIGKILL");
+    await new Promise<void>((resolve) => child.on("exit", () => resolve()));
+
+    const { resolveDeepestExisting } =
+      await import("../src/probe/containment.js");
+    const realRoot = resolveDeepestExisting(repo);
+    const marker = readMarkerFor(realRoot);
+    expect(marker).toBeDefined();
+    expect(marker!.targetPath).toBe(worktreePath);
+    // The leftover really is registered: asserted before the recovery
+    // steps, so a regression that never created one reads as that.
+    expect(fs.existsSync(worktreePath)).toBe(true);
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(2);
+
+    const { doctor } = await import("../src/doctor/index.js");
+    const doctorResult = await doctor({ cwd: repo, lockDir });
+    const staleWorktreeCheck = doctorResult.checks.find(
+      (c) => c.name === "stale-worktree",
+    );
+    expect(staleWorktreeCheck?.ok).toBe(false);
+    expect(staleWorktreeCheck?.detail).toContain(worktreePath);
+
+    // The next probe on this repository recovers it and reaches a normal
+    // verdict. The big working-tree change is dropped first: it is the
+    // slow-diff device of this test, not part of what recovery proves.
+    fs.rmSync(path.join(repo, "big.bin"), { force: true });
+    git(repo, ["checkout", "--", "big.bin"]);
+    const result = await probe(baseOptions(repo, { logDir }));
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    expect(result.status).toBe("killed");
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(fs.existsSync(worktreePath)).toBe(false);
+  }, 40000);
+});
+
 describe("probe(): worktree isolation, a reused --log-dir never replays a previous run", () => {
   it("two probes sharing one --log-dir each get their own scratch subdirectory (not one fixed name reused)", async () => {
     useLockDir();
@@ -830,7 +1083,7 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
     expect(result.isolation.syncedUntrackedFiles).toBe(0);
   });
 
-  it("an untracked directory entry without its own .git is walked and its files copied, not treated as a nested repository", async () => {
+  it("an untracked plain directory entry is skipped with a warning naming it, neither walked nor mistaken for a nested repository", async () => {
     useLockDir();
     const { repo } = initRepo();
     const plainDir = path.join(repo, "plain-untracked-dir");
@@ -844,10 +1097,11 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
     mockRun.mockImplementation(async (file, args, options) => {
       const result = await actualRun.runArgv(file, args, options);
       if (args[0] === "ls-files" && args.includes("--others")) {
-        // Real `git ls-files` never reports a plain (non-repository)
-        // directory as its own entry; this simulates the shape handled
-        // defensively anyway, to prove the walk -- not a nested-
-        // repository skip -- is what runs for it.
+        // Real `git ls-files --others --exclude-standard` never reports
+        // a plain (non-repository) directory as its own entry: it lists
+        // files, or a directory only at a nested `.git` boundary. The
+        // entry is stubbed in here because that is the only way to
+        // reach the skip-with-a-warning fallback this asserts.
         return { ...result, stdout: result.stdout + "plain-untracked-dir\0" };
       }
       return result;
@@ -855,10 +1109,22 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
 
     try {
       const result = await probe(baseOptions(repo));
+      // The entry is skipped, not walked and not copied, and the sync
+      // continues to a normal verdict rather than failing over it.
       expect(result.status).toBe("killed");
-      expect(result.warnings.some((w) => w.includes("nested repository"))).toBe(
-        false,
-      );
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(
+              "neither a regular file, a symlink, nor a nested repository",
+            ) && w.includes("plain-untracked-dir"),
+        ),
+      ).toBe(true);
+      expect(
+        result.warnings.some((w) =>
+          w.includes("skipped a nested repository directory"),
+        ),
+      ).toBe(false);
     } finally {
       mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
         actualRun.runArgv(...args),

@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   beginInplace,
   beginWorktree,
@@ -10,6 +11,25 @@ import {
   countNumstatFiles,
   findNodeModulesDirs,
 } from "../src/probe/isolation.js";
+import { runArgv } from "../src/probe/run.js";
+
+// Call-through mock (the same shape probe-worktree.test.ts uses): every
+// call runs the real runner, and the recorded calls are what lets a test
+// assert what `beginWorktree` passed into each git invocation. This is
+// the one seam every git call in isolation.ts goes through.
+vi.mock("../src/probe/run.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/probe/run.js")>();
+  return { ...actual, runArgv: vi.fn(actual.runArgv) };
+});
+
+/** The recorded `runArgv` calls for `git`, in order. */
+function gitCalls(): Parameters<typeof runArgv>[] {
+  return vi
+    .mocked(runArgv)
+    .mock.calls.filter((call) => call[0] === "git") as Parameters<
+    typeof runArgv
+  >[];
+}
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -24,6 +44,7 @@ afterEach(() => {
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  vi.mocked(runArgv).mockClear();
 });
 
 describe("beginInplace", () => {
@@ -400,5 +421,218 @@ describe("beginWorktree / cleanupWorktree", () => {
     if (result.ok) return;
     expect(result.reason).toBe("worktree_sync_failed");
     expect(result.worktreePath).toBeUndefined();
+  });
+
+  describe("under a caller's signal and tracking hook", () => {
+    /** A repository whose sync exercises every git call: a tracked
+     * modification (so the diff is non-empty) and an untracked file. */
+    function initDirtyRepo(): string {
+      const repo = initRepo();
+      fs.writeFileSync(
+        path.join(repo, "fixture.js"),
+        "module.exports = { a: 1 };\n",
+      );
+      fs.writeFileSync(path.join(repo, "extra.txt"), "untracked\n");
+      return repo;
+    }
+
+    /** A repository with a tracked change big enough that `git diff HEAD
+     * --binary` takes hundreds of milliseconds, which is the window an
+     * abort has to land in. Generated here, never checked in: the
+     * committed blob is one byte, and the incompressible content is
+     * written into the working tree afterwards. */
+    function initRepoWithSlowDiff(): string {
+      const repo = initRepo();
+      fs.writeFileSync(path.join(repo, "big.bin"), "x");
+      git(repo, ["add", "-A"]);
+      git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "big"]);
+      fs.writeFileSync(
+        path.join(repo, "big.bin"),
+        randomBytes(40 * 1024 * 1024),
+      );
+      return repo;
+    }
+
+    async function waitFor(
+      predicate: () => boolean,
+      what: string,
+      timeoutMs = 15000,
+    ): Promise<void> {
+      const deadline = Date.now() + timeoutMs;
+      while (!predicate()) {
+        if (Date.now() > deadline) throw new Error(`${what} never happened`);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
+
+    function worktreeBlocks(repo: string): string[] {
+      return execFileSync("git", ["worktree", "list", "--porcelain"], {
+        cwd: repo,
+        encoding: "utf8",
+      })
+        .split("\n\n")
+        .filter((block) => block.trim().length > 0);
+    }
+
+    it("passes the caller's signal into every git call and registers every one of them through track", async () => {
+      const repo = initDirtyRepo();
+      const logDir = makeTmpDir();
+      const controller = new AbortController();
+      const tracked: Promise<unknown>[] = [];
+      const closures: Promise<void>[] = [];
+
+      const result = await beginWorktree({
+        root: repo,
+        cwd: repo,
+        logDir,
+        links: [],
+        signal: controller.signal,
+        track: async (started, closed) => {
+          tracked.push(started);
+          closures.push(closed);
+          return started;
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      // worktree add, the tracked diff, the numstat count, the apply,
+      // and the untracked listing: every one of them under the signal.
+      const calls = gitCalls();
+      expect(calls.length).toBe(5);
+      for (const call of calls) {
+        expect(call[2].signal).toBe(controller.signal);
+      }
+      // ... and every one of them registered as the caller's in-flight
+      // run, so a signal handler waits for it instead of restoring or
+      // removing the worktree underneath it.
+      expect(tracked).toHaveLength(calls.length);
+      expect(closures).toHaveLength(calls.length);
+      await Promise.all(closures);
+    });
+
+    it("an abort during the tracked-diff capture is reported as aborted, never as a sync failure", async () => {
+      const repo = initRepoWithSlowDiff();
+      const logDir = makeTmpDir();
+      const controller = new AbortController();
+
+      const started = beginWorktree({
+        root: repo,
+        cwd: repo,
+        logDir,
+        links: [],
+        signal: controller.signal,
+      });
+      // `git diff --output=<path>` creates that file when it starts, so
+      // its appearance is the diff phase actually being under way; no
+      // fixed sleep decides when the abort lands.
+      const diffFile = (): string | undefined => {
+        for (const entry of fs.readdirSync(logDir)) {
+          if (!entry.startsWith("wt-")) continue;
+          const candidate = path.join(logDir, entry, "tracked.diff");
+          if (fs.existsSync(candidate)) return candidate;
+        }
+        return undefined;
+      };
+      await waitFor(() => diffFile() !== undefined, "the tracked diff started");
+      const diffPath = diffFile()!;
+      controller.abort();
+
+      const result = await started;
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toBe("aborted");
+      expect(result.detail).toContain("tracked-diff");
+      // The killed git child wrote nothing more after the abort: the
+      // diff of a 40 MB change is far from finished this early.
+      const sizeAtAbort = fs.statSync(diffPath).size;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(fs.statSync(diffPath).size).toBe(sizeAtAbort);
+
+      const cleanup = await cleanupWorktree(repo, result.worktreePath!, logDir);
+      expect(cleanup.ok).toBe(true);
+      expect(worktreeBlocks(repo)).toHaveLength(1);
+    }, 30000);
+
+    it("an abort during the untracked-file copy is reported as aborted", async () => {
+      const repo = initRepo();
+      const many = path.join(repo, "many");
+      fs.mkdirSync(many, { recursive: true });
+      for (let i = 0; i < 6000; i += 1) {
+        fs.writeFileSync(
+          path.join(many, `u-${String(i).padStart(5, "0")}.txt`),
+          "x".repeat(64),
+        );
+      }
+      const logDir = makeTmpDir();
+      const controller = new AbortController();
+      let worktreePath: string | undefined;
+
+      const started = beginWorktree({
+        root: repo,
+        cwd: repo,
+        logDir,
+        links: [],
+        signal: controller.signal,
+        onWorktreeAttempt: (p) => {
+          worktreePath = p;
+        },
+      });
+      // The first copied entry appearing in the worktree is the copy
+      // phase being under way; `git ls-files` sorts, so this is the
+      // first of the 6000, with the rest of the phase still ahead.
+      await waitFor(
+        () =>
+          worktreePath !== undefined &&
+          fs.existsSync(path.join(worktreePath, "many", "u-00000.txt")),
+        "the untracked copy started",
+      );
+      controller.abort();
+
+      const result = await started;
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toBe("aborted");
+      expect(result.detail).toContain("untracked-file copy");
+      // Stopped partway, not merely reported as stopped after copying
+      // everything anyway.
+      expect(
+        fs.existsSync(path.join(worktreePath!, "many", "u-05999.txt")),
+      ).toBe(false);
+
+      const cleanup = await cleanupWorktree(repo, worktreePath!, logDir);
+      expect(cleanup.ok).toBe(true);
+      expect(worktreeBlocks(repo)).toHaveLength(1);
+    }, 30000);
+
+    it("an abort that lands before git worktree add returns leaves nothing registered", async () => {
+      const repo = initRepo();
+      const logDir = makeTmpDir();
+      const controller = new AbortController();
+      controller.abort();
+      let worktreePath: string | undefined;
+
+      const result = await beginWorktree({
+        root: repo,
+        cwd: repo,
+        logDir,
+        links: [],
+        signal: controller.signal,
+        onWorktreeAttempt: (p) => {
+          worktreePath = p;
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toBe("aborted");
+      // The caller knows the path even though the add never returned
+      // successfully, which is what lets it clean up a registration git
+      // may already have written.
+      expect(worktreePath).toBeDefined();
+      const cleanup = await cleanupWorktree(repo, worktreePath!, logDir);
+      expect(cleanup.ok).toBe(true);
+      expect(worktreeBlocks(repo)).toHaveLength(1);
+      expect(fs.existsSync(worktreePath!)).toBe(false);
+    });
   });
 });

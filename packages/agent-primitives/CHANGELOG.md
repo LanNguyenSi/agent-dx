@@ -452,7 +452,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --others --exclude-standard`) is synced by its own type: a regular
   file is copied, a symlink (dangling or not) is recreated as a
   symlink, a directory that is itself a git repository is skipped with
-  a warning, any other directory is walked and copied file by file, and
+  a warning, any other entry is skipped with a warning naming it, and
   a path inside `--log-dir` itself is never treated as a source.
   `isolation.syncedUntrackedFiles` counts the `ls-files` entries acted
   on, not the files that ended up on disk. A gitignored `--file` is
@@ -467,6 +467,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `isolation.linked`. Any non-zero exit while syncing, or a genuine
   filesystem failure while copying/linking, is
   `inconclusive`/`worktree_sync_failed`, exit 2, never a verdict. The
+  whole sync runs under the probe's own abort signal and in-flight
+  accounting: every git call it makes is killed when `SIGINT`/`SIGTERM`
+  arrives and is waited for before anything removes the worktree
+  underneath it, and the untracked-file copy checks the same abort
+  between batches instead of running to the end of the listing. A sync
+  stopped that way reports `inconclusive`/`aborted`, never
+  `worktree_sync_failed`: it is a run that was stopped, not a sync that
+  failed (on the CLI the signal handler ends the process first, so the
+  result is what a library caller sees). The
   lock and the leftover-worktree marker are keyed on the repository
   root instead of `--file` (two probes on one repository serialize,
   covering the shared, linked node_modules caches, and matching
@@ -476,12 +485,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   original target's hash is still checked before and after, and a
   mismatch is reported as `worktree_original_tree_modified` rather than
   silently trusted. The worktree is removed (`git worktree remove
-  --force` then `git worktree prune`) on normal completion, on any
-  thrown error, and on `SIGINT`/`SIGTERM` (the signal handler and the
-  pipeline's own cleanup share one in-flight promise, so neither can
-  let the process exit while the other's `git worktree remove` is still
-  running); a `SIGKILL` leaves it registered, and the next `worktree`
-  probe on that repository recovers it automatically. Outside a git
+  --force`, the directory itself, then `git worktree prune`) on normal
+  completion, on any thrown error, and on `SIGINT`/`SIGTERM` (the
+  signal handler and the pipeline's own cleanup share one in-flight
+  promise, so neither can let the process exit while the other's `git
+  worktree remove` is still running), including a signal that lands
+  while the worktree is still being synced or while `git worktree add`
+  itself is running: the path is recorded before the add runs, so a
+  registration a killed add left behind is removed too. The
+  repository-keyed marker is written as soon as the add succeeds rather
+  than after the sync, so every moment from there on has either a
+  cleanup that runs or a marker left behind; a `SIGKILL` leaves the
+  worktree registered with that marker, and `doctor` reports it and the
+  next `worktree` probe on that repository recovers it automatically.
+  Outside a git
   work tree, `worktree` falls back to `inplace` with a warning naming
   the fallback. `doctor` gained a `stale-worktree` check reporting a
   leftover worktree for the current repository, naming the manual `git
