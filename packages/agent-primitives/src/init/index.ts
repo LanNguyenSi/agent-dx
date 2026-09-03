@@ -226,10 +226,9 @@ function resolveTargetPath(
 // `undefined` instead of failing loudly; asserted once, at module load,
 // so a platform where the constant is missing or falsy is refused outright
 // rather than quietly writing through a symlink from then on.
-if (
-  typeof fs.constants.O_NOFOLLOW !== "number" ||
-  fs.constants.O_NOFOLLOW <= 0
-) {
+const O_NOFOLLOW_IS_VALID =
+  typeof fs.constants.O_NOFOLLOW === "number" && fs.constants.O_NOFOLLOW > 0;
+if (!O_NOFOLLOW_IS_VALID) {
   throw new Error(
     "init: fs.constants.O_NOFOLLOW is not a positive number on this " +
       "platform; refusing to load a module whose symlink guard would be " +
