@@ -769,27 +769,34 @@ describe("cli verify: live integration against real tools from node_modules", ()
     const cwd = path.join(FIXTURES_DIR, "vitest-project");
     const logDir = makeTmpDir();
     const vitestEntry = path.join(NODE_MODULES, "vitest", "vitest.mjs");
-    const run = await spawnCli([
-      "-C",
-      cwd,
-      "-l",
-      logDir,
-      "verify",
-      "-x",
-      `test=node ${vitestEntry} run`,
-    ]);
-    const parsed = JSON.parse(run.stdout);
-    const check = parsed.checks.find(
-      (c: { name: string }) => c.name === "test",
-    );
-    expect(check.detector).toBe("vitest");
-    expect(check.summary.failed).toBeGreaterThanOrEqual(1);
-    expect(check.failures[0].file).toBeTruthy();
-    expect(check.failures[0].name).toBeTruthy();
-    fs.rmSync(path.join(cwd, "node_modules"), {
-      recursive: true,
-      force: true,
-    });
+    // try/finally, not an in-body cleanup at the end of the test: an
+    // assertion failure above would otherwise skip the rmSync and leave
+    // the transform cache node_modules/.vite behind under this fixture,
+    // which ships no node_modules of its own (see test/fixtures/.gitignore).
+    try {
+      const run = await spawnCli([
+        "-C",
+        cwd,
+        "-l",
+        logDir,
+        "verify",
+        "-x",
+        `test=node ${vitestEntry} run`,
+      ]);
+      const parsed = JSON.parse(run.stdout);
+      const check = parsed.checks.find(
+        (c: { name: string }) => c.name === "test",
+      );
+      expect(check.detector).toBe("vitest");
+      expect(check.summary.failed).toBeGreaterThanOrEqual(1);
+      expect(check.failures[0].file).toBeTruthy();
+      expect(check.failures[0].name).toBeTruthy();
+    } finally {
+      fs.rmSync(path.join(cwd, "node_modules"), {
+        recursive: true,
+        force: true,
+      });
+    }
   }, 20000);
 
   it("tsc fixture: detector tsc, at least one failure with file populated", async () => {

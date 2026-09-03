@@ -14,7 +14,24 @@ capture:
 
 - vitest 4.1.11
 - typescript 5.9.3 (`tsc`)
-- eslint 10.9.1 (stylish formatter, the CLI default)
+- eslint 10.9.1 (stylish formatter, the CLI default; developing against
+  this package requires Node `^20.19.0 || ^22.13.0 || >=24` for that
+  reason, narrower than this package's own published `engines.node
+  >=20`, since eslint is a devDependency only)
+
+`tsc-vitest-concat.txt` is the one exception: not a raw capture, but two
+of the other captures (`tsc-errors.txt` and the vitest mixed-run capture)
+concatenated, so a single check's output can be made to carry both
+shapes at once for the ambiguous-selection tests. `tsc-errors-many.txt`
+is a real capture too (a throwaway project with 70 type errors, one per
+line), used to exercise the tail-truncation warning against more
+diagnostic lines than exec.ts's own 60-line tail bound keeps.
+`*-colorized.txt` fixtures carry ANSI SGR escape codes: the eslint one is
+a real `FORCE_COLOR=1` capture (stylish colorizes by default outside a
+TTY-detected terminal); the tsc one is inline SGR sequences hand-added to
+a real capture, since `tsc --pretty false` (the shape this detector
+targets) never colorizes on its own, so there is no non-pretty colorized
+shape to capture from a real run.
 
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 

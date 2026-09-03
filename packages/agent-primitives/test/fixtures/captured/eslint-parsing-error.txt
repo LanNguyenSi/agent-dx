@@ -1,0 +1,6 @@
+
+/project/bad.js
+  2:3  error  Parsing error: Unexpected keyword 'return'
+
+✖ 1 problem (1 error, 0 warnings)
+

@@ -1,11 +1,13 @@
 import type { Detector, DetectorInput, DetectorParseResult } from "../types.js";
 
-/** Strips ANSI SGR escape codes (`\x1b[...m`). `tsc --pretty` (the
- * default when stdout looks like it might support it) colorizes and
- * reflows its diagnostics; the fully isolated environment a `-x`
- * override's real-tool invocation runs under here (no `TERM`, no
- * `NO_COLOR`) still triggers that, so codes are stripped before the
- * diagnostic-line regex runs. */
+/** Strips ANSI SGR escape codes (`\x1b[...m`) only. This detector is
+ * written against `--pretty false`, which never colorizes on its own;
+ * codes are still stripped defensively, since a wrapper around `tsc`
+ * (or a future default change) could inject them into that same
+ * diagnostic-line shape. Cursor movement and other non-SGR escape
+ * sequences are out of scope: `tsc`'s non-pretty diagnostic output has
+ * no occasion to emit them, so stripping them would be dead code
+ * against every shape this detector is written for. */
 function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, "");
 }

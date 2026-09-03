@@ -1,0 +1,8 @@
+[0m
+[4m/project/a.js[24m
+  [2m2:9[22m   [31merror[39m  'unused' is assigned a value but never used  [2mno-unused-vars[22m
+  [2m6:1[22m   [31merror[39m  'console' is not defined                     [2mno-undef[22m
+  [2m6:13[22m  [31merror[39m  'notDefined' is not defined                  [2mno-undef[22m
+
+[31m[1m✖ 3 problems (3 errors, 0 warnings)[22m[39m
+[0m

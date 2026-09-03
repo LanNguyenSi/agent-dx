@@ -63,6 +63,69 @@ export const DEFAULT_MAX_FAILURES = 20;
  * being interpolated into a shell command. */
 const CHECK_NAME_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 
+/** exec.ts's own tail bounds (60 lines, 6000 characters per stream; see
+ * `TAIL_LINES`/`TAIL_CHARS` there), mirrored here rather than imported so
+ * this detection stays a read of the tails it is handed, not a change to
+ * exec.ts itself. A tail sitting exactly at either bound means real
+ * output was cut off there, not that the command coincidentally produced
+ * exactly this much. */
+const TAIL_LINE_BOUND = 60;
+const TAIL_CHAR_BOUND = 6000;
+
+/** True when a captured tail (stdout or stderr, as returned by
+ * `execCommand`) is at exec.ts's own bound. */
+function tailAtBound(tail: string): boolean {
+  if (tail.length === 0) return false;
+  return (
+    tail.split("\n").length >= TAIL_LINE_BOUND || tail.length >= TAIL_CHAR_BOUND
+  );
+}
+
+/** eslint's own "✖ N problems (N errors, M warnings)" summary line: the
+ * tool's own total, always more trustworthy than a count of issue rows
+ * out of a tail that may have been cut before every row reached it. This
+ * line is the very last thing eslint prints, so it typically survives a
+ * truncated tail (the tail keeps the *end* of the output) even when
+ * earlier issue rows did not. */
+const ESLINT_TOTALS_LINE =
+  /✖\s*\d+\s*problems?\s*\(\s*(\d+)\s*errors?,\s*(\d+)\s*warnings?\s*\)/;
+
+/**
+ * When a check's output was truncated at exec.ts's tail bound, a
+ * detector's own issue-row count can undercount the real total. Prefers
+ * the tool's own reported total where one can be found in the tail
+ * (currently only eslint's summary line); otherwise appends a warning
+ * naming the truncation so a caller does not read a partial count as
+ * complete.
+ */
+function adjustForTruncatedTail(
+  parsed: DetectorParseResult,
+  output: string,
+  truncated: boolean,
+): DetectorParseResult {
+  if (!truncated) return parsed;
+
+  const totals = ESLINT_TOTALS_LINE.exec(output);
+  if (totals) {
+    return {
+      ...parsed,
+      summary: {
+        ...parsed.summary,
+        errors: Number(totals[1]),
+        warnings: Number(totals[2]),
+      },
+    };
+  }
+
+  return {
+    ...parsed,
+    warnings: [
+      ...parsed.warnings,
+      "output_tail_truncated: counts may be undercounted",
+    ],
+  };
+}
+
 /**
  * One detector selection outcome. `ambiguousCandidates` is populated only
  * when the selection was ambiguous (two or more shape-matching, non-
@@ -449,6 +512,11 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     });
 
     if (status === "fail" || status === "error") {
+      const truncated =
+        tailAtBound(execResult.stdoutTail) ||
+        tailAtBound(execResult.stderrTail);
+      parsed = adjustForTruncatedTail(parsed, output, truncated);
+
       const tail = output.trim();
       parsed = applyFailuresInvariant(
         parsed,
