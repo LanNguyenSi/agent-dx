@@ -65,6 +65,19 @@ export interface ExecResult {
    * actually happened) should not treat this promise's settling alone
    * as proof; it should also consult `onStdioClosed` in `ExecOptions`. */
   stdioClosed: boolean;
+  /** True when `stdoutTail` is missing real output that this run
+   * actually saw: either more than `TAIL_LINES` real lines were pushed,
+   * or the tail text (after any line trim) still exceeded `TAIL_CHARS`.
+   * Computed by `TailKeeper.wasTruncated()` on the real line count (the
+   * phantom empty element `split("\n")` produces for output ending in a
+   * newline is not a line, so it is never counted as one, on either side
+   * of the comparison); a truncated tail that happens to end with a
+   * newline is therefore never missed the way counting `stdoutTail`'s
+   * own split length after the fact would miss it. Additive: a caller
+   * that ignores this field sees unchanged behavior. */
+  stdoutTruncated: boolean;
+  /** Same as `stdoutTruncated`, for stderr. */
+  stderrTruncated: boolean;
 }
 
 const TAIL_LINES = 60;
@@ -149,6 +162,35 @@ class TailKeeper {
       text = text.slice(-TAIL_CHARS);
     }
     return text;
+  }
+
+  /**
+   * True when the buffered output holds more than `tail()` can keep: a
+   * real line, or a byte of the kept lines' own text, was dropped.
+   * Mirrors `tail()`'s own two-stage bound (line count, then character
+   * count) but on the *real* line count first: `split("\n")` on output
+   * that ends with a newline yields one trailing empty element that is
+   * not a line at all (e.g. `"a\nb\n".split("\n")` is `["a", "b", ""]`,
+   * three elements for two real lines), so that phantom element is
+   * dropped before comparing against `TAIL_LINES`. Without this
+   * correction, output ending in a newline (nearly all of it) always
+   * looks one real line short of the bound and truncation is never
+   * detected. Computed independently of, and without altering, what
+   * `tail()` itself returns.
+   */
+  wasTruncated(): boolean {
+    let lines = this.buf.split("\n");
+    if (lines.length > 0 && lines[lines.length - 1] === "") {
+      lines.pop();
+    }
+    let lineTruncated = false;
+    if (lines.length > TAIL_LINES) {
+      lines = lines.slice(-TAIL_LINES);
+      lineTruncated = true;
+    }
+    const text = lines.join("\n");
+    const charTruncated = text.length > TAIL_CHARS;
+    return lineTruncated || charTruncated;
   }
 }
 
@@ -407,6 +449,8 @@ export function execCommand(
             : {}),
           outputMayBeIncomplete,
           stdioClosed,
+          stdoutTruncated: stdoutTail.wasTruncated(),
+          stderrTruncated: stderrTail.wasTruncated(),
         });
       });
     };

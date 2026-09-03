@@ -58,17 +58,43 @@ const SEGMENT = /(\d+)\s+(failed|passed|expected fail|skipped|todo)\b/g;
 
 /**
  * ` FAIL  file > suite > name` (one or more `>`-separated suite segments
- * before the test name), or ` FAIL  file [ file ]` (a file that failed to
- * collect, e.g. a broken import: no suite, no name, just the file
- * repeated in brackets). The file capture is never `\S+`: a real,
- * if unusual, path can carry a space, so `file` is captured structurally
- * up to the ` > ` suite separator (when present) or the trailing
- * ` [ ... ]` collection-error marker (when present), never merely up to
- * the first whitespace. The assertion/error text is the first non-blank
- * line that follows, appended to the failure's message so a subagent
- * sees the "why" without opening the log file.
+ * before the test name). Tried first, and only matches a line that
+ * carries a ` > ` separator at all: the name is everything after the
+ * first one, to the end of the line, so a name that itself ends in a
+ * bracketed segment (a parameterized test's `name[0]`, or a
+ * snapshot-shaped name) is captured whole. The file capture is never
+ * `\S+`: it is captured structurally, lazily up to that first ` > `.
  */
-const FAIL_LINE = /^\s*FAIL\s+(.+?)(?:\s+>\s+(.+?))?(?:\s+\[.*\])?\s*$/;
+const FAIL_LINE_WITH_SUITE = /^\s*FAIL\s+(.+?)\s+>\s+(.+?)\s*$/;
+
+/**
+ * ` FAIL  file` or ` FAIL  file [ file ]` (a file that failed to collect,
+ * e.g. a broken import: no suite, no name, just the file repeated in
+ * brackets). Only ever consulted when `FAIL_LINE_WITH_SUITE` above did
+ * not match (no ` > ` anywhere on the line): keeping the two shapes as
+ * separate, anchored alternatives -- rather than one regex with both a
+ * suite group and a trailing-bracket group, each optional -- is what
+ * keeps this shape's own bracket handling from ever being reached for a
+ * suite/name line, so a name ending in `[0]` can never be mistaken for
+ * this shape's collection-error marker. The file capture is never
+ * `\S+`: it is captured structurally, up to the trailing ` [ ... ]`
+ * marker when present, or to the end of the line otherwise.
+ */
+const FAIL_LINE_FILE_ONLY = /^\s*FAIL\s+(.+?)(?:\s+\[.*\])?\s*$/;
+
+/** One parsed ` FAIL ` line: `name` is `undefined` for the file-only
+ * shape (`FAIL_LINE_FILE_ONLY`), always present (though possibly empty)
+ * for the suite/name shape (`FAIL_LINE_WITH_SUITE`). `null` when the
+ * line is not a ` FAIL ` line at all. */
+function matchFailLine(
+  line: string,
+): { file: string; name: string | undefined } | null {
+  const withSuite = FAIL_LINE_WITH_SUITE.exec(line);
+  if (withSuite) return { file: withSuite[1], name: withSuite[2] };
+  const fileOnly = FAIL_LINE_FILE_ONLY.exec(line);
+  if (fileOnly) return { file: fileOnly[1], name: undefined };
+  return null;
+}
 
 interface TestsSummary {
   passed: number;
@@ -129,6 +155,20 @@ function parseTestsSummary(output: string): TestsSummary | null {
   return matchedAny ? summary : null;
 }
 
+/**
+ * Known boundary: this detector reads the `Test Files`/`Tests` summary
+ * lines and ` FAIL ` blocks only. It does not parse vitest's separate
+ * `Type Errors`, `Errors`, or `Leaks` summary lines (typecheck failures
+ * under `vitest typecheck`, uncaught errors outside any test, and memory
+ * leak warnings, respectively) into `summary` or `failures`; a run that
+ * prints one of those lines alongside a `Tests` line still gets whatever
+ * the `Tests` line and ` FAIL ` blocks state, just nothing from the
+ * other three. A run whose *only* signal is one of those lines (no
+ * `Tests` line at all) does not match this detector in the first place
+ * and falls back to `generic`, which the failures invariant in
+ * verify/index.ts still covers with a synthetic failure entry, so
+ * nothing is silently reported as a pass either way.
+ */
 export const vitestDetector: Detector = {
   name: "vitest",
   matches(input: DetectorInput): boolean {
@@ -145,10 +185,10 @@ export const vitestDetector: Detector = {
     const failures: DetectorParseResult["failures"] = [];
 
     for (let i = 0; i < lines.length; i++) {
-      const match = FAIL_LINE.exec(lines[i]);
+      const match = matchFailLine(lines[i]);
       if (!match) continue;
-      const file = match[1];
-      const name = match[2]?.trim();
+      const file = match.file;
+      const name = match.name?.trim();
       let assertion: string | undefined;
       for (let j = i + 1; j < lines.length; j++) {
         const candidate = lines[j].trim();

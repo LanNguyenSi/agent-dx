@@ -61,8 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ANSI SGR color codes before matching or parsing, since a tool can
   default to colorized output even outside a real terminal (the Node
   floor eslint needs to develop against is documented once, in the
-  package README's `verify` section). When a check's captured output
-  tail was truncated at exec.ts's own bound, eslint's own reported total
+  package README's `verify` section). Truncation is read from exec.ts's
+  own `stdoutTruncated`/`stderrTruncated` flags, never recomputed from
+  the tail text itself (a tail that happens to end with a trailing
+  newline is not a reliable way to tell a truncated tail from an
+  untruncated one). When either flag is set, eslint's own reported total
   is preferred, only when the eslint detector was selected for that
   check, where one survives in the tail (eslint's `✖ N problems` line);
   either way a warning names the truncation, since the `failures` list

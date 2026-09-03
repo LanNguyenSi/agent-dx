@@ -14,6 +14,19 @@ function stripAnsi(text: string): string {
 }
 
 /**
+ * A real eslint rule id, core or plugin: lowercase letters, digits,
+ * hyphens within a segment (`no-unused-vars`), one or more `/`-separated
+ * segments for a plugin rule (`import/order`), and an optional leading
+ * `@scope/` for a scoped plugin (`@typescript-eslint/no-unused-vars`).
+ * Verified against eslint's own core rule id set (all lowercase,
+ * hyphen-separated) and a live `@typescript-eslint` capture (a scoped,
+ * slash-separated id); no uppercase letter, space, or punctuation beyond
+ * `@`, `/`, and `-` appears in any real rule id this detector has been
+ * checked against.
+ */
+const RULE_ID = "[a-z0-9@/-]+";
+
+/**
  * eslint's default "stylish" formatter: an absolute file path on its own
  * line, then one `line:col  severity  message[  rule]` row per problem
  * (severity `error` or `warning`; the rule id column is present for a
@@ -23,11 +36,17 @@ function stripAnsi(text: string): string {
  * never matches tsc's `(line,col): error TSnnnn:` shape (parentheses,
  * `TS` code) or vitest's `Tests`/`FAIL` lines. The rule id, when present,
  * is captured as a trailing token set off by two or more spaces from the
- * message; a row with no such trailing token (a parsing error) still
- * matches, with an `undefined` rule.
+ * message, restricted to `RULE_ID`'s grammar rather than `\S+`: a
+ * message that itself ends with a non-rule-id token containing a slash
+ * or other punctuation (an inline regex literal, a path) is never
+ * mistaken for the rule id column, since only a token this grammar
+ * actually accepts is captured out of the trailing position; a row with
+ * no such trailing token (a parsing error) still matches, with an
+ * `undefined` rule.
  */
-const ISSUE_LINE =
-  /^\s*(\d+):(\d+)\s+(error|warning)\s+(.+?)(?:\s{2,}(\S+))?\s*$/;
+const ISSUE_LINE = new RegExp(
+  `^\\s*(\\d+):(\\d+)\\s+(error|warning)\\s+(.+?)(?:\\s{2,}(${RULE_ID}))?\\s*$`,
+);
 
 /** A stylish file header: a line starting with `/` at column 0, never
  * indented, unlike every issue row under it (which is always indented)

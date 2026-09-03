@@ -18,6 +18,7 @@ import type {
   DetectorParseResult,
   ExecLike,
 } from "../src/verify/types.js";
+import { execCommand } from "../src/exec.js";
 import type { ExecResult } from "../src/exec.js";
 import { fileURLToPath } from "node:url";
 
@@ -76,6 +77,8 @@ function makeStubExec(responses: Record<string, Partial<ExecResult>> = {}): {
       logWriteFailed: false,
       outputMayBeIncomplete: r.outputMayBeIncomplete ?? false,
       stdioClosed: r.stdioClosed ?? true,
+      stdoutTruncated: r.stdoutTruncated ?? false,
+      stderrTruncated: r.stderrTruncated ?? false,
     };
   };
   return { fn, calls };
@@ -806,6 +809,8 @@ describe("verify: exec rejection is a per-check error, not a thrown promise", ()
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
     const result = await verify({
@@ -1066,6 +1071,8 @@ describe("verify: the optional signal", () => {
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
     await verify({
@@ -1096,6 +1103,8 @@ describe("verify: the optional signal", () => {
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
     await verify({ cwd, logDir, checks: ["test"], execFn: fn });
@@ -1133,6 +1142,8 @@ describe("verify: an aborted run", () => {
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
 
@@ -1187,6 +1198,8 @@ describe("verify: an aborted run", () => {
         logWriteFailed: false,
         outputMayBeIncomplete: false,
         stdioClosed: true,
+        stdoutTruncated: false,
+        stderrTruncated: false,
       };
     };
 
@@ -1458,6 +1471,21 @@ describe("eslintDetector: captured real output", () => {
     );
   });
 
+  it("a scoped plugin rule id (`@typescript-eslint/no-unused-vars`) is captured whole, and the message's own inline regex-literal token just before it is never mistaken for the rule id", () => {
+    const parsed = eslintDetector.parse({
+      output: readCaptured("eslint-scoped-rule-id"),
+      command: "npm run lint --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.summary.errors).toBe(1);
+    expect(parsed.failures[0].file).toBe("/project/a.ts");
+    expect(parsed.failures[0].message).toContain(
+      "@typescript-eslint/no-unused-vars",
+    );
+    expect(parsed.failures[0].message).toContain("/^_/u");
+  });
+
   it("a file header with a space in its path is recognized (structural match, not \\S*)", () => {
     const parsed = eslintDetector.parse({
       output: readCaptured("eslint-space-in-path"),
@@ -1646,6 +1674,22 @@ describe("vitestDetector: FAIL line structural path capture (not \\S+)", () => {
     expect(parsed.failures[0].name).toBe("sample > is wrong");
     expect(parsed.summary.failed).toBe(1);
   });
+
+  it("a test name ending in a bracketed segment is captured whole, never truncated by the collection-error shape's bracket handling", () => {
+    const output = readCaptured("vitest-fail-bracket-name");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 1 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("sample.test.js");
+    expect(parsed.failures[0].name).toBe("parses row [1,2,3]");
+    expect(parsed.summary.failed).toBe(1);
+  });
 });
 
 describe("vitestDetector: `expected fail` (an it.fails run)", () => {
@@ -1687,6 +1731,26 @@ describe("vitestDetector: `expected fail` (an it.fails run)", () => {
       detectors: DEFAULT_DETECTORS,
     });
     expect(result.checks[0].detector).toBe("vitest");
+  });
+
+  it("an all-`expected fail` run (`Tests  1 expected fail (1)`, no `passed`/`failed` segment at all) still selects vitest and folds into summary.passed -- unlike the mixed fixture above, no other segment is present to select the detector on its own, so this discriminates the `expected fail` alternative in SUMMARY_LINE itself", () => {
+    const output = readCaptured("vitest-all-expected-fail");
+    expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+      true,
+    );
+    const parsed = vitestDetector.parse({
+      output,
+      command: "npm run test --silent",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toEqual([]);
   });
 });
 
@@ -1752,6 +1816,24 @@ describe("tscDetector: bare `tsc --noEmit` (no --pretty false)", () => {
   });
 });
 
+describe("tscDetector: a path with a space (structural file capture, not \\S+)", () => {
+  it("captures the whole relative path up to the diagnostic's own `(line,col):` separator, space included", () => {
+    const output = readCaptured("tsc-space-in-path");
+    expect(tscDetector.matches({ output, command: "", exitCode: 2 })).toBe(
+      true,
+    );
+    const parsed = tscDetector.parse({
+      output,
+      command: "npm run typecheck --silent",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("my dir/a.ts");
+    expect(parsed.failures[0].line).toBe(5);
+    expect(parsed.failures[0].message).toContain("TS2322");
+  });
+});
+
 describe("eslintDetector: blank-line reset (synthetic)", () => {
   it("synthetic: a blank line resets currentFile, so an issue row that follows one with no recognized header in between gets file: undefined (not silently inherited from the previous file) -- this shape is not producible by the real stylish formatter (every issue row is always preceded by a header), only exercised to cover the reset", () => {
     const output = [
@@ -1771,38 +1853,30 @@ describe("eslintDetector: blank-line reset (synthetic)", () => {
   });
 });
 
-describe("verify: tailAtBound line-count boundary (a trailing newline is not a phantom line)", () => {
-  it("58 real lines: not truncated", async () => {
-    const stdoutTail = Array.from({ length: 58 }, (_, i) => `line ${i}`).join(
-      "\n",
-    );
-    const cwd = makeTmpDir();
-    writePackageJson(cwd, { typecheck: "run-tsc" });
-    const logDir = makeTmpDir();
-    const { fn } = makeStubExec({
-      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
-    });
-    const result = await verify({
-      cwd,
-      logDir,
-      checks: ["typecheck"],
-      execFn: fn,
-    });
-    expect(
-      result.warnings.some(
-        (w) => w.includes("typecheck") && w.includes("truncated"),
-      ),
-    ).toBe(false);
-  });
-
-  it('59 real lines with a trailing newline (60 elements from split("\\n"), one of them the phantom empty tail): not truncated -- discriminates the off-by-one on the trailing-newline split element', async () => {
+describe("verify: truncation is read from exec's own stdoutTruncated/stderrTruncated flags", () => {
+  // Every stub tail here carries a trailing newline (the shape real
+  // command output almost always has) precisely because that shape is
+  // what hid the earlier bug: verify used to recompute truncation itself
+  // by counting lines in the tail text, and a trailing newline made a
+  // truncated tail always look one line short of its own bound. verify
+  // now only ever reads exec's own flags, so what the tail text itself
+  // looks like is no longer load-bearing for this decision; these flags
+  // are set the same way exec.ts's TailKeeper.wasTruncated() would set
+  // them for the stated shape, not left at a value convenient for the
+  // test.
+  it("stdoutTruncated: false and stderrTruncated: false: no truncation warning", async () => {
     const stdoutTail =
       Array.from({ length: 59 }, (_, i) => `line ${i}`).join("\n") + "\n";
     const cwd = makeTmpDir();
     writePackageJson(cwd, { typecheck: "run-tsc" });
     const logDir = makeTmpDir();
     const { fn } = makeStubExec({
-      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
+      "npm run typecheck --silent": {
+        exitCode: 2,
+        stdoutTail,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      },
     });
     const result = await verify({
       cwd,
@@ -1817,15 +1891,19 @@ describe("verify: tailAtBound line-count boundary (a trailing newline is not a p
     ).toBe(false);
   });
 
-  it("60 real lines: truncated", async () => {
-    const stdoutTail = Array.from({ length: 60 }, (_, i) => `line ${i}`).join(
-      "\n",
-    );
+  it("stdoutTruncated: true: warns naming the check as truncated", async () => {
+    const stdoutTail =
+      Array.from({ length: 60 }, (_, i) => `line ${i}`).join("\n") + "\n";
     const cwd = makeTmpDir();
     writePackageJson(cwd, { typecheck: "run-tsc" });
     const logDir = makeTmpDir();
     const { fn } = makeStubExec({
-      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
+      "npm run typecheck --silent": {
+        exitCode: 2,
+        stdoutTail,
+        stdoutTruncated: true,
+        stderrTruncated: false,
+      },
     });
     const result = await verify({
       cwd,
@@ -1840,13 +1918,19 @@ describe("verify: tailAtBound line-count boundary (a trailing newline is not a p
     ).toBe(true);
   });
 
-  it("exactly 6000 characters: truncated (the character bound, independent of the line-count bound)", async () => {
-    const stdoutTail = "a".repeat(6000);
+  it("stderrTruncated: true alone (stdout untouched) still warns: either stream truncated is enough", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, { typecheck: "run-tsc" });
     const logDir = makeTmpDir();
     const { fn } = makeStubExec({
-      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
+      "npm run typecheck --silent": {
+        exitCode: 2,
+        stdoutTail: "line 0\n",
+        stderrTail:
+          Array.from({ length: 60 }, (_, i) => `err ${i}`).join("\n") + "\n",
+        stdoutTruncated: false,
+        stderrTruncated: true,
+      },
     });
     const result = await verify({
       cwd,
@@ -1860,27 +1944,42 @@ describe("verify: tailAtBound line-count boundary (a trailing newline is not a p
       ),
     ).toBe(true);
   });
+});
 
-  it("5999 characters: not truncated", async () => {
-    const stdoutTail = "a".repeat(5999);
+describe("verify: truncation detection end-to-end through the real execCommand (not a stub)", () => {
+  it("a real command printing more than exec's line bound, with a trailing newline, is reported truncated by exec's own flags and by verify's warning", async () => {
+    // 90 lines, comfortably past exec.ts's 60-line TAIL_LINES bound, with
+    // the trailing newline `echo` always adds: the exact real-tool shape
+    // the earlier line-counting heuristic in verify/index.ts could never
+    // detect as truncated (see the describe block above). Run twice: once
+    // directly through execCommand (the flags themselves), once through
+    // verify() with the same command as a check (the warning that a
+    // caller actually sees).
+    const cmd =
+      "i=1; while [ $i -le 90 ]; do echo line-$i; i=$((i+1)); done; exit 1";
+
+    const execLogDir = makeTmpDir();
+    const execResult = await execCommand(cmd, { logDir: execLogDir });
+    expect(execResult.exitCode).toBe(1);
+    expect(execResult.stdoutTruncated).toBe(true);
+    expect(execResult.stderrTruncated).toBe(false);
+
     const cwd = makeTmpDir();
-    writePackageJson(cwd, { typecheck: "run-tsc" });
-    const logDir = makeTmpDir();
-    const { fn } = makeStubExec({
-      "npm run typecheck --silent": { exitCode: 2, stdoutTail },
-    });
+    writePackageJson(cwd, {});
+    const verifyLogDir = makeTmpDir();
     const result = await verify({
       cwd,
-      logDir,
-      checks: ["typecheck"],
-      execFn: fn,
+      logDir: verifyLogDir,
+      checks: [],
+      overrides: { test: cmd },
     });
+    expect(result.checks[0].status).toBe("fail");
     expect(
       result.warnings.some(
-        (w) => w.includes("typecheck") && w.includes("truncated"),
+        (w) => w.includes("test") && w.includes("truncated"),
       ),
-    ).toBe(false);
-  });
+    ).toBe(true);
+  }, 20000);
 });
 
 describe("tscDetector: colorized (ANSI SGR) output", () => {
@@ -1921,6 +2020,7 @@ describe("verify: tail-bound counts (truncated output tail)", () => {
       "npm run typecheck --silent": {
         exitCode: 2,
         stdoutTail: truncatedTail,
+        stdoutTruncated: true,
       },
     });
     const result = await verify({
@@ -1954,7 +2054,11 @@ describe("verify: tail-bound counts (truncated output tail)", () => {
     writePackageJson(cwd, { lint: "run-eslint" });
     const logDir = makeTmpDir();
     const { fn } = makeStubExec({
-      "npm run lint --silent": { exitCode: 1, stdoutTail },
+      "npm run lint --silent": {
+        exitCode: 1,
+        stdoutTail,
+        stdoutTruncated: true,
+      },
     });
     const result = await verify({
       cwd,
@@ -1997,6 +2101,7 @@ describe("verify: tail-bound counts (truncated output tail)", () => {
       "npm run typecheck --silent": {
         exitCode: 2,
         stdoutTail: truncatedTail,
+        stdoutTruncated: true,
       },
     });
     const result = await verify({

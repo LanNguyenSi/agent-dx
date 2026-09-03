@@ -40,6 +40,24 @@ is a real capture of a broken import (a file that fails to collect: the
 is a real capture of `tsc --noEmit` without `--pretty false`, run
 non-interactively (no TTY) against the same `tsc-project` sources as
 `tsc-errors.txt`, showing the shape is identical either way.
+`vitest-all-expected-fail.txt` is a real capture of a run whose *only*
+test is `it.fails` (`Tests  1 expected fail (1)`, no `passed`/`failed`
+segment at all): unlike the mixed `vitest-expected-fail.txt` capture
+above, this is the only fixture that can tell whether the `expected
+fail` alternative in the detector's own summary-line pattern is actually
+load-bearing, since no other segment is present to select the detector
+on its own. `vitest-fail-bracket-name.txt` is a real capture of a
+failing test whose own name ends in a bracketed segment (`parses row
+[1,2,3]`), exercising the ` FAIL ` line's suite/name shape against a
+name that could otherwise be mistaken for the file-only shape's
+collection-error marker. `tsc-space-in-path.txt` is a real capture of a
+type error in a file whose relative path contains a space, exercising
+the diagnostic line's structural (not `\S+`) file capture.
+`eslint-scoped-rule-id.txt` is a real capture, via the `@typescript-eslint`
+plugin, of a scoped, slash-separated rule id
+(`@typescript-eslint/no-unused-vars`) whose message also happens to
+carry an inline regex literal (`/^_/u`) right before the rule id column,
+exercising the rule id capture's grammar against both shapes at once.
 
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 

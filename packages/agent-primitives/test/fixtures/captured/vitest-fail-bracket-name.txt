@@ -1,0 +1,33 @@
+ RUN  v4.1.11 /project
+
+ ❯ sample.test.js (1 test | 1 failed) 6ms
+   × parses row [1,2,3] 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  sample.test.js > parses row [1,2,3]
+AssertionError: Expected values to be strictly equal:
+
+1 !== 2
+
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ sample.test.js:5:10
+      3|
+      4| it("parses row [1,2,3]", () => {
+      5|   assert.strictEqual(1, 2);
+       |          ^
+      6| });
+      7|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Duration [elided]

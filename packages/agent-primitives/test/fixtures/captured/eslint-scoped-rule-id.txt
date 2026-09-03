@@ -1,0 +1,5 @@
+
+/project/a.ts
+  2:9  error  'unusedVar' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+✖ 1 problem (1 error, 0 warnings)

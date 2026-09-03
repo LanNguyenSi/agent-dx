@@ -63,37 +63,6 @@ export const DEFAULT_MAX_FAILURES = 20;
  * being interpolated into a shell command. */
 const CHECK_NAME_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 
-/** exec.ts's own tail bounds (60 lines, 6000 characters per stream; see
- * `TAIL_LINES`/`TAIL_CHARS` there), mirrored here rather than imported so
- * this detection stays a read of the tails it is handed, not a change to
- * exec.ts itself. A tail sitting exactly at either bound means real
- * output was cut off there, not that the command coincidentally produced
- * exactly this much. */
-const TAIL_LINE_BOUND = 60;
-const TAIL_CHAR_BOUND = 6000;
-
-/** Counts the real lines in a captured tail: `split("\n")` on a string
- * that ends with a newline yields one trailing empty element that is
- * not a line of output at all (e.g. `"a\nb\n".split("\n")` is `["a",
- * "b", ""]`, three elements for two real lines); that phantom element
- * is dropped before counting, so a tail of exactly `TAIL_LINE_BOUND - 1`
- * real lines that happens to end with a newline is never reported as
- * being at the bound. */
-function countLines(tail: string): number {
-  const lines = tail.split("\n");
-  if (lines.length > 0 && lines[lines.length - 1] === "") {
-    lines.pop();
-  }
-  return lines.length;
-}
-
-/** True when a captured tail (stdout or stderr, as returned by
- * `execCommand`) is at exec.ts's own bound. */
-function tailAtBound(tail: string): boolean {
-  if (tail.length === 0) return false;
-  return countLines(tail) >= TAIL_LINE_BOUND || tail.length >= TAIL_CHAR_BOUND;
-}
-
 /** eslint's own "✖ N problems (N errors, M warnings)" summary line: the
  * tool's own total, always more trustworthy than a count of issue rows
  * out of a tail that may have been cut before every row reached it. This
@@ -546,13 +515,12 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
 
     if (status === "fail" || status === "error") {
       const truncated =
-        tailAtBound(execResult.stdoutTail) ||
-        tailAtBound(execResult.stderrTail);
+        execResult.stdoutTruncated || execResult.stderrTruncated;
       parsed = adjustForTruncatedTail(
         parsed,
         output,
         truncated,
-        detector.name === "eslint",
+        detector === eslintDetector,
       );
 
       const tail = output.trim();
