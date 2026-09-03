@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +14,13 @@ function makeTmpDir(): string {
   );
   tmpDirs.push(dir);
   return dir;
+}
+
+/** The same digest probe records in a marker, so a fixture marker can
+ * describe a state doctor's recovery check actually accepts instead of
+ * placeholder hashes that match nothing. */
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
 }
 
 afterEach(() => {
@@ -308,5 +317,251 @@ describe("doctor: hints", () => {
   it("is empty when no required tool is missing", async () => {
     const result = await doctor({ required: ["node"], optional: [] });
     expect(result.hints.length).toBe(0);
+  });
+});
+
+describe("doctor: stale-probe-marker check", () => {
+  it("ok when there are no markers at all", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).toContain("no stale probe markers");
+  });
+
+  it("ok when a marker exists but its pid is still alive", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const target = path.join(cwd, "target.js");
+    fs.writeFileSync(target, "x");
+    fs.writeFileSync(
+      path.join(lockDir, "abc.marker.json"),
+      JSON.stringify({
+        targetPath: target,
+        backupPath: `${target}.backup`,
+        preHash: "a".repeat(64),
+        mutatedHash: "b".repeat(64),
+        pid: process.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(true);
+  });
+
+  it("not ok when a marker's target is inside cwd, its pid is dead, and its backup is missing: names the marker file, never promises auto-recovery", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const target = path.join(cwd, "target.js");
+    fs.writeFileSync(target, "x");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    const markerPath = path.join(lockDir, "abc.marker.json");
+    fs.writeFileSync(
+      markerPath,
+      JSON.stringify({
+        targetPath: target,
+        // Never created on disk: simulates a backup that did not
+        // survive (its per-run log dir was cleaned up, or never
+        // existed on this machine at all).
+        backupPath: `${target}.backup`,
+        preHash: "a".repeat(64),
+        mutatedHash: "b".repeat(64),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(markerPath);
+    expect(check?.detail).toContain("auto-recovery is not possible");
+    expect(check?.detail).not.toContain("auto-recover,");
+  });
+
+  it("not ok, and names the backup path with an auto-recovery hint, when a stale marker describes a state the next probe would really recover", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const original = "original content";
+    const mutated = "mutated content";
+    const target = path.join(cwd, "target.js");
+    // The state probe requires before it restores anything: the target
+    // still carries exactly the mutation the marker records, and the
+    // backup still hashes to the pre-mutation content.
+    fs.writeFileSync(target, mutated);
+    const backupPath = path.join(lockDir, "backup-target.js");
+    fs.writeFileSync(backupPath, original);
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, "abc.marker.json"),
+      JSON.stringify({
+        targetPath: target,
+        backupPath,
+        preHash: sha256(original),
+        mutatedHash: sha256(mutated),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(backupPath);
+    expect(check?.detail).toContain("auto-recover");
+  });
+
+  it("ok to promise auto-recovery for a marker whose target is already back at its recorded pre-mutation hash: probe clears such a marker and continues", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const original = "original content";
+    const target = path.join(cwd, "target.js");
+    fs.writeFileSync(target, original);
+    const backupPath = path.join(lockDir, "backup-target.js");
+    fs.writeFileSync(backupPath, original);
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, "abc.marker.json"),
+      JSON.stringify({
+        targetPath: target,
+        backupPath,
+        preHash: sha256(original),
+        mutatedHash: sha256("mutated content"),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("auto-recover");
+  });
+
+  it("not ok, and names the marker file instead of promising auto-recovery, when a stale marker's backup exists but does not hash to the pre-mutation content it records", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const original = "original content";
+    const mutated = "mutated content";
+    const target = path.join(cwd, "target.js");
+    fs.writeFileSync(target, mutated);
+    const backupPath = path.join(lockDir, "backup-target.js");
+    // A backup that exists but is not this target's pre-mutation
+    // content (truncated, half-written, or some other run's). probe
+    // refuses to copy it over the target, so doctor must not point at a
+    // recovery that will not happen.
+    fs.writeFileSync(backupPath, "not the pre-mutation content");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    const markerPath = path.join(lockDir, "abc.marker.json");
+    fs.writeFileSync(
+      markerPath,
+      JSON.stringify({
+        targetPath: target,
+        backupPath,
+        preHash: sha256(original),
+        mutatedHash: sha256(mutated),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(markerPath);
+    expect(check?.detail).toContain("auto-recovery is not possible");
+    expect(check?.detail).not.toContain("auto-recover,");
+  });
+
+  it("not ok, and names the marker file instead of promising auto-recovery, when a stale marker's target is in neither the pre- nor the post-mutation state it records", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const target = path.join(cwd, "target.js");
+    // Edited by hand since the crash: neither preHash nor mutatedHash.
+    fs.writeFileSync(target, "something else entirely");
+    const backupPath = path.join(lockDir, "backup-target.js");
+    fs.writeFileSync(backupPath, "original content");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    const markerPath = path.join(lockDir, "abc.marker.json");
+    fs.writeFileSync(
+      markerPath,
+      JSON.stringify({
+        targetPath: target,
+        backupPath,
+        preHash: sha256("original content"),
+        mutatedHash: sha256("mutated content"),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(markerPath);
+    expect(check?.detail).toContain("auto-recovery is not possible");
+    expect(check?.detail).not.toContain("auto-recover,");
+  });
+
+  it("not ok when cwd reaches the marker's target through a symlinked ancestor: the same directory under two spellings is one repository", async () => {
+    const lockDir = makeTmpDir();
+    // Two spellings of one directory: `<parent>/real` and the symlink
+    // `<parent>/link` pointing at it, the way macOS's `/tmp` and
+    // `/private/tmp` name the same place. A marker records the target
+    // resolved; doctor may well be invoked under the other spelling.
+    const parent = makeTmpDir();
+    const realDir = path.join(parent, "real");
+    const linkDir = path.join(parent, "link");
+    fs.mkdirSync(realDir);
+    fs.symlinkSync(realDir, linkDir);
+    const original = "original content";
+    const mutated = "mutated content";
+    const target = path.join(realDir, "target.js");
+    fs.writeFileSync(target, mutated);
+    const backupPath = path.join(lockDir, "backup-target.js");
+    fs.writeFileSync(backupPath, original);
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, "abc.marker.json"),
+      JSON.stringify({
+        // Recorded the way probe() records it: fully resolved.
+        targetPath: fs.realpathSync(target),
+        backupPath,
+        preHash: sha256(original),
+        mutatedHash: sha256(mutated),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: linkDir,
+      lockDir,
+    });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(backupPath);
+  });
+
+  it("ok when a dead-pid marker's target is outside cwd (a different repository)", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const elsewhere = makeTmpDir();
+    const target = path.join(elsewhere, "target.js");
+    fs.writeFileSync(target, "x");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, "abc.marker.json"),
+      JSON.stringify({
+        targetPath: target,
+        backupPath: `${target}.backup`,
+        preHash: "a".repeat(64),
+        mutatedHash: "b".repeat(64),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(true);
   });
 });

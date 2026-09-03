@@ -84,7 +84,9 @@ export interface VerifyResult {
   fullChecks?: CheckResult[];
   /** Present only for a status that needs a machine-readable cause beyond
    * `status` itself: `nothing_verified` when every requested check
-   * resolved to `skipped` (status `error`, never a silent `pass`). */
+   * resolved to `skipped` (status `error`, never a silent `pass`), and
+   * `aborted` when the run was stopped by `VerifyOptions.signal` (status
+   * `error`, with the checks that never ran named in `warnings`). */
   reason?: string;
 }
 
@@ -120,6 +122,15 @@ export interface VerifyOptions {
   /** Test seam: replaces `execCommand`, e.g. to spy on invocation count
    * for a `--fail-fast` test without spawning real shells. */
   execFn?: ExecLike;
+  /** Stops the run. The currently running check's command is killed
+   * (`exec.ts` `SIGKILL`s its whole process group, so Ctrl-C leaves no
+   * orphan), that check is reported as `error` naming the abort rather
+   * than as a check that failed, and no further check is started: the
+   * ones that never ran are named in a run-level warning, and the result
+   * carries `reason: "aborted"`. Additive and optional: omitted,
+   * behaviour is exactly as before. The CLI passes the signal its
+   * top-level SIGINT/SIGTERM handler owns. */
+  signal?: AbortSignal;
   /** Identifies this run for the purpose of nesting per-check log files
    * uniquely under `logDir/verify/<runId>/`, so two runs sharing the same
    * `logDir` never share, or silently append to, the same log file.

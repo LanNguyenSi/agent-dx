@@ -158,9 +158,224 @@ Overall `status` is `error` if any check errored, else `fail` if any check
 failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
 the same way every other subcommand's does.
 
-## `probe`, `init`
+`SIGINT` and `SIGTERM` are handled for every subcommand: the CLI kills
+the command it is running with `SIGKILL` on that command's whole process
+group, waits for that run to settle (so whatever the killed command had
+in flight has landed), and then exits `130` or `143`. There is no
+`SIGTERM` grace on this path, because a command that traps `SIGTERM`
+would sit the grace out and the escalation that would eventually reach it
+dies with the process that is exiting. Each command runs in a process
+group of its own, so a terminal's Ctrl-C reaches the CLI alone; without
+this a check's own worker would outlive the Ctrl-C that ended the CLI.
+`probe` owns the two signals for as long as it runs, since it also has a
+mutated file to restore and a lock to release before the process may end.
 
-Not yet implemented. Each currently returns a JSON result with
+The exported `verify()` reports a run stopped that way rather than
+guessing at it: the check that was running becomes `status: "error"` with
+a failure naming the abort (never a synthesized `exit code null`
+finding), every check queued behind it is left unstarted and named in a
+warning, and the result carries `reason: "aborted"`. The CLI prints none
+of that on a signal (see below).
+
+## `probe`
+
+Runs one mutation probe: mutate a line (or apply a patch), confirm the
+unmutated test passes first (the baseline; there is no `--no-baseline`,
+because a probe whose test was never shown to pass unmutated is not a
+probe), run the test against the mutant, restore the file, and classify
+the result.
+
+```bash
+agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
+  -t 'npm test' -i inplace
+agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
+  -t 'npm test'
+agent-primitives probe --file src/foo.js -n 1 -p mutant.patch -t 'npm test'
+```
+
+Only `-i inplace` is implemented: it backs up the target file
+before mutating it and restores from that backup afterward (on normal
+completion, on any error, and on `SIGINT`/`SIGTERM`; on a signal the CLI
+then ends the process, while the exported `probe()` restores and returns
+control instead, unless the caller passes `exitOnSignal: true`).
+`-i worktree` (the
+eventual default, isolating the mutation in a throwaway git worktree
+instead of the working tree) returns `status: "usage_error"`,
+`reason: "not_implemented"`, exit `2`, until a later release. `--file`
+is long-only (the global `-f` is `--format`). Exactly one mutant form is
+required: `-r, --replace` (replace the whole line), `-M, --match` with
+`-w, --with` (replace the first occurrence of a substring on the line),
+or `-p, --patch` (apply a unified diff via `git apply`).
+
+`-t` and `--pre` are shell commands, executed through `sh -c` as given,
+so neither may be filled from untrusted text (an issue body, a model's
+output, a file in the tree under test); `-p`'s patch path is not, and is
+handed to `git apply` as one element of an argv array with no shell
+involved, so a path containing `$(...)` or a backtick is a path and
+nothing else.
+
+`--file` and every `--link` entry must resolve inside the git work-tree
+root (or inside the cwd when not in a repo), unless `--allow-outside` is
+passed; otherwise the result is `status: "inconclusive"`,
+`reason: "file_outside_root"`, exit `2`.
+
+`--pre <command>` runs (e.g. a rebuild) before each test invocation, in
+both the baseline and mutant runs, and in the invocation cwd (not the
+containment root, so a probe run from a subdirectory of a monorepo sees
+the same cwd its test command normally would): needed whenever the test
+executes built output (`dist/`) rather than the source file being
+mutated, otherwise the mutant never reaches the test and the probe
+reports a false `survived`. A non-zero `--pre` exit in either run is
+`status: "inconclusive"`, `reason: "pre_failed"`, exit `2`, never a
+verdict. `--timeout <seconds>` bounds every `--pre`/`-t` invocation (both
+the baseline and the mutant run); a run that hits it is killed and
+reported as `timedOut: true` on that run's own phase (`baseline` or
+`test`), so a killed baseline is distinguishable from one that genuinely
+failed. It also bounds every `git apply` the `-p` form runs (the path
+check, the dry run, and the real apply); with no `--timeout` those keep a
+fixed ten-second bound of their own, so an apply that hangs cannot leave
+the probe sitting under an in-flight marker forever. An apply killed by
+that bound is `status: "inconclusive"`, `reason: "git_apply_timeout"`,
+exit `2`, kept apart from `mutant_not_applicable`, which means the patch
+itself did not apply.
+
+Every `--pre`/`-t` invocation runs in a process group of its own, and the
+timeout, `SIGINT`, and `SIGTERM` all signal that whole group: the timeout
+sends `SIGTERM` and escalates to `SIGKILL` after a short grace, while a
+signal sends `SIGKILL` outright. A worker the command spawned
+therefore dies with it instead of outliving the run while still holding
+its stdout and stderr, which is what would otherwise stretch a bounded
+run to the descendant's own lifetime and leave a process writing to the
+target while the restore is happening. What that does not cover is a
+descendant that puts itself in a process group of its own: it is out of
+reach of the group signal, and the run then settles a short grace after
+the command's own process exits rather than waiting on the pipes. A run
+that settles that way may be missing whatever was still in flight on
+those pipes, and both `probe` and `verify` say so in a warning instead of
+presenting the captured tail as the whole output. On the signal path
+specifically, the restore paragraph below does not stop at this flush
+grace: it waits further, and bounded, for the pipes to actually close
+before treating the restore as final.
+
+A probe stopped by `SIGINT`/`SIGTERM` restores the target before it does
+anything else. Whatever child was in flight (a `--pre`, a `-t`, or the
+`git apply` of a `-p` mutant) is killed with `SIGKILL` on its whole
+process group; the handler then waits, bounded, for that child's stdio
+to truly close, not merely for the run's own promise to settle (which
+the flush grace above can do early), and only then copies the backup
+back and hash-verifies it. The restore is therefore the last write to
+the target for every process still in the command's own process group,
+including one that traps `SIGTERM` and an interrupted `git apply`. A
+descendant that left the group is covered too, for as long as it holds
+the command's stdio open: the same bounded wait applies to it. One that
+both leaves the group and detaches its own stdio, or that writes after
+the bound expires, is beyond what this wait can cover. In that bounded
+case the target is still restored, but the marker (and its backup) are
+kept rather than removed, even though the restore itself already
+landed: a write that lands later would otherwise leave no trail, so the
+marker stays, `doctor` reports it, and the next `probe` on that target
+recovers from the hash-verified backup the same way it already does for
+any other in-flight marker.
+
+What the caller sees splits by caller. The exported `probe()` (or a
+library caller's own abort) returns `status: "inconclusive"`,
+`reason: "aborted"` in either phase, never a `killed`/`survived` verdict:
+the interrupted test child exits non-zero, which under `--expect fail`
+would otherwise read exactly like a mutant the suite caught. A baseline
+stopped the same way is `aborted` rather than `baseline_failed`, for the
+same reason: nothing was learned about the test, the run was stopped. The
+CLI never prints that envelope: on a signal it restores, releases the
+lock, and exits `130` or `143` with no output, because a signal is the
+operator saying stop rather than asking for a result.
+
+Probes are serialized against each other by a lock file outside the
+repository (`$AGENT_PRIMITIVES_LOCK_DIR` or
+`<tmpdir>/agent-primitives-<uid>/locks/`, created `0700` and owned by the
+current user), keyed on the repository's work-tree root: an `inplace`
+probe mutates the one working tree that every probe in that repository
+builds and tests in, so two of them are not independent even when their
+target files differ. Outside a repository there is no shared tree, and
+the lock is keyed on the target file itself. A second probe started while
+one is running is refused rather than queued: `status: "inconclusive"`,
+`reason: "probe_in_progress"`, exit `2`. A lock directory this process
+cannot trust (wrong owner, unwritable, or a created level owned by
+another user) gets `reason: "lock_unavailable"`, exit `2`, instead of a
+raw filesystem error. If a probe is killed outright (`SIGKILL` or a
+crash) mid-mutation, it leaves an in-flight marker behind; the next
+probe on that same target recovers automatically (restores from the
+recorded backup, verifies by hash, adds a `recovered_stale_probe`
+warning) when it can prove two things: that the file is still in the
+exact mutated state the marker describes, and that the recorded backup
+still hashes to the pre-mutation content the marker recorded. That second
+check happens before any copy, because the copy is destructive: a backup
+that no longer matches would otherwise be written over the target,
+destroying the only remaining copy of the mutated file. When either proof
+fails, the probe refuses with `reason: "stale_probe_marker"`, leaves the
+target exactly as it found it, and names the backup path for a human to
+inspect. The backup lives under the probe's own `--log-dir` (a per-run
+scratch directory, not something a crash is guaranteed to have left
+behind); when it is gone, automatic recovery is not possible and the
+warning says so and names the marker file itself instead -- delete that
+file to clear it manually. `agent-primitives doctor` also reports any
+such marker left for the current repository, and applies the same two
+proofs before it says anything about automatic recovery: it hashes the
+recorded backup and compares the target, points at re-running `probe`
+only for a marker the next probe would really recover, and names the
+marker file and the manual delete for every other one; it compares the
+marker's target against
+the current repository with both paths fully resolved, so a symlinked
+ancestor cannot hide a marker that is really there.
+
+The target file is backed up immediately, before the baseline ever runs,
+and the backup is verified against the file's pre-mutation hash; a backup
+that does not match is `status: "inconclusive"`,
+`reason: "backup_verification_failed"`, exit `2`, before anything is
+mutated. If the baseline itself fails and also rewrote the target, the
+backup is kept rather than discarded, and a warning names it: it holds
+the only remaining copy of the target's pre-baseline content. After
+the baseline passes, the target is re-hashed; if it no longer matches
+(a formatter or codegen step run as part of the baseline rewrote it),
+the probe aborts with `status: "inconclusive"`,
+`reason: "target_changed_during_baseline"`, exit `2`, before any
+mutation or marker is created, and leaves the target exactly as the
+baseline run wrote it (never restored, since that write was not this
+probe's own).
+
+A failed restore (the backup or the target became unwritable) is
+terminal: `status: "inconclusive"`, `reason: "restore_failed"`, exit `2`,
+never a `killed`/`survived` verdict, with a warning naming the absolute
+backup path; the in-flight marker is left in place on a failed restore
+(deliberately, for the same manual recovery described above) and removed
+only once a restore is hash-verified.
+
+A mutant whose applied content does not hash to what the dry run
+predicted is `status: "inconclusive"`, `reason: "apply_hash_mismatch"`,
+exit `2`, carrying `mutation_probe` with its real `restored_verified`:
+the mutation is undone and the restore verified first, and the mismatch
+is reported as a verdict the caller can read rather than raised as an
+error.
+
+`--file` naming a path that does not exist is `status: "usage_error"`,
+`reason: "file_not_found"`, exit `2`, with the resolved path in a
+warning. `-p, --patch` combined with `--allow-outside` is rejected
+outright as `status: "usage_error"`,
+`reason: "patch_allow_outside_unsupported"`, exit `2`: a patch's own
+relative paths could otherwise escape the scratch directory used for its
+dry run.
+
+Output beside the envelope: `status` (`killed`, `survived`, or
+`inconclusive`), `reason` (when inconclusive), `mutant: { file, line,
+before, after, form }`, `mutation_probe: { mutant, verified_applied_via,
+result, restored_verified }` (paste straight into an implementer's
+`mutation_probes` output field), `baseline: { exitCode, durationMs,
+logPath, timedOut }`, `test: { command, exitCode, durationMs, timedOut,
+stdoutTail, stderrTail, logPath }`, `isolation: { mode, path, linked,
+syncedTrackedFiles, syncedUntrackedFiles }` (the `worktree`-only fields
+are empty for `inplace`).
+
+## `init`
+
+Not yet implemented. It currently returns a JSON result with
 `status: "usage_error"` and `reason: "not_implemented"`, exit `2`, rather
 than doing nothing silently or claiming success.
 

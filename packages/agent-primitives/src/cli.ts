@@ -17,12 +17,19 @@ import {
   DEFAULT_REQUIRED,
   type DoctorResult,
 } from "./doctor/index.js";
+import { execCommand, stdioWatchBoundMs, type ExecResult } from "./exec.js";
 import {
   verify,
   DEFAULT_CHECKS,
   DEFAULT_MAX_FAILURES,
+  type ExecLike,
   type VerifyResult,
 } from "./verify/index.js";
+import {
+  probe,
+  type ExpectVerdict,
+  type IsolationMode,
+} from "./probe/index.js";
 
 function readVersion(): string {
   try {
@@ -311,6 +318,134 @@ function emit(
   writeAndExit(JSON.stringify(envelope) + "\n", exitCode);
 }
 
+/**
+ * The exit code convention for a process ended by a signal: 128 plus the
+ * signal number (SIGINT is 2, SIGTERM is 15). Exported so the mapping is
+ * unit-testable without sending a real signal to the test runner.
+ */
+export function signalExitCode(signal: "SIGINT" | "SIGTERM"): number {
+  return signal === "SIGINT" ? 130 : 143;
+}
+
+/**
+ * One controller for the whole process, aborted by the signal handlers
+ * below and threaded into every command that runs child processes
+ * through `exec.ts`. `exec.ts` `SIGKILL`s the aborted child's whole
+ * process group, so a check's own worker dies with this CLI instead of
+ * being orphaned by the exit: `detached: true` puts each command in a
+ * group of its own, which means a terminal's Ctrl-C reaches this process
+ * alone.
+ *
+ * `probe` is deliberately not wired to it: it installs its own handler
+ * for the same two signals, because it has a mutated file to restore and
+ * a lock to release before the process may end, and it ends the process
+ * itself once that is done.
+ */
+const shutdownController = new AbortController();
+
+/**
+ * The one command child this process has in flight, as the promise of
+ * its run, or `null`, together with a promise of when its stdio TRULY
+ * closes. The signal handler waits on the latter, not the former: a
+ * run's own promise can settle early on `exec.ts`'s flush-grace
+ * shortcut while a descendant that left the process group still holds
+ * the pipes, and only true closure means every write the run had in
+ * flight has actually landed (the same distinction `probe`'s own signal
+ * handler makes; see `src/probe/index.ts`).
+ */
+let inFlightExec: Promise<ExecResult> | null = null;
+let inFlightExecClosed: Promise<void> | null = null;
+
+/** How long the signal handler waits for that run to settle before
+ * exiting anyway. A `SIGKILL`ed process group is gone in milliseconds;
+ * this bound only matters for something that put itself out of the
+ * group's reach, where exiting is still the right answer. */
+const DEFAULT_SHUTDOWN_SETTLE_BOUND_MS = 2000;
+
+/** Always below `exec.ts`'s stdio watch bound, for the same reason as
+ * `probe`'s `signalSettleBoundMs()`: past that bound no genuine close
+ * can arrive any more. */
+function shutdownSettleBoundMs(): number {
+  return Math.min(DEFAULT_SHUTDOWN_SETTLE_BOUND_MS, stdioWatchBoundMs() - 1);
+}
+
+/** `execCommand` plus the tracking above. Handed to `verify` as its
+ * `execFn` so the handler has something to wait for; the real
+ * `execCommand` is what actually runs. */
+const trackingExec: ExecLike = (cmd, options) => {
+  let resolveClosed: (() => void) | undefined;
+  const closed = new Promise<void>((res) => {
+    resolveClosed = res;
+  });
+  const started = execCommand(cmd, {
+    ...options,
+    onStdioClosed: () => resolveClosed?.(),
+  });
+  inFlightExec = started;
+  inFlightExecClosed = closed;
+  void started
+    .catch(() => resolveClosed?.())
+    .then(() => {
+      if (inFlightExec === started) {
+        inFlightExec = null;
+        inFlightExecClosed = null;
+      }
+    });
+  return started;
+};
+
+async function settleInFlightExec(): Promise<void> {
+  const pendingClosed = inFlightExecClosed;
+  if (pendingClosed === null) return;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    pendingClosed,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, shutdownSettleBoundMs());
+    }),
+  ]);
+  if (timer !== undefined) clearTimeout(timer);
+}
+
+/**
+ * Set for exactly as long as a `probe()` call is running. `probe`
+ * installs its own SIGINT/SIGTERM handlers, which kill its child,
+ * restore the file it mutated, release its lock and only then end the
+ * process; the handler below therefore stands aside entirely rather than
+ * exiting out from under that restore. Flipped immediately before the
+ * call and back in a `finally`, with no `await` in between, so no signal
+ * can be delivered in a window where neither handler would act.
+ */
+let probeOwnsShutdown = false;
+
+/**
+ * Installs the process-wide SIGINT/SIGTERM handling: abort whatever
+ * child is in flight (which `SIGKILL`s its whole process group), wait
+ * for that run to settle, then exit with the signal's conventional code.
+ *
+ * The wait is what keeps a killed check's last write from landing after
+ * this process has already gone; it also lets every other listener for
+ * the same signal run first, since it yields before exiting.
+ *
+ * Installed only on the real CLI entrypoint, never on import: a test
+ * importing this module for its exports must not have process-wide
+ * signal handlers installed behind its back.
+ */
+function installSignalHandlers(): void {
+  let handling = false;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      if (probeOwnsShutdown) return;
+      if (handling) return;
+      handling = true;
+      shutdownController.abort();
+      void settleInFlightExec().then(() =>
+        process.exit(signalExitCode(signal)),
+      );
+    });
+  }
+}
+
 const program = new Command();
 
 // Route commander's own usage errors (unknown option, missing required
@@ -447,6 +582,11 @@ program
       checks: opts.checks,
       overrides: opts.exec,
       failFast: Boolean(opts.failFast),
+      signal: shutdownController.signal,
+      // Not the default `execCommand`: the tracking wrapper, so the
+      // signal handler can wait for the check it just killed to settle
+      // before this process exits.
+      execFn: trackingExec,
       timeoutMs:
         opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
       maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
@@ -616,6 +756,202 @@ function renderDoctorText(result: DoctorResult): string {
   return lines.join("\n");
 }
 
+interface ProbeCliOptions {
+  file: string;
+  line: number;
+  replace?: string;
+  match?: string;
+  with?: string;
+  patch?: string;
+  test: string;
+  pre?: string;
+  isolation: IsolationMode;
+  expect: ExpectVerdict;
+  timeout?: string;
+  link?: string[];
+  allowOutside?: boolean;
+}
+
+function parseLine(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new InvalidArgumentError(
+      `-n/--line must be a positive integer (got "${value}")`,
+    );
+  }
+  return n;
+}
+
+function parseIsolationMode(value: string): IsolationMode {
+  if (value !== "worktree" && value !== "inplace") {
+    throw new InvalidArgumentError(
+      `-i/--isolation must be "worktree" or "inplace" (got "${value}")`,
+    );
+  }
+  return value;
+}
+
+function parseExpectVerdict(value: string): ExpectVerdict {
+  if (value !== "fail" && value !== "pass") {
+    throw new InvalidArgumentError(
+      `--expect must be "fail" or "pass" (got "${value}")`,
+    );
+  }
+  return value;
+}
+
+type MutantChoice =
+  | { form: "replace"; replaceText: string }
+  | { form: "match"; matchText: string; withText: string }
+  | { form: "patch"; patchPath: string };
+
+/**
+ * Exactly one mutant form is required: `-r`, or `-M` together with `-w`,
+ * or `-p`. Anything else (none, more than one, or `-M`/`-w` given
+ * without its pair) is a usage error, thrown here so it flows through
+ * the same top-level `mapTopLevelError` path as every other usage error
+ * in this CLI.
+ */
+function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
+  const hasReplace = opts.replace !== undefined;
+  const hasMatchPair = opts.match !== undefined || opts.with !== undefined;
+  const hasPatch = opts.patch !== undefined;
+  const formCount = [hasReplace, hasMatchPair, hasPatch].filter(Boolean).length;
+  if (formCount !== 1) {
+    throw new UsageError(
+      "probe: exactly one mutant form is required: -r/--replace, or " +
+        "-M/--match together with -w/--with, or -p/--patch",
+    );
+  }
+  if (hasMatchPair) {
+    if (opts.match === undefined || opts.with === undefined) {
+      throw new UsageError(
+        "probe: -M/--match and -w/--with must be given together",
+      );
+    }
+    return { form: "match", matchText: opts.match, withText: opts.with };
+  }
+  if (hasReplace) {
+    return { form: "replace", replaceText: opts.replace as string };
+  }
+  return { form: "patch", patchPath: opts.patch as string };
+}
+
+program
+  .command("probe")
+  .description(
+    "Confirm the unmutated test passes (the baseline), apply one mutant, run the test again and check it reacts per --expect (fails by default), then restore the file",
+  )
+  .requiredOption(
+    "--file <path>",
+    "path to the file to mutate (long-only: the global -f is --format)",
+  )
+  .requiredOption("-n, --line <n>", "1-indexed line number", parseLine)
+  .option("-r, --replace <text>", "replace the whole line with this text")
+  .option("-M, --match <substr>", "substring to find on the line (requires -w)")
+  .option("-w, --with <text>", "replacement for the first match of -M")
+  .option("-p, --patch <path>", "path to a unified diff, applied via git apply")
+  .requiredOption("-t, --test <command>", "shell command that runs the test")
+  .option(
+    "--pre <command>",
+    "shell command (e.g. a rebuild) run before each test invocation",
+  )
+  .option(
+    "-i, --isolation <mode>",
+    "worktree or inplace (default inplace; worktree is not yet implemented)",
+    parseIsolationMode,
+    "inplace",
+  )
+  .option(
+    "--expect <verdict>",
+    "fail (default, mutant should break the test) or pass",
+    parseExpectVerdict,
+    "fail",
+  )
+  .option(
+    "--timeout <seconds>",
+    "timeout for --pre and -t",
+    parseTimeoutSeconds,
+  )
+  .option(
+    "--link <dirs>",
+    "comma-separated extra directories checked for containment",
+    parseList,
+  )
+  .option(
+    "--allow-outside",
+    "allow --file/--link to resolve outside the containment root",
+  )
+  .action(async (opts: ProbeCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    const mutantChoice = resolveMutantForm(opts);
+    // Handed to `probe` for the duration of the call: it owns SIGINT and
+    // SIGTERM while it runs, because it has a mutated file to restore
+    // before the process may end. Set with no `await` between it and the
+    // call, so there is no window where a signal would find neither
+    // handler willing to act.
+    probeOwnsShutdown = true;
+    let result;
+    try {
+      result = await probe({
+        file: opts.file,
+        line: opts.line,
+        ...mutantChoice,
+        testCommand: opts.test,
+        preCommand: opts.pre,
+        isolation: opts.isolation,
+        expect: opts.expect,
+        timeoutMs:
+          opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
+        links: opts.link ?? [],
+        allowOutside: opts.allowOutside ?? false,
+        cwd: global.cwd,
+        logDir: global.logDir,
+        // This process exists to run exactly this probe, so a SIGINT or
+        // SIGTERM means "stop now": the handler kills the in-flight
+        // child, waits for it to settle, restores, releases the lock,
+        // and ends the process with the signal's own conventional exit
+        // code. Library callers get the opposite default.
+        exitOnSignal: true,
+      });
+    } finally {
+      // `probe` has removed its own handlers by now, so the process-wide
+      // one takes over again for whatever is left (building and emitting
+      // the envelope).
+      probeOwnsShutdown = false;
+    }
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "probe",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs: [
+        ...(result.baseline !== undefined ? [result.baseline.logPath] : []),
+        ...(result.test !== undefined ? [result.test.logPath] : []),
+        ...(result.dryRunLogPaths ?? []),
+      ],
+      extra: {
+        ...(result.reason !== undefined ? { reason: result.reason } : {}),
+        ...(result.mutant !== undefined ? { mutant: result.mutant } : {}),
+        ...(result.mutation_probe !== undefined
+          ? { mutation_probe: result.mutation_probe }
+          : {}),
+        ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
+        ...(result.test !== undefined ? { test: result.test } : {}),
+        isolation: result.isolation,
+      },
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(envelope, exitCode, {
+      format: global.format,
+      maxChars: global.maxChars,
+    });
+  });
+
 function registerStub(name: string, description: string): void {
   program
     .command(name)
@@ -642,7 +978,6 @@ function registerStub(name: string, description: string): void {
     });
 }
 
-registerStub("probe", "Run a mutation probe");
 registerStub(
   "init",
   "Install the agent-primitives skill into a harness's skill directories",
@@ -722,6 +1057,7 @@ const isMainModule =
   import.meta.url === resolvedArgvUrl(process.argv[1]);
 
 if (isMainModule) {
+  installSignalHandlers();
   const start = Date.now();
   program.parseAsync().catch((err: unknown) => {
     // Each branch below terminates the handler (`return` after emitting):

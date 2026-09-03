@@ -110,7 +110,7 @@ export interface CliRun {
 }
 
 /** A spawned CLI: stdin closed, stdout and stderr piped. */
-type PipedCli = ChildProcessByStdio<null, Readable, Readable>;
+export type PipedCli = ChildProcessByStdio<null, Readable, Readable>;
 
 /**
  * Stay well under Linux's `MAX_ARG_STRLEN`, which caps any single argv
@@ -149,8 +149,11 @@ export function spawnCli(
   return collect(child);
 }
 
-/** The same spawn, handing back the live child instead of a promise. */
-function spawnCliRaw(
+/** The same spawn, handing back the live child instead of a promise: for
+ * a test that has to interact with the process while it runs (send it a
+ * signal, say) rather than only read what it produced. Pair it with
+ * `collectCli` to await the same child's output and exit code. */
+export function spawnCliRaw(
   args: string[],
   options: { env?: NodeJS.ProcessEnv } = {},
 ): PipedCli {
@@ -164,6 +167,10 @@ function spawnCliRaw(
 /** Attaches every listener before returning (nothing here awaits first),
  * so the result is complete whether the child is still running or has
  * already exited. */
+export function collectCli(child: PipedCli): Promise<CliRun> {
+  return collect(child);
+}
+
 function collect(child: PipedCli): Promise<CliRun> {
   return new Promise((resolve, reject) => {
     let stdout = "";

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,13 +21,16 @@ import {
   assertArgvWithinLimit,
   buildSpawnEnv,
   CLI_PATH,
+  collectCli,
   FIXED_BINARIES,
   FIXED_BIN_DIR,
   FIXED_TMPDIR,
   MAX_ARGV_ELEMENT_BYTES,
   resolveBinary,
   spawnCli,
+  spawnCliRaw,
 } from "./helpers/spawn-cli.js";
+import { signalExitCode } from "../src/cli.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -121,18 +124,27 @@ describe("cli", () => {
     expect(JSON.parse(run.stdout).status).toBe("ok");
   });
 
-  it("returns not_implemented usage_error for the probe and init stubs", async () => {
-    // `verify` is implemented (see the "verify" describe block below) and
-    // is deliberately excluded here: running it with no `-C` would target
+  it("returns not_implemented usage_error for the init stub", async () => {
+    // `probe` and `verify` are both implemented (see their own describe
+    // blocks below), so `init` is the only stub left. `verify` would in
+    // any case be excluded here: running it with no `-C` would target
     // this package's own real cwd and its real `test` script, re-invoking
     // this very test suite from inside itself.
-    for (const sub of ["probe", "init"]) {
+    for (const sub of ["init"]) {
       const run = await spawnCli([sub]);
       expect(run.code).toBe(2);
       const parsed = JSON.parse(run.stdout);
       expect(parsed.status).toBe("usage_error");
       expect(parsed.reason).toBe("not_implemented");
     }
+  });
+
+  it("probe is no longer a stub: missing required flags is a normal commander usage_error", async () => {
+    const run = await spawnCli(["probe"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).not.toBe("not_implemented");
   });
 
   it("rejects a -r entry shaped like a path traversal as usage_error (never resolved as a real binary)", async () => {
@@ -562,14 +574,15 @@ describe("cli verify", () => {
     const cwd = makeTmpDir();
     const logDir = makeTmpDir();
     // `sleep` is not on the fixed four-binary PATH spawnCli hands the
-    // child (git, node, npm, sh). A `sh -c "sleep 30"` (or a `node -e`
-    // one-liner) would work on macOS's sh, which exec-replaces itself for
-    // a trailing simple command, but on Linux's dash `sh` forks a real
-    // child for it; exec.ts's timeout only signals the immediate child it
-    // spawned, so the grandchild survives the kill and the check never
-    // ends. A `while true; do :; done` loop is a shell builtin: dash runs
-    // it in the `sh` process itself, with no fork, so the SIGTERM
-    // exec.ts sends actually reaches the work being timed out.
+    // child (git, node, npm, sh), so the work being timed out has to come
+    // from the shell itself. A `while true; do :; done` loop is a shell
+    // builtin: dash runs it in the `sh` process with no fork, so the
+    // fixture behaves the same whether or not the shell exec-replaces
+    // itself for a trailing simple command (macOS's sh does, dash forks).
+    // exec.ts signals the command's whole process group, so a forked
+    // grandchild would be reached too (see exec.test.ts's stdio-holding
+    // descendant case); the builtin keeps this fixture independent of
+    // that and of what the host has installed.
     const run = await spawnCli([
       "-C",
       cwd,
@@ -1039,4 +1052,405 @@ describe("writeFullVerifyResult", () => {
       fs.chmodSync(logDir, 0o700);
     }
   });
+});
+
+describe("cli: probe", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  function initRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    return repo;
+  }
+
+  function commitAll(repo: string): void {
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "x"]);
+  }
+
+  it("-i worktree is usage_error/not_implemented, exit 2, for the probe command specifically", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-r",
+      "y",
+      "-t",
+      "node -e 1",
+      "-i",
+      "worktree",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.command).toBe("probe");
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("not_implemented");
+  });
+
+  it("reports killed, exit 0, for a fixture whose test catches the mutant (the acceptance-criterion CLI shape)", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "node fixture.test.js",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("reports survived, exit 1, for a fixture whose test does not catch the mutant", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "function unused(n) {",
+        "  return n * 2;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "5",
+      "-r",
+      "  return n * 3;",
+      "-t",
+      "node fixture.test.js",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("survived");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("a --file that does not exist is usage_error/file_not_found under command probe, with the path in a warning", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "placeholder.js"), "x\n");
+    commitAll(repo);
+    const missing = path.join(repo, "does-not-exist.js");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "does-not-exist.js",
+      "-n",
+      "1",
+      "-r",
+      "y",
+      "-t",
+      "node -e 1",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.command).toBe("probe");
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("file_not_found");
+    expect((parsed.warnings as string[]).some((w) => w.includes(missing))).toBe(
+      true,
+    );
+  });
+
+  it("exactly one mutant form is required: none given is usage_error, exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-t",
+      "node -e 1",
+    ]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+  });
+
+  it("-p's dry-run exec log paths (the git apply dry run and its --numstat check) are folded into the envelope's logs", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      ["function isPositive(n) {", "  return n > 0;", "}", ""].join("\n"),
+    );
+    commitAll(repo);
+    const patchPath = path.join(repo, "mutant.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+      ].join("\n") + "\n",
+    );
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-p",
+      patchPath,
+      "-t",
+      "node -e 1",
+    ]);
+
+    const parsed = JSON.parse(run.stdout);
+    const logs: string[] = parsed.logs;
+    // At least the dry-run apply and its --numstat check, both under the
+    // run's log dir, neither of them the baseline/test's own logPath.
+    expect(logs.length).toBeGreaterThanOrEqual(2);
+    for (const logPath of logs) {
+      expect(fs.existsSync(logPath)).toBe(true);
+    }
+  });
+
+  it("exactly one mutant form is required: two given (-r and -p) is usage_error, exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-r",
+      "y",
+      "-p",
+      "/dev/null",
+      "-t",
+      "node -e 1",
+    ]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+  });
+});
+
+describe("cli signal handling", () => {
+  it("maps a signal to its conventional exit code", () => {
+    expect(signalExitCode("SIGINT")).toBe(130);
+    expect(signalExitCode("SIGTERM")).toBe(143);
+  });
+
+  it("SIGINT during a verify check kills the check's own worker instead of orphaning it, and exits 130", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const heartbeat = path.join(cwd, "heartbeat.txt");
+    const workerPath = path.join(cwd, "worker.js");
+    const spawnerPath = path.join(cwd, "spawner.js");
+
+    // The worker is a grandchild of the CLI: it inherits the check
+    // command's stdout and stderr, so a signal that reaches only the
+    // CLI leaves it running (and holding those pipes). Its heartbeat
+    // file says whether it is still alive: a killed worker stops
+    // incrementing, an orphaned one does not.
+    fs.writeFileSync(
+      workerPath,
+      [
+        "const fs = require('node:fs');",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        `  fs.writeFileSync(${JSON.stringify(heartbeat)}, String(n));`,
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      spawnerPath,
+      [
+        "const { spawn } = require('node:child_process');",
+        `spawn(process.execPath, [${JSON.stringify(workerPath)}], {`,
+        "  stdio: 'inherit',",
+        "});",
+        "setTimeout(() => { process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+
+    const child = spawnCliRaw([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      `hb=node ${shQuote(spawnerPath)}`,
+    ]);
+    const run = collectCli(child);
+
+    // Readiness: the check's worker is really running, not merely
+    // scheduled.
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    child.kill("SIGINT");
+    const result = await run;
+
+    // The worker is gone, not merely parentless: its heartbeat stops.
+    // Asserted first, so a regression is reported as the orphaned
+    // process it is rather than as an unexpected exit code.
+    const countAtExit = fs.readFileSync(heartbeat, "utf8");
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(fs.readFileSync(heartbeat, "utf8")).toBe(countAtExit);
+
+    expect(result.code).toBe(130);
+  }, 40000);
+});
+
+describe("cli signal handling: a check that traps the signal", () => {
+  it("SIGINT kills a verify check that traps SIGTERM and SIGINT, instead of leaving it running past the exit", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const heartbeat = path.join(cwd, "heartbeat.txt");
+    const trapPath = path.join(cwd, "trap.js");
+
+    // The check command installs no-op handlers for both signals, so
+    // only SIGKILL can end it. A signal path that sends SIGTERM and then
+    // exits leaves it running: the escalation to SIGKILL is scheduled in
+    // the process that is going away. Its heartbeat file is the proof
+    // either way.
+    fs.writeFileSync(
+      trapPath,
+      [
+        "const fs = require('node:fs');",
+        "process.on('SIGTERM', () => {});",
+        "process.on('SIGINT', () => {});",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        `  fs.writeFileSync(${JSON.stringify(heartbeat)}, String(n));`,
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+
+    const child = spawnCliRaw([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      `hb=node ${shQuote(trapPath)}`,
+    ]);
+    const run = collectCli(child);
+
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    child.kill("SIGINT");
+    const result = await run;
+
+    const countAtExit = fs.readFileSync(heartbeat, "utf8");
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(fs.readFileSync(heartbeat, "utf8")).toBe(countAtExit);
+
+    expect(result.code).toBe(130);
+  }, 40000);
 });

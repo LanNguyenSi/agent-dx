@@ -7,36 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `verify` subcommand core: resolves each named check (`-x` override wins,
-  else `package.json` `scripts[name]` as `npm run <name> --silent`, else
-  `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`
-  list, deduplicated preserving the first occurrence, in order), through
-  `exec.ts` with a per-check timeout and log file. Every resolved check
-  name is validated against a conservative pattern before any command is
-  built; an invalid name is `status: "usage_error"`, exit `2`, never run.
-  Shell exit `126`/`127` maps to `status: "error"`, never `"fail"`.
-  `--fail-fast` stops after the first check that fails or errors; a
-  skipped check falls through instead of stopping the run. When every
-  requested check resolves to `skipped`, the run is `status: "error"` with
-  `reason: "nothing_verified"`, never a silent pass. Detector selection is
-  by output shape first, command text only as a tiebreaker among shape
-  matches, and only when it names exactly one of them; otherwise the
-  generic detector is chosen and a warning lists the shapes seen. v0 wires
-  the `generic` detector (parses no failures out of the text itself), with
-  the selection seam left open for tool-specific detectors. The failures
-  invariant is enforced once, centrally, for every detector and for both
-  `fail` and `error` checks: a check with zero parsed failures always gets
-  one synthetic failure entry (naming `timedOut`, or the exit code, plus
-  output tail) instead of shipping an empty `failures` list, and an
-  `error` check always reports at least one `summary.errors`. A detector's
-  own warnings, and a log file the run could not write to, are merged into
-  the top-level `warnings`, prefixed with the check name. `--max-failures`
-  (a positive integer, default 20) caps each check's own `failures` list,
-  failures-first; a cut is reported via `truncated: true` and the full,
-  uncapped result is written to the log directory.
-
 ### Fixed
 
 - **Envelope bound and reduction.** The bound is met by reducing the
@@ -126,9 +96,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a failure as `logWriteFailed`/`logWriteError` on `ExecResult` instead of
   crashing on an unhandled `'error'` event. stdout/stderr decoding uses
   `StringDecoder`, so a multi-byte character split across two chunks no
-  longer becomes a replacement character.
+  longer becomes a replacement character. A run that settles on the
+  stream flush grace rather than on `close` (something the command left
+  behind is still holding the stdio pipes) reports
+  `outputMayBeIncomplete: true`, so output dropped at that moment is
+  stated instead of silently missing; `probe` and `verify` both surface
+  it as a warning.
 
-- **Tests.** Every CLI test spawns through one shared helper that hands
+- **`probe`: patches are applied without a shell.** All three `git apply`
+  invocations (the `--numstat` path check, the dry run, and the real
+  apply) run through a small argv-array runner instead of being built as
+  `sh -c` strings. A `-p` path is caller-supplied, and `sh` expands
+  `$(...)` and backticks inside double quotes, so no quoting of such a
+  path into a shell string is safe. The `--numstat` check also reads the
+  command's whole output rather than a tail, and refuses a listing that
+  did not fit instead of checking the patch's paths against a fragment.
+
+- **`probe`: an interrupted run is `inconclusive`/`aborted`.** In both the
+  baseline and the mutant phase, a run stopped by `SIGINT`/`SIGTERM` or
+  by a caller's abort classifies as `status: "inconclusive"`,
+  `reason: "aborted"`, never `killed`/`survived` and never a plain
+  `baseline_failed`: the interrupted test child exits non-zero, which
+  under `--expect fail` is indistinguishable from a mutant the suite
+  caught.
+
+- **CLI signal handling.** `SIGINT`/`SIGTERM` are handled for every
+  subcommand: the in-flight command is aborted (which `SIGKILL`s its whole
+  process group), the CLI waits for that run to settle, and the process
+  then exits `130`/`143`, instead of a Ctrl-C ending the CLI and orphaning
+  the worker its check had spawned. `verify()` gains an optional `signal`
+  threaded to `exec.ts`. `probe` owns the two signals for the duration of
+  its call, since it also has a mutated file to restore before the process
+  may end.
+
+- **The emergency restore is the last write to the target.** On
+  `SIGINT`/`SIGTERM`, `probe` no longer sends `SIGTERM` and exits: it
+  `SIGKILL`s the in-flight child's whole process group outright, waits
+  (bounded) for that run to settle, and only then restores, verifies the
+  restore by hash, removes the marker and releases the lock. A test
+  command that traps `SIGTERM` used to sit out the grace period, outlive
+  the exit (the escalation timer died with the process that scheduled it),
+  and write over the restored file; the same held for a descendant that
+  put itself out of the group's reach. Both are covered by tests that let
+  such a writer run and assert the target's content afterwards.
+  `ExecOptions.signal` and the new `RunArgvOptions.signal` both kill with
+  `SIGKILL` and no grace for this reason; the timeout path still sends
+  `SIGTERM` first.
+
+- **The emergency restore waits for true stdio closure, not just for the
+  run's own promise to settle.** `exec`'s flush-grace shortcut lets that
+  promise resolve while a descendant that left the process group still
+  holds the command's stdio open, and `probe`'s signal handler used to
+  await that same promise: a write landing after the shortcut but before
+  the descendant actually closed its pipes could land after the restore,
+  with the marker already gone. The handler now waits, bounded, for the
+  pipes to genuinely close (`exec` and `runArgv` both expose this: an
+  additive `stdioClosed` field on their result, and `exec` also takes an
+  `onStdioClosed` callback fired exactly on that closure, independent of
+  when its own promise settles). When the bound expires with the pipes
+  still open, the target is still restored, but the marker and its
+  backup are deliberately kept rather than removed: `doctor` reports the
+  marker as stale, and the next `probe` on that target recovers from the
+  hash-verified backup the same way it already does for any other
+  in-flight marker, including when the target already matches the
+  marker's own pre-mutation hash. Also fixed: the signal handler's own
+  restore-then-exit no longer races the normal control flow's return.
+  Every point where the normal flow detects that a run it started was
+  aborted now checks whether the handler has already taken over; if so,
+  it defers to the handler's own outcome instead of restoring a second
+  time, and in the CLI it never returns at all, so the handler's own
+  exit is always what ends the process. Before this, an aborted run
+  could resolve fast enough that the CLI printed an inconclusive/aborted
+  envelope and exited `2` instead of ending with `130`/`143` and no
+  output, depending on how long the killed command took to actually die.
+
+- **`probe`: every `git apply` is abortable and bounded by `--timeout`.**
+  The path check, the dry run, and the real apply now take the probe's
+  own signal, so an interrupted apply is killed rather than left to land
+  on the target after the restore has already put the original back (with
+  the marker gone). `--timeout` bounds them too; with no `--timeout` they
+  keep the fixed ten-second bound they always had. An apply killed by that
+  bound reports `reason: "git_apply_timeout"`, and one killed by the
+  signal reports `reason: "aborted"`, instead of both being reported as a
+  patch that failed to parse or to apply.
+
+- **`verify`: an aborted run says so.** `options.signal` now stops the
+  run instead of only killing the current command: the check that was
+  running is reported as `status: "error"` with a failure naming the
+  abort (never the failures invariant's synthesized `exit code null`
+  entry), no further check is started, the ones that never ran are named
+  in a warning, and the result carries `reason: "aborted"`.
+
+- **`probe`: the lock is keyed on the repository.** An `inplace` probe
+  mutates the one working tree that every probe in that repository builds
+  and tests in, so two probes on different files in one repository are
+  not independent; the second is now refused with
+  `reason: "probe_in_progress"` the way a second probe on the same file
+  always was. Outside a repository the target path remains the lock's
+  identity. Markers stay keyed per target file.
+
+- **`doctor`: the stale-marker hint applies probe's own recovery rule.**
+  It hashes the recorded backup and compares the target before pointing
+  at automatic recovery, instead of splitting on whether the backup file
+  still exists. A marker whose backup no longer matches the pre-mutation
+  hash it records, or whose target has moved on from the state it
+  describes, is one the next probe refuses, and doctor now names the
+  marker file and the manual delete for it rather than promising a
+  recovery that will fail.
+
+- **Tests.** The `O_EXCL` backup-name claim in `isolation.ts` is pinned
+  through an injected `open`, which makes the name appear exactly in the
+  window between choosing it and opening it: the session claims the next
+  name and the other session's backup is left intact. `exec`'s
+  flush-grace settle path is pinned by a command whose descendant puts
+  itself in a process group of its own and holds the stdio pipes, and the
+  library-mode signal path (including `exitOnSignal`'s default) by a
+  spawned library caller that is sent `SIGTERM` mid-probe. Every CLI test
+  spawns through one shared helper that hands
   the child a PATH of exactly four resolved binaries (node, npm, git, sh),
   a fixed temp directory, and no inherited environment, and that attaches
   its readers before returning rather than after a sleep. A spawned CLI's
@@ -140,7 +224,146 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path, and the shell loops they run are POSIX constructs rather than
   `seq`.
 
+- `probe`: restore now runs in the pipeline's
+  own `finally` as a backstop, so a thrown error mid-mutation (not just
+  a normal return) still restores and hash-verifies the target before
+  re-throwing; `--pre`/`-t` run in the invocation cwd instead of the
+  containment root, so a probe from a subdirectory of a monorepo sees
+  the same cwd its test command normally would; a non-zero `--pre` exit
+  in either the baseline or the mutant run is `inconclusive`/
+  `pre_failed`, never a verdict; a marker found under the lock is always
+  treated as an unfinished probe regardless of its recorded pid (the
+  lock already excludes a second live probe, and pids recycle);
+  `--file`/`--link` are resolved with `realpath` before both the
+  containment check and the lock/marker key, so an in-repo symlink to an
+  outside file can no longer bypass containment; a `-p` patch that
+  touches any path other than `--file` (checked via `git apply
+  --numstat` after the dry run) is `mutant_not_applicable` instead of
+  silently mutating extra files with nothing to restore them; the lock
+  directory is uid-scoped (`agent-primitives-<uid>/locks`) and created
+  `0700`, and one that exists but is not owned by (or writable by) the
+  current user is `inconclusive`/`lock_unavailable` instead of a raw
+  filesystem error; `mutation_probe.result` now stays within
+  `killed`/`survived`/`inconclusive` (the detail moved to `reason`); the
+  baseline, test, and dry-run exec log paths are folded into the
+  envelope's `logs`; a whole-line `-r, --replace` mutation preserves the
+  target line's own CRLF terminator instead of silently downgrading that
+  one line to LF; and `-p` combined with `--allow-outside` is now a
+  usage error instead of a scratch-dir path that always fails.
+
+- `probe`: the target is backed up (and the backup verified against its
+  pre-mutation hash) immediately, before the baseline ever runs, instead
+  of afterward; a target rewritten by the baseline itself (a formatter
+  or codegen step) is caught by a post-baseline re-hash and reported as
+  `inconclusive`/`target_changed_during_baseline` before any mutation or
+  marker exists, leaving the target exactly as the baseline left it. A
+  missing `--file` is `usage_error`/`file_not_found` (naming the path)
+  instead of an uncaught filesystem error surfacing under an unknown
+  command. `mutant_not_applicable` always carries a one-line reason
+  (line out of range, substring not found, an identical replacement, or
+  why a patch did not apply) and always returns its dry-run log paths,
+  including the baseline's own `--pre` log; the mutant-phase `pre_failed`
+  path now also reports `mutation_probe` with its real
+  `restored_verified`. The `SIGINT`/`SIGTERM` handler now kills the
+  in-flight `--pre`/`-t` child (via a new, additive `signal` option on
+  `execCommand`) before restoring, instead of leaving it running after
+  the process exits; the `finally` backstop's warning names the error
+  that actually triggered it. The in-flight backup's name is now claimed
+  atomically (`O_EXCL`) instead of via a check-then-copy that could race
+  two sessions in the same log dir. The lock directory check now
+  validates every level it had to create (not just the leaf) for
+  ownership and permissive mode, since a level above the leaf sits
+  directly under a shared, world-writable `/tmp`. `doctor`'s stale-marker
+  hint, and the marker-recovery path itself, only promise auto-recovery
+  when the backup still exists; when it is gone, both name the marker
+  file for a manual delete instead. The baseline phase now reports its
+  own `timedOut`, so a killed baseline is distinguishable from one that
+  genuinely failed.
+- `probe`: stale-marker recovery now hashes the recorded backup and
+  requires it to match the marker's own pre-mutation hash BEFORE copying
+  anything over the target. A corrupt, truncated, or foreign backup was
+  previously written over the target first and only found out afterward,
+  destroying the only remaining copy of the mutated file while reporting
+  `stale_probe_marker` as though nothing had been touched; the refusal now
+  names both the backup and the marker file and leaves the target alone.
+  A failing baseline that also rewrote the target keeps its backup (named
+  in a warning) instead of discarding the only copy of the pre-baseline
+  content silently. A post-apply hash mismatch is
+  `inconclusive`/`apply_hash_mismatch` carrying `mutation_probe` with its
+  real `restored_verified`, instead of throwing out of `probe()` and
+  surfacing as `status: "error"` under an unknown command. A `-p` patch
+  that touches a second path is now diagnosed by `git apply --numstat`
+  before the scratch dry run, so a patch modifying another file that
+  exists in the repository is reported as touching paths other than
+  `--file` rather than as a patch that did not apply. The exported
+  `probe()` no longer ends the host process on `SIGINT`/`SIGTERM` unless
+  the caller opts in with `exitOnSignal` (the CLI does); the emergency
+  restore and lock release happen either way.
+
+- `exec`: commands run in a process group of their own (`detached`), and
+  both `--timeout` and `options.signal` signal that whole group (the
+  timeout with `SIGTERM` then `SIGKILL` after a grace; the abort path with
+  `SIGKILL`, see the entry above). A worker the command spawned no longer
+  survives the kill while holding the run's stdout and stderr open, which
+  stretched a bounded run to the descendant's own lifetime and left a
+  process writing to a probe's target during the restore. Settling is
+  driven by the command's own `exit` plus a bounded flush grace rather
+  than unconditionally by `close`, so a descendant in a process group of
+  its own cannot hold the call open either. `ExecResult` is unchanged
+  apart from the additive `aborted`.
+
+- `doctor`: the stale-probe-marker check resolves both the current
+  repository's containment root and the marker's target path before
+  comparing them, so a symlinked ancestor (`/tmp` against `/private/tmp`,
+  a symlinked checkout) no longer reports "no stale probe markers" while
+  one is sitting there.
+
 ### Added
+
+- `verify` subcommand core: resolves each named check (`-x` override wins,
+  else `package.json` `scripts[name]` as `npm run <name> --silent`, else
+  `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`
+  list, deduplicated preserving the first occurrence, in order), through
+  `exec.ts` with a per-check timeout and log file. Every resolved check
+  name is validated against a conservative pattern before any command is
+  built; an invalid name is `status: "usage_error"`, exit `2`, never run.
+  Shell exit `126`/`127` maps to `status: "error"`, never `"fail"`.
+  `--fail-fast` stops after the first check that fails or errors; a
+  skipped check falls through instead of stopping the run. When every
+  requested check resolves to `skipped`, the run is `status: "error"` with
+  `reason: "nothing_verified"`, never a silent pass. Detector selection is
+  by output shape first, command text only as a tiebreaker among shape
+  matches, and only when it names exactly one of them; otherwise the
+  generic detector is chosen and a warning lists the shapes seen. v0 wires
+  the `generic` detector (parses no failures out of the text itself), with
+  the selection seam left open for tool-specific detectors. The failures
+  invariant is enforced once, centrally, for every detector and for both
+  `fail` and `error` checks: a check with zero parsed failures always gets
+  one synthetic failure entry (naming `timedOut`, or the exit code, plus
+  output tail) instead of shipping an empty `failures` list, and an
+  `error` check always reports at least one `summary.errors`. A detector's
+  own warnings, and a log file the run could not write to, are merged into
+  the top-level `warnings`, prefixed with the check name. `--max-failures`
+  (a positive integer, default 20) caps each check's own `failures` list,
+  failures-first; a cut is reported via `truncated: true` and the full,
+  uncapped result is written to the log directory.
+
+- `probe` subcommand (`inplace` isolation only; `-i worktree` still
+  returns `not_implemented`, a later release flips the default): the full
+  mutation-probe pipeline (lock, containment, stale-marker recovery,
+  baseline, apply, `--pre`/test, restore, hash verification, classify)
+  for all three mutant forms (`-r, --replace`, `-M, --match` with
+  `-w, --with`, `-p, --patch` via `git apply`). A per-target lock
+  (`src/lock.ts`, `O_EXCL`, stale-pid reclaim) outside the repository
+  serializes concurrent probes on the same file; an in-flight marker
+  written before mutation lets the next invocation recover automatically
+  from a `SIGKILL`/crash mid-mutation, or refuse with
+  `stale_probe_marker` naming the backup path when it cannot prove that
+  recovery is safe. Restore runs on normal completion, on any thrown
+  error, and on `SIGINT`/`SIGTERM`; a failed restore is terminal
+  (`restore_failed`, exit 2, never a `killed`/`survived` verdict).
+  `doctor`'s `checks` gained a `stale-probe-marker` entry for the current
+  repository.
 
 - Initial package scaffold: the shared envelope module (bounded
   serialization, status-to-exit-code mapping), an `exec` runner with fixed
