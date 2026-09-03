@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `init` subcommand: installs the packaged `assets/skill/SKILL.md` into
+  one or more harnesses' skill directories (`-H claude,codex,opencode`,
+  or the single value `all`; default `claude`), writing
+  `<target>/.claude/skills/agent-primitives/SKILL.md`,
+  `<target>/.agents/skills/agent-primitives/SKILL.md`, and
+  `<target>/.opencode/skills/agent-primitives/SKILL.md` respectively.
+  Mirrors a standard kit installer's write-if-new-or-unedited semantics
+  without importing that internal module: a target that does not exist
+  yet, or exists with byte-identical content, is written or reported
+  `unchanged`; a target with different content is `conflicted`, exit
+  `1`, and left untouched, unless `--force`, which overwrites it and
+  reports `written`. Every requested harness's target path is resolved
+  and checked against `--target-dir` before any file is written, so a
+  condition knowable without writing (an escape through a pre-existing
+  symlink, a symlink or a directory or a FIFO at the target file path,
+  or, where a write is actually due under `--force`, a target that is
+  not writable) refuses the whole run rather than leaving other
+  harnesses partially written. Write access is checked only where the
+  content differs, so a read-only target that already holds this skill
+  is `unchanged` under `--force` too. A condition that only surfaces
+  during the write itself, such as a symlink planted between validation
+  and the write, can still leave a prefix of the requested harnesses
+  installed; the `usage_error` envelope's `targets` field then names
+  that prefix. Each such refusal carries a `reason` of its own
+  (`target_not_a_directory`, `target_path_is_a_directory`,
+  `target_not_a_regular_file`, `target_not_writable`,
+  `target_is_a_symlink`, `target_escapes_directory`,
+  `platform_unsupported`) instead of a raw filesystem message, and
+  `InitFsUsageError` plus that reason type are exported for callers
+  using `init` as a library. A target is never written through a
+  symbolic link, at the target path or above it; a hard link at the
+  target path is indistinguishable from a plain regular file and is
+  written through like one. The `O_NOFOLLOW` the write's symlink guard
+  needs is checked inside `init`, so a platform without it refuses
+  `init` alone and leaves `probe`, `verify`, and `doctor` usable.
+  `init` never writes under `.claude/agents/`, which belongs to a
+  different installer. The skill document itself teaches the search,
+  verify, probe, and doctor conventions to an agent working in the
+  target repository. Evidence for the terrain claims and design
+  decisions behind `probe`, `verify`, `doctor`, and `init` lives in the
+  pandora workspace run `2026-09-03-agent-tools-kit` and its memory
+  record.
 - `verify` subcommand core: resolves each named check (`-x` override wins,
   else `package.json` `scripts[name]` as `npm run <name> --silent`, else
   `skipped`), runs `build, typecheck, lint, test` by default (or the `-c`

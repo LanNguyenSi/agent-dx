@@ -22,6 +22,9 @@ on:
     tags:
       - "orchestrator-workflow/v*"
       - "okf-kit/v*"
+      # agent-primitives: prepared, not triggered: no tag is pushed until
+      # the package has been dogfooded.
+      - "agent-primitives/v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -47,7 +50,9 @@ jobs:
         env:
           RESOLVED_TAG: ${{ inputs.tag || github.ref_name }}
           # Space-separated allowlist of publishable package directories.
-          PUBLISHABLE: "orchestrator-workflow okf-kit"
+          # agent-primitives is prepared here, not triggered: no tag is
+          # pushed until the package has been dogfooded.
+          PUBLISHABLE: "orchestrator-workflow okf-kit agent-primitives"
         run: |
           set -euo pipefail
           pkg="${RESOLVED_TAG%%/v*}"

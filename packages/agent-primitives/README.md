@@ -28,7 +28,9 @@ node dist/cli.js doctor
 ```
 
 Once published, the usual `npx agent-primitives doctor` / `npm install -g
-agent-primitives` paths will work too.
+agent-primitives` paths will work too. Publishing this package's first
+tag requires its own npm Trusted Publisher entry, separate from any
+other package published out of the same repository.
 
 Requires Node >= 20.
 
@@ -421,6 +423,30 @@ line), or `-p, --patch` (apply a unified diff via `git apply`, applied
 against the worktree for `-i worktree`, against the working tree itself
 for `-i inplace`).
 
+The dist trap: a project whose test command runs built output
+(`dist/`, `lib/`, ...) rather than `--file` itself needs `--pre` to
+rebuild before every test invocation, or a real mutant never reaches the
+code the test actually runs and is misreported as `survived`:
+
+```bash
+agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
+  -t 'npm test' --pre 'npm run build'
+```
+
+`agent-primitives doctor` reports a `dist/` directory sitting next to
+`src/` as a hint that a probe on that project may need `--pre`.
+
+`-i inplace` mutates the working tree directly and restores it from a
+backup afterward (on normal completion, on any error, and on
+`SIGINT`/`SIGTERM`, as the signals section above describes); because
+`SIGKILL` cannot be trapped, a probe killed outright while `-i inplace`
+is running can leave the mutation in place, which is why `worktree` is
+the default rather than `inplace`: a `worktree` probe killed the same
+way leaves the original tree untouched. The in-flight marker and its
+hash-verified recovery described above apply to `-i inplace`; a
+`worktree` probe's leftover is covered by the repository-keyed marker,
+git's own registry, and `doctor` as described in this section.
+
 `-t` and `--pre` are shell commands, executed through `sh -c` as given,
 so neither may be filled from untrusted text (an issue body, a model's
 output, a file in the tree under test); `-p`'s patch path is not, and is
@@ -593,9 +619,84 @@ every `inplace` run).
 
 ## `init`
 
-Not yet implemented. It currently returns a JSON result with
-`status: "usage_error"` and `reason: "not_implemented"`, exit `2`, rather
-than doing nothing silently or claiming success.
+Installs this package's own skill document into a harness's skill
+directory, so an agent working in the target repository is told when to
+reach for `probe`, `verify`, and `doctor` (see `assets/skill/SKILL.md`).
+
+```bash
+agent-primitives init
+agent-primitives init -H claude,codex -t /path/to/some/repo
+agent-primitives init -H all --force
+```
+
+- `-H, --harness <list>`: comma-separated `claude`, `codex`, `opencode`,
+  or the single value `all` (default: `claude`). Writes to
+  `<target>/.claude/skills/agent-primitives/SKILL.md`,
+  `<target>/.agents/skills/agent-primitives/SKILL.md`, and
+  `<target>/.opencode/skills/agent-primitives/SKILL.md` respectively.
+  `init` never writes anywhere under `.claude/agents/`: that directory
+  belongs to a different installer (orchestrator-workflow) and carries
+  its own role prompts and manifest hashes.
+- `-t, --target-dir <dir>`: the directory the harness-specific paths
+  above are resolved under (defaults to `-C`/`--cwd`, itself defaulting
+  to the process cwd). Any missing directory on the way to the target
+  (`-t` itself included, and the harness's own skill subdirectory on a
+  first run) is created rather than treated as an error.
+- `--force`: overwrite a conflicting existing file instead of reporting
+  it as `conflicted`.
+
+Semantics mirror a standard kit installer's write-if-new-or-unedited
+convention: a target that does not exist yet, or exists with
+byte-identical content, is written (or reported `unchanged`) with no
+further action, exit `0`. A target that exists with different content
+is reported `conflicted`, exit `1`, and left untouched, unless `--force`
+is given, in which case it is overwritten and reported `written`, exit
+`0`. Every requested harness's target is validated against
+`--target-dir` before anything is written: containment, a symlink, a
+directory or another entry that is not a regular file already sitting
+at the target file path, and, under `--force`, write access to a target
+whose content differs from the skill being installed are all checked up
+front, so a condition of that kind on one harness (for example a
+pre-existing symlink, or `.claude` itself pointing outside
+`--target-dir`) refuses the whole invocation, exit `2`, with nothing
+written for any harness. Write access is checked only where a write is
+actually due: a read-only target that already holds exactly this skill
+needs no write and is reported `unchanged`, exit `0`, under `--force`
+as well, and the other requested harnesses are installed alongside it.
+A condition that only shows up during the write itself, such as a
+symlink planted in the gap between validation and the write, can still
+leave a prefix of the requested harnesses written; the envelope's own
+`targets` field then lists whatever was written or found unchanged
+before the failure. A symlink at the target file path itself is
+refused the same way, whether it dangles, resolves inside or outside
+`--target-dir`, and whether or not `--force` is given: a target is
+never written through a symlink. This containment guarantee is about
+symbolic links specifically; a hard link at the target path is
+indistinguishable from a plain regular file and is written through like
+one. An entry that is neither a regular file nor a directory (a FIFO, a
+socket, a device node) is refused by its type instead of being read or
+written, so a FIFO at the target path cannot block the run. `-t` naming
+a file instead of a directory, a directory sitting at the target file
+path, an entry there that is not a regular file, an existing target
+that is not writable, a symlink at the target file path, a resolved
+target that escapes `--target-dir`, and a platform whose `fs.constants`
+offers no usable `O_NOFOLLOW` for the write's symlink guard are each
+reported as `status: "usage_error"`, exit `2`, with a `reason` naming
+which one it was (`target_not_a_directory`,
+`target_path_is_a_directory`, `target_not_a_regular_file`,
+`target_not_writable`, `target_is_a_symlink`,
+`target_escapes_directory`, `platform_unsupported`) instead of a raw
+filesystem error message. The platform check is scoped to `init` and
+runs when `init` is called, so `probe`, `verify`, and `doctor` stay
+usable on such a platform.
+
+Output beside the envelope: `status` (`written`, `unchanged`, or
+`conflicted`, the worst outcome across every requested harness) and
+`targets: [{ harness, path, status }]`, one entry per requested harness.
+A usage-error envelope from a filesystem condition at the target also
+carries `targets`, naming whatever harness or harnesses were already
+installed before the error (empty when the error was caught by
+validation before any write).
 
 ## Output shape
 

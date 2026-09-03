@@ -44,6 +44,7 @@ Full pack reference, sample output, the scan pipeline, and the rationale (includ
 | [orchestrator-workflow](packages/orchestrator-workflow) | Installer for an orchestrator-led agent workflow: `.ai/` run state, an `AGENTS.md` policy section, and subagent definitions with preselected models for Claude Code, Codex, and opencode. | published |
 | [okf-kit](packages/okf-kit) | CLI that validates OKF v0.1 knowledge bundles: frontmatter shape, reserved files, link resolution, absolute-link warnings, `sources` shape. | published |
 | [slop-detector](packages/slop-detector) | AI-slop linter for PRs: leaked tool-call XML, doubled Summary headings, hedging openers, marketing adjectives, and more across six rule packs. | not published (name taken; run from a local build) |
+| [agent-primitives](packages/agent-primitives) | Agent-first CLI: bounded JSON envelopes, a mutation-probe runner, a verify runner, and a PATH doctor, plus an `init` command that installs its own skill document into a harness's skill directory. | not published, prepared, pending dogfood |
 | [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. | not published |
 | [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. | not published |
 | [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. | private |

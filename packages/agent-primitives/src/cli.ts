@@ -30,6 +30,13 @@ import {
   type ExpectVerdict,
   type IsolationMode,
 } from "./probe/index.js";
+import {
+  init,
+  ALL_HARNESSES,
+  InitFsUsageError,
+  type Harness,
+  type InitResult,
+} from "./init/index.js";
 
 function readVersion(): string {
   try {
@@ -82,6 +89,37 @@ function parseList(value: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/** `-H, --harness <list>`: `claude`, `codex`, `opencode`, comma-separated,
+ * or the single literal `all`. `all` cannot be mixed with a named harness
+ * (its meaning, "every harness", would otherwise be ambiguous alongside an
+ * explicit subset). */
+function parseHarnessList(value: string): Harness[] {
+  const raw = parseList(value);
+  if (raw.length === 0) {
+    throw new InvalidArgumentError(
+      "-H/--harness: at least one harness is required",
+    );
+  }
+  if (raw.includes("all")) {
+    if (raw.length !== 1) {
+      throw new InvalidArgumentError(
+        '-H/--harness: "all" must not be combined with other harness names',
+      );
+    }
+    return [...ALL_HARNESSES];
+  }
+  const seen: Harness[] = [];
+  for (const name of raw) {
+    if (name !== "claude" && name !== "codex" && name !== "opencode") {
+      throw new InvalidArgumentError(
+        `-H/--harness: unknown harness "${name}" (must be claude, codex, opencode, or all)`,
+      );
+    }
+    if (!seen.includes(name)) seen.push(name);
+  }
+  return seen;
 }
 
 /** `-x name=command`, accumulated across repeated flags into an object
@@ -952,36 +990,101 @@ program
     });
   });
 
-function registerStub(name: string, description: string): void {
-  program
-    .command(name)
-    .description(`${description} (not yet implemented)`)
-    .action((_opts: object, command: Command) => {
-      const start = Date.now();
-      const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
-      const { envelope, exitCode } = buildEnvelope({
-        version: VERSION,
-        command: name,
-        status: "usage_error",
-        durationMs: Date.now() - start,
-        cwd: global.cwd,
-        warnings: [],
-        logs: [],
-        extra: { reason: "not_implemented" },
-        maxChars: global.maxChars,
-        logDir: global.logDir,
-      });
-      emit(envelope, exitCode, {
-        format: global.format,
-        maxChars: global.maxChars,
-      });
-    });
+interface InitCliOptions {
+  harness: Harness[];
+  targetDir?: string;
+  force?: boolean;
 }
 
-registerStub(
-  "init",
-  "Install the agent-primitives skill into a harness's skill directories",
-);
+function renderInitText(result: InitResult): string {
+  const lines: string[] = [];
+  lines.push(`status: ${result.status}`);
+  lines.push("");
+  lines.push("targets:");
+  for (const target of result.targets) {
+    lines.push(`  [${target.status}] ${target.harness}: ${target.path}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+program
+  .command("init")
+  .description(
+    "Install the agent-primitives skill into a harness's skill directories",
+  )
+  .option(
+    "-H, --harness <list>",
+    "comma-separated harnesses (claude, codex, opencode) or the single value all (default: claude)",
+    parseHarnessList,
+    ["claude"] as Harness[],
+  )
+  .option(
+    "-t, --target-dir <dir>",
+    "directory the harness skill paths are resolved under (defaults to -C/--cwd)",
+  )
+  .option(
+    "--force",
+    "overwrite a conflicting existing skill file instead of reporting conflicted",
+  )
+  .action((opts: InitCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    const targetDir = opts.targetDir
+      ? path.resolve(global.cwd, opts.targetDir)
+      : global.cwd;
+    let result: InitResult;
+    try {
+      result = init({
+        harnesses: opts.harness,
+        targetDir,
+        force: Boolean(opts.force),
+      });
+    } catch (err) {
+      if (err instanceof InitFsUsageError) {
+        const { envelope, exitCode } = buildEnvelope({
+          version: VERSION,
+          command: "init",
+          status: "usage_error",
+          durationMs: Date.now() - start,
+          cwd: global.cwd,
+          warnings: [],
+          logs: [],
+          extra: {
+            reason: err.reason,
+            message: err.message,
+            targets: err.targets,
+          },
+          maxChars: global.maxChars,
+          logDir: global.logDir,
+        });
+        emit(envelope, exitCode, {
+          format: global.format,
+          maxChars: global.maxChars,
+        });
+        return;
+      }
+      throw err;
+    }
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "init",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs: [],
+      extra: { targets: result.targets },
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(
+      envelope,
+      exitCode,
+      { format: global.format, maxChars: global.maxChars },
+      () => renderInitText(result),
+    );
+  });
 
 // CommanderError codes that represent a genuine, successful exit (--help,
 // --version) rather than a usage error, and must therefore pass their exit
