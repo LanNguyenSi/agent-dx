@@ -10,10 +10,13 @@ import {
   classifyStdoutError,
   mapTopLevelError,
   writeAndExitTo,
+  parseExecOverride,
+  writeFullVerifyResult,
   type ResolvedGlobal,
   type StdoutSink,
 } from "../src/cli.js";
 import { UsageError } from "../src/envelope.js";
+import type { VerifyResult, CheckResult } from "../src/verify/index.js";
 import {
   assertArgvWithinLimit,
   buildSpawnEnv,
@@ -118,8 +121,12 @@ describe("cli", () => {
     expect(JSON.parse(run.stdout).status).toBe("ok");
   });
 
-  it("returns not_implemented usage_error for probe, verify, and init stubs", async () => {
-    for (const sub of ["probe", "verify", "init"]) {
+  it("returns not_implemented usage_error for the probe and init stubs", async () => {
+    // `verify` is implemented (see the "verify" describe block below) and
+    // is deliberately excluded here: running it with no `-C` would target
+    // this package's own real cwd and its real `test` script, re-invoking
+    // this very test suite from inside itself.
+    for (const sub of ["probe", "init"]) {
       const run = await spawnCli([sub]);
       expect(run.code).toBe(2);
       const parsed = JSON.parse(run.stdout);
@@ -352,6 +359,399 @@ describe("boundText", () => {
   });
 });
 
+describe("cli verify", () => {
+  // Every case here passes an explicit -C to a fresh, empty tmp dir (never
+  // the package's own real cwd): `verify` with no package.json and no `-x`
+  // override for a default check name just skips it, so these never touch
+  // this package's own real build/typecheck/lint/test scripts.
+  it("-x mycheck='exit 1' is a fail with one synthetic failure, status fail, exit 1", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "mycheck=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check.status).toBe("fail");
+    expect(check.failures).toHaveLength(1);
+  });
+
+  it("-x mycheck='exit 0' is a pass, exit 0", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "mycheck=exit 0",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+  });
+
+  it("-x nope=nonexistent-binary-xyz is a check error, status error, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "nope=nonexistent-binary-xyz",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "nope",
+    );
+    expect(check.status).toBe("error");
+  });
+
+  it("a FAILING check printing a multi-megabyte single line stays within --max-chars and is marked truncated", async () => {
+    // A passing check carries no output in the envelope at all, so a
+    // multi-megabyte line on a passing check never touches the reduction
+    // logic (the earlier version of this test was inert for exactly that
+    // reason). Failing forces the synthetic failure entry's message to
+    // carry the (still large) output tail, which does exercise it.
+    const cwd = makeTmpDir();
+    const scriptPath = path.join(cwd, "big.js");
+    fs.writeFileSync(
+      scriptPath,
+      "process.stdout.write('y'.repeat(5 * 1000 * 1000));" +
+        "process.stderr.write('z'.repeat(5 * 1000 * 1000));" +
+        "process.exitCode = 1;\n",
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "-m",
+      "8000",
+      "verify",
+      "-x",
+      `big=node ${scriptPath}`,
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(JSON.stringify(parsed).length).toBeLessThanOrEqual(8000);
+    expect(parsed.status).toBe("fail");
+    expect(parsed.truncated).toBe(true);
+  }, 20000);
+
+  it("rejects a -c name carrying shell metacharacters as usage_error, never executed (no side-effect file appears)", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const sentinel = path.join(cwd, "pwned");
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      `test; touch ${sentinel}`,
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(fs.existsSync(sentinel)).toBe(false);
+  });
+
+  it("--fail-fast on a package missing `build` runs typecheck, lint, and test", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { typecheck: "exit 0", lint: "exit 0", test: "exit 0" },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--fail-fast",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    const names = parsed.checks.map((c: { name: string }) => c.name);
+    expect(names).toEqual(["build", "typecheck", "lint", "test"]);
+    expect(
+      parsed.checks.find((c: { name: string }) => c.name === "build").status,
+    ).toBe("skipped");
+    for (const name of ["typecheck", "lint", "test"]) {
+      expect(
+        parsed.checks.find((c: { name: string }) => c.name === name).status,
+      ).toBe("pass");
+    }
+  });
+
+  it("a package.json with none of the requested scripts is status error, reason nothing_verified, exit 2", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({ name: "fixture", version: "0.0.0", scripts: {} }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", cwd, "-l", logDir, "verify"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    expect(parsed.reason).toBe("nothing_verified");
+  });
+
+  it("--timeout above the millisecond ceiling (2147483647ms) is a usage_error, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--timeout",
+      "3000000",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+  });
+
+  it("--max-failures 0 is a usage_error, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--max-failures",
+      "0",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+  });
+
+  it("--timeout 1 -x a busy-looping check times out: check status error, one synthetic failure naming timedOut, summary.errors 1, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    // `sleep` is not on the fixed four-binary PATH spawnCli hands the
+    // child (git, node, npm, sh). A `sh -c "sleep 30"` (or a `node -e`
+    // one-liner) would work on macOS's sh, which exec-replaces itself for
+    // a trailing simple command, but on Linux's dash `sh` forks a real
+    // child for it; exec.ts's timeout only signals the immediate child it
+    // spawned, so the grandchild survives the kill and the check never
+    // ends. A `while true; do :; done` loop is a shell builtin: dash runs
+    // it in the `sh` process itself, with no fork, so the SIGTERM
+    // exec.ts sends actually reaches the work being timed out.
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--timeout",
+      "1",
+      "-x",
+      "slow=while true; do :; done",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "slow",
+    );
+    expect(check.status).toBe("error");
+    expect(check.failures).toHaveLength(1);
+    expect(check.failures[0].message).toContain("timedOut");
+    expect(check.summary.errors).toBe(1);
+  }, 15000);
+
+  it("--max-failures 1 is accepted (a positive integer) and plumbs through to a real run", async () => {
+    // The only detector shipped in v0 (generic) never parses more than
+    // the failures invariant's single synthetic entry per check, so
+    // `--max-failures 1` can never itself be the thing that trips
+    // truncatedByMaxFailures through the real CLI (that cap is exercised
+    // directly against `verify()` with a stub multi-failure detector, see
+    // verify.test.ts). This asserts the flag is accepted and wired
+    // through to a real run without changing its outcome; the
+    // envelope-level `truncated`/full-result-in-`logs` behavior for a
+    // large payload is covered by the "FAILING check printing a
+    // multi-megabyte single line" case above.
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--max-failures",
+      "1",
+      "-x",
+      "one=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find((c: { name: string }) => c.name === "one");
+    expect(check.failures).toHaveLength(1);
+  });
+
+  it("-c '' resolves to an empty check list: status error, reason nothing_verified, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", cwd, "-l", logDir, "verify", "-c", ""]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    expect(parsed.reason).toBe("nothing_verified");
+    expect(parsed.checks).toEqual([]);
+  });
+
+  it("-c ',,,' resolves to an empty check list: status error, reason nothing_verified, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      ",,,",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    expect(parsed.reason).toBe("nothing_verified");
+    expect(parsed.checks).toEqual([]);
+  });
+
+  it("one exit-1 check and one exit-127 check: status error (error wins over fail), exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "f=exit 1",
+      "-x",
+      "e=exit 127",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+  });
+
+  it("checks[].logPath all nest under one verify/<id>/ parent whose <id> is the same run id embedded in the default log dir", async () => {
+    const cwd = makeTmpDir();
+    // No -l: the default log dir is <tmpdir>/agent-primitives/<runId>, and
+    // verify() nests its own logs under <logDir>/verify/<runId> using
+    // that same run id, so the id appears twice in each check's logPath.
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "verify",
+      "-x",
+      "a=exit 0",
+      "-x",
+      "b=exit 0",
+      "-c",
+      "a,b",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    const logPaths = parsed.checks.map((c: { logPath: string }) => c.logPath);
+    expect(logPaths).toHaveLength(2);
+    const parents = logPaths.map((p: string) => path.dirname(p));
+    expect(parents[0]).toBe(parents[1]);
+    expect(path.basename(path.dirname(parents[0]))).toBe("verify");
+    const idFromVerifyNesting = path.basename(parents[0]);
+    const idFromDefaultLogDir = path.basename(
+      path.dirname(path.dirname(parents[0])),
+    );
+    expect(idFromVerifyNesting).toBe(idFromDefaultLogDir);
+  });
+
+  it("an unwritable log directory parent still yields an envelope with per-check errors, not a crash", async () => {
+    const cwd = makeTmpDir();
+    const parentDir = makeTmpDir();
+    const logDir = path.join(parentDir, "logs");
+    fs.chmodSync(parentDir, 0o500);
+    try {
+      const run = await spawnCli([
+        "-C",
+        cwd,
+        "-l",
+        logDir,
+        "verify",
+        "-x",
+        "mycheck=exit 0",
+      ]);
+      const parsed = JSON.parse(run.stdout);
+      expect(Array.isArray(parsed.checks)).toBe(true);
+      const check = parsed.checks.find(
+        (c: { name: string }) => c.name === "mycheck",
+      );
+      expect(check.status).toBe("error");
+      expect(check.failures.length).toBeGreaterThan(0);
+    } finally {
+      fs.chmodSync(parentDir, 0o700);
+    }
+  });
+});
+
+describe("parseExecOverride", () => {
+  it("splits name=command at the first `=` only, preserving an `=` inside the command", () => {
+    const result = parseExecOverride("e=FOO=bar cmd", {});
+    expect(result).toEqual({ e: "FOO=bar cmd" });
+  });
+
+  it("accumulates repeated -x flags into one object, keyed by name", () => {
+    const first = parseExecOverride("a=echo 1", {});
+    const second = parseExecOverride("b=echo 2", first);
+    expect(second).toEqual({ a: "echo 1", b: "echo 2" });
+  });
+
+  it("rejects a value with an empty name (leading `=`)", () => {
+    expect(() => parseExecOverride("=x", {})).toThrow();
+  });
+
+  it("rejects a value with no `=` at all", () => {
+    expect(() => parseExecOverride("noequals", {})).toThrow();
+  });
+});
+
 describe("classifyStdoutError", () => {
   it("maps EPIPE to the pending success exit code, with no stderr line", () => {
     const result = classifyStdoutError(
@@ -485,5 +885,158 @@ describe("mapTopLevelError", () => {
     expect(envelope.status).toBe("usage_error");
     expect(exitCode).toBe(2);
     expect((envelope as { message?: string }).message).toBe("unknown option");
+  });
+});
+
+describe("writeFullVerifyResult", () => {
+  function makeResult(overrides: Partial<VerifyResult> = {}): VerifyResult {
+    const fullFailures = Array.from({ length: 30 }, (_, i) => ({
+      message: `f${i}`,
+    }));
+    const fullChecks: CheckResult[] = [
+      {
+        name: "test",
+        status: "fail",
+        exitCode: 1,
+        durationMs: 1,
+        timedOut: false,
+        summary: { passed: 0, failed: 30, skipped: 0, errors: 0, warnings: 0 },
+        failures: fullFailures,
+      },
+    ];
+    return {
+      status: "fail",
+      checks: [{ ...fullChecks[0], failures: fullFailures.slice(0, 20) }],
+      totalDurationMs: 1,
+      warnings: [],
+      logs: [],
+      truncatedByMaxFailures: true,
+      fullChecks,
+      ...overrides,
+    };
+  }
+
+  it("writes the uncapped checks to verify-full-<runId>.json, pushes its path onto logs, and sets envelopePatch.truncated", () => {
+    const logDir = makeTmpDir();
+    const result = makeResult();
+    const logs: string[] = [];
+    const warnings: string[] = [];
+    const envelopePatch: { truncated?: true } = {};
+
+    writeFullVerifyResult(
+      result,
+      envelopePatch,
+      logs,
+      warnings,
+      logDir,
+      "run-a",
+    );
+
+    expect(envelopePatch.truncated).toBe(true);
+    expect(logs).toHaveLength(1);
+    const fullResultPath = logs[0];
+    expect(fullResultPath).toContain("verify-full-run-a.json");
+    expect(fs.existsSync(fullResultPath)).toBe(true);
+    const written = JSON.parse(fs.readFileSync(fullResultPath, "utf8")) as {
+      checks: CheckResult[];
+    };
+    expect(written.checks[0].failures).toHaveLength(30);
+    expect(warnings).toEqual([]);
+  });
+
+  it("is a no-op when nothing was truncated", () => {
+    const logDir = makeTmpDir();
+    const result = makeResult({ truncatedByMaxFailures: false });
+    const logs: string[] = [];
+    const warnings: string[] = [];
+    const envelopePatch: { truncated?: true } = {};
+
+    writeFullVerifyResult(
+      result,
+      envelopePatch,
+      logs,
+      warnings,
+      logDir,
+      "run-a",
+    );
+
+    expect(envelopePatch.truncated).toBeUndefined();
+    expect(logs).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("two calls with different run ids produce different paths, each holding its own checks", () => {
+    const logDir = makeTmpDir();
+    const resultA = makeResult();
+    const resultB = makeResult({
+      fullChecks: [
+        {
+          name: "lint",
+          status: "fail",
+          exitCode: 1,
+          durationMs: 1,
+          timedOut: false,
+          summary: {
+            passed: 0,
+            failed: 5,
+            skipped: 0,
+            errors: 0,
+            warnings: 0,
+          },
+          failures: Array.from({ length: 5 }, (_, i) => ({
+            message: `lint-f${i}`,
+          })),
+        },
+      ],
+    });
+    const logsA: string[] = [];
+    const logsB: string[] = [];
+    const warningsA: string[] = [];
+    const warningsB: string[] = [];
+    const patchA: { truncated?: true } = {};
+    const patchB: { truncated?: true } = {};
+
+    writeFullVerifyResult(resultA, patchA, logsA, warningsA, logDir, "run-a");
+    writeFullVerifyResult(resultB, patchB, logsB, warningsB, logDir, "run-b");
+
+    expect(logsA[0]).not.toBe(logsB[0]);
+    const writtenA = JSON.parse(fs.readFileSync(logsA[0], "utf8")) as {
+      checks: CheckResult[];
+    };
+    const writtenB = JSON.parse(fs.readFileSync(logsB[0], "utf8")) as {
+      checks: CheckResult[];
+    };
+    expect(writtenA.checks[0].name).toBe("test");
+    expect(writtenB.checks[0].name).toBe("lint");
+    expect(writtenB.checks[0].failures).toHaveLength(5);
+  });
+
+  it("an unwritable log directory never swallows the write failure: truncated is still set and a warning names the directory and error", () => {
+    const parentDir = makeTmpDir();
+    const logDir = path.join(parentDir, "unwritable");
+    fs.mkdirSync(logDir);
+    fs.chmodSync(logDir, 0o500);
+    try {
+      const result = makeResult();
+      const logs: string[] = [];
+      const warnings: string[] = [];
+      const envelopePatch: { truncated?: true } = {};
+
+      writeFullVerifyResult(
+        result,
+        envelopePatch,
+        logs,
+        warnings,
+        path.join(logDir, "nested"),
+        "run-a",
+      );
+
+      expect(envelopePatch.truncated).toBe(true);
+      expect(logs).toEqual([]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(path.join(logDir, "nested"));
+    } finally {
+      fs.chmodSync(logDir, 0o700);
+    }
   });
 });

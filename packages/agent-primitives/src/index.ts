@@ -23,3 +23,23 @@ export type {
 export { execCommand } from "./exec.js";
 export type { ExecOptions, ExecResult } from "./exec.js";
 export { sha256File } from "./hash.js";
+export {
+  verify,
+  selectDetector,
+  genericDetector,
+  DEFAULT_CHECKS,
+  DEFAULT_MAX_FAILURES,
+} from "./verify/index.js";
+export type {
+  CheckResult,
+  CheckStatus,
+  Detector,
+  DetectorInput,
+  DetectorParseResult,
+  ExecLike,
+  Failure,
+  Summary,
+  VerifyOptions,
+  VerifyResult,
+  VerifyStatus,
+} from "./verify/index.js";

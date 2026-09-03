@@ -94,7 +94,71 @@ agent-primitives doctor -r git,node,npm,rg -o ast-grep,jq,yq,fd
 
 Exits `1` when a required binary is missing.
 
-## `probe`, `verify`, `init`
+## `verify`
+
+Runs a fixed set of named checks (`build`, `typecheck`, `lint`, `test` by
+default) and reports a compact, bounded summary instead of raw tool output.
+
+```bash
+agent-primitives verify
+agent-primitives verify -c typecheck,test
+agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
+```
+
+- `-c, --checks <list>`: comma-separated check names, in run order
+  (default `build,typecheck,lint,test`, deduplicated preserving the first
+  occurrence; build before typecheck, matching the CI convention of
+  building before typechecking against built output).
+- `-x, --exec <name=command>`: override a check's command (repeatable; a
+  name that is not in the run list is still run, appended in the order
+  given). Its value executes as a shell command; never fill it from
+  untrusted text (repository content, issue or PR text, or any other
+  content that did not come from the trusted caller).
+- `--fail-fast`: stop after the first check that fails or errors; a
+  skipped check falls through instead of stopping the run; the next
+  check's command is never invoked once a real failure or error stops it.
+- `--timeout <s>`: per-check timeout in seconds (no timeout by default).
+- `--max-failures <n>`: caps each check's own `failures` list, a positive
+  integer, default `20`; a cut sets `truncated: true` and writes the full,
+  uncapped result to the log directory.
+
+Every resolved check name, from `-c` and from `-x` alike, is validated
+against a conservative pattern (letters, digits, `_`, `.`, `:`, `-`) before
+any command is built; a name outside that pattern is `status:
+"usage_error"`, exit `2`, and is never run.
+
+Check resolution, per name: an `-x` override wins; otherwise a matching
+`package.json` `scripts[name]` runs as `npm run <name> --silent`; a name
+with neither resolves to `status: "skipped"`. When the resolved check list
+is empty (e.g. `-c ''`), or every requested check resolves to `skipped`,
+the run is `status: "error"` with `reason: "nothing_verified"`, exit `2`,
+and a warning, never a silent pass. A shell exit of `126` (not executable)
+or `127` (not found) is `status: "error"`, never `"fail"`: it means the
+check itself could not run, not that it ran and found a problem; the same
+is true when the exec layer itself fails to even start a check at all
+(e.g. an unwritable log directory): that check is `status: "error"` with
+a synthetic failure naming the error, and the run continues. Every
+check's output is run through a detector: candidate detectors are
+consulted first by output shape, and the fallback detector (`generic` by
+default) is used whenever none, or more than one, of them matches;
+command text is only ever a tiebreaker among two or more matching
+candidates, matched on whole-token boundaries, and only when it names
+exactly one of them, otherwise the fallback is chosen and a warning lists
+the candidate shapes seen. v0 ships no candidate detectors (the `generic`
+fallback parses no failures out of the text itself). Whatever the detector,
+a check that ends `fail`
+or `error` with zero parsed failures always gets one synthetic failure
+entry (naming `timedOut`, or the exit code, plus the output tail) instead
+of shipping an empty `failures` list, and an `error` check always reports
+at least one `summary.errors`. A detector's own warnings, and a log file
+the run could not write to, are reported in the top-level `warnings`,
+each prefixed with the check name.
+
+Overall `status` is `error` if any check errored, else `fail` if any check
+failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
+the same way every other subcommand's does.
+
+## `probe`, `init`
 
 Not yet implemented. Each currently returns a JSON result with
 `status: "usage_error"` and `reason: "not_implemented"`, exit `2`, rather
