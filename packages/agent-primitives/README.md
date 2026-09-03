@@ -28,7 +28,9 @@ node dist/cli.js doctor
 ```
 
 Once published, the usual `npx agent-primitives doctor` / `npm install -g
-agent-primitives` paths will work too.
+agent-primitives` paths will work too. Publishing this package's first
+tag requires its own npm Trusted Publisher entry, separate from any
+other package published out of the same repository.
 
 Requires Node >= 20.
 
@@ -637,7 +639,9 @@ agent-primitives init -H all --force
   its own role prompts and manifest hashes.
 - `-t, --target-dir <dir>`: the directory the harness-specific paths
   above are resolved under (defaults to `-C`/`--cwd`, itself defaulting
-  to the process cwd).
+  to the process cwd). Any missing directory on the way to the target
+  (`-t` itself included, and the harness's own skill subdirectory on a
+  first run) is created rather than treated as an error.
 - `--force`: overwrite a conflicting existing file instead of reporting
   it as `conflicted`.
 
@@ -651,7 +655,15 @@ is given, in which case it is overwritten and reported `written`, exit
 anything is written; one that would land outside it (for example
 because an existing `.claude` entry is a symlink pointing elsewhere) is
 refused as `status: "usage_error"`, exit `2`, and nothing is written for
-any harness in that invocation.
+any harness in that invocation. A symlink at the target file path
+itself is refused the same way, whether it dangles, resolves inside or
+outside `--target-dir`, and whether or not `--force` is given: a target
+is never written through a symlink. `-t` naming a file instead of a
+directory, a directory sitting at the target file path, and an existing
+target that is not writable are each reported as `status:
+"usage_error"`, exit `2`, with a `reason` naming which of the three it
+was (`target_not_a_directory`, `target_path_is_a_directory`,
+`target_not_writable`) instead of a raw filesystem error message.
 
 Output beside the envelope: `status` (`written`, `unchanged`, or
 `conflicted`, the worst outcome across every requested harness) and

@@ -31,7 +31,7 @@ checks the acceptance criteria name, for example `agent-primitives verify
 -c build,typecheck,lint,test`. Read its `summary` and `failures` fields
 first; open a check's `logPath` only once something failed. When the
 runner is on PATH, never trim its output by hand instead of using its own
-`-m`/`--max-failures` bounds.
+`--max-failures` bound.
 
 ## 3. Probe
 
