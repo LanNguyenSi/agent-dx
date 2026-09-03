@@ -3,12 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "../envelope.js";
 import { sha256File } from "../hash.js";
-import {
-  isPidAlive,
-  lockKey,
-  listMarkers,
-  type MarkerEntry,
-} from "../lock.js";
+import { isPidAlive, lockKey, listMarkers, type MarkerEntry } from "../lock.js";
 import {
   containmentRoot,
   isPathContained,

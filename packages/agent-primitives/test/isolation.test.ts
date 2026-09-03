@@ -7,7 +7,7 @@ import {
   beginInplace,
   beginWorktree,
   cleanupWorktree,
-  countDiffFiles,
+  countNumstatFiles,
   findNodeModulesDirs,
 } from "../src/probe/isolation.js";
 
@@ -116,30 +116,62 @@ describe("beginInplace", () => {
   });
 });
 
-describe("countDiffFiles", () => {
-  it("is 0 for an empty diff", () => {
-    expect(countDiffFiles("")).toBe(0);
+describe("countNumstatFiles", () => {
+  it("is 0 for empty numstat output (a clean tree)", () => {
+    expect(countNumstatFiles("")).toBe(0);
   });
 
-  it("counts one 'diff --git ' header per file", () => {
-    const diff = [
-      "diff --git a/foo.js b/foo.js",
-      "index 111..222 100644",
-      "--- a/foo.js",
-      "+++ b/foo.js",
-      "@@ -1 +1 @@",
-      "-old",
-      "+new",
-      "diff --git a/bar.js b/bar.js",
-      "index 333..444 100644",
-      "--- a/bar.js",
-      "+++ b/bar.js",
-      "@@ -1 +1 @@",
-      "-old",
-      "+new",
-      "",
-    ].join("\n");
-    expect(countDiffFiles(diff)).toBe(2);
+  it("counts one record per plain file, NUL-delimited", () => {
+    const numstat = ["3\t1\tfoo.js", "5\t0\tbar.js"].join("\0") + "\0";
+    expect(countNumstatFiles(numstat)).toBe(2);
+  });
+
+  it("counts a binary file's '-\\t-\\tpath' record as one file, never by scanning its content", () => {
+    // A binary file's numstat record uses "-" for both counts; its
+    // content (the diff's own binary hunk) is never involved in this
+    // count at all -- only the numstat listing is parsed.
+    const numstat = "-\t-\timage.png\0";
+    expect(countNumstatFiles(numstat)).toBe(1);
+  });
+
+  it("counts a rename record (empty path field, then old and new path tokens) as one file", () => {
+    // git's own `-z` rename shape: "<added>\t<deleted>\t" (empty path),
+    // then the old path, then the new path, each its own NUL-terminated
+    // token.
+    const numstat = ["0\t0\t", "old-name.js", "new-name.js"].join("\0") + "\0";
+    expect(countNumstatFiles(numstat)).toBe(1);
+  });
+
+  it("counts a rename mixed with plain files correctly", () => {
+    const numstat =
+      ["1\t1\tfoo.js", "0\t0\t", "old.js", "new.js", "2\t2\tbar.js"].join(
+        "\0",
+      ) + "\0";
+    expect(countNumstatFiles(numstat)).toBe(3);
+  });
+
+  it("a real 'git diff HEAD --numstat -z' against a tracked modification matches the byte-count for a single file", async () => {
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-numstat-test-"),
+    );
+    tmpDirs.push(dir);
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: dir,
+    });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: dir });
+    fs.writeFileSync(path.join(dir, "a.js"), "one\n");
+    execFileSync("git", ["add", "-A"], { cwd: dir });
+    execFileSync(
+      "git",
+      ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+      { cwd: dir },
+    );
+    fs.writeFileSync(path.join(dir, "a.js"), "one\ntwo\n");
+    const numstat = execFileSync("git", ["diff", "HEAD", "--numstat", "-z"], {
+      cwd: dir,
+    }).toString("utf8");
+    expect(countNumstatFiles(numstat)).toBe(1);
   });
 });
 
@@ -159,6 +191,37 @@ describe("findNodeModulesDirs", () => {
     expect(found).toContain(path.join(root, "node_modules"));
     expect(found).toContain(path.join(root, "a", "b", "node_modules"));
     expect(found).not.toContain(path.join(root, "a", "b", "c", "node_modules"));
+  });
+
+  it("does not find a node_modules at depth 5, one level further than the already-excluded depth 4", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "a", "b", "c", "d", "node_modules"), {
+      recursive: true,
+    });
+
+    expect(findNodeModulesDirs(root)).toEqual([]);
+  });
+
+  it("links a node_modules that is itself a symlink to a directory (a hoisted or workspace-linked install)", () => {
+    const root = makeTmpDir();
+    const realDir = makeTmpDir();
+    fs.writeFileSync(path.join(realDir, "marker.txt"), "present\n");
+    fs.symlinkSync(realDir, path.join(root, "node_modules"), "dir");
+
+    const found = findNodeModulesDirs(root);
+
+    expect(found).toEqual([path.join(root, "node_modules")]);
+  });
+
+  it("does not link a node_modules symlink that dangles (points at nothing)", () => {
+    const root = makeTmpDir();
+    fs.symlinkSync(
+      path.join(root, "does-not-exist"),
+      path.join(root, "node_modules"),
+      "dir",
+    );
+
+    expect(findNodeModulesDirs(root)).toEqual([]);
   });
 
   it("never recurses into a node_modules directory it already found", () => {

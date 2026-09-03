@@ -572,6 +572,26 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   }
   isolationField.mode = effectiveIsolation;
 
+  // `--allow-outside` computes the scratch/worktree-relative placement
+  // of a path outside the containment root by relativizing it against
+  // that root; for `worktree` that placement is then re-based onto the
+  // worktree copy (`mutationFilePath` below), and a path outside the
+  // root has no well-defined worktree copy to re-base onto at all.
+  // Rejected outright, mirroring `patch_allow_outside_unsupported`,
+  // rather than surfacing as a raw ENOENT or `backup_verification_failed`
+  // once the pipeline reaches a target it never actually synced.
+  if (effectiveIsolation === "worktree" && opts.allowOutside) {
+    return {
+      status: "usage_error",
+      reason: "worktree_allow_outside_unsupported",
+      warnings: [
+        ...warnings,
+        "--isolation worktree cannot be combined with --allow-outside",
+      ],
+      isolation: isolationField,
+    };
+  }
+
   // The lock is keyed on the repository, not on the target file, for
   // BOTH modes, whenever one exists: an `inplace` probe mutates the one
   // working tree that every probe in the same repository builds and
@@ -891,6 +911,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       isolationField.linked = wt.linked;
       isolationField.syncedTrackedFiles = wt.syncedTrackedFiles;
       isolationField.syncedUntrackedFiles = wt.syncedUntrackedFiles;
+      warnings.push(...wt.warnings);
     }
 
     // The path actually mutated: the worktree's own copy of `--file` for
@@ -906,6 +927,28 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         : displayFile;
     const applyRoot = wtSession !== undefined ? wtSession.worktreePath : root;
     const execCwd = wtSession !== undefined ? wtSession.mappedCwd : cwd;
+
+    // A gitignored `--file` is neither tracked (so the tracked-diff sync
+    // never carries it) nor an untracked-non-ignored file (so the
+    // untracked sync explicitly excludes it): under `worktree`, that
+    // combination means `mutationFilePath` was simply never created, and
+    // nothing downstream (`beginInplace`'s own read of it, first) can
+    // succeed against it. Named here, by a typed reason, instead of
+    // surfacing several frames later as a raw ENOENT.
+    if (wtSession !== undefined && !fs.existsSync(mutationFilePath)) {
+      return {
+        status: "inconclusive",
+        reason: "target_not_synced",
+        warnings: [
+          ...warnings,
+          `--file (${displayFile}) was not synced into the worktree; it is ` +
+            `neither a tracked file nor an untracked, non-ignored one, so a ` +
+            `gitignored target cannot be probed under --isolation worktree`,
+        ],
+        isolation: isolationField,
+        dryRunLogPaths: wtSession.logPaths,
+      };
+    }
 
     // Backed up immediately, before the baseline (or anything else) ever
     // runs against the target: a baseline command that itself rewrites

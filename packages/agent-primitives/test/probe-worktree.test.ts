@@ -1,4 +1,5 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,16 +7,28 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { probe, type ProbeOptions } from "../src/probe/index.js";
 import { readMarkerFor } from "../src/lock.js";
-import { execCommand } from "../src/exec.js";
+import { runArgv } from "../src/probe/run.js";
+
+// Call-through mock, the same shape as the one above for
+// "../src/probe/run.js": lets a test pin the run id `beginWorktree`
+// derives its scratch subdirectory name from, to reproduce a genuine
+// collision (finding #1's "refuse a pre-existing diff file" guard)
+// without waiting on an actual `randomUUID` clash.
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return { ...actual, randomUUID: vi.fn(actual.randomUUID) };
+});
 
 // Call-through mock: every call runs the real implementation unless a
 // test explicitly overrides it for one call (mirrors probe.test.ts's own
 // seam). Used to corrupt the tracked-diff sync's own output for the
 // worktree_sync_failed test, without touching a shell pipeline that
-// would hide the exit code this package must observe.
-vi.mock("../src/exec.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/exec.js")>();
-  return { ...actual, execCommand: vi.fn(actual.execCommand) };
+// would hide the exit code this package must observe. Isolation.ts runs
+// every git call through this argv runner (never `execCommand`'s
+// shell), so this is the one seam that reaches all of them.
+vi.mock("../src/probe/run.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/probe/run.js")>();
+  return { ...actual, runArgv: vi.fn(actual.runArgv) };
 });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -235,16 +248,17 @@ describe("probe(): worktree isolation syncs the working tree, not just HEAD", ()
     ]);
     fs.writeFileSync(path.join(repo, "strict.marker"), "");
 
-    const actualExec =
-      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
-    const mockExec = vi.mocked(execCommand);
-    mockExec.mockImplementation(async (cmd, options) => {
-      const result = await actualExec.execCommand(cmd, options);
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    mockRun.mockImplementation(async (file, args, options) => {
+      const result = await actualRun.runArgv(file, args, options);
       // Simulate a disabled copy step: strip whatever `git ls-files
       // --others` reported, so beginWorktree's own copy loop has nothing
       // to iterate over.
-      if (cmd.startsWith("git ls-files --others")) {
-        fs.writeFileSync(result.logPath, "");
+      if (args[0] === "ls-files" && args.includes("--others")) {
+        return { ...result, stdout: "" };
       }
       return result;
     });
@@ -262,8 +276,8 @@ describe("probe(): worktree isolation syncs the working tree, not just HEAD", ()
       expect(result.isolation.syncedUntrackedFiles).toBe(0);
       expect(result.status).toBe("survived");
     } finally {
-      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
-        actualExec.execCommand(...args),
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
       );
     }
   });
@@ -371,16 +385,26 @@ describe("probe(): worktree isolation, sync failure", () => {
     useLockDir();
     const { repo } = initRepo();
 
-    const actualExec =
-      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
-    const mockExec = vi.mocked(execCommand);
-    mockExec.mockImplementation(async (cmd, options) => {
-      const result = await actualExec.execCommand(cmd, options);
-      if (cmd.startsWith("git diff HEAD --binary")) {
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    mockRun.mockImplementation(async (file, args, options) => {
+      const result = await actualRun.runArgv(file, args, options);
+      if (args[0] === "diff" && args.includes("--binary")) {
+        // `git diff HEAD --binary --output=<path>` writes the diff
+        // straight to that file (never through this call's own stdout
+        // capture); overwriting it here, after the real call already
+        // produced it, is what corrupts the sync's own diff content.
+        const outputArg = args.find((a) => a.startsWith("--output="));
+        if (outputArg === undefined) {
+          throw new Error("expected a --output= argument on this diff call");
+        }
+        const diffPath = outputArg.slice("--output=".length);
         // A hunk whose context matches nothing in fixture.js: cannot
         // apply cleanly against a freshly checked-out HEAD worktree.
         fs.writeFileSync(
-          result.logPath,
+          diffPath,
           [
             "diff --git a/fixture.js b/fixture.js",
             "index 0000000..1111111 100644",
@@ -402,8 +426,8 @@ describe("probe(): worktree isolation, sync failure", () => {
       expect(result.reason).toBe("worktree_sync_failed");
       expect(result.mutant).toBeUndefined();
     } finally {
-      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
-        actualExec.execCommand(...args),
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
       );
     }
   });
@@ -453,9 +477,21 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
     const lockDir = useLockDir();
     const { repo } = initRepo();
     // Pinned (rather than the CLI's own per-run default) so the test
-    // knows exactly where the worktree lands.
+    // knows where to look for the worktree: it lands at
+    // `<logDir>/wt-<random>/wt`, a fresh per-run subdirectory of
+    // `logDir` rather than a fixed name directly under it (see
+    // isolation.ts's own docblock on why), so the exact path is
+    // discovered once the run is under way rather than pinned up front.
     const logDir = makeTmpDir();
-    const worktreePath = path.join(logDir, "wt");
+    const findWorktreePath = (): string | undefined => {
+      for (const entry of fs.readdirSync(logDir)) {
+        if (entry.startsWith("wt-")) {
+          const candidate = path.join(logDir, entry, "wt");
+          if (fs.existsSync(candidate)) return candidate;
+        }
+      }
+      return undefined;
+    };
     // Written OUTSIDE the worktree (via an absolute path in an env var,
     // inherited all the way down to the grandchild): the worktree itself
     // gets removed as part of the SIGTERM cleanup this test is proving,
@@ -538,13 +574,21 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
     }
     await new Promise((resolve) => setTimeout(resolve, 150));
 
+    // The worktree really is there, mid-run, before it gets torn down:
+    // asserted first, so a regression that never creates it in the first
+    // place is reported as that, not as a false pass on "gone after
+    // SIGTERM".
+    const worktreePath = findWorktreePath();
+    expect(worktreePath).toBeDefined();
+    expect(fs.existsSync(worktreePath!)).toBe(true);
+
     child.kill("SIGTERM");
     await new Promise<void>((resolve) => child.on("exit", () => resolve()));
 
     expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
       [],
     );
-    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(fs.existsSync(worktreePath!)).toBe(false);
     // Only the main worktree (the repo itself) is left registered: the
     // probe's own worktree was removed as part of the SIGTERM cleanup.
     const list = worktreeList(repo);
@@ -595,5 +639,395 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
     expect(readMarkerFor(realRoot)).toBeUndefined();
     // The stale worktree itself is gone (removed as part of recovery).
     expect(fs.existsSync(path.join(staleLogDir, "wt"))).toBe(false);
+  });
+});
+
+describe("probe(): worktree isolation, a reused --log-dir never replays a previous run", () => {
+  it("two probes sharing one --log-dir each get their own scratch subdirectory (not one fixed name reused)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const sharedLogDir = makeTmpDir();
+
+    const result1 = await probe(baseOptions(repo, { logDir: sharedLogDir }));
+    expect(result1.status).toBe("killed");
+    const result2 = await probe(baseOptions(repo, { logDir: sharedLogDir }));
+    expect(result2.status).toBe("killed");
+
+    const subdirs = fs
+      .readdirSync(sharedLogDir)
+      .filter((e) => e.startsWith("wt-"));
+    expect(subdirs.length).toBe(2);
+  });
+
+  it("refuses to reuse a pre-existing tracked-diff scratch file (a run-id collision) rather than silently replaying it", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = makeTmpDir();
+    const fixedId = "11111111-1111-1111-1111-111111111111";
+    const mockUuid = vi.mocked(randomUUID);
+    mockUuid.mockReturnValue(fixedId as ReturnType<typeof randomUUID>);
+
+    // Pre-seed the exact scratch file this run's `beginWorktree` call
+    // will compute (given the pinned run id above), with content from
+    // an imagined "previous run": exactly the collision the pre-existing
+    // check refuses instead of silently treating as this run's own.
+    const staleDiffPath = path.join(logDir, `wt-${fixedId}`, "tracked.diff");
+    fs.mkdirSync(path.dirname(staleDiffPath), { recursive: true });
+    fs.writeFileSync(staleDiffPath, "stale content from an earlier run\n");
+
+    try {
+      const result = await probe(baseOptions(repo, { logDir }));
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("worktree_sync_failed");
+      // Refused before ever being touched: neither read as this run's
+      // own diff nor overwritten.
+      expect(fs.readFileSync(staleDiffPath, "utf8")).toBe(
+        "stale content from an earlier run\n",
+      );
+    } finally {
+      mockUuid.mockReset();
+      mockUuid.mockImplementation(
+        (await vi.importActual<typeof import("node:crypto")>("node:crypto"))
+          .randomUUID,
+      );
+    }
+  });
+});
+
+describe("probe(): worktree isolation, argv-only git calls (no shell injection)", () => {
+  it("a --log-dir containing shell metacharacters is passed to git as an opaque argv element, never executed", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const base = makeTmpDir();
+    const logDir = path.join(base, "$(touch PWNED)x");
+    const pwnedMarker = path.join(base, "PWNED");
+
+    const result = await probe(baseOptions(repo, { logDir }));
+
+    expect(result.status).toBe("killed");
+    expect(fs.existsSync(pwnedMarker)).toBe(false);
+  });
+});
+
+describe("probe(): worktree isolation, tracked-diff sync preserves non-UTF-8 bytes", () => {
+  it("a non-UTF-8 byte in a non-target tracked file survives the sync byte for byte (never routed through a UTF-8-decoding capture)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const otherFile = path.join(repo, "other.bin");
+    fs.writeFileSync(otherFile, "committed\n");
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "other file",
+    ]);
+    // A lone UTF-8 continuation byte (0x80): never valid on its own, so
+    // decoding as UTF-8 and re-encoding would replace it with U+FFFD,
+    // changing both the bytes and the hash.
+    const binaryContent = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x80, 0x0d, 0x0a,
+    ]);
+    fs.writeFileSync(otherFile, binaryContent);
+    const expectedSha = createHash("sha256")
+      .update(binaryContent)
+      .digest("hex");
+
+    const shaOutDir = makeTmpDir();
+    const shaOutPath = path.join(shaOutDir, "sha-out.txt");
+    const previousEnv = process.env.SHA_OUT_PATH;
+    process.env.SHA_OUT_PATH = shaOutPath;
+    try {
+      const result = await probe(
+        baseOptions(repo, {
+          preCommand:
+            "node -e \"const fs=require('fs'),crypto=require('crypto');" +
+            "const h=crypto.createHash('sha256').update(fs.readFileSync('other.bin')).digest('hex');" +
+            'fs.writeFileSync(process.env.SHA_OUT_PATH, h);"',
+        }),
+      );
+      expect(result.status).toBe("killed");
+      expect(fs.readFileSync(shaOutPath, "utf8")).toBe(expectedSha);
+    } finally {
+      if (previousEnv === undefined) delete process.env.SHA_OUT_PATH;
+      else process.env.SHA_OUT_PATH = previousEnv;
+    }
+  });
+});
+
+describe("probe(): worktree isolation, untracked entries by type", () => {
+  it("a nested repository directory is skipped with a warning instead of aborting the sync", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const nestedDir = path.join(repo, "vendor", "nested-repo");
+    fs.mkdirSync(nestedDir, { recursive: true });
+    git(nestedDir, ["init", "-q"]);
+    fs.writeFileSync(path.join(nestedDir, "file.txt"), "nested\n");
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("nested repository") &&
+          w.includes(path.join("vendor", "nested-repo")),
+      ),
+    ).toBe(true);
+  });
+
+  it("a valid untracked symlink and a dangling one are both recreated as symlinks, neither aborting the sync", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, "link-target.txt"), "target\n");
+    fs.symlinkSync("link-target.txt", path.join(repo, "valid-link.txt"));
+    fs.symlinkSync("does-not-exist.txt", path.join(repo, "dangling-link.txt"));
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+  });
+
+  it("the probe's own --log-dir, when it sits inside the repository, is excluded from the untracked sync entirely", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const inRepoLogDir = path.join(repo, "scratch-logs");
+    fs.mkdirSync(inRepoLogDir, { recursive: true });
+
+    const result = await probe(baseOptions(repo, { logDir: inRepoLogDir }));
+
+    expect(result.status).toBe("killed");
+    // Nothing from the probe's own scratch space (its worktree, its
+    // tracked-diff file, its exec logs) was ever treated as an
+    // untracked source file to copy.
+    expect(result.isolation.syncedUntrackedFiles).toBe(0);
+  });
+
+  it("an untracked directory entry without its own .git is walked and its files copied, not treated as a nested repository", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const plainDir = path.join(repo, "plain-untracked-dir");
+    fs.mkdirSync(plainDir, { recursive: true });
+    fs.writeFileSync(path.join(plainDir, "inner.txt"), "hello\n");
+
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    mockRun.mockImplementation(async (file, args, options) => {
+      const result = await actualRun.runArgv(file, args, options);
+      if (args[0] === "ls-files" && args.includes("--others")) {
+        // Real `git ls-files` never reports a plain (non-repository)
+        // directory as its own entry; this simulates the shape handled
+        // defensively anyway, to prove the walk -- not a nested-
+        // repository skip -- is what runs for it.
+        return { ...result, stdout: result.stdout + "plain-untracked-dir\0" };
+      }
+      return result;
+    });
+
+    try {
+      const result = await probe(baseOptions(repo));
+      expect(result.status).toBe("killed");
+      expect(result.warnings.some((w) => w.includes("nested repository"))).toBe(
+        false,
+      );
+    } finally {
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
+      );
+    }
+  });
+});
+
+describe("probe(): worktree isolation, a gitignored target is never synced", () => {
+  it("--file that is gitignored yields a typed target_not_synced reason, not a raw ENOENT", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "ignored.js\n");
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "gitignore",
+    ]);
+    fs.writeFileSync(path.join(repo, "ignored.js"), FIXTURE_JS);
+
+    const result = await probe(baseOptions(repo, { file: "ignored.js" }));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("target_not_synced");
+  });
+});
+
+describe("probe(): worktree isolation, --allow-outside is rejected as a usage error", () => {
+  it("--allow-outside combined with --isolation worktree is worktree_allow_outside_unsupported, not a raw path or hash failure", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outsideDir = makeTmpDir();
+    const outsideFile = path.join(outsideDir, "outside.js");
+    fs.writeFileSync(outsideFile, FIXTURE_JS);
+
+    const result = await probe(
+      baseOptions(repo, {
+        file: path.relative(repo, outsideFile),
+        allowOutside: true,
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("worktree_allow_outside_unsupported");
+  });
+});
+
+describe("probe(): worktree isolation, a real SIGKILL leaves a recoverable marker", () => {
+  it("SIGKILL to a CLI worktree probe mid-run leaves a marker at the repository key that doctor reports and the next probe recovers from", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const logDir = makeTmpDir();
+    // Written OUTSIDE the worktree (an absolute path, via an env var):
+    // the test command's own cwd is the worktree's copy, which is what
+    // this test leaves leftover on disk by design (SIGKILL, no
+    // cleanup) -- but the readiness signal itself must survive
+    // independent of that.
+    const readyDir = makeTmpDir();
+    const ready = path.join(readyDir, "ready.txt");
+
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "fs.writeFileSync(process.env.READY_ABS_PATH, 'running');",
+        "setTimeout(() => { process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "slow test",
+    ]);
+
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-r",
+        "  return false;",
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "worktree",
+      ],
+      {
+        cwd: repo,
+        env: {
+          ...process.env,
+          AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+          AGENT_PRIMITIVES_LOG_DIR: logDir,
+          READY_ABS_PATH: ready,
+        },
+        stdio: "ignore",
+      },
+    );
+
+    const deadline = Date.now() + 15000;
+    while (!fs.existsSync(ready)) {
+      if (Date.now() > deadline) {
+        throw new Error("ready.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    // SIGKILL, not SIGTERM: bypasses this probe's own signal handler
+    // entirely, so nothing here runs cleanup -- exactly the crash the
+    // repository-keyed marker exists to recover from.
+    child.kill("SIGKILL");
+    await new Promise<void>((resolve) => child.on("exit", () => resolve()));
+
+    const { resolveDeepestExisting } =
+      await import("../src/probe/containment.js");
+    const realRoot = resolveDeepestExisting(repo);
+    const marker = readMarkerFor(realRoot);
+    expect(marker).toBeDefined();
+    // The leftover worktree really is still there (nothing cleaned it
+    // up): asserted before the doctor/recovery steps below, so a
+    // regression that never actually created one is reported as that.
+    expect(fs.existsSync(marker!.targetPath)).toBe(true);
+
+    const { doctor } = await import("../src/doctor/index.js");
+    const doctorResult = await doctor({ cwd: repo, lockDir });
+    const staleWorktreeCheck = doctorResult.checks.find(
+      (c) => c.name === "stale-worktree",
+    );
+    expect(staleWorktreeCheck?.ok).toBe(false);
+    expect(staleWorktreeCheck?.detail).toContain(marker!.targetPath);
+
+    // Restore the normal test command (the killed run's own left a
+    // command that depends on an env var only that spawned CLI had) so
+    // the recovery run below is a normal probe, not a repeat of the
+    // crash.
+    fs.writeFileSync(path.join(repo, "fixture.test.js"), FIXTURE_TEST_JS);
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "restore normal test command",
+    ]);
+
+    // The next probe on this repository recovers automatically: the
+    // leftover worktree is removed and a normal verdict is produced.
+    const result = await probe(baseOptions(repo, { logDir }));
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    expect(result.status).toBe("killed");
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(fs.existsSync(marker!.targetPath)).toBe(false);
+  }, 30000);
+});
+
+describe("probe(): worktree isolation, the original-tree defense-in-depth guard", () => {
+  it("a test command that writes to the original tree's target (an absolute path, bypassing the worktree remap) is caught as worktree_original_tree_modified", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const absTarget = path.join(repo, "fixture.js");
+    // The path travels via an env var, not interpolated into the shell
+    // command string: this test is about the original-tree guard, not
+    // about quoting a path safely into `-e`.
+    const previousEnv = process.env.ORIGINAL_TREE_TARGET;
+    process.env.ORIGINAL_TREE_TARGET = absTarget;
+
+    try {
+      const result = await probe(
+        baseOptions(repo, {
+          testCommand:
+            "node -e \"require('fs').writeFileSync(process.env.ORIGINAL_TREE_TARGET, 'CLOBBERED')\"",
+        }),
+      );
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("worktree_original_tree_modified");
+    } finally {
+      if (previousEnv === undefined) delete process.env.ORIGINAL_TREE_TARGET;
+      else process.env.ORIGINAL_TREE_TARGET = previousEnv;
+    }
   });
 });

@@ -433,40 +433,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gained a `stale-probe-marker` entry for the current repository.
 
 - `probe`'s `worktree` isolation (now the default `-i`): the mutation
-  runs inside a detached `git worktree add --detach` under `--log-dir`
-  instead of the working tree. The worktree is synced to the actual
-  working tree state, not just `HEAD`: tracked modifications are captured
-  with `git diff HEAD --binary` (written to `<log-dir>/tracked.diff`) and
-  replayed with `git -C <worktree> apply --allow-empty` -- run
-  unconditionally, even against an empty diff, so a clean tree and a dirty
-  one exercise the same two observable exec calls -- and every untracked,
-  non-ignored file (`git ls-files --others --exclude-standard`) is copied
-  to the same relative path, including an untracked target or test file.
-  `syncedTrackedFiles`/`syncedUntrackedFiles` on `isolation` report the
-  counts (both `0` on a clean tree, and for every `inplace` run, where
-  they were previously always-empty arrays -- a breaking type change for
-  anything reading them). Every `node_modules` directory up to 3 levels
-  deep (never one nested inside another) is symlinked into the worktree
-  at the same relative path, alongside every `--link` extra, reported in
-  `isolation.linked`. Any non-zero exit while syncing, or a filesystem
-  failure while copying/linking, is `inconclusive`/`worktree_sync_failed`,
-  exit 2, never a verdict. The lock and the leftover-worktree marker are
-  keyed on the repository root instead of `--file` (two probes on one
-  repository serialize, covering the shared, linked node_modules caches);
-  the file-keyed in-flight marker from `inplace` is not written at all for
+  runs inside a detached git worktree, never the working tree itself.
+  Every git invocation this mode makes runs through an argv array with
+  no shell involved (the same runner `-p, --patch` already used), so a
+  `--file`, `--log-dir`, or `--link` value reaches `git` as one opaque
+  argument regardless of its characters. Each run gets its own scratch
+  subdirectory under `--log-dir` (`<log-dir>/wt-<random>/`), never a
+  fixed name reused across invocations that happen to share `--log-dir`.
+  The worktree is synced to the actual working tree state, not just
+  `HEAD`: tracked modifications are captured with `git diff HEAD
+  --binary --output=<scratch file>` (written by git directly to that
+  file, never through this process's own output capture) and replayed
+  with `git -C <worktree> apply --allow-empty` -- run unconditionally,
+  even against an empty diff, so a clean tree and a dirty one exercise
+  the same steps; the file count reported in `isolation.syncedTrackedFiles`
+  comes from a separate `git diff HEAD --numstat -z`, never from the
+  diff's own text. Every untracked, non-ignored path (`git ls-files
+  --others --exclude-standard`) is synced by its own type: a regular
+  file is copied, a symlink (dangling or not) is recreated as a
+  symlink, a directory that is itself a git repository is skipped with
+  a warning, any other directory is walked and copied file by file, and
+  a path inside `--log-dir` itself is never treated as a source.
+  `isolation.syncedUntrackedFiles` counts the `ls-files` entries acted
+  on, not the files that ended up on disk. A gitignored `--file` is
+  never synced by either sync step, and probing one under `worktree`
+  fails fast with `reason: "target_not_synced"`. `--allow-outside`
+  combined with `-i worktree` is a usage error
+  (`worktree_allow_outside_unsupported`) rather than a raw path or hash
+  failure. Every `node_modules` directory or directory symlink (a
+  hoisted or workspace-linked install included) up to 3 levels deep
+  (never one nested inside another) is symlinked into the worktree at
+  the same relative path, alongside every `--link` extra, reported in
+  `isolation.linked`. Any non-zero exit while syncing, or a genuine
+  filesystem failure while copying/linking, is
+  `inconclusive`/`worktree_sync_failed`, exit 2, never a verdict. The
+  lock and the leftover-worktree marker are keyed on the repository
+  root instead of `--file` (two probes on one repository serialize,
+  covering the shared, linked node_modules caches, and matching
+  `inplace`'s own key whenever `--cwd` is inside a repository); the
+  file-keyed in-flight marker from `inplace` is not written at all for
   `worktree`, since nothing in the original tree is ever mutated -- the
-  original target's hash is still checked before and after, and a mismatch
-  is reported as `worktree_original_tree_modified` rather than silently
-  trusted. The worktree is removed (`git worktree remove --force` then
-  `git worktree prune`) on normal completion, on any thrown error, and on
-  `SIGINT`/`SIGTERM` (the signal handler and the pipeline's own cleanup
-  share one in-flight promise, so neither can let the process exit while
-  the other's `git worktree remove` is still running); a `SIGKILL` leaves
-  it registered, and the next `worktree` probe on that repository recovers
-  it automatically. Outside a git work tree, `worktree` falls back to
-  `inplace` with a warning naming the fallback. `doctor` gained a
-  `stale-worktree` check reporting a leftover worktree for the current
-  repository, naming the manual `git worktree remove`/`prune` command.
+  original target's hash is still checked before and after, and a
+  mismatch is reported as `worktree_original_tree_modified` rather than
+  silently trusted. The worktree is removed (`git worktree remove
+  --force` then `git worktree prune`) on normal completion, on any
+  thrown error, and on `SIGINT`/`SIGTERM` (the signal handler and the
+  pipeline's own cleanup share one in-flight promise, so neither can
+  let the process exit while the other's `git worktree remove` is still
+  running); a `SIGKILL` leaves it registered, and the next `worktree`
+  probe on that repository recovers it automatically. Outside a git
+  work tree, `worktree` falls back to `inplace` with a warning naming
+  the fallback. `doctor` gained a `stale-worktree` check reporting a
+  leftover worktree for the current repository, naming the manual `git
+  worktree remove`/`prune` command. Submodule contents are not synced
+  by either sync step; a submodule directory is tracked as a gitlink,
+  not walked into.
 
 - Initial package scaffold: the shared envelope module (bounded
   serialization, status-to-exit-code mapping), an `exec` runner with fixed

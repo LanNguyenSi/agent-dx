@@ -245,25 +245,61 @@ agent-primitives probe --file src/foo.js -n 1 -p mutant.patch -t 'npm test'
 ```
 
 `-i worktree` is the default: `--file` is mutated in a detached git
-worktree (`git worktree add --detach` under `--log-dir`), never in the
-working tree itself. Before the mutation runs, the worktree is synced to
-look like the actual working tree, not just `HEAD`: uncommitted tracked
-modifications are captured with `git diff HEAD --binary` (written to
-`<log-dir>/tracked.diff`) and replayed with `git -C <worktree> apply
---allow-empty` (run unconditionally, even against an empty diff, so a
-clean tree exercises the same two exec calls as a dirty one), and every
-untracked, non-ignored file (`git ls-files --others --exclude-standard`)
-is copied to the same relative path -- including an untracked target or
-test file, which would otherwise be invisible to the probe and produce a
-false `survived`. Every `node_modules` directory found in the source tree
-up to 3 levels deep (never one nested inside another `node_modules`) is
-symlinked into the worktree at the same relative path, alongside every
-`--link` extra, so installed dependencies and tool caches are shared
-rather than reinstalled per probe. `--pre`/`-t` run with their cwd mapped
-onto the worktree at `--cwd`'s own relative offset from the containment
-root. Any non-zero exit while syncing (the worktree add, the tracked-diff
-apply, or the untracked-file listing) or a filesystem failure while
-copying/linking is `status: "inconclusive"`, `reason:
+worktree, never in the working tree itself. Every git invocation this
+mode makes (the worktree add, the tracked-diff capture and apply, the
+untracked-file listing, and the worktree removal) runs through an argv
+array with no shell involved, the same as `-p`'s patch path: a `--file`,
+`--log-dir`, or `--link` value containing `$(...)` or a backtick reaches
+`git` as one opaque argument, never as something a shell could expand.
+
+Each run gets its own scratch subdirectory under `--log-dir`
+(`<log-dir>/wt-<random>/`), never a fixed name reused across separate
+invocations that happen to share `--log-dir`: a fixed name plus a
+previous run's leftover content is exactly how a stale diff would get
+replayed into a fresh, clean-tree worktree. Before the mutation runs,
+the worktree is synced to look like the actual working tree, not just
+`HEAD`: uncommitted tracked modifications are captured with `git diff
+HEAD --binary --output=<scratch file>` (written by `git` directly to
+that file, never through this process's own output capture, so a
+binary hunk's bytes are never at risk of UTF-8 decoding) and replayed
+with `git -C <worktree> apply --allow-empty` (run unconditionally, even
+against an empty diff, so a clean tree exercises the same steps as a
+dirty one); the file count in `isolation.syncedTrackedFiles` comes from
+a separate `git diff HEAD --numstat -z`, never from scanning the diff's
+own text.
+
+Every untracked, non-ignored path (`git ls-files --others
+--exclude-standard`) is synced by its own type: a regular file is
+copied; a symlink (including a dangling one) is recreated as a symlink
+pointing at the same target, never followed; a directory that is itself
+a git repository (the only shape `git ls-files` reports a directory
+path in at all) is skipped, named in a warning, rather than pulling in
+an unrelated checkout; any other directory is walked and copied file by
+file. A path inside `--log-dir` itself (this probe's own scratch
+space, including the worktree just created) is never treated as a
+source to sync. `isolation.syncedUntrackedFiles` counts the `ls-files`
+entries this sync acted on, not the number of files that ended up on
+disk -- a skipped nested-repository entry still counts as one, and a
+plain directory entry can expand into several copied files. A gitignored
+`--file` is therefore never synced either way (not tracked, and
+excluded by `--exclude-standard`); probing one under `-i worktree`
+fails fast with `reason: "target_not_synced"` rather than a raw file-not-
+found further into the run. `--allow-outside` is rejected outright as a
+usage error (`reason: "worktree_allow_outside_unsupported"`) when
+combined with `-i worktree`: its placement is relative to the
+containment root, which has no meaning once re-based onto a worktree
+copy. Submodule contents are not synced by any of the above; a
+submodule directory is tracked as a gitlink, not walked into.
+
+Every `node_modules` directory or directory symlink (e.g. a hoisted or
+workspace-linked install) found in the source tree up to 3 levels deep
+(never one nested inside another `node_modules`) is symlinked into the
+worktree at the same relative path, alongside every `--link` extra, so
+installed dependencies and tool caches are shared rather than
+reinstalled per probe. `--pre`/`-t` run with their cwd mapped onto the
+worktree at `--cwd`'s own relative offset from the containment root.
+Any non-zero exit while syncing, or a genuine filesystem failure while
+copying/linking, is `status: "inconclusive"`, `reason:
 "worktree_sync_failed"`, exit `2`, never a verdict. The worktree is
 removed (`git worktree remove --force` then `git worktree prune`) on
 normal completion, on any error, and on `SIGINT`/`SIGTERM`; a `SIGKILL`
@@ -274,12 +310,14 @@ the same repository recovers it automatically (a warning names
 worktree remove`/`prune` command. The lock for `worktree` is keyed on the
 repository root rather than on `--file` (two probes on the same
 repository serialize, which also covers the shared, linked node_modules
-caches); the in-flight marker and its automatic recovery described below
-apply only to `inplace`, since nothing in the original tree is ever
-mutated by a `worktree` probe -- the repository-keyed lock/marker above
-is what covers a `worktree` probe's own leftover-on-crash case instead.
-Outside a git work tree, `worktree` falls back to `inplace` with a
-warning naming the fallback, never an error.
+caches, and matches `-i inplace`'s own lock key whenever `--cwd` is
+inside a repository); the in-flight marker and its automatic recovery
+described below apply only to `inplace`, since nothing in the original
+tree is ever mutated by a `worktree` probe -- the repository-keyed
+lock/marker above is what covers a `worktree` probe's own
+leftover-on-crash case instead. Outside a git work tree, `worktree`
+falls back to `inplace` with a warning naming the fallback, never an
+error.
 
 `-i inplace` backs up the target file before mutating it and restores
 from that backup afterward (on normal completion, on any error, and on
