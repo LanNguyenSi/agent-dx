@@ -2097,6 +2097,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     }
     await sleep(150);
 
+    const signalledAt = Date.now();
     child.kill("SIGTERM");
     const [code] = await new Promise<[number | null]>((resolve) => {
       child.on("close", (c) => resolve([c]));
@@ -2104,8 +2105,20 @@ describe("probe(): the emergency restore is the last write to the target", () =>
 
     expect(code).toBe(143);
     expect(stdout).toBe("");
-    // Asserted well past the watcher's 650ms delayed write: if the
-    // restore had landed before it, this would read the poison instead.
+    // The CLI process itself exiting proves nothing about the watcher,
+    // which is a fully independent (detached) process the exit does not
+    // touch: a broken wait would let the CLI restore and exit around the
+    // 250ms flush grace, well before the watcher's own 650ms write, and
+    // reading the file immediately after `close` would then pass by
+    // coincidence (the poison simply had not landed yet), not because
+    // the fix held. Waiting out the watcher's own delay from the moment
+    // of the signal (not from `close`) is what makes this assertion
+    // discriminate: if the poison writer ever gets to run at all, it is
+    // done well before this point either way.
+    const elapsedSinceSignal = Date.now() - signalledAt;
+    if (elapsedSinceSignal < 1200) {
+      await sleep(1200 - elapsedSinceSignal);
+    }
     expect(fs.readFileSync(absFile, "utf8")).toBe(before);
     expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
     expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
@@ -2298,7 +2311,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     expect(fs.readFileSync(absFile, "utf8")).toBe(before);
   }, 30000);
 
-  it("a SIGTERM during the baseline phase of a plain, non-trapping test command exits 143 with empty stdout: deterministic by construction (the handler sets isHandling() synchronously, before abortInFlight even runs, which strictly precedes the aborted run's own promise settling; no timing seam needed)", async () => {
+  it("a SIGTERM during the baseline phase of a plain, non-trapping test command exits 143 with empty stdout, even when the signal handler's own restore-then-exit is forced to be slower than the normal control flow's own return path", async () => {
     const lockDir = useLockDir();
     const { repo } = initRepo();
     const absFile = path.join(repo, "fixture.js");
@@ -2336,7 +2349,20 @@ describe("probe(): the emergency restore is the last write to the target", () =>
       ],
       {
         cwd: repo,
-        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        env: {
+          ...process.env,
+          AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+          // Same seam as the mutant-test-phase case below: without the
+          // mutual-exclusion gate at this site, isHandling() being
+          // deterministically true by the time either path reacts is
+          // NOT by itself enough to make the exit code deterministic --
+          // it only guarantees the gate CAN check the right thing, not
+          // that the underlying process.exit race resolves the same way
+          // every time. Artificially slowing the handler this way is
+          // what actually proves the gate holds regardless of that
+          // race, and reproduces the round-6 bug when it does not.
+          AGENT_PRIMITIVES_TEST_HANDLER_DELAY_MS: "300",
+        },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -2349,8 +2375,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     // The baseline phase has no readiness file of its own (it is the
     // very first thing the probe runs); this fixed wait just gives the
     // spawned node process time to actually start the test command
-    // before the signal lands. Not the source of the test's
-    // determinism: see the `it` title.
+    // before the signal lands.
     await sleep(800);
 
     child.kill("SIGTERM");
@@ -2367,7 +2392,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     );
   }, 15000);
 
-  it("a SIGTERM during the mutant-test phase of a plain, non-trapping test command exits 143 with empty stdout, and the target is restored: deterministic by construction, same as the baseline-phase case above", async () => {
+  it("a SIGTERM during the mutant-test phase of a plain, non-trapping test command exits 143 with empty stdout, and the target is restored, even when the signal handler's own restore-then-exit is forced to be slower than the normal control flow's own return path", async () => {
     const lockDir = useLockDir();
     const { repo } = initRepo();
     const absFile = path.join(repo, "fixture.js");
@@ -2414,7 +2439,18 @@ describe("probe(): the emergency restore is the last write to the target", () =>
       ],
       {
         cwd: repo,
-        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        env: {
+          ...process.env,
+          AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+          // Seam only: proves the mutual exclusion is a hard gate
+          // (the normal flow never returns while the handler is
+          // active), not a race this test happens to win by timing.
+          // Without the gate, artificially slowing the handler this
+          // way is exactly what lets the normal flow's own return
+          // path finish first and print an envelope instead of
+          // hanging, which is the round-6 bug this closes.
+          AGENT_PRIMITIVES_TEST_HANDLER_DELAY_MS: "300",
+        },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );

@@ -285,6 +285,20 @@ export function installCrashHandlers(
         // confirm" so the marker-retention path below is the safe one.
         closedInTime = false;
       }
+      // Test-only seam (undocumented, not a CLI flag): artificially
+      // slows this handler's own restore-then-exit, after the child is
+      // already killed and waited for, so a test can force the race
+      // this function's mutual exclusion with the normal control flow
+      // exists to remove. Production code never sets it; the delay
+      // lands after `abortInFlight`/`waitForInFlight` so it never
+      // widens the window a real signal handler leaves the target
+      // mutated for.
+      const testDelayMs = Number(
+        process.env.AGENT_PRIMITIVES_TEST_HANDLER_DELAY_MS ?? "0",
+      );
+      if (Number.isFinite(testDelayMs) && testDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, testDelayMs));
+      }
       const state = getRestoreState();
       let outcome: CrashHandlerOutcome | null = null;
       if (state) {
