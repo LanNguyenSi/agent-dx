@@ -33,6 +33,7 @@ import {
 import {
   init,
   ALL_HARNESSES,
+  InitFsUsageError,
   type Harness,
   type InitResult,
 } from "./init/index.js";
@@ -1026,17 +1027,41 @@ program
     "--force",
     "overwrite a conflicting existing skill file instead of reporting conflicted",
   )
-  .action(async (opts: InitCliOptions, command: Command) => {
+  .action((opts: InitCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
     const targetDir = opts.targetDir
       ? path.resolve(global.cwd, opts.targetDir)
       : global.cwd;
-    const result = await init({
-      harnesses: opts.harness,
-      targetDir,
-      force: Boolean(opts.force),
-    });
+    let result: InitResult;
+    try {
+      result = init({
+        harnesses: opts.harness,
+        targetDir,
+        force: Boolean(opts.force),
+      });
+    } catch (err) {
+      if (err instanceof InitFsUsageError) {
+        const { envelope, exitCode } = buildEnvelope({
+          version: VERSION,
+          command: "init",
+          status: "usage_error",
+          durationMs: Date.now() - start,
+          cwd: global.cwd,
+          warnings: [],
+          logs: [],
+          extra: { reason: err.reason, message: err.message },
+          maxChars: global.maxChars,
+          logDir: global.logDir,
+        });
+        emit(envelope, exitCode, {
+          format: global.format,
+          maxChars: global.maxChars,
+        });
+        return;
+      }
+      throw err;
+    }
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
       command: "init",

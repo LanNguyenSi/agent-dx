@@ -1504,6 +1504,128 @@ describe("cli: init", () => {
       fs.existsSync(path.join(outside, "agent-primitives", "SKILL.md")),
     ).toBe(false);
   });
+
+  it("rejects a dangling symlink at the target file path, exit 2, nothing written outside -t", async () => {
+    const dir = makeTmpDir();
+    const outside = makeTmpDir();
+    const filePath = path.join(
+      dir,
+      ".claude",
+      "skills",
+      "agent-primitives",
+      "SKILL.md",
+    );
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.symlinkSync(path.join(outside, "escaped.md"), filePath);
+
+    const run = await spawnCli(["init", "-t", dir]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+    expect(fs.existsSync(path.join(outside, "escaped.md"))).toBe(false);
+  });
+
+  it("rejects the same dangling symlink with --force, exit 2, nothing written outside -t", async () => {
+    const dir = makeTmpDir();
+    const outside = makeTmpDir();
+    const filePath = path.join(
+      dir,
+      ".claude",
+      "skills",
+      "agent-primitives",
+      "SKILL.md",
+    );
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.symlinkSync(path.join(outside, "escaped.md"), filePath);
+
+    const run = await spawnCli(["init", "-t", dir, "--force"]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+    expect(fs.existsSync(path.join(outside, "escaped.md"))).toBe(false);
+  });
+
+  it("-H all: nothing is written for any harness when one harness's target is a dangling symlink, exit 2", async () => {
+    const dir = makeTmpDir();
+    const outside = makeTmpDir();
+    const codexFilePath = path.join(
+      dir,
+      ".agents",
+      "skills",
+      "agent-primitives",
+      "SKILL.md",
+    );
+    fs.mkdirSync(path.dirname(codexFilePath), { recursive: true });
+    fs.symlinkSync(path.join(outside, "escaped.md"), codexFilePath);
+
+    const run = await spawnCli(["init", "-t", dir, "-H", "all"]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+    expect(
+      fs.existsSync(path.join(dir, ".claude", "skills", "agent-primitives")),
+    ).toBe(false);
+    expect(
+      fs.existsSync(path.join(dir, ".opencode", "skills", "agent-primitives")),
+    ).toBe(false);
+    expect(fs.existsSync(path.join(outside, "escaped.md"))).toBe(false);
+  });
+
+  it('reports reason "target_not_a_directory" (ENOTDIR) when -t itself is a file', async () => {
+    const parent = makeTmpDir();
+    const targetDir = path.join(parent, "not-a-directory");
+    fs.writeFileSync(targetDir, "x");
+
+    const run = await spawnCli(["init", "-t", targetDir]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("target_not_a_directory");
+  });
+
+  it('reports reason "target_path_is_a_directory" (EISDIR) when a directory sits at the target file path', async () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(
+      dir,
+      ".claude",
+      "skills",
+      "agent-primitives",
+      "SKILL.md",
+    );
+    fs.mkdirSync(filePath, { recursive: true });
+
+    const run = await spawnCli(["init", "-t", dir]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("target_path_is_a_directory");
+  });
+
+  const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+  it.skipIf(isRoot)(
+    'reports reason "target_not_writable" (EACCES) for an unwritable existing target with --force',
+    async () => {
+      const dir = makeTmpDir();
+      const filePath = path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, "different content\n");
+      fs.chmodSync(filePath, 0o400);
+
+      let run: Awaited<ReturnType<typeof spawnCli>>;
+      try {
+        run = await spawnCli(["init", "-t", dir, "--force"]);
+      } finally {
+        fs.chmodSync(filePath, 0o600);
+      }
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.reason).toBe("target_not_writable");
+    },
+  );
 });
 
 describe("cli signal handling", () => {

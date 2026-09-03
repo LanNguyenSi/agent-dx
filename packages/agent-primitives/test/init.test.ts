@@ -1,10 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, afterEach } from "vitest";
-import { init, ALL_HARNESSES } from "../src/init/index.js";
+import { describe, expect, it, afterEach, vi } from "vitest";
+import { init, ALL_HARNESSES, InitFsUsageError } from "../src/init/index.js";
 import { init as initFromIndex } from "../src/index.js";
 import { UsageError } from "../src/envelope.js";
+
+// Permission bits are meaningless to root (bypasses them entirely), so the
+// EACCES case below only discriminates as a non-root user.
+const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -135,12 +139,12 @@ describe("init", () => {
     expect(codexTarget?.status).toBe("written");
   });
 
-  it("refuses a target that resolves outside targetDir via a pre-existing symlink", async () => {
+  it("refuses a target that resolves outside targetDir via a pre-existing symlink", () => {
     const dir = makeTmpDir();
     const outside = makeTmpDir();
     fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
     fs.symlinkSync(outside, path.join(dir, ".claude", "skills"));
-    await expect(init({ targetDir: dir, content: CONTENT_A })).rejects.toThrow(
+    expect(() => init({ targetDir: dir, content: CONTENT_A })).toThrow(
       UsageError,
     );
     expect(
@@ -148,19 +152,19 @@ describe("init", () => {
     ).toBe(false);
   });
 
-  it("refuses the whole run, writing nothing, when only one of several harnesses escapes", async () => {
+  it("refuses the whole run, writing nothing, when only one of several harnesses escapes", () => {
     const dir = makeTmpDir();
     const outside = makeTmpDir();
     // codex's own path (.agents/skills/...) escapes; claude's does not.
     fs.mkdirSync(path.join(dir, ".agents"), { recursive: true });
     fs.symlinkSync(outside, path.join(dir, ".agents", "skills"));
-    await expect(
+    expect(() =>
       init({
         targetDir: dir,
         content: CONTENT_A,
         harnesses: ["claude", "codex"],
       }),
-    ).rejects.toThrow(UsageError);
+    ).toThrow(UsageError);
     expect(
       fs.existsSync(path.join(dir, ".claude", "skills", "agent-primitives")),
     ).toBe(false);
@@ -175,5 +179,236 @@ describe("init", () => {
     expect(result.status).toBe("written");
     const written = fs.readFileSync(result.targets[0]!.path, "utf8");
     expect(written).toMatch(/^---\nname: agent-primitives\n/);
+  });
+
+  describe("a symlink at the target file path itself", () => {
+    function claudeFilePath(dir: string): string {
+      return path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+    }
+
+    it("refuses a dangling symlink pointing outside targetDir, and writes nothing", () => {
+      const dir = makeTmpDir();
+      const outside = makeTmpDir();
+      const filePath = claudeFilePath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.symlinkSync(path.join(outside, "escaped.md"), filePath);
+
+      expect(() => init({ targetDir: dir, content: CONTENT_A })).toThrow(
+        UsageError,
+      );
+      expect(fs.existsSync(path.join(outside, "escaped.md"))).toBe(false);
+    });
+
+    it("refuses the same dangling symlink with --force", () => {
+      const dir = makeTmpDir();
+      const outside = makeTmpDir();
+      const filePath = claudeFilePath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.symlinkSync(path.join(outside, "escaped.md"), filePath);
+
+      expect(() =>
+        init({ targetDir: dir, content: CONTENT_A, force: true }),
+      ).toThrow(UsageError);
+      expect(fs.existsSync(path.join(outside, "escaped.md"))).toBe(false);
+    });
+
+    it("refuses a symlink at the target path even when it resolves inside targetDir", () => {
+      const dir = makeTmpDir();
+      const filePath = claudeFilePath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const realFile = path.join(dir, "real-content.md");
+      fs.writeFileSync(realFile, CONTENT_A);
+      fs.symlinkSync(realFile, filePath);
+
+      expect(() => init({ targetDir: dir, content: CONTENT_A })).toThrow(
+        UsageError,
+      );
+      // The file the symlink points at, not just the symlink itself, is
+      // never written through.
+      expect(fs.readFileSync(realFile, "utf8")).toBe(CONTENT_A);
+      expect(fs.lstatSync(filePath).isSymbolicLink()).toBe(true);
+    });
+
+    it("-H all: a dangling symlink at one harness's target refuses the whole run", () => {
+      const dir = makeTmpDir();
+      const outside = makeTmpDir();
+      const codexFilePath = path.join(
+        dir,
+        ".agents",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(codexFilePath), { recursive: true });
+      fs.symlinkSync(path.join(outside, "escaped.md"), codexFilePath);
+
+      expect(() =>
+        init({
+          targetDir: dir,
+          content: CONTENT_A,
+          harnesses: [...ALL_HARNESSES],
+        }),
+      ).toThrow(UsageError);
+      expect(
+        fs.existsSync(path.join(dir, ".claude", "skills", "agent-primitives")),
+      ).toBe(false);
+      expect(
+        fs.existsSync(
+          path.join(dir, ".opencode", "skills", "agent-primitives"),
+        ),
+      ).toBe(false);
+      expect(fs.existsSync(path.join(outside, "escaped.md"))).toBe(false);
+    });
+
+    it("O_NOFOLLOW refuses a symlink planted after the pre-write check finds no entry (TOCTOU)", () => {
+      const dir = makeTmpDir();
+      const outside = makeTmpDir();
+      const filePath = claudeFilePath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+      const realLstatSync = fs.lstatSync;
+      const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
+        p: fs.PathLike,
+        opts?: unknown,
+      ) => {
+        if (p === filePath) {
+          // Simulate a race: something else plants a symlink in the
+          // gap right after this process's own check observed nothing
+          // there, then this mock still reports "no entry" to the
+          // caller, exactly as the real, unraced check would have.
+          fs.symlinkSync(path.join(outside, "escaped.md"), filePath);
+          return undefined;
+        }
+        return (realLstatSync as (p: fs.PathLike, opts?: unknown) => unknown)(
+          p,
+          opts,
+        );
+      }) as typeof fs.lstatSync);
+
+      try {
+        expect(() => init({ targetDir: dir, content: CONTENT_A })).toThrow();
+      } finally {
+        spy.mockRestore();
+      }
+      expect(fs.existsSync(path.join(outside, "escaped.md"))).toBe(false);
+    });
+  });
+
+  describe("a symlink introduced while init creates the target directory", () => {
+    it("re-checks realpath after mkdir, refusing an intermediate symlink introduced during directory creation (TOCTOU)", () => {
+      const dir = makeTmpDir();
+      const outside = makeTmpDir();
+      const claudeDir = path.join(dir, ".claude");
+      const skillDir = path.join(claudeDir, "skills", "agent-primitives");
+
+      const realMkdirSync = fs.mkdirSync;
+      const spy = vi.spyOn(fs, "mkdirSync").mockImplementation(((
+        p: fs.PathLike,
+        opts?: unknown,
+      ) => {
+        if (p === skillDir) {
+          // Simulate a race: something else replaced ".claude" with a
+          // symlink to an outside directory right before this
+          // process's own mkdir -p ran.
+          fs.symlinkSync(outside, claudeDir);
+        }
+        return (realMkdirSync as (p: fs.PathLike, opts?: unknown) => unknown)(
+          p,
+          opts,
+        );
+      }) as typeof fs.mkdirSync);
+
+      try {
+        expect(() => init({ targetDir: dir, content: CONTENT_A })).toThrow(
+          UsageError,
+        );
+      } finally {
+        spy.mockRestore();
+      }
+      // The race's mkdir -p unavoidably creates the empty directory shell
+      // under `outside` before the post-mkdir recheck can run; what the
+      // recheck must still prevent is the file itself landing there.
+      expect(
+        fs.existsSync(
+          path.join(outside, "skills", "agent-primitives", "SKILL.md"),
+        ),
+      ).toBe(false);
+    });
+  });
+
+  describe("named reasons for filesystem errors at the target", () => {
+    it('ENOTDIR: "-t" itself is a file -> reason "target_not_a_directory"', () => {
+      const parent = makeTmpDir();
+      const targetDir = path.join(parent, "not-a-directory");
+      fs.writeFileSync(targetDir, "x");
+
+      let caught: unknown;
+      try {
+        init({ targetDir, content: CONTENT_A });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(InitFsUsageError);
+      expect((caught as InitFsUsageError).reason).toBe(
+        "target_not_a_directory",
+      );
+    });
+
+    it('EISDIR: a directory sits at the target file path -> reason "target_path_is_a_directory"', () => {
+      const dir = makeTmpDir();
+      const filePath = path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(filePath, { recursive: true });
+
+      let caught: unknown;
+      try {
+        init({ targetDir: dir, content: CONTENT_A });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(InitFsUsageError);
+      expect((caught as InitFsUsageError).reason).toBe(
+        "target_path_is_a_directory",
+      );
+    });
+
+    it.skipIf(isRoot)(
+      'EACCES: an unwritable existing target with --force -> reason "target_not_writable"',
+      () => {
+        const dir = makeTmpDir();
+        const filePath = path.join(
+          dir,
+          ".claude",
+          "skills",
+          "agent-primitives",
+          "SKILL.md",
+        );
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, CONTENT_B);
+        fs.chmodSync(filePath, 0o400);
+
+        let caught: unknown;
+        try {
+          init({ targetDir: dir, content: CONTENT_A, force: true });
+        } catch (err) {
+          caught = err;
+        } finally {
+          fs.chmodSync(filePath, 0o600);
+        }
+        expect(caught).toBeInstanceOf(InitFsUsageError);
+        expect((caught as InitFsUsageError).reason).toBe("target_not_writable");
+      },
+    );
   });
 });
