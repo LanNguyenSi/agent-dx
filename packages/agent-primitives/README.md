@@ -105,30 +105,45 @@ agent-primitives verify -c typecheck,test
 agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
 ```
 
-- `-c, --checks <list>` — comma-separated check names, in run order
-  (default `build,typecheck,lint,test`; build before typecheck, matching
-  the CI convention of building before typechecking against built output).
-- `-x, --exec <name=command>` — override a check's command (repeatable; a
+- `-c, --checks <list>`: comma-separated check names, in run order
+  (default `build,typecheck,lint,test`, deduplicated preserving the first
+  occurrence; build before typecheck, matching the CI convention of
+  building before typechecking against built output).
+- `-x, --exec <name=command>`: override a check's command (repeatable; a
   name that is not in the run list is still run, appended in the order
   given).
-- `--fail-fast` — stop after the first check that does not pass; the next
-  check's command is never invoked.
-- `--timeout <s>` — per-check timeout in seconds (no timeout by default).
-- `--max-failures <n>` — caps each check's own `failures` list (default
-  `20`); a cut sets `truncated: true` and writes the full, uncapped result
-  to the log directory.
+- `--fail-fast`: stop after the first check that fails or errors; a
+  skipped check falls through instead of stopping the run; the next
+  check's command is never invoked once a real failure or error stops it.
+- `--timeout <s>`: per-check timeout in seconds (no timeout by default).
+- `--max-failures <n>`: caps each check's own `failures` list, a positive
+  integer, default `20`; a cut sets `truncated: true` and writes the full,
+  uncapped result to the log directory.
+
+Every resolved check name, from `-c` and from `-x` alike, is validated
+against a conservative pattern (letters, digits, `_`, `.`, `:`, `-`) before
+any command is built; a name outside that pattern is `status:
+"usage_error"`, exit `2`, and is never run.
 
 Check resolution, per name: an `-x` override wins; otherwise a matching
 `package.json` `scripts[name]` runs as `npm run <name> --silent`; a name
-with neither resolves to `status: "skipped"`. A shell exit of `126`
-(not executable) or `127` (not found) is `status: "error"`, never `"fail"`:
-it means the check itself could not run, not that it ran and found a
-problem. Every check's output is run through a detector, selected by
-output shape (command text is only ever a tiebreaker); v0 ships the
-`generic` detector only, which parses no failures out of the text itself.
-Whatever the detector, a check that ends `fail` with zero parsed failures
-always gets one synthetic failure entry (the exit code plus the output
-tail) instead of shipping `status: "fail"` with an empty `failures` list.
+with neither resolves to `status: "skipped"`. When every requested check
+resolves to `skipped`, the run is `status: "error"` with `reason:
+"nothing_verified"`, exit `2`, and a warning, never a silent pass. A shell
+exit of `126` (not executable) or `127` (not found) is `status: "error"`,
+never `"fail"`: it means the check itself could not run, not that it ran
+and found a problem. Every check's output is run through a detector,
+selected by output shape (command text is only ever a tiebreaker when more
+than one detector's shape matches, and only when it names exactly one of
+them; otherwise the generic detector is chosen and a warning lists the
+shapes seen); v0 ships the `generic` detector only, which parses no
+failures out of the text itself. Whatever the detector, a check that ends
+`fail` or `error` with zero parsed failures always gets one synthetic
+failure entry (naming `timedOut`, or the exit code, plus the output tail)
+instead of shipping an empty `failures` list, and an `error` check always
+reports at least one `summary.errors`. A detector's own warnings, and a
+log file the run could not write to, are reported in the top-level
+`warnings`, each prefixed with the check name.
 
 Overall `status` is `error` if any check errored, else `fail` if any check
 failed, else `pass`; `error` wins over `fail`. Exit code follows `status`

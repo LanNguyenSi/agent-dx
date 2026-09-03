@@ -81,7 +81,7 @@ function parseList(value: string): string[] {
  * keyed by check name (a later `-x` for the same name overrides an
  * earlier one). Splits on the first `=` only, so a command containing
  * `=` (e.g. `FOO=1 npm test`) is preserved intact. */
-function parseExecOverride(
+export function parseExecOverride(
   value: string,
   previous: Record<string, string>,
 ): Record<string, string> {
@@ -117,9 +117,9 @@ function parseTimeoutSeconds(value: string): string {
 
 function parseMaxFailures(value: string): string {
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 0) {
+  if (!Number.isInteger(n) || n < 1) {
     throw new InvalidArgumentError(
-      `--max-failures must be a non-negative integer (got "${value}")`,
+      `--max-failures must be a positive integer (got "${value}")`,
     );
   }
   return value;
@@ -469,6 +469,7 @@ program
       extra: {
         checks: result.checks,
         totalDurationMs: result.totalDurationMs,
+        ...(result.reason ? { reason: result.reason } : {}),
       },
       maxChars: global.maxChars,
       logDir: global.logDir,

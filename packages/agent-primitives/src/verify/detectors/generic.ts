@@ -8,7 +8,8 @@ import type { Detector, DetectorInput, DetectorParseResult } from "../types.js";
  * entry) is exercised on the real, un-mocked path rather than only in a
  * unit test of the invariant itself. `matches` always returns true, so
  * placing this detector last in a detector list makes it the fallback for
- * any output shape a more specific detector (T-005) does not recognize.
+ * any output shape a more specific detector, added in a later release,
+ * does not recognize.
  */
 export const genericDetector: Detector = {
   name: "generic",

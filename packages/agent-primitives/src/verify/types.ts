@@ -82,6 +82,10 @@ export interface VerifyResult {
   /** Present only when `truncatedByMaxFailures` is true: the same checks,
    * with every failures list left uncapped. */
   fullChecks?: CheckResult[];
+  /** Present only for a status that needs a machine-readable cause beyond
+   * `status` itself: `nothing_verified` when every requested check
+   * resolved to `skipped` (status `error`, never a silent `pass`). */
+  reason?: string;
 }
 
 export type ExecLike = (
@@ -105,7 +109,8 @@ export interface VerifyOptions {
   maxFailures?: number;
   env?: NodeJS.ProcessEnv;
   /** Detector list, in priority order, generic-style fallback last.
-   * Defaults to `[genericDetector]`. T-005 prepends real detectors. */
+   * Defaults to `[genericDetector]`. Real, tool-specific detectors are
+   * prepended to this list in a later release. */
   detectors?: Detector[];
   /** Test seam: replaces `execCommand`, e.g. to spy on invocation count
    * for a `--fail-fast` test without spawning real shells. */

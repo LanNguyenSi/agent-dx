@@ -10,6 +10,7 @@ import {
   classifyStdoutError,
   mapTopLevelError,
   writeAndExitTo,
+  parseExecOverride,
   type ResolvedGlobal,
   type StdoutSink,
 } from "../src/cli.js";
@@ -421,12 +422,19 @@ describe("cli verify", () => {
     expect(check.status).toBe("error");
   });
 
-  it("a check printing a multi-megabyte single line stays within --max-chars", async () => {
+  it("a FAILING check printing a multi-megabyte single line stays within --max-chars and is marked truncated", async () => {
+    // A passing check carries no output in the envelope at all, so a
+    // multi-megabyte line on a passing check never touches the reduction
+    // logic (the earlier version of this test was inert for exactly that
+    // reason). Failing forces the synthetic failure entry's message to
+    // carry the (still large) output tail, which does exercise it.
     const cwd = makeTmpDir();
     const scriptPath = path.join(cwd, "big.js");
     fs.writeFileSync(
       scriptPath,
-      "process.stdout.write('y'.repeat(5 * 1000 * 1000));\n",
+      "process.stdout.write('y'.repeat(5 * 1000 * 1000));" +
+        "process.stderr.write('z'.repeat(5 * 1000 * 1000));" +
+        "process.exitCode = 1;\n",
     );
     const logDir = makeTmpDir();
     const run = await spawnCli([
@@ -440,11 +448,174 @@ describe("cli verify", () => {
       "-x",
       `big=node ${scriptPath}`,
     ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(JSON.stringify(parsed).length).toBeLessThanOrEqual(8000);
+    expect(parsed.status).toBe("fail");
+    expect(parsed.truncated).toBe(true);
+  }, 20000);
+
+  it("rejects a -c name carrying shell metacharacters as usage_error, never executed (no side-effect file appears)", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const sentinel = path.join(cwd, "pwned");
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      `test; touch ${sentinel}`,
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(fs.existsSync(sentinel)).toBe(false);
+  });
+
+  it("--fail-fast on a package missing `build` runs typecheck, lint, and test", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "0.0.0",
+        scripts: { typecheck: "exit 0", lint: "exit 0", test: "exit 0" },
+      }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--fail-fast",
+    ]);
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThan(8000 + 2000);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("pass");
-  }, 20000);
+    const names = parsed.checks.map((c: { name: string }) => c.name);
+    expect(names).toEqual(["build", "typecheck", "lint", "test"]);
+    expect(
+      parsed.checks.find((c: { name: string }) => c.name === "build").status,
+    ).toBe("skipped");
+    for (const name of ["typecheck", "lint", "test"]) {
+      expect(
+        parsed.checks.find((c: { name: string }) => c.name === name).status,
+      ).toBe("pass");
+    }
+  });
+
+  it("a package.json with none of the requested scripts is status error, reason nothing_verified, exit 2", async () => {
+    const cwd = makeTmpDir();
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({ name: "fixture", version: "0.0.0", scripts: {} }),
+    );
+    const logDir = makeTmpDir();
+    const run = await spawnCli(["-C", cwd, "-l", logDir, "verify"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    expect(parsed.reason).toBe("nothing_verified");
+  });
+
+  it("--max-failures 0 is a usage_error, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--max-failures",
+      "0",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+  });
+
+  it("--timeout 1 -x 'slow=sleep 30' times out: check status error, one synthetic failure naming timedOut, summary.errors 1, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--timeout",
+      "1",
+      "-x",
+      "slow=sleep 30",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("error");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "slow",
+    );
+    expect(check.status).toBe("error");
+    expect(check.failures).toHaveLength(1);
+    expect(check.failures[0].message).toContain("timedOut");
+    expect(check.summary.errors).toBe(1);
+  }, 15000);
+
+  it("--max-failures 1 is accepted (a positive integer) and plumbs through to a real run", async () => {
+    // The only detector shipped in v0 (generic) never parses more than
+    // the failures invariant's single synthetic entry per check, so
+    // `--max-failures 1` can never itself be the thing that trips
+    // truncatedByMaxFailures through the real CLI (that cap is exercised
+    // directly against `verify()` with a stub multi-failure detector, see
+    // verify.test.ts). This asserts the flag is accepted and wired
+    // through to a real run without changing its outcome; the
+    // envelope-level `truncated`/full-result-in-`logs` behavior for a
+    // large payload is covered by the "FAILING check printing a
+    // multi-megabyte single line" case above.
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--max-failures",
+      "1",
+      "-x",
+      "one=exit 1",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find((c: { name: string }) => c.name === "one");
+    expect(check.failures).toHaveLength(1);
+  });
+});
+
+describe("parseExecOverride", () => {
+  it("splits name=command at the first `=` only, preserving an `=` inside the command", () => {
+    const result = parseExecOverride("e=FOO=bar cmd", {});
+    expect(result).toEqual({ e: "FOO=bar cmd" });
+  });
+
+  it("accumulates repeated -x flags into one object, keyed by name", () => {
+    const first = parseExecOverride("a=echo 1", {});
+    const second = parseExecOverride("b=echo 2", first);
+    expect(second).toEqual({ a: "echo 1", b: "echo 2" });
+  });
+
+  it("rejects a value with an empty name (leading `=`)", () => {
+    expect(() => parseExecOverride("=x", {})).toThrow();
+  });
+
+  it("rejects a value with no `=` at all", () => {
+    expect(() => parseExecOverride("noequals", {})).toThrow();
+  });
 });
 
 describe("classifyStdoutError", () => {
