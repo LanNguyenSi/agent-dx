@@ -1840,3 +1840,284 @@ describe("probe(): an aborted run in the baseline phase and on --pre", () => {
     expect(result.mutation_probe?.restored_verified).toBe(true);
   }, 20000);
 });
+
+/** The single-file patch every `-p` fixture below uses: it replaces
+ * `fixture.js`'s line 2, exactly as the `replace` form would. */
+function writeSingleLinePatch(patchPath: string): void {
+  const fixtureLines = FIXTURE_JS.split("\n");
+  fs.writeFileSync(
+    patchPath,
+    [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -1,3 +1,3 @@",
+      ` ${fixtureLines[0]}`,
+      `-${fixtureLines[1]}`,
+      "+  return false;",
+      ` ${fixtureLines[2]}`,
+    ].join("\n") + "\n",
+  );
+}
+
+describe("probe(): the emergency restore is the last write to the target", () => {
+  it("a signalled CLI probe whose test command traps SIGTERM and SIGINT leaves no descendant alive and leaves the target at its original content, even against a writer that outruns the restore", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+    const ready = path.join(repo, "ready.txt");
+    const heartbeat = path.join(repo, "heartbeat.txt");
+
+    // Two writers, each aimed at one half of the guarantee.
+    //
+    // The test command itself TRAPS SIGTERM and SIGINT, so only SIGKILL
+    // can end it, and it writes the target 3s in. A signal path that
+    // sends SIGTERM and exits leaves it running (the escalation timer
+    // dies with the process that scheduled it), and it then writes over
+    // the restored file. Its heartbeat is the descendant-is-gone proof.
+    //
+    // The watcher is spawned INTO A PROCESS GROUP OF ITS OWN, so the
+    // group kill cannot reach it, and it holds the test command's
+    // inherited stdout/stderr. Its stdin is a pipe from the test
+    // command: when that command dies, the pipe closes, the watcher
+    // wakes on EOF and writes the target at once, then exits, which is
+    // what finally lets the run settle. A restore that does not wait for
+    // the run to settle therefore lands BEFORE that write and loses the
+    // file; one that waits lands after it and wins.
+    fs.writeFileSync(
+      path.join(repo, "watcher.js"),
+      [
+        "const fs = require('node:fs');",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  fs.writeFileSync('fixture.js', 'POISON_FROM_WATCHER\\n');",
+        "  process.exit(0);",
+        "});",
+        "setTimeout(() => { process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const { spawn } = require('node:child_process');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "if (!content.includes('SLOW_MARKER')) { process.exit(0); }",
+        "process.on('SIGTERM', () => {});",
+        "process.on('SIGINT', () => {});",
+        "spawn(process.execPath, ['watcher.js'], {",
+        "  detached: true,",
+        "  stdio: ['pipe', 'inherit', 'inherit'],",
+        "});",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        "  fs.writeFileSync('heartbeat.txt', String(n));",
+        "};",
+        "tick();",
+        "setInterval(tick, 100);",
+        "fs.writeFileSync('ready.txt', 'running');",
+        "setTimeout(() => {",
+        "  fs.writeFileSync('fixture.js', 'POISON_FROM_TEST_CHILD\\n');",
+        "  process.exit(0);",
+        "}, 3000);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "trapping test command",
+    ]);
+
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-r",
+        "  return false; // SLOW_MARKER",
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "inplace",
+      ],
+      {
+        cwd: repo,
+        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        stdio: "ignore",
+      },
+    );
+
+    // Readiness: the mutant-phase test is really running (and its
+    // watcher spawned), not merely scheduled.
+    const deadline = Date.now() + 15000;
+    while (!fs.existsSync(ready)) {
+      if (Date.now() > deadline) {
+        throw new Error("ready.txt never appeared before the deadline");
+      }
+      await sleep(50);
+    }
+    await sleep(150);
+
+    child.kill("SIGTERM");
+    await new Promise<void>((resolve) => child.on("exit", () => resolve()));
+
+    // The restore was the last write: neither the out-of-group watcher's
+    // write (which lands while the run is settling) nor anything else is
+    // sitting on the target when the process is gone.
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+
+    // No descendant survived the exit: the trapping test command's
+    // heartbeat has stopped, and its own delayed write never happens.
+    const countAtExit = fs.existsSync(heartbeat)
+      ? fs.readFileSync(heartbeat, "utf8")
+      : "";
+    await sleep(4000);
+    expect(
+      fs.existsSync(heartbeat) ? fs.readFileSync(heartbeat, "utf8") : "",
+    ).toBe(countAtExit);
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+  }, 40000);
+
+  it("a signal during the real git apply leaves the target unmutated, and the apply never lands after the restore", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+    const patchPath = path.join(makeTmpDir(), "single-line.patch");
+    writeSingleLinePatch(patchPath);
+
+    // A PATH shim that widens the real apply's window: it delays only
+    // when it is run from a git work tree (the real apply's cwd is the
+    // repository root; the dry run's is a scratch directory with no
+    // .git), so the dry run stays fast and only the one apply that
+    // writes the real target sits in a signal's way.
+    const realGit = execFileSync("sh", ["-c", "command -v git"], {
+      encoding: "utf8",
+    }).trim();
+    const shimDir = makeTmpDir();
+    const applyStarted = path.join(repo, "apply-started.txt");
+    fs.writeFileSync(
+      path.join(shimDir, "git"),
+      [
+        "#!/bin/sh",
+        "if [ -d .git ]; then",
+        `  printf running > ${JSON.stringify(applyStarted)}`,
+        "  sleep 3",
+        "fi",
+        `exec ${JSON.stringify(realGit)} "$@"`,
+        "",
+      ].join("\n"),
+    );
+    fs.chmodSync(path.join(shimDir, "git"), 0o755);
+
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-p",
+        patchPath,
+        "-t",
+        "node fixture.test.js",
+        "-i",
+        "inplace",
+      ],
+      {
+        cwd: repo,
+        env: {
+          ...process.env,
+          PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+        },
+        stdio: "ignore",
+      },
+    );
+
+    // Readiness: the real apply is in flight (the shim is sleeping).
+    const deadline = Date.now() + 25000;
+    while (!fs.existsSync(applyStarted)) {
+      if (Date.now() > deadline) {
+        throw new Error("the real git apply never started before the deadline");
+      }
+      await sleep(50);
+    }
+    // The marker is up while the apply is in flight, and must not be
+    // removed until the apply has settled and the restore is verified.
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeDefined();
+
+    child.kill("SIGTERM");
+    await new Promise<void>((resolve) => child.on("exit", () => resolve()));
+
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    // Past the shim's own delay: an apply that was not killed with the
+    // process would run to completion here and mutate the target with
+    // nothing left to restore it.
+    await sleep(4000);
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+  }, 60000);
+});
+
+describe("probe(): a git apply stopped by its own bound", () => {
+  it("reports git_apply_timeout, not mutant_not_applicable, when the real apply is killed by its timeout", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(target, "utf8");
+    const patchPath = path.join(makeTmpDir(), "single-line.patch");
+    writeSingleLinePatch(patchPath);
+
+    // The apply that hit its bound and was killed: a non-zero exit with
+    // `timedOut`, which is exactly what run.ts reports for one.
+    vi.mocked(applyPatchForReal).mockImplementationOnce(
+      async (_patchPath, _root, logDir) => ({
+        exitCode: null,
+        durationMs: 10,
+        stdout: "",
+        stderr: "",
+        logPath: path.join(logDir, "apply.log"),
+        timedOut: true,
+        aborted: false,
+        outputTruncated: false,
+        logWriteFailed: false,
+      }),
+    );
+
+    const result = await probe(
+      baseOptions(repo, { form: "patch", replaceText: undefined, patchPath }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("git_apply_timeout");
+    expect(result.reason).not.toBe("mutant_not_applicable");
+    expect(result.warnings.some((w) => w.includes("timeout"))).toBe(true);
+    // Nothing was mutated, and the marker was cleared by the verified
+    // restore the timeout path runs.
+    expect(fs.readFileSync(target, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+  }, 20000);
+});

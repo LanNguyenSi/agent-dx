@@ -4,7 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import {
+  applyPatchForReal,
   computeMutant,
+  DEFAULT_GIT_APPLY_TIMEOUT_MS,
   formatMutantSummary,
   formatVerifiedAppliedVia,
   parseNumstatPaths,
@@ -391,5 +393,139 @@ describe("computeMutant: a --numstat listing that did not fit", () => {
     expect(result.reason).toContain("more output than can be checked");
     expect(result.logPaths.length).toBe(1);
     expect(fs.readFileSync(absFile, "utf8")).toBe(content);
+  });
+});
+
+/** Writes a single-file unified diff for `relPath`'s line 2. */
+function writeValidPatch(patchPath: string, relPath: string): void {
+  fs.writeFileSync(
+    patchPath,
+    [
+      `diff --git a/${relPath} b/${relPath}`,
+      "index 0000000..0000000 100644",
+      `--- a/${relPath}`,
+      `+++ b/${relPath}`,
+      "@@ -1,3 +1,3 @@",
+      " function isPositive(n) {",
+      "-  return n > 0;",
+      "+  return false;",
+      " }",
+    ].join("\n") + "\n",
+  );
+}
+
+describe("git apply invocations", () => {
+  it("puts `--` before the patch path in every git apply argv, so a patch file whose name begins with a dash is a path and not an option", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    writeValidPatch(patchPath, relPath);
+    const runner = vi.mocked(runArgv);
+
+    runner.mockClear();
+    const computed = await computeMutant(
+      { form: "patch", file: absFile, line: 0, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    expect(computed.applicable).toBe(true);
+    expect(runner.mock.calls.map((c) => [c[0], c[1]])).toEqual([
+      ["git", ["apply", "--numstat", "--", patchPath]],
+      ["git", ["apply", "--", patchPath]],
+    ]);
+
+    runner.mockClear();
+    await applyPatchForReal(patchPath, root, makeTmpDir());
+    expect(runner.mock.calls.map((c) => [c[0], c[1]])).toEqual([
+      ["git", ["apply", "--", patchPath]],
+    ]);
+  });
+
+  it("bounds every git apply at the caller's timeout, and at the fixed default when there is none", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    writeValidPatch(patchPath, relPath);
+    const runner = vi.mocked(runArgv);
+
+    runner.mockClear();
+    await computeMutant(
+      { form: "patch", file: absFile, line: 0, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    await applyPatchForReal(patchPath, root, makeTmpDir());
+    expect(runner.mock.calls.map((c) => c[2].timeoutMs)).toEqual([
+      DEFAULT_GIT_APPLY_TIMEOUT_MS,
+      DEFAULT_GIT_APPLY_TIMEOUT_MS,
+      DEFAULT_GIT_APPLY_TIMEOUT_MS,
+    ]);
+
+    runner.mockClear();
+    await computeMutant(
+      { form: "patch", file: absFile, line: 0, patchPath },
+      {
+        root,
+        logDir: makeTmpDir(),
+        originalContent: content,
+        timeoutMs: 4321,
+      },
+    );
+    await applyPatchForReal(patchPath, root, makeTmpDir(), {
+      timeoutMs: 4321,
+    });
+    expect(runner.mock.calls.map((c) => c[2].timeoutMs)).toEqual([
+      4321, 4321, 4321,
+    ]);
+  });
+
+  it("hands the caller's abort signal to every git apply, so an interrupted apply is killed rather than left to land later", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    writeValidPatch(patchPath, relPath);
+    const controller = new AbortController();
+    const runner = vi.mocked(runArgv);
+
+    runner.mockClear();
+    await computeMutant(
+      { form: "patch", file: absFile, line: 0, patchPath },
+      {
+        root,
+        logDir: makeTmpDir(),
+        originalContent: content,
+        signal: controller.signal,
+      },
+    );
+    await applyPatchForReal(patchPath, root, makeTmpDir(), {
+      signal: controller.signal,
+    });
+    expect(runner.mock.calls.map((c) => c[2].signal)).toEqual([
+      controller.signal,
+      controller.signal,
+      controller.signal,
+    ]);
+  });
+
+  it("names a dry run killed by its own bound as a timeout, not as a patch that failed to parse or to apply", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    writeValidPatch(patchPath, relPath);
+
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    // The --numstat call, killed by the bound: a non-zero exit with
+    // `timedOut`, exactly what run.ts reports for one.
+    vi.mocked(runArgv).mockImplementationOnce(async (file, args, options) => {
+      const result = await actualRun.runArgv(file, args, options);
+      return { ...result, exitCode: null, timedOut: true };
+    });
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, line: 0, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.reasonCode).toBe("git_apply_timeout");
+    expect(result.reason).toContain("hit its timeout");
+    expect(result.reason).not.toContain("failed to parse");
   });
 });

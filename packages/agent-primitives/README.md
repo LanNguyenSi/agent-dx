@@ -158,13 +158,24 @@ Overall `status` is `error` if any check errored, else `fail` if any check
 failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
 the same way every other subcommand's does.
 
-`SIGINT` and `SIGTERM` are handled for every subcommand: the CLI aborts
-the command it is running, which signals that command's whole process
-group, and then exits `130` or `143`. Each command runs in a process
+`SIGINT` and `SIGTERM` are handled for every subcommand: the CLI kills
+the command it is running with `SIGKILL` on that command's whole process
+group, waits for that run to settle (so whatever the killed command had
+in flight has landed), and then exits `130` or `143`. There is no
+`SIGTERM` grace on this path, because a command that traps `SIGTERM`
+would sit the grace out and the escalation that would eventually reach it
+dies with the process that is exiting. Each command runs in a process
 group of its own, so a terminal's Ctrl-C reaches the CLI alone; without
 this a check's own worker would outlive the Ctrl-C that ended the CLI.
-`probe` additionally restores the file it mutated and releases its lock
-before the process ends.
+`probe` owns the two signals for as long as it runs, since it also has a
+mutated file to restore and a lock to release before the process may end.
+
+The exported `verify()` reports a run stopped that way rather than
+guessing at it: the check that was running becomes `status: "error"` with
+a failure naming the abort (never a synthesized `exit code null`
+finding), every check queued behind it is left unstarted and named in a
+warning, and the result carries `reason: "aborted"`. The CLI prints none
+of that on a signal (see below).
 
 ## `probe`
 
@@ -220,11 +231,18 @@ verdict. `--timeout <seconds>` bounds every `--pre`/`-t` invocation (both
 the baseline and the mutant run); a run that hits it is killed and
 reported as `timedOut: true` on that run's own phase (`baseline` or
 `test`), so a killed baseline is distinguishable from one that genuinely
-failed.
+failed. It also bounds every `git apply` the `-p` form runs (the path
+check, the dry run, and the real apply); with no `--timeout` those keep a
+fixed ten-second bound of their own, so an apply that hangs cannot leave
+the probe sitting under an in-flight marker forever. An apply killed by
+that bound is `status: "inconclusive"`, `reason: "git_apply_timeout"`,
+exit `2`, kept apart from `mutant_not_applicable`, which means the patch
+itself did not apply.
 
 Every `--pre`/`-t` invocation runs in a process group of its own, and the
-timeout, `SIGINT`, and `SIGTERM` all signal that whole group (`SIGTERM`,
-then `SIGKILL` after a short grace). A worker the command spawned
+timeout, `SIGINT`, and `SIGTERM` all signal that whole group: the timeout
+sends `SIGTERM` and escalates to `SIGKILL` after a short grace, while a
+signal sends `SIGKILL` outright. A worker the command spawned
 therefore dies with it instead of outliving the run while still holding
 its stdout and stderr, which is what would otherwise stretch a bounded
 run to the descendant's own lifetime and leave a process writing to the
@@ -236,13 +254,25 @@ that settles that way may be missing whatever was still in flight on
 those pipes, and both `probe` and `verify` say so in a warning instead of
 presenting the captured tail as the whole output.
 
-A probe stopped by `SIGINT`/`SIGTERM` (or by a library caller's abort) is
-`status: "inconclusive"`, `reason: "aborted"`, exit `2`, in either phase,
-never a `killed`/`survived` verdict: the interrupted test child exits
-non-zero, which under `--expect fail` would otherwise read exactly like a
-mutant the suite caught. A baseline stopped the same way is `aborted`
-rather than `baseline_failed`, for the same reason: nothing was learned
-about the test, the run was stopped.
+A probe stopped by `SIGINT`/`SIGTERM` restores the target before it does
+anything else. Whatever child was in flight (a `--pre`, a `-t`, or the
+`git apply` of a `-p` mutant) is killed with `SIGKILL` on its whole
+process group, the run is given a bounded moment to settle so that
+child's last write has landed, and only then is the backup copied back,
+hash-verified, the marker removed and the lock released. The restore is
+therefore the last write to the target, including against a command that
+traps `SIGTERM` and against an interrupted `git apply`.
+
+What the caller sees splits by caller. The exported `probe()` (or a
+library caller's own abort) returns `status: "inconclusive"`,
+`reason: "aborted"` in either phase, never a `killed`/`survived` verdict:
+the interrupted test child exits non-zero, which under `--expect fail`
+would otherwise read exactly like a mutant the suite caught. A baseline
+stopped the same way is `aborted` rather than `baseline_failed`, for the
+same reason: nothing was learned about the test, the run was stopped. The
+CLI never prints that envelope: on a signal it restores, releases the
+lock, and exits `130` or `143` with no output, because a signal is the
+operator saying stop rather than asking for a result.
 
 Probes are serialized against each other by a lock file outside the
 repository (`$AGENT_PRIMITIVES_LOCK_DIR` or

@@ -1047,3 +1047,130 @@ describe("verify: the optional signal", () => {
     expect(seen).toEqual([undefined]);
   });
 });
+
+describe("verify: an aborted run", () => {
+  it("stops the run when a check is aborted: the queued checks are never spawned and the result names the abort", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    writePackageJson(cwd, {
+      build: "b",
+      typecheck: "tc",
+      lint: "l",
+      test: "t",
+    });
+    const controller = new AbortController();
+    const calls: string[] = [];
+    // The first check is the one the abort lands on: exec reports it as
+    // aborted, exactly as exec.ts does for a signal that killed the
+    // child's process group.
+    const fn: ExecLike = async (cmd, options) => {
+      calls.push(cmd);
+      const aborted = calls.length === 1;
+      if (aborted) controller.abort();
+      return {
+        exitCode: aborted ? null : 0,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(options.logDir, "stub.log"),
+        timedOut: false,
+        aborted,
+        logWriteFailed: false,
+        outputMayBeIncomplete: false,
+      };
+    };
+
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["build", "typecheck", "lint", "test"],
+      execFn: fn,
+      signal: controller.signal,
+    });
+
+    // The two checks queued behind the aborted one were never spawned.
+    expect(calls).toEqual(["npm run build --silent"]);
+    expect(result.checks.map((c) => c.name)).toEqual(["build"]);
+    expect(result.status).toBe("error");
+    expect(result.reason).toBe("aborted");
+    expect(result.checks[0].status).toBe("error");
+    expect(result.checks[0].failures[0].message).toContain("aborted");
+    // Never the failures invariant's synthetic entry, which would
+    // present a run that was stopped as a check that ran and produced
+    // nothing parseable.
+    expect(
+      result.checks[0].failures.some((f) => f.message.includes("exit code")),
+    ).toBe(false);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("typecheck") && w.includes("lint") && w.includes("test"),
+      ),
+    ).toBe(true);
+  });
+
+  it("stops the run for an aborted check even when no signal option was passed, since the abort reaches it through the exec result alone", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    writePackageJson(cwd, { build: "b", typecheck: "tc", test: "t" });
+    const calls: string[] = [];
+    // No `signal` option at all: a caller whose own exec seam reports an
+    // aborted run (its provider holds the signal) still gets a run that
+    // stops, rather than one that spawns every remaining check.
+    const fn: ExecLike = async (cmd, options) => {
+      calls.push(cmd);
+      const aborted = calls.length === 1;
+      return {
+        exitCode: aborted ? null : 0,
+        durationMs: 1,
+        stdoutTail: "",
+        stderrTail: "",
+        logPath: path.join(options.logDir, "stub.log"),
+        timedOut: false,
+        aborted,
+        logWriteFailed: false,
+        outputMayBeIncomplete: false,
+      };
+    };
+
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["build", "typecheck", "test"],
+      execFn: fn,
+    });
+
+    expect(calls).toEqual(["npm run build --silent"]);
+    expect(result.reason).toBe("aborted");
+    expect(
+      result.warnings.some(
+        (w) => w.includes("typecheck") && w.includes("test"),
+      ),
+    ).toBe(true);
+  });
+
+  it("starts no check at all when the signal has already fired before the run began", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    writePackageJson(cwd, { build: "b", test: "t" });
+    const controller = new AbortController();
+    controller.abort();
+    const { fn, calls } = makeStubExec();
+
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["build", "test"],
+      execFn: fn,
+      signal: controller.signal,
+    });
+
+    expect(calls).toEqual([]);
+    expect(result.status).toBe("error");
+    // `aborted`, not `nothing_verified`: the run was stopped, which is a
+    // different thing to tell a caller than "every check was skipped".
+    expect(result.reason).toBe("aborted");
+    expect(result.reason).not.toBe("nothing_verified");
+    expect(result.warnings.some((w) => w.includes("never started"))).toBe(true);
+  });
+});

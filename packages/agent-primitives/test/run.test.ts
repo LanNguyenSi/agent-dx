@@ -108,6 +108,56 @@ describe("runArgv", () => {
     expect(result.stdout.length).toBe(1_000_000);
   }, 20000);
 
+  it("kills the child's process group and reports aborted: true when the signal fires, without waiting out a SIGTERM grace", async () => {
+    const logDir = makeTmpDir();
+    const controller = new AbortController();
+    const started = Date.now();
+    // A child that traps SIGTERM: only the SIGKILL this runner sends on
+    // an abort can end it, so a SIGTERM-and-wait abort would sit here
+    // until the test's own timeout.
+    const promise = runArgv(
+      process.execPath,
+      [
+        "-e",
+        "process.on('SIGTERM', () => {}); process.stdout.write('up'); setTimeout(() => {}, 30000)",
+      ],
+      { logDir, signal: controller.signal },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    controller.abort();
+    const result = await promise;
+    expect(result.aborted).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).not.toBe(0);
+    expect(Date.now() - started).toBeLessThan(8000);
+  }, 20000);
+
+  it("kills the child straight away for a signal that is already aborted when the call starts", async () => {
+    const logDir = makeTmpDir();
+    const controller = new AbortController();
+    controller.abort();
+    const started = Date.now();
+    const result = await runArgv(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)"],
+      { logDir, signal: controller.signal },
+    );
+    expect(result.aborted).toBe(true);
+    expect(Date.now() - started).toBeLessThan(8000);
+  }, 20000);
+
+  it("reports aborted: false for a command that finishes on its own with a signal given", async () => {
+    const logDir = makeTmpDir();
+    const controller = new AbortController();
+    const result = await runArgv(
+      process.execPath,
+      ["-e", "process.stdout.write('done')"],
+      { logDir, signal: controller.signal },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.aborted).toBe(false);
+  });
+
   it("rejects when the program cannot be spawned at all", async () => {
     const logDir = makeTmpDir();
     await expect(

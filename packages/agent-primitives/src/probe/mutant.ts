@@ -35,17 +35,61 @@ export interface MutantComputed {
 
 export interface MutantNotApplicable {
   applicable: false;
-  /** Human-readable detail for the `mutant_not_applicable` warning, set
-   * when the reason is more specific than "did not apply" (e.g. a patch
-   * touching paths other than `--file`). */
+  /** Human-readable detail for the warning, set when the reason is more
+   * specific than "did not apply" (e.g. a patch touching paths other
+   * than `--file`). */
   reason?: string;
+  /** The machine-readable reason the caller reports. Defaults to
+   * `mutant_not_applicable`; a `git apply` killed by its own bound, or
+   * stopped by the caller's abort, is named apart from a patch that
+   * genuinely does not apply, so a probe that never got an answer is not
+   * read as one that got the answer "this patch is bad". */
+  reasonCode?: "mutant_not_applicable" | "git_apply_timeout" | "aborted";
   logPaths: string[];
 }
 
 export type MutantComputeResult = MutantComputed | MutantNotApplicable;
 
+/**
+ * The bound every `git apply` invocation runs under when the caller
+ * passes no `--timeout`. `--timeout` bounds the `--pre`/`-t` commands a
+ * probe runs, and a caller who set one means "no step of this probe may
+ * run longer than that"; without one, `git apply` still gets a bound of
+ * its own, since a probe that hangs on it would sit under an in-flight
+ * marker forever.
+ */
+export const DEFAULT_GIT_APPLY_TIMEOUT_MS = 10_000;
+
+/** What every `git apply` here is given beyond its argv: the caller's
+ * abort signal (so an interrupted apply is killed rather than left to
+ * land after the emergency restore) and the bound above. */
+export interface GitApplyOptions {
+  signal?: AbortSignal;
+  /** Overrides `DEFAULT_GIT_APPLY_TIMEOUT_MS`; the probe passes
+   * `--timeout` through here. */
+  timeoutMs?: number;
+}
+
 function hashString(text: string): string {
   return createHash("sha256").update(text).digest("hex");
+}
+
+/** Maps one `git apply` result that did not exit 0 onto the reason the
+ * caller reports, so a run killed by the bound above or by an abort is
+ * never reported as a patch that failed to parse or to apply. Returns
+ * `undefined` for a plain non-zero exit, which each call site names in
+ * its own words. */
+function stoppedReason(result: {
+  timedOut: boolean;
+  aborted: boolean;
+}): { reasonCode: "git_apply_timeout" | "aborted"; label: string } | undefined {
+  if (result.timedOut) {
+    return { reasonCode: "git_apply_timeout", label: "hit its timeout" };
+  }
+  if (result.aborted) {
+    return { reasonCode: "aborted", label: "was aborted" };
+  }
+  return undefined;
 }
 
 /** When `original` ends in a `\r` (a CRLF line) and `replacement` does
@@ -191,7 +235,9 @@ export function parseNumstatPaths(stdout: string): string[] {
  * shell at all. The patch path comes from the caller, and a path
  * containing `$(...)` or a backtick is executed by `sh -c` even inside
  * double quotes, so there is no quoting of it into a shell string that
- * would be safe.
+ * would be safe. Each argv puts `--` before that path, so a patch file
+ * whose name begins with a dash reaches `git apply` as a path and not as
+ * an option; the argv shapes are pinned by a unit test.
  *
  * The scratch copy only ever seeds `--file`'s own relative path, so a
  * patch that also touches other paths would apply cleanly here (`git
@@ -215,6 +261,7 @@ async function computePatch(
   root: string,
   patchPath: string,
   logDir: string,
+  gitApply: GitApplyOptions,
 ): Promise<MutantComputeResult> {
   const relPath = path.relative(root, absFile);
   fs.mkdirSync(logDir, { recursive: true });
@@ -224,19 +271,24 @@ async function computePatch(
   fs.writeFileSync(scratchFile, originalContent);
 
   const absPatchPath = path.resolve(patchPath);
+  const runOptions = {
+    logDir: scratchDir,
+    timeoutMs: gitApply.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS,
+    ...(gitApply.signal ? { signal: gitApply.signal } : {}),
+  };
   const numstatResult = await runArgv(
     "git",
     ["apply", "--numstat", "--", absPatchPath],
-    {
-      cwd: scratchDir,
-      logDir: scratchDir,
-      timeoutMs: 10_000,
-    },
+    { cwd: scratchDir, ...runOptions },
   );
   if (numstatResult.exitCode !== 0) {
+    const stopped = stoppedReason(numstatResult);
     return {
       applicable: false,
-      reason: `git apply --numstat failed to parse the patch; see ${numstatResult.logPath}`,
+      reason: stopped
+        ? `git apply --numstat ${stopped.label} and was killed; see ${numstatResult.logPath}`
+        : `git apply --numstat failed to parse the patch; see ${numstatResult.logPath}`,
+      ...(stopped ? { reasonCode: stopped.reasonCode } : {}),
       logPaths: [numstatResult.logPath],
     };
   }
@@ -265,14 +317,17 @@ async function computePatch(
 
   const result = await runArgv("git", ["apply", "--", absPatchPath], {
     cwd: scratchDir,
-    logDir: scratchDir,
-    timeoutMs: 10_000,
+    ...runOptions,
   });
   const logPaths = [numstatResult.logPath, result.logPath];
   if (result.exitCode !== 0) {
+    const stopped = stoppedReason(result);
     return {
       applicable: false,
-      reason: `patch did not apply cleanly; see ${result.logPath}`,
+      reason: stopped
+        ? `the dry-run git apply ${stopped.label} and was killed; see ${result.logPath}`
+        : `patch did not apply cleanly; see ${result.logPath}`,
+      ...(stopped ? { reasonCode: stopped.reasonCode } : {}),
       logPaths,
     };
   }
@@ -295,7 +350,7 @@ async function computePatch(
   };
 }
 
-export interface ComputeMutantOptions {
+export interface ComputeMutantOptions extends GitApplyOptions {
   /** Containment root, used to resolve the patch form's relative path. */
   root: string;
   /** Scratch space for the patch form's dry run. */
@@ -332,6 +387,7 @@ export function computeMutant(
         opts.root,
         spec.patchPath ?? "",
         opts.logDir,
+        { signal: opts.signal, timeoutMs: opts.timeoutMs },
       );
   }
 }
@@ -339,17 +395,21 @@ export function computeMutant(
 /** Applies an already-validated `patch` mutant to the real target file
  * via `git apply`, run through `run.ts` (an argv array, no shell) so the
  * invocation is logged like every other command this package runs and the
- * patch path can never be read as shell syntax. */
+ * patch path can never be read as shell syntax. `gitApply.signal` is what
+ * keeps an interrupted apply from landing on the target after the
+ * caller's emergency restore has already put the original back. */
 export function applyPatchForReal(
   patchPath: string,
   root: string,
   logDir: string,
+  gitApply: GitApplyOptions = {},
 ) {
   const absPatchPath = path.resolve(patchPath);
   return runArgv("git", ["apply", "--", absPatchPath], {
     cwd: root,
     logDir,
-    timeoutMs: 10_000,
+    timeoutMs: gitApply.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS,
+    ...(gitApply.signal ? { signal: gitApply.signal } : {}),
   });
 }
 

@@ -12,6 +12,13 @@ export interface RunArgvOptions {
   logDir: string;
   /** Log file basename. Defaults to a name derived from the current time. */
   logFileName?: string;
+  /** When aborted, kills the child's whole process group with `SIGKILL`
+   * straight away, the same shape (and for the same reason) as
+   * `ExecOptions.signal`: `probe` threads its own SIGINT/SIGTERM
+   * controller into every `git apply`, so an interrupted apply cannot
+   * land on the target after the emergency restore has already put the
+   * original content back. Additive: omitted, behavior is unchanged. */
+  signal?: AbortSignal;
 }
 
 export interface RunArgvResult {
@@ -26,6 +33,11 @@ export interface RunArgvResult {
   stderr: string;
   logPath: string;
   timedOut: boolean;
+  /** True when `options.signal` fired and killed the child before it
+   * exited on its own. Distinct from `timedOut` (this runner's own
+   * bound): an abort is the caller asking to stop, not the command
+   * itself running too long. */
+  aborted: boolean;
   /** True when either stream hit `MAX_CAPTURED_CHARS`, so `stdout` and
    * `stderr` are no longer the complete output of the command. */
   outputTruncated: boolean;
@@ -62,9 +74,9 @@ const MAX_CAPTURED_CHARS = 1_000_000;
  * Unlike `execCommand` this settles on `close` alone: its callers run
  * `git apply`, which spawns no descendant that could inherit and hold the
  * stdio pipes open, so there is nothing for a flush grace to bound. The
- * child is still started in its own process group so a timeout can signal
- * the whole group, matching `exec.ts` rather than leaving a narrower kill
- * here.
+ * child is still started in its own process group so a timeout, or
+ * `options.signal`, can signal the whole group, matching `exec.ts` rather
+ * than leaving a narrower kill here.
  */
 export function runArgv(
   file: string,
@@ -110,6 +122,7 @@ export function runArgv(
 
     const start = Date.now();
     let timedOut = false;
+    let aborted = false;
     let settled = false;
 
     const child = spawn(file, args, {
@@ -149,6 +162,24 @@ export function runArgv(
       timer.unref();
     }
 
+    // `SIGKILL` on the group straight away, with none of the timeout
+    // path's `SIGTERM` grace, for the same reason `exec.ts`'s abort path
+    // skips it: the caller aborting is about to write to the very file
+    // this `git apply` is writing, and the escalation timer that would
+    // eventually reach a surviving child dies with the exiting process.
+    const onAbort = () => {
+      if (settled) return;
+      aborted = true;
+      signalGroup("SIGKILL");
+    };
+    if (options.signal) {
+      if (options.signal.aborted) onAbort();
+      else options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+    const detachAbortListener = () => {
+      options.signal?.removeEventListener("abort", onAbort);
+    };
+
     const capture = (text: string, isStdout: boolean): void => {
       logStream.write(text);
       const current = isStdout ? stdout : stderr;
@@ -174,6 +205,7 @@ export function runArgv(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      detachAbortListener();
       logStream.end();
       logStreamDone.then(() => reject(err));
     });
@@ -182,6 +214,7 @@ export function runArgv(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      detachAbortListener();
       // Flush whatever incomplete trailing multi-byte sequence each
       // decoder is still holding back.
       const stdoutRemainder = stdoutDecoder.end();
@@ -197,6 +230,7 @@ export function runArgv(
           stderr,
           logPath,
           timedOut,
+          aborted,
           outputTruncated,
           logWriteFailed: logWriteFailed !== undefined,
           ...(logWriteFailed !== undefined

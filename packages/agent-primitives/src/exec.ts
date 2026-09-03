@@ -12,9 +12,14 @@ export interface ExecOptions {
   logDir: string;
   /** Log file basename. Defaults to a name derived from the current time. */
   logFileName?: string;
-  /** When aborted, kills the child (SIGTERM, escalating to SIGKILL after
-   * the same grace period a timeout uses) instead of leaving it running
-   * after this call resolves. Additive: omitted, behavior is unchanged. */
+  /** When aborted, kills the child's whole process group with `SIGKILL`
+   * straight away, with none of the `SIGTERM` grace the timeout path
+   * gives: a caller that aborts is about to write to the same files the
+   * command runs against (`probe`'s emergency restore, the CLI's exit),
+   * and a command that traps `SIGTERM` would otherwise still be running
+   * when it does. This call then settles once the killed child's stdio
+   * is closed, so awaiting it is what makes the caller's next write the
+   * last one. Additive: omitted, behavior is unchanged. */
   signal?: AbortSignal;
 }
 
@@ -54,8 +59,8 @@ const TAIL_CHARS = 6000;
 const TRIM_SLACK_MULTIPLE = 8;
 const TRIM_KEEP_MULTIPLE = 4;
 
-/** How long SIGTERM is given before SIGKILL follows, on both the timeout
- * and the abort path. */
+/** How long SIGTERM is given before SIGKILL follows on the timeout path.
+ * The abort path does not use it: see `onAbort` below. */
 const KILL_ESCALATION_GRACE_MS = 2000;
 
 /** How long the stdio pipes are given to deliver what is already in
@@ -97,9 +102,12 @@ class TailKeeper {
  * The command runs in its own process group, and both the timeout and
  * `options.signal` signal that whole group, so a descendant the command
  * spawned dies with it instead of outliving the run and holding its stdio
- * pipes open. A descendant that puts itself in a process group of its own
- * is out of that reach; the run still settles a short grace after the
- * command itself exits rather than waiting on the pipes.
+ * pipes open. The timeout sends `SIGTERM` and escalates to `SIGKILL`
+ * after a short grace; an abort sends `SIGKILL` outright, because its
+ * caller is stopping either way and a `SIGTERM`-trapping command would
+ * survive the grace. A descendant that puts itself in a process group of
+ * its own is out of that reach; the run still settles a short grace after
+ * the command itself exits rather than waiting on the pipes.
  */
 export function execCommand(
   cmd: string,
@@ -193,8 +201,11 @@ export function execCommand(
       }
     };
 
-    /** SIGTERM first, then SIGKILL once this grace has passed without the
-     * run settling, for a command (or a descendant) that ignores SIGTERM. */
+    /** The timeout path's kill: SIGTERM first, then SIGKILL once this
+     * grace has passed without the run settling, for a command (or a
+     * descendant) that ignores SIGTERM. A command that hit its timeout is
+     * given the chance to shut down on its own first; an abort is not
+     * (see `onAbort`). */
     const terminateGroup = () => {
       signalGroup("SIGTERM");
       setTimeout(() => {
@@ -211,15 +222,19 @@ export function execCommand(
       timer.unref();
     }
 
-    // Same kill/escalate shape as the timeout above, triggered by the
-    // caller instead of a duration: used by `probe`'s SIGINT/SIGTERM
-    // handler so an emergency restore never races a still-running child
-    // (the child would otherwise keep writing to the target/log after
-    // this call has already resolved and the caller has moved on).
+    // `SIGKILL` on the group straight away, NOT the timeout's
+    // SIGTERM-then-escalate: this is `probe`'s SIGINT/SIGTERM handler (or
+    // the CLI's) about to make its emergency restore the last write to
+    // the target. A command that traps `SIGTERM` would sit out the grace
+    // period, and the escalation timer that would eventually reach it
+    // dies with the process that is exiting, so the child would outlive
+    // the restore and write over it. Nothing is lost by skipping the
+    // grace: the caller is stopping either way, so there is no orderly
+    // shutdown left for the command to perform.
     const onAbort = () => {
       if (settled) return;
       aborted = true;
-      terminateGroup();
+      signalGroup("SIGKILL");
     };
     if (options.signal) {
       if (options.signal.aborted) onAbort();

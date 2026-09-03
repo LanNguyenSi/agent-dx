@@ -1393,3 +1393,64 @@ describe("cli signal handling", () => {
     expect(result.code).toBe(130);
   }, 40000);
 });
+
+describe("cli signal handling: a check that traps the signal", () => {
+  it("SIGINT kills a verify check that traps SIGTERM and SIGINT, instead of leaving it running past the exit", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const heartbeat = path.join(cwd, "heartbeat.txt");
+    const trapPath = path.join(cwd, "trap.js");
+
+    // The check command installs no-op handlers for both signals, so
+    // only SIGKILL can end it. A signal path that sends SIGTERM and then
+    // exits leaves it running: the escalation to SIGKILL is scheduled in
+    // the process that is going away. Its heartbeat file is the proof
+    // either way.
+    fs.writeFileSync(
+      trapPath,
+      [
+        "const fs = require('node:fs');",
+        "process.on('SIGTERM', () => {});",
+        "process.on('SIGINT', () => {});",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        `  fs.writeFileSync(${JSON.stringify(heartbeat)}, String(n));`,
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+
+    const child = spawnCliRaw([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      `hb=node ${shQuote(trapPath)}`,
+    ]);
+    const run = collectCli(child);
+
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    child.kill("SIGINT");
+    const result = await run;
+
+    const countAtExit = fs.readFileSync(heartbeat, "utf8");
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(fs.readFileSync(heartbeat, "utf8")).toBe(countAtExit);
+
+    expect(result.code).toBe(130);
+  }, 40000);
+});

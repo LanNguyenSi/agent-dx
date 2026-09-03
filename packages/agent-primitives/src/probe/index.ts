@@ -18,6 +18,7 @@ import { beginInplace, type InplaceSession } from "./isolation.js";
 import {
   applyPatchForReal,
   computeMutant,
+  DEFAULT_GIT_APPLY_TIMEOUT_MS,
   formatMutantSummary,
   formatVerifiedAppliedVia,
   type MutantForm,
@@ -40,7 +41,10 @@ export interface ProbeOptions {
   preCommand?: string;
   isolation: IsolationMode;
   expect: ExpectVerdict;
-  /** Timeout in milliseconds, applied to every `--pre`/`-t` invocation. */
+  /** Timeout in milliseconds, applied to every `--pre`/`-t` invocation
+   * and to every `git apply` the `patch` form runs. Omitted, the
+   * commands run unbounded and `git apply` keeps
+   * `DEFAULT_GIT_APPLY_TIMEOUT_MS`. */
   timeoutMs?: number;
   links?: string[];
   allowOutside?: boolean;
@@ -48,7 +52,8 @@ export interface ProbeOptions {
   logDir: string;
   /**
    * Whether the SIGINT/SIGTERM handler ends the host process once it has
-   * restored the target and released the lock. `true` is right for the
+   * killed the in-flight child, waited for that run to settle, restored
+   * the target and released the lock. `true` is right for the
    * CLI, where this call owns the process and the signal means "stop
    * now"; the default `false` is right for a library caller, whose
    * process must not be terminated by a function it called. With `false`
@@ -131,9 +136,12 @@ function emptyIsolationField(mode: IsolationMode): IsolationField {
 
 /** Restores `session` and verifies the restore by hash. A restore whose
  * copy itself throws is treated the same as a restore that copies but
- * lands on the wrong content: both fail `verified`. */
+ * lands on the wrong content: both fail `verified`. Takes only the two
+ * fields it uses, so the signal handler can call it with a
+ * `RestoreState` and both paths go through the same restore-then-hash
+ * rather than each rolling its own. */
 async function restoreAndVerify(
-  session: InplaceSession,
+  session: Pick<InplaceSession, "restore" | "targetPath">,
   preHash: string,
 ): Promise<{ ok: boolean; verified: boolean }> {
   let ok = false;
@@ -166,16 +174,37 @@ interface RestoreState {
   preHash: string;
 }
 
+/** How long the signal handler waits for the child it just killed to
+ * actually settle before it restores anyway. A `SIGKILL`ed process group
+ * is gone in milliseconds, so this is only ever reached when something
+ * put itself out of the group's reach; restoring under it is still
+ * better than leaving the target mutated, and the restore is verified by
+ * hash either way. */
+const SIGNAL_SETTLE_BOUND_MS = 2000;
+
 /**
- * Installs SIGINT/SIGTERM handlers scoped to one `probe()` call: on
- * either signal, first kills whatever `--pre`/`-t` child is currently
- * running (via `abortInFlight`, so the emergency restore below never
- * races a test process still writing to the target or its own log),
- * then, if a mutation is currently in flight (per `getRestoreState`),
- * restores the target via the session's own `restore()` and removes the
- * marker (only when that restore itself succeeded, so a failed
- * emergency restore still leaves the marker for the next invocation to
- * recover), releases the lock, then exits when `exitOnSignal` says to.
+ * Installs SIGINT/SIGTERM handlers scoped to one `probe()` call, whose
+ * whole purpose is that the emergency restore is the LAST write to the
+ * target. In order:
+ *
+ * 1. `abortInFlight` kills whatever child is currently running (a
+ *    `--pre`/`-t` command, or a `git apply`) by `SIGKILL`ing its whole
+ *    process group outright. Not `SIGTERM`: a command that traps it
+ *    would sit out any grace period, and the escalation timer that would
+ *    eventually reach it dies with this process.
+ * 2. `waitForInFlight` waits (bounded by `SIGNAL_SETTLE_BOUND_MS`) for
+ *    that child's run to settle, which happens once its stdio is closed
+ *    and therefore once every write it had in flight has landed.
+ * 3. Only then, if a mutation is in flight (per `getRestoreState`), the
+ *    target is restored via the session's own `restore()` and the marker
+ *    removed (only when that restore itself succeeded, so a failed
+ *    emergency restore still leaves the marker for the next invocation
+ *    to recover), the lock released, and the process ended when
+ *    `exitOnSignal` says to.
+ *
+ * A second signal arriving while the first is still being handled is
+ * ignored rather than starting a second pass beside the first.
+ *
  * Returns a function that removes exactly these two handlers, so
  * concurrent `probe()` calls in the same process never interfere with
  * each other's signal handling.
@@ -184,32 +213,45 @@ function installCrashHandlers(
   getRestoreState: () => RestoreState | null,
   releaseLock: () => void,
   abortInFlight: () => void,
+  waitForInFlight: () => Promise<void>,
   exitOnSignal: boolean,
 ): () => void {
+  let handling = false;
   const handler = (signal: NodeJS.Signals) => {
-    try {
-      abortInFlight();
-    } catch {
-      // Best-effort: a failure to abort the in-flight child must never
-      // block the restore/lock-release that follows.
-    }
-    const state = getRestoreState();
-    if (state) {
-      let restored = false;
+    if (handling) return;
+    handling = true;
+    void (async () => {
       try {
-        restored = state.restore();
+        abortInFlight();
       } catch {
-        // Best-effort: a failed emergency restore leaves the marker in
-        // place, which is exactly what lets the next invocation recover.
+        // Best-effort: a failure to abort the in-flight child must never
+        // block the restore/lock-release that follows.
       }
-      if (restored) removeMarkerFor(state.markerKey);
-    }
-    try {
-      releaseLock();
-    } catch {
-      // Best-effort.
-    }
-    if (exitOnSignal) process.exit(signal === "SIGINT" ? 130 : 143);
+      try {
+        await waitForInFlight();
+      } catch {
+        // Best-effort, for the same reason.
+      }
+      const state = getRestoreState();
+      if (state) {
+        // `restoreAndVerify` is the same restore-then-hash the normal
+        // control flow uses: the marker is removed only for a restore
+        // that is verified to have landed on the pre-mutation content,
+        // so a restore that failed (or wrote the wrong bytes) leaves the
+        // marker for the next invocation to recover from.
+        const { verified } = await restoreAndVerify(
+          { restore: state.restore, targetPath: state.targetPath },
+          state.preHash,
+        );
+        if (verified) removeMarkerFor(state.markerKey);
+      }
+      try {
+        releaseLock();
+      } catch {
+        // Best-effort.
+      }
+      if (exitOnSignal) process.exit(signal === "SIGINT" ? 130 : 143);
+    })();
   };
   process.on("SIGINT", handler);
   process.on("SIGTERM", handler);
@@ -251,12 +293,15 @@ async function runPreThenTest(
     timeoutMs?: number;
     signal?: AbortSignal;
   },
+  /** Registers each started run as the probe's one in-flight child, so
+   * the signal handler can wait for it to settle before restoring. */
+  track: <T>(started: Promise<T>) => Promise<T>,
 ): Promise<RunPhaseResult> {
   if (opts.preCommand) {
-    const pre = await execCommand(opts.preCommand, env);
+    const pre = await track(execCommand(opts.preCommand, env));
     if (pre.exitCode !== 0) return { ok: false, pre };
   }
-  const test = await execCommand(opts.testCommand, env);
+  const test = await track(execCommand(opts.testCommand, env));
   return { ok: true, test };
 }
 
@@ -308,6 +353,11 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   const root = gitRoot ?? path.resolve(cwd);
   const links = opts.links ?? [];
   const displayLinks = links.map((l) => path.resolve(cwd, l));
+  // `--timeout` is the caller saying how long any step of this probe may
+  // run, so every `git apply` gets that same bound; without one they
+  // keep the fixed default, since an apply that hangs would otherwise
+  // sit under an in-flight marker forever.
+  const gitApplyTimeoutMs = opts.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS;
 
   // Containment and the lock/marker key are resolved through realpath
   // (before either check), so an in-repo symlink pointing outside the
@@ -353,15 +403,48 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   let mutantSummary: string | undefined;
   let verifiedAppliedVia: string | undefined;
   let baseline: ExecPhaseField | undefined;
-  // Scopes exactly one in-flight `--pre`/`-t` child: the SIGINT/SIGTERM
-  // handler aborts it before restoring, so an emergency restore never
-  // races a test process still running against (and possibly still
-  // writing) the target file.
+  // Scopes every child this probe starts: the `--pre`/`-t` commands
+  // through `exec.ts` and every `git apply` through `run.ts`. The
+  // SIGINT/SIGTERM handler aborts it before restoring, which SIGKILLs
+  // that child's whole process group, so an emergency restore never
+  // races a process still running against (and possibly still writing)
+  // the target file.
   const execController = new AbortController();
+  // The one child in flight at any moment, as the promise of its run.
+  // The handler waits for it to settle after killing it: a run settles
+  // once its stdio is closed, which is also once every write it had in
+  // flight has landed, so the restore that follows is the last write.
+  let inFlight: Promise<unknown> | null = null;
+  const track = async <T>(started: Promise<T>): Promise<T> => {
+    inFlight = started;
+    try {
+      return await started;
+    } finally {
+      if (inFlight === started) inFlight = null;
+    }
+  };
+  const waitForInFlight = async (): Promise<void> => {
+    const pending = inFlight;
+    if (pending === null) return;
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      // A rejected run (`exec.ts` could not spawn at all) is a settled
+      // run for this purpose: there is no child left to race.
+      pending.then(
+        () => undefined,
+        () => undefined,
+      ),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, SIGNAL_SETTLE_BOUND_MS);
+      }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+  };
   const removeCrashHandlers = installCrashHandlers(
     () => restoreState,
     lockResult.release,
     () => execController.abort(),
+    waitForInFlight,
     opts.exitOnSignal ?? false,
   );
   // Set by the `catch` below and read by `finally`'s emergency-restore
@@ -550,16 +633,25 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       withText: opts.withText,
       patchPath: opts.patchPath,
     };
-    const computed = await computeMutant(mutantSpec, {
-      root,
-      logDir: opts.logDir,
-      originalContent,
-    });
+    // The dry run's own `git apply` calls get the same controller the
+    // `--pre`/`-t` commands do, and are tracked the same way: a signal
+    // landing while one of them is running kills it and the handler
+    // waits for it to settle, rather than letting an interrupted apply
+    // finish writing after this process has moved on.
+    const computed = await track(
+      computeMutant(mutantSpec, {
+        root,
+        logDir: opts.logDir,
+        originalContent,
+        signal: execController.signal,
+        timeoutMs: gitApplyTimeoutMs,
+      }),
+    );
     if (!computed.applicable) {
       discardBackup();
       return {
         status: "inconclusive",
-        reason: "mutant_not_applicable",
+        reason: computed.reasonCode ?? "mutant_not_applicable",
         warnings: computed.reason ? [...warnings, computed.reason] : warnings,
         isolation: isolationField,
         dryRunLogPaths: computed.logPaths,
@@ -601,7 +693,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
 
     // (2) baseline: unmutated, must exit 0.
     const baselineStart = Date.now();
-    const baselineRun = await runPreThenTest(opts, execEnv);
+    const baselineRun = await runPreThenTest(opts, execEnv, track);
     if (!baselineRun.ok) {
       noteIncompleteOutput(warnings, "baseline --pre", baselineRun.pre);
       discardBackup();
@@ -706,10 +798,17 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     });
 
     if (opts.form === "patch") {
-      const applyResult = await applyPatchForReal(
-        opts.patchPath ?? "",
-        root,
-        opts.logDir,
+      // The one `git apply` that writes to the real target, and the only
+      // command that runs while the in-flight marker is up: it gets the
+      // signal controller too, so a SIGINT/SIGTERM kills it and the
+      // handler waits for it to settle before restoring. Without that,
+      // an interrupted apply outlives this process and lands on the
+      // target after the restore, with the marker already gone.
+      const applyResult = await track(
+        applyPatchForReal(opts.patchPath ?? "", root, opts.logDir, {
+          signal: execController.signal,
+          timeoutMs: gitApplyTimeoutMs,
+        }),
       );
       if (applyResult.exitCode !== 0) {
         const { ok, verified } = await restoreAndVerify(session, preHash);
@@ -735,12 +834,25 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
             dryRunLogPaths: [...computed.logPaths, applyResult.logPath],
           };
         }
+        // A `git apply` killed by its own bound, or by this probe's
+        // signal handler, never said anything about the patch: it is
+        // reported under its own reason rather than as a patch that does
+        // not apply, so a probe that was stopped is not read as a
+        // verdict about the mutant.
         return {
           status: "inconclusive",
-          reason: "mutant_not_applicable",
+          reason: applyResult.timedOut
+            ? "git_apply_timeout"
+            : applyResult.aborted
+              ? "aborted"
+              : "mutant_not_applicable",
           warnings: [
             ...warnings,
-            `git apply failed against the real target after the dry run succeeded; see ${applyResult.logPath}`,
+            applyResult.timedOut
+              ? `git apply against the real target hit its ${gitApplyTimeoutMs}ms timeout and was killed; see ${applyResult.logPath}`
+              : applyResult.aborted
+                ? `git apply against the real target was aborted and killed; see ${applyResult.logPath}`
+                : `git apply failed against the real target after the dry run succeeded; see ${applyResult.logPath}`,
           ],
           baseline,
           isolation: isolationField,
@@ -803,7 +915,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     }
 
     // (4) --pre then -t, mutated.
-    const mutantRun = await runPreThenTest(opts, execEnv);
+    const mutantRun = await runPreThenTest(opts, execEnv, track);
     if (!mutantRun.ok) {
       noteIncompleteOutput(warnings, "mutant --pre", mutantRun.pre);
       const { ok, verified } = await restoreAndVerify(session, preHash);

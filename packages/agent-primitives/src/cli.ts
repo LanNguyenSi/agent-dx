@@ -17,10 +17,12 @@ import {
   DEFAULT_REQUIRED,
   type DoctorResult,
 } from "./doctor/index.js";
+import { execCommand, type ExecResult } from "./exec.js";
 import {
   verify,
   DEFAULT_CHECKS,
   DEFAULT_MAX_FAILURES,
+  type ExecLike,
   type VerifyResult,
 } from "./verify/index.js";
 import {
@@ -328,10 +330,11 @@ export function signalExitCode(signal: "SIGINT" | "SIGTERM"): number {
 /**
  * One controller for the whole process, aborted by the signal handlers
  * below and threaded into every command that runs child processes
- * through `exec.ts`. `exec.ts` signals the aborted child's whole process
- * group, so a check's own worker dies with this CLI instead of being
- * orphaned by the exit: `detached: true` puts each command in a group of
- * its own, which means a terminal's Ctrl-C reaches this process alone.
+ * through `exec.ts`. `exec.ts` `SIGKILL`s the aborted child's whole
+ * process group, so a check's own worker dies with this CLI instead of
+ * being orphaned by the exit: `detached: true` puts each command in a
+ * group of its own, which means a terminal's Ctrl-C reaches this process
+ * alone.
  *
  * `probe` is deliberately not wired to it: it installs its own handler
  * for the same two signals, because it has a mutated file to restore and
@@ -341,24 +344,85 @@ export function signalExitCode(signal: "SIGINT" | "SIGTERM"): number {
 const shutdownController = new AbortController();
 
 /**
+ * The one command child this process has in flight, as the promise of
+ * its run, or `null`. Tracked so the signal handler can wait for the
+ * child it just killed to actually settle (a run settles once its stdio
+ * is closed, and therefore once every write it had in flight has landed)
+ * before this process exits.
+ */
+let inFlightExec: Promise<ExecResult> | null = null;
+
+/** How long the signal handler waits for that run to settle before
+ * exiting anyway. A `SIGKILL`ed process group is gone in milliseconds;
+ * this bound only matters for something that put itself out of the
+ * group's reach, where exiting is still the right answer. */
+const SHUTDOWN_SETTLE_BOUND_MS = 2000;
+
+/** `execCommand` plus the tracking above. Handed to `verify` as its
+ * `execFn` so the handler has something to wait for; the real
+ * `execCommand` is what actually runs. */
+const trackingExec: ExecLike = (cmd, options) => {
+  const started = execCommand(cmd, options);
+  inFlightExec = started;
+  void started
+    .catch(() => undefined)
+    .then(() => {
+      if (inFlightExec === started) inFlightExec = null;
+    });
+  return started;
+};
+
+async function settleInFlightExec(): Promise<void> {
+  const pending = inFlightExec;
+  if (pending === null) return;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    pending.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, SHUTDOWN_SETTLE_BOUND_MS);
+    }),
+  ]);
+  if (timer !== undefined) clearTimeout(timer);
+}
+
+/**
+ * Set for exactly as long as a `probe()` call is running. `probe`
+ * installs its own SIGINT/SIGTERM handlers, which kill its child,
+ * restore the file it mutated, release its lock and only then end the
+ * process; the handler below therefore stands aside entirely rather than
+ * exiting out from under that restore. Flipped immediately before the
+ * call and back in a `finally`, with no `await` in between, so no signal
+ * can be delivered in a window where neither handler would act.
+ */
+let probeOwnsShutdown = false;
+
+/**
  * Installs the process-wide SIGINT/SIGTERM handling: abort whatever
- * child is in flight, then exit with the signal's conventional code.
+ * child is in flight (which `SIGKILL`s its whole process group), wait
+ * for that run to settle, then exit with the signal's conventional code.
  *
- * The exit is scheduled with `setImmediate` rather than called here, so
- * every other listener for the same signal still runs first. `probe`
- * registers its own (later, hence after this one), and an immediate
- * `process.exit()` would end the process before that handler could
- * restore the file `probe` had mutated.
+ * The wait is what keeps a killed check's last write from landing after
+ * this process has already gone; it also lets every other listener for
+ * the same signal run first, since it yields before exiting.
  *
  * Installed only on the real CLI entrypoint, never on import: a test
  * importing this module for its exports must not have process-wide
  * signal handlers installed behind its back.
  */
 function installSignalHandlers(): void {
+  let handling = false;
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
+      if (probeOwnsShutdown) return;
+      if (handling) return;
+      handling = true;
       shutdownController.abort();
-      setImmediate(() => process.exit(signalExitCode(signal)));
+      void settleInFlightExec().then(() =>
+        process.exit(signalExitCode(signal)),
+      );
     });
   }
 }
@@ -500,6 +564,10 @@ program
       overrides: opts.exec,
       failFast: Boolean(opts.failFast),
       signal: shutdownController.signal,
+      // Not the default `execCommand`: the tracking wrapper, so the
+      // signal handler can wait for the check it just killed to settle
+      // before this process exits.
+      execFn: trackingExec,
       timeoutMs:
         opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
       maxFailures: Number(opts.maxFailures ?? DEFAULT_MAX_FAILURES),
@@ -799,26 +867,41 @@ program
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
     const mutantChoice = resolveMutantForm(opts);
-    const result = await probe({
-      file: opts.file,
-      line: opts.line,
-      ...mutantChoice,
-      testCommand: opts.test,
-      preCommand: opts.pre,
-      isolation: opts.isolation,
-      expect: opts.expect,
-      timeoutMs:
-        opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
-      links: opts.link ?? [],
-      allowOutside: opts.allowOutside ?? false,
-      cwd: global.cwd,
-      logDir: global.logDir,
-      // This process exists to run exactly this probe, so a SIGINT or
-      // SIGTERM means "stop now": the handler restores, releases the
-      // lock, and ends the process with the signal's own conventional
-      // exit code. Library callers get the opposite default.
-      exitOnSignal: true,
-    });
+    // Handed to `probe` for the duration of the call: it owns SIGINT and
+    // SIGTERM while it runs, because it has a mutated file to restore
+    // before the process may end. Set with no `await` between it and the
+    // call, so there is no window where a signal would find neither
+    // handler willing to act.
+    probeOwnsShutdown = true;
+    let result;
+    try {
+      result = await probe({
+        file: opts.file,
+        line: opts.line,
+        ...mutantChoice,
+        testCommand: opts.test,
+        preCommand: opts.pre,
+        isolation: opts.isolation,
+        expect: opts.expect,
+        timeoutMs:
+          opts.timeout !== undefined ? Number(opts.timeout) * 1000 : undefined,
+        links: opts.link ?? [],
+        allowOutside: opts.allowOutside ?? false,
+        cwd: global.cwd,
+        logDir: global.logDir,
+        // This process exists to run exactly this probe, so a SIGINT or
+        // SIGTERM means "stop now": the handler kills the in-flight
+        // child, waits for it to settle, restores, releases the lock,
+        // and ends the process with the signal's own conventional exit
+        // code. Library callers get the opposite default.
+        exitOnSignal: true,
+      });
+    } finally {
+      // `probe` has removed its own handlers by now, so the process-wide
+      // one takes over again for whatever is left (building and emitting
+      // the envelope).
+      probeOwnsShutdown = false;
+    }
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
       command: "probe",

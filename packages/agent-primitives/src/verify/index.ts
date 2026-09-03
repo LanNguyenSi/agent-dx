@@ -222,6 +222,11 @@ function dedupePreservingOrder(names: string[]): string[] {
  * check's own `failures` list at `maxFailures`. Never touches the
  * envelope: the caller (cli.ts) decides how `truncatedByMaxFailures` /
  * `fullChecks` map onto `truncated` and `logs`.
+ *
+ * `options.signal` stops the run rather than merely killing one command:
+ * the check that was running is reported as an `error` naming the abort,
+ * every check after it is left unstarted and named in a warning, and the
+ * result carries `reason: "aborted"`.
  */
 export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const start = Date.now();
@@ -281,8 +286,25 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const fullChecks: CheckResult[] = [];
   const logs: string[] = [];
   let truncatedByMaxFailures = false;
+  // Set once the run is stopped (the caller's signal fired), together
+  // with the checks that were therefore never started. Reported as its
+  // own run-level reason: a stopped run measured nothing about the
+  // checks it did not reach, and must not read as a run that did.
+  let aborted = false;
+  let notStarted: string[] = [];
 
-  for (const name of names) {
+  for (let index = 0; index < names.length; index++) {
+    const name = names[index];
+    // Checked before the next check is resolved, not just inside
+    // `execFn`: once the caller has asked to stop, spawning another
+    // command only to kill it is work nobody asked for, and (for the
+    // probe whose emergency restore is waiting on this) one more process
+    // racing that restore.
+    if (options.signal?.aborted) {
+      aborted = true;
+      notStarted = names.slice(index);
+      break;
+    }
     const resolved = resolveCommand(name, overrides, scripts);
 
     if (resolved.skipped || resolved.command === undefined) {
@@ -345,6 +367,38 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       );
     } else {
       logs.push(execResult.logPath);
+    }
+
+    // A check whose command was killed by the caller's abort never ran
+    // to a conclusion. Reported as an `error` naming the abort, and NOT
+    // through `classifyStatus`/`applyFailuresInvariant`, whose synthetic
+    // entry would read `exit code null: ...` and present a stopped run
+    // as a check that ran and produced nothing. The run stops here: the
+    // remaining checks are named in the run-level warning below rather
+    // than spawned.
+    if (execResult.aborted) {
+      const abortedResult: CheckResult = {
+        name,
+        command,
+        status: "error",
+        exitCode: execResult.exitCode,
+        durationMs: execResult.durationMs,
+        timedOut: execResult.timedOut,
+        summary: { passed: 0, failed: 0, skipped: 0, errors: 1, warnings: 0 },
+        failures: [
+          {
+            name,
+            message: `aborted: the run was stopped while ${name} was running, so this check has no result`,
+          },
+        ],
+        ...(execResult.logWriteFailed ? {} : { logPath: execResult.logPath }),
+      };
+      checks.push(abortedResult);
+      fullChecks.push(abortedResult);
+      warnings.push(`${name}: aborted before it could finish`);
+      aborted = true;
+      notStarted = names.slice(index + 1);
+      break;
     }
 
     // The command exited but something it spawned still held its
@@ -428,7 +482,19 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
 
   let overallStatus: VerifyResult["status"];
   let reason: string | undefined;
-  if (nothingVerified) {
+  if (aborted) {
+    // Named ahead of `nothing_verified`, which is what an abort landing
+    // before the first check would otherwise look like: "the run was
+    // stopped" and "every check resolved to skipped" are different
+    // things to tell a caller.
+    overallStatus = "error";
+    reason = "aborted";
+    warnings.push(
+      notStarted.length > 0
+        ? `aborted: the run was stopped; these checks were never started: ${notStarted.join(", ")}`
+        : "aborted: the run was stopped after the last check",
+    );
+  } else if (nothingVerified) {
     overallStatus = "error";
     reason = "nothing_verified";
     warnings.push(

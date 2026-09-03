@@ -121,13 +121,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caught.
 
 - **CLI signal handling.** `SIGINT`/`SIGTERM` are handled for every
-  subcommand: the in-flight command is aborted (which signals its whole
-  process group) and the process then exits `130`/`143`, instead of a
-  Ctrl-C ending the CLI and orphaning the worker its check had spawned.
-  `verify()` gains an optional `signal` threaded to `exec.ts`; nothing
-  else about `verify` changes. The exit is scheduled rather than
-  immediate, so `probe`'s own handler still runs first and restores the
-  file it mutated.
+  subcommand: the in-flight command is aborted (which `SIGKILL`s its whole
+  process group), the CLI waits for that run to settle, and the process
+  then exits `130`/`143`, instead of a Ctrl-C ending the CLI and orphaning
+  the worker its check had spawned. `verify()` gains an optional `signal`
+  threaded to `exec.ts`. `probe` owns the two signals for the duration of
+  its call, since it also has a mutated file to restore before the process
+  may end.
+
+- **The emergency restore is the last write to the target.** On
+  `SIGINT`/`SIGTERM`, `probe` no longer sends `SIGTERM` and exits: it
+  `SIGKILL`s the in-flight child's whole process group outright, waits
+  (bounded) for that run to settle, and only then restores, verifies the
+  restore by hash, removes the marker and releases the lock. A test
+  command that traps `SIGTERM` used to sit out the grace period, outlive
+  the exit (the escalation timer died with the process that scheduled it),
+  and write over the restored file; the same held for a descendant that
+  put itself out of the group's reach. Both are covered by tests that let
+  such a writer run and assert the target's content afterwards.
+  `ExecOptions.signal` and the new `RunArgvOptions.signal` both kill with
+  `SIGKILL` and no grace for this reason; the timeout path still sends
+  `SIGTERM` first.
+
+- **`probe`: every `git apply` is abortable and bounded by `--timeout`.**
+  The path check, the dry run, and the real apply now take the probe's
+  own signal, so an interrupted apply is killed rather than left to land
+  on the target after the restore has already put the original back (with
+  the marker gone). `--timeout` bounds them too; with no `--timeout` they
+  keep the fixed ten-second bound they always had. An apply killed by that
+  bound reports `reason: "git_apply_timeout"`, and one killed by the
+  signal reports `reason: "aborted"`, instead of both being reported as a
+  patch that failed to parse or to apply.
+
+- **`verify`: an aborted run says so.** `options.signal` now stops the
+  run instead of only killing the current command: the check that was
+  running is reported as `status: "error"` with a failure naming the
+  abort (never the failures invariant's synthesized `exit code null`
+  entry), no further check is started, the ones that never ran are named
+  in a warning, and the result carries `reason: "aborted"`.
 
 - **`probe`: the lock is keyed on the repository.** An `inplace` probe
   mutates the one working tree that every probe in that repository builds
@@ -243,8 +274,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restore and lock release happen either way.
 
 - `exec`: commands run in a process group of their own (`detached`), and
-  both `--timeout` and `options.signal` signal that whole group (`SIGTERM`,
-  then `SIGKILL` after a grace). A worker the command spawned no longer
+  both `--timeout` and `options.signal` signal that whole group (the
+  timeout with `SIGTERM` then `SIGKILL` after a grace; the abort path with
+  `SIGKILL`, see the entry above). A worker the command spawned no longer
   survives the kill while holding the run's stdout and stderr open, which
   stretched a bounded run to the descendant's own lifetime and left a
   process writing to a probe's target during the restore. Settling is
