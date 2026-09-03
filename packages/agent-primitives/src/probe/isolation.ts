@@ -492,7 +492,8 @@ export async function beginWorktree(
   // Written before anything is registered with git: from the add
   // onward, a probe under another lock directory that finds this
   // worktree in the registry reads this record and leaves the worktree
-  // alone while this process is alive (see `liveForeignOwner`).
+  // alone while this process is alive and the record is within its
+  // bound (see `liveForeignOwner`).
   try {
     writeScratchOwner(runDir, logDir);
   } catch (err) {
@@ -734,6 +735,8 @@ export const SCRATCH_OWNER_FILE = "owner.json";
 
 export interface ScratchOwner {
   pid: number;
+  /** When the record was written (ISO 8601): what `scratchOwnerState`
+   * measures `SCRATCH_OWNER_MAX_AGE_HOURS` against. */
   timestamp: string;
   /** The resolved `--log-dir` the scratch directory was created under. */
   logDir: string;
@@ -779,19 +782,72 @@ export function readScratchOwner(
   }
 }
 
+/** How long an owner record vouches for its worktree, measured from the
+ * record's own timestamp. A probe's worktree lives for one run, so a
+ * record older than this names a run that is long over: the pid it
+ * carries is either recycled or some unrelated process, and reading it
+ * as a probe in flight would park the leftover for as long as that pid
+ * happens to stay alive. Past the bound the worktree is a leftover
+ * whatever the pid says. Exported for `doctor`'s hint and the tests. */
+export const SCRATCH_OWNER_MAX_AGE_HOURS = 24;
+
+const SCRATCH_OWNER_MAX_AGE_MS = SCRATCH_OWNER_MAX_AGE_HOURS * 60 * 60 * 1000;
+
+/** What the owner record of a scratch directory says about the process
+ * behind it: `none` when there is no record (or it does not parse),
+ * `self` for this process's own, `dead` when the pid is gone, `expired`
+ * when the pid is alive but the record's timestamp does not parse or
+ * lies more than `SCRATCH_OWNER_MAX_AGE_HOURS` from the clock in either
+ * direction, and `live` only for an alive pid under a record within
+ * that bound. Only `live` is a probe in flight. */
+export type ScratchOwnerState = "none" | "self" | "dead" | "expired" | "live";
+
+/** True when `timestamp` (the record's own, never the file's mtime) does
+ * not parse or lies more than the bound away from `now`. A future-dated
+ * record is as untrustworthy as a stale one. */
+function scratchOwnerExpired(timestamp: string, now: number): boolean {
+  const written = Date.parse(timestamp);
+  return (
+    !Number.isFinite(written) ||
+    Math.abs(now - written) > SCRATCH_OWNER_MAX_AGE_MS
+  );
+}
+
+function classifyScratchOwner(
+  owner: ScratchOwner,
+  now: number,
+): ScratchOwnerState {
+  if (owner.pid === process.pid) return "self";
+  if (!isPidAlive(owner.pid)) return "dead";
+  if (scratchOwnerExpired(owner.timestamp, now)) return "expired";
+  return "live";
+}
+
+/** The `ScratchOwnerState` of the scratch directory holding
+ * `worktreePath`, read against the clock now. Exported for the tests;
+ * `liveForeignOwner` is what the gate, the recovery, and `doctor` ask. */
+export function scratchOwnerState(worktreePath: string): ScratchOwnerState {
+  const owner = readScratchOwner(worktreePath);
+  return owner === undefined ? "none" : classifyScratchOwner(owner, Date.now());
+}
+
 /** The pid of a process other than this one that owns the scratch
- * directory holding `worktreePath` and is still alive (the same
- * liveness check the lock and marker files use), or undefined: no owner
- * record, a dead owner, or this process itself. A live owner means the
- * worktree is a probe in flight, never a leftover. The lock serializes
- * probes only within one lock directory, so a probe under another
- * `AGENT_PRIMITIVES_LOCK_DIR` finds this one's worktree in git's
- * registry while it is still in use; this record is what tells the two
- * apart. Exported for `doctor` and the recovery path. */
+ * directory holding `worktreePath` and is a probe still in flight (the
+ * record classifies as `live`: an alive pid, by the same liveness check
+ * the lock and marker files use, under a record within
+ * `SCRATCH_OWNER_MAX_AGE_HOURS`), or undefined for every other state:
+ * no owner record, this process itself, a dead owner, or a record past
+ * the bound. The lock serializes probes only within one lock directory,
+ * so a probe under another `AGENT_PRIMITIVES_LOCK_DIR` finds this one's
+ * worktree in git's registry while it is still in use; this record is
+ * what tells the two apart, for as long as the bound lets it. Exported
+ * for `doctor` and the recovery path. */
 export function liveForeignOwner(worktreePath: string): number | undefined {
   const owner = readScratchOwner(worktreePath);
-  if (owner === undefined || owner.pid === process.pid) return undefined;
-  return isPidAlive(owner.pid) ? owner.pid : undefined;
+  if (owner === undefined) return undefined;
+  return classifyScratchOwner(owner, Date.now()) === "live"
+    ? owner.pid
+    : undefined;
 }
 
 /** The `worktree <path>` records of a `git worktree list --porcelain

@@ -12,11 +12,14 @@ import {
   findNodeModulesDirs,
   isScratchWorktreePath,
   listRegisteredWorktrees,
+  liveForeignOwner,
   parseWorktreeListLines,
   parseWorktreeListZ,
   readScratchOwner,
   rejectsOption,
   SCRATCH_OWNER_FILE,
+  SCRATCH_OWNER_MAX_AGE_HOURS,
+  scratchOwnerState,
 } from "../src/probe/isolation.js";
 import { resolveDeepestExisting } from "../src/probe/containment.js";
 import { runArgv } from "../src/probe/run.js";
@@ -1478,6 +1481,101 @@ describe("the scratch owner record", () => {
     });
 
     expect(admitted.ok).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
+  });
+
+  const FAR_PAST = "2020-01-01T00:00:00.000Z";
+
+  /** A pid that is alive from any user's point of view: pid 1 always
+   * exists, and `isPidAlive` reads the EPERM a non-root user gets from
+   * signalling it as alive. */
+  const ALIVE_PID = 1;
+
+  function writeOwner(
+    wt: string,
+    owner: { pid: number; timestamp: string },
+  ): void {
+    fs.writeFileSync(
+      path.join(path.dirname(wt), SCRATCH_OWNER_FILE),
+      JSON.stringify({ ...owner, logDir: path.dirname(path.dirname(wt)) }),
+    );
+  }
+
+  it("scratchOwnerState tells none, self, dead, expired, and live apart, and liveForeignOwner answers only for live", () => {
+    const wt = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(wt, { recursive: true });
+    const fresh = new Date().toISOString();
+    expect(scratchOwnerState(wt)).toBe("none");
+    expect(liveForeignOwner(wt)).toBeUndefined();
+
+    writeOwner(wt, { pid: process.pid, timestamp: fresh });
+    expect(scratchOwnerState(wt)).toBe("self");
+    expect(liveForeignOwner(wt)).toBeUndefined();
+
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    writeOwner(wt, { pid: dead, timestamp: fresh });
+    expect(scratchOwnerState(wt)).toBe("dead");
+    expect(liveForeignOwner(wt)).toBeUndefined();
+
+    writeOwner(wt, { pid: ALIVE_PID, timestamp: fresh });
+    expect(scratchOwnerState(wt)).toBe("live");
+    expect(liveForeignOwner(wt)).toBe(ALIVE_PID);
+
+    // Past the bound, an alive pid no longer vouches for the worktree.
+    writeOwner(wt, { pid: ALIVE_PID, timestamp: FAR_PAST });
+    expect(scratchOwnerState(wt)).toBe("expired");
+    expect(liveForeignOwner(wt)).toBeUndefined();
+    // Just inside the bound still does; just outside no longer does.
+    const boundMs = SCRATCH_OWNER_MAX_AGE_HOURS * 60 * 60 * 1000;
+    const marginMs = 60_000;
+    writeOwner(wt, {
+      pid: ALIVE_PID,
+      timestamp: new Date(Date.now() - boundMs + marginMs).toISOString(),
+    });
+    expect(scratchOwnerState(wt)).toBe("live");
+    writeOwner(wt, {
+      pid: ALIVE_PID,
+      timestamp: new Date(Date.now() - boundMs - marginMs).toISOString(),
+    });
+    expect(scratchOwnerState(wt)).toBe("expired");
+    // A record dated past the bound into the future, and one whose
+    // timestamp does not parse, count as expired too.
+    writeOwner(wt, {
+      pid: ALIVE_PID,
+      timestamp: new Date(Date.now() + boundMs + marginMs).toISOString(),
+    });
+    expect(scratchOwnerState(wt)).toBe("expired");
+    writeOwner(wt, { pid: ALIVE_PID, timestamp: "not a timestamp" });
+    expect(scratchOwnerState(wt)).toBe("expired");
+  });
+
+  it("cleanupWorktree refuses a scratch worktree under a fresh record naming an alive pid, and admits the same worktree once the record is past the bound", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const wt = path.join(logDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(wt), { recursive: true });
+    git(repo, ["worktree", "add", "--detach", "--", wt, "HEAD"]);
+
+    writeOwner(wt, { pid: ALIVE_PID, timestamp: new Date().toISOString() });
+    const refused = await cleanupWorktree(repo, wt, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(refused.ok).toBe(false);
+    expect(refused.refused).toBe(true);
+    expect(refused.detail).toContain(
+      `a live probe (pid ${String(ALIVE_PID)}) owns it`,
+    );
+    expect(fs.existsSync(wt)).toBe(true);
+
+    writeOwner(wt, { pid: ALIVE_PID, timestamp: FAR_PAST });
+    const admitted = await cleanupWorktree(repo, wt, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(admitted.ok).toBe(true);
+    expect(admitted.verified).toBe(true);
     expect(fs.existsSync(wt)).toBe(false);
     expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
   });

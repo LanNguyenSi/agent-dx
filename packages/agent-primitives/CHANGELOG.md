@@ -98,12 +98,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`git apply --allow-empty`); both floors are documented in the README,
   and `doctor` gained a `git-version` check that reads the installed git
   against them and warns below 2.36. Each scratch directory now carries
-  an `owner.json` with the creating probe's pid, written before the add
-  runs: the recovery and `doctor` skip a registered or marker-named
-  scratch worktree whose owner is still alive, naming it as a live probe
-  under another `AGENT_PRIMITIVES_LOCK_DIR` rather than removing it (the
-  lock serializes probes within one lock directory only), and the
-  removal gate refuses such a path outright. A path git does not report
+  an `owner.json` with the creating probe's pid and a timestamp, written
+  before the add runs: the recovery and `doctor` skip a registered or
+  marker-named scratch worktree whose owner is still alive under a
+  record within 24 hours of the clock, the recovery naming it as a live
+  probe under another `AGENT_PRIMITIVES_LOCK_DIR` in a warning and
+  `doctor` in a hint (the pid, the path, the record, and the bound)
+  rather than removing it (the lock serializes probes within one lock
+  directory only), and the removal gate refuses such a path outright; a
+  record past that bound no longer vouches for its worktree whatever its
+  pid says, so the worktree is a leftover again, removed by the next run
+  and reported by `doctor` with the manual command. A path git does not
+  report
   is now checked against the recovering run's own `--log-dir`, never
   against the log dir a marker recorded, so a marker cannot certify its
   own containment; the scratch-shape check pins the uuid's 8-4-4-4-12

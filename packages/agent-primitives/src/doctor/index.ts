@@ -17,6 +17,8 @@ import {
   parseWorktreeListLines,
   parseWorktreeListZ,
   rejectsOption,
+  SCRATCH_OWNER_MAX_AGE_HOURS,
+  scratchOwnerPath,
 } from "../probe/isolation.js";
 
 export interface ToolCheck {
@@ -497,8 +499,10 @@ export async function doctor(
   // live run is never reported as a leftover. A live run under another
   // lock directory has no marker here at all; its scratch directory's
   // owner record (see `liveForeignOwner`) is what keeps it out of the
-  // leftovers. A registry that cannot be read is said so in a warning,
-  // never treated as empty.
+  // leftovers, for as long as the record is within its bound: past
+  // it the worktree is a leftover whatever the pid says, reported with
+  // the command like any other. A registry that cannot be read is said
+  // so in a warning, never treated as empty.
   const registry = insideGitWorkTree
     ? listScratchWorktreesSync(markerRoot, gitPath)
     : { ok: true, paths: [] as string[] };
@@ -524,14 +528,19 @@ export async function doctor(
   const manualRemove = (worktreePath: string): string =>
     `git -C ${markerRoot} worktree remove --force --force -- ${worktreePath}`;
   const worktreeProblems: string[] = [];
-  const liveWorktrees: string[] = [];
+  // A worktree a live probe owns is never a problem for this check; each
+  // becomes a hint below, since a worktree parked behind an alive pid is
+  // still worth a line naming what holds it and for how long.
+  const liveOwned: { path: string; pid: number; fromMarker: boolean }[] = [];
   if (worktreeMarker !== undefined && !markerAlive) {
     const markerOwner =
       markerTarget !== undefined ? liveForeignOwner(markerTarget) : undefined;
     if (markerOwner !== undefined) {
-      liveWorktrees.push(
-        `${String(worktreeMarker.targetPath)} (pid ${markerOwner}, named by the marker)`,
-      );
+      liveOwned.push({
+        path: String(worktreeMarker.targetPath),
+        pid: markerOwner,
+        fromMarker: true,
+      });
     } else if (
       markerTarget !== undefined &&
       isScratchWorktreePath(markerTarget)
@@ -563,7 +572,7 @@ export async function doctor(
     }
     const owner = liveForeignOwner(registeredPath);
     if (owner !== undefined) {
-      liveWorktrees.push(`${registeredPath} (pid ${owner})`);
+      liveOwned.push({ path: registeredPath, pid: owner, fromMarker: false });
       continue;
     }
     worktreeProblems.push(
@@ -573,23 +582,29 @@ export async function doctor(
         `\`${manualRemove(registeredPath)}\` manually`,
     );
   }
-  const liveNote =
-    liveWorktrees.length === 0
-      ? ""
-      : `; a live probe owns ${liveWorktrees.join(", ")}`;
   checks.push({
     name: "stale-worktree",
     ok: worktreeProblems.length === 0,
     detail:
       worktreeProblems.length === 0
-        ? `no stale worktree marker or leftover registered worktree for this repository${liveNote}`
-        : `${worktreeProblems.join(" ")}${liveNote}`,
+        ? "no stale worktree marker or leftover registered worktree for this repository"
+        : worktreeProblems.join(" "),
   });
 
   const hints: string[] = [];
   for (const tool of missingRequired) {
     const hint = GENERIC_HINTS[tool.name];
     if (hint) hints.push(hint);
+  }
+  for (const live of liveOwned) {
+    hints.push(
+      `a live probe (pid ${String(live.pid)}) owns the scratch worktree at ` +
+        `${live.path}${live.fromMarker ? ", named by this repository's worktree marker" : ""}; ` +
+        `it is left alone while that process is alive and its owner record ` +
+        `${scratchOwnerPath(live.path)} is within ${String(SCRATCH_OWNER_MAX_AGE_HOURS)} ` +
+        `hours of the clock; past that bound the next \`probe -i worktree\` on ` +
+        `this repository removes it and this check reports it as a leftover`,
+    );
   }
 
   return {

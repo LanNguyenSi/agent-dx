@@ -93,7 +93,11 @@ git (below 2.35 the worktree sync cannot run at all; between 2.35 and
 the `probe` section). The `stale-worktree` check reads the same
 listing, with the same fallback; when the listing cannot run in any
 form, a warning says that a leftover registered worktree cannot be
-reported, rather than the check reading as clean.
+reported, rather than the check reading as clean. A scratch worktree a
+live probe owns (its `owner.json` names an alive pid and is within 24
+hours of the clock) is not a leftover: the check stays ok and a hint
+names the worktree, the pid, the record, and the bound; past that
+bound the worktree is reported as a leftover with the manual command.
 
 ```bash
 agent-primitives doctor
@@ -363,10 +367,16 @@ registration reported, and the next `probe -i worktree` run on the same
 repository removes every such leftover before it starts (a warning
 names `recovered_stale_worktree`), marker or not. Each scratch
 directory also carries an `owner.json` recording the pid of the probe
-that created it: a registered scratch worktree whose owner is still
-alive is a probe in flight under another `AGENT_PRIMITIVES_LOCK_DIR`
-(the lock serializes probes within one lock directory only), which the
-recovery and `doctor` name in a warning and leave alone. Only a path of
+that created it and when: a registered scratch worktree whose owner is
+still alive under a record within 24 hours of the clock is a probe in
+flight under another `AGENT_PRIMITIVES_LOCK_DIR` (the lock serializes
+probes within one lock directory only), which the recovery names in a
+warning and leaves alone and `doctor` names in a hint (the pid, the
+path, the record, and the bound). A record older than that no longer
+vouches for its worktree whatever its pid says, since a probe's
+worktree lives for one run and a pid can be recycled: the worktree is
+a leftover again, removed by the next run and reported by `doctor`
+with the manual command. Only a path of
 the probe's own scratch shape (`<log-dir>/wt-<uuid>/wt`, the uuid in
 its 8-4-4-4-12 hex layout) that git reports as a worktree of the
 repository, or that sits under the recovering run's own `--log-dir`, is

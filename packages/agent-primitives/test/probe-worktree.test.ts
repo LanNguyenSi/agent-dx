@@ -17,6 +17,7 @@ import {
   isScratchWorktreePath,
   parseWorktreeListZ,
   readScratchOwner,
+  SCRATCH_OWNER_FILE,
 } from "../src/probe/isolation.js";
 import { runArgv } from "../src/probe/run.js";
 import { withPathPrepended, writeGitShim } from "./helpers/git-shim.js";
@@ -2202,4 +2203,69 @@ describe("probe(): worktree isolation, a live probe under another lock directory
     expect(third.warnings.filter((w) => w.includes("live probe"))).toEqual([]);
     expect(worktreeBlocks(repo)).toHaveLength(1);
   }, 30000);
+});
+
+describe("probe(): worktree isolation, the owner record's bound", () => {
+  /** A pid that is alive from any user's point of view: pid 1 always
+   * exists, and the liveness check reads the EPERM a non-root user gets
+   * from signalling it as alive. */
+  const ALIVE_PID = 1;
+
+  function writeOwner(wt: string, timestamp: string): void {
+    fs.writeFileSync(
+      path.join(path.dirname(wt), SCRATCH_OWNER_FILE),
+      JSON.stringify({
+        pid: ALIVE_PID,
+        timestamp,
+        logDir: path.dirname(path.dirname(wt)),
+      }),
+    );
+  }
+
+  function registeredScratch(repo: string): string[] {
+    return parseWorktreeListZ(
+      execFileSync("git", ["worktree", "list", "--porcelain", "-z"], {
+        cwd: repo,
+        encoding: "utf8",
+      }),
+    )
+      .map(resolveDeepestExisting)
+      .filter(isScratchWorktreePath);
+  }
+
+  it("recovers a registered scratch worktree whose owner record is past the bound even though its pid is alive, and leaves one under a fresh record alone", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = makeTmpDir();
+    const expired = path.join(logDir, `wt-${randomUUID()}`, "wt");
+    const fresh = path.join(logDir, `wt-${randomUUID()}`, "wt");
+    for (const wt of [expired, fresh]) {
+      fs.mkdirSync(path.dirname(wt), { recursive: true });
+      git(repo, ["worktree", "add", "--detach", "--", wt, "HEAD"]);
+    }
+    writeOwner(expired, "2020-01-01T00:00:00.000Z");
+    writeOwner(fresh, new Date().toISOString());
+    const expiredResolved = resolveDeepestExisting(expired);
+    const freshResolved = resolveDeepestExisting(fresh);
+
+    const result = await probe(baseOptions(repo, { logDir }));
+
+    expect(result.status).toBe("killed");
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    expect(
+      result.warnings.filter(
+        (w) =>
+          w.includes(freshResolved) &&
+          w.includes(`live probe (pid ${String(ALIVE_PID)})`),
+      ),
+    ).toHaveLength(1);
+    expect(
+      result.warnings.filter(
+        (w) => w.includes(expiredResolved) && w.includes("live probe"),
+      ),
+    ).toEqual([]);
+    expect(fs.existsSync(expired)).toBe(false);
+    expect(fs.existsSync(fresh)).toBe(true);
+    expect(registeredScratch(repo)).toEqual([freshResolved]);
+  });
 });

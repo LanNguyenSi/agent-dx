@@ -11,7 +11,11 @@ import {
   containmentRoot,
   resolveDeepestExisting,
 } from "../src/probe/containment.js";
-import { SCRATCH_OWNER_FILE } from "../src/probe/isolation.js";
+import {
+  SCRATCH_OWNER_FILE,
+  SCRATCH_OWNER_MAX_AGE_HOURS,
+  scratchOwnerPath,
+} from "../src/probe/isolation.js";
 import { writeGitShim } from "./helpers/git-shim.js";
 
 const tmpDirs: string[] = [];
@@ -1077,16 +1081,27 @@ describe("doctor: stale-worktree check and the scratch owner record", () => {
     return resolveDeepestExisting(worktreePath);
   }
 
-  function writeOwner(worktreePath: string, pid: number | undefined): void {
+  function writeOwner(
+    worktreePath: string,
+    pid: number | undefined,
+    timestamp: string = new Date().toISOString(),
+  ): void {
     fs.writeFileSync(
       path.join(path.dirname(worktreePath), SCRATCH_OWNER_FILE),
       JSON.stringify({
         pid,
-        timestamp: new Date().toISOString(),
+        timestamp,
         logDir: path.dirname(path.dirname(worktreePath)),
       }),
     );
   }
+
+  const FAR_PAST = "2020-01-01T00:00:00.000Z";
+
+  /** A pid that is alive from any user's point of view: pid 1 always
+   * exists, and the liveness check reads the EPERM a non-root user gets
+   * from signalling it as alive. */
+  const ALIVE_PID = 1;
 
   it("ok, naming the live probe, for a registered scratch worktree whose owner record names a live process; not ok once that process is gone", async () => {
     const lockDir = makeTmpDir();
@@ -1112,10 +1127,18 @@ describe("doctor: stale-worktree check and the scratch owner record", () => {
 
       const check = live.checks.find((c) => c.name === "stale-worktree");
       expect(check?.ok).toBe(true);
-      expect(check?.detail).toContain(
-        `a live probe owns ${resolved} (pid ${String(sleeper.pid)})`,
-      );
+      expect(check?.detail).not.toContain(resolved);
       expect(check?.detail).not.toContain("worktree remove");
+      // The live worktree is a hint, naming what holds it and for how
+      // long, never part of the check's own detail.
+      expect(live.hints).toHaveLength(1);
+      expect(live.hints[0]).toContain(
+        `a live probe (pid ${String(sleeper.pid)}) owns the scratch worktree at ${resolved};`,
+      );
+      expect(live.hints[0]).toContain(scratchOwnerPath(resolved));
+      expect(live.hints[0]).toContain(
+        `${String(SCRATCH_OWNER_MAX_AGE_HOURS)} hours`,
+      );
     } finally {
       sleeper.kill("SIGKILL");
     }
@@ -1133,6 +1156,93 @@ describe("doctor: stale-worktree check and the scratch owner record", () => {
     expect(check?.detail).toContain(
       `worktree remove --force --force -- ${resolved}`,
     );
+    expect(dead.hints).toEqual([]);
+  });
+
+  it("not ok, with the manual command and no hint, for a registered scratch worktree whose owner record names an alive pid under a timestamp past the bound", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const resolved = addScratchWorktree(repo);
+    writeOwner(resolved, ALIVE_PID, FAR_PAST);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("has no live probe behind it");
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.hints).toEqual([]);
+  });
+
+  it("ok, with a hint naming the pid, the path, the record, and the bound, for the same worktree under a fresh record naming the same alive pid", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const resolved = addScratchWorktree(repo);
+    writeOwner(resolved, ALIVE_PID);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).not.toContain(resolved);
+    expect(result.hints).toHaveLength(1);
+    expect(result.hints[0]).toContain(
+      `a live probe (pid ${String(ALIVE_PID)}) owns the scratch worktree at ${resolved};`,
+    );
+    expect(result.hints[0]).toContain(scratchOwnerPath(resolved));
+    expect(result.hints[0]).toContain(
+      `${String(SCRATCH_OWNER_MAX_AGE_HOURS)} hours`,
+    );
+    expect(result.hints[0]).not.toContain(
+      "named by this repository's worktree marker",
+    );
+  });
+
+  it("not ok, as the interrupted probe's leftover with the manual command, for a dead marker naming a scratch worktree whose owner record is past the bound", async () => {
+    const lockDir = makeTmpDir();
+    const repo = initRepo();
+    const root = resolveDeepestExisting(containmentRoot(repo));
+    const resolved = addScratchWorktree(repo);
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: resolved,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: deadPid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    writeOwner(resolved, ALIVE_PID, FAR_PAST);
+
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: repo,
+      lockDir,
+    });
+
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("was interrupted");
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${resolved}`,
+    );
+    expect(result.hints).toEqual([]);
   });
 
   it("ok, naming the live probe, for a dead marker whose worktree's owner record names a live process", async () => {
@@ -1172,8 +1282,10 @@ describe("doctor: stale-worktree check and the scratch owner record", () => {
 
       const check = result.checks.find((c) => c.name === "stale-worktree");
       expect(check?.ok).toBe(true);
-      expect(check?.detail).toContain(
-        `${resolved} (pid ${String(sleeper.pid)}, named by the marker)`,
+      expect(check?.detail).not.toContain(resolved);
+      expect(result.hints).toHaveLength(1);
+      expect(result.hints[0]).toContain(
+        `a live probe (pid ${String(sleeper.pid)}) owns the scratch worktree at ${resolved}, named by this repository's worktree marker;`,
       );
     } finally {
       sleeper.kill("SIGKILL");

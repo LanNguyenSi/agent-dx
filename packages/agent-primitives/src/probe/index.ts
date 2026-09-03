@@ -928,10 +928,11 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       // not a marker names it (a marker can be deleted by hand, and git
       // registers the worktree before `git worktree add` returns). The
       // one exception is a worktree whose scratch directory records a
-      // live owner (see `liveForeignOwner`): a probe running under
-      // another lock directory, which the lock cannot see; it is named
-      // in a warning and left alone, never removed and never treated as
-      // stale. Recovery is the same gated remove-and-assert every
+      // live owner (see `liveForeignOwner`: an alive pid under a record
+      // within its bound): a probe running under another lock
+      // directory, which the lock cannot see; it is named in a warning
+      // and left alone, never removed and never treated as stale.
+      // Recovery is the same gated remove-and-assert every
       // removal goes through, gated against THIS run's own log dir,
       // never against a root the marker recorded; nothing in the
       // original tree was ever touched by a worktree-mode probe, so
