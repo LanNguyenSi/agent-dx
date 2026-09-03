@@ -700,12 +700,17 @@ describe("probe(): worktree isolation, argv-only git calls (no shell injection)"
     const { repo } = initRepo();
     const base = makeTmpDir();
     const logDir = path.join(base, "$(touch PWNED)x");
-    const pwnedMarker = path.join(base, "PWNED");
 
     const result = await probe(baseOptions(repo, { logDir }));
 
     expect(result.status).toBe("killed");
-    expect(fs.existsSync(pwnedMarker)).toBe(false);
+    // Every git call in isolation.ts runs with `cwd: root` (the
+    // repository), so a shell that DID expand this would create PWNED
+    // there, not under `--log-dir` itself or this process's own cwd;
+    // checked in all three places nothing was ever created anywhere.
+    expect(fs.existsSync(path.join(repo, "PWNED"))).toBe(false);
+    expect(fs.existsSync(path.join(base, "PWNED"))).toBe(false);
+    expect(fs.existsSync(path.join(process.cwd(), "PWNED"))).toBe(false);
   });
 });
 
@@ -778,17 +783,36 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
     ).toBe(true);
   });
 
-  it("a valid untracked symlink and a dangling one are both recreated as symlinks, neither aborting the sync", async () => {
+  it("a valid untracked symlink and a dangling one are both recreated as symlinks (not copied as files), neither aborting the sync", async () => {
     useLockDir();
     const { repo } = initRepo();
     fs.writeFileSync(path.join(repo, "link-target.txt"), "target\n");
     fs.symlinkSync("link-target.txt", path.join(repo, "valid-link.txt"));
     fs.symlinkSync("does-not-exist.txt", path.join(repo, "dangling-link.txt"));
 
-    const result = await probe(baseOptions(repo));
+    const outDir = makeTmpDir();
+    const outPath = path.join(outDir, "link-check.json");
+    const previousEnv = process.env.LINK_CHECK_OUT_PATH;
+    process.env.LINK_CHECK_OUT_PATH = outPath;
+    try {
+      const result = await probe(
+        baseOptions(repo, {
+          preCommand:
+            "node -e \"const fs=require('fs');" +
+            "const valid=fs.lstatSync('valid-link.txt').isSymbolicLink();" +
+            "const dangling=fs.lstatSync('dangling-link.txt').isSymbolicLink();" +
+            'fs.writeFileSync(process.env.LINK_CHECK_OUT_PATH, JSON.stringify({valid,dangling}));"',
+        }),
+      );
 
-    expect(result.status).toBe("killed");
-    expect(result.reason).toBeUndefined();
+      expect(result.status).toBe("killed");
+      expect(result.reason).toBeUndefined();
+      const linkCheck = JSON.parse(fs.readFileSync(outPath, "utf8"));
+      expect(linkCheck).toEqual({ valid: true, dangling: true });
+    } finally {
+      if (previousEnv === undefined) delete process.env.LINK_CHECK_OUT_PATH;
+      else process.env.LINK_CHECK_OUT_PATH = previousEnv;
+    }
   });
 
   it("the probe's own --log-dir, when it sits inside the repository, is excluded from the untracked sync entirely", async () => {
