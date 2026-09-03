@@ -308,16 +308,39 @@ export async function doctor(
       !isPidAlive(m.pid) &&
       isPathContained(containmentRoot(cwd), path.resolve(m.targetPath)),
   );
+  // Auto-recovery (the next `probe` on the affected file restoring from
+  // the backup) is only actually possible while that backup still
+  // exists; a marker whose backup is gone needs the manual escape
+  // (delete the marker file) named explicitly instead of a hint that
+  // promises a recovery path that will just fail.
+  const recoverable = staleMarkers.filter((m) => fs.existsSync(m.backupPath));
+  const unrecoverable = staleMarkers.filter(
+    (m) => !fs.existsSync(m.backupPath),
+  );
+  const detailParts: string[] = [];
+  if (recoverable.length > 0) {
+    detailParts.push(
+      `${recoverable.length} stale probe marker(s) for this repository whose ` +
+        `backup still exists; run \`agent-primitives probe\` again on the ` +
+        `affected file to auto-recover, or inspect the backup(s): ` +
+        recoverable.map((m) => m.backupPath).join(", "),
+    );
+  }
+  if (unrecoverable.length > 0) {
+    detailParts.push(
+      `${unrecoverable.length} stale probe marker(s) for this repository ` +
+        `whose backup is missing (auto-recovery is not possible); delete ` +
+        `the marker file(s) manually: ` +
+        unrecoverable.map((m) => m.markerPath).join(", "),
+    );
+  }
   checks.push({
     name: "stale-probe-marker",
     ok: staleMarkers.length === 0,
     detail:
       staleMarkers.length === 0
         ? "no stale probe markers for this repository"
-        : `${staleMarkers.length} stale probe marker(s) for this repository; ` +
-          `run \`agent-primitives probe\` again on the affected file to ` +
-          `auto-recover, or inspect the backup(s): ` +
-          staleMarkers.map((m) => m.backupPath).join(", "),
+        : detailParts.join(" "),
   });
 
   const hints: string[] = [];

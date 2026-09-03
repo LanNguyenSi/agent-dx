@@ -12,6 +12,10 @@ export interface ExecOptions {
   logDir: string;
   /** Log file basename. Defaults to a name derived from the current time. */
   logFileName?: string;
+  /** When aborted, kills the child (SIGTERM, escalating to SIGKILL after
+   * the same grace period a timeout uses) instead of leaving it running
+   * after this call resolves. Additive: omitted, behavior is unchanged. */
+  signal?: AbortSignal;
 }
 
 export interface ExecResult {
@@ -21,6 +25,11 @@ export interface ExecResult {
   stderrTail: string;
   logPath: string;
   timedOut: boolean;
+  /** True when `options.signal` fired and killed the child before it
+   * exited on its own. Distinct from `timedOut` (this package's own
+   * `--timeout`): an abort is the caller asking to stop, not the command
+   * itself running too long. */
+  aborted: boolean;
   /** True when the log file write stream reported an error (e.g. the
    * disk filled, or a path collision like a directory where a file was
    * expected). The command's own exit code and tails are still reported;
@@ -115,6 +124,7 @@ export function execCommand(
 
     const start = Date.now();
     let timedOut = false;
+    let aborted = false;
     let settled = false;
 
     const child = spawn("sh", ["-c", cmd], {
@@ -135,6 +145,27 @@ export function execCommand(
       timer.unref();
     }
 
+    // Same kill/escalate shape as the timeout above, triggered by the
+    // caller instead of a duration: used by `probe`'s SIGINT/SIGTERM
+    // handler so an emergency restore never races a still-running child
+    // (the child would otherwise keep writing to the target/log after
+    // this call has already resolved and the caller has moved on).
+    const onAbort = () => {
+      if (settled) return;
+      aborted = true;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!settled) child.kill("SIGKILL");
+      }, 2000).unref();
+    };
+    if (options.signal) {
+      if (options.signal.aborted) onAbort();
+      else options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+    const detachAbortListener = () => {
+      options.signal?.removeEventListener("abort", onAbort);
+    };
+
     child.stdout.on("data", (data: Buffer) => {
       const text = stdoutDecoder.write(data);
       stdoutTail.push(text);
@@ -150,6 +181,7 @@ export function execCommand(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      detachAbortListener();
       // Flush any incomplete trailing multi-byte sequence held by each
       // decoder (StringDecoder#end returns the remainder, if any).
       const stdoutRemainder = stdoutDecoder.end();
@@ -171,6 +203,7 @@ export function execCommand(
           stderrTail: stderrTail.tail(),
           logPath,
           timedOut,
+          aborted,
           logWriteFailed: logWriteFailed !== undefined,
           ...(logWriteFailed !== undefined
             ? { logWriteError: logWriteFailed }
@@ -183,6 +216,7 @@ export function execCommand(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      detachAbortListener();
       logStream.end();
       logStreamDone.then(() => reject(err));
     });

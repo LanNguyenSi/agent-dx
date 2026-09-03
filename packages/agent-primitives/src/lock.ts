@@ -31,33 +31,76 @@ interface LockDirState {
   detail?: string;
 }
 
+/** Test seam: lets a test inject a fake `statSync` to exercise a branch
+ * (a created ancestor level owned by a different uid) that cannot be
+ * reproduced for real without root. Defaults to the genuine `fs.statSync`. */
+export interface LockDirDeps {
+  stat?: (path: string) => fs.Stats;
+}
+
+/** Every directory `mkdirSync(dir, { recursive: true })` would have to
+ * create on top of what already exists, from the outermost missing
+ * level down to `dir` itself, in creation order. Returns just `[dir]`
+ * when `dir` (or, for a nested override, its lowest missing ancestor)
+ * already exists, so the leaf is still always checked. */
+function levelsToCreate(dir: string): string[] {
+  const missing: string[] = [];
+  let cur = dir;
+  for (;;) {
+    if (fs.existsSync(cur)) break;
+    missing.push(cur);
+    const parent = path.dirname(cur);
+    if (parent === cur) break; // filesystem root
+    cur = parent;
+  }
+  missing.reverse();
+  return missing.length > 0 ? missing : [dir];
+}
+
 /**
- * Creates `dir` (mode `0700`) if missing, then confirms it is a
- * directory this process actually owns and can write to. A dir that
- * exists but is owned by another uid, or that resists a write-access
- * check, is never trusted: it could be an attacker-planted directory
- * whose lock/marker files this process would otherwise read as if they
- * were its own.
+ * Creates `dir` (mode `0700`) if missing, then confirms every level
+ * `mkdirSync(..., { recursive: true })` actually had to create (plus the
+ * leaf itself) is a directory this process owns, with no group/other
+ * write bit set. Checking only the leaf is not enough: this directory's
+ * own parent (by default `<tmpdir>/agent-primitives-<uid>`) sits
+ * directly under a shared, world-writable `/tmp`, so a level above the
+ * leaf that is owned by another uid (or left group/other-writable) is
+ * exactly as untrustworthy as the leaf itself would be -- its lock and
+ * marker files would otherwise be read as if they were this process's
+ * own.
  */
-function ensureLockDir(dir: string): LockDirState {
+function ensureLockDir(dir: string, deps: LockDirDeps = {}): LockDirState {
+  const stat = deps.stat ?? fs.statSync;
+  const levels = levelsToCreate(dir);
   try {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, detail: `could not create ${dir}: ${message}` };
   }
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(dir);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, detail: `could not stat ${dir}: ${message}` };
-  }
-  if (!stat.isDirectory()) {
-    return { ok: false, detail: `${dir} exists and is not a directory` };
-  }
-  if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
-    return { ok: false, detail: `${dir} is not owned by the current user` };
+  for (const level of levels) {
+    let levelStat: fs.Stats;
+    try {
+      levelStat = stat(level);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, detail: `could not stat ${level}: ${message}` };
+    }
+    if (!levelStat.isDirectory()) {
+      return { ok: false, detail: `${level} exists and is not a directory` };
+    }
+    if (
+      typeof process.getuid === "function" &&
+      levelStat.uid !== process.getuid()
+    ) {
+      return { ok: false, detail: `${level} is not owned by the current user` };
+    }
+    if ((levelStat.mode & 0o022) !== 0) {
+      return {
+        ok: false,
+        detail: `${level} is group- or world-writable (mode ${(levelStat.mode & 0o777).toString(8)})`,
+      };
+    }
   }
   try {
     fs.accessSync(dir, fs.constants.W_OK);
@@ -80,6 +123,13 @@ function lockFilePath(absTargetPath: string): string {
 
 function markerFilePath(absTargetPath: string): string {
   return path.join(lockDir(), `${lockKey(absTargetPath)}.marker.json`);
+}
+
+/** Public form of `markerFilePath`, for a caller that needs to name the
+ * marker file itself (e.g. the manual-delete escape when its backup is
+ * gone and automatic recovery is not possible). */
+export function markerFilePathFor(absTargetPath: string): string {
+  return markerFilePath(absTargetPath);
 }
 
 /**
@@ -132,10 +182,13 @@ export type AcquireLockResult =
  * fails to create), this returns `lock_unavailable` instead of letting a
  * raw `EACCES`/`EPERM` escape as an uncaught error.
  */
-export function acquireLock(absTargetPath: string): AcquireLockResult {
+export function acquireLock(
+  absTargetPath: string,
+  deps: LockDirDeps = {},
+): AcquireLockResult {
   const dir = lockDir();
   const lockPath = lockFilePath(absTargetPath);
-  const dirState = ensureLockDir(dir);
+  const dirState = ensureLockDir(dir, deps);
   if (!dirState.ok) {
     return {
       ok: false,
@@ -222,10 +275,19 @@ export function removeMarkerFor(absTargetPath: string): void {
   }
 }
 
+/** A marker as `listMarkers` returns it: the parsed data plus the
+ * marker file's own path on disk, so a caller (e.g. `doctor`'s hint, or
+ * the manual-delete escape) can name exactly the file to act on without
+ * re-deriving it from `targetPath` (which may not be the same value the
+ * marker was originally keyed by, e.g. across a symlink). */
+export interface MarkerEntry extends MarkerData {
+  markerPath: string;
+}
+
 /** Every marker currently on disk in `lockDir()` (or `dirOverride`),
  * skipping any file that fails to parse as a marker (never lets a
  * corrupt file crash a caller that just wants to list what is there). */
-export function listMarkers(dirOverride?: string): MarkerData[] {
+export function listMarkers(dirOverride?: string): MarkerEntry[] {
   const dir = dirOverride ?? lockDir();
   let entries: string[];
   try {
@@ -233,12 +295,13 @@ export function listMarkers(dirOverride?: string): MarkerData[] {
   } catch {
     return [];
   }
-  const markers: MarkerData[] = [];
+  const markers: MarkerEntry[] = [];
   for (const entry of entries) {
     if (!entry.endsWith(".marker.json")) continue;
     try {
-      const raw = fs.readFileSync(path.join(dir, entry), "utf8");
-      markers.push(JSON.parse(raw) as MarkerData);
+      const markerPath = path.join(dir, entry);
+      const raw = fs.readFileSync(markerPath, "utf8");
+      markers.push({ ...(JSON.parse(raw) as MarkerData), markerPath });
     } catch {
       // Skip a corrupt or half-written marker file.
     }

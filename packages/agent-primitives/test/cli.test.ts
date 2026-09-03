@@ -1191,6 +1191,34 @@ describe("cli: probe", () => {
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
+  it("a --file that does not exist is usage_error/file_not_found under command probe, with the path in a warning", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "placeholder.js"), "x\n");
+    commitAll(repo);
+    const missing = path.join(repo, "does-not-exist.js");
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "does-not-exist.js",
+      "-n",
+      "1",
+      "-r",
+      "y",
+      "-t",
+      "node -e 1",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.command).toBe("probe");
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("file_not_found");
+    expect((parsed.warnings as string[]).some((w) => w.includes(missing))).toBe(
+      true,
+    );
+  });
+
   it("exactly one mutant form is required: none given is usage_error, exit 2", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
@@ -1208,6 +1236,53 @@ describe("cli: probe", () => {
     ]);
     expect(run.code).toBe(2);
     expect(JSON.parse(run.stdout).status).toBe("usage_error");
+  });
+
+  it("-p's dry-run exec log paths (the git apply dry run and its --numstat check) are folded into the envelope's logs", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      ["function isPositive(n) {", "  return n > 0;", "}", ""].join("\n"),
+    );
+    commitAll(repo);
+    const patchPath = path.join(repo, "mutant.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+      ].join("\n") + "\n",
+    );
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-p",
+      patchPath,
+      "-t",
+      "node -e 1",
+    ]);
+
+    const parsed = JSON.parse(run.stdout);
+    const logs: string[] = parsed.logs;
+    // At least the dry-run apply and its --numstat check, both under the
+    // run's log dir, neither of them the baseline/test's own logPath.
+    expect(logs.length).toBeGreaterThanOrEqual(2);
+    for (const logPath of logs) {
+      expect(fs.existsSync(logPath)).toBe(true);
+    }
   });
 
   it("exactly one mutant form is required: two given (-r and -p) is usage_error, exit 2", async () => {

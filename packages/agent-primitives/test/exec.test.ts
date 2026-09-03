@@ -72,6 +72,33 @@ describe("execCommand", () => {
     expect(result.exitCode).not.toBe(0);
   }, 10000);
 
+  it("an aborted signal kills the child and resolves with aborted: true instead of leaving it running", async () => {
+    const logDir = makeTmpDir();
+    const controller = new AbortController();
+    const promise = execCommand("sleep 5", {
+      logDir,
+      signal: controller.signal,
+    });
+    // Give the child a moment to actually start before aborting it.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    controller.abort();
+    const result = await promise;
+    expect(result.aborted).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).not.toBe(0);
+  }, 10000);
+
+  it("does not report aborted: true for a command that finishes on its own with a signal given", async () => {
+    const logDir = makeTmpDir();
+    const controller = new AbortController();
+    const result = await execCommand("echo hi", {
+      logDir,
+      signal: controller.signal,
+    });
+    expect(result.aborted).toBe(false);
+    expect(result.exitCode).toBe(0);
+  });
+
   it("runs in the given cwd", async () => {
     const logDir = makeTmpDir();
     const cwd = makeTmpDir();

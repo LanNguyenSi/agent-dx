@@ -13,6 +13,7 @@ import {
   writeMarker,
   type MarkerData,
 } from "../src/lock.js";
+import type { Stats } from "node:fs";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -154,6 +155,38 @@ describe("acquireLock", () => {
     const stat = fs.statSync(fresh);
     expect(stat.isDirectory()).toBe(true);
     expect(stat.mode & 0o777).toBe(0o700);
+  });
+
+  it("returns lock_unavailable (never throws) when a created ancestor level is owned by a different uid, via the injectable stat seam", () => {
+    savedLockDir = process.env.AGENT_PRIMITIVES_LOCK_DIR;
+    const parent = makeTmpDir();
+    // Two levels under `parent` that acquireLock's mkdirSync(...,
+    // {recursive:true}) has to create: neither exists yet.
+    const foreignLevel = path.join(parent, "agent-primitives-test-uid");
+    const fresh = path.join(foreignLevel, "locks");
+    process.env.AGENT_PRIMITIVES_LOCK_DIR = fresh;
+    const target = path.join(makeTmpDir(), "target.js");
+
+    const result = acquireLock(target, {
+      stat: (p: string) => {
+        if (p === foreignLevel) {
+          return {
+            isDirectory: () => true,
+            uid: (process.getuid?.() ?? 0) + 999_999,
+            mode: 0o40700,
+          } as Stats;
+        }
+        return fs.statSync(p);
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("lock_unavailable");
+    if (result.reason === "lock_unavailable") {
+      expect(result.detail).toContain(foreignLevel);
+      expect(result.detail).toContain("not owned by the current user");
+    }
   });
 
   // Permission bits are meaningless to root (bypasses them entirely), so

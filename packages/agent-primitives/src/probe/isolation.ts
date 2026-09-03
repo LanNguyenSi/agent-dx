@@ -21,7 +21,12 @@ export interface InplaceSession {
  * includes the original basename (for a human skimming the log dir) and
  * a counter to stay unique across repeated calls with the same target
  * inside one log dir (e.g. the stale-marker recovery path re-uses the
- * same log dir as the probe that recovers it).
+ * same log dir as the probe that recovers it). The name itself is
+ * claimed atomically via an `O_EXCL` create (`wx`): a check-then-copy
+ * (`existsSync` then `copyFileSync`) would leave a window for two
+ * concurrent sessions in the same log dir to both observe a name as free
+ * and both write to it, silently clobbering one session's backup with
+ * the other's.
  */
 export function beginInplace(
   targetPath: string,
@@ -31,11 +36,20 @@ export function beginInplace(
   const base = path.basename(targetPath);
   let backupPath = path.join(logDir, `backup-${base}`);
   let n = 0;
-  while (fs.existsSync(backupPath)) {
-    n += 1;
-    backupPath = path.join(logDir, `backup-${n}-${base}`);
+  let fd: number;
+  for (;;) {
+    try {
+      fd = fs.openSync(backupPath, "wx");
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      n += 1;
+      backupPath = path.join(logDir, `backup-${n}-${base}`);
+    }
   }
-  fs.copyFileSync(targetPath, backupPath);
+  const data = fs.readFileSync(targetPath);
+  fs.writeSync(fd, data);
+  fs.closeSync(fd);
   return {
     backupPath,
     targetPath,

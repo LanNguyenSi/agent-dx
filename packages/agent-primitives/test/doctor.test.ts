@@ -343,16 +343,20 @@ describe("doctor: stale-probe-marker check", () => {
     expect(check?.ok).toBe(true);
   });
 
-  it("not ok when a marker's target is inside cwd and its pid is dead", async () => {
+  it("not ok when a marker's target is inside cwd, its pid is dead, and its backup is missing: names the marker file, never promises auto-recovery", async () => {
     const lockDir = makeTmpDir();
     const cwd = makeTmpDir();
     const target = path.join(cwd, "target.js");
     fs.writeFileSync(target, "x");
     const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    const markerPath = path.join(lockDir, "abc.marker.json");
     fs.writeFileSync(
-      path.join(lockDir, "abc.marker.json"),
+      markerPath,
       JSON.stringify({
         targetPath: target,
+        // Never created on disk: simulates a backup that did not
+        // survive (its per-run log dir was cleaned up, or never
+        // existed on this machine at all).
         backupPath: `${target}.backup`,
         preHash: "a".repeat(64),
         mutatedHash: "b".repeat(64),
@@ -363,7 +367,35 @@ describe("doctor: stale-probe-marker check", () => {
     const result = await doctor({ required: [], optional: [], cwd, lockDir });
     const check = result.checks.find((c) => c.name === "stale-probe-marker");
     expect(check?.ok).toBe(false);
-    expect(check?.detail).toContain(`${target}.backup`);
+    expect(check?.detail).toContain(markerPath);
+    expect(check?.detail).toContain("auto-recovery is not possible");
+    expect(check?.detail).not.toContain("auto-recover,");
+  });
+
+  it("not ok, and names the backup path with an auto-recovery hint, when a stale marker's backup still exists", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const target = path.join(cwd, "target.js");
+    fs.writeFileSync(target, "x");
+    const backupPath = path.join(lockDir, "backup-target.js");
+    fs.writeFileSync(backupPath, "original content");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, "abc.marker.json"),
+      JSON.stringify({
+        targetPath: target,
+        backupPath,
+        preHash: "a".repeat(64),
+        mutatedHash: "b".repeat(64),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(backupPath);
+    expect(check?.detail).toContain("auto-recover");
   });
 
   it("ok when a dead-pid marker's target is outside cwd (a different repository)", async () => {

@@ -67,10 +67,19 @@ function computeReplace(
   const lines = content.split("\n");
   const idx = line - 1;
   if (idx < 0 || idx >= lines.length)
-    return { applicable: false, logPaths: [] };
+    return {
+      applicable: false,
+      reason: `line ${line} is out of range (file has ${lines.length} lines)`,
+      logPaths: [],
+    };
   const before = lines[idx];
   const after = preserveTerminator(before, replaceText);
-  if (before === after) return { applicable: false, logPaths: [] };
+  if (before === after)
+    return {
+      applicable: false,
+      reason: `replacement is identical to the original line (line ${line})`,
+      logPaths: [],
+    };
   const newLines = lines.slice();
   newLines[idx] = after;
   const newContent = newLines.join("\n");
@@ -93,12 +102,31 @@ function computeMatch(
   const lines = content.split("\n");
   const idx = line - 1;
   if (idx < 0 || idx >= lines.length)
-    return { applicable: false, logPaths: [] };
+    return {
+      applicable: false,
+      reason: `line ${line} is out of range (file has ${lines.length} lines)`,
+      logPaths: [],
+    };
   const original = lines[idx];
   const pos = original.indexOf(matchText);
-  if (matchText === "" || pos === -1)
-    return { applicable: false, logPaths: [] };
-  if (withText === matchText) return { applicable: false, logPaths: [] };
+  if (matchText === "")
+    return {
+      applicable: false,
+      reason: "-M/--match text must not be empty",
+      logPaths: [],
+    };
+  if (pos === -1)
+    return {
+      applicable: false,
+      reason: `substring not found on line ${line}`,
+      logPaths: [],
+    };
+  if (withText === matchText)
+    return {
+      applicable: false,
+      reason: `replacement is identical to the matched text (line ${line})`,
+      logPaths: [],
+    };
   // The tail (`original.slice(pos + matchText.length)`) already carries
   // whatever terminator (bare `\n` or `\r` before the join's `\n`) the
   // original line had, so a mid-line match/replace preserves CRLF for
@@ -141,7 +169,7 @@ function firstDiffLine(
  * touches (one per line: `<added>\t<deleted>\t<path>`; the path is
  * always the last tab-separated field, which also survives the `-\t-`
  * placeholder numstat uses for binary files). */
-function parseNumstatPaths(stdout: string): string[] {
+export function parseNumstatPaths(stdout: string): string[] {
   return stdout
     .split("\n")
     .map((line) => line.trim())
@@ -192,7 +220,11 @@ async function computePatch(
     },
   );
   if (result.exitCode !== 0) {
-    return { applicable: false, logPaths: [result.logPath] };
+    return {
+      applicable: false,
+      reason: `patch did not apply cleanly; see ${result.logPath}`,
+      logPaths: [result.logPath],
+    };
   }
 
   const numstatResult = await execCommand(
@@ -224,7 +256,12 @@ async function computePatch(
   }
 
   const newContent = fs.readFileSync(scratchFile, "utf8");
-  if (newContent === originalContent) return { applicable: false, logPaths };
+  if (newContent === originalContent)
+    return {
+      applicable: false,
+      reason: "patch applied cleanly but produced no content change",
+      logPaths,
+    };
   const { before, after } = firstDiffLine(originalContent, newContent);
   return {
     applicable: true,

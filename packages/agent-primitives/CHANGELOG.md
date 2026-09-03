@@ -141,7 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path, and the shell loops they run are POSIX constructs rather than
   `seq`.
 
-- `probe` round-2 review hardening: restore now runs in the pipeline's
+- `probe`: restore now runs in the pipeline's
   own `finally` as a backstop, so a thrown error mid-mutation (not just
   a normal return) still restores and hash-verifies the target before
   re-throwing; `--pre`/`-t` run in the invocation cwd instead of the
@@ -168,6 +168,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one line to LF; and `-p` combined with `--allow-outside` is now a
   usage error instead of a scratch-dir path that always fails.
 
+- `probe`: the target is backed up (and the backup verified against its
+  pre-mutation hash) immediately, before the baseline ever runs, instead
+  of afterward; a target rewritten by the baseline itself (a formatter
+  or codegen step) is caught by a post-baseline re-hash and reported as
+  `inconclusive`/`target_changed_during_baseline` before any mutation or
+  marker exists, leaving the target exactly as the baseline left it. A
+  missing `--file` is `usage_error`/`file_not_found` (naming the path)
+  instead of an uncaught filesystem error surfacing under an unknown
+  command. `mutant_not_applicable` always carries a one-line reason
+  (line out of range, substring not found, an identical replacement, or
+  why a patch did not apply) and always returns its dry-run log paths,
+  including the baseline's own `--pre` log; the mutant-phase `pre_failed`
+  path now also reports `mutation_probe` with its real
+  `restored_verified`. The `SIGINT`/`SIGTERM` handler now kills the
+  in-flight `--pre`/`-t` child (via a new, additive `signal` option on
+  `execCommand`) before restoring, instead of leaving it running after
+  the process exits; the `finally` backstop's warning names the error
+  that actually triggered it. The in-flight backup's name is now claimed
+  atomically (`O_EXCL`) instead of via a check-then-copy that could race
+  two sessions in the same log dir. The lock directory check now
+  validates every level it had to create (not just the leaf) for
+  ownership and permissive mode, since a level above the leaf sits
+  directly under a shared, world-writable `/tmp`. `doctor`'s stale-marker
+  hint, and the marker-recovery path itself, only promise auto-recovery
+  when the backup still exists; when it is gone, both name the marker
+  file for a manual delete instead. The baseline phase now reports its
+  own `timedOut`, so a killed baseline is distinguishable from one that
+  genuinely failed.
 ### Added
 
 - `probe` subcommand (`inplace` isolation only; `-i worktree` still

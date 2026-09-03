@@ -7,6 +7,7 @@ import {
   computeMutant,
   formatMutantSummary,
   formatVerifiedAppliedVia,
+  parseNumstatPaths,
 } from "../src/probe/mutant.js";
 
 const tmpDirs: string[] = [];
@@ -48,15 +49,18 @@ describe("computeMutant: replace form", () => {
     expect(result.mutatedHash).not.toBe("");
   });
 
-  it("is not applicable for a line number out of range", async () => {
+  it("is not applicable for a line number out of range, with a one-line reason", async () => {
     const result = await computeMutant(
       { form: "replace", file: "/x/fixture.js", line: 999, replaceText: "x" },
       { root: "/x", logDir: makeTmpDir(), originalContent: ORIGINAL },
     );
     expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.reason).toContain("out of range");
+    expect(result.logPaths).toEqual([]);
   });
 
-  it("is not applicable when the replacement is byte-identical to the original line", async () => {
+  it("is not applicable when the replacement is byte-identical to the original line, with a one-line reason", async () => {
     const result = await computeMutant(
       {
         form: "replace",
@@ -67,6 +71,8 @@ describe("computeMutant: replace form", () => {
       { root: "/x", logDir: makeTmpDir(), originalContent: ORIGINAL },
     );
     expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.reason).toContain("identical");
   });
 });
 
@@ -88,7 +94,7 @@ describe("computeMutant: match form", () => {
     expect(result.after).toBe("  return false;");
   });
 
-  it("is not applicable when the substring is not found on the line", async () => {
+  it("is not applicable when the substring is not found on the line, with a one-line reason naming the line", async () => {
     const result = await computeMutant(
       {
         form: "match",
@@ -100,9 +106,11 @@ describe("computeMutant: match form", () => {
       { root: "/x", logDir: makeTmpDir(), originalContent: ORIGINAL },
     );
     expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.reason).toBe("substring not found on line 2");
   });
 
-  it("is not applicable for a line number out of range", async () => {
+  it("is not applicable for a line number out of range, with a one-line reason", async () => {
     const result = await computeMutant(
       {
         form: "match",
@@ -114,6 +122,26 @@ describe("computeMutant: match form", () => {
       { root: "/x", logDir: makeTmpDir(), originalContent: ORIGINAL },
     );
     expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.reason).toContain("out of range");
+  });
+});
+
+describe("parseNumstatPaths", () => {
+  it("takes the last tab-separated field as the path, not a fixed index, for a rename-shaped line", () => {
+    // Every `git apply --numstat` line this package has ever observed is
+    // exactly 3 tab-separated fields (added, deleted, path), so a fixed
+    // `parts[2]` and `parts[parts.length - 1]` happen to agree on real
+    // git output. This directly exercises the parser against a line
+    // carrying extra tab-separated fields ahead of the path -- the shape
+    // a rename-tracking numstat variant could produce -- where a fixed
+    // index and "always the last field" diverge.
+    const paths = parseNumstatPaths(
+      ["3\t1\tsrc/old-name.js\tsrc/new-name.js", "0\t0\tunchanged.js", ""].join(
+        "\n",
+      ),
+    );
+    expect(paths).toEqual(["src/new-name.js", "unchanged.js"]);
   });
 });
 
@@ -190,6 +218,9 @@ describe("computeMutant: patch form", () => {
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.reason).toContain("did not apply");
+    expect(result.logPaths.length).toBeGreaterThan(0);
   });
 
   it("is not applicable when the patch touches a path other than --file, naming the extra path", async () => {

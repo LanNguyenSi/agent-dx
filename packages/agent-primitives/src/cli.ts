@@ -715,7 +715,7 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
 program
   .command("probe")
   .description(
-    "Apply one mutant, confirm the test fails on baseline and (per --expect) reacts to the mutant, then restore",
+    "Confirm the unmutated test passes (the baseline), apply one mutant, run the test again and check it reacts per --expect (fails by default), then restore the file",
   )
   .requiredOption(
     "--file <path>",

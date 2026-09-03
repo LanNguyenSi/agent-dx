@@ -198,7 +198,11 @@ executes built output (`dist/`) rather than the source file being
 mutated, otherwise the mutant never reaches the test and the probe
 reports a false `survived`. A non-zero `--pre` exit in either run is
 `status: "inconclusive"`, `reason: "pre_failed"`, exit `2`, never a
-verdict.
+verdict. `--timeout <seconds>` bounds every `--pre`/`-t` invocation (both
+the baseline and the mutant run); a run that hits it is killed and
+reported as `timedOut: true` on that run's own phase (`baseline` or
+`test`), so a killed baseline is distinguishable from one that genuinely
+failed.
 
 A probe on one target file is serialized against any other probe on the
 same target via a lock file outside the repository
@@ -206,30 +210,56 @@ same target via a lock file outside the repository
 created `0700` and owned by the current user); a second probe on the same
 target while the first is running gets `status: "inconclusive"`,
 `reason: "probe_in_progress"`, exit `2`, and a lock directory this
-process cannot trust (wrong owner, unwritable) gets
-`reason: "lock_unavailable"`, exit `2`, instead of a raw filesystem
-error. If a probe is killed outright
-(`SIGKILL`, a crash, a machine restart) mid-mutation, it leaves an
-in-flight marker behind; the next probe on that same target recovers
-automatically (restores from the recorded backup, verifies by hash, adds
-a `recovered_stale_probe` warning) when it can prove the file is still in
-the exact mutated state the marker describes, and otherwise refuses with
+process cannot trust (wrong owner, unwritable, or a created level owned
+by another user) gets `reason: "lock_unavailable"`, exit `2`, instead of
+a raw filesystem error. If a probe is killed outright (`SIGKILL` or a
+crash) mid-mutation, it leaves an in-flight marker behind; the next
+probe on that same target recovers automatically (restores from the
+recorded backup, verifies by hash, adds a `recovered_stale_probe`
+warning) when it can prove the file is still in the exact mutated state
+the marker describes, and otherwise refuses with
 `reason: "stale_probe_marker"`, naming the backup path for a human to
-inspect. `agent-primitives doctor` also reports any such marker left for
-the current repository.
+inspect. The backup lives under the probe's own `--log-dir` (a per-run
+scratch directory, not something a crash is guaranteed to have left
+behind); when it is gone, automatic recovery is not possible and the
+warning says so and names the marker file itself instead -- delete that
+file to clear it manually. `agent-primitives doctor` also reports any
+such marker left for the current repository, with the same conditional
+wording (a hint to re-run `probe` only when the backup still exists, the
+marker file's path otherwise).
+
+The target file is backed up immediately, before the baseline ever runs,
+and the backup is verified against the file's pre-mutation hash. After
+the baseline passes, the target is re-hashed; if it no longer matches
+(a formatter or codegen step run as part of the baseline rewrote it),
+the probe aborts with `status: "inconclusive"`,
+`reason: "target_changed_during_baseline"`, exit `2`, before any
+mutation or marker is created, and leaves the target exactly as the
+baseline run wrote it (never restored, since that write was not this
+probe's own).
 
 A failed restore (the backup or the target became unwritable) is
 terminal: `status: "inconclusive"`, `reason: "restore_failed"`, exit `2`,
 never a `killed`/`survived` verdict, with a warning naming the absolute
-backup path.
+backup path; the in-flight marker is left in place on a failed restore
+(deliberately, for the same manual recovery described above) and removed
+only once a restore is hash-verified.
+
+`--file` naming a path that does not exist is `status: "usage_error"`,
+`reason: "file_not_found"`, exit `2`, with the resolved path in a
+warning. `-p, --patch` combined with `--allow-outside` is rejected
+outright as `status: "usage_error"`,
+`reason: "patch_allow_outside_unsupported"`, exit `2`: a patch's own
+relative paths could otherwise escape the scratch directory used for its
+dry run.
 
 Output beside the envelope: `status` (`killed`, `survived`, or
 `inconclusive`), `reason` (when inconclusive), `mutant: { file, line,
 before, after, form }`, `mutation_probe: { mutant, verified_applied_via,
 result, restored_verified }` (paste straight into an implementer's
 `mutation_probes` output field), `baseline: { exitCode, durationMs,
-logPath }`, `test: { command, exitCode, durationMs, timedOut, stdoutTail,
-stderrTail, logPath }`, `isolation: { mode, path, linked,
+logPath, timedOut }`, `test: { command, exitCode, durationMs, timedOut,
+stdoutTail, stderrTail, logPath }`, `isolation: { mode, path, linked,
 syncedTrackedFiles, syncedUntrackedFiles }` (the `worktree`-only fields
 are empty for `inplace`).
 
