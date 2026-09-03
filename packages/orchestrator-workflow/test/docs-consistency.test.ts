@@ -3968,3 +3968,50 @@ describe("the Anchor-citation guard CI step runs --require-anchors with no --req
     expect(step).not.toContain("--require-anchors-allow");
   });
 });
+
+describe("roles prefer connected structural search, verify, and mutation-probe runners", () => {
+  const explorerMd = unwrap(readAsset("agents/explorer.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  // The sentences wrap across lines in the assets; compare with whitespace collapsed.
+  const flat = (doc: string) => doc.replace(/\s+/g, " ");
+
+  it("explorer prompt and SKILL.md Discover step carry the same guarded structural-search clause", () => {
+    const clause =
+      "when a structural code-search tool is available, prefer it over text grep for symbol lookups (callers, definitions)";
+    expect(flat(explorerMd)).toContain(clause);
+    expect(flat(skillMd)).toContain(clause);
+  });
+
+  it("reviewer prompt routes probes through a connected mutation-probe runner and reads a verify runner's summary first", () => {
+    expect(flat(reviewerMd)).toContain(
+      "When a mutation-probe runner is available in the session, run probes through it instead of editing files by hand",
+    );
+    expect(flat(reviewerMd)).toContain(
+      "when a verify runner is available, read its summary before opening full logs",
+    );
+  });
+
+  it("implementer prompt runs named checks through a connected verify runner and probes through a connected mutation-probe runner", () => {
+    expect(flat(implementerMd)).toContain(
+      "When a verify runner is available, run it for the checks the acceptance criteria name and report its summary under `tests.executed`",
+    );
+    expect(flat(implementerMd)).toContain(
+      "run the named probes through it and copy its fields into `mutation_probes`",
+    );
+  });
+
+  it("the runner guidance stays tool-agnostic: no product or binary name is hardcoded", () => {
+    for (const doc of [explorerMd, reviewerMd, implementerMd, skillMd]) {
+      for (const name of [
+        "agent-primitives",
+        "ast-grep",
+        "codebase-oracle",
+        "ripgrep",
+      ]) {
+        expect(doc).not.toContain(name);
+      }
+    }
+  });
+});
