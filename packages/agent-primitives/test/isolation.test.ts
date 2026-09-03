@@ -782,10 +782,36 @@ describe("isScratchWorktreePath / parseWorktreeListZ", () => {
       "\nprunable",
       "\nbare",
       "\nworktree /elsewhere",
+      // Continuations that read as a block boundary: the path's own
+      // block then ends after its worktree line alone, which no block
+      // git prints ever does, so the line after the boundary never
+      // starts a phantom block that registers a path of its own.
+      "\n\nworktree /elsewhere",
+      "\n",
     ]) {
       const parsed = parseWorktreeListLines(withTail(tail));
       expect(parsed.ok, tail).toBe(false);
     }
+    expect(parseWorktreeListLines(withTail("\n\nworktree /elsewhere"))).toEqual(
+      {
+        ok: false,
+        detail: "line 5 is a worktree path with nothing after it in its block",
+      },
+    );
+    // The same rule at the end of the listing, with and without a
+    // trailing newline; a complete last block needs no trailing newline.
+    expect(
+      parseWorktreeListLines("worktree /repo\nHEAD abc\n\nworktree /x"),
+    ).toEqual({
+      ok: false,
+      detail: "line 4 is a worktree path with nothing after it in its block",
+    });
+    expect(parseWorktreeListLines("worktree /repo\n").ok).toBe(false);
+    expect(parseWorktreeListLines("worktree /repo").ok).toBe(false);
+    expect(parseWorktreeListLines("worktree /repo\nHEAD abc")).toEqual({
+      ok: true,
+      paths: ["/repo"],
+    });
     // A block that does not start with a worktree path.
     expect(parseWorktreeListLines("HEAD abc\ndetached\n").ok).toBe(false);
   });

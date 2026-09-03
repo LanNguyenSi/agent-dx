@@ -833,13 +833,18 @@ export type ParsedWorktreeList =
  * fallback for a git that rejects `-z`) into the worktree paths, in
  * order, the main worktree first. A worktree path containing a newline
  * is the one thing this form cannot represent: its continuation shows
- * up as a line that is not an attribute, or as an attribute out of the
+ * up as a line that is not an attribute, as an attribute out of the
  * fixed order (git always prints `bare` or `HEAD` right after
  * `worktree`, so a continuation line can never sit between the two
- * without breaking the order). Either way the WHOLE listing is refused,
- * naming the line, rather than read as two paths or as a shorter one.
- * Exported for `doctor`, which runs the same fallback through its own
- * synchronous spawn. */
+ * without breaking the order), or as a block boundary, when what
+ * follows the newline is an empty line or the end of the listing. That
+ * last shape is caught by the block rule: every block git prints
+ * carries a second line (`bare` or `HEAD`), so a block that ends after
+ * its `worktree` line alone is a path cut short, never a worktree.
+ * Each of these refuses the WHOLE listing, naming the line, rather
+ * than reading it as two paths, as a shorter one, or as a path plus a
+ * phantom block that a later line then starts. Exported for `doctor`,
+ * which runs the same fallback through its own synchronous spawn. */
 export function parseWorktreeListLines(stdout: string): ParsedWorktreeList {
   const paths: string[] = [];
   const lines = stdout.split("\n");
@@ -848,6 +853,12 @@ export function parseWorktreeListLines(stdout: string): ParsedWorktreeList {
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (line.length === 0) {
+      if (lastOrder === 0) {
+        return {
+          ok: false,
+          detail: `line ${i} is a worktree path with nothing after it in its block`,
+        };
+      }
       lastOrder = -1;
       continue;
     }
@@ -874,6 +885,12 @@ export function parseWorktreeListLines(stdout: string): ParsedWorktreeList {
     }
     lastOrder = order;
     if (key === "worktree") paths.push(line.slice("worktree ".length));
+  }
+  if (lastOrder === 0) {
+    return {
+      ok: false,
+      detail: `line ${lines.length} is a worktree path with nothing after it in its block`,
+    };
   }
   return { ok: true, paths };
 }

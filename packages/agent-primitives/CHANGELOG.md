@@ -84,7 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --porcelain -z`: when git rejects `-z` (a release older than 2.36), the
   newline-separated `--porcelain` form runs instead and is parsed against
   the fixed attribute order, so a worktree path containing a newline is
-  reported as unparseable rather than misread. A listing that cannot run
+  reported as unparseable rather than misread, a block that ends after
+  its `worktree` line alone (the shape such a path takes when its
+  newline reads as a block boundary) refused with the rest instead of
+  registering a phantom path. A listing that cannot run
   in any form is an unknown registry, never "still registered": the
   removal is then judged by the disk and by `git worktree remove`'s own
   exit status, reported as done but unverified in a warning, and the
