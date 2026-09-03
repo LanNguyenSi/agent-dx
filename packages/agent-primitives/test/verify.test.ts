@@ -2122,6 +2122,48 @@ describe("verify: tail-bound counts (truncated output tail)", () => {
       ),
     ).toBe(true);
   });
+
+  it('a custom, non-default detector also named "eslint" (a different object from the real eslintDetector) does not get the totals-line preference: gated on detector identity, not the name string', async () => {
+    // A detector object that shares eslintDetector's `name` but is a
+    // distinct object: were the totals-line preference gated on
+    // `detector.name === "eslint"` instead of `detector === eslintDetector`,
+    // this fake detector's own, already-correct summary would be
+    // silently overwritten by a coincidentally eslint-shaped totals line
+    // in the tail that belongs to a different tool entirely.
+    const fakeEslintNamedDetector: Detector = {
+      name: "eslint",
+      matches: () => true,
+      parse: () => ({
+        summary: { passed: 0, failed: 0, skipped: 0, errors: 5, warnings: 0 },
+        failures: Array.from({ length: 5 }, (_, i) => ({
+          message: `fake failure ${i}`,
+        })),
+        warnings: [],
+      }),
+    };
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { typecheck: "run-fake" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run typecheck --silent": {
+        exitCode: 1,
+        stdoutTail: "✖ 1 problem (1 error, 0 warnings)",
+        stdoutTruncated: true,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["typecheck"],
+      execFn: fn,
+      detectors: [fakeEslintNamedDetector],
+    });
+    const check = result.checks[0];
+    expect(check.detector).toBe("eslint");
+    // The fake detector's own count (5), never the coincidental
+    // eslint-shaped totals line's "1".
+    expect(check.summary.errors).toBe(5);
+  });
 });
 
 describe("verify: detector shapes are disjoint under real DEFAULT_DETECTORS ordering", () => {
