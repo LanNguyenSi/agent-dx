@@ -175,7 +175,7 @@ harnesses/profile/tiers/models precedence is layered:
    `resolveInitInputs` already applies to a plain `init` re-run: for
    example `--tiers`/`--no-tiers` always overrides whatever `previous`
    (the synthetic manifest built below) carries
-   (cli-inputs.ts:349-349#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
+   (cli-inputs.ts:348-348#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
 2. Absent an explicit `--harness`, harnesses fall back to the target's own
    recorded harnesses, else the operator defaults, else detection
    (cli.ts:601-603#"else the operator defaults, else detected",

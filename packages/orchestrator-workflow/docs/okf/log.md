@@ -6532,7 +6532,7 @@ params object inline; it lives in its own module (not `cli.ts` itself)
 because `cli.ts` runs `program.parseAsync(process.argv)` at import time,
 which importing it directly from a unit test would trigger. It also
 carries a new `stickyAnnotateDetected` field
-(`packages/orchestrator-workflow/src/cli-inputs.ts:211-211#"stickyAnnotateDetected?: Harness[];"`)
+(`packages/orchestrator-workflow/src/cli-inputs.ts:210-210#"stickyAnnotateDetected?: Harness[];"`)
 that restores the "(detected)" label: `promptHarnesses` gained a fourth
 parameter, `annotateDetected` (default: its own first argument, so every
 call site that omits it is unchanged), that drives only the checkbox's
@@ -6545,7 +6545,7 @@ disk without a bare Enter re-widening the install.
 
 Docs: `install-fence-mechanics.md` re-pointed `previous.harnessesRecordedEmpty`
 from JSDoc prose to the actual gate
-(`cli-inputs.ts:264-264#"previous.harnessesRecordedEmpty"`), dropped the
+(`cli-inputs.ts:263-263#"previous.harnessesRecordedEmpty"`), dropped the
 run-internal "decision D-007" label from its prose (the `agent-tasks
 fe834823` pointer alone identifies the task), and now describes the
 `buildApplyInitInputs`/`stickyAnnotateDetected` split. `CHANGELOG.md`'s

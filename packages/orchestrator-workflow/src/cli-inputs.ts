@@ -177,15 +177,14 @@ export interface ResolveInitInputsParams {
    * The entries pre-checked in the interactive prompt when the target
    * recorded `harnesses: []` (the harnesses-stickiness gate's branch,
    * gated on `previousIsRecordedManifest && previous.
-   * harnessesRecordedEmpty`). Defaults to `[]` when omitted: `init` and
-   * `apply` share this semantics (D-002, agent-dx 7669907c). A fresh
+   * harnessesRecordedEmpty`). Defaults to `[]` when omitted, so `init` and
+   * `apply` share this semantics. A fresh
    * interactive re-run on a templates-only target starts with nothing
    * pre-checked, because the recorded `harnesses: []` is the intent that
    * matters, not a `.claude/`-style directory the harness itself left on
    * disk, which is a weak signal and must not re-widen a deliberate
-   * `--harness none` install just because a bare Enter is pressed
-   * (agent-tasks fe834823; the same argument applies identically to
-   * `init`). `apply`'s call site still passes `[]` explicitly, as defence
+   * `--harness none` install just because a bare Enter is pressed. `apply`'s
+   * call site still passes `[]` explicitly, as defence
    * in depth (see `buildApplyInitInputs`'s doc comment). Only the sticky
    * branch reads this field; the normal (non-recorded-empty) branch still
    * prompts from `detected` unchanged, matching `apply`'s existing
