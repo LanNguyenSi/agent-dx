@@ -6204,7 +6204,7 @@ the operator default or `["claude"]`) -- unlike `init`'s call site, where
 the install exactly as it did before this round; `fallbackToClaude: false`
 is live for `init` and dead code on `apply`'s interactive path. Left as a
 known residual (see the extended comment at
-`cli-inputs.ts:39-50#"harnesses-stickiness branch (shared by"` in this
+cli-inputs.ts lines 39-50 in that commit in this
 round's commit); fixing the interactive case is out of this task's scope.
 
 Tests added: a CLI-level `apply.test.ts` case chaining three `apply` runs
@@ -6280,7 +6280,7 @@ inconsistent, ad hoc bump. A log entry records a past state; reverted the
 one re-point back to line 121 so the paragraph is internally consistent
 again (same rule already followed by every other historical entry in this
 file: recorded citation numbers are not bumped when a later change moves
-the cited lines). The reverted `:121` now lands on a blank line in the
+the cited lines). The reverted line 121 now lands on a blank line in the
 current README.md (the `okf-kit` warning noted above), which is the
 expected cost of that rule, not a defect to fix.
 
@@ -6453,7 +6453,7 @@ when the target recorded `harnesses: []`; defaults to `detected` for
 `init`; `apply` passes `[]`"). The sticky branch now reads
 `stickyPreChecked ?? detected`
 (deliberately historical, same caveat:
-`packages/orchestrator-workflow/src/cli-inputs.ts:307`)
+packages/orchestrator-workflow/src/cli-inputs.ts line 307 at that commit)
 instead of `filesystemDetected ?? detected`; `init`'s call site still omits
 the field entirely, so its own pre-check (real on-disk detection) is
 unchanged. `apply`'s CLI action now passes a hardcoded `[]`
@@ -6483,7 +6483,7 @@ block above (`init`'s own sticky pre-check, unchanged since it omits
 
 Mutation probe: reverted the sticky branch's own call
 (deliberately historical, same caveat as above:
-`packages/orchestrator-workflow/src/cli-inputs.ts:307`)
+packages/orchestrator-workflow/src/cli-inputs.ts line 307 at that commit)
 from `promptHarnesses(stickyPreChecked ?? detected, [], false)` back to plain
 `promptHarnesses(detected, [], false)`, ignoring `stickyPreChecked`
 entirely (equivalent in effect to `apply`'s CLI action passing `detected`
@@ -6532,7 +6532,7 @@ params object inline; it lives in its own module (not `cli.ts` itself)
 because `cli.ts` runs `program.parseAsync(process.argv)` at import time,
 which importing it directly from a unit test would trigger. It also
 carries a new `stickyAnnotateDetected` field
-(`packages/orchestrator-workflow/src/cli-inputs.ts:220-234#"stickyAnnotateDetected?: Harness[];"`)
+(`packages/orchestrator-workflow/src/cli-inputs.ts:211-211#"stickyAnnotateDetected?: Harness[];"`)
 that restores the "(detected)" label: `promptHarnesses` gained a fourth
 parameter, `annotateDetected` (default: its own first argument, so every
 call site that omits it is unchanged), that drives only the checkbox's
@@ -6545,7 +6545,7 @@ disk without a bare Enter re-widening the install.
 
 Docs: `install-fence-mechanics.md` re-pointed `previous.harnessesRecordedEmpty`
 from JSDoc prose to the actual gate
-(`cli-inputs.ts:290-293#"previous.harnessesRecordedEmpty"`), dropped the
+(`cli-inputs.ts:264-264#"previous.harnessesRecordedEmpty"`), dropped the
 run-internal "decision D-007" label from its prose (the `agent-tasks
 fe834823` pointer alone identifies the task), and now describes the
 `buildApplyInitInputs`/`stickyAnnotateDetected` split. `CHANGELOG.md`'s
@@ -6807,7 +6807,7 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   does not have to re-derive that judgment); `cli-inputs.ts:39-50` in the
   "Left as a known residual" paragraph above (currently live and
   accurate -- anchored in place, `#"harnesses-stickiness branch (shared
-  by"`); `cli-inputs.ts:190-208` and both `cli-inputs.ts:307` occurrences
+  by"`); `cli-inputs.ts:190-208` and both cli-inputs.ts line 307 occurrences
   in the D-007 entry above (deliberately historical -- that entry
   describes fix-round-2 of a DIFFERENT, earlier task, agent-tasks
   fe834823, whose `stickyPreChecked ?? detected` semantics were later
