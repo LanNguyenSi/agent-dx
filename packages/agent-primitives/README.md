@@ -21,8 +21,8 @@ its primary caller is another agent, not a terminal.
 npx agent-primitives doctor
 ```
 
-For a binary that stays on `PATH` (and is therefore inherited by every
-subagent a harness spawns):
+For a binary that stays on `PATH`, so that a subagent started as an
+ordinary child process finds it too:
 
 ```bash
 npm install -g agent-primitives
