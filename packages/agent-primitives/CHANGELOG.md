@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `init` now distinguishes unreadable targets from unwritable ones with
+  `target_not_readable`, maps otherwise-unclassified read failures into the
+  same command-specific envelope, revalidates identical targets before
+  reporting `unchanged`, and completes short filesystem writes instead of
+  treating a partial byte count as success. Final absent-name creation uses
+  `O_EXCL`, so a target planted in that gap is revalidated rather than
+  truncated; zero-progress writes report `target_write_failed` after closing
+  the descriptor.
+
 ## [0.1.0] - 2026-09-04
 
 ### Added

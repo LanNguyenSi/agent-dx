@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { constants as bufferConstants } from "node:buffer";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1475,6 +1476,28 @@ const HAS_MKFIFO = (() => {
 })();
 
 describe("cli: init", () => {
+  it("reports a named init read reason for a sparse target above V8's string limit", async () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(
+      dir,
+      ".claude",
+      "skills",
+      "agent-primitives",
+      "SKILL.md",
+    );
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.closeSync(fs.openSync(filePath, "w"));
+    fs.truncateSync(filePath, bufferConstants.MAX_STRING_LENGTH + 1);
+
+    const run = await spawnCliBounded(["init", "-t", dir], 5000);
+    expect(run.timedOut).toBe(false);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("target_not_readable");
+    expect(parsed.command).toBe("init");
+  });
+
   it("the four-step smoke sequence: written, then unchanged, then conflicted, then --force written", async () => {
     const dir = makeTmpDir();
 
