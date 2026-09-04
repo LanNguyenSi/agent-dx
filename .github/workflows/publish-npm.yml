@@ -22,8 +22,6 @@ on:
     tags:
       - "orchestrator-workflow/v*"
       - "okf-kit/v*"
-      # agent-primitives: prepared, not triggered: no tag is pushed until
-      # the package has been dogfooded.
       - "agent-primitives/v*"
   workflow_dispatch:
     inputs:
@@ -50,8 +48,6 @@ jobs:
         env:
           RESOLVED_TAG: ${{ inputs.tag || github.ref_name }}
           # Space-separated allowlist of publishable package directories.
-          # agent-primitives is prepared here, not triggered: no tag is
-          # pushed until the package has been dogfooded.
           PUBLISHABLE: "orchestrator-workflow okf-kit agent-primitives"
         run: |
           set -euo pipefail
@@ -128,9 +124,9 @@ jobs:
         # npm 10, so upgrade first. Auth comes from the GitHub OIDC token
         # (permissions.id-token: write above) matched against the package's
         # Trusted Publisher entry on npmjs.com (repo LanNguyenSi/agent-dx,
-        # workflow publish-npm.yml) — no NPM_TOKEN secret involved. Both
-        # published packages, orchestrator-workflow and okf-kit, need their
-        # own separate Trusted Publisher entry pointing at this file.
+        # workflow publish-npm.yml) — no NPM_TOKEN secret involved. Every
+        # published package (orchestrator-workflow, okf-kit, agent-primitives)
+        # needs its own separate Trusted Publisher entry pointing at this file.
         run: npm install -g npm@11
 
       - name: Publish
