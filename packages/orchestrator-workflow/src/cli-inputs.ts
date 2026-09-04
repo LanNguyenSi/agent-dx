@@ -27,33 +27,12 @@ export async function promptHarnesses(
   installed: Harness[],
   fallbackToClaude = true,
   // Drives only the checkbox's " (detected)" label suffix, independent of
-  // `detected`'s own role in pre-checking a choice: defaults to `detected`
-  // so a call site that omits this parameter keeps annotating exactly what
-  // it pre-checks from, unchanged. `resolveInitInputs`'s harnesses-
-  // stickiness branch (shared by `init` and `apply`, D-002, agent-dx
-  // 7669907c) always passes an explicit value here (`stickyAnnotateDetected
-  // ?? detected`) instead of relying on this default: that branch pre-checks
-  // nothing but still wants the operator to see which harness is actually
-  // on disk, so labelling and pre-checking are resolved separately
-  // (agent-tasks fe834823, fix round 3).
+  // `detected`'s role in pre-checking; see `stickyAnnotateDetected` below.
   annotateDetected: Harness[] = detected,
 ): Promise<Harness[]> {
   const known = [...new Set([...detected, ...installed])];
-  // Nothing detected and nothing previously installed: the plain-first-run
-  // case pre-checks `claude` as a sane default (`fallbackToClaude`'s default
-  // `true`). The templates-only re-run branch below opts OUT of that
-  // (`fallbackToClaude: false`): a repo the operator explicitly recorded as
-  // `harnesses: []` has no harness files by construction, and pre-checking
-  // `claude` on Enter would silently re-widen an explicit `--harness none`
-  // install -- contradicting README.md's and this function's own "nothing
-  // forced pre-selected" claim (see CHANGELOG). `resolveInitInputs`'s
-  // harnesses-stickiness branch (shared by `init` and `apply`, D-002,
-  // agent-dx 7669907c) always calls this function with `stickyPreChecked ??
-  // []` regardless of what is actually on disk or previously chosen --
-  // the operator's recorded `harnesses: []` is the intent that matters,
-  // not a harness config a harness itself left behind (agent-tasks
-  // fe834823; the residual noted in docs/okf/log.md's 2026-08-31 entry is
-  // closed).
+  // The templates-only branch disables this first-run fallback; see
+  // `ResolveInitInputsParams.stickyPreChecked` for the sticky rule.
   const preselected =
     known.length > 0 ? known : fallbackToClaude ? ["claude" as Harness] : [];
   const { harnesses } = await inquirer.prompt<{ harnesses: Harness[] }>([
@@ -198,15 +177,14 @@ export interface ResolveInitInputsParams {
    * The entries pre-checked in the interactive prompt when the target
    * recorded `harnesses: []` (the harnesses-stickiness gate's branch,
    * gated on `previousIsRecordedManifest && previous.
-   * harnessesRecordedEmpty`). Defaults to `[]` when omitted: `init` and
-   * `apply` share this semantics (D-002, agent-dx 7669907c). A fresh
+   * harnessesRecordedEmpty`). Defaults to `[]` when omitted, so `init` and
+   * `apply` share this semantics. A fresh
    * interactive re-run on a templates-only target starts with nothing
    * pre-checked, because the recorded `harnesses: []` is the intent that
    * matters, not a `.claude/`-style directory the harness itself left on
    * disk, which is a weak signal and must not re-widen a deliberate
-   * `--harness none` install just because a bare Enter is pressed
-   * (agent-tasks fe834823; the same argument applies identically to
-   * `init`). `apply`'s call site still passes `[]` explicitly, as defence
+   * `--harness none` install just because a bare Enter is pressed. `apply`'s
+   * call site still passes `[]` explicitly, as defence
    * in depth (see `buildApplyInitInputs`'s doc comment). Only the sticky
    * branch reads this field; the normal (non-recorded-empty) branch still
    * prompts from `detected` unchanged, matching `apply`'s existing
@@ -221,7 +199,7 @@ export interface ResolveInitInputsParams {
    * `stickyPreChecked`'s doc comment), the operator still sees which
    * harness is actually on disk, because labelling is a hint, not an
    * intent signal, so it is safe to annotate what the pre-check itself
-   * must not read (agent-tasks fe834823, fix round 3). `init`'s call site
+   * must not read. `init`'s call site
    * omits this field and gets its own `detectHarnesses(targetDir)` result
    * via this default; `apply`'s call site passes a fresh
    * `detectHarnesses(targetDir)` call explicitly, since its own
@@ -260,13 +238,8 @@ export interface ResolvedInitInputs {
  * omitted) keeps the previously installed value; a fresh install with no
  * prior manifest falls back to the shipped default.
  *
- * `params.detected` is the fallback-chain input the non-sticky "else"
- * branch below prompts and falls back from. It plays no role in the
- * harnesses-stickiness branch's own pre-check any more: that branch
- * always pre-checks `stickyPreChecked ?? []` (D-002, agent-dx 7669907c),
- * never `detected`, so `init` and `apply` share one semantics there. It
- * still feeds that branch's " (detected)" label by default (see
- * `ResolveInitInputsParams.stickyAnnotateDetected`'s doc comment).
+ * `params.detected` is the non-sticky fallback-chain input; see
+ * `ResolveInitInputsParams.stickyPreChecked` for the sticky rule.
  */
 export async function resolveInitInputs(
   params: ResolveInitInputsParams,
@@ -313,19 +286,7 @@ export async function resolveInitInputs(
     // as `[]` (not the recorded `previous.harnesses`) so nothing is
     // pre-checked from the previous install, unlike the "else" branch
     // below's normal re-run prompt.
-    // `stickyPreChecked ?? []` pre-checks nothing by default: `init` and
-    // `apply` share this semantics (D-002, agent-dx 7669907c; see
-    // CHANGELOG). Neither call site needs to pass `stickyPreChecked`
-    // itself for this default to apply (`apply` still does, as defence in
-    // depth; see `buildApplyInitInputs`'s doc comment); a bare Enter on a
-    // target recorded as `harnesses: []` must not re-widen a deliberate
-    // `--harness none` install just because a harness config happens to
-    // still be on disk, which is a weak signal, not the recorded intent
-    // (agent-tasks fe834823; the same argument applies identically to
-    // `init`). `fallbackToClaude: false` closes the same gap for the case
-    // where nothing is pre-checked either: without it, `promptHarnesses`
-    // would pre-check `claude` on its own "nothing known" fallback,
-    // re-widening the install on a bare Enter.
+    // See `ResolveInitInputsParams.stickyPreChecked` for the shared sticky rule.
     // `stickyAnnotateDetected ?? detected` is passed through as the fourth
     // argument so the checkbox's " (detected)" label still points at what
     // is actually on disk even though nothing is pre-checked from it: the

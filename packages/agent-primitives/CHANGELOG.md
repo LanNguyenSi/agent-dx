@@ -84,6 +84,14 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   silently convert the scratch copy's LF line endings to CRLF, making
   the dry run compare corrupted content against the original and derive
   the wrong line and before/after text for `mutation_probe.mutant`.
+- `init` now distinguishes unreadable targets from unwritable ones with
+  `target_not_readable`, maps otherwise-unclassified read failures into the
+  same command-specific envelope, revalidates identical targets before
+  reporting `unchanged`, and completes short filesystem writes instead of
+  treating a partial byte count as success. Final absent-name creation uses
+  `O_EXCL`, so a target planted in that gap is revalidated rather than
+  truncated; zero-progress writes report `target_write_failed` after closing
+  the descriptor.
 
 ## [0.1.0] - 2026-09-04
 

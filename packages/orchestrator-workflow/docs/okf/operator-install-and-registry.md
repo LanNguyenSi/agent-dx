@@ -3,7 +3,7 @@ type: module
 title: Operator install and target registry
 description: The operator-level home, manifest schema, locked write API, target registry, and the setup/apply/doctor/adopt commands built on top of it.
 tags: [operator, manifest, registry, lock, doctor, adopt, pin, cli]
-timestamp: 2026-09-02T04:58:00Z
+timestamp: 2026-09-04T15:23:47Z
 sources:
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/src/doctor.ts
@@ -175,7 +175,7 @@ harnesses/profile/tiers/models precedence is layered:
    `resolveInitInputs` already applies to a plain `init` re-run: for
    example `--tiers`/`--no-tiers` always overrides whatever `previous`
    (the synthetic manifest built below) carries
-   (cli-inputs.ts:377-387#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
+   (cli-inputs.ts:348-348#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
 2. Absent an explicit `--harness`, harnesses fall back to the target's own
    recorded harnesses, else the operator defaults, else detection
    (cli.ts:601-603#"else the operator defaults, else detected",
