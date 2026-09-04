@@ -691,9 +691,16 @@ offers no usable `O_NOFOLLOW` for the write's symlink guard are each
 reported as `status: "usage_error"`, exit `2`, with a `reason` naming
 which one it was (`target_not_a_directory`,
 `target_path_is_a_directory`, `target_not_a_regular_file`,
-`target_not_writable`, `target_is_a_symlink`,
+`target_not_readable`, `target_not_writable`, `target_is_a_symlink`,
 `target_escapes_directory`, `platform_unsupported`) instead of a raw
-filesystem error message. The platform check is scoped to `init` and
+filesystem error message. `target_not_readable` covers both permission
+denials while reading and read failures that have no portable errno mapping,
+so even an oversized target retains an `init`-specific envelope. Before
+reporting an existing file `unchanged`, `init` re-stats and re-reads it; a
+target removed or rewritten after validation is therefore written again or
+reported conflicted rather than accepted from stale data. Writes account for
+the byte count returned by each filesystem call and continue after a short
+write. The platform check is scoped to `init` and
 runs when `init` is called, so `probe`, `verify`, and `doctor` stay
 usable on such a platform.
 

@@ -353,6 +353,66 @@ describe("init", () => {
   });
 
   describe("named reasons for filesystem errors at the target", () => {
+    for (const mode of [0o000, 0o200]) {
+      it.skipIf(isRoot)(
+        `mode ${mode.toString(8).padStart(4, "0")}: an existing target that cannot be read -> reason "target_not_readable"`,
+        () => {
+          const dir = makeTmpDir();
+          const filePath = path.join(
+            dir,
+            ".claude",
+            "skills",
+            "agent-primitives",
+            "SKILL.md",
+          );
+          fs.mkdirSync(path.dirname(filePath), { recursive: true });
+          fs.writeFileSync(filePath, CONTENT_B);
+          fs.chmodSync(filePath, mode);
+
+          let caught: unknown;
+          try {
+            init({ targetDir: dir, content: CONTENT_A });
+          } catch (err) {
+            caught = err;
+          } finally {
+            fs.chmodSync(filePath, 0o600);
+          }
+          expect(caught).toBeInstanceOf(InitFsUsageError);
+          expect((caught as InitFsUsageError).reason).toBe(
+            "target_not_readable",
+          );
+        },
+      );
+    }
+
+    it('an unmapped read failure -> reason "target_not_readable"', () => {
+      const dir = makeTmpDir();
+      const filePath = path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, CONTENT_B);
+      const spy = vi.spyOn(fs, "readFileSync").mockImplementation(((p) => {
+        if (p === filePath) throw new RangeError("fixture read limit");
+        return CONTENT_A;
+      }) as typeof fs.readFileSync);
+
+      let caught: unknown;
+      try {
+        init({ targetDir: dir, content: CONTENT_A });
+      } catch (err) {
+        caught = err;
+      } finally {
+        spy.mockRestore();
+      }
+      expect(caught).toBeInstanceOf(InitFsUsageError);
+      expect((caught as InitFsUsageError).reason).toBe("target_not_readable");
+    });
+
     it('ENOTDIR: "-t" itself is a file -> reason "target_not_a_directory"', () => {
       const parent = makeTmpDir();
       const targetDir = path.join(parent, "not-a-directory");
@@ -501,6 +561,90 @@ describe("init", () => {
       expect((caught as InitFsUsageError).reason).toBe("target_is_a_symlink");
       expect(fs.lstatSync(filePath).isSymbolicLink()).toBe(true);
     });
+  });
+
+  describe("validation-to-write changes", () => {
+    function targetPath(dir: string): string {
+      return path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+    }
+
+    it("writes again when an identical target is removed after validation", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, CONTENT_A);
+      const realLstat = fs.lstatSync;
+      let targetStats = 0;
+      const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((p, opts) => {
+        if (p === filePath && ++targetStats === 2) fs.unlinkSync(filePath);
+        return realLstat(p, opts as never);
+      }) as typeof fs.lstatSync);
+      try {
+        const result = init({ targetDir: dir, content: CONTENT_A });
+        expect(result.targets[0]?.status).toBe("written");
+      } finally {
+        spy.mockRestore();
+      }
+      expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_A);
+    });
+
+    it("reports conflict when an identical target is rewritten after validation", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, CONTENT_A);
+      const realLstat = fs.lstatSync;
+      let targetStats = 0;
+      const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((p, opts) => {
+        if (p === filePath && ++targetStats === 2) {
+          fs.writeFileSync(filePath, CONTENT_B);
+        }
+        return realLstat(p, opts as never);
+      }) as typeof fs.lstatSync);
+      try {
+        const result = init({ targetDir: dir, content: CONTENT_A });
+        expect(result.targets[0]?.status).toBe("conflicted");
+      } finally {
+        spy.mockRestore();
+      }
+      expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_B);
+    });
+  });
+
+  it("completes a write when writeSync initially writes only a prefix", () => {
+    const dir = makeTmpDir();
+    const realWrite = fs.writeSync;
+    let calls = 0;
+    const spy = vi.spyOn(fs, "writeSync").mockImplementation(((
+      fd: number,
+      buffer: Uint8Array,
+      offset: number,
+      length: number,
+    ) => {
+      calls += 1;
+      const bounded =
+        calls === 1 ? Math.max(1, Math.floor(length / 2)) : length;
+      return realWrite(fd, buffer, offset, bounded);
+    }) as typeof fs.writeSync);
+    try {
+      const result = init({ targetDir: dir, content: CONTENT_B.repeat(100) });
+      expect(result.status).toBe("written");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls).toBeGreaterThan(1);
+    expect(
+      fs.readFileSync(
+        path.join(dir, ".claude", "skills", "agent-primitives", "SKILL.md"),
+        "utf8",
+      ),
+    ).toBe(CONTENT_B.repeat(100));
   });
 
   describe("-H all validates every harness before writing any of them", () => {
