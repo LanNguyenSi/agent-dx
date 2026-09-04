@@ -74,7 +74,7 @@ Every subcommand accepts:
   (`tool`, `version`, `command`, `status`, `durationMs`, `cwd`,
   `truncated`, `logs`, `warnings`) are held out of the reduction entirely
   and lead the serialized object, so the real bound is `max(-m, size of
-  those fixed fields)`, not `-m` unconditionally; when even that cannot be
+those fixed fields)`, not `-m` unconditionally; when even that cannot be
   honored, a warning names the envelope's true final length instead of
   silently exceeding what was asked for. `-f text` output is bounded the
   same way and never exceeds `-m`: its truncation marker names the full
@@ -205,7 +205,7 @@ shapes a check's own script happens to print is parsed as-is; a check that
 emits more than one shape at once (a `pretest` build followed by `vitest`,
 say) is ambiguous and falls back to `generic`, same as any other ambiguous
 case. Every file-path capture across the three detectors is matched
-structurally (up to the shape's own separator, such as vitest's ` > ` or
+structurally (up to the shape's own separator, such as vitest's `>` or
 tsc's `(line,col):`), never merely up to the first whitespace, so a path
 containing a space is still captured whole. ANSI color codes are stripped
 before any of these three detectors matches or parses, since a tool run in
@@ -214,16 +214,15 @@ a fully non-interactive environment can still default to colorized output
 output emits cursor-movement or other non-SGR escape sequences). eslint 10
 (a devDependency, used only for this package's own lint check and for the
 `eslint` detector's fixtures) requires Node `^20.19.0 || ^22.13.0 ||
->=24`, narrower than the `>=20` this package itself requires; that floor
+
+> =24`, narrower than the `>=20`this package itself requires; that floor
 applies to developing this package, not to a caller running the built CLI.
-Whatever the detector, a check that ends `fail` or `error` with zero
-parsed failures always gets one synthetic failure entry (naming
-`timedOut`, or the exit code, plus the output tail) instead of shipping an
-empty `failures` list, and an `error` check always reports at least one
-`summary.errors`; this synthetic entry is added on top of whatever count
+Whatever the detector, a check that ends`fail`or`error`with zero
+parsed failures always gets one synthetic failure entry (naming`timedOut`, or the exit code, plus the output tail) instead of shipping an
+empty `failures`list, and an`error`check always reports at least one`summary.errors`; this synthetic entry is added on top of whatever count
 the detector already reported, never doubling a count the detector already
 got right. Truncation is read from exec.ts's own
-`stdoutTruncated`/`stderrTruncated` flags (set when the command's real
+`stdoutTruncated`/`stderrTruncated`flags (set when the command's real
 output, at either its own 60-line or 6000-character-per-stream bound,
 exceeded what the captured tail could keep), never recomputed from the
 tail text itself: a captured tail that happens to end with a trailing
@@ -233,12 +232,12 @@ after splitting on it is not a real line. When either flag is set, a
 detector's own issue-row count can undercount the real total; the eslint
 detector's own reported total is preferred, when the eslint detector was
 the one selected for this check, where one can still be found in the tail
-(eslint's `✖ N problems (N errors, M warnings)` line, which survives most
+(eslint's`✖ N problems (N errors, M warnings)`line, which survives most
 truncation since it is the last thing eslint prints); either way a warning
-names the truncation, since the `failures` list itself can still be
+names the truncation, since the`failures`list itself can still be
 missing entries even when the total is trustworthy. A detector's own
 warnings, and a log file the run could not write to, are reported in the
-top-level `warnings`, each prefixed with the check name.
+top-level`warnings`, each prefixed with the check name.
 
 Overall `status` is `error` if any check errored, else `fail` if any check
 failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
@@ -440,7 +439,11 @@ fallback registry unusable for that repository, so a leftover outside
 this run's `--log-dir` is refused rather than removed and a leftover
 the registry would otherwise have named is not recovered either; a
 manual `git worktree prune` or repair of the unreadable entry restores
-it. Once this source
+it. An entry whose `gitdir` content does not end in `/.git` counts as
+unreadable here even though git's own reader would still resolve it
+(git writes `<worktree>/.git` itself; only a hand-written entry takes
+another shape): the fallback errs toward "unverified", never toward
+guessing a worktree path. Once this source
 can list something (ok), the removal is asserted against it exactly as
 it would be against a genuine `git worktree list` -- which also makes
 a scratch-shaped worktree this source reports as registered eligible

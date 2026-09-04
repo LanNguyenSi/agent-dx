@@ -1152,7 +1152,12 @@ async function listRegisteredWorktreesViaGit(
  * takes once resolved relative to the admin entry's own directory --
  * `path.dirname` of `<adminEntryDir>/<junk>` is `adminEntryDir`), is
  * never a real worktree, so the caller must treat it the same as an
- * unreadable entry rather than list it as a registered one. */
+ * unreadable entry rather than list it as a registered one. This is
+ * stricter than git's own reader, which also accepts content without
+ * the `/.git` suffix and takes it as the worktree path itself; such a
+ * hand-written entry makes this source report the listing as not ok
+ * (the fallback errs toward "unverified", never toward guessing a
+ * worktree path). Every git release writes `<worktree>/.git`. */
 function worktreeDirFromGitdirFile(
   adminEntryDir: string,
   raw: string,

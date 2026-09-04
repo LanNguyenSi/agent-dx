@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `listRegisteredWorktrees` (`-i worktree`'s registry listing, used by
   the removal, the leftover recovery, and `cleanupWorktree`'s
-  assertion) falls back to a third source, `<git-common-dir
-  >/worktrees/<id>/gitdir` read directly, when neither
+  assertion) falls back to a third source, the `gitdir` files under
+  `<git-common-dir>/worktrees/<id>` read directly, when neither
   `git worktree list` form ran to a parse: a dead listing no longer
   leaves a leftover judged by the disk alone. The fallback lists linked
   worktrees only (never the main worktree, which git's admin directory

@@ -1532,17 +1532,25 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     // Content that is non-empty and, resolved relative to `junkDir`
     // the way a relative `gitdir` file is, still names no `.git` file
     // anywhere -- `path.dirname` of the resolved path lands back on
-    // `junkDir` itself. Before this validation, this resolved to
-    // `junkDir` and was reported as a registered worktree in an
-    // `ok: true` listing (the reviewer's exact reproduction). This
-    // case alone does not discriminate the basename check from the
-    // "resolves back to the admin entry dir" check below it (both
-    // reject it), so a second entry, below, isolates the basename
-    // check on its own.
+    // `junkDir` itself. Without the validation this resolves to
+    // `junkDir` and is reported as a registered worktree in an
+    // `ok: true` listing. This entry alone does not discriminate the
+    // basename check from the "resolves back to the admin entry dir"
+    // check below it (both reject it), so the two entries below
+    // isolate each check on its own.
     fs.writeFileSync(
       path.join(junkDir, "gitdir"),
       "this is not a path at all\n",
     );
+
+    const selfId = "bogus-self";
+    const selfDir = path.join(adminDir, selfId);
+    fs.mkdirSync(selfDir, { recursive: true });
+    // Content whose basename IS `.git`, so only the "resolves back to
+    // the admin entry dir" check rejects it: `.git` relative to the
+    // entry's own directory is `<entry>/.git`, whose `path.dirname` is
+    // the entry itself, never a worktree.
+    fs.writeFileSync(path.join(selfDir, "gitdir"), ".git\n");
 
     const elsewhereId = "bogus-elsewhere";
     const elsewhereDir = path.join(adminDir, elsewhereId);
@@ -1565,7 +1573,7 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     expect(listed.form).toBe("gitdir-files");
     expect(listed.paths).toEqual([]);
     expect(listed.goneTargets).toBeUndefined();
-    for (const id of [junkId, elsewhereId]) {
+    for (const id of [junkId, elsewhereId, selfId]) {
       expect(listed.detail).toContain(id);
     }
     expect(listed.detail).toContain("does not name a .git file");
@@ -1576,9 +1584,7 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
   // is running as root, unlike the chmod-000 case below, which needs
   // root excluded to actually leave the file unreadable (see
   // `isRoot`). Split out so the `const ok = odd.length === 0` rule
-  // (round 1's fix) has coverage that survives a root CI runner: it
-  // used to live only inside the two `it.skipIf(isRoot)` tests here,
-  // so on a root runner the rule had no test at all.
+  // keeps coverage on a root CI runner, where the chmod cases skip.
   it("reports the gitdir-files listing as not ok, naming every admin entry whose gitdir file is missing or empty by id and reason, rather than silently dropping them from an otherwise ok result", async () => {
     const repo = initRepo();
     const logDir = makeTmpDir();
