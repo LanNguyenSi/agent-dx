@@ -12,6 +12,7 @@ import {
 } from "../src/probe/plan.js";
 import { readMarkerFor } from "../src/lock.js";
 import { sha256File } from "../src/hash.js";
+import { execCommand } from "../src/exec.js";
 import { computeMutant } from "../src/probe/mutant.js";
 import {
   beginInplace,
@@ -25,6 +26,10 @@ import {
 // worktree, or hand one target a session whose restore verifies against
 // something other than the file the next mutant lands on (`vi.spyOn`
 // cannot be used directly on an ESM named export).
+vi.mock("../src/exec.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/exec.js")>();
+  return { ...actual, execCommand: vi.fn(actual.execCommand) };
+});
 vi.mock("../src/probe/mutant.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../src/probe/mutant.js")>();
@@ -864,6 +869,58 @@ describe("probePlan(): a mutant that cannot be applied is inconclusive on its ow
     expect(result.results[1].status).toBe("killed");
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("mutant_inconclusive");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  }, 30000);
+});
+
+describe("probePlan(): a stopped run never starts the next mutant (I5)", () => {
+  it("ends the plan aborted and reports the remaining mutants not_run when a mutant's own run was stopped", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+
+    // The library-mode half of the signal contract: a run reported as
+    // aborted (what `exec.ts` reports once the signal handler has killed
+    // the in-flight child) must stop the plan where it stands. The CLI
+    // half -- exit 130/143 with no output at all -- is covered through
+    // the built CLI in `cli.test.ts`, since there the handler ends the
+    // process itself. Forced here rather than by signalling this test
+    // process, which would race vitest's own handlers.
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    let callCount = 0;
+    vi.mocked(execCommand).mockImplementation(
+      async (...args: Parameters<typeof execCommand>) => {
+        callCount += 1;
+        const result = await actualExec.execCommand(...args);
+        // Call 1 is the baseline (which must pass for the plan to reach
+        // a mutant at all); call 2 is the first mutant's own test run.
+        return callCount === 2 ? { ...result, aborted: true } : result;
+      },
+    );
+
+    const result = await probePlan(
+      planOptions(repo, [
+        replaceMutant(2, "  return false;"),
+        replaceMutant(5, "  return true;"),
+        replaceMutant(7, "module.exports = {};"),
+      ]),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    expect(result.results[0].status).toBe("inconclusive");
+    expect(result.results[0].reason).toBe("aborted");
+    // Never a verdict about a mutant nothing measured, and never a
+    // fourth run: the second and third mutants were not attempted.
+    expect(result.results.slice(1).map((r) => r.status)).toEqual([
+      "not_run",
+      "not_run",
+    ]);
+    expect(callCount).toBe(2);
+    expect(runsSeen(repo)).toHaveLength(2);
+    // The in-flight mutant was still restored.
+    expect(result.results[0].mutation_probe?.restored_verified).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   }, 30000);
 });
