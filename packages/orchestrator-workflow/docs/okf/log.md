@@ -2544,11 +2544,12 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:88-110#"the keyed placeholder line's exact text,"`,
-re-pointed by 19 lines since this account was first written, by T-002's own
-fix-round-1 `[Unreleased]` insertion above it, on top of the earlier
-+2-line shift from the 0.27.0 release commit inserting the `## [0.27.0]`
-heading above it) grew
+(`CHANGELOG.md:90-112#"the keyed placeholder line's exact text,"`,
+re-pointed by 21 lines since this account was first written, by T-002's own
+fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
+from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
+it, and a further +2-line shift from the 0.28.0 release commit inserting
+the `## [0.28.0]` heading above it) grew
 by a net 3
 lines relative to the pre-round-2 base commit (`5a33adb`, `git diff
 --stat 5a33adb -- CHANGELOG.md`: 17 insertions, 14 deletions), shifting
@@ -6896,3 +6897,32 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   entry: `okf-kit@0.9.0 check --json docs/okf --require-anchors`: 0 errors,
   0 warnings, and the same pre-existing notice set as master (no
   anchor-family finding).
+
+- 2026-09-04T04:20:12Z (chore, release 0.28.0): the release commit inserts
+  a `## [0.28.0] - 2026-09-04` heading above the prior `## [Unreleased]`
+  content (2 lines: the heading plus a blank line, same shape as the
+  0.27.0 release commit), pushing every line at or below `CHANGELOG.md`
+  line 9 down by 2. Grepped all `CHANGELOG.md:` occurrences under
+  `docs/okf/*.md`: the bundle's live navigational citations into
+  `CHANGELOG.md` are heading-anchored (path.md-colon-hash-version form,
+  migrated 2026-08-27) and are unaffected by a line shift; the one
+  exception is this file's own live line-range citation two entries
+  above, previously pointed at the 88-110 range (the keyed placeholder
+  line's exact text), re-pointed to `90-112` above. The remaining
+  `CHANGELOG.md:` mentions in this file (`59-81`, `78-100`, `808-815`,
+  and similar) are deliberately
+  historical prose about past diffs, already frozen to the commit they
+  describe, and are left as written. No `## [Unreleased]`-anchored citation
+  exists anywhere in the bundle, so the heading move itself needed no
+  further re-pointing; no "-unreleased" prose reference needed correcting
+  this round (unlike 0.27.0's two 0.26.0-unreleased mentions), confirmed by
+  grepping `index.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, and `subagent-contracts-superset.md`
+  for "unreleased" (case-insensitive): the one hit
+  (`review-gate-and-waivers.md`) names the CHANGELOG's `[Unreleased]`
+  section generically, not a specific shipped version, and is unchanged.
+  Re-measured on the committed tree: `okf-kit@0.9.0 check --json docs/okf
+  --require-anchors`: 0 errors, 0 warnings, 23 notices, byte-identical to
+  the pre-release baseline (master `56f34c6`, same worktree comparison
+  method as prior rounds; the anchor-family jq filter from `ci.yml`
+  reports 0 findings both before and after).
