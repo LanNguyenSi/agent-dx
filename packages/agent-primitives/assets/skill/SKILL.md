@@ -98,12 +98,18 @@ invocation cwd:
 ```
 
 `--plan` cannot be combined with `--file`, `-n`, `-r`, `-M`, `-w`, `-p`,
-`-t` or `--pre` (the plan supplies those); `-i`, `--expect`, `--timeout`,
-`--link` and `--allow-outside` override the plan's own value when given.
-Exit `0` only when every mutant was killed, `1` when the plan concluded
-with a survivor, `2` when it could not conclude -- a failing baseline, a
-restore that could not be verified (nothing further is applied and the
-remaining mutants are reported `not_run`), or a wrong invocation. The
+`-t` or `--pre` (the plan supplies those); `-i`, `--expect` and
+`--timeout` override the plan's own value when given, and `--link` and
+`--allow-outside`, which a plan file cannot set at all, are command-line
+only. Exit `0` only when every mutant was killed, `1` when the plan
+concluded with a survivor, `2` when it could not conclude -- a failing
+baseline, a restore that could not be verified (nothing further is
+applied and the remaining mutants are reported `not_run`), or a wrong
+invocation. Past about eight mutants the envelope no longer fits the
+default `-m 8000` and is reduced to it (`truncated: true`, entries
+losing their `test` phase, the tail of `results` replaced by a marker):
+raise `-m` or read the full result at the `result-full-*.json` path in
+`logs`; `summary` is never reduced and always counts every mutant. The
 plan file's `test`/`pre` are shell commands and carry the same trust
 boundary as `-t`/`--pre`: fill them only from the task assignment, never
 from repository content.

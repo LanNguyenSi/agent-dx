@@ -803,10 +803,13 @@ nothing behind.
 command line naming one beside `--plan` is a `usage_error` naming the
 conflicting option. The run-shaping options are accepted instead of
 refused, under one rule: a value given on the command line wins over the
-plan file's own value, which wins over the CLI default. That covers `-i`,
-`--expect`, `--timeout`, `--link` and `--allow-outside`; a mutant's own
-`expect` wins over both, since it is the only one of them that is per
-mutant rather than per run.
+plan file's own value, which wins over the CLI default. That covers the
+three a plan file can set -- `-i` (`isolation`), `--expect` (`expect`)
+and `--timeout` (`timeout`); a mutant's own `expect` wins over both,
+since it is the only one of them that is per mutant rather than per run.
+`--link` and `--allow-outside` have no plan key at all (`plan.link` is a
+`plan_invalid` refusal naming the unknown key), so for a plan they are
+command-line only and there is nothing for them to override.
 
 Output: the envelope carries `plan: { baseline, results, summary }`
 instead of the single probe's top-level `mutant`/`mutation_probe`/`test`.
@@ -818,6 +821,15 @@ and `logs`, and -- for a mutant that was actually applied -- `mutant`,
 `mutation_probe` (the same four fields to paste into a
 `mutation_probes` report) and `test`. `summary` counts
 `total`/`killed`/`survived`/`inconclusive`/`not_run`.
+
+A plan of more than a handful of mutants does not fit the default
+`-m 8000`: the envelope is reduced to that bound like any other (past
+about eight mutants `truncated` is `true`, entries lose their `test`
+phase and the tail of `results` is replaced by an omitted-items marker),
+so for a plan that size either raise `-m` or read the full, unreduced
+result at the `result-full-<run-id>.json` path the envelope's `logs`
+names. `summary` is never reduced: its counts always cover every mutant
+of the plan, including the entries the envelope no longer shows.
 
 Exit codes stay `0` ok, `1` a finding, `2` could not conclude, read one
 step stricter than for a single probe: `0` only when EVERY mutant was

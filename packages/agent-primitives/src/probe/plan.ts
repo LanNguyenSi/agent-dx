@@ -132,13 +132,31 @@ function readEnum<T extends string>(
 }
 
 /**
+ * Reads at most `size` bytes from `fd`, starting at its beginning: the
+ * size `PLAN_MAX_BYTES` was checked against on this very descriptor, so a
+ * file that grows between that check and this read still cannot deliver
+ * more bytes than the cap allowed.
+ */
+function readBounded(fd: number, size: number): string {
+  const buffer = Buffer.allocUnsafe(size);
+  let read = 0;
+  while (read < size) {
+    const chunk = fs.readSync(fd, buffer, read, size - read, read);
+    if (chunk === 0) break;
+    read += chunk;
+  }
+  return buffer.subarray(0, read).toString("utf8");
+}
+
+/**
  * Reads and validates a `--plan` file. Two layers, in this order:
  *
- * 1. Metadata only (`statSync`, `accessSync`), the same bound `-p/--patch`
- *    is checked against before anything reads it: a directory, a FIFO or
- *    socket (whose unbounded read would block forever with no writer), an
- *    unreadable file, or one past `PLAN_MAX_BYTES` is `plan_not_readable`
- *    without a single byte being loaded.
+ * 1. Metadata only, on the OPEN descriptor (`fstatSync`), the same bound
+ *    `-p/--patch` is checked against before anything reads it: a
+ *    directory, a FIFO or socket (whose unbounded read would block
+ *    forever with no writer), an unreadable file, or one past
+ *    `PLAN_MAX_BYTES` is `plan_not_readable` without a single byte being
+ *    loaded.
  * 2. The schema: JSON object, known keys only, `test` present, `mutants`
  *    non-empty, and exactly one mutant form per entry. Every refusal names
  *    the offending path inside the plan (`mutants[2].patch`), so a caller
@@ -155,52 +173,63 @@ function readEnum<T extends string>(
  */
 export function parsePlanFile(planPath: string): PlanParseResult {
   const absPlanPath = path.resolve(planPath);
-  let stat: fs.Stats;
+  const notReadable = (detail?: string): PlanParseResult => ({
+    ok: false,
+    reason: "plan_not_readable",
+    message: `--plan could not be read: ${absPlanPath}${
+      detail === undefined ? "" : ` (${detail})`
+    }`,
+  });
+  // Opened once, and every check made against THAT descriptor: the type
+  // and the size come from `fstatSync` on the open handle, and the bytes
+  // are read from the same handle, bounded by the size the cap was
+  // checked against. A `statSync`-then-`readFileSync` pair checks one
+  // file and reads whatever the path names by the time the read happens,
+  // so the cap it enforces is advisory across that window; this one is
+  // enforced on the bytes actually read.
+  //
+  // `O_NONBLOCK` is what keeps the FIFO refusal intact: opening a FIFO
+  // for reading blocks until a writer appears, so without it this open
+  // would hang on exactly the file the type check below exists to
+  // refuse. It has no effect on a regular file.
+  let fd: number;
   try {
-    stat = fs.statSync(absPlanPath);
+    fd = fs.openSync(
+      absPlanPath,
+      fs.constants.O_RDONLY | fs.constants.O_NONBLOCK,
+    );
   } catch {
-    return {
-      ok: false,
-      reason: "plan_not_readable",
-      message: `--plan could not be read: ${absPlanPath}`,
-    };
-  }
-  if (!stat.isFile()) {
-    return {
-      ok: false,
-      reason: "plan_not_readable",
-      message: `--plan is not a regular file: ${absPlanPath}`,
-    };
-  }
-  if (stat.size > PLAN_MAX_BYTES) {
-    return {
-      ok: false,
-      reason: "plan_not_readable",
-      message:
-        `--plan is ${String(stat.size)} bytes, over the ` +
-        `${String(PLAN_MAX_BYTES)}-byte cap: ${absPlanPath}`,
-    };
-  }
-  try {
-    fs.accessSync(absPlanPath, fs.constants.R_OK);
-  } catch {
-    return {
-      ok: false,
-      reason: "plan_not_readable",
-      message: `--plan could not be read: ${absPlanPath}`,
-    };
+    return notReadable();
   }
   let text: string;
   try {
-    text = fs.readFileSync(absPlanPath, "utf8");
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      return {
+        ok: false,
+        reason: "plan_not_readable",
+        message: `--plan is not a regular file: ${absPlanPath}`,
+      };
+    }
+    if (stat.size > PLAN_MAX_BYTES) {
+      return {
+        ok: false,
+        reason: "plan_not_readable",
+        message:
+          `--plan is ${String(stat.size)} bytes, over the ` +
+          `${String(PLAN_MAX_BYTES)}-byte cap: ${absPlanPath}`,
+      };
+    }
+    text = readBounded(fd, stat.size);
   } catch (err) {
-    return {
-      ok: false,
-      reason: "plan_not_readable",
-      message: `--plan could not be read: ${absPlanPath} (${
-        err instanceof Error ? err.message : String(err)
-      })`,
-    };
+    return notReadable(err instanceof Error ? err.message : String(err));
+  } finally {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // Best-effort: a descriptor this process could not close is
+      // released when it exits, and the plan's verdict is already made.
+    }
   }
   let parsed: unknown;
   try {
@@ -218,8 +247,11 @@ export function parsePlanFile(planPath: string): PlanParseResult {
 }
 
 /** The schema half of `parsePlanFile`, on an already-parsed value.
- * Exported for the unit tests that drive it directly, and used by
- * `parsePlanFile` itself; `planPath` only ever appears in messages. */
+ * Used by `parsePlanFile` itself and exported for the unit tests that
+ * drive it directly from this module; it is deliberately NOT part of the
+ * package's public surface (`src/index.ts` re-exports `parsePlanFile`
+ * alone), since a caller with a parsed value has no plan file for the
+ * metadata layer to check. `planPath` only ever appears in messages. */
 export function validatePlan(
   parsed: unknown,
   planPath: string,

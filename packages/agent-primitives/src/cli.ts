@@ -1076,6 +1076,13 @@ async function runProbePlanCommand(
       },
       isolation: result.isolation,
     },
+    // A plan of more than a handful of mutants does not fit the default
+    // `-m`, and the reduction then cuts `plan.results` (fields per entry
+    // first, then whole entries). The counts stay whole: they are five
+    // numbers, and they are what tells a reader how much of the array
+    // they are looking at is missing -- and that the full result named
+    // in `logs` carries the rest.
+    keepWhole: ["plan.summary"],
     maxChars: global.maxChars,
     logDir: global.logDir,
   });

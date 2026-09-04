@@ -1381,6 +1381,38 @@ describe("cli: probe", () => {
     );
   });
 
+  it("-t/--test is required without --plan: exit 2, usage_error, message naming the flag", async () => {
+    // `-t` is optional at the option-parser level so `--plan` can supply
+    // it instead; the action checks it. Without the check a probe with
+    // no test command would run its baseline against `undefined`.
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      "const a = 1;\nconst b = 2;\n",
+    );
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "const b = 3;",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    // Thrown out of the action rather than by the option parser, so the
+    // top-level mapper builds this envelope and the message is in
+    // `message` (`command` is "unknown" there, as for every UsageError
+    // raised past option parsing).
+    expect(parsed.message).toContain("-t/--test is required");
+    expect(parsed.message).toContain("--plan");
+  });
+
   it("exactly one mutant form is required: none given is usage_error, exit 2", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
@@ -2645,6 +2677,136 @@ describe("cli: probe --plan", () => {
     expect(overridden.code).toBe(0);
     expect(JSON.parse(overridden.stdout).isolation.mode).toBe("worktree");
   }, 30000);
+
+  /** A repository whose fixture carries `count` one-line functions and a
+   * test that catches a mutant of any of them: enough mutants for one
+   * plan envelope to exceed the default `-m`. */
+  function initWidePlanRepo(count: number): { repo: string; planPath: string } {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    const fns = Array.from(
+      { length: count },
+      (_v, i) => `function f${String(i)}(n) { return n + ${String(i)}; }`,
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        ...fns,
+        `module.exports = { ${fns.map((_f, i) => `f${String(i)}`).join(", ")} };`,
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const m = require('./fixture.js');",
+        `for (let i = 0; i < ${String(count)}; i++) {`,
+        "  if (m['f' + i](1) !== 1 + i) process.exit(1);",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: Array.from({ length: count }, (_v, i) => ({
+        file: "fixture.js",
+        line: i + 1,
+        replace: `function f${String(i)}(n) { return 999; }`,
+      })),
+    });
+    return { repo, planPath };
+  }
+
+  it("a plan past a handful of mutants is reduced to the default -m: truncated, summary still complete, and the full result named in logs", async () => {
+    const count = 12;
+    const { repo, planPath } = initWidePlanRepo(count);
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    // The envelope does not fit the default bound and says so...
+    expect(parsed.truncated).toBe(true);
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    // ...and what it cut is `plan.results`: fewer entries than mutants,
+    // the rest behind an honest marker.
+    expect(parsed.plan.results.length).toBeLessThan(count);
+    // The counts are never cut, so they still cover every mutant,
+    // including the entries no longer shown.
+    expect(parsed.plan.summary).toEqual({
+      total: count,
+      killed: count,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+    });
+    // The full result is on disk and named in `logs`, carrying every
+    // mutant's four contract fields.
+    const fullPath = (parsed.logs as string[]).find((log) =>
+      /result-full-.*\.json$/.test(log),
+    );
+    expect(fullPath).toBeDefined();
+    const full = JSON.parse(fs.readFileSync(fullPath as string, "utf8"));
+    expect(full.plan.results).toHaveLength(count);
+    for (const entry of full.plan.results) {
+      expect(typeof entry.mutation_probe.mutant).toBe("string");
+      expect(typeof entry.mutation_probe.verified_applied_via).toBe("string");
+      expect(entry.mutation_probe.result).toBe("killed");
+      expect(entry.mutation_probe.restored_verified).toBe(true);
+    }
+  }, 120000);
+
+  it("on SIGINT during mutant 2 of 3: restores the in-flight mutant, never applies the third, exits 130 with no output", async () => {
+    const { repo, before } = initPlanRepo();
+    const lockDir = makeTmpDir();
+    const heartbeat = path.join(repo, "heartbeat.txt");
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [
+        { file: "fixture.js", line: 2, replace: "  return false;" },
+        {
+          file: "fixture.js",
+          line: 5,
+          replace: "  return true; // SLOW_MARKER",
+        },
+        { file: "fixture.js", line: 7, replace: "module.exports = {};" },
+      ],
+    });
+
+    const child = spawnCliRaw(["-C", repo, "probe", "--plan", planPath], {
+      env: { AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+    });
+    const run = collectCli(child);
+
+    // Readiness: the heartbeat file only appears once the SECOND
+    // mutant's test run is actually running, so the signal below lands
+    // mid-plan rather than at a guessed moment.
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    child.kill("SIGINT");
+    const result = await run;
+
+    expect(result.code).toBe(130);
+    expect(result.stdout).toBe("");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+    expect(runsIn(repo)).toBe(3);
+    expect(fs.readdirSync(lockDir)).toEqual([]);
+  }, 40000);
 
   it("on SIGTERM during mutant 2 of 3: restores the in-flight mutant, never applies the third, exits 143 with no output", async () => {
     const { repo, before } = initPlanRepo();

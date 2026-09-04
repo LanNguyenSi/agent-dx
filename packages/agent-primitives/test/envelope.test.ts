@@ -1337,3 +1337,145 @@ describe("buildEnvelope: results that cannot be serialized at all", () => {
     expect(() => JSON.stringify(envelope)).not.toThrow();
   });
 });
+
+describe("keepWhole: a named path is reported whole, never reduced", () => {
+  /** A payload shaped like a plan result: a long array of entries plus
+   * the small summary a reader needs whatever the reduction cuts. */
+  function planPayload(count: number): Record<string, unknown> {
+    return {
+      reason: "mutant_inconclusive",
+      plan: {
+        baseline: { exitCode: 0, durationMs: 1234, logPath: "/tmp/base.log" },
+        results: Array.from({ length: count }, (_v, i) => ({
+          index: i,
+          file: `/a/very/long/path/to/the/file/under/test/fixture-${String(i)}.ts`,
+          expect: "fail",
+          status: "killed",
+          warnings: [],
+          mutation_probe: {
+            mutant: `line ${String(i)}: before -> after`,
+            verified_applied_via: `line ${String(i)} now reads after`,
+            result: "killed",
+            restored_verified: true,
+          },
+          logs: [`/tmp/logs/exec-${String(i)}.log`],
+        })),
+        summary: {
+          total: count,
+          killed: count,
+          survived: 0,
+          inconclusive: 0,
+          not_run: 0,
+        },
+      },
+    };
+  }
+
+  const BOUND = 900;
+
+  it("keeps the named path whole while its siblings are cut, and the caller's bound still holds", () => {
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "probe",
+      status: "killed",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: planPayload(40),
+      keepWhole: ["plan.summary"],
+      maxChars: BOUND,
+    });
+    expect(envelope.truncated).toBe(true);
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(BOUND);
+    const plan = envelope.plan as Record<string, unknown>;
+    // The five counts are all there, and they still describe all forty
+    // mutants, not the handful of entries that survived beside them.
+    expect(plan.summary).toEqual({
+      total: 40,
+      killed: 40,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+    });
+    expect((plan.results as unknown[]).length).toBeLessThan(40);
+  });
+
+  it("without the path named, the same bound cuts into the summary itself (the control)", () => {
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "probe",
+      status: "killed",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: planPayload(40),
+      maxChars: BOUND,
+    });
+    const plan = envelope.plan as Record<string, unknown>;
+    expect(plan.summary).not.toEqual({
+      total: 40,
+      killed: 40,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+    });
+  });
+
+  it("holds a path out of the key budget without lying about what was dropped", () => {
+    const limits: CapLimits = {
+      maxString: 50,
+      maxArray: 50,
+      maxKeys: 1,
+      maxDepth: 6,
+    };
+    const capped = applyCaps(
+      {
+        a: 1,
+        plan: { results: [1, 2], summary: { total: 2 }, extra: 3 },
+        z: 9,
+      },
+      limits,
+      ["plan.summary"],
+    );
+    // `plan` is on the kept path, so it is emitted beside the one key
+    // the budget allows; only `z` is missing at the top level.
+    expect(Object.keys(capped)).toEqual(["a", "plan", "..."]);
+    expect(capped["..."]).toBe("1 more key omitted");
+    const plan = capped.plan as Record<string, unknown>;
+    // Inside it, the held key is exempt from the budget while the other
+    // keys still spend it, and the marker counts exactly what it cut.
+    expect(plan.summary).toEqual({ total: 2 });
+    expect(Object.keys(plan)).toEqual(["results", "summary", "..."]);
+    expect(plan["..."]).toBe("1 more key omitted");
+  });
+
+  it("survives a depth limit that would otherwise prune the container holding it", () => {
+    const limits: CapLimits = {
+      maxString: 50,
+      maxArray: 50,
+      maxKeys: 50,
+      maxDepth: 1,
+    };
+    const capped = applyCaps(
+      { plan: { summary: { total: 2 }, results: [{ index: 0 }] } },
+      limits,
+      ["plan.summary"],
+    );
+    const plan = capped.plan as Record<string, unknown>;
+    expect(plan.summary).toEqual({ total: 2 });
+    // Everything not on the kept path is still pruned at that depth.
+    expect(typeof plan.results).toBe("string");
+  });
+
+  it("is exactly the reduction it always was when no path is named", () => {
+    const limits: CapLimits = {
+      maxString: 50,
+      maxArray: 50,
+      maxKeys: 1,
+      maxDepth: 6,
+    };
+    const payload = { a: 1, b: 2, c: 3 };
+    expect(applyCaps(payload, limits, [])).toEqual(applyCaps(payload, limits));
+    expect(applyCaps(payload, limits, [""])).toEqual(
+      applyCaps(payload, limits),
+    );
+  });
+});

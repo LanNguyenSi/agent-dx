@@ -34,17 +34,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only when every mutant was killed per its `expect`, `1` when the plan
   concluded with a survivor, `2` for a wrong invocation or a plan that
   could not conclude. `--plan` is mutually exclusive with `--file`, `-n`,
-  `-r`, `-M`, `-w`, `-p`, `-t` and `--pre`; `-i`, `--expect`,
-  `--timeout`, `--link` and `--allow-outside` override the plan's own
-  value when given on the command line, and a mutant's own `expect` wins
-  over both. Plan validation (unknown keys, a missing `test`, an empty
+  `-r`, `-M`, `-w`, `-p`, `-t` and `--pre`; the three run-shaping options
+  a plan file can also set -- `-i`, `--expect`, `--timeout` -- override
+  the plan's own value when given on the command line, and a mutant's own
+  `expect` wins over both. `--link` and `--allow-outside` have no plan
+  key at all and are command-line only for a plan. Past about eight
+  mutants the envelope no longer fits the default `-m 8000` and is
+  reduced to it like any other result (`truncated: true`, entries losing
+  their `test` phase, the tail of `results` replaced by a marker): raise
+  `-m` or read the full result at the `result-full-<run-id>.json` path
+  the envelope's `logs` names. `plan.summary` is held out of that
+  reduction (see `keepWhole` below), so its counts always cover every
+  mutant of the plan, including the entries the envelope no longer
+  shows. Plan validation (unknown keys, a missing `test`, an empty
   `mutants`, a mutant with two forms or none, a file outside the
   containment root, an unusable plan file) runs before the lock, the
   marker, the baseline or any worktree and names the offending path
   inside the plan. `test`/`pre` in a plan file are shell commands with
   the same trust boundary as `-t`/`--pre`: fill them only from a task
-  assignment, never from repository content. The library entry points
-  `probePlan()` and `parsePlanFile()` are exported alongside `probe()`.
+  assignment, never from repository content. Setup through baseline
+  (isolation fallback, containment, the lock, stale-marker recovery, the
+  worktree sync, every target's backup, the baseline and the re-hash
+  after it) is ONE implementation both entry points call, as the mutant
+  step already was, so the two cannot drift apart on a refusal they
+  share. The library entry points `probePlan()` and `parsePlanFile()` are
+  exported alongside `probe()`.
+- `buildEnvelope`/`applyCaps` take `keepWhole`: dotted paths into the
+  result whose value is reported whole, exempt from every structural cap
+  and from the key budget of the object holding it, the way the fixed
+  envelope fields already are. The bound is unaffected (every candidate
+  is measured after the held path is folded in), so this only spends the
+  budget on that value instead of another; it is for the small field a
+  reader cannot do without once the rest was cut. `probe --plan` names
+  `plan.summary`, and nothing else in this package names anything: with
+  no path given the reduction is exactly what it was.
 - `listRegisteredWorktrees` (`-i worktree`'s registry listing, used by
   the removal, the leftover recovery, and `cleanupWorktree`'s
   assertion) falls back to a third source, the `gitdir` files under

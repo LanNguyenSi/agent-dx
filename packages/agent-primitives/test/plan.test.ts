@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { probePlan, type ProbePlanOptions } from "../src/probe/index.js";
+import { probe, probePlan, type ProbePlanOptions } from "../src/probe/index.js";
 import {
   parsePlanFile,
   validatePlan,
@@ -191,6 +191,23 @@ function writePlan(contents: unknown): string {
 
 const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
 
+/** Whether this host can create a FIFO. Node has no `mkfifo` binding, so
+ * the test that needs one shells out; where the binary is absent the test
+ * is skipped rather than silently weakened. */
+const HAS_MKFIFO = (() => {
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "agent-primitives-plan-mkfifo-probe-"),
+  );
+  try {
+    execFileSync("mkfifo", [path.join(dir, "fifo")], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+})();
+
 describe("plan file validation (before the lock, the marker or any run)", () => {
   it("accepts a full plan and converts timeout seconds to milliseconds", () => {
     const planPath = writePlan({
@@ -351,6 +368,25 @@ describe("plan file validation (before the lock, the marker or any run)", () => 
       expect(tooBig.message).toContain("cap");
     }
   });
+
+  it.skipIf(!HAS_MKFIFO)(
+    "refuses a FIFO as plan_not_readable without blocking on it (needs mkfifo; skipped where the host has none)",
+    () => {
+      // The type check runs on an open descriptor, so the open itself
+      // must not be the thing that hangs: a FIFO opened for reading
+      // blocks until a writer appears, and there is none here. A test
+      // that hangs instead of failing is the regression this guards.
+      const planPath = path.join(makeTmpDir(), "fifo.json");
+      execFileSync("mkfifo", [planPath]);
+      const parsed = parsePlanFile(planPath);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) {
+        expect(parsed.reason).toBe("plan_not_readable");
+        expect(parsed.message).toContain("not a regular file");
+      }
+    },
+    10000,
+  );
 
   it.skipIf(isRoot)(
     "refuses a plan whose permissions deny reading (root bypasses permissions, so this only discriminates as a normal user)",
@@ -787,14 +823,23 @@ describe("probePlan(): refusals before the lock, the marker or any worktree", ()
     expect(noLine.warnings.join(" ")).toContain("plan.mutants[0].line");
   });
 
-  it("reports a missing target file as usage_error/file_not_found", async () => {
+  it("reports a missing target file as usage_error/file_not_found, naming the plan entry rather than the plan file", async () => {
     useLockDir();
     const { repo } = initRepo();
     const result = await probePlan(
-      planOptions(repo, [replaceMutant(1, "x", "does-not-exist.js")]),
+      planOptions(repo, [
+        replaceMutant(2, "  return false;"),
+        replaceMutant(1, "x", "does-not-exist.js"),
+      ]),
     );
     expect(result.status).toBe("usage_error");
     expect(result.reason).toBe("file_not_found");
+    // The refusal points at the entry that named the path, not at the
+    // plan file (which was read fine) and not at `--file` (which a plan
+    // has none of).
+    expect(result.warnings.join(" ")).toContain(
+      `plan.mutants[1].file not found: ${path.join(repo, "does-not-exist.js")}`,
+    );
   });
 });
 
@@ -923,4 +968,193 @@ describe("probePlan(): a stopped run never starts the next mutant (I5)", () => {
     expect(result.results[0].mutation_probe?.restored_verified).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   }, 30000);
+});
+
+/** Every backup `beginInplace` handed out during the run under test,
+ * read off the call-through mock's own recorded return values rather
+ * than by guessing at paths. */
+function backupPathsTaken(): string[] {
+  return vi
+    .mocked(beginInplace)
+    .mock.results.filter((result) => result.type === "return")
+    .map((result) => result.value.backupPath);
+}
+
+describe("probePlan(): a target the baseline itself rewrote", () => {
+  // The plan used to leave that target's backup file behind while the
+  // single probe discarded it, because each pipeline carried its own
+  // copy of this step. They run the same code now, so this test states
+  // the shared contract and compares the two runs directly.
+  const REWRITING_TEST =
+    "node -e \"require('fs').writeFileSync('fixture.js', 'REWRITTEN')\"";
+
+  it("ends target_changed_during_baseline leaving the target as the baseline wrote it, with no backup left behind: the same handling as the single probe", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    vi.mocked(beginInplace).mockClear();
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          replaceMutant(2, "  return false;"),
+          replaceMutant(5, "  return true;"),
+        ],
+        { testCommand: REWRITING_TEST },
+      ),
+    );
+    const planBackups = backupPathsTaken();
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("target_changed_during_baseline");
+    expect(result.results.map((r) => r.status)).toEqual(["not_run", "not_run"]);
+    // Never restored: the baseline's own write stands, since it was not
+    // this plan's mutation to undo.
+    expect(fs.readFileSync(target, "utf8")).toBe("REWRITTEN");
+    expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+    // ...and the backup went with the decision not to restore from it.
+    expect(planBackups.length).toBeGreaterThan(0);
+    expect(planBackups.filter((backup) => fs.existsSync(backup))).toEqual([]);
+
+    // The single probe, on the same fixture: same reason, same shape of
+    // warning (only the subject differs, since a plan may carry several
+    // targets), and the same empty aftermath.
+    vi.mocked(beginInplace).mockClear();
+    const { repo: soloRepo } = initRepo();
+    const solo = await probe({
+      file: "fixture.js",
+      line: 2,
+      form: "replace",
+      replaceText: "  return false;",
+      testCommand: REWRITING_TEST,
+      isolation: "inplace",
+      expect: "fail",
+      cwd: soloRepo,
+      logDir: makeTmpDir(),
+    });
+    const soloBackups = backupPathsTaken();
+
+    expect(solo.reason).toBe(result.reason);
+    expect(soloBackups.length).toBeGreaterThan(0);
+    expect(soloBackups.filter((backup) => fs.existsSync(backup))).toEqual([]);
+    const tail =
+      " changed during the baseline run (before any mutation was applied); the target is left as the baseline run wrote it, not restored";
+    expect(solo.warnings).toContain(`the target${tail}`);
+    expect(result.warnings).toContain(`${target}${tail}`);
+  }, 30000);
+});
+
+describe("probePlan(): an unexpected error while a mutant is applied", () => {
+  it("reports the verdicts it already collected, the in-flight mutant as restore_failed, and only the unreached mutants not_run", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const target = path.join(repo, "fixture.js");
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    // The third command this plan runs is the SECOND mutant's test (the
+    // baseline is the first): it destroys the target, so no restore can
+    // succeed, and then fails the way an unexpected internal error does
+    // -- by throwing, which is the only way into the emergency-restore
+    // path in `finally`.
+    let commands = 0;
+    vi.mocked(execCommand).mockImplementation((cmd, options) => {
+      commands += 1;
+      if (commands === 3) {
+        fs.rmSync(target, { force: true });
+        fs.mkdirSync(target);
+        throw new Error("exec exploded");
+      }
+      return actualExec.execCommand(cmd, options);
+    });
+
+    const result = await probePlan(
+      planOptions(repo, [
+        replaceMutant(2, "  return false;"),
+        replaceMutant(5, "  return true;"),
+        replaceMutant(7, "module.exports = {};"),
+      ]),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("restore_failed");
+    expect(result.warnings.join(" ")).toContain(
+      "restore failed after an unexpected error",
+    );
+    expect(result.warnings.join(" ")).toContain("exec exploded");
+    // The verdict the plan had already reached is reported, not thrown
+    // away: the first mutant really was killed.
+    expect(result.results[0].status).toBe("killed");
+    expect(result.results[0].mutation_probe?.result).toBe("killed");
+    // The mutant that was applied when the error hit is reported as
+    // applied-and-not-restored, never as `not_run`.
+    expect(result.results[1].status).toBe("inconclusive");
+    expect(result.results[1].reason).toBe("restore_failed");
+    expect(result.results[1].mutation_probe?.restored_verified).toBe(false);
+    // Only the mutant the plan never reached is `not_run`.
+    expect(result.results[2].status).toBe("not_run");
+    expect(result.summary).toEqual({
+      total: 3,
+      killed: 1,
+      survived: 0,
+      inconclusive: 1,
+      not_run: 1,
+    });
+    // The baseline is still reported, and so is the log path of the
+    // baseline run, which the emergency path used to drop.
+    expect(result.baseline?.exitCode).toBe(0);
+  }, 30000);
+});
+
+describe("probePlan(): a target that was never synced into the worktree", () => {
+  it("refuses partway through the target-open loop with target_not_synced, leaving no backup, marker or restore slot from the target it already opened", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const ignored = path.join(repo, "ignored.js");
+    fs.writeFileSync(path.join(repo, ".gitignore"), "ignored.js\n");
+    fs.writeFileSync(ignored, "module.exports = { two: () => 2 };\n");
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "gitignore",
+    ]);
+    const target = path.join(repo, "fixture.js");
+    const beforeHash = await sha256File(target);
+    vi.mocked(beginInplace).mockClear();
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          // The first target opens (and is backed up) before the second
+          // is even looked at.
+          replaceMutant(2, "  return false;"),
+          replaceMutant(1, "module.exports = { two: () => 3 };", "ignored.js"),
+        ],
+        { isolation: "worktree" },
+      ),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("target_not_synced");
+    expect(result.warnings.join(" ")).toContain("plan.mutants[1].file");
+    expect(result.results.map((r) => r.status)).toEqual(["not_run", "not_run"]);
+    // The first target's backup was taken and then dropped again: no
+    // stray backup file, no marker, and (the same call that removes the
+    // backup) no restore armed for a run that never mutated anything.
+    const backups = backupPathsTaken();
+    expect(backups.length).toBe(1);
+    expect(backups.filter((backup) => fs.existsSync(backup))).toEqual([]);
+    expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+    expect(readMarkerFor(fs.realpathSync(repo))).toBeUndefined();
+    expect(await sha256File(target)).toBe(beforeHash);
+    // The worktree was cleaned up with the refusal.
+    expect(
+      gitOutput(repo, ["worktree", "list"]).trim().split("\n"),
+    ).toHaveLength(1);
+  }, 60000);
 });

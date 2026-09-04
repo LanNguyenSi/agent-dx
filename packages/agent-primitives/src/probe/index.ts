@@ -1662,12 +1662,605 @@ async function prepareWorktreeSession(input: {
   return { ok: true, session: wt };
 }
 
+/** One file a run will mutate, named the way the entry point that
+ * produced it names things: a refusal about this target has to read like
+ * the command the caller actually ran. */
+interface RunTargetInput {
+  displayFile: string;
+  absFile: string;
+  /** Where a refusal points back at the caller's own input: `--file` for
+   * the single probe, `plan.mutants[2].file` for a plan. */
+  label: string;
+  /** How a prose warning names this target: "the target" for the single
+   * probe, which has exactly one, the path itself for a plan, which may
+   * carry several. */
+  subject: string;
+}
+
+/** The lock set and the run controller, handed to the caller the moment
+ * they exist: from then on the caller's own `finally` owns the teardown,
+ * whether the setup goes on to refuse, to succeed, or to throw. */
+interface RunSetupContext {
+  controller: RunController;
+  /** Releases every lock this run took, in the order they were taken. */
+  releaseLocks: () => void;
+}
+
+/** A refusal from the shared setup, in the neutral shape both entry
+ * points map onto their own envelope: the single probe's `ProbeResult`,
+ * a plan's `ProbePlanResult` with the mutants it never reached. */
+interface RunSetupRefusal {
+  status: ProbeStatus;
+  reason: string;
+  /** The warnings to report, this refusal's own message already
+   * appended. */
+  warnings: string[];
+  /** Absent where the refusing path reports no exec logs at all, which
+   * is the caller's cue to omit the field entirely rather than report an
+   * empty one. */
+  logPaths?: string[];
+  /** Present once the baseline itself has a verdict to report. */
+  baseline?: ExecPhaseField;
+  /** Whether the single probe reports its own `mutant` field beside this
+   * refusal. Its dry run (`beforeBaseline`) computes that field before
+   * the baseline runs, so a `--pre` failure and the post-baseline hash
+   * check report it while the failing baseline itself never did: the
+   * flag is what keeps that envelope exactly as it was before this
+   * segment became shared. A plan carries its mutant fields per result
+   * and ignores it. */
+  reportsMutant: boolean;
+}
+
+/** Everything a run needs before its first mutant may be applied: the
+ * runtime the mutant step takes, every target opened and backed up, and
+ * the one baseline they were all measured against. */
+interface OpenedRun {
+  rt: MutantRuntime;
+  /** One session per DISTINCT target, in first-named order; a plan
+   * reuses one for every mutant that names the same file. */
+  targets: TargetSession[];
+  baseline: ExecPhaseField;
+  /** The caller's own prior logs, the worktree sync's, and whatever
+   * `beforeBaseline` produced: what a caller folds into the log paths of
+   * everything it reports from here on. */
+  logPaths: string[];
+}
+
+interface RunSetupInput {
+  /** Already resolved by the caller, which needs them before this point
+   * (the `-p` derivation resolves `--file` against `root`). */
+  cwd: string;
+  root: string;
+  gitRoot: string | undefined;
+  realRoot: string;
+  logDir: string;
+  wtScratchRoot: string;
+  isolation: IsolationMode;
+  allowOutside: boolean;
+  displayLinks: string[];
+  absLinks: string[];
+  timeoutMs?: number;
+  gitApplyTimeoutMs: number;
+  testCommand: string;
+  preCommand?: string;
+  exitOnSignal: boolean;
+  /** The run's warnings: every warning this setup produces is pushed
+   * here, and a refusal carries the array as it stood when it happened. */
+  warnings: string[];
+  /** Filled in as the setup learns the effective mode, the worktree path
+   * and what it synced; the caller reports this same object. */
+  isolationField: IsolationField;
+  /** In the caller's own order. A file named twice (a plan with two
+   * mutants in one file) is opened once and shares one session. */
+  targets: RunTargetInput[];
+  /** Exec logs the caller produced before this setup ran (`-p`'s own
+   * `git apply --numstat`), carried by every refusal that reports log
+   * paths. */
+  priorLogPaths: string[];
+  /** The status a containment refusal reports: `inconclusive` for the
+   * single probe, whose contract has classified it that way since before
+   * `--plan` existed, `usage_error` for a plan, where every refusal made
+   * before anything runs is a usage error. */
+  outsideRootStatus: ProbeStatus;
+  /** Called with the run context the moment the locks and the controller
+   * exist. */
+  onContext: (context: RunSetupContext) => void;
+  /** Runs on the opened targets AFTER they are backed up and BEFORE the
+   * baseline: the single probe computes its one mutant there, so a
+   * mutant that cannot be applied is reported without a baseline ever
+   * running. A plan computes each mutant inside its own loop and passes
+   * nothing. A failure discards every backup and refuses the run. */
+  beforeBaseline?: (input: {
+    targets: TargetSession[];
+    rt: MutantRuntime;
+  }) => Promise<
+    | { ok: true; logPaths: string[] }
+    | { ok: false; reason: string; logPaths: string[] }
+  >;
+}
+
+type RunSetupOutcome =
+  { ok: true; run: OpenedRun } | { ok: false; refusal: RunSetupRefusal };
+
+/**
+ * The setup both entry points run before their first mutant: isolation
+ * fallback, the `--allow-outside` refusal, containment, the lock, stale
+ * in-flight marker recovery, the worktree sync, every target's backup,
+ * and the one baseline (I1). One implementation, so the single probe and
+ * a plan cannot drift apart on any of it -- which they had: a target the
+ * baseline rewrote left its backup behind in a plan and not in a single
+ * probe, and the content the mutant was computed against was read from a
+ * different file in each.
+ *
+ * Returns the opened targets and the baseline, or the refusal the caller
+ * maps onto its own envelope. Nothing here applies a mutant: past a
+ * successful return the caller owns the mutant step, and from the
+ * `onContext` call onwards it owns the teardown (worktree cleanup,
+ * handler removal, lock release) on every path, this function throwing
+ * included.
+ */
+async function openRunSetup(input: RunSetupInput): Promise<RunSetupOutcome> {
+  const {
+    cwd,
+    root,
+    gitRoot,
+    realRoot,
+    logDir,
+    wtScratchRoot,
+    allowOutside,
+    displayLinks,
+    absLinks,
+    warnings,
+    isolationField,
+    priorLogPaths,
+  } = input;
+  const exitOnSignal = input.exitOnSignal;
+  const refuse = (
+    status: ProbeStatus,
+    reason: string,
+    message?: string,
+    extra: {
+      logPaths?: string[];
+      baseline?: ExecPhaseField;
+      reportsMutant?: boolean;
+    } = {},
+  ): RunSetupOutcome => ({
+    ok: false,
+    refusal: {
+      status,
+      reason,
+      warnings: message === undefined ? [...warnings] : [...warnings, message],
+      ...(extra.logPaths !== undefined ? { logPaths: extra.logPaths } : {}),
+      ...(extra.baseline !== undefined ? { baseline: extra.baseline } : {}),
+      reportsMutant: extra.reportsMutant ?? false,
+    },
+  });
+
+  // `worktree` needs a real git work tree to branch a worktree off of;
+  // outside one there is nothing to isolate into, so the mode falls back
+  // to `inplace` (named in a warning) instead of failing outright.
+  let effectiveIsolation = input.isolation;
+  if (effectiveIsolation === "worktree" && gitRoot === undefined) {
+    effectiveIsolation = "inplace";
+    warnings.push(
+      "not inside a git work tree; falling back to --isolation inplace",
+    );
+  }
+  isolationField.mode = effectiveIsolation;
+
+  // `--allow-outside` computes the scratch/worktree-relative placement
+  // of a path outside the containment root by relativizing it against
+  // that root; for `worktree` that placement is then re-based onto the
+  // worktree copy, and a path outside the root has no well-defined
+  // worktree copy to re-base onto at all. Rejected outright, mirroring
+  // `patch_allow_outside_unsupported`, rather than surfacing as a raw
+  // ENOENT or `backup_verification_failed` once the pipeline reaches a
+  // target it never actually synced.
+  if (effectiveIsolation === "worktree" && allowOutside) {
+    return refuse(
+      "usage_error",
+      "worktree_allow_outside_unsupported",
+      "--isolation worktree cannot be combined with --allow-outside",
+    );
+  }
+
+  // Containment for EVERY target of the run (and every `--link`) up
+  // front: one file outside the root refuses the whole run rather than
+  // being discovered halfway through, with earlier mutants already run.
+  if (!allowOutside) {
+    const outside = [
+      ...input.targets.map((target) => ({
+        display: target.displayFile,
+        real: target.absFile,
+      })),
+      ...displayLinks.map((display, i) => ({ display, real: absLinks[i] })),
+    ].filter((p) => !isPathContained(realRoot, p.real));
+    if (outside.length > 0) {
+      return refuse(
+        input.outsideRootStatus,
+        "file_outside_root",
+        `outside the containment root (${root}): ${[
+          ...new Set(outside.map((p) => p.display)),
+        ].join(", ")}`,
+        // Carries a `-p`-derived `--file`'s own numstat log path through,
+        // same as every other early return the caller makes; empty for an
+        // explicit `--file`, which never runs that listing.
+        { logPaths: priorLogPaths },
+      );
+    }
+  }
+
+  // One entry per distinct target file: the marker recovery, the backup
+  // and the restore between mutants are all per FILE, not per mutant.
+  const distinct: RunTargetInput[] = [];
+  const distinctPaths = new Set<string>();
+  for (const target of input.targets) {
+    if (distinctPaths.has(target.absFile)) continue;
+    distinctPaths.add(target.absFile);
+    distinct.push(target);
+  }
+
+  // The lock is keyed on the repository, not on the target file, for
+  // BOTH modes, whenever one exists: an `inplace` run mutates the one
+  // working tree that every probe in the same repository builds and
+  // tests in, and a `worktree` run shares the same worktree machinery
+  // (and, once linked, the same node_modules caches) with every other
+  // probe on that repository, so two probes on the same repository are
+  // never independent even when their target files differ. It is refused
+  // rather than queued, the same contract a second probe on the same
+  // file has always had. Outside a repository there is no shared tree
+  // and each target file is its own identity, so a run takes one lock
+  // per distinct target -- the same identities a single probe on each of
+  // those files would take, so a plan and a single probe still exclude
+  // each other there. Acquisition never queues (a held lock is refused
+  // outright), so taking several cannot deadlock; a refusal releases
+  // whatever this call already took. The `inplace` marker stays keyed on
+  // the target file (it records that one file's backup and hashes); the
+  // `worktree` leftover marker is keyed on the repository-root identity
+  // (see the stale-worktree recovery in `prepareWorktreeSession`).
+  const lockIdentities =
+    gitRoot !== undefined ? [realRoot] : [...distinctPaths].sort();
+  const acquired: (() => void)[] = [];
+  const releaseLocks = (): void => {
+    for (const release of acquired) release();
+  };
+  for (const identity of lockIdentities) {
+    const lockResult = acquireLock(identity);
+    if (!lockResult.ok) {
+      releaseLocks();
+      return refuse(
+        "inconclusive",
+        lockResult.reason,
+        lockResult.reason === "lock_unavailable"
+          ? lockResult.detail
+          : undefined,
+      );
+    }
+    acquired.push(lockResult.release);
+  }
+  let controller: RunController;
+  try {
+    controller = createRunController({
+      realRoot,
+      logDir,
+      wtScratchRoot,
+      exitOnSignal,
+      releaseLock: releaseLocks,
+      warnings,
+    });
+  } catch (err) {
+    // Nothing owns the locks yet (`onContext` below is what hands them
+    // over), so they are released here rather than left held by a run
+    // that never started.
+    releaseLocks();
+    throw err;
+  }
+  input.onContext({ controller, releaseLocks });
+  const { crashHandlers, cleanupWtSession } = controller;
+
+  // Stale in-flight markers, one per distinct target: any marker found
+  // here is an unfinished run, since the lock above already excludes a
+  // live one on this repository.
+  for (const target of distinct) {
+    const stale = await recoverTargetMarker(
+      target.displayFile,
+      target.absFile,
+      warnings,
+    );
+    if (stale) {
+      return refuse("inconclusive", stale.reason, stale.warning);
+    }
+    if (!fs.existsSync(target.displayFile)) {
+      return refuse(
+        "usage_error",
+        "file_not_found",
+        `${target.label} not found: ${target.displayFile}`,
+      );
+    }
+  }
+
+  let wtSession: WorktreeSyncSuccess | undefined;
+  let setupLogPaths = [...priorLogPaths];
+  if (effectiveIsolation === "worktree") {
+    const preparedWt = await prepareWorktreeSession({
+      root,
+      cwd,
+      realRoot,
+      logDir,
+      wtScratchRoot,
+      absLinks,
+      controller,
+      warnings,
+    });
+    if (!preparedWt.ok) {
+      if (preparedWt.fromSync) {
+        if (preparedWt.reason === "aborted") {
+          // The signal handler owns the cleanup and the exit from here
+          // (in CLI mode this call never returns); racing it with this
+          // path's own cleanup-and-return would print an envelope for a
+          // run the handler is about to end with no output at all.
+          await deferToHandlerIfActive(crashHandlers, exitOnSignal);
+        }
+        await cleanupWtSession();
+      }
+      return {
+        ok: false,
+        refusal: {
+          status: "inconclusive",
+          reason: preparedWt.reason,
+          warnings: [...warnings, ...preparedWt.warnings],
+          ...(preparedWt.logPaths !== undefined
+            ? { logPaths: preparedWt.logPaths }
+            : {}),
+          reportsMutant: false,
+        },
+      };
+    }
+    wtSession = preparedWt.session;
+    isolationField.path = wtSession.worktreePath;
+    isolationField.linked = wtSession.linked;
+    isolationField.syncedTrackedFiles = wtSession.syncedTrackedFiles;
+    isolationField.syncedUntrackedFiles = wtSession.syncedUntrackedFiles;
+    setupLogPaths = [...priorLogPaths, ...wtSession.logPaths];
+  }
+
+  // `--pre`/`-t` run in the invocation cwd (where the operator ran the
+  // probe from), not the containment root: a run started from a
+  // subdirectory of a monorepo must see the same cwd its test command
+  // would normally get. For `worktree`, that cwd is remapped onto the
+  // worktree; the real apply uses `applyRoot`, since a patch's paths are
+  // relative to the repository (or its worktree copy), not to wherever
+  // the run was invoked from.
+  const rt: MutantRuntime = {
+    root,
+    logDir,
+    applyRoot: wtSession !== undefined ? wtSession.worktreePath : root,
+    execEnv: {
+      cwd: wtSession !== undefined ? wtSession.mappedCwd : cwd,
+      logDir,
+      timeoutMs: input.timeoutMs,
+      signal: controller.execController.signal,
+    },
+    gitApplyTimeoutMs: input.gitApplyTimeoutMs,
+    effectiveIsolation,
+    testCommand: input.testCommand,
+    preCommand: input.preCommand,
+    signal: controller.execController.signal,
+    track: controller.track,
+    crashHandlers,
+    exitOnSignal,
+    setRestoreState: controller.setRestoreState,
+  };
+
+  // Every target is backed up (and each backup verified by hash) BEFORE
+  // the baseline runs: a baseline command that itself rewrites a target
+  // (a formatter, a codegen step, ...) must never end up being what the
+  // backup captured, and the re-hash after the baseline needs a backup
+  // that already exists and is verified in order to have anything
+  // trustworthy to restore from once a mutation is actually applied.
+  // `restoreState` is armed right away too (inside `openTarget`), so a
+  // signal landing anywhere from here on has a (possibly no-op) restore
+  // to run instead of nothing.
+  const opened: { named: RunTargetInput; target: TargetSession }[] = [];
+  /** Every backup taken so far, dropped together: a refusal partway
+   * through this loop must not leave the targets it already opened with
+   * a backup file on disk and an armed restore slot behind it. */
+  const discardOpened = (): void => {
+    for (const entry of opened) entry.target.discardBackup();
+  };
+  for (const named of distinct) {
+    // The path actually mutated: the worktree's own copy of the target
+    // under `-i worktree` (never the original tree), the target itself
+    // for `inplace`.
+    const mutationFilePath =
+      wtSession !== undefined
+        ? path.join(
+            wtSession.worktreePath,
+            path.relative(root, named.displayFile),
+          )
+        : named.displayFile;
+    // A gitignored target is neither tracked (so the tracked-diff sync
+    // never carries it) nor an untracked-non-ignored file (so the
+    // untracked sync explicitly excludes it): under `worktree`, that
+    // combination means `mutationFilePath` was simply never created, and
+    // nothing downstream (`beginInplace`'s own read of it, first) can
+    // succeed against it. Named here, by a typed reason, instead of
+    // surfacing several frames later as a raw ENOENT.
+    if (wtSession !== undefined && !fs.existsSync(mutationFilePath)) {
+      discardOpened();
+      return refuse(
+        "inconclusive",
+        "target_not_synced",
+        `${named.label} (${named.displayFile}) was not synced into the ` +
+          `worktree; it is neither a tracked file nor an untracked, ` +
+          `non-ignored one, so a gitignored target cannot be probed under ` +
+          `--isolation worktree`,
+        { logPaths: wtSession.logPaths },
+      );
+    }
+    const preHash = await sha256File(named.displayFile);
+    const result = await openTarget(rt, {
+      displayFile: named.displayFile,
+      absFile: named.absFile,
+      mutationFilePath,
+      preHash,
+      // Read from the file that is actually mutated, which is what the
+      // mutant is computed against. Under `worktree` that is the synced
+      // copy rather than the original tree's file; the two are provably
+      // the same bytes past the backup verification just below, which
+      // hashes a copy of THIS file against `preHash`, taken from the
+      // original.
+      originalContent: fs.readFileSync(mutationFilePath, "utf8"),
+    });
+    if (!result.ok) {
+      discardOpened();
+      return refuse(
+        "inconclusive",
+        "backup_verification_failed",
+        result.warning,
+      );
+    }
+    opened.push({ named, target: result.target });
+  }
+  const targets = opened.map((entry) => entry.target);
+
+  const hook =
+    input.beforeBaseline === undefined
+      ? { ok: true as const, logPaths: [] as string[] }
+      : await input.beforeBaseline({ targets, rt });
+  const stepLogPaths = [...setupLogPaths, ...hook.logPaths];
+  if (!hook.ok) {
+    discardOpened();
+    return refuse("inconclusive", hook.reason, undefined, {
+      logPaths: stepLogPaths,
+    });
+  }
+
+  // (2) baseline: unmutated, must exit 0. Once per run (I1).
+  const baselineStart = Date.now();
+  const baselineRun = await runPreThenTest(
+    { testCommand: input.testCommand, preCommand: input.preCommand },
+    rt.execEnv,
+    controller.track,
+  );
+  if (!baselineRun.ok) {
+    noteIncompleteOutput(warnings, "baseline --pre", baselineRun.pre);
+    // An aborted `--pre` (this run was signalled, or its caller aborted
+    // it) never ran to a conclusion, so it is not a `--pre` that failed:
+    // it is a run that was stopped.
+    const preAborted = baselineRun.pre.aborted;
+    if (preAborted) {
+      // Nothing has mutated any target yet: ordering only, same as the
+      // dry-run site in `prepareMutant`.
+      await deferToHandlerIfActive(crashHandlers, exitOnSignal);
+    }
+    discardOpened();
+    return refuse(
+      "inconclusive",
+      preAborted ? "aborted" : "pre_failed",
+      preAborted
+        ? `--pre was aborted during the baseline run; see ${baselineRun.pre.logPath}`
+        : `--pre exited ${baselineRun.pre.exitCode} during the baseline run; see ${baselineRun.pre.logPath}`,
+      {
+        logPaths: [...stepLogPaths, baselineRun.pre.logPath],
+        reportsMutant: true,
+      },
+    );
+  }
+  const baselineTest = baselineRun.test;
+  noteIncompleteOutput(warnings, "baseline", baselineTest);
+  const baseline: ExecPhaseField = {
+    exitCode: baselineTest.exitCode,
+    durationMs: Date.now() - baselineStart,
+    logPath: baselineTest.logPath,
+    timedOut: baselineTest.timedOut,
+  };
+  if (baselineTest.exitCode !== 0 || baselineTest.aborted) {
+    if (baselineTest.aborted) {
+      // If the handler is active it may already have restored a target
+      // (a no-op copy of still-original content, since nothing has
+      // mutated one at this phase); wait for that before re-hashing
+      // below, so the re-hash reads settled content.
+      await deferToHandlerIfActive(crashHandlers, exitOnSignal);
+    }
+    // A failing baseline is still a baseline that ran commands against
+    // the working tree, and one of them may have rewritten a target (a
+    // formatter, a codegen step). Re-hash before deciding what to do
+    // with each backup: discarding one silently would throw away the
+    // only copy of that target's pre-baseline content.
+    for (const entry of opened) {
+      const postHash = await sha256File(entry.target.mutationFilePath).catch(
+        () => undefined,
+      );
+      if (postHash === entry.target.preHash) {
+        entry.target.discardBackup();
+      } else {
+        // Keep the backup file itself: nothing was mutated, so there is
+        // nothing to restore, and the target is deliberately left as the
+        // baseline wrote it.
+        warnings.push(
+          `the failing baseline run also rewrote ${entry.named.subject}; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at ${entry.target.session.backupPath}`,
+        );
+      }
+    }
+    // Stop treating a mutation as in flight, whichever branch above each
+    // target took.
+    controller.setRestoreState(null);
+    // An aborted baseline is not a red baseline: nothing about the test
+    // was learned, the run was stopped. Reported apart from a baseline
+    // that genuinely failed, so a caller cannot read a cancelled run as
+    // a broken test suite.
+    if (baselineTest.aborted) {
+      warnings.push(
+        `the baseline run was aborted; see ${baselineTest.logPath}`,
+      );
+    }
+    return refuse(
+      "inconclusive",
+      baselineTest.aborted ? "aborted" : "baseline_failed",
+      undefined,
+      { logPaths: stepLogPaths, baseline },
+    );
+  }
+
+  // The baseline run (the `--pre`/`-t` commands themselves, not this
+  // package) is the only thing that has touched the filesystem since the
+  // backups were taken and verified above: re-hash each target and, if
+  // one no longer matches its `preHash`, a formatter/codegen/build step
+  // run as part of the baseline rewrote it. Stopping here (before any
+  // mutation or marker exists) leaves that rewrite exactly as the
+  // baseline left it -- restoring from the backup would instead throw
+  // away a legitimate write this run never made, and the backup goes
+  // with it, since no mutant will be applied against it at all.
+  for (const entry of opened) {
+    const postBaselineHash = await sha256File(
+      entry.target.mutationFilePath,
+    ).catch(() => undefined);
+    if (postBaselineHash !== entry.target.preHash) {
+      discardOpened();
+      return refuse(
+        "inconclusive",
+        "target_changed_during_baseline",
+        `${entry.named.subject} changed during the baseline run (before any mutation was applied); the target is left as the baseline run wrote it, not restored`,
+        { logPaths: stepLogPaths, baseline, reportsMutant: true },
+      );
+    }
+  }
+
+  return {
+    ok: true,
+    run: { rt, targets, baseline, logPaths: stepLogPaths },
+  };
+}
+
 /**
  * Runs the full probe pipeline: lock -> containment -> stale-marker
  * recovery -> baseline -> mutate -> pre+test -> restore -> verify ->
- * classify. `probePlan` below runs the same pipeline with the mutate ->
- * test -> restore -> classify step in a loop, sharing the setup and the
- * teardown; see its own docblock for the invariants that split holds to.
+ * classify. Setup through baseline is `openRunSetup` above, which
+ * `probePlan` runs too; the mutate -> test -> restore -> classify step
+ * is `prepareMutant`/`runMutantAttempt`, which `probePlan` runs once per
+ * mutant. See `probePlan`'s docblock for the invariants that split holds
+ * to.
  */
 export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   const warnings: string[] = [];
@@ -1837,446 +2430,126 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   // the path and the root to check it against would certify itself.
   const wtScratchRoot = path.resolve(opts.logDir);
 
-  // `worktree` needs a real git work tree to branch a worktree off of;
-  // outside one there is nothing to isolate into, so the mode falls back
-  // to `inplace` (named in a warning) instead of failing outright.
-  let effectiveIsolation = opts.isolation;
-  if (effectiveIsolation === "worktree" && gitRoot === undefined) {
-    effectiveIsolation = "inplace";
-    warnings.push(
-      "not inside a git work tree; falling back to --isolation inplace",
-    );
-  }
-  isolationField.mode = effectiveIsolation;
-
-  // `--allow-outside` computes the scratch/worktree-relative placement
-  // of a path outside the containment root by relativizing it against
-  // that root; for `worktree` that placement is then re-based onto the
-  // worktree copy (`mutationFilePath` below), and a path outside the
-  // root has no well-defined worktree copy to re-base onto at all.
-  // Rejected outright, mirroring `patch_allow_outside_unsupported`,
-  // rather than surfacing as a raw ENOENT or `backup_verification_failed`
-  // once the pipeline reaches a target it never actually synced.
-  if (effectiveIsolation === "worktree" && opts.allowOutside) {
-    return {
-      status: "usage_error",
-      reason: "worktree_allow_outside_unsupported",
-      warnings: [
-        ...warnings,
-        "--isolation worktree cannot be combined with --allow-outside",
-      ],
-      isolation: isolationField,
-    };
-  }
-
-  // The lock is keyed on the repository, not on the target file, for
-  // BOTH modes, whenever one exists: an `inplace` probe mutates the one
-  // working tree that every probe in the same repository builds and
-  // tests in, and a `worktree` probe shares the same worktree machinery
-  // (and, once linked, the same node_modules caches) with every other
-  // probe on that repository, so two probes on the same repository are
-  // never independent even when their target files differ. It is
-  // refused rather than queued, the same contract a second probe on the
-  // same file has always had. Outside a repository there is no shared
-  // tree, and the target file itself is the identity. The `inplace`
-  // marker stays keyed on the target file (it records that one file's
-  // backup and hashes); the `worktree` leftover marker is keyed on this
-  // same repository-root identity (see the stale-worktree recovery
-  // below).
-  const lockIdentity = gitRoot !== undefined ? realRoot : absFile;
-  const lockResult = acquireLock(lockIdentity);
-  if (!lockResult.ok) {
-    return {
-      status: "inconclusive",
-      reason: lockResult.reason,
-      warnings:
-        lockResult.reason === "lock_unavailable"
-          ? [...warnings, lockResult.detail]
-          : warnings,
-      isolation: isolationField,
-    };
-  }
-
-  // The completed sync, set once `beginWorktree` succeeds: read by the
-  // pipeline below to route the mutation, exec cwd, and patch apply at
-  // the worktree instead of the original tree.
-  let wtSession: WorktreeSyncSuccess | undefined;
-  // Populated inside the try block as soon as each becomes known, so the
-  // `finally` block's emergency-restore path can build a full result
-  // even when it is reached via a thrown error partway through.
+  // Populated by the shared setup's `beforeBaseline` hook below as soon
+  // as each becomes known, so the `finally` block's emergency-restore
+  // path can build a full result even when it is reached via a thrown
+  // error partway through.
   let mutantField: MutantField | undefined;
   let mutantSummary: string | undefined;
   let verifiedAppliedVia: string | undefined;
+  let prepared: Extract<PreparedMutant, { ok: true }> | undefined;
   let baseline: ExecPhaseField | undefined;
-  const controller = createRunController({
-    realRoot,
-    logDir: opts.logDir,
-    wtScratchRoot,
-    exitOnSignal: opts.exitOnSignal ?? false,
-    releaseLock: lockResult.release,
-    warnings,
-  });
-  const { execController, track, crashHandlers, cleanupWtSession } = controller;
-  const exitOnSignalFlag = opts.exitOnSignal ?? false;
+  // The locks and the run controller, handed over by `openRunSetup` the
+  // moment they exist: from then on this function's own `finally` owns
+  // the teardown, however the setup ends.
+  let context: RunSetupContext | undefined;
   // Set by the `catch` below and read by `finally`'s emergency-restore
   // path, so its warning can name what actually triggered the restore
   // instead of just "an unexpected error".
   let caughtError: unknown;
+  const spec: MutantStepSpec = {
+    form: opts.form,
+    line,
+    replaceText: opts.replaceText,
+    matchText: opts.matchText,
+    withText: opts.withText,
+    patchPath: opts.patchPath,
+    expect: opts.expect,
+  };
 
   try {
-    if (!opts.allowOutside) {
-      const outside = [
-        { display: displayFile, real: absFile },
-        ...links.map((_l, i) => ({
-          display: displayLinks[i],
-          real: absLinks[i],
-        })),
-      ].filter((p) => !isPathContained(realRoot, p.real));
-      if (outside.length > 0) {
-        return {
-          status: "inconclusive",
-          reason: "file_outside_root",
-          warnings: [
-            ...warnings,
-            `outside the containment root (${root}): ${outside
-              .map((p) => p.display)
-              .join(", ")}`,
-          ],
-          isolation: isolationField,
-          // Carries a `-p`-derived `--file`'s own numstat log path
-          // through, same as every other early return above; empty for
-          // an explicit `--file`, which never runs that listing.
-          dryRunLogPaths: derivationLogPaths,
-        };
-      }
-    }
-
-    const staleMarker = await recoverTargetMarker(
-      displayFile,
-      absFile,
-      warnings,
-    );
-    if (staleMarker) {
-      return {
-        status: "inconclusive",
-        reason: staleMarker.reason,
-        warnings: [...warnings, staleMarker.warning],
-        isolation: isolationField,
-      };
-    }
-
-    if (!fs.existsSync(displayFile)) {
-      return {
-        status: "usage_error",
-        reason: "file_not_found",
-        warnings: [...warnings, `--file not found: ${displayFile}`],
-        isolation: isolationField,
-      };
-    }
-
-    const preHash = await sha256File(displayFile);
-    const originalContent = fs.readFileSync(displayFile, "utf8");
-
-    if (effectiveIsolation === "worktree") {
-      const preparedWt = await prepareWorktreeSession({
-        root,
-        cwd,
-        realRoot,
-        logDir: opts.logDir,
-        wtScratchRoot,
-        absLinks,
-        controller,
-        warnings,
-      });
-      if (!preparedWt.ok) {
-        if (preparedWt.fromSync) {
-          if (preparedWt.reason === "aborted") {
-            // The signal handler owns the cleanup and the exit from here
-            // (in CLI mode this call never returns); racing it with this
-            // path's own cleanup-and-return would print an envelope for
-            // a run the handler is about to end with no output at all.
-            await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
-          }
-          await cleanupWtSession();
-        }
-        return {
-          status: "inconclusive",
-          reason: preparedWt.reason,
-          warnings: [...warnings, ...preparedWt.warnings],
-          isolation: isolationField,
-          ...(preparedWt.logPaths !== undefined
-            ? { dryRunLogPaths: preparedWt.logPaths }
-            : {}),
-        };
-      }
-      wtSession = preparedWt.session;
-      isolationField.path = wtSession.worktreePath;
-      isolationField.linked = wtSession.linked;
-      isolationField.syncedTrackedFiles = wtSession.syncedTrackedFiles;
-      isolationField.syncedUntrackedFiles = wtSession.syncedUntrackedFiles;
-    }
-
-    // The path actually mutated: the worktree's own copy of `--file` for
-    // `worktree` (never the original tree), `displayFile` itself for
-    // `inplace`. Every remaining step below -- backup, mutate, `--pre`/
-    // `-t`, restore, hash-verify -- operates on this path and, for the
-    // patch form and the exec env, on `applyRoot`/`execCwd` below; the
-    // sequence and its rules are otherwise identical between the two
-    // modes.
-    const mutationFilePath =
-      wtSession !== undefined
-        ? path.join(wtSession.worktreePath, path.relative(root, displayFile))
-        : displayFile;
-    const applyRoot = wtSession !== undefined ? wtSession.worktreePath : root;
-    const execCwd = wtSession !== undefined ? wtSession.mappedCwd : cwd;
-
-    // A gitignored `--file` is neither tracked (so the tracked-diff sync
-    // never carries it) nor an untracked-non-ignored file (so the
-    // untracked sync explicitly excludes it): under `worktree`, that
-    // combination means `mutationFilePath` was simply never created, and
-    // nothing downstream (`beginInplace`'s own read of it, first) can
-    // succeed against it. Named here, by a typed reason, instead of
-    // surfacing several frames later as a raw ENOENT.
-    if (wtSession !== undefined && !fs.existsSync(mutationFilePath)) {
-      return {
-        status: "inconclusive",
-        reason: "target_not_synced",
-        warnings: [
-          ...warnings,
-          `--file (${displayFile}) was not synced into the worktree; it is ` +
-            `neither a tracked file nor an untracked, non-ignored one, so a ` +
-            `gitignored target cannot be probed under --isolation worktree`,
-        ],
-        isolation: isolationField,
-        dryRunLogPaths: wtSession.logPaths,
-      };
-    }
-
-    // `--pre`/`-t` run in the invocation cwd (where the operator ran the
-    // probe from), not the containment root: a probe run from a
-    // subdirectory of a monorepo must see the same cwd its test command
-    // would normally get. For `worktree`, that cwd is remapped onto the
-    // worktree (`execCwd`, computed above); the real apply below uses
-    // `applyRoot`, since a patch's paths are relative to the repository
-    // (or its worktree copy), not to wherever the probe was invoked from.
-    const rt: MutantRuntime = {
+    const setup = await openRunSetup({
+      cwd,
       root,
+      gitRoot,
+      realRoot,
       logDir: opts.logDir,
-      applyRoot,
-      execEnv: {
-        cwd: execCwd,
-        logDir: opts.logDir,
-        timeoutMs: opts.timeoutMs,
-        signal: execController.signal,
-      },
+      wtScratchRoot,
+      isolation: opts.isolation,
+      allowOutside: opts.allowOutside ?? false,
+      displayLinks,
+      absLinks,
+      timeoutMs: opts.timeoutMs,
       gitApplyTimeoutMs,
-      effectiveIsolation,
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
-      signal: execController.signal,
-      track,
-      crashHandlers,
-      exitOnSignal: exitOnSignalFlag,
-      setRestoreState: controller.setRestoreState,
-    };
-
-    // Backed up immediately, before the baseline (or anything else) ever
-    // runs against the target: a baseline command that itself rewrites
-    // the target (a formatter, a codegen step, ...) must never end up
-    // being the thing this backup captures, and the check just below
-    // (re-hashing after the baseline) needs a backup that already exists
-    // and is verified in order to have anything trustworthy to restore
-    // from once a mutation is actually applied. `restoreState` is set
-    // right away too (inside `openTarget`), so a signal landing anywhere
-    // from here on has a (possibly no-op) restore to run instead of
-    // nothing.
-    const opened = await openTarget(rt, {
-      displayFile,
-      absFile,
-      mutationFilePath,
-      preHash,
-      originalContent,
-    });
-    if (!opened.ok) {
-      return {
-        status: "inconclusive",
-        reason: "backup_verification_failed",
-        warnings: [...warnings, opened.warning],
-        isolation: isolationField,
-      };
-    }
-    const target = opened.target;
-
-    const prepared = await prepareMutant(
-      rt,
-      target,
-      {
-        form: opts.form,
-        line,
-        replaceText: opts.replaceText,
-        matchText: opts.matchText,
-        withText: opts.withText,
-        patchPath: opts.patchPath,
-        expect: opts.expect,
-      },
+      exitOnSignal: opts.exitOnSignal ?? false,
       warnings,
-    );
-    // Folded in once, here, so every downstream `dryRunLogPaths:
-    // stepLogPaths` (every return from this point on) also carries the
-    // worktree setup's own exec logs (`git worktree add`, the
-    // tracked-diff sync, the untracked-file listing) and the `-p`
-    // derivation's own `git apply --numstat` log (empty unless `--file`
-    // was derived) without touching each of those return sites
-    // individually.
-    const stepLogPaths = [
-      ...derivationLogPaths,
-      ...(wtSession ? wtSession.logPaths : []),
-      ...prepared.logPaths,
-    ];
-    if (!prepared.ok) {
-      target.discardBackup();
+      isolationField,
+      targets: [
+        { displayFile, absFile, label: "--file", subject: "the target" },
+      ],
+      priorLogPaths: derivationLogPaths,
+      // What a single probe has always reported for a target outside the
+      // containment root; a plan calls the same finding a usage error.
+      outsideRootStatus: "inconclusive",
+      onContext: (runContext) => {
+        context = runContext;
+      },
+      // The dry run, before the baseline: the single probe computes its
+      // one mutant against the target's original content here, so a
+      // mutant that cannot be applied is reported without a baseline
+      // ever running, and a `--pre` failure or a target the baseline
+      // rewrote still reports the mutant this probe would have applied.
+      // A plan computes each of its mutants inside its own loop instead.
+      beforeBaseline: async ({ targets, rt }) => {
+        const computed = await prepareMutant(rt, targets[0], spec, warnings);
+        if (!computed.ok) {
+          return {
+            ok: false,
+            reason: computed.reason,
+            logPaths: computed.logPaths,
+          };
+        }
+        prepared = computed;
+        mutantField = computed.mutant;
+        mutantSummary = computed.mutantSummary;
+        verifiedAppliedVia = computed.verifiedAppliedVia;
+        return { ok: true, logPaths: computed.logPaths };
+      },
+    });
+    if (!setup.ok) {
+      const { refusal } = setup;
       return {
-        status: "inconclusive",
-        reason: prepared.reason,
-        warnings,
+        status: refusal.status,
+        reason: refusal.reason,
+        warnings: refusal.warnings,
+        ...(refusal.reportsMutant && mutantField !== undefined
+          ? { mutant: mutantField }
+          : {}),
+        ...(refusal.baseline !== undefined
+          ? { baseline: refusal.baseline }
+          : {}),
         isolation: isolationField,
-        dryRunLogPaths: stepLogPaths,
+        ...(refusal.logPaths !== undefined
+          ? { dryRunLogPaths: refusal.logPaths }
+          : {}),
       };
     }
-    mutantField = prepared.mutant;
-    mutantSummary = prepared.mutantSummary;
-    verifiedAppliedVia = prepared.verifiedAppliedVia;
-
-    // (2) baseline: unmutated, must exit 0.
-    const baselineStart = Date.now();
-    const baselineRun = await runPreThenTest(opts, rt.execEnv, track);
-    if (!baselineRun.ok) {
-      noteIncompleteOutput(warnings, "baseline --pre", baselineRun.pre);
-      // An aborted `--pre` (this probe was signalled, or its caller
-      // aborted it) never ran to a conclusion, so it is not a `--pre`
-      // that failed: it is a run that was stopped.
-      const preAborted = baselineRun.pre.aborted;
-      if (preAborted) {
-        // Nothing has mutated the target yet: ordering only, same as
-        // the computeMutant-dry-run site above.
-        await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
-      }
-      target.discardBackup();
-      return {
-        status: "inconclusive",
-        reason: preAborted ? "aborted" : "pre_failed",
-        warnings: [
-          ...warnings,
-          preAborted
-            ? `--pre was aborted during the baseline run; see ${baselineRun.pre.logPath}`
-            : `--pre exited ${baselineRun.pre.exitCode} during the baseline run; see ${baselineRun.pre.logPath}`,
-        ],
-        mutant: mutantField,
-        isolation: isolationField,
-        dryRunLogPaths: [...stepLogPaths, baselineRun.pre.logPath],
-      };
-    }
-    const baselineTest = baselineRun.test;
-    noteIncompleteOutput(warnings, "baseline", baselineTest);
-    baseline = {
-      exitCode: baselineTest.exitCode,
-      durationMs: Date.now() - baselineStart,
-      logPath: baselineTest.logPath,
-      timedOut: baselineTest.timedOut,
-    };
-    if (baselineTest.exitCode !== 0 || baselineTest.aborted) {
-      if (baselineTest.aborted) {
-        // If the handler is active it may already have restored the
-        // target (a no-op copy of still-original content, since nothing
-        // has mutated it yet at this phase); wait for that before
-        // re-hashing below, so the re-hash reads settled content.
-        await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
-      }
-      // A failing baseline is still a baseline that ran commands against
-      // the working tree, and one of them may have rewritten the target
-      // (a formatter, a codegen step). Re-hash before deciding what to do
-      // with the backup: discarding it silently would throw away the only
-      // copy of the target's pre-baseline content.
-      const postHash = await sha256File(mutationFilePath).catch(
-        () => undefined,
+    const { rt, targets, logPaths: stepLogPaths } = setup.run;
+    baseline = setup.run.baseline;
+    if (prepared === undefined) {
+      // Unreachable: `openRunSetup` returns `ok` only past the
+      // `beforeBaseline` hook above, which is where this is set. A
+      // typed narrowing, and never a silent one.
+      throw new Error(
+        "internal error: the mutant was not prepared before the baseline",
       );
-      if (postHash === preHash) {
-        target.discardBackup();
-      } else {
-        // Keep the backup file itself, and stop treating a mutation as in
-        // flight: nothing was mutated, so there is nothing to restore, and
-        // the target is deliberately left as the baseline wrote it.
-        controller.setRestoreState(null);
-        warnings.push(
-          `the failing baseline run also rewrote the target; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at ${target.session.backupPath}`,
-        );
-      }
-      // An aborted baseline is not a red baseline: nothing about the
-      // test was learned, the run was stopped. Reported apart from a
-      // baseline that genuinely failed, so a caller cannot read a
-      // cancelled probe as a broken test suite.
-      if (baselineTest.aborted) {
-        warnings.push(
-          `the baseline run was aborted; see ${baselineTest.logPath}`,
-        );
-      }
-      return {
-        status: "inconclusive",
-        reason: baselineTest.aborted ? "aborted" : "baseline_failed",
-        warnings,
-        baseline,
-        isolation: isolationField,
-        dryRunLogPaths: stepLogPaths,
-      };
     }
-
-    // The baseline run (the `--pre`/`-t` commands themselves, not this
-    // probe) is the only thing that has touched the filesystem since the
-    // backup was taken and verified above: re-hash the target and, if it
-    // no longer matches `preHash`, a formatter/codegen/build step run as
-    // part of the baseline rewrote it. Aborting here (before any
-    // mutation or marker exists) leaves that rewrite exactly as the
-    // baseline left it -- restoring from the backup would instead throw
-    // away a legitimate write this probe never made.
-    const postBaselineHash = await sha256File(mutationFilePath).catch(
-      () => undefined,
-    );
-    if (postBaselineHash !== preHash) {
-      target.discardBackup();
-      return {
-        status: "inconclusive",
-        reason: "target_changed_during_baseline",
-        warnings: [
-          ...warnings,
-          `the target changed during the baseline run (before any mutation was applied); the target is left as the baseline run wrote it, not restored`,
-        ],
-        mutant: mutantField,
-        baseline,
-        isolation: isolationField,
-        dryRunLogPaths: stepLogPaths,
-      };
-    }
+    const preparedMutant = prepared;
 
     // (3) marker, (4) apply, pre+test, (5) restore, (6) verify the
     // restore by hash, (7) classify: one mutant, through the same step a
     // plan runs once per mutant.
     const outcome = await runMutantAttempt(
       rt,
-      target,
+      targets[0],
+      spec,
       {
-        form: opts.form,
-        line,
-        replaceText: opts.replaceText,
-        matchText: opts.matchText,
-        withText: opts.withText,
-        patchPath: opts.patchPath,
-        expect: opts.expect,
-      },
-      {
-        computed: prepared.computed,
-        mutant: prepared.mutant,
-        mutantSummary: prepared.mutantSummary,
-        verifiedAppliedVia: prepared.verifiedAppliedVia,
+        computed: preparedMutant.computed,
+        mutant: preparedMutant.mutant,
+        mutantSummary: preparedMutant.mutantSummary,
+        verifiedAppliedVia: preparedMutant.verifiedAppliedVia,
         logPaths: stepLogPaths,
       },
       warnings,
@@ -2299,8 +2572,11 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     throw err;
   } finally {
     let emergencyResult: ProbeResult | undefined;
-    const inFlightRestore = controller.getRestoreState();
-    if (inFlightRestore) {
+    // No context means the setup refused (or threw) before it took a
+    // lock: nothing was opened, nothing is in flight, and there is
+    // nothing to tear down.
+    const inFlightRestore = context?.controller.getRestoreState();
+    if (context !== undefined && inFlightRestore) {
       // Reached only when something unwound the stack (a thrown error)
       // while a mutation was still in flight and never went through one
       // of the explicit restore points above. The rule this backstop
@@ -2309,7 +2585,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       // still has to surface as `inconclusive`/`restore_failed`, never
       // silently as whatever exception triggered this path.
       const state = inFlightRestore;
-      controller.setRestoreState(null);
+      context.controller.setRestoreState(null);
       let restored = false;
       try {
         restored = state.restore();
@@ -2361,9 +2637,11 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     // the lock is released, so a concurrent probe on the same repository
     // never observes the lock as free while this run's worktree removal
     // is still in flight.
-    await cleanupWtSession();
-    crashHandlers.remove();
-    lockResult.release();
+    if (context !== undefined) {
+      await context.controller.cleanupWtSession();
+      context.controller.crashHandlers.remove();
+      context.releaseLocks();
+    }
     if (emergencyResult) return emergencyResult;
   }
 }
@@ -2453,10 +2731,11 @@ function summarize(results: PlanMutantResult[]): PlanSummaryField {
 /**
  * Runs a list of mutants that share one test command against ONE
  * baseline, in order, each applied and then restored before the next is
- * applied. The pipeline is the single probe's, with the mutate ->
- * pre+test -> restore -> verify -> classify step (`prepareMutant` and
- * `runMutantAttempt`, the very functions `probe()` calls) run once per
- * mutant between a shared setup and a shared teardown.
+ * applied. The pipeline is the single probe's, not a copy of it: the
+ * setup through the baseline is `openRunSetup`, the very function
+ * `probe()` calls, and the mutate -> pre+test -> restore -> verify ->
+ * classify step is `prepareMutant`/`runMutantAttempt`, likewise shared,
+ * run once per mutant between that setup and one shared teardown.
  *
  * The invariants this split holds to:
  *
@@ -2478,7 +2757,11 @@ function summarize(results: PlanMutantResult[]): PlanSummaryField {
  *   next mutant. On the CLI the handler ends the process itself, with
  *   exit 130/143 and no output.
  * - I6 the single-probe path is unchanged: `probe()` runs the same
- *   setup, the same one step, and the same teardown it always did.
+ *   setup, the same one step, and the same teardown it always did --
+ *   which is now literally the same code, so a refusal a plan makes and
+ *   the one a single probe makes for the same reason cannot drift apart
+ *   again (they had: a target the baseline rewrote left its backup
+ *   behind here and not there).
  */
 export async function probePlan(
   opts: ProbePlanOptions,
@@ -2536,19 +2819,50 @@ export async function probePlan(
     warnings: [],
     logs: [],
   });
-  const allNotRun = (): PlanMutantResult[] => planned.map(notRunResult);
+  /** Every verdict this plan has collected, in `planned` order: hoisted
+   * out of the mutant loop so every exit path -- the loop's own returns,
+   * a refusal before it, and the emergency-restore path in `finally` --
+   * reports the verdicts that were actually reached instead of claiming
+   * the plan never ran. */
+  const results: PlanMutantResult[] = [];
+  /** The mutant the loop is inside RIGHT NOW, cleared as soon as its
+   * result is pushed: what the emergency-restore path in `finally`
+   * reports for a mutant an unexpected error unwound the stack on, since
+   * `not_run` would claim it was never attempted. */
+  let inFlight:
+    | {
+        item: PlannedMutant;
+        warnings: string[];
+        logs: string[];
+        mutant?: MutantField;
+        mutantSummary?: string;
+        verifiedAppliedVia?: string;
+      }
+    | undefined;
+  /** The plan's results as they stand: every verdict collected, the
+   * mutant in flight (when the caller has one to report), then `not_run`
+   * for every mutant the plan never reached. */
+  const resultsSoFar = (
+    inFlightEntry?: PlanMutantResult,
+  ): PlanMutantResult[] => {
+    const reached = [
+      ...results,
+      ...(inFlightEntry === undefined ? [] : [inFlightEntry]),
+    ];
+    return [...reached, ...planned.slice(reached.length).map(notRunResult)];
+  };
   const refuse = (
     status: ProbeStatus,
     reason: string,
     message?: string,
   ): ProbePlanResult => {
-    const results = allNotRun();
+    const entries = resultsSoFar();
     return {
       status,
       reason,
       warnings: message === undefined ? warnings : [...warnings, message],
-      results,
-      summary: summarize(results),
+      results: entries,
+      summary: summarize(entries),
       isolation: isolationField,
       ...(setupLogPaths.length > 0 ? { dryRunLogPaths: setupLogPaths } : {}),
     };
@@ -2582,351 +2896,94 @@ export async function probePlan(
         `plan.mutants[${String(item.index)}] uses "patch", which cannot be combined with --allow-outside`,
       );
     }
-  }
-
-  // `worktree` needs a real git work tree to branch a worktree off of;
-  // outside one there is nothing to isolate into, so the mode falls back
-  // to `inplace` (named in a warning) instead of failing outright.
-  let effectiveIsolation = opts.isolation;
-  if (effectiveIsolation === "worktree" && gitRoot === undefined) {
-    effectiveIsolation = "inplace";
-    warnings.push(
-      "not inside a git work tree; falling back to --isolation inplace",
-    );
-  }
-  isolationField.mode = effectiveIsolation;
-  if (effectiveIsolation === "worktree" && opts.allowOutside) {
-    return refuse(
-      "usage_error",
-      "worktree_allow_outside_unsupported",
-      "--isolation worktree cannot be combined with --allow-outside",
-    );
-  }
-
-  for (const item of planned) {
-    if (item.spec.form !== "patch") continue;
-    const unusable = patchUnusableReason(
-      item.spec.patchPath ?? "",
-      `plan.mutants[${String(item.index)}].patch`,
-    );
-    if (unusable !== undefined) {
-      return refuse("usage_error", "patch_not_readable", unusable);
-    }
-  }
-
-  // Containment for EVERY file of the plan (and every `--link`) up
-  // front: one file outside the root refuses the whole plan rather than
-  // being discovered halfway through, with earlier mutants already run.
-  if (!opts.allowOutside) {
-    const outside = [
-      ...planned.map((item) => ({
-        display: item.displayFile,
-        real: item.absFile,
-      })),
-      ...displayLinks.map((display, i) => ({ display, real: absLinks[i] })),
-    ].filter((p) => !isPathContained(realRoot, p.real));
-    if (outside.length > 0) {
-      return refuse(
-        "usage_error",
-        "file_outside_root",
-        `outside the containment root (${root}): ${[
-          ...new Set(outside.map((p) => p.display)),
-        ].join(", ")}`,
+    if (item.spec.form === "patch") {
+      // Metadata only, the same check the single probe makes for `-p`
+      // before anything hands the patch to `git apply`: an unusable
+      // patch is a caller error naming the entry it belongs to, not a
+      // mutant that turns out not to be applicable halfway through the
+      // plan.
+      const unusable = patchUnusableReason(
+        item.spec.patchPath ?? "",
+        `plan.mutants[${String(item.index)}].patch`,
       );
+      if (unusable !== undefined) {
+        return refuse("usage_error", "patch_not_readable", unusable);
+      }
     }
   }
 
-  // The lock is keyed on the repository whenever there is one, exactly
-  // as the single probe keys it: two probes on the same repository are
-  // never independent, whatever their target files. Outside a
-  // repository there is no shared tree and each target file is its own
-  // identity, so a plan takes one lock per distinct target -- the same
-  // identities a single probe on each of those files would take, so a
-  // plan and a single probe still exclude each other there. Acquisition
-  // never queues (a held lock is refused outright), so taking several
-  // cannot deadlock; a refusal releases whatever this call already took.
-  const lockIdentities =
-    gitRoot !== undefined
-      ? [realRoot]
-      : [...new Set(planned.map((item) => item.absFile))].sort();
-  const acquired: (() => void)[] = [];
-  const releaseLocks = (): void => {
-    for (const release of acquired) release();
-  };
-  for (const identity of lockIdentities) {
-    const lockResult = acquireLock(identity);
-    if (!lockResult.ok) {
-      releaseLocks();
-      return refuse(
-        "inconclusive",
-        lockResult.reason,
-        lockResult.reason === "lock_unavailable"
-          ? lockResult.detail
-          : undefined,
-      );
-    }
-    acquired.push(lockResult.release);
-  }
-
-  let wtSession: WorktreeSyncSuccess | undefined;
   let baseline: ExecPhaseField | undefined;
-  const controller = createRunController({
-    realRoot,
-    logDir: opts.logDir,
-    wtScratchRoot,
-    exitOnSignal: opts.exitOnSignal ?? false,
-    releaseLock: releaseLocks,
-    warnings,
-  });
-  const { execController, track, crashHandlers, cleanupWtSession } = controller;
-  const exitOnSignalFlag = opts.exitOnSignal ?? false;
+  // The locks and the run controller, handed over by `openRunSetup` the
+  // moment they exist: from then on this function's own `finally` owns
+  // the teardown, however the setup ends.
+  let context: RunSetupContext | undefined;
   let caughtError: unknown;
 
   try {
-    // Stale in-flight markers, one per distinct target: the same
-    // hash-based recovery the single probe runs, refusing the whole plan
-    // when any target's marker cannot be recovered.
-    const distinct = new Map<
-      string,
-      { displayFile: string; absFile: string }
-    >();
-    for (const item of planned) {
-      if (!distinct.has(item.absFile)) {
-        distinct.set(item.absFile, {
-          displayFile: item.displayFile,
-          absFile: item.absFile,
-        });
-      }
-    }
-    for (const entry of distinct.values()) {
-      const stale = await recoverTargetMarker(
-        entry.displayFile,
-        entry.absFile,
-        warnings,
-      );
-      if (stale) {
-        return refuse("inconclusive", stale.reason, stale.warning);
-      }
-      if (!fs.existsSync(entry.displayFile)) {
-        return refuse(
-          "usage_error",
-          "file_not_found",
-          `plan file not found: ${entry.displayFile}`,
-        );
-      }
-    }
-
-    if (effectiveIsolation === "worktree") {
-      const prepared = await prepareWorktreeSession({
-        root,
-        cwd,
-        realRoot,
-        logDir: opts.logDir,
-        wtScratchRoot,
-        absLinks,
-        controller,
-        warnings,
-      });
-      if (!prepared.ok) {
-        if (prepared.fromSync) {
-          if (prepared.reason === "aborted") {
-            // The signal handler owns the cleanup and the exit from here
-            // (in CLI mode this call never returns); racing it with this
-            // path's own cleanup-and-return would print an envelope for
-            // a run the handler is about to end with no output at all.
-            await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
-          }
-          await cleanupWtSession();
-        }
-        const results = allNotRun();
-        return {
-          status: "inconclusive",
-          reason: prepared.reason,
-          warnings: [...warnings, ...prepared.warnings],
-          results,
-          summary: summarize(results),
-          isolation: isolationField,
-          ...(prepared.logPaths !== undefined
-            ? { dryRunLogPaths: prepared.logPaths }
-            : {}),
-        };
-      }
-      wtSession = prepared.session;
-      isolationField.path = wtSession.worktreePath;
-      isolationField.linked = wtSession.linked;
-      isolationField.syncedTrackedFiles = wtSession.syncedTrackedFiles;
-      isolationField.syncedUntrackedFiles = wtSession.syncedUntrackedFiles;
-      setupLogPaths = wtSession.logPaths;
-    }
-
-    const rt: MutantRuntime = {
+    const setup = await openRunSetup({
+      cwd,
       root,
+      gitRoot,
+      realRoot,
       logDir: opts.logDir,
-      applyRoot: wtSession !== undefined ? wtSession.worktreePath : root,
-      execEnv: {
-        cwd: wtSession !== undefined ? wtSession.mappedCwd : cwd,
-        logDir: opts.logDir,
-        timeoutMs: opts.timeoutMs,
-        signal: execController.signal,
-      },
+      wtScratchRoot,
+      isolation: opts.isolation,
+      allowOutside: opts.allowOutside ?? false,
+      displayLinks,
+      absLinks,
+      timeoutMs: opts.timeoutMs,
       gitApplyTimeoutMs,
-      effectiveIsolation,
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
-      signal: execController.signal,
-      track,
-      crashHandlers,
-      exitOnSignal: exitOnSignalFlag,
-      setRestoreState: controller.setRestoreState,
-    };
-
-    // Every target is backed up (and each backup verified by hash)
-    // BEFORE the baseline runs, the same ordering the single probe
-    // keeps: a baseline command that rewrites a target must never be
-    // what a backup captured. One session per distinct file, reused by
-    // every mutant that targets it -- the file is restored to that same
-    // pre-mutation content between mutants, so one backup stays valid
-    // for all of them.
-    const targets = new Map<string, TargetSession>();
-    for (const entry of distinct.values()) {
-      const mutationFilePath =
-        wtSession !== undefined
-          ? path.join(
-              wtSession.worktreePath,
-              path.relative(root, entry.displayFile),
-            )
-          : entry.displayFile;
-      // A gitignored target is neither tracked nor an untracked,
-      // non-ignored file, so under `worktree` it was simply never
-      // synced; named by a typed reason instead of surfacing as a raw
-      // ENOENT several frames later.
-      if (wtSession !== undefined && !fs.existsSync(mutationFilePath)) {
-        return refuse(
-          "inconclusive",
-          "target_not_synced",
-          `${entry.displayFile} was not synced into the worktree; it is ` +
-            `neither a tracked file nor an untracked, non-ignored one, so a ` +
-            `gitignored target cannot be probed under --isolation worktree`,
-        );
-      }
-      const preHash = await sha256File(entry.displayFile);
-      const opened = await openTarget(rt, {
-        displayFile: entry.displayFile,
-        absFile: entry.absFile,
-        mutationFilePath,
-        preHash,
-        originalContent: fs.readFileSync(mutationFilePath, "utf8"),
-      });
-      if (!opened.ok) {
-        return refuse(
-          "inconclusive",
-          "backup_verification_failed",
-          opened.warning,
-        );
-      }
-      targets.set(entry.absFile, opened.target);
-    }
-    // Nothing is mutated until the first mutant is applied, so nothing
-    // is in flight for the handler to restore; `runMutantAttempt` arms
-    // the slot per mutant from here on.
-    controller.setRestoreState(null);
-
-    // (2) baseline: unmutated, must exit 0. Once per plan (I1).
-    const baselineStart = Date.now();
-    const baselineRun = await runPreThenTest(opts, rt.execEnv, track);
-    if (!baselineRun.ok) {
-      noteIncompleteOutput(warnings, "baseline --pre", baselineRun.pre);
-      const preAborted = baselineRun.pre.aborted;
-      if (preAborted) {
-        await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
-      }
-      for (const target of targets.values()) target.discardBackup();
-      return refuse(
-        "inconclusive",
-        preAborted ? "aborted" : "pre_failed",
-        preAborted
-          ? `--pre was aborted during the baseline run; see ${baselineRun.pre.logPath}`
-          : `--pre exited ${baselineRun.pre.exitCode} during the baseline run; see ${baselineRun.pre.logPath}`,
-      );
-    }
-    const baselineTest = baselineRun.test;
-    noteIncompleteOutput(warnings, "baseline", baselineTest);
-    baseline = {
-      exitCode: baselineTest.exitCode,
-      durationMs: Date.now() - baselineStart,
-      logPath: baselineTest.logPath,
-      timedOut: baselineTest.timedOut,
-    };
-    // A baseline that failed (or was stopped) ends the plan with no
-    // mutant applied at all: every target is still at its pre-baseline
-    // hash unless the baseline itself rewrote it, and a backup whose
-    // target the baseline rewrote is kept rather than discarded, so the
-    // pre-baseline content survives.
-    if (baselineTest.exitCode !== 0 || baselineTest.aborted) {
-      if (baselineTest.aborted) {
-        await deferToHandlerIfActive(crashHandlers, exitOnSignalFlag);
-      }
-      for (const target of targets.values()) {
-        const postHash = await sha256File(target.mutationFilePath).catch(
-          () => undefined,
-        );
-        if (postHash === target.preHash) {
-          target.discardBackup();
-        } else {
-          warnings.push(
-            `the failing baseline run also rewrote ${target.displayFile}; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at ${target.session.backupPath}`,
-          );
-        }
-      }
-      controller.setRestoreState(null);
-      if (baselineTest.aborted) {
-        warnings.push(
-          `the baseline run was aborted; see ${baselineTest.logPath}`,
-        );
-      }
-      const results = allNotRun();
+      exitOnSignal: opts.exitOnSignal ?? false,
+      warnings,
+      isolationField,
+      targets: planned.map((item) => ({
+        displayFile: item.displayFile,
+        absFile: item.absFile,
+        label: `plan.mutants[${String(item.index)}].file`,
+        subject: item.displayFile,
+      })),
+      priorLogPaths: [],
+      // Every refusal a plan makes before anything runs is a usage
+      // error, this one included (AC9); the single probe reports the
+      // same finding as `inconclusive`.
+      outsideRootStatus: "usage_error",
+      onContext: (runContext) => {
+        context = runContext;
+      },
+      // No `beforeBaseline`: a plan computes each mutant inside the loop
+      // below, right before it is applied.
+    });
+    if (!setup.ok) {
+      const { refusal } = setup;
+      if (refusal.logPaths !== undefined) setupLogPaths = refusal.logPaths;
+      const results = resultsSoFar();
       return {
-        status: "inconclusive",
-        reason: baselineTest.aborted ? "aborted" : "baseline_failed",
-        warnings,
-        baseline,
+        status: refusal.status,
+        reason: refusal.reason,
+        warnings: refusal.warnings,
+        ...(refusal.baseline !== undefined
+          ? { baseline: refusal.baseline }
+          : {}),
         results,
         summary: summarize(results),
         isolation: isolationField,
-        dryRunLogPaths: setupLogPaths,
+        ...(setupLogPaths.length > 0 ? { dryRunLogPaths: setupLogPaths } : {}),
       };
     }
-
-    // The baseline's own commands are the only thing that has touched
-    // the filesystem since the backups were taken: a target the baseline
-    // rewrote is left exactly as the baseline wrote it, and no mutant is
-    // applied on top of it.
-    for (const target of targets.values()) {
-      const postBaselineHash = await sha256File(target.mutationFilePath).catch(
-        () => undefined,
-      );
-      if (postBaselineHash !== target.preHash) {
-        const results = allNotRun();
-        return {
-          status: "inconclusive",
-          reason: "target_changed_during_baseline",
-          warnings: [
-            ...warnings,
-            `${target.displayFile} changed during the baseline run (before any mutation was applied); the target is left as the baseline run wrote it, not restored`,
-          ],
-          baseline,
-          results,
-          summary: summarize(results),
-          isolation: isolationField,
-          dryRunLogPaths: setupLogPaths,
-        };
-      }
-    }
+    const { rt } = setup.run;
+    baseline = setup.run.baseline;
+    setupLogPaths = setup.run.logPaths;
+    // Keyed by the resolved path every planned mutant carries, so the
+    // mutants that share a file share one backup and one restore.
+    const targets = new Map<string, TargetSession>(
+      setup.run.targets.map((target) => [target.absFile, target]),
+    );
 
     // One mutant at a time, never in parallel: each is applied against a
     // target proven to be back at its pre-mutation content, tested, and
     // restored before the next one is even computed.
-    const results: PlanMutantResult[] = [];
     let terminal: string | undefined;
     for (const item of planned) {
       if (terminal !== undefined) {
@@ -2944,6 +3001,11 @@ export async function probePlan(
         continue;
       }
       const mutantWarnings: string[] = [];
+      // From here until this mutant's result is pushed, an unexpected
+      // error unwinding the stack lands in `finally` with this mutant
+      // applied: the emergency-restore path reports THIS entry rather
+      // than calling it `not_run`.
+      inFlight = { item, warnings: mutantWarnings, logs: [] };
       // I2, checked from the applying side: the previous mutant's
       // restore was verified when it ran, and the target is verified to
       // be back at its pre-mutation content here, before this mutant is
@@ -2966,6 +3028,7 @@ export async function probePlan(
           ],
           logs: [],
         });
+        inFlight = undefined;
         continue;
       }
       const prepared = await prepareMutant(
@@ -2977,7 +3040,7 @@ export async function probePlan(
       if (!prepared.ok) {
         // Nothing was applied, so this mutant is inconclusive on its own
         // and the plan continues -- unless the run itself was stopped.
-        if (prepared.reason === "aborted" || crashHandlers.isHandling()) {
+        if (prepared.reason === "aborted" || rt.crashHandlers.isHandling()) {
           terminal = "aborted";
         }
         results.push({
@@ -2989,8 +3052,19 @@ export async function probePlan(
           warnings: mutantWarnings,
           logs: prepared.logPaths,
         });
+        inFlight = undefined;
         continue;
       }
+      // The evidence the emergency-restore path needs to report this
+      // mutant honestly: it is applied from here on.
+      inFlight = {
+        item,
+        warnings: mutantWarnings,
+        logs: prepared.logPaths,
+        mutant: prepared.mutant,
+        mutantSummary: prepared.mutantSummary,
+        verifiedAppliedVia: prepared.verifiedAppliedVia,
+      };
       const outcome = await runMutantAttempt(
         rt,
         target,
@@ -3018,12 +3092,13 @@ export async function probePlan(
         ...(outcome.test !== undefined ? { test: outcome.test } : {}),
         logs: outcome.logPaths,
       });
+      inFlight = undefined;
       // I3: a restore that could not be verified is terminal for the
       // plan. I5: so is a signal, whether this mutant's own phase
       // reported the abort or the handler is only just acting on it --
       // the next mutant must never start.
       if (outcome.restoreFailed) terminal = "restore_failed";
-      else if (outcome.aborted || crashHandlers.isHandling()) {
+      else if (outcome.aborted || rt.crashHandlers.isHandling()) {
         terminal = "aborted";
       }
     }
@@ -3061,15 +3136,18 @@ export async function probePlan(
     throw err;
   } finally {
     let emergencyResult: ProbePlanResult | undefined;
-    const inFlightRestore = controller.getRestoreState();
-    if (inFlightRestore) {
+    // No context means the setup refused (or threw) before it took a
+    // lock: nothing was opened, nothing is in flight, and there is
+    // nothing to tear down.
+    const inFlightRestore = context?.controller.getRestoreState();
+    if (context !== undefined && inFlightRestore) {
       // Reached only when something unwound the stack (a thrown error)
       // while a mutation was still in flight and never went through one
       // of the explicit restore points above: no path out of this
       // function may leave a target mutated, whether it returns or
       // throws.
       const state = inFlightRestore;
-      controller.setRestoreState(null);
+      context.controller.setRestoreState(null);
       let restored = false;
       try {
         restored = state.restore();
@@ -3090,7 +3168,37 @@ export async function probePlan(
             : caughtError !== undefined
               ? String(caughtError)
               : undefined;
-        const results = allNotRun();
+        // The verdicts already collected are reported as they stand,
+        // and the mutant that was in flight as what it is: applied, its
+        // restore unverified. Only the mutants this plan never reached
+        // are `not_run`.
+        const entries = resultsSoFar(
+          inFlight === undefined
+            ? undefined
+            : {
+                index: inFlight.item.index,
+                file: inFlight.item.displayFile,
+                expect: inFlight.item.spec.expect,
+                status: "inconclusive",
+                reason: "restore_failed",
+                warnings: inFlight.warnings,
+                ...(inFlight.mutant !== undefined
+                  ? { mutant: inFlight.mutant }
+                  : {}),
+                ...(inFlight.mutantSummary !== undefined &&
+                inFlight.verifiedAppliedVia !== undefined
+                  ? {
+                      mutation_probe: {
+                        mutant: inFlight.mutantSummary,
+                        verified_applied_via: inFlight.verifiedAppliedVia,
+                        result: "inconclusive" as const,
+                        restored_verified: false,
+                      },
+                    }
+                  : {}),
+                logs: inFlight.logs,
+              },
+        );
         emergencyResult = {
           status: "inconclusive",
           reason: "restore_failed",
@@ -3101,18 +3209,23 @@ export async function probePlan(
             }; the original content is preserved at backup path ${state.backupPath}`,
           ],
           ...(baseline ? { baseline } : {}),
-          results,
-          summary: summarize(results),
+          results: entries,
+          summary: summarize(entries),
           isolation: isolationField,
+          ...(setupLogPaths.length > 0
+            ? { dryRunLogPaths: setupLogPaths }
+            : {}),
         };
       }
     }
     // Once per plan (I4), before the locks are released, so a concurrent
     // probe never observes the lock as free while this run's worktree
     // removal is still in flight.
-    await cleanupWtSession();
-    crashHandlers.remove();
-    releaseLocks();
+    if (context !== undefined) {
+      await context.controller.cleanupWtSession();
+      context.controller.crashHandlers.remove();
+      context.releaseLocks();
+    }
     if (emergencyResult) return emergencyResult;
   }
 }

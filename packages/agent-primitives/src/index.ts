@@ -73,7 +73,7 @@ export type {
   ProbeStatus,
   TestPhaseField,
 } from "./probe/index.js";
-export { parsePlanFile, validatePlan, PLAN_MAX_BYTES } from "./probe/plan.js";
+export { parsePlanFile, PLAN_MAX_BYTES } from "./probe/plan.js";
 export type {
   PlanMutantSpec,
   PlanParseResult,
