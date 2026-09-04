@@ -33,7 +33,6 @@ import {
   applyPatchForReal,
   computeMutant,
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
-  deriveLineFromPatch,
   formatMutantSummary,
   formatVerifiedAppliedVia,
   listPatchTouchedPaths,
@@ -51,9 +50,12 @@ export interface ProbeOptions {
    * patch touches (`git apply --numstat`), resolved against the
    * containment root. Every other form still requires it. */
   file?: string;
-  /** 1-indexed line number. Optional only for `form: "patch"`: when
-   * omitted, derived from the patch's first hunk header. Every other
-   * form still requires it. */
+  /** 1-indexed line number of the line to mutate. Required for every
+   * form except `patch`, whose line is decided by the patch itself: the
+   * reported `mutant.line` is always the first line the applied diff
+   * changes, and a `line` passed alongside `form: "patch"` is neither
+   * used nor echoed -- when it names a different line, that disagreement
+   * is reported as a warning. */
   line?: number;
   form: MutantForm;
   replaceText?: string;
@@ -573,54 +575,52 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   // on how long it may run.
   const gitApplyTimeoutMs = opts.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS;
 
-  // `-p/--patch` derives `--file` (from the single path `git apply
+  // `-p/--patch` derives `--file` from the single path `git apply
   // --numstat` reports the patch touches, resolved against the
   // containment root -- `root`, never `cwd`, since they differ when
   // `--cwd` is a subdirectory of the repository, and never the patch
   // file's own directory, since a patch is portable and carries no base
-  // directory of its own) and, independently, `-n`/`--line` (from the
-  // patch's first hunk header) whenever either is omitted. The two are
-  // independent: `-n` is derived from the patch's own content regardless
-  // of whether `--file` was given explicitly or derived here, since the
-  // hunk header does not depend on which of the patch's paths is the
-  // mutation target. `--file` derivation has to run before the
-  // containment check below, which needs `displayFile`. Two or more
-  // touched paths without an explicit `--file` is ambiguous and refused
-  // outright, rather than guessed at: the caller has to say which one is
-  // the mutation target.
+  // directory of its own. It has to run before the containment check
+  // below, which needs `displayFile`. Two or more touched paths without
+  // an explicit `--file` is ambiguous and refused outright, rather than
+  // guessed at: the caller has to say which one is the mutation target.
+  //
+  // `-n/--line` is NOT derived here, and for the `patch` form it is not
+  // required at all: the line a patch changes is whatever the applied
+  // diff changed, which the dry run below reports back as
+  // `computed.line`. Nothing between here and there needs it.
   let displayFile: string;
-  let line = opts.line;
+  const line = opts.line;
   let derivationLogPaths: string[] = [];
-  // Read (not just stat) the patch once here, before either derivation
-  // below touches it: an unreadable `-p/--patch` (missing, a directory,
-  // unreadable permissions) is a caller usage error, not something for
-  // `git apply --numstat` to diagnose. Without this upfront read, a bad
-  // `-p` given without `--file` fell into the `--file` derivation's own
-  // `git apply --numstat` failure below and came back as
+  // Check the `-p/--patch` path once here, before anything else looks
+  // at it: an unusable `-p` (missing, a directory or another
+  // non-regular file, unreadable permissions, or larger than this
+  // package accepts) is a caller usage error, not something for `git
+  // apply --numstat` to diagnose. Without this check, a bad `-p` given
+  // without `--file` fell into the `--file` derivation's own `git apply
+  // --numstat` failure below and came back as
   // `inconclusive`/`mutant_not_applicable` ("failed to parse the
   // patch") -- a diagnosis that points at the patch's *content*, not at
-  // the path itself being wrong. Doing this once, ahead of both the
-  // `--file` numstat listing and the `-n` hunk-header derivation
-  // further down, means every path that needs the patch's bytes --
-  // `--file` derivation, `-n` derivation, and an explicit `--file`
-  // paired with a bad `-p` -- shares the same `patch_not_readable`
-  // diagnosis instead of three different ones. The content read here is
-  // reused for the `-n` derivation below rather than read a second time.
+  // the path itself being wrong. Doing it once, ahead of the numstat
+  // listing (and ahead of the lock, the in-flight marker and any
+  // worktree, so a refusal here leaves nothing behind), means every
+  // path that hands this patch to `git apply` -- `--file` derivation,
+  // the dry run, the real apply -- shares the same `patch_not_readable`
+  // diagnosis instead of several different ones.
   //
-  // `fs.statSync` runs first (and, unlike `fs.readFileSync`, cannot
-  // block: querying a FIFO's metadata does not open it for reading) so
-  // a `-p` that is not a regular file -- a FIFO or a socket someone
-  // handed this option, most concretely -- is refused before anything
-  // tries to read its bytes; an unbounded `readFileSync` on a FIFO with
-  // no writer blocks forever (measured: it outlives `SIGTERM` and needs
-  // `SIGKILL`). This deliberately follows symlinks (same as
-  // `fs.readFileSync` below, and same as `fs.lstatSync` would not), so
-  // a symlink to a regular file is accepted and a symlink to a FIFO or
-  // directory is still rejected by what it resolves to. The size check
-  // below runs before the read for the same reason: `PATCH_MAX_BYTES`
-  // (`mutant.js`) is this package's bound on how much of any one `-p`
-  // file it will hold in memory at once.
-  let readPatchContent: string | undefined;
+  // Every check here is metadata-only: nothing in this process opens
+  // the patch or reads its bytes (`git apply` streams it in a child of
+  // its own). That is deliberate. `fs.statSync` cannot block --
+  // querying a FIFO's metadata does not open it -- while an unbounded
+  // read of a writer-less FIFO blocks forever (measured: it outlives
+  // `SIGTERM` and needs `SIGKILL`), so a FIFO or socket handed to `-p`
+  // is refused by `isFile()` before anything can wait on it, and an
+  // oversized file is refused by its recorded size without being
+  // loaded. `statSync` and `accessSync` both follow symlinks (unlike
+  // `lstatSync`), so a symlink to a regular readable file is accepted
+  // and a symlink to a FIFO or a directory is still rejected by what it
+  // resolves to. `accessSync(R_OK)` is what catches a patch whose
+  // permissions deny reading, which a `stat` alone cannot see.
   if (opts.form === "patch") {
     const absPatchPathForRead = path.resolve(opts.patchPath ?? "");
     let patchStat: fs.Stats;
@@ -661,7 +661,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       };
     }
     try {
-      readPatchContent = fs.readFileSync(absPatchPathForRead, "utf8");
+      fs.accessSync(absPatchPathForRead, fs.constants.R_OK);
     } catch {
       return {
         status: "usage_error",
@@ -717,26 +717,9 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       isolation: isolationField,
     };
   }
-  if (line === undefined && opts.form === "patch") {
-    // readPatchContent is always set here: this branch only runs for
-    // `opts.form === "patch"`, which is exactly the condition under
-    // which the upfront read above ran (and returned early on failure).
-    const patchContent = readPatchContent as string;
-    line = deriveLineFromPatch(patchContent);
-    if (line === undefined) {
-      return {
-        status: "inconclusive",
-        reason: "mutant_not_applicable",
-        warnings: [
-          ...warnings,
-          "-p/--patch has no hunk header to derive -n from; pass -n explicitly",
-        ],
-        isolation: isolationField,
-        dryRunLogPaths: derivationLogPaths,
-      };
-    }
-  }
-  if (line === undefined) {
+  // `patch` is exempt: its line comes from the applied diff, so there is
+  // nothing for the caller to be required to supply.
+  if (line === undefined && opts.form !== "patch") {
     return {
       status: "usage_error",
       reason: "line_required",
@@ -1430,6 +1413,8 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     const mutantSpec: MutantSpec = {
       form: opts.form,
       file: displayFile,
+      // `undefined` only ever reaches here for the `patch` form, which
+      // ignores it; every other form was refused above without one.
       line,
       replaceText: opts.replaceText,
       matchText: opts.matchText,
@@ -1484,22 +1469,39 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       };
     }
 
+    // `computed.line` -- never the caller's `-n` -- is what every piece
+    // of reported evidence uses, so the line number and the `before`
+    // content quoted beside it always come from the same comparison and
+    // can never name different lines. For `replace`/`match` it IS the
+    // caller's `-n` (that is the line those forms mutate); for `patch`
+    // it is the first line the applied diff changed, which the caller
+    // has no say over. An `-n` passed with `-p` anyway is neither used
+    // nor silently swallowed: when it names a different line, both
+    // numbers go into a warning, so a caller who expected the probe to
+    // target their line finds out rather than reading their own number
+    // back from the result.
+    if (opts.form === "patch" && line !== undefined && line !== computed.line) {
+      warnings.push(
+        `-n ${String(line)} differs from the patch's first changed line ` +
+          `${String(computed.line)}; mutant.line reports ${String(computed.line)}`,
+      );
+    }
     mutantField = {
       file: displayFile,
-      line,
+      line: computed.line,
       before: computed.before,
       after: computed.after,
       form: opts.form,
     };
     mutantSummary = formatMutantSummary(
       displayFile,
-      line,
+      computed.line,
       computed.before,
       computed.after,
     );
     verifiedAppliedVia = formatVerifiedAppliedVia(
       displayFile,
-      line,
+      computed.line,
       computed.before,
       computed.after,
     );

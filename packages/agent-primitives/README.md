@@ -281,24 +281,30 @@ agent-primitives verify -c build,typecheck,lint,test
 agent-primitives doctor
 ```
 
-The third form derives `--file` and `-n` from the patch itself when it
-touches exactly one path: `--file` from that path (resolved against the
-containment root), `-n` from the first hunk's first changed (`+`/`-`)
-line -- the header's own new-file start (`@@ -a,b +c,d @@` -> `c`) plus
-however many leading unchanged (` `-prefixed, or blank) context lines
-come before it, since `c` itself is only the changed line when the hunk
-has no leading context. A patch touching two or more paths without an
-explicit `--file` is `status: "usage_error"`,
-`reason: "patch_file_ambiguous"`, exit `2`, naming the touched paths in
-a warning; pass `--file` naming the one to mutate to resolve it (the
-extra-path refusal below then applies as it always has). A patch with
-no hunk header and no explicit `-n` is `status: "inconclusive"`,
-`reason: "mutant_not_applicable"`; `-p, --patch` naming a path that
-cannot be read at all (missing, not a regular file -- a directory, a
-FIFO, a socket -- unreadable permissions, or over the 8&nbsp;MiB
-`PATCH_MAX_BYTES` cap this package reads a patch's bytes up to) is
+The third form needs neither `--file` nor `-n`. `--file` is derived from
+the single path the patch touches (resolved against the containment
+root) when the patch touches exactly one. `-n` is not derived at all:
+the reported `mutant.line` is the first line at which the patch's
+applied result differs from the original, taken from the dry run itself,
+so the line number and the `before` content quoted beside it always name
+the same line -- whatever the diff's shape (leading context or none, a
+removed `---`, an added `++`, a pure deletion, several hunks). Passing
+`-n` alongside `-p` neither moves the mutation nor changes what is
+reported; when it names a different line than the patch changes, both
+numbers appear in a warning.
+
+A patch touching two or more paths without an explicit `--file` is
+`status: "usage_error"`, `reason: "patch_file_ambiguous"`, exit `2`,
+naming the touched paths in a warning; pass `--file` naming the one to
+mutate to resolve it (the extra-path refusal below then applies as it
+always has). `-p, --patch` naming a path that cannot be used at all
+(missing, not a regular file -- a directory, a FIFO, a socket --
+unreadable permissions, or over the 8&nbsp;MiB `PATCH_MAX_BYTES` cap) is
 `status: "usage_error"`, `reason: "patch_not_readable"`, exit `2`,
-whether or not `--file`/`-n` were also given.
+whether or not `--file`/`-n` were also given. A patch that changes no
+content at all (a rename-only patch, say) has nothing for a mutation
+probe to mutate: its derived `--file` is the rename's destination, which
+does not exist yet, so it ends in `reason: "file_not_found"`.
 
 A patch made with `git diff --relative` from a subdirectory records
 paths relative to that subdirectory, not the repository root; the
@@ -473,8 +479,7 @@ substring on the line), or `-p, --patch` (apply a unified diff via
 `git apply`, applied against the worktree for `-i worktree`, against
 the working tree itself for `-i inplace`). `--file` and `-n, --line`
 are required for `-r` and for `-M`/`-w`, which have nothing to derive
-them from; `-p` alone can omit either or both, deriving them from the
-patch as described above.
+them from; `-p` alone needs neither, as described above.
 
 The dist trap: a project whose test command runs built output
 (`dist/`, `lib/`, ...) rather than `--file` itself needs `--pre` to
@@ -658,13 +663,16 @@ relative paths could otherwise escape the scratch directory used for its
 dry run. `-p` touching two or more paths with no explicit `--file` to
 say which one is the target is `status: "usage_error"`,
 `reason: "patch_file_ambiguous"`, exit `2`. `-p, --patch` naming a path
-that cannot be read (missing, not a regular file -- a directory, a
+that cannot be used (missing, not a regular file -- a directory, a
 FIFO, a socket -- unreadable permissions, or larger than the 8&nbsp;MiB
 `PATCH_MAX_BYTES` cap) is `status: "usage_error"`,
-`reason: "patch_not_readable"`, exit `2`, checked once up front (a
-`stat` before any read, so a FIFO is never opened and a large file is
-never loaded) so it applies the same whether `--file`/`-n` were given
-explicitly or are themselves derived from the patch.
+`reason: "patch_not_readable"`, exit `2`, decided once up front from the
+path's metadata alone (a `stat` for the kind of file and its size, an
+access check for the permissions; nothing in this process ever opens the
+patch, so a FIFO cannot block it and a large file is never loaded) and
+before the containment check, the lock, the in-flight marker or any
+worktree, so a refusal leaves nothing behind and applies the same
+whether `--file` was given explicitly or is derived from the patch.
 
 Output beside the envelope: `status` (`killed`, `survived`, or
 `inconclusive`), `reason` (when inconclusive), `mutant: { file, line,

@@ -7,7 +7,6 @@ import {
   applyPatchForReal,
   computeMutant,
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
-  deriveLineFromPatch,
   formatMutantSummary,
   formatVerifiedAppliedVia,
   listPatchTouchedPaths,
@@ -200,7 +199,7 @@ describe("computeMutant: patch form", () => {
       ].join("\n") + "\n",
     );
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(result.applicable).toBe(true);
@@ -228,7 +227,7 @@ describe("computeMutant: patch form", () => {
       ].join("\n") + "\n",
     );
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(result.applicable).toBe(false);
@@ -262,7 +261,7 @@ describe("computeMutant: patch form", () => {
       ].join("\n") + "\n",
     );
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(result.applicable).toBe(false);
@@ -291,7 +290,7 @@ describe("computeMutant: patch form", () => {
       ].join("\n") + "\n",
     );
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(result.applicable).toBe(true);
@@ -299,6 +298,96 @@ describe("computeMutant: patch form", () => {
     for (const logPath of result.logPaths) {
       expect(fs.existsSync(logPath)).toBe(true);
     }
+  });
+});
+
+describe("computeMutant: the reported line", () => {
+  it("replace form reports the line it was asked to mutate", async () => {
+    const result = await computeMutant(
+      {
+        form: "replace",
+        file: "/x/fixture.js",
+        line: 2,
+        replaceText: "  return false;",
+      },
+      { root: "/x", logDir: makeTmpDir(), originalContent: ORIGINAL },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.line).toBe(2);
+    expect(ORIGINAL.split("\n")[result.line - 1]).toBe(result.before);
+  });
+
+  it("match form reports the line it was asked to mutate", async () => {
+    const result = await computeMutant(
+      {
+        form: "match",
+        file: "/x/fixture.js",
+        line: 2,
+        matchText: "n > 0",
+        withText: "false",
+      },
+      { root: "/x", logDir: makeTmpDir(), originalContent: ORIGINAL },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.line).toBe(2);
+    expect(ORIGINAL.split("\n")[result.line - 1]).toBe(result.before);
+  });
+
+  it("patch form reports the first line the applied diff changed, not the hunk header's own start line", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    // The hunk starts at line 1 and its first CHANGED line is line 2:
+    // a result reporting the header's start would say 1 here.
+    writeValidPatch(patchPath, relPath);
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.line).toBe(2);
+    expect(content.split("\n")[result.line - 1]).toBe(result.before);
+    expect(result.before).toBe("  return n > 0;");
+  });
+
+  it("patch form treats a change that only appends trailing whitespace as a real change on that line", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "trailing-space.patch");
+    // `git apply` warns about the added trailing whitespace and applies
+    // it anyway (exit 0). The comparison that decides `line`/`before`/
+    // `after` has to be exact: a trimmed comparison would see the two
+    // lines as equal, walk past them, find no other difference, and
+    // report this patch as one that "produced no content change".
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return n > 0; ",
+        " }",
+      ].join("\n") + "\n",
+    );
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.line).toBe(2);
+    expect(content.split("\n")[result.line - 1]).toBe(result.before);
+    expect(result.before).toBe("  return n > 0;");
+    expect(result.after).toBe("  return n > 0; ");
   });
 });
 
@@ -386,7 +475,7 @@ describe("computeMutant: a --numstat listing that did not fit", () => {
     });
 
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
 
@@ -425,7 +514,7 @@ describe("git apply invocations", () => {
 
     runner.mockClear();
     const computed = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(computed.applicable).toBe(true);
@@ -454,7 +543,7 @@ describe("git apply invocations", () => {
 
     runner.mockClear();
     await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     await applyPatchForReal(patchPath, root, makeTmpDir());
@@ -466,7 +555,7 @@ describe("git apply invocations", () => {
 
     runner.mockClear();
     await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       {
         root,
         logDir: makeTmpDir(),
@@ -491,7 +580,7 @@ describe("git apply invocations", () => {
 
     runner.mockClear();
     await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       {
         root,
         logDir: makeTmpDir(),
@@ -525,7 +614,7 @@ describe("git apply invocations", () => {
     });
 
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
 
@@ -534,234 +623,6 @@ describe("git apply invocations", () => {
     expect(result.reasonCode).toBe("git_apply_timeout");
     expect(result.reason).toContain("hit its timeout");
     expect(result.reason).not.toContain("failed to parse");
-  });
-});
-
-// Table-driven: each case names one shape of hunk body the small parser
-// in `deriveLineFromPatch` has to classify correctly. Redesigned in
-// round 4 (from a header regex plus a scan of raw split lines with
-// accumulated one-off rules) specifically so a new shape is one more
-// table row, not one more special case in the parser itself.
-interface DeriveLineCase {
-  name: string;
-  patch: string;
-  expected: number | undefined;
-}
-
-const deriveLineCases: DeriveLineCase[] = [
-  {
-    name: "3 leading context lines plus git's function-context header hint (@@ ... @@ <context>) -> header start (9) + 3 context = 12",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -9,7 +9,7 @@ const l8 = 8;",
-      " pad1",
-      " pad2",
-      " pad3",
-      "-old",
-      "+new",
-      " pad4",
-      " pad5",
-      "",
-    ].join("\n"),
-    expected: 12,
-  },
-  {
-    name: "0 leading context, first body line a '-' line -> header start unadjusted",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -12,7 +12,7 @@",
-      "-old",
-      "+new",
-      "",
-    ].join("\n"),
-    expected: 12,
-  },
-  {
-    name: "0 leading context, first body line a '+' line (pure-addition hunk) -> header start unadjusted",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -0,0 +1,2 @@",
-      "+new1",
-      "+new2",
-      "",
-    ].join("\n"),
-    expected: 1,
-  },
-  {
-    name: "'\\ No newline at end of file' marker between the header and the first changed line -> not counted as context",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -9,6 +9,6 @@",
-      " pad1",
-      " pad2",
-      "\\ No newline at end of file",
-      " pad3",
-      "-old",
-      "+new",
-      " pad4",
-      "",
-    ].join("\n"),
-    expected: 12,
-  },
-  {
-    name: "'\\ No newline at end of file' marker after the first changed line -> irrelevant, the scan already stopped",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -12,7 +12,7 @@",
-      "-old",
-      "+new",
-      "\\ No newline at end of file",
-      "",
-    ].join("\n"),
-    expected: 12,
-  },
-  {
-    name: "a whitespace-stripped blank context line inside the leading-context run -> still counted as context",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -9,6 +9,6 @@",
-      " pad1",
-      " pad2",
-      "",
-      "-old",
-      "+new",
-      " pad4",
-      "",
-    ].join("\n"),
-    expected: 12,
-  },
-  {
-    name: "header-only patch, no body at all -> the header's own start (not start + 1 for the trailing split element)",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -9,6 +9,6 @@",
-      "",
-    ].join("\n"),
-    expected: 9,
-  },
-  {
-    name: "truncated body (context lines only, no changed line ever reached) -> the header's own start, the accumulated context is discarded",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -9,6 +9,6 @@",
-      " pad1",
-      " pad2",
-      " pad3",
-      "",
-    ].join("\n"),
-    expected: 9,
-  },
-  {
-    name: "multi-hunk patch -> the first hunk decides, a later hunk's header is never reached",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -9,6 +9,6 @@",
-      " pad1",
-      "-old",
-      "+new",
-      "@@ -40,3 +40,4 @@",
-      " pad9",
-      "+another",
-      " pad10",
-      "",
-    ].join("\n"),
-    expected: 10,
-  },
-  {
-    name: "CRLF line endings throughout -> same result as the LF-terminated equivalent",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -9,6 +9,6 @@",
-      " pad1",
-      " pad2",
-      " pad3",
-      "-old",
-      "+new",
-      " pad4",
-      "",
-    ].join("\r\n"),
-    expected: 12,
-  },
-  {
-    name: "hunk header without the ,d length on either side (a single-line hunk), no leading context",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -1 +1 @@",
-      "-old",
-      "+new",
-      "",
-    ].join("\n"),
-    expected: 1,
-  },
-  {
-    name: "a body line that is itself the next hunk header, immediately after the first (an empty first-hunk body) -> the first header's own start",
-    patch: [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -9,6 +9,6 @@",
-      "@@ -40,3 +40,4 @@",
-      " pad9",
-      "+another",
-      "",
-    ].join("\n"),
-    expected: 9,
-  },
-  {
-    name: "no hunk header at all (a rename-only patch) -> undefined",
-    patch: [
-      "diff --git a/old.js b/new.js",
-      "similarity index 100%",
-      "rename from old.js",
-      "rename to new.js",
-      "",
-    ].join("\n"),
-    expected: undefined,
-  },
-  {
-    name: "empty patch -> undefined",
-    patch: "",
-    expected: undefined,
-  },
-];
-
-describe("deriveLineFromPatch", () => {
-  it.each(deriveLineCases)("$name", ({ patch, expected }) => {
-    expect(deriveLineFromPatch(patch)).toBe(expected);
   });
 });
 

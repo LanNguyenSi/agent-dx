@@ -116,6 +116,10 @@ function gitOutput(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
 
+// Permission bits mean nothing to root (it bypasses them), so the
+// unreadable-patch case below only discriminates as a non-root user.
+const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
 const FIXTURE_JS = [
   "function isPositive(n) {",
   "  return n > 0;",
@@ -158,6 +162,69 @@ function initRepo(): { repo: string } {
   git(repo, ["add", "-A"]);
   git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
   return { repo };
+}
+
+/**
+ * The invariant every `patch`-form result has to satisfy, whatever the
+ * shape of the diff: the line `mutant.line` names is the line
+ * `mutant.before` quotes. It is asserted against the target file's own
+ * pre-probe content, split on `"\n"` alone (never `/\r?\n/`) so a CRLF
+ * file's `\r` stays part of the line on both sides of the comparison,
+ * exactly as `probe` itself treats it.
+ *
+ * This is the class-level guard for the reported line: it holds no
+ * matter how the number is arrived at, so it stays a check on the
+ * result rather than on any one implementation of it. An off-by-one, a
+ * number read out of the patch text instead of the applied file, or a
+ * caller's `-n` echoed back over the real one all fail it.
+ */
+function expectLineQuotesBefore(
+  originalContent: string,
+  mutant: ProbeResult["mutant"],
+): void {
+  expect(mutant).toBeDefined();
+  if (!mutant) return;
+  expect(originalContent.split("\n")[mutant.line - 1]).toBe(mutant.before);
+}
+
+/** Writes `content` at `relPath` in `repo` and commits it, so the real
+ * `git diff` fixtures below have a committed base to diff against. */
+function commitFile(repo: string, relPath: string, content: string): void {
+  fs.writeFileSync(path.join(repo, relPath), content);
+  git(repo, ["add", "--", relPath]);
+  git(repo, [
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    `add ${relPath}`,
+  ]);
+}
+
+/**
+ * A patch produced by git itself rather than hand-written: edits the
+ * committed `relPath` to `edited`, captures `git diff` (git's own
+ * default 3 lines of context, its function-context hints, its
+ * `\ No newline` markers), then restores the working tree so the probe
+ * under test sees the original content. Returns the path the diff was
+ * written to.
+ *
+ * Hand-written hunks are what let earlier shapes go untested; every
+ * shape below comes out of git so the fixture cannot quietly disagree
+ * with what `git apply` will do to it.
+ */
+function realDiffPatch(repo: string, relPath: string, edited: string): string {
+  const abs = path.join(repo, relPath);
+  const original = fs.readFileSync(abs, "utf8");
+  fs.writeFileSync(abs, edited);
+  const diff = gitOutput(repo, ["diff", "--", relPath]);
+  git(repo, ["checkout", "--", relPath]);
+  expect(fs.readFileSync(abs, "utf8")).toBe(original);
+  expect(diff).not.toBe("");
+  const patchPath = path.join(makeTmpDir(), "real.patch");
+  fs.writeFileSync(patchPath, diff);
+  return patchPath;
 }
 
 function baseOptions(
@@ -1462,6 +1529,8 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
     );
 
     expect(result.status).toBe("killed");
+    expect(result.mutant?.line).toBe(2);
+    expectLineQuotesBefore(before, result.mutant);
     expect(result.mutation_probe?.restored_verified).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
@@ -1529,6 +1598,7 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
       line: 2,
       form: "patch",
     });
+    expectLineQuotesBefore(before, result.mutant);
     expect(result.mutation_probe?.restored_verified).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
@@ -1569,6 +1639,7 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
       line: 5,
       form: "patch",
     });
+    expectLineQuotesBefore(before, result.mutant);
     expect(result.mutation_probe?.mutant).toContain(fixtureLines[4].trim());
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
@@ -1607,6 +1678,8 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
 
     expect(result.isolation.mode).toBe("inplace");
     expect(result.status).toBe("killed");
+    expect(result.mutant?.line).toBe(2);
+    expectLineQuotesBefore(before, result.mutant);
     expect(result.mutation_probe?.restored_verified).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
@@ -1727,6 +1800,7 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
 
     expect(result.status).toBe("killed");
     expect(result.mutant?.file).toBe(path.join(repo, "fixture.js"));
+    expectLineQuotesBefore(before, result.mutant);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
@@ -1855,13 +1929,16 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
     );
   });
 
-  it("inconclusive/mutant_not_applicable when the patch has no hunk header to derive -n from", async () => {
+  it("usage_error/file_not_found, nothing renamed, for a rename-only patch with no content change", async () => {
     useLockDir();
     const { repo } = initRepo();
     const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
     const patchPath = path.join(makeTmpDir(), "no-hunk.patch");
-    // A rename-only patch: touches exactly one path (so derivation of
-    // --file succeeds) but has no `@@` hunk header to derive -n from.
+    // A rename-only patch touches exactly one path, so `--file`
+    // derivation succeeds -- `git apply --numstat` reports the rename's
+    // DESTINATION (`renamed.js`), which does not exist yet, and the
+    // probe stops there. There is nothing on such a patch for a mutation
+    // probe to mutate.
     fs.writeFileSync(
       patchPath,
       [
@@ -1883,11 +1960,10 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
       }),
     );
 
-    expect(result.status).toBe("inconclusive");
-    expect(result.reason).toBe("mutant_not_applicable");
-    expect(result.warnings.some((w) => w.includes("no hunk header"))).toBe(
-      true,
-    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("file_not_found");
+    expect(result.warnings.some((w) => w.includes("renamed.js"))).toBe(true);
+    expect(fs.existsSync(path.join(repo, "renamed.js"))).toBe(false);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
@@ -1945,6 +2021,45 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
   // ("cli: probe -p targeting a FIFO"), where the CLI is spawned as a
   // real subprocess and bounded with an external watchdog that can
   // kill it regardless of what its own event loop is doing.
+
+  it.skipIf(isRoot)(
+    "usage_error/patch_not_readable for a -p/--patch whose permissions deny reading (skipped as root, which bypasses them)",
+    async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+      const patchPath = path.join(makeTmpDir(), "unreadable.patch");
+      fs.writeFileSync(patchPath, "@@ -1 +1 @@\n-old\n+new\n");
+      // A regular file of an acceptable size: only an explicit access
+      // check can tell that its bytes are out of reach. Handed to `git
+      // apply` instead, this would come back as a patch that "failed to
+      // parse" -- a diagnosis about the patch's content, when the real
+      // problem is the path's permissions.
+      fs.chmodSync(patchPath, 0o000);
+
+      let result: ProbeResult;
+      try {
+        result = await probe(
+          baseOptions(repo, {
+            form: "patch",
+            replaceText: undefined,
+            patchPath,
+            file: undefined,
+            line: undefined,
+          }),
+        );
+      } finally {
+        fs.chmodSync(patchPath, 0o600);
+      }
+
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("patch_not_readable");
+      expect(result.warnings.some((w) => w.includes(patchPath))).toBe(true);
+      expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+        before,
+      );
+    },
+  );
 
   it("usage_error/patch_not_readable naming the size and the cap, for a -p/--patch over PATCH_MAX_BYTES", async () => {
     useLockDir();
@@ -2031,6 +2146,310 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
   });
 });
 
+/** 20 numbered lines, committed by the tests below so a real `git diff`
+ * against them carries git's default 3 lines of leading context and a
+ * hunk that does not start at line 1. */
+const LONG_JS =
+  Array.from(
+    { length: 20 },
+    (_, i) => `const l${String(i + 1)} = ${String(i + 1)};`,
+  ).join("\n") + "\n";
+
+describe("probe(): the line a -p patch reports is the line the applied diff changed", () => {
+  // Every case here builds its patch with a real `git diff` and then
+  // asserts the same invariant through `expectLineQuotesBefore`: the
+  // reported line is the line the reported `before` was taken from. The
+  // shapes differ (leading context or none, a removed `---`, an added
+  // `++`, a pure deletion, several hunks, CRLF) because those are the
+  // shapes a reading of the patch TEXT has to classify; a line taken
+  // from the applied file has nothing left to classify, and these pin
+  // that.
+  it("a change 3 context lines into the hunk: the changed line (12), not the hunk header's start (9)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    commitFile(repo, "long.js", LONG_JS);
+    const before = fs.readFileSync(path.join(repo, "long.js"), "utf8");
+    const lines = LONG_JS.split("\n");
+    const patchPath = realDiffPatch(
+      repo,
+      "long.js",
+      LONG_JS.replace(lines[11], "const l12 = 999;"),
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.line).toBe(12);
+    expect(result.mutant?.before).toBe("const l12 = 12;");
+    expectLineQuotesBefore(before, result.mutant);
+    expect(result.mutation_probe?.mutant).toContain("const l12 = 12;");
+    expect(fs.readFileSync(path.join(repo, "long.js"), "utf8")).toBe(before);
+  });
+
+  it("a removed `---` line in a markdown file: the removed line, not a file header", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const doc = ["# Title", "", "intro", "", "---", "", "body", ""].join("\n");
+    commitFile(repo, "doc.md", doc);
+    const before = fs.readFileSync(path.join(repo, "doc.md"), "utf8");
+    // The removal reaches the patch as `----`: a `-` marker in front of
+    // the line's own `---`.
+    const patchPath = realDiffPatch(
+      repo,
+      "doc.md",
+      ["# Title", "", "intro", "", "", "body", ""].join("\n"),
+    );
+    expect(fs.readFileSync(patchPath, "utf8")).toContain("\n----\n");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.line).toBe(5);
+    expect(result.mutant?.before).toBe("---");
+    expectLineQuotesBefore(before, result.mutant);
+    expect(fs.readFileSync(path.join(repo, "doc.md"), "utf8")).toBe(before);
+  });
+
+  it("an added line starting with `++`: the line it displaces, not a file header", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    commitFile(repo, "long.js", LONG_JS);
+    const before = fs.readFileSync(path.join(repo, "long.js"), "utf8");
+    const lines = LONG_JS.split("\n");
+    const edited = [...lines.slice(0, 9), "++i;", ...lines.slice(9)].join("\n");
+    const patchPath = realDiffPatch(repo, "long.js", edited);
+    // The addition reaches the patch as `+++i;`.
+    expect(fs.readFileSync(patchPath, "utf8")).toContain("\n+++i;\n");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    // Line 10 is where the applied file first differs: the inserted
+    // line now sits there and `const l10 = 10;` moved down.
+    expect(result.mutant?.line).toBe(10);
+    expect(result.mutant?.before).toBe("const l10 = 10;");
+    expect(result.mutant?.after).toBe("++i;");
+    expectLineQuotesBefore(before, result.mutant);
+    expect(fs.readFileSync(path.join(repo, "long.js"), "utf8")).toBe(before);
+  });
+
+  it("a change at line 1, with no leading context at all", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    commitFile(repo, "long.js", LONG_JS);
+    const before = fs.readFileSync(path.join(repo, "long.js"), "utf8");
+    const lines = LONG_JS.split("\n");
+    const patchPath = realDiffPatch(
+      repo,
+      "long.js",
+      LONG_JS.replace(lines[0], "const l1 = 999;"),
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.line).toBe(1);
+    expect(result.mutant?.before).toBe("const l1 = 1;");
+    expectLineQuotesBefore(before, result.mutant);
+    expect(fs.readFileSync(path.join(repo, "long.js"), "utf8")).toBe(before);
+  });
+
+  it("a pure deletion: the deleted line's own number and content, not the line that moved up into its place", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    commitFile(repo, "long.js", LONG_JS);
+    const before = fs.readFileSync(path.join(repo, "long.js"), "utf8");
+    const lines = LONG_JS.split("\n");
+    const edited = [...lines.slice(0, 7), ...lines.slice(8)].join("\n");
+    const patchPath = realDiffPatch(repo, "long.js", edited);
+    expect(fs.readFileSync(patchPath, "utf8")).not.toContain("\n+const l");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.line).toBe(8);
+    expect(result.mutant?.before).toBe("const l8 = 8;");
+    // Line 8 now holds what used to be line 9.
+    expect(result.mutant?.after).toBe("const l9 = 9;");
+    expectLineQuotesBefore(before, result.mutant);
+    expect(fs.readFileSync(path.join(repo, "long.js"), "utf8")).toBe(before);
+  });
+
+  it("a multi-hunk patch: the first hunk's changed line decides", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    commitFile(repo, "long.js", LONG_JS);
+    const before = fs.readFileSync(path.join(repo, "long.js"), "utf8");
+    const lines = LONG_JS.split("\n");
+    const patchPath = realDiffPatch(
+      repo,
+      "long.js",
+      LONG_JS.replace(lines[2], "const l3 = 999;").replace(
+        lines[17],
+        "const l18 = 999;",
+      ),
+    );
+    // Two hunks, far enough apart that git does not merge them.
+    expect(fs.readFileSync(patchPath, "utf8").match(/^@@ /gm)?.length).toBe(2);
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.line).toBe(3);
+    expect(result.mutant?.before).toBe("const l3 = 3;");
+    expectLineQuotesBefore(before, result.mutant);
+    expect(fs.readFileSync(path.join(repo, "long.js"), "utf8")).toBe(before);
+  });
+
+  it("a CRLF file, committed and patched as-is: the reported line keeps its own terminator", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // `initRepo` pins `core.autocrlf=false`, so these bytes go into the
+    // index and come back out unchanged and the diff below carries the
+    // CRLF endings the file really has.
+    const crlf = ["line1", "line2", "line3", "line4", "line5", ""].join("\r\n");
+    commitFile(repo, "crlf.txt", crlf);
+    const before = fs.readFileSync(path.join(repo, "crlf.txt"), "utf8");
+    expect(before).toBe(crlf);
+    const patchPath = realDiffPatch(
+      repo,
+      "crlf.txt",
+      crlf.replace("line3", "line3-mutated"),
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.line).toBe(3);
+    expect(result.mutant?.before).toBe("line3\r");
+    expect(result.mutant?.after).toBe("line3-mutated\r");
+    expectLineQuotesBefore(before, result.mutant);
+    expect(fs.readFileSync(path.join(repo, "crlf.txt"), "utf8")).toBe(before);
+  });
+});
+
+describe("probe(): -n passed alongside -p", () => {
+  it("reports the patch's first changed line and warns, naming both numbers, when -n names a different one", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    commitFile(repo, "long.js", LONG_JS);
+    const before = fs.readFileSync(path.join(repo, "long.js"), "utf8");
+    const lines = LONG_JS.split("\n");
+    const patchPath = realDiffPatch(
+      repo,
+      "long.js",
+      LONG_JS.replace(lines[11], "const l12 = 999;"),
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: 5,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.line).toBe(12);
+    expect(result.mutant?.before).toBe("const l12 = 12;");
+    expectLineQuotesBefore(before, result.mutant);
+    expect(
+      result.warnings.some(
+        (w) => w.includes("-n 5") && w.includes("first changed line 12"),
+      ),
+    ).toBe(true);
+    // The evidence strings follow the reported line, never the -n.
+    expect(result.mutation_probe?.mutant).toContain(":12:");
+    expect(result.mutation_probe?.mutant).not.toContain(":5:");
+  });
+
+  it("adds no warning when -n names the same line the patch changes", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    commitFile(repo, "long.js", LONG_JS);
+    const before = fs.readFileSync(path.join(repo, "long.js"), "utf8");
+    const lines = LONG_JS.split("\n");
+    const patchPath = realDiffPatch(
+      repo,
+      "long.js",
+      LONG_JS.replace(lines[11], "const l12 = 999;"),
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: 12,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.line).toBe(12);
+    expectLineQuotesBefore(before, result.mutant);
+    expect(result.warnings.some((w) => w.includes("differs from"))).toBe(false);
+  });
+});
+
 describe("probe(): -p combined with --allow-outside", () => {
   it("usage_error when -p is combined with --allow-outside", async () => {
     useLockDir();
@@ -2106,6 +2525,7 @@ describe("probe(): -p patch paths reach git apply without a shell", () => {
     // And the patch itself still works: the path is passed through
     // intact, not sanitized into something git cannot open.
     expect(result.status).toBe("killed");
+    expectLineQuotesBefore(before, result.mutant);
     expect(result.mutation_probe?.restored_verified).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   }, 20000);
@@ -3189,6 +3609,7 @@ describe("probe(): gitApplyTimeoutMs derivation at the probe entry", () => {
     );
 
     expect(result.status).toBe("killed");
+    expectLineQuotesBefore(FIXTURE_JS, result.mutant);
     expect(vi.mocked(computeMutant)).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ timeoutMs }),
@@ -3212,6 +3633,7 @@ describe("probe(): gitApplyTimeoutMs derivation at the probe entry", () => {
     );
 
     expect(result.status).toBe("killed");
+    expectLineQuotesBefore(FIXTURE_JS, result.mutant);
     expect(vi.mocked(computeMutant)).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ timeoutMs: DEFAULT_GIT_APPLY_TIMEOUT_MS }),

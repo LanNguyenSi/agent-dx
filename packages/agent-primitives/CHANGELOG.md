@@ -9,23 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `probe -p/--patch` now derives `--file` (from the single path the
-  patch touches) and `-n/--line` (from the patch's first hunk header)
-  whenever either is omitted, so `-p <patch> -t '<cmd>'` alone is enough
-  for a single-path patch; `--file` and `-n` are still required for
-  `-r` and `-M`/`-w`, which have nothing to derive them from. A patch
-  touching two or more paths with no explicit `--file` is
-  `status: "usage_error"`, `reason: "patch_file_ambiguous"`, exit `2`.
-  A `-p, --patch` path that cannot be read (missing, not a regular
-  file -- a FIFO, a socket, a directory -- unreadable permissions, or
-  larger than the 8&nbsp;MiB `PATCH_MAX_BYTES` cap this package reads a
-  patch's bytes up to) is `status: "usage_error"`,
-  `reason: "patch_not_readable"`, exit `2`, checked once (a `stat`
-  before any read, so a FIFO is never opened for reading and never
-  blocks the probe, and an oversized file is never loaded into memory)
-  before either derivation runs, so it applies the same whether
-  `--file`/`-n` were given explicitly or are themselves derived from the
-  patch.
+- `probe -p/--patch` now needs neither `--file` nor `-n/--line`, so
+  `-p <patch> -t '<cmd>'` alone is enough for a single-path patch;
+  both are still required for `-r` and `-M`/`-w`, which have nothing
+  to derive them from. `--file` is derived from the single path the
+  patch touches; the reported `mutant.line` is the first line at which
+  the dry run's applied result differs from the original -- the applied
+  file, never a reading of the patch text, so the reported number and
+  the `before` content quoted beside it always name the same line
+  whatever the diff's shape (leading context or none, a removed `---`,
+  an added `++`, a pure deletion, several hunks, CRLF). A `-n` passed
+  alongside `-p` is neither used nor echoed back: when it names a
+  different line than the patch changes, both numbers go into a
+  warning. A patch touching two or more paths with no explicit `--file`
+  is `status: "usage_error"`, `reason: "patch_file_ambiguous"`,
+  exit `2`. A `-p, --patch` path that cannot be used (missing, not a
+  regular file -- a FIFO, a socket, a directory -- unreadable
+  permissions, or larger than the 8&nbsp;MiB `PATCH_MAX_BYTES` cap) is
+  `status: "usage_error"`, `reason: "patch_not_readable"`, exit `2`,
+  decided once from the path's metadata alone (a `stat` for the kind of
+  file and its size, an access check for the permissions; the patch is
+  never opened in-process, so a FIFO cannot block the probe and an
+  oversized file is never loaded) before the `--file` derivation, the
+  lock, the in-flight marker or any worktree, so it applies the same
+  whether `--file` was given explicitly or is derived from the patch,
+  and a refusal leaves nothing behind.
 - A global `--json` option: a no-op alias for `-f json` (already the
   default). Combined with an explicit `-f text` it is
   `status: "usage_error"`, `reason: "format_conflict"`, exit `2`.
@@ -50,6 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   -r/--replace (...)`, instead of commander's own `required option
   '--file <path>' not specified`; `status: "usage_error"` and exit `2`
   are unchanged.
+- `probe -p/--patch` no longer reports
+  `-p/--patch has no hunk header to derive -n from; pass -n explicitly`:
+  nothing reads the patch's text any more, so there is no such
+  condition to detect. A patch with no content change reaches the
+  `--file` derivation as before -- for a rename-only patch that is the
+  rename's destination, which does not exist yet, so the run ends in
+  `status: "usage_error"`, `reason: "file_not_found"` naming that path,
+  instead of `inconclusive`/`mutant_not_applicable`.
 
 ### Fixed
 
@@ -61,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `core.autocrlf = true` (a common Windows default) the write would
   silently convert the scratch copy's LF line endings to CRLF, making
   the dry run compare corrupted content against the original and derive
-  the wrong before/after text for `mutation_probe.mutant`.
+  the wrong line and before/after text for `mutation_probe.mutant`.
 
 ## [0.1.0] - 2026-09-04
 

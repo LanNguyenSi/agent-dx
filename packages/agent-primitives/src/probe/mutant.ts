@@ -9,8 +9,12 @@ export interface MutantSpec {
   form: MutantForm;
   /** Absolute path of the target file. */
   file: string;
-  /** 1-indexed line number; informational only for `patch`. */
-  line: number;
+  /** 1-indexed line number of the line to mutate. Required for
+   * `replace` and `match`, which mutate exactly that line; the `patch`
+   * form does not read it at all, since which line a patch changes is
+   * decided by the patch, not by the caller -- `computeMutant` reports
+   * that line back as `MutantComputed.line`. */
+  line?: number;
   /** `-r, --replace`: whole-line replacement text. */
   replaceText?: string;
   /** `-M, --match`: substring to find on `line`. */
@@ -23,6 +27,14 @@ export interface MutantSpec {
 
 export interface MutantComputed {
   applicable: true;
+  /** 1-indexed line this mutant actually changes, and the line `before`
+   * and `after` below quote: the requested `line` for `replace` and
+   * `match`, and for `patch` the first line at which the applied result
+   * differs from the original -- what `git apply` did, not what a
+   * reading of the patch text predicted it would do. Reported as
+   * `mutant.line` and in the `mutation_probe` strings, so the line
+   * number and the quoted content can never disagree. */
+  line: number;
   before: string;
   after: string;
   newContent: string;
@@ -61,15 +73,19 @@ export type MutantComputeResult = MutantComputed | MutantNotApplicable;
 export const DEFAULT_GIT_APPLY_TIMEOUT_MS = 10_000;
 
 /**
- * Upper bound on how large a `-p/--patch` file `probe/index.ts` will read
- * into memory up front (the `patch_not_readable` stat-and-read that runs
- * once, before either the `--file`/`-n` derivation or `git apply` itself
- * gets to stream the patch). Neither of this package's own existing
- * subprocess-output caps is a byte-sized file-read cap that this value
- * could reuse directly: `src/exec.ts` streams a child's stdout/stderr
- * with no cap of its own, and `src/probe/run.ts`'s `MAX_CAPTURED_CHARS`
- * (1,000,000) bounds captured subprocess *characters*, not bytes read
- * from a file. So this falls back to a flat 8 MiB.
+ * Upper bound on how large a `-p/--patch` file `probe/index.ts` accepts
+ * at all: the `patch_not_readable` `stat` that runs once, before the
+ * `--file` derivation's `git apply --numstat` and before the lock, the
+ * marker, or any worktree exists. Nothing in this process reads the
+ * patch's bytes; the bound is on what gets handed to `git apply`, so a
+ * caller who points `-p` at a multi-gigabyte file is told so up front
+ * instead of waiting on a child parsing it. Neither of this package's
+ * own existing subprocess-output caps is a byte-sized file cap that this
+ * value could reuse directly: `src/exec.ts` streams a child's
+ * stdout/stderr with no cap of its own, and `src/probe/run.ts`'s
+ * `MAX_CAPTURED_CHARS` (1,000,000) bounds captured subprocess
+ * *characters*, not bytes of an input file. So this falls back to a flat
+ * 8 MiB.
  */
 export const PATCH_MAX_BYTES = 8 * 1024 * 1024;
 
@@ -142,6 +158,7 @@ function computeReplace(
   const newContent = newLines.join("\n");
   return {
     applicable: true,
+    line,
     before,
     after,
     newContent,
@@ -195,6 +212,7 @@ function computeMatch(
   const newContent = newLines.join("\n");
   return {
     applicable: true,
+    line,
     before: original,
     after,
     newContent,
@@ -203,23 +221,41 @@ function computeMatch(
   };
 }
 
-/** First line (0-indexed within each string's own split) at which `a`
- * and `b` differ, used to render an informational before/after for the
- * `patch` form (whose real "line" is inside the diff, not the CLI's
- * `-n`). Returns empty strings when the two are identical. */
+/**
+ * The first line at which `a` and `b` differ: its 1-indexed number in
+ * `a` plus that line's content on each side. This is what the `patch`
+ * form reports as `mutant.line`/`before`/`after`, and the three come
+ * from this one comparison so they cannot disagree with each other:
+ * `line` is by construction the index at which `before` was taken from
+ * `a`.
+ *
+ * Comparison is exact -- whole lines, no trimming -- so a change that
+ * only adds or removes trailing whitespace is a difference like any
+ * other, and lines are split on `"\n"` alone (never `/\r?\n/`), so in a
+ * CRLF file both sides keep their `\r` and a line whose only change is
+ * its terminator still differs.
+ *
+ * `undefined` means the two are identical, which for a dry run means
+ * the patch applied but changed nothing: the same condition as
+ * `a === b`, since splitting on `"\n"` and rejoining is lossless.
+ */
 function firstDiffLine(
   a: string,
   b: string,
-): { before: string; after: string } {
+): { line: number; before: string; after: string } | undefined {
   const aLines = a.split("\n");
   const bLines = b.split("\n");
   const max = Math.max(aLines.length, bLines.length);
   for (let i = 0; i < max; i++) {
     if (aLines[i] !== bLines[i]) {
-      return { before: aLines[i] ?? "", after: bLines[i] ?? "" };
+      return {
+        line: i + 1,
+        before: aLines[i] ?? "",
+        after: bLines[i] ?? "",
+      };
     }
   }
-  return { before: "", after: "" };
+  return undefined;
 }
 
 /** Parses `git apply --numstat` output into the list of paths the patch
@@ -313,101 +349,6 @@ export async function listPatchTouchedPaths(
   };
 }
 
-/** Matches one hunk header line: `@@ -a,b +c,d @@` with the `,b`/`,d`
- * lengths optional (a single-line hunk omits them) and, deliberately, no
- * trailing anchor -- git's function-context hint (`@@ ... @@ <context>`)
- * and anything else after the closing `@@` is not part of what this
- * matches on, it is ignored. */
-const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
-
-/**
- * Parses the first hunk of a unified diff and returns the new-file line
- * of its first CHANGED (`+`/`-`) body line -- the informational `-n`
- * this package derives for the `patch` form when the caller gives none.
- * That is `c` (the header's new-file start) plus the number of leading
- * unchanged (` `-prefixed, or blank -- `git apply` also accepts a
- * context line whose leading space was stripped) context lines between
- * the header and that first `+`/`-` line, or `c` itself, unadjusted,
- * when the hunk's body never reaches a changed line at all (a
- * header-only patch, or one truncated to context lines only): git's
- * default 3 lines of context means `c` alone is usually a context line
- * and not the changed one, but a hunk with nothing beyond its header has
- * no better answer than the header's own start.
- *
- * Works as a small line-by-line parser rather than a single regex plus
- * a scan of raw split lines: (1) split into lines, dropping exactly one
- * trailing empty element when the content ends in a newline, so that
- * element is never miscounted as a trailing context line; (2) find the
- * first line matching `HUNK_HEADER_RE`; (3) walk the lines after it
- * until the next hunk header, a `diff --git`/`---`/`+++` file header, or
- * the end of the patch; (4) classify each of those body lines by its
- * first character: ` ` or empty (a whitespace-stripped blank context
- * line git apply still accepts) is context and keeps the scan going; `+`
- * or `-` is the changed line the scan is looking for and stops it;
- * `\` (`\ No newline at end of file`) annotates the previous line, not a
- * body line of its own, and is skipped without counting or stopping;
- * anything else is a malformed body and ends the scan the same as
- * running out of lines. The file-header prefixes in (3) are checked
- * before the first-character classification in (4) because `---`/`+++`
- * would otherwise be misread as `-`/`+` changed lines belonging to this
- * hunk.
- *
- * Returns `undefined` when the patch has no hunk header at all (e.g. a
- * patch that only renames or touches file modes with no content
- * change).
- */
-export function deriveLineFromPatch(patchContent: string): number | undefined {
-  let lines = patchContent.split(/\r?\n/);
-  if (patchContent.endsWith("\n")) {
-    // `"a\nb\n".split(/\r?\n/)` is `["a", "b", ""]`: exactly one
-    // trailing empty element for content that ends in a newline (CRLF
-    // included, since `\r\n` also ends in `\n`). Drop it so it is never
-    // counted as one more leading-context line than the patch actually
-    // has.
-    lines = lines.slice(0, -1);
-  }
-
-  let headerIdx = -1;
-  let start: number | undefined;
-  for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(HUNK_HEADER_RE);
-    if (match) {
-      headerIdx = i;
-      start = Number(match[1]);
-      break;
-    }
-  }
-  if (headerIdx === -1 || start === undefined || !Number.isFinite(start)) {
-    return undefined;
-  }
-
-  let contextLines = 0;
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (HUNK_HEADER_RE.test(line)) break; // the next hunk; this one is done
-    if (
-      line.startsWith("diff --git") ||
-      line.startsWith("---") ||
-      line.startsWith("+++")
-    ) {
-      break; // a file header follows; this hunk had no changed line
-    }
-    const head = line.charAt(0);
-    if (line === "" || head === " ") {
-      contextLines += 1;
-      continue;
-    }
-    if (head === "+" || head === "-") {
-      return start + contextLines;
-    }
-    if (head === "\\") {
-      continue; // "\ No newline at end of file" -- not a body line
-    }
-    break; // malformed body line: treat as the end of this hunk
-  }
-  return start;
-}
-
 /**
  * Dry-runs a unified diff against a scratch copy of the file (never the
  * real target) via `git apply`, so applicability (and the resulting
@@ -438,6 +379,13 @@ export function deriveLineFromPatch(patchContent: string): number | undefined {
  * running the dry run first would report that as "the patch did not
  * apply" when the real answer is that it touches paths other than
  * `--file`.
+ *
+ * The reported `line` comes from this dry run's own result too (the
+ * first line at which the applied content differs from the original),
+ * not from reading the patch text: the applied file is the ground truth
+ * for which line a patch changes, and taking `line`, `before` and
+ * `after` from one comparison is what keeps the reported number and the
+ * quoted content from ever naming different lines.
  */
 async function computePatch(
   originalContent: string,
@@ -528,17 +476,23 @@ async function computePatch(
   }
 
   const newContent = fs.readFileSync(scratchFile, "utf8");
-  if (newContent === originalContent)
+  // One comparison of the applied result against the original answers
+  // both questions at once: `undefined` is "the patch changed nothing"
+  // (identical content), and otherwise the line it names IS the line
+  // this mutant changes -- there is no second, text-level reading of the
+  // patch that could disagree with what `git apply` actually did.
+  const diff = firstDiffLine(originalContent, newContent);
+  if (diff === undefined)
     return {
       applicable: false,
       reason: "patch applied cleanly but produced no content change",
       logPaths,
     };
-  const { before, after } = firstDiffLine(originalContent, newContent);
   return {
     applicable: true,
-    before,
-    after,
+    line: diff.line,
+    before: diff.before,
+    after: diff.after,
     newContent,
     mutatedHash: hashString(newContent),
     logPaths,
@@ -556,7 +510,14 @@ export interface ComputeMutantOptions extends GitApplyOptions {
 
 /** Computes what a mutant would do without ever touching the real
  * target file: for `replace`/`match` this is pure string manipulation,
- * for `patch` it is a `git apply` dry run against a scratch copy. */
+ * for `patch` it is a `git apply` dry run against a scratch copy.
+ *
+ * `spec.line ?? 0` on the two forms that need a line follows the same
+ * shape as `spec.replaceText ?? ""` beside it: an optional field a form
+ * requires, defaulted to a value that form itself refuses (line 0 is out
+ * of range for any file), so a spec missing it is a not-applicable
+ * result naming the problem rather than a crash. `probe()` never
+ * produces such a spec -- it returns `line_required` first. */
 export function computeMutant(
   spec: MutantSpec,
   opts: ComputeMutantOptions,
@@ -564,13 +525,17 @@ export function computeMutant(
   switch (spec.form) {
     case "replace":
       return Promise.resolve(
-        computeReplace(opts.originalContent, spec.line, spec.replaceText ?? ""),
+        computeReplace(
+          opts.originalContent,
+          spec.line ?? 0,
+          spec.replaceText ?? "",
+        ),
       );
     case "match":
       return Promise.resolve(
         computeMatch(
           opts.originalContent,
-          spec.line,
+          spec.line ?? 0,
           spec.matchText ?? "",
           spec.withText ?? "",
         ),

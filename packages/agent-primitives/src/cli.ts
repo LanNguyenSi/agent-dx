@@ -832,7 +832,9 @@ interface ProbeCliOptions {
    * derive it; `resolveMutantForm` still requires it for `-r` and
    * `-M`/`-w`, which have nothing to derive it from. */
   file?: string;
-  /** Same relaxation as `file`, for the same reason. */
+  /** Optional for the same reason, except that `-p` does not derive a
+   * line so much as report the one the patch changed: passing it with
+   * `-p` neither moves the mutation nor changes what is reported. */
   line?: number;
   replace?: string;
   match?: string;
@@ -946,7 +948,7 @@ program
   )
   .option(
     "-n, --line <n>",
-    "1-indexed line number; required unless -p derives it from the patch's first hunk",
+    "1-indexed line number; required except with -p, whose reported line is always the patch's first changed line",
     parseLine,
   )
   .option("-r, --replace <text>", "replace the whole line with this text")
