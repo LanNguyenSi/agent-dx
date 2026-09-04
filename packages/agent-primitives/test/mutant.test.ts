@@ -562,10 +562,9 @@ describe("deriveLineFromPatch", () => {
   });
 
   it("adds the leading-context offset to the header's start line before the first changed line (full a,b/c,d header, 3 leading context lines, first body line a '-' line)", () => {
-    // Mirrors the reproduction from the round-1 review: `git diff`'s
-    // default 3 lines of context puts the header 3 lines before the
-    // actual change, so the header's own `+c` (9) is a context line,
-    // not the changed one (12).
+    // `git diff`'s default 3 lines of context puts the header 3 lines
+    // before the actual change, so the header's own `+c` (9) is a
+    // context line, not the changed one (12).
     const patch = [
       "diff --git a/fixture.js b/fixture.js",
       "index 0000000..0000000 100644",
@@ -574,6 +573,78 @@ describe("deriveLineFromPatch", () => {
       "@@ -9,6 +9,6 @@",
       " pad1",
       " pad2",
+      " pad3",
+      "-old",
+      "+new",
+      " pad4",
+      "",
+    ].join("\n");
+    expect(deriveLineFromPatch(patch)).toBe(12);
+  });
+
+  it("adds the leading-context offset when the hunk header carries git's function-context hint after the second @@ (`@@ ... @@ <context>`)", () => {
+    // Git appends a hint of the enclosing function/context to the hunk
+    // header when a funcname pattern matches (e.g. `git diff` on a
+    // source file): `@@ -9,7 +9,7 @@ const l8 = 8;`. The header regex
+    // has to match through that trailing text, not just up to the bare
+    // `@@`, or the whole header fails to match and `-n` cannot be
+    // derived at all.
+    const patch = [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,7 +9,7 @@ const l8 = 8;",
+      " pad1",
+      " pad2",
+      " pad3",
+      "-old",
+      "+new",
+      " pad4",
+      " pad5",
+      "",
+    ].join("\n");
+    expect(deriveLineFromPatch(patch)).toBe(12);
+  });
+
+  it("treats a blank line inside the leading-context run as a context line (a whitespace-stripped context line git apply still accepts)", () => {
+    // Some patch producers/editors strip trailing whitespace, turning a
+    // context line that was just " " (a single space, git's marker for
+    // a blank source line) into "" -- `git apply` still accepts that,
+    // so `deriveLineFromPatch` has to keep counting it as context
+    // rather than treating it as the start of the hunk body.
+    const patch = [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,6 +9,6 @@",
+      " pad1",
+      " pad2",
+      "",
+      "-old",
+      "+new",
+      " pad4",
+      "",
+    ].join("\n");
+    expect(deriveLineFromPatch(patch)).toBe(12);
+  });
+
+  it("skips a `\\ No newline at end of file` marker between the header and the first body line without ending the leading-context scan", () => {
+    // The marker sits between two context lines (not last, so a scan
+    // that stopped there instead of skipping past it would undercount):
+    // it is not itself a body line, so it must not count toward the
+    // offset, and it must not be mistaken for "the body started" either
+    // (which would end the scan before `pad3`, one short of 12).
+    const patch = [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,6 +9,6 @@",
+      " pad1",
+      " pad2",
+      "\\ No newline at end of file",
       " pad3",
       "-old",
       "+new",

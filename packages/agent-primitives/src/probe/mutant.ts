@@ -304,11 +304,13 @@ export async function listPatchTouchedPaths(
  * returns the new-file line of the hunk's first CHANGED (`+`/`-`) body
  * line -- the informational `-n` this package derives for the `patch`
  * form when the caller gives none. That is `c` (the header's new-file
- * start) plus the number of leading unchanged (` `-prefixed) context
- * lines between the header and that first `+`/`-` line: git's default 3
- * lines of context means `c` itself is usually a context line, not the
- * changed one, so returning `c` unadjusted (the pre-fix behaviour) cites
- * the wrong line whenever a hunk carries any leading context. A `\ No
+ * start) plus the number of leading unchanged (` `-prefixed, or blank --
+ * `git apply` also accepts a context line whose leading space was
+ * stripped) context lines between the header and that first `+`/`-`
+ * line: git's default 3 lines of context means `c` itself is usually a
+ * context line, not the changed one, so returning `c` unadjusted (the
+ * pre-fix behaviour) cites the wrong line whenever a hunk carries any
+ * leading context. A `\ No
  * newline at end of file` marker line is not itself a body line -- it
  * annotates the line before it -- so it is skipped without counting
  * toward the offset or ending the scan. The hunk length (`,d`, and `,b`
@@ -326,7 +328,13 @@ export function deriveLineFromPatch(patchContent: string): number | undefined {
   const afterHeader = patchContent.slice(headerEnd).replace(/^\r?\n/, "");
   let contextLines = 0;
   for (const line of afterHeader.split(/\r?\n/)) {
-    if (line.startsWith(" ")) {
+    if (line === "" || line.startsWith(" ")) {
+      // A blank line inside the leading-context run is still a context
+      // line: `git apply` accepts a whitespace-stripped blank context
+      // line (its leading space trimmed by whatever mangled the patch,
+      // e.g. an editor that strips trailing whitespace), so treating it
+      // as "the body started" would end the scan early and understate
+      // the offset.
       contextLines += 1;
       continue;
     }

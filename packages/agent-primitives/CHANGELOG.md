@@ -16,13 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-r` and `-M`/`-w`, which have nothing to derive them from. A patch
   touching two or more paths with no explicit `--file` is
   `status: "usage_error"`, `reason: "patch_file_ambiguous"`, exit `2`.
+  A `-p, --patch` path that cannot be read (missing, a directory,
+  unreadable permissions) is `status: "usage_error"`,
+  `reason: "patch_not_readable"`, exit `2`, checked once before either
+  derivation runs, so it applies the same whether `--file`/`-n` were
+  given explicitly or are themselves derived from the patch.
 - A global `--json` option: a no-op alias for `-f json` (already the
   default). Combined with an explicit `-f text` it is
   `status: "usage_error"`, `reason: "format_conflict"`, exit `2`.
 - An unrecognized option's `usage_error` message now names a common
-  alias when it has one (`--json` -> `-f json`; `--text` -> `-f text`),
-  and an invalid `-f`/`--format` value that looks like a path adds a
-  hint pointing at `probe`'s `--file` instead.
+  alias when it has one (`--text` -> `-f text`; `--json` is itself a
+  real global option now, so it never reaches this hint), and an
+  invalid `-f`/`--format` value that looks like a path adds a hint
+  pointing at `probe`'s `--file` instead.
 - `probe --help`'s description now states that `--file` is long-only
   because the global `-f` is `--format`, and that every global option
   may precede the subcommand; the packaged skill (`assets/skill/

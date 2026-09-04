@@ -590,6 +590,38 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   let displayFile: string;
   let line = opts.line;
   let derivationLogPaths: string[] = [];
+  // Read (not just stat) the patch once here, before either derivation
+  // below touches it: an unreadable `-p/--patch` (missing, a directory,
+  // unreadable permissions) is a caller usage error, not something for
+  // `git apply --numstat` to diagnose. Without this upfront read, a bad
+  // `-p` given without `--file` fell into the `--file` derivation's own
+  // `git apply --numstat` failure below and came back as
+  // `inconclusive`/`mutant_not_applicable` ("failed to parse the
+  // patch") -- a diagnosis that points at the patch's *content*, not at
+  // the path itself being wrong. Doing this once, ahead of both the
+  // `--file` numstat listing and the `-n` hunk-header derivation
+  // further down, means every path that needs the patch's bytes --
+  // `--file` derivation, `-n` derivation, and an explicit `--file`
+  // paired with a bad `-p` -- shares the same `patch_not_readable`
+  // diagnosis instead of three different ones. The content read here is
+  // reused for the `-n` derivation below rather than read a second time.
+  let readPatchContent: string | undefined;
+  if (opts.form === "patch") {
+    const absPatchPathForRead = path.resolve(opts.patchPath ?? "");
+    try {
+      readPatchContent = fs.readFileSync(absPatchPathForRead, "utf8");
+    } catch {
+      return {
+        status: "usage_error",
+        reason: "patch_not_readable",
+        warnings: [
+          ...warnings,
+          `-p/--patch could not be read: ${absPatchPathForRead}`,
+        ],
+        isolation: isolationField,
+      };
+    }
+  }
   if (opts.file !== undefined) {
     displayFile = path.resolve(cwd, opts.file);
   } else if (opts.form === "patch") {
@@ -634,27 +666,10 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     };
   }
   if (line === undefined && opts.form === "patch") {
-    const absPatchPath = path.resolve(opts.patchPath ?? "");
-    let patchContent: string;
-    try {
-      patchContent = fs.readFileSync(absPatchPath, "utf8");
-    } catch {
-      // Distinct from "no hunk header" below: the patch could not even
-      // be read to look for one (missing, a directory, unreadable
-      // permissions). Kept apart so the warning does not tell the
-      // caller to "pass -n explicitly" for a patch path that is simply
-      // wrong.
-      return {
-        status: "usage_error",
-        reason: "patch_not_readable",
-        warnings: [
-          ...warnings,
-          `-p/--patch could not be read to derive -n: ${absPatchPath}`,
-        ],
-        isolation: isolationField,
-        dryRunLogPaths: derivationLogPaths,
-      };
-    }
+    // readPatchContent is always set here: this branch only runs for
+    // `opts.form === "patch"`, which is exactly the condition under
+    // which the upfront read above ran (and returned early on failure).
+    const patchContent = readPatchContent as string;
     line = deriveLineFromPatch(patchContent);
     if (line === undefined) {
       return {

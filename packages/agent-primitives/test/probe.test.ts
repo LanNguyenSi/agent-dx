@@ -108,6 +108,13 @@ function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd });
 }
 
+/** Same as `git`, but returns stdout -- used to capture a real `git
+ * diff` as a test fixture patch, rather than hand-writing a hunk
+ * header. */
+function gitOutput(cwd: string, args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8" });
+}
+
 const FIXTURE_JS = [
   "function isPositive(n) {",
   "  return n > 0;",
@@ -1515,28 +1522,26 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
-  it("derives the hunk's changed line, not the header's own start line, for a hunk with leading context that does not start at line 1 (round-1 review repro); mutation_probe.mutant quotes that line's content", async () => {
+  it("derives the hunk's changed line, not the header's own start line, for a hunk with leading context that does not start at line 1; mutation_probe.mutant quotes that line's content", async () => {
     useLockDir();
     const { repo } = initRepo();
     const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
     const fixtureLines = FIXTURE_JS.split("\n");
-    const patchPath = path.join(makeTmpDir(), "derive-mid-file.patch");
+    // A real `git diff`, not a hand-written header: edit the committed
+    // fixture in place, capture the diff (git's default 3 lines of
+    // context, and -- since the file "looks like" source -- its own
+    // function-context hint after the second `@@`), then put the
+    // working tree back so `probe`'s own read of the file sees the
+    // original (unmutated) content, same as every other test here.
     fs.writeFileSync(
-      patchPath,
-      [
-        "diff --git a/fixture.js b/fixture.js",
-        "index 0000000..0000000 100644",
-        "--- a/fixture.js",
-        "+++ b/fixture.js",
-        "@@ -2,5 +2,5 @@",
-        ` ${fixtureLines[1]}`,
-        ` ${fixtureLines[2]}`,
-        ` ${fixtureLines[3]}`,
-        `-${fixtureLines[4]}`,
-        "+  return 999;",
-        ` ${fixtureLines[5]}`,
-      ].join("\n") + "\n",
+      path.join(repo, "fixture.js"),
+      before.replace(fixtureLines[4], "  return 999;"),
     );
+    const diff = gitOutput(repo, ["diff", "--", "fixture.js"]);
+    git(repo, ["checkout", "--", "fixture.js"]);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+    const patchPath = path.join(makeTmpDir(), "derive-mid-file.patch");
+    fs.writeFileSync(patchPath, diff);
 
     const result = await probe(
       baseOptions(repo, {
@@ -1630,6 +1635,14 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("file_outside_root");
     expect(fs.readFileSync(outsideFile, "utf8")).toBe("module.exports = {};\n");
+    // The `-p`-derived `--file` still carries its numstat log path
+    // through this early return (dryRunLogPaths: [] would silently
+    // drop the caller's ability to inspect why derivation ran).
+    expect(result.dryRunLogPaths).toBeDefined();
+    expect(result.dryRunLogPaths?.length).toBeGreaterThan(0);
+    for (const logPath of result.dryRunLogPaths ?? []) {
+      expect(fs.existsSync(logPath)).toBe(true);
+    }
   });
 
   it("usage_error/file_not_found, nothing created, for a new-file patch whose path does not exist yet", async () => {
@@ -1864,6 +1877,70 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
     expect(result.warnings.some((w) => w.includes("no hunk header"))).toBe(
       true,
     );
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("usage_error/patch_not_readable, not inconclusive/mutant_not_applicable, for a nonexistent -p/--patch and no --file", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = path.join(makeTmpDir(), "does-not-exist.patch");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("patch_not_readable");
+    expect(result.warnings.some((w) => w.includes(patchPath))).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("usage_error/patch_not_readable for a directory passed as -p/--patch and no --file", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = makeTmpDir();
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("patch_not_readable");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("usage_error/patch_not_readable for a nonexistent -p/--patch even with an explicit --file", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = path.join(makeTmpDir(), "does-not-exist.patch");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: "fixture.js",
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("patch_not_readable");
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 

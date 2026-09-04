@@ -88,9 +88,10 @@ Every subcommand accepts:
   exit `2`; `-f json --json` is accepted, since the two agree.
 
 An unrecognized option's message names a common alias when it has one
-(`--json` -> use `-f json`; `--text` -> use `-f text`), and an invalid
-`-f`/`--format` value that looks like a path adds a hint that `-f` is
-the global `--format` and `probe`'s file option is `--file`.
+(`--text` -> use `-f text`; `--json` is itself a real global option, so
+it never reaches this hint), and an invalid `-f`/`--format` value that
+looks like a path adds a hint that `-f` is the global `--format` and
+`probe`'s file option is `--file`.
 
 ## `doctor`
 
@@ -276,22 +277,26 @@ agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
 agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
   -t 'npm test' -i inplace
 agent-primitives probe -p mutant.patch -t 'npm test'
+agent-primitives verify -c build,typecheck,lint,test
+agent-primitives doctor
 ```
 
 The third form derives `--file` and `-n` from the patch itself when it
 touches exactly one path: `--file` from that path (resolved against the
 containment root), `-n` from the first hunk's first changed (`+`/`-`)
 line -- the header's own new-file start (`@@ -a,b +c,d @@` -> `c`) plus
-however many leading unchanged (` `-prefixed) context lines come before
-it, since `c` itself is only the changed line when the hunk has no
-leading context. A patch touching two or more paths without an explicit
-`--file` is `status: "usage_error"`, `reason: "patch_file_ambiguous"`,
-exit `2`, naming the touched paths in a warning; pass `--file` naming
-the one to mutate to resolve it (the extra-path refusal below then
-applies as it always has). A patch with no hunk header and no explicit
-`-n` is `status: "inconclusive"`, `reason: "mutant_not_applicable"`; a
-patch path that cannot even be read to look for one is
-`status: "usage_error"`, `reason: "patch_not_readable"`.
+however many leading unchanged (` `-prefixed, or blank) context lines
+come before it, since `c` itself is only the changed line when the hunk
+has no leading context. A patch touching two or more paths without an
+explicit `--file` is `status: "usage_error"`,
+`reason: "patch_file_ambiguous"`, exit `2`, naming the touched paths in
+a warning; pass `--file` naming the one to mutate to resolve it (the
+extra-path refusal below then applies as it always has). A patch with
+no hunk header and no explicit `-n` is `status: "inconclusive"`,
+`reason: "mutant_not_applicable"`; `-p, --patch` naming a path that
+cannot be read at all (missing, a directory, unreadable permissions) is
+`status: "usage_error"`, `reason: "patch_not_readable"`, exit `2`,
+whether or not `--file`/`-n` were also given.
 
 A patch made with `git diff --relative` from a subdirectory records
 paths relative to that subdirectory, not the repository root; the
@@ -650,7 +655,11 @@ outright as `status: "usage_error"`,
 relative paths could otherwise escape the scratch directory used for its
 dry run. `-p` touching two or more paths with no explicit `--file` to
 say which one is the target is `status: "usage_error"`,
-`reason: "patch_file_ambiguous"`, exit `2`.
+`reason: "patch_file_ambiguous"`, exit `2`. `-p, --patch` naming a path
+that cannot be read (missing, a directory, unreadable permissions) is
+`status: "usage_error"`, `reason: "patch_not_readable"`, exit `2`,
+checked once up front so it applies the same whether `--file`/`-n` were
+given explicitly or are themselves derived from the patch.
 
 Output beside the envelope: `status` (`killed`, `survived`, or
 `inconclusive`), `reason` (when inconclusive), `mutant: { file, line,
