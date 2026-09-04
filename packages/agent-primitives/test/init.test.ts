@@ -283,11 +283,13 @@ describe("init", () => {
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
       const realLstatSync = fs.lstatSync;
+      let planted = false;
       const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
         p: fs.PathLike,
         opts?: unknown,
       ) => {
-        if (p === filePath) {
+        if (p === filePath && !planted) {
+          planted = true;
           // Simulate a race: something else plants a symlink in the
           // gap right after this process's own check observed nothing
           // there, then this mock still reports "no entry" to the
@@ -528,11 +530,13 @@ describe("init", () => {
       const filePath = path.join(skillDir, "SKILL.md");
 
       const realLstatSync = fs.lstatSync;
+      let planted = false;
       const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
         p: fs.PathLike,
         opts?: unknown,
       ) => {
-        if (p === filePath) {
+        if (p === filePath && !planted) {
+          planted = true;
           // Simulate a race: something else plants a symlink, pointing
           // inside the target directory at a file that does not exist,
           // right after this process's own pre-validation lstat observed
@@ -615,6 +619,63 @@ describe("init", () => {
       }
       expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_B);
     });
+
+    it("preserves and conflicts with a regular target created just before the absent-name open", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      const realOpen = fs.openSync;
+      let planted = false;
+      const spy = vi.spyOn(fs, "openSync").mockImplementation(((p, flags) => {
+        if (p === filePath && !planted) {
+          planted = true;
+          fs.writeFileSync(filePath, CONTENT_B);
+        }
+        return realOpen(p, flags);
+      }) as typeof fs.openSync);
+      try {
+        const result = init({ targetDir: dir, content: CONTENT_A });
+        expect(result.targets[0]?.status).toBe("conflicted");
+      } finally {
+        spy.mockRestore();
+      }
+      expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_B);
+    });
+
+    it("preserves and conflicts when an identical target is removed, then recreated differently before open", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, CONTENT_A);
+      const realLstat = fs.lstatSync;
+      let targetStats = 0;
+      const lstatSpy = vi.spyOn(fs, "lstatSync").mockImplementation(((
+        p,
+        opts,
+      ) => {
+        if (p === filePath && ++targetStats === 2) fs.unlinkSync(filePath);
+        return realLstat(p, opts as never);
+      }) as typeof fs.lstatSync);
+      const realOpen = fs.openSync;
+      let planted = false;
+      const openSpy = vi.spyOn(fs, "openSync").mockImplementation(((
+        p,
+        flags,
+      ) => {
+        if (p === filePath && !planted) {
+          planted = true;
+          fs.writeFileSync(filePath, CONTENT_B);
+        }
+        return realOpen(p, flags);
+      }) as typeof fs.openSync);
+      try {
+        const result = init({ targetDir: dir, content: CONTENT_A });
+        expect(result.targets[0]?.status).toBe("conflicted");
+      } finally {
+        openSpy.mockRestore();
+        lstatSpy.mockRestore();
+      }
+      expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_B);
+    });
   });
 
   it("completes a write when writeSync initially writes only a prefix", () => {
@@ -645,6 +706,26 @@ describe("init", () => {
         "utf8",
       ),
     ).toBe(CONTENT_B.repeat(100));
+  });
+
+  it("names a zero-progress write failure and closes the descriptor", () => {
+    const dir = makeTmpDir();
+    const writeSpy = vi.spyOn(fs, "writeSync").mockReturnValue(0);
+    const closeSpy = vi.spyOn(fs, "closeSync");
+    let caught: unknown;
+    let closeCalls = 0;
+    try {
+      init({ targetDir: dir, content: CONTENT_A });
+    } catch (err) {
+      caught = err;
+    } finally {
+      closeCalls = closeSpy.mock.calls.length;
+      writeSpy.mockRestore();
+      closeSpy.mockRestore();
+    }
+    expect(caught).toBeInstanceOf(InitFsUsageError);
+    expect((caught as InitFsUsageError).reason).toBe("target_write_failed");
+    expect(closeCalls).toBe(1);
   });
 
   describe("-H all validates every harness before writing any of them", () => {
@@ -827,11 +908,13 @@ describe("init", () => {
       fs.mkdirSync(path.dirname(opencodeFilePath), { recursive: true });
 
       const realLstatSync = fs.lstatSync;
+      let planted = false;
       const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
         p: fs.PathLike,
         opts?: unknown,
       ) => {
-        if (p === opencodeFilePath) {
+        if (p === opencodeFilePath && !planted) {
+          planted = true;
           // Simulate a race on the last of the three harnesses: something
           // else plants a symlink right after this process's own
           // pre-validation lstat observed nothing there, so claude and

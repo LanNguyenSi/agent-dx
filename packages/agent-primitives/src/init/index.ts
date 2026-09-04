@@ -82,6 +82,7 @@ export type InitFsErrorReason =
   | "target_not_a_regular_file"
   | "target_not_readable"
   | "target_not_writable"
+  | "target_write_failed"
   | "target_is_a_symlink"
   | "target_escapes_directory"
   | "platform_unsupported";
@@ -364,12 +365,12 @@ function writeOne(
       );
     }
 
+    let liveExisting: string | undefined;
     if (existing !== undefined) {
       // Validation and writing are separate phases. Re-read an existing
       // regular target here so a remove or rewrite in that gap cannot turn
       // stale validation data into an incorrect `unchanged` result.
       const liveStat = fs.lstatSync(filePath, { throwIfNoEntry: false });
-      let liveExisting: string | undefined;
       if (liveStat !== undefined) {
         if (liveStat.isSymbolicLink()) {
           throw new InitFsUsageError(
@@ -410,20 +411,85 @@ function writeOne(
       }
     }
 
-    const fd = fs.openSync(
-      filePath,
-      fs.constants.O_WRONLY |
-        fs.constants.O_CREAT |
-        fs.constants.O_TRUNC |
-        fs.constants.O_NOFOLLOW,
-    );
+    let fd: number;
+    if (force && liveExisting !== undefined) {
+      // This is the one intentional replacement path. A differing regular
+      // target was observed both during validation and immediately above,
+      // and --force explicitly authorizes truncating it.
+      fd = fs.openSync(
+        filePath,
+        fs.constants.O_WRONLY | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW,
+      );
+    } else {
+      try {
+        // Claim an absent name atomically. Without O_EXCL, a regular file
+        // planted after the final lstat would be silently truncated.
+        fd = fs.openSync(
+          filePath,
+          fs.constants.O_WRONLY |
+            fs.constants.O_CREAT |
+            fs.constants.O_EXCL |
+            fs.constants.O_NOFOLLOW,
+        );
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException | undefined)?.code !== "EEXIST") {
+          throw err;
+        }
+
+        // A regular target won the absent-name race. Revalidate it and
+        // apply the ordinary identical/conflict/--force semantics; never
+        // truncate it merely because the earlier observation was absent.
+        const racedStat = fs.lstatSync(filePath);
+        if (racedStat.isSymbolicLink()) {
+          throw new InitFsUsageError(
+            `init: resolved target for harness "${harness}" is a symbolic link ` +
+              `and will not be followed: ${filePath}`,
+            "target_is_a_symlink",
+          );
+        }
+        if (!racedStat.isFile()) {
+          throw new InitFsUsageError(
+            `init: the raced target for harness "${harness}" is not a regular file: ${filePath}`,
+            racedStat.isDirectory()
+              ? "target_path_is_a_directory"
+              : "target_not_a_regular_file",
+          );
+        }
+        let racedExisting: string;
+        try {
+          racedExisting = fs.readFileSync(filePath, "utf8");
+        } catch (readErr) {
+          const mapped = mapInitFsError(readErr, harness, filePath, "read");
+          if (mapped instanceof InitFsUsageError) throw mapped;
+          throw new InitFsUsageError(
+            `init: the target for harness "${harness}" could not be read: ${filePath}`,
+            "target_not_readable",
+          );
+        }
+        if (racedExisting === content) {
+          return { harness, path: filePath, status: "unchanged" };
+        }
+        if (!force) {
+          return { harness, path: filePath, status: "conflicted" };
+        }
+        fd = fs.openSync(
+          filePath,
+          fs.constants.O_WRONLY |
+            fs.constants.O_TRUNC |
+            fs.constants.O_NOFOLLOW,
+        );
+      }
+    }
     try {
       const bytes = Buffer.from(content);
       let offset = 0;
       while (offset < bytes.length) {
         const written = fs.writeSync(fd, bytes, offset, bytes.length - offset);
         if (written <= 0) {
-          throw new Error(`init: write made no progress: ${filePath}`);
+          throw new InitFsUsageError(
+            `init: writing the target for harness "${harness}" made no progress: ${filePath}`,
+            "target_write_failed",
+          );
         }
         offset += written;
       }
