@@ -3801,3 +3801,183 @@ describe("signalSettleBoundMs(): clamped below exec's stdio watch bound", () => 
     }
   });
 });
+
+describe("probe(): the single-mutant result is what it was before the plan runner", () => {
+  // The mutant step (`prepareMutant`/`runMutantAttempt`) and the run
+  // controller were extracted out of `probe()` so a `--plan` run could
+  // reuse them. This test is the guard on that extraction: it replays
+  // four fixtures through `probe()` and compares them against the
+  // results the package produced at master a908951, before the
+  // extraction, recorded in
+  // `test/fixtures/single-probe-result-master-a908951.json`.
+  //
+  // Everything is compared: status, reason, warnings, the mutant, the
+  // `mutation_probe` strings, both phases and the isolation field. Only
+  // what cannot be reproduced twice is normalized away -- durations and
+  // the random parts of temp/log paths -- so a real change to the
+  // single-mutant path is a diff here rather than a silent drift.
+  const RECORDED = JSON.parse(
+    fs.readFileSync(
+      path.join(
+        __dirname,
+        "fixtures",
+        "single-probe-result-master-a908951.json",
+      ),
+      "utf8",
+    ),
+  ) as Record<string, unknown>;
+
+  const ENVELOPE_FIXTURE_JS = [
+    "function isPositive(n) {",
+    "  return n > 0;",
+    "}",
+    "module.exports = { isPositive };",
+    "",
+  ].join("\n");
+  // Exits non-zero without printing anything, so the recorded
+  // `stdoutTail`/`stderrTail` carry no node-version-specific text.
+  const ENVELOPE_FIXTURE_TEST_JS = [
+    "const { isPositive } = require('./fixture.js');",
+    "if (isPositive(5) !== true) process.exit(1);",
+    "if (isPositive(-5) !== false) process.exit(1);",
+    "",
+  ].join("\n");
+
+  function initEnvelopeRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "diff.noprefix", "false"]);
+    git(repo, ["config", "diff.mnemonicPrefix", "false"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), ENVELOPE_FIXTURE_JS);
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      ENVELOPE_FIXTURE_TEST_JS,
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return repo;
+  }
+
+  function normalize(
+    result: ProbeResult,
+    repo: string,
+    logDir: string,
+  ): unknown {
+    let json = JSON.stringify(result);
+    for (const [needle, token] of [
+      [fs.realpathSync(logDir), "<LOGS>"],
+      [logDir, "<LOGS>"],
+      [fs.realpathSync(repo), "<REPO>"],
+      [repo, "<REPO>"],
+    ] as const) {
+      json = json.split(needle).join(token);
+    }
+    json = json
+      .replace(/exec-\d+-[a-z0-9]+\.log/g, "exec-<id>.log")
+      .replace(/argv-\d+-[a-z0-9]+\.log/g, "argv-<id>.log")
+      .replace(/patch-list-[A-Za-z0-9]+/g, "patch-list-<id>")
+      .replace(/mutant-dry-run-[A-Za-z0-9]+/g, "mutant-dry-run-<id>")
+      .replace(/wt-[0-9a-f-]{36}/g, "wt-<id>");
+    const value: unknown = JSON.parse(json);
+    const zeroDurations = (node: unknown): void => {
+      if (node && typeof node === "object") {
+        const record = node as Record<string, unknown>;
+        for (const key of Object.keys(record)) {
+          if (key === "durationMs") record[key] = 0;
+          else zeroDurations(record[key]);
+        }
+      }
+    };
+    zeroDurations(value);
+    return value;
+  }
+
+  it("reproduces the inplace kill recorded before the extraction", async () => {
+    useLockDir();
+    const repo = initEnvelopeRepo();
+    const logDir = makeTmpDir();
+    const result = await probe({
+      file: "fixture.js",
+      line: 2,
+      form: "replace",
+      replaceText: "  return false;",
+      testCommand: "node fixture.test.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir,
+    });
+    expect(normalize(result, repo, logDir)).toEqual(
+      RECORDED.inplaceReplaceKilled,
+    );
+  }, 30000);
+
+  it("reproduces the worktree -p kill recorded before the extraction", async () => {
+    useLockDir();
+    const repo = initEnvelopeRepo();
+    const logDir = makeTmpDir();
+    fs.mkdirSync(logDir, { recursive: true });
+    const target = path.join(repo, "fixture.js");
+    fs.writeFileSync(
+      target,
+      ENVELOPE_FIXTURE_JS.replace("  return n > 0;", "  return false;"),
+    );
+    const diff = gitOutput(repo, ["diff", "--", "fixture.js"]);
+    git(repo, ["checkout", "--", "fixture.js"]);
+    const patchPath = path.join(logDir, "mutant.patch");
+    fs.writeFileSync(patchPath, diff);
+
+    const result = await probe({
+      form: "patch",
+      patchPath,
+      testCommand: "node fixture.test.js",
+      isolation: "worktree",
+      expect: "fail",
+      cwd: repo,
+      logDir,
+    });
+    expect(normalize(result, repo, logDir)).toEqual(
+      RECORDED.worktreePatchKilled,
+    );
+  }, 60000);
+
+  it("reproduces the survivor and the failing baseline recorded before the extraction", async () => {
+    useLockDir();
+    const repo = initEnvelopeRepo();
+    const logDir = makeTmpDir();
+    const survived = await probe({
+      file: "fixture.js",
+      line: 4,
+      form: "replace",
+      replaceText: "module.exports = { isPositive, extra: 1 };",
+      testCommand: "node fixture.test.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir,
+    });
+    expect(normalize(survived, repo, logDir)).toEqual(
+      RECORDED.inplaceReplaceSurvived,
+    );
+
+    const repo2 = initEnvelopeRepo();
+    const logDir2 = makeTmpDir();
+    const baselineFailed = await probe({
+      file: "fixture.js",
+      line: 2,
+      form: "replace",
+      replaceText: "  return false;",
+      testCommand: "exit 1",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo2,
+      logDir: logDir2,
+    });
+    expect(normalize(baselineFailed, repo2, logDir2)).toEqual(
+      RECORDED.inplaceBaselineFailed,
+    );
+  }, 30000);
+});

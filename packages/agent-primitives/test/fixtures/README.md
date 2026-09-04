@@ -1,8 +1,21 @@
-# verify detector fixtures
+# test fixtures
 
-Two kinds of fixture live here, both consumed only by `verify.test.ts` and
-`cli.test.ts`; neither is picked up by this package's own `npm test`
-(`vitest.config.ts` excludes `test/fixtures/**`).
+Three kinds of fixture live here, consumed by `verify.test.ts`,
+`cli.test.ts` and `probe.test.ts`; none of them is picked up by this
+package's own `npm test` (`vitest.config.ts` excludes
+`test/fixtures/**`).
+
+## `single-probe-result-master-a908951.json`
+
+Four `probe()` results (an `inplace` kill, a `worktree` `-p` kill, a
+survivor, a failing baseline), captured from the package as it stood at
+master `a908951` -- before the mutant step was extracted so a `--plan`
+run could reuse it -- with durations zeroed and the random parts of
+temp/log paths replaced by tokens (`<REPO>`, `<LOGS>`, `exec-<id>.log`).
+`probe.test.ts` reproduces the same four runs and compares against this
+file, so any change to the single-mutant path shows up as a diff rather
+than as an unnoticed drift. Regenerate it only when a single-probe
+result is DELIBERATELY changed, and say so in the CHANGELOG.
 
 ## `captured/`
 

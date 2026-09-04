@@ -55,7 +55,7 @@ export type {
   MarkerData,
   MarkerEntry,
 } from "./lock.js";
-export { probe } from "./probe/index.js";
+export { probe, probePlan } from "./probe/index.js";
 export type {
   ExpectVerdict,
   ExecPhaseField,
@@ -63,11 +63,23 @@ export type {
   IsolationMode,
   MutantField,
   MutationProbeField,
+  PlanMutantResult,
+  PlanMutantStatus,
+  PlanSummaryField,
   ProbeOptions,
+  ProbePlanOptions,
+  ProbePlanResult,
   ProbeResult,
   ProbeStatus,
   TestPhaseField,
 } from "./probe/index.js";
+export { parsePlanFile, validatePlan, PLAN_MAX_BYTES } from "./probe/plan.js";
+export type {
+  PlanMutantSpec,
+  PlanParseResult,
+  PlanParseFailureReason,
+  ProbePlanSpec,
+} from "./probe/plan.js";
 export { init, ALL_HARNESSES, InitFsUsageError } from "./init/index.js";
 export type {
   Harness,

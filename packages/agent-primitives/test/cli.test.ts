@@ -2426,3 +2426,273 @@ describe("cli signal handling: a check that traps the signal", () => {
     expect(result.code).toBe(130);
   }, 40000);
 });
+
+describe("cli: probe --plan", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  /** A repository with two functions and a test that catches a mutant of
+   * either, plus a `runs.txt` the test appends to on every invocation:
+   * the count is what proves how many times the command ran (one
+   * baseline plus one run per mutant), and the absence of a fourth entry
+   * is what proves a mutant was never reached. */
+  function initPlanRepo(): { repo: string; before: string } {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    const fixture = [
+      "function isPositive(n) {",
+      "  return n > 0;",
+      "}",
+      "function isNegative(n) {",
+      "  return n < 0;",
+      "}",
+      "module.exports = { isPositive, isNegative };",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(repo, "fixture.js"), fixture);
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "fs.appendFileSync('runs.txt', 'run\\n');",
+        "if (content.includes('SLOW_MARKER')) {",
+        "  const { spawn } = require('node:child_process');",
+        "  spawn(process.execPath, ['heartbeat-worker.js'], {",
+        "    stdio: 'inherit',",
+        "  });",
+        "  setTimeout(() => { process.exit(0); }, 15000);",
+        "  return;",
+        "}",
+        "const { isPositive, isNegative } = require('./fixture.js');",
+        "if (isPositive(5) !== true) process.exit(1);",
+        "if (isPositive(-5) !== false) process.exit(1);",
+        "if (isNegative(-5) !== true) process.exit(1);",
+        "if (isNegative(5) !== false) process.exit(1);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "heartbeat-worker.js"),
+      [
+        "const fs = require('node:fs');",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        "  fs.writeFileSync('heartbeat.txt', String(n));",
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo, before: fixture };
+  }
+
+  function writePlan(repo: string, plan: unknown): string {
+    const planPath = path.join(repo, "plan.json");
+    fs.writeFileSync(planPath, JSON.stringify(plan, null, 2));
+    return planPath;
+  }
+
+  function runsIn(repo: string): number {
+    const runsFile = path.join(repo, "runs.txt");
+    if (!fs.existsSync(runsFile)) return 0;
+    return fs.readFileSync(runsFile, "utf8").split("\n").filter(Boolean).length;
+  }
+
+  it("runs every mutant against one baseline, exits 0 when all are killed, and carries plan.baseline/results/summary", async () => {
+    const { repo, before } = initPlanRepo();
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [
+        { file: "fixture.js", line: 2, replace: "  return false;" },
+        { file: "fixture.js", line: 5, replace: "  return true;" },
+      ],
+    });
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.command).toBe("probe");
+    expect(parsed.status).toBe("killed");
+    expect(parsed.plan.baseline.exitCode).toBe(0);
+    expect(parsed.plan.summary).toEqual({
+      total: 2,
+      killed: 2,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+    });
+    expect(parsed.plan.results).toHaveLength(2);
+    for (const entry of parsed.plan.results) {
+      expect(entry.mutation_probe.result).toBe("killed");
+      expect(entry.mutation_probe.restored_verified).toBe(true);
+      expect(typeof entry.mutation_probe.mutant).toBe("string");
+      expect(typeof entry.mutation_probe.verified_applied_via).toBe("string");
+      expect(entry.test.command).toBe("node fixture.test.js");
+    }
+    // One baseline, then one run per mutant.
+    expect(runsIn(repo)).toBe(3);
+    expect(parsed.logs.length).toBeGreaterThanOrEqual(3);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  }, 30000);
+
+  it("exits 1 when a mutant survives, with the survivor named in plan.results", async () => {
+    const { repo } = initPlanRepo();
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [
+        { file: "fixture.js", line: 2, replace: "  return false;" },
+        {
+          file: "fixture.js",
+          line: 7,
+          replace: "module.exports = { isPositive, isNegative, extra: 1 };",
+        },
+      ],
+    });
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("survived");
+    expect(parsed.plan.results[0].status).toBe("killed");
+    expect(parsed.plan.results[1].status).toBe("survived");
+  }, 30000);
+
+  it("refuses --plan beside a single-mutant option as usage_error, naming the conflict, exit 2", async () => {
+    const { repo } = initPlanRepo();
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "-t",
+      "node fixture.test.js",
+      "--file",
+      "fixture.js",
+    ]);
+
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(JSON.stringify(parsed)).toContain("--file");
+    expect(JSON.stringify(parsed)).toContain("-t/--test");
+    expect(runsIn(repo)).toBe(0);
+  });
+
+  it("reports an unusable plan file as usage_error/plan_not_readable and an empty one as plan_empty, exit 2, before anything runs", async () => {
+    const { repo } = initPlanRepo();
+
+    const missing = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      path.join(repo, "no-such-plan.json"),
+    ]);
+    expect(missing.code).toBe(2);
+    expect(JSON.parse(missing.stdout).status).toBe("usage_error");
+    expect(JSON.parse(missing.stdout).reason).toBe("plan_not_readable");
+
+    const emptyPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      mutants: [],
+    });
+    const empty = await spawnCli(["-C", repo, "probe", "--plan", emptyPath]);
+    expect(empty.code).toBe(2);
+    expect(JSON.parse(empty.stdout).reason).toBe("plan_empty");
+    expect(runsIn(repo)).toBe(0);
+  });
+
+  it("lets -i on the command line override the plan's own isolation", async () => {
+    const { repo } = initPlanRepo();
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const asPlanned = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+    expect(JSON.parse(asPlanned.stdout).isolation.mode).toBe("inplace");
+
+    const overridden = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "-i",
+      "worktree",
+    ]);
+    expect(overridden.code).toBe(0);
+    expect(JSON.parse(overridden.stdout).isolation.mode).toBe("worktree");
+  }, 30000);
+
+  it("on SIGTERM during mutant 2 of 3: restores the in-flight mutant, never applies the third, exits 143 with no output", async () => {
+    const { repo, before } = initPlanRepo();
+    const lockDir = makeTmpDir();
+    const heartbeat = path.join(repo, "heartbeat.txt");
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [
+        { file: "fixture.js", line: 2, replace: "  return false;" },
+        {
+          file: "fixture.js",
+          line: 5,
+          replace: "  return true; // SLOW_MARKER",
+        },
+        { file: "fixture.js", line: 7, replace: "module.exports = {};" },
+      ],
+    });
+
+    const child = spawnCliRaw(["-C", repo, "probe", "--plan", planPath], {
+      env: { AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+    });
+    const run = collectCli(child);
+
+    // Readiness: the heartbeat file only appears once the SECOND
+    // mutant's test run is actually running, so the signal below lands
+    // mid-plan rather than at a guessed moment.
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    child.kill("SIGTERM");
+    const result = await run;
+
+    expect(result.code).toBe(143);
+    // No envelope at all: the handler ends the process before anything
+    // could print a verdict it is about to make moot.
+    expect(result.stdout).toBe("");
+    // The in-flight (second) mutant was restored...
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+    // ...the third mutant never ran (baseline + two mutant runs only)...
+    expect(runsIn(repo)).toBe(3);
+    // ...and neither a lock nor a marker was left behind.
+    expect(fs.readdirSync(lockDir)).toEqual([]);
+  }, 40000);
+});

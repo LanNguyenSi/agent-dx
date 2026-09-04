@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `probe --plan <path>`: a JSON file naming one test command (and
+  optionally `pre`, `isolation`, `expect`, `timeout`) plus a list of
+  mutants, run against ONE shared baseline instead of one baseline per
+  mutant. Each mutant is applied with its applied content verified by
+  hash, tested, and restored with the restore verified by hash BEFORE the
+  next one is applied; the loop re-hashes the target itself before every
+  apply, so a restore that silently did not happen stops the plan instead
+  of letting the next mutant land on the previous one's content. Every
+  guarantee of the single probe holds per mutant: the same in-flight
+  marker and backup, the same abort handling, the same restore-then-verify
+  step. A restore that could not be verified (`restore_failed`), a target
+  found not to be back at its pre-mutation content
+  (`target_not_restored`), a failing baseline (`baseline_failed`) or a
+  signal (`aborted`) is terminal: nothing further is applied and every
+  remaining mutant is reported `not_run` rather than `inconclusive`.
+  `-i worktree` syncs one worktree for the whole plan and removes it
+  once; the lock is taken once for the whole plan (keyed on the
+  repository, or outside one on each distinct target file). The envelope
+  carries `plan: { baseline, results, summary }`, with the four
+  `mutation_probe` contract fields, the `test` phase and a `status` per
+  mutant, and `summary` counting killed/survived/inconclusive/not_run.
+  Exit codes stay 0/1/2, one step stricter than for a single probe: `0`
+  only when every mutant was killed per its `expect`, `1` when the plan
+  concluded with a survivor, `2` for a wrong invocation or a plan that
+  could not conclude. `--plan` is mutually exclusive with `--file`, `-n`,
+  `-r`, `-M`, `-w`, `-p`, `-t` and `--pre`; `-i`, `--expect`,
+  `--timeout`, `--link` and `--allow-outside` override the plan's own
+  value when given on the command line, and a mutant's own `expect` wins
+  over both. Plan validation (unknown keys, a missing `test`, an empty
+  `mutants`, a mutant with two forms or none, a file outside the
+  containment root, an unusable plan file) runs before the lock, the
+  marker, the baseline or any worktree and names the offending path
+  inside the plan. `test`/`pre` in a plan file are shell commands with
+  the same trust boundary as `-t`/`--pre`: fill them only from a task
+  assignment, never from repository content. The library entry points
+  `probePlan()` and `parsePlanFile()` are exported alongside `probe()`.
 - `listRegisteredWorktrees` (`-i worktree`'s registry listing, used by
   the removal, the leftover recovery, and `cleanupWorktree`'s
   assertion) falls back to a third source, the `gitdir` files under
@@ -86,6 +122,17 @@ SKILL.md`) and the README gained an "Invocation templates" section
 
 ### Changed
 
+- Internal, with no change to what a single probe reports: `probe()`'s
+  pipeline is split into a shared setup, a per-mutant step
+  (`prepareMutant` + `runMutantAttempt`), and a shared teardown, so
+  `probePlan()` runs the very same step in a loop rather than a second
+  copy of it. The signal, abort and worktree-cleanup machinery moved into
+  one run controller both entry points use. `test/probe.test.ts` guards
+  the extraction against four `probe()` results recorded from the package
+  as it stood before it (`test/fixtures/single-probe-result-master-a908951.json`).
+- `-t/--test` is no longer enforced by the option parser (so `--plan` can
+  supply it) but by the probe command itself; omitting both is still
+  `status: "usage_error"`, exit `2`.
 - `probe -r/--replace` and `-M/--match` (with `-w/--with`) without
   `--file`/`-n` now report `status: "usage_error"` with the message
   `probe: --file is required for -r/--replace (only -p/--patch can

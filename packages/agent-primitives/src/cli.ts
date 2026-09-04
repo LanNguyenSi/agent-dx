@@ -27,9 +27,12 @@ import {
 } from "./verify/index.js";
 import {
   probe,
+  probePlan,
   type ExpectVerdict,
   type IsolationMode,
+  type ProbePlanResult,
 } from "./probe/index.js";
+import { parsePlanFile, type ProbePlanSpec } from "./probe/plan.js";
 import {
   init,
   ALL_HARNESSES,
@@ -840,8 +843,11 @@ interface ProbeCliOptions {
   match?: string;
   with?: string;
   patch?: string;
-  test: string;
+  /** Optional at the option-parser level so `--plan` can supply it;
+   * required (and checked in the action) for every single-mutant run. */
+  test?: string;
   pre?: string;
+  plan?: string;
   isolation: IsolationMode;
   expect: ExpectVerdict;
   timeout?: string;
@@ -936,6 +942,149 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
   return { form: "patch", patchPath: opts.patch as string };
 }
 
+/** The single-mutant options `--plan` refuses outright: the plan file
+ * itself carries the mutants and the command they share, so accepting
+ * one of these beside it would mean two sources for the same value with
+ * no honest precedence between them. The run-shaping options (`-i`,
+ * `--expect`, `--timeout`, `--link`, `--allow-outside`) are NOT in this
+ * set: they override the plan's own value when given (see
+ * `resolvePlanOverrides`). */
+const PLAN_EXCLUSIVE_OPTIONS: readonly {
+  flag: string;
+  key: keyof ProbeCliOptions;
+}[] = [
+  { flag: "--file", key: "file" },
+  { flag: "-n/--line", key: "line" },
+  { flag: "-r/--replace", key: "replace" },
+  { flag: "-M/--match", key: "match" },
+  { flag: "-w/--with", key: "with" },
+  { flag: "-p/--patch", key: "patch" },
+  { flag: "-t/--test", key: "test" },
+  { flag: "--pre", key: "pre" },
+];
+
+function requirePlanExclusive(opts: ProbeCliOptions): void {
+  const conflicts = PLAN_EXCLUSIVE_OPTIONS.filter(
+    ({ key }) => opts[key] !== undefined,
+  ).map(({ flag }) => flag);
+  if (conflicts.length > 0) {
+    throw new UsageError(
+      `probe: --plan cannot be combined with ${conflicts.join(", ")}; the ` +
+        `plan file supplies the mutants, the test command and --pre`,
+    );
+  }
+}
+
+/** Whether an option was actually given on the command line, as opposed
+ * to carrying commander's own default: only an explicit value overrides
+ * what the plan file says. */
+function explicitlyGiven(command: Command, key: string): boolean {
+  const source = command.getOptionValueSource(key);
+  return source !== undefined && source !== "default";
+}
+
+/**
+ * Runs `probe --plan <path>`: read and validate the plan, reconcile the
+ * run-shaping options with it, run every mutant against one shared
+ * baseline, and emit one envelope carrying `plan: { baseline, results,
+ * summary }`.
+ *
+ * Precedence, one rule for every run-shaping option: a value given on
+ * the command line wins over the plan file's own value, which wins over
+ * the CLI default. A mutant's own `expect` wins over both, since it is
+ * the only value that is per mutant rather than per run.
+ */
+async function runProbePlanCommand(
+  opts: ProbeCliOptions,
+  command: Command,
+  global: ResolvedGlobal,
+  start: number,
+): Promise<void> {
+  requirePlanExclusive(opts);
+  const parsed = parsePlanFile(path.resolve(global.cwd, opts.plan ?? ""));
+  if (!parsed.ok) {
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "probe",
+      status: "usage_error",
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: [parsed.message],
+      logs: [],
+      extra: { reason: parsed.reason },
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(envelope, exitCode, {
+      format: global.format,
+      maxChars: global.maxChars,
+    });
+    return;
+  }
+  const plan: ProbePlanSpec = parsed.plan;
+  const isolation = explicitlyGiven(command, "isolation")
+    ? opts.isolation
+    : (plan.isolation ?? opts.isolation);
+  const expect = explicitlyGiven(command, "expect")
+    ? opts.expect
+    : (plan.expect ?? opts.expect);
+  const timeoutMs =
+    opts.timeout !== undefined ? Number(opts.timeout) * 1000 : plan.timeoutMs;
+  // Handed to `probePlan` for the duration of the call, the same as for a
+  // single probe: it owns SIGINT and SIGTERM while it runs, because it
+  // has a mutated file to restore before the process may end.
+  probeOwnsShutdown = true;
+  let result: ProbePlanResult;
+  try {
+    result = await probePlan({
+      mutants: plan.mutants,
+      testCommand: plan.testCommand,
+      preCommand: plan.preCommand,
+      isolation,
+      expect,
+      timeoutMs,
+      links: opts.link ?? [],
+      allowOutside: opts.allowOutside ?? false,
+      cwd: global.cwd,
+      logDir: global.logDir,
+      exitOnSignal: true,
+    });
+  } finally {
+    probeOwnsShutdown = false;
+  }
+  const { envelope, exitCode } = buildEnvelope({
+    version: VERSION,
+    command: "probe",
+    status: result.status,
+    durationMs: Date.now() - start,
+    cwd: global.cwd,
+    warnings: result.warnings,
+    logs: [
+      ...(result.baseline !== undefined ? [result.baseline.logPath] : []),
+      ...result.results.flatMap((r) => [
+        ...(r.test !== undefined ? [r.test.logPath] : []),
+        ...r.logs,
+      ]),
+      ...(result.dryRunLogPaths ?? []),
+    ],
+    extra: {
+      ...(result.reason !== undefined ? { reason: result.reason } : {}),
+      plan: {
+        ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
+        results: result.results,
+        summary: result.summary,
+      },
+      isolation: result.isolation,
+    },
+    maxChars: global.maxChars,
+    logDir: global.logDir,
+  });
+  emit(envelope, exitCode, {
+    format: global.format,
+    maxChars: global.maxChars,
+  });
+}
+
 program
   .command("probe")
   .description(
@@ -955,7 +1104,10 @@ program
   .option("-M, --match <substr>", "substring to find on the line (requires -w)")
   .option("-w, --with <text>", "replacement for the first match of -M")
   .option("-p, --patch <path>", "path to a unified diff, applied via git apply")
-  .requiredOption("-t, --test <command>", "shell command that runs the test")
+  .option(
+    "-t, --test <command>",
+    "shell command that runs the test; required unless --plan supplies it",
+  )
   .option(
     "--pre <command>",
     "shell command (e.g. a rebuild) run before each test invocation",
@@ -978,6 +1130,10 @@ program
     parseTimeoutSeconds,
   )
   .option(
+    "--plan <path>",
+    "JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with --file, -n, -r, -M, -w, -p, -t and --pre",
+  )
+  .option(
     "--link <dirs>",
     "comma-separated extra directories checked for containment",
     parseList,
@@ -989,6 +1145,16 @@ program
   .action(async (opts: ProbeCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    if (opts.plan !== undefined) {
+      await runProbePlanCommand(opts, command, global, start);
+      return;
+    }
+    if (opts.test === undefined) {
+      throw new UsageError(
+        "probe: -t/--test is required (only --plan can supply it instead)",
+      );
+    }
+    const testCommand = opts.test;
     const mutantChoice = resolveMutantForm(opts);
     // Handed to `probe` for the duration of the call: it owns SIGINT and
     // SIGTERM while it runs, because it has a mutated file to restore
@@ -1002,7 +1168,7 @@ program
         file: opts.file,
         line: opts.line,
         ...mutantChoice,
-        testCommand: opts.test,
+        testCommand,
         preCommand: opts.pre,
         isolation: opts.isolation,
         expect: opts.expect,

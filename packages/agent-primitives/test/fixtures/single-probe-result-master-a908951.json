@@ -1,0 +1,150 @@
+{
+  "inplaceReplaceKilled": {
+    "status": "killed",
+    "warnings": [],
+    "mutant": {
+      "file": "<REPO>/fixture.js",
+      "line": 2,
+      "before": "  return n > 0;",
+      "after": "  return false;",
+      "form": "replace"
+    },
+    "mutation_probe": {
+      "mutant": "<REPO>/fixture.js:2:   return n > 0; ->   return false;",
+      "verified_applied_via": "<REPO>/fixture.js:2\n-   return n > 0;\n+   return false;",
+      "result": "killed",
+      "restored_verified": true
+    },
+    "baseline": {
+      "exitCode": 0,
+      "durationMs": 0,
+      "logPath": "<LOGS>/exec-<id>.log",
+      "timedOut": false
+    },
+    "test": {
+      "command": "node fixture.test.js",
+      "exitCode": 1,
+      "durationMs": 0,
+      "timedOut": false,
+      "stdoutTail": "",
+      "stderrTail": "",
+      "logPath": "<LOGS>/exec-<id>.log"
+    },
+    "isolation": {
+      "mode": "inplace",
+      "path": null,
+      "linked": [],
+      "syncedTrackedFiles": 0,
+      "syncedUntrackedFiles": 0
+    },
+    "dryRunLogPaths": []
+  },
+  "worktreePatchKilled": {
+    "status": "killed",
+    "warnings": [],
+    "mutant": {
+      "file": "<REPO>/fixture.js",
+      "line": 2,
+      "before": "  return n > 0;",
+      "after": "  return false;",
+      "form": "patch"
+    },
+    "mutation_probe": {
+      "mutant": "<REPO>/fixture.js:2:   return n > 0; ->   return false;",
+      "verified_applied_via": "<REPO>/fixture.js:2\n-   return n > 0;\n+   return false;",
+      "result": "killed",
+      "restored_verified": true
+    },
+    "baseline": {
+      "exitCode": 0,
+      "durationMs": 0,
+      "logPath": "<LOGS>/exec-<id>.log",
+      "timedOut": false
+    },
+    "test": {
+      "command": "node fixture.test.js",
+      "exitCode": 1,
+      "durationMs": 0,
+      "timedOut": false,
+      "stdoutTail": "",
+      "stderrTail": "",
+      "logPath": "<LOGS>/exec-<id>.log"
+    },
+    "isolation": {
+      "mode": "worktree",
+      "path": "<LOGS>/wt-<id>/wt",
+      "linked": [],
+      "syncedTrackedFiles": 0,
+      "syncedUntrackedFiles": 0
+    },
+    "dryRunLogPaths": [
+      "<LOGS>/patch-list-<id>/argv-<id>.log",
+      "<LOGS>/wt-<id>/worktree-add.log",
+      "<LOGS>/wt-<id>/tracked-diff.log",
+      "<LOGS>/wt-<id>/tracked-diff-numstat.log",
+      "<LOGS>/wt-<id>/worktree-apply.log",
+      "<LOGS>/wt-<id>/untracked-files.log",
+      "<LOGS>/mutant-dry-run-<id>/argv-<id>.log",
+      "<LOGS>/mutant-dry-run-<id>/argv-<id>.log"
+    ]
+  },
+  "inplaceReplaceSurvived": {
+    "status": "survived",
+    "warnings": [],
+    "mutant": {
+      "file": "<REPO>/fixture.js",
+      "line": 4,
+      "before": "module.exports = { isPositive };",
+      "after": "module.exports = { isPositive, extra: 1 };",
+      "form": "replace"
+    },
+    "mutation_probe": {
+      "mutant": "<REPO>/fixture.js:4: module.exports = { isPositive }; -> module.exports = { isPositive, extra: 1 };",
+      "verified_applied_via": "<REPO>/fixture.js:4\n- module.exports = { isPositive };\n+ module.exports = { isPositive, extra: 1 };",
+      "result": "survived",
+      "restored_verified": true
+    },
+    "baseline": {
+      "exitCode": 0,
+      "durationMs": 0,
+      "logPath": "<LOGS>/exec-<id>.log",
+      "timedOut": false
+    },
+    "test": {
+      "command": "node fixture.test.js",
+      "exitCode": 0,
+      "durationMs": 0,
+      "timedOut": false,
+      "stdoutTail": "",
+      "stderrTail": "",
+      "logPath": "<LOGS>/exec-<id>.log"
+    },
+    "isolation": {
+      "mode": "inplace",
+      "path": null,
+      "linked": [],
+      "syncedTrackedFiles": 0,
+      "syncedUntrackedFiles": 0
+    },
+    "dryRunLogPaths": []
+  },
+  "inplaceBaselineFailed": {
+    "status": "inconclusive",
+    "reason": "baseline_failed",
+    "warnings": [],
+    "baseline": {
+      "exitCode": 1,
+      "durationMs": 0,
+      "logPath": "<LOGS>/exec-<id>.log",
+      "timedOut": false
+    },
+    "isolation": {
+      "mode": "inplace",
+      "path": null,
+      "linked": [],
+      "syncedTrackedFiles": 0,
+      "syncedUntrackedFiles": 0
+    },
+    "dryRunLogPaths": []
+  }
+}
