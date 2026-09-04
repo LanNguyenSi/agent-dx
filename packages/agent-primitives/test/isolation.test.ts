@@ -1534,10 +1534,27 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     // anywhere -- `path.dirname` of the resolved path lands back on
     // `junkDir` itself. Before this validation, this resolved to
     // `junkDir` and was reported as a registered worktree in an
-    // `ok: true` listing.
+    // `ok: true` listing (the reviewer's exact reproduction). This
+    // case alone does not discriminate the basename check from the
+    // "resolves back to the admin entry dir" check below it (both
+    // reject it), so a second entry, below, isolates the basename
+    // check on its own.
     fs.writeFileSync(
       path.join(junkDir, "gitdir"),
       "this is not a path at all\n",
+    );
+
+    const elsewhereId = "bogus-elsewhere";
+    const elsewhereDir = path.join(adminDir, elsewhereId);
+    fs.mkdirSync(elsewhereDir, { recursive: true });
+    // Absolute content whose resolved directory is NOT the admin entry
+    // dir, so only the basename check rejects it: with that check
+    // dropped, this would resolve to a plausible-looking worktree
+    // directory (which merely does not exist on disk, landing it in
+    // `goneTargets` rather than `odd`) instead of being flagged odd.
+    fs.writeFileSync(
+      path.join(elsewhereDir, "gitdir"),
+      "/definitely/not/a/worktree/not-a-dot-git-file\n",
     );
 
     const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
@@ -1548,7 +1565,9 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     expect(listed.form).toBe("gitdir-files");
     expect(listed.paths).toEqual([]);
     expect(listed.goneTargets).toBeUndefined();
-    expect(listed.detail).toContain(junkId);
+    for (const id of [junkId, elsewhereId]) {
+      expect(listed.detail).toContain(id);
+    }
     expect(listed.detail).toContain("does not name a .git file");
   });
 
