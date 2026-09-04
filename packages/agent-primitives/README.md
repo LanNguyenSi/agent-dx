@@ -407,9 +407,38 @@ leaves behind, which a single `--force` refuses and `git worktree
 prune` skips), then `git worktree prune`; the outcome is then checked
 against `git worktree list` and the disk rather than read off an exit
 code, and a removal that did not take keeps the repository-keyed marker
-and adds a warning naming the path and the manual command. When that
-listing cannot run in any form, the registry is unknown rather than
-"still registered": the removal is judged by the disk alone (never by
+and adds a warning naming the path and the manual command. When
+`git worktree list` cannot run in EITHER form (a git that rejects `-z`
+and then also fails the newline-separated fallback, or one whose
+`worktree list` is broken outright, whatever the option), a third
+source stands in before the registry is given up as unknown: every
+`<git-common-dir>/worktrees/<id>/gitdir` file is read directly, no
+`git worktree list` invocation at all, since `git rev-parse
+--git-common-dir` (already relied on to find that directory for the
+half-written-entry repair below) still answers when the listing itself
+is dead. This source lists LINKED worktrees only -- git's admin
+directory carries no entry for the main worktree, so it is never
+reported by this form -- and it does not know `locked` or `prunable`
+the way `git worktree list` does, so an admin entry a real listing
+would have pruned is read the same as a live one, UNLESS its own
+target directory no longer exists on disk, in which case it is kept
+apart from the paths that do (never folded in as though still
+registered): a stale entry naming a worktree `cleanupWorktree` just
+removed must read as gone, not as still there. An entry whose `gitdir`
+file is missing, empty, or does not name an absolute path is reported
+rather than silently dropped. Once this source can list something, the
+removal is asserted against it exactly as it would be against a
+genuine `git worktree list`, `cleanupWorktree`'s half-written-entry
+repair (below) having already had its own chance against the real
+listing failure first, since that repair fixes git's own admin state
+for every future listing on the repository, which a read-only fallback
+cannot do. When this source cannot run either (`git rev-parse` itself
+fails, or the repository has no `worktrees/` admin directory to read
+at all -- true of a repository that has never had a linked worktree,
+and also true right after the LAST linked worktree of a repository is
+removed, since `git worktree prune` deletes the now-empty `worktrees/`
+directory itself), the registry is unknown rather than "still
+registered": the removal is judged by the disk alone (never by
 `git worktree remove`'s exit status, which is non-zero for a path git
 never registered, the very leftover an add killed early leaves), a
 warning reports it as done but unverified, and the marker is cleared,
@@ -442,7 +471,20 @@ path, the record, and the bound). A record older than that no longer
 vouches for its worktree whatever its pid says, since a probe's
 worktree lives for one run and a pid can be recycled: the worktree is
 a leftover again, removed by the next run and reported by `doctor`
-with the manual command. Only a path of
+with the manual command. `doctor`'s own `stale-worktree` check applies
+the same 24-hour bound to the repository-keyed worktree MARKER too,
+against the marker's own `timestamp` field (written when the marker is
+created, never the marker file's mtime): a marker whose pid is still
+alive but whose own timestamp is past the bound is treated as stale
+regardless, the same as a dead pid, since an alive pid a marker
+happens to name proves nothing about whether ITS probe is still
+running once its own record is this old. The worktree-marker recovery
+`probe -i worktree` itself runs before its own baseline never consults
+a marker's pid at all, alive or dead, past the bound or not: the lock
+already excludes a second live probe on the same repository under the
+same lock directory before that recovery ever runs, so any marker
+found there is unfinished work from a run that is definitely over.
+Only a path of
 the probe's own scratch shape (`<log-dir>/wt-<uuid>/wt`, the uuid in
 its 8-4-4-4-12 hex layout) that git reports as a worktree of the
 repository, or that sits under the recovering run's own `--log-dir`, is

@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `listRegisteredWorktrees` (`-i worktree`'s registry listing, used by
+  the removal, the leftover recovery, and `cleanupWorktree`'s
+  assertion) falls back to a third source, `<git-common-dir
+  >/worktrees/<id>/gitdir` read directly, when neither
+  `git worktree list` form ran to a parse: a dead listing no longer
+  leaves a leftover judged by the disk alone. The fallback lists linked
+  worktrees only (never the main worktree, which git's admin directory
+  carries no entry for) and keeps an admin entry whose target no longer
+  exists on disk apart from the entries that still do, so a stale entry
+  naming a worktree just removed reads as gone, never as still
+  registered; an entry whose `gitdir` file is missing, empty, or not an
+  absolute path is reported rather than silently dropped.
+  `cleanupWorktree`'s previously-unverified double-fault outcome (both
+  `git worktree list` forms dead, the target never registered in the
+  first place) is now asserted (`verified: true`) whenever this source
+  can list something.
+- `doctor`'s `stale-worktree` check and the marker's own
+  `SCRATCH_OWNER_MAX_AGE_HOURS`-bound age check (previously applied
+  only to the scratch owner record) now also bound the repository-keyed
+  worktree marker itself, against its own `timestamp` field: a marker
+  whose pid is alive but whose record is older than the bound is
+  reported as a leftover with the manual removal command, the same as
+  a dead pid, since an alive pid recycled onto an unrelated process
+  proves nothing once the marker's own record is this old.
+
 - `probe -p/--patch` now needs neither `--file` nor `-n/--line`, so
   `-p <patch> -t '<cmd>'` alone is enough for a single-path patch;
   both are still required for `-r` and `-M`/`-w`, which have nothing

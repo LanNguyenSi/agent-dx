@@ -784,13 +784,16 @@ export function readScratchOwner(
   }
 }
 
-/** How long an owner record vouches for its worktree, measured from the
- * record's own timestamp. A probe's worktree lives for one run, so a
- * record older than this names a run that is long over: the pid it
- * carries is either recycled or some unrelated process, and reading it
- * as a probe in flight would park the leftover for as long as that pid
- * happens to stay alive. Past the bound the worktree is a leftover
- * whatever the pid says. Exported for `doctor`'s hint and the tests. */
+/** How long a timestamped record vouches for what it names, measured
+ * from the record's own timestamp: the scratch owner record below, and
+ * a probe marker's own `timestamp` field (`doctor`'s `stale-worktree`
+ * check; see `isTimestampPastBound`). A probe's worktree lives for one
+ * run, so a record or marker older than this names a run that is long
+ * over: the pid it carries is either recycled or some unrelated
+ * process, and reading it as a probe in flight would park the leftover
+ * for as long as that pid happens to stay alive. Past the bound the
+ * worktree is a leftover whatever the pid says. Exported for `doctor`'s
+ * hint and the tests. */
 export const SCRATCH_OWNER_MAX_AGE_HOURS = 24;
 
 const SCRATCH_OWNER_MAX_AGE_MS = SCRATCH_OWNER_MAX_AGE_HOURS * 60 * 60 * 1000;
@@ -805,9 +808,15 @@ const SCRATCH_OWNER_MAX_AGE_MS = SCRATCH_OWNER_MAX_AGE_HOURS * 60 * 60 * 1000;
 export type ScratchOwnerState = "none" | "self" | "dead" | "expired" | "live";
 
 /** True when `timestamp` (the record's own, never the file's mtime) does
- * not parse or lies more than the bound away from `now`. A future-dated
- * record is as untrustworthy as a stale one. */
-function scratchOwnerExpired(timestamp: string, now: number): boolean {
+ * not parse or lies more than `SCRATCH_OWNER_MAX_AGE_HOURS` away from
+ * `now`. A future-dated record is as untrustworthy as a stale one. The
+ * one bound this package applies to a record's own age, shared by the
+ * scratch owner record's classification below and by `doctor`'s
+ * `stale-worktree` check, which applies it to a probe marker's
+ * `timestamp` field (never the marker file's mtime, the same choice
+ * made here) the same way: a marker whose pid happens to still resolve
+ * to *something* must not be read as vouching for a run forever. */
+export function isTimestampPastBound(timestamp: string, now: number): boolean {
   const written = Date.parse(timestamp);
   return (
     !Number.isFinite(written) ||
@@ -821,7 +830,7 @@ function classifyScratchOwner(
 ): ScratchOwnerState {
   if (owner.pid === process.pid) return "self";
   if (!isPidAlive(owner.pid)) return "dead";
-  if (scratchOwnerExpired(owner.timestamp, now)) return "expired";
+  if (isTimestampPastBound(owner.timestamp, now)) return "expired";
   return "live";
 }
 
@@ -979,26 +988,48 @@ export function rejectsOption(result: GitCallOutcome): boolean {
 }
 
 export interface RegisteredWorktrees {
-  /** True when a listing ran, exited 0, was captured whole, and parsed;
-   * `paths` is empty (and says nothing) otherwise. A false here means
-   * the registry is UNKNOWN, never known to be empty, and `detail`
-   * says why. */
+  /** True when a listing ran and paths were determined, through
+   * `git worktree list` (`ok: true` with exit 0, captured whole, and
+   * parsed) or, when neither form of that could run to a parse,
+   * through the `gitdir-files` fallback below. `paths` is empty (and
+   * says nothing) otherwise. A false here means the registry is
+   * UNKNOWN, never known to be empty, and `detail` says why. */
   ok: boolean;
-  /** Every registered worktree of the repository, the main one first,
-   * each through `resolveDeepestExisting` so a caller can compare it
-   * with a path of its own spelling. */
+  /** Every registered worktree the listing found, the main one first
+   * for `nul`/`newline`, each through `resolveDeepestExisting` so a
+   * caller can compare it with a path of its own spelling. For
+   * `gitdir-files` this never includes the main worktree (see `form`)
+   * and never an entry whose target no longer exists on disk (see
+   * `goneTargets`): a stale admin entry naming a removed directory
+   * must not read as "still registered" to `cleanupWorktree`'s
+   * assertion. */
   paths: string[];
   /** Which listing produced `paths`: `nul` for `--porcelain -z`,
    * `newline` for the fallback a git older than
-   * `GIT_MIN_VERSION_WORKTREE_LIST_Z` gets. Absent when neither ran to
-   * a parse. */
-  form?: "nul" | "newline";
-  /** Why `ok` is false. */
+   * `GIT_MIN_VERSION_WORKTREE_LIST_Z` gets, `gitdir-files` for the
+   * third source (see `listRegisteredWorktreesViaGitdirFiles`) used
+   * when neither `git worktree list` form ran to a parse. Absent when
+   * nothing ran to a parse at all. */
+  form?: "nul" | "newline" | "gitdir-files";
+  /** For `form: "gitdir-files"` only: every admin entry whose target
+   * directory no longer exists on disk, resolved through
+   * `resolveDeepestExisting` like `paths`. Kept apart from `paths`
+   * rather than folded into it, so a leftover admin entry for a
+   * worktree `cleanupWorktree` just removed reads as "gone", not as
+   * "still registered". Absent for `nul`/`newline`, and when the
+   * gitdir-files listing found no such entry. */
+  goneTargets?: string[];
+  /** Why `ok` is false; for a `gitdir-files` listing that is otherwise
+   * `ok: true`, names any admin entry whose `gitdir` file could not be
+   * read, was empty, or did not parse, and any entry in
+   * `goneTargets`, so a caller can report them rather than silently
+   * drop them. */
   detail?: string;
   /** The log of the last listing attempted. */
   logPath: string;
   /** The logs of every listing attempted, the rejected `-z` form first
-   * when the fallback ran. */
+   * when the fallback ran, and the `git rev-parse --git-common-dir`
+   * log when the `gitdir-files` fallback ran. */
   logPaths: string[];
 }
 
@@ -1012,12 +1043,11 @@ export interface RegisteredWorktrees {
  * or whose fallback fails or does not parse, is reported as not ok:
  * unknown, which the callers treat as "could not check", never as
  * "nothing registered" and never as "still registered". */
-export async function listRegisteredWorktrees(
+async function listRegisteredWorktreesViaGit(
   root: string,
   logDir: string,
-  opts: { track?: TrackGitCall } = {},
+  track: TrackGitCall,
 ): Promise<RegisteredWorktrees> {
-  const track: TrackGitCall = opts.track ?? ((started) => started);
   const list = (args: string[]): Promise<RunArgvResult> =>
     trackGit(
       track,
@@ -1080,6 +1110,142 @@ export async function listRegisteredWorktrees(
     form: "newline",
     logPath: newline.logPath,
     logPaths,
+  };
+}
+
+/** The third listing source: `<git-common-dir>/worktrees/<id>/gitdir`
+ * read directly, with no `git worktree list` invocation at all, so it
+ * still answers when that command is broken outright (any exit status,
+ * any option) rather than only when it rejects `-z`. `gitdir` names the
+ * linked worktree's own `.git` FILE, one level below the worktree
+ * itself, so `resolveDeepestExisting(path.dirname(gitdir))` (the same
+ * read `removeHalfWrittenAdminEntry` already does for the one entry it
+ * repairs) is the worktree path. Two things this source cannot do that
+ * `git worktree list` can: it never names the MAIN worktree (git's
+ * admin directory carries no entry for it -- only a linked worktree
+ * gets one), and it does not know whether an entry is locked or
+ * prunable, so an admin entry `git worktree prune` would clear is
+ * listed the same as a live one, UNLESS its target directory is
+ * already gone, in which case it is reported apart, in `goneTargets`,
+ * rather than folded into `paths` as though it were still there: a
+ * stale entry naming a target `cleanupWorktree` just removed must read
+ * as "not registered", never as "still registered".
+ *
+ * An entry whose `gitdir` file is missing, empty, or does not name an
+ * absolute path is reported in `detail` (never silently dropped as
+ * though it simply were not there) and excluded from both `paths` and
+ * `goneTargets`, since neither is known for it.
+ *
+ * Returns `undefined` when even this cannot run: `git rev-parse
+ * --git-common-dir` itself failed (see `worktreeAdminDir`), or the
+ * resulting directory cannot be read at all. The registry is then
+ * truly unknown, and the caller (`listRegisteredWorktrees`) reports
+ * its own `git worktree list` failure instead of this one. */
+async function listRegisteredWorktreesViaGitdirFiles(
+  root: string,
+  logDir: string,
+  track: TrackGitCall,
+): Promise<RegisteredWorktrees | undefined> {
+  const admin = await worktreeAdminDir(root, logDir, track);
+  const logPaths = [admin.logPath];
+  if (admin.dir === undefined) return undefined;
+  let ids: string[];
+  try {
+    ids = fs.readdirSync(admin.dir);
+  } catch {
+    return undefined;
+  }
+  const paths: string[] = [];
+  const goneTargets: string[] = [];
+  const odd: string[] = [];
+  for (const id of ids) {
+    const gitdirFile = path.join(admin.dir, id, "gitdir");
+    let raw: string;
+    try {
+      raw = fs.readFileSync(gitdirFile, "utf8");
+    } catch (err) {
+      odd.push(
+        `${id}: gitdir file could not be read (${err instanceof Error ? err.message : String(err)})`,
+      );
+      continue;
+    }
+    const gitdir = raw.trim();
+    if (gitdir.length === 0) {
+      odd.push(`${id}: gitdir file is empty`);
+      continue;
+    }
+    const worktreeDir = path.dirname(gitdir);
+    if (!path.isAbsolute(worktreeDir)) {
+      odd.push(`${id}: gitdir file does not name an absolute path (${gitdir})`);
+      continue;
+    }
+    const resolved = resolveDeepestExisting(path.resolve(worktreeDir));
+    if (fs.existsSync(worktreeDir)) {
+      paths.push(resolved);
+    } else {
+      goneTargets.push(resolved);
+    }
+  }
+  const detailParts: string[] = [];
+  if (odd.length > 0) {
+    detailParts.push(
+      `${String(odd.length)} admin ${odd.length === 1 ? "entry" : "entries"} ` +
+        `could not be read as a gitdir file: ${odd.join("; ")}`,
+    );
+  }
+  if (goneTargets.length > 0) {
+    detailParts.push(
+      `${String(goneTargets.length)} admin ${goneTargets.length === 1 ? "entry names" : "entries name"} ` +
+        `a target that no longer exists on disk: ${goneTargets.join(", ")}`,
+    );
+  }
+  return {
+    ok: true,
+    paths,
+    form: "gitdir-files",
+    ...(goneTargets.length > 0 ? { goneTargets } : {}),
+    ...(detailParts.length > 0 ? { detail: detailParts.join("; ") } : {}),
+    logPath: admin.logPath,
+    logPaths,
+  };
+}
+
+/**
+ * Every registered worktree of the repository at `root`: `git worktree
+ * list --porcelain -z` (falling back to the newline-separated form on a
+ * git older than `GIT_MIN_VERSION_WORKTREE_LIST_Z`, see
+ * `listRegisteredWorktreesViaGit`), and, only when NEITHER of those ran
+ * to a parse, the `gitdir-files` third source (see
+ * `listRegisteredWorktreesViaGitdirFiles`): a dead listing -- git
+ * itself broken, not merely an option it rejects -- no longer leaves a
+ * caller with nothing but the disk to judge a leftover by. The
+ * fallback lists linked worktrees only: the main worktree carries no
+ * admin entry, so a caller comparing `paths` against the repository
+ * root itself must not read its absence as "not registered" (see
+ * `cleanupWorktree`, which is already gated against the main worktree
+ * by its own `mainWorktree` check on the `nul`/`newline` forms and
+ * never relies on this form for that). When the fallback cannot run
+ * either, the original `git worktree list` failure is what `ok`,
+ * `form`, and `detail` report; the fallback's own inability to help is
+ * not itself surfaced as a separate error.
+ */
+export async function listRegisteredWorktrees(
+  root: string,
+  logDir: string,
+  opts: { track?: TrackGitCall } = {},
+): Promise<RegisteredWorktrees> {
+  const track: TrackGitCall = opts.track ?? ((started) => started);
+  const viaGit = await listRegisteredWorktreesViaGit(root, logDir, track);
+  if (viaGit.ok) return viaGit;
+  const viaGitdir = await listRegisteredWorktreesViaGitdirFiles(
+    root,
+    logDir,
+    track,
+  );
+  if (viaGitdir === undefined) return viaGit;
+  return {
+    ...viaGitdir,
+    logPaths: [...viaGit.logPaths, ...viaGitdir.logPaths],
   };
 }
 
@@ -1258,7 +1424,14 @@ export async function cleanupWorktree(
   const before = await listRegisteredWorktrees(root, logDir, { track });
   logPaths.push(...before.logPaths);
   const registeredBefore = before.ok && before.paths.includes(target);
-  const mainWorktree = before.ok ? before.paths[0] : undefined;
+  // `paths[0]` is the main worktree only for `nul`/`newline`, which list
+  // it first; `gitdir-files` never carries an entry for the main
+  // worktree at all (see `RegisteredWorktrees.form`), so its first
+  // entry is just some linked worktree, never one to compare `target`
+  // against as "the main worktree". `rootReal` below is what actually
+  // gates the repository root either way.
+  const mainWorktree =
+    before.ok && before.form !== "gitdir-files" ? before.paths[0] : undefined;
   const contained =
     opts.scratchRoot !== undefined &&
     isPathContained(
@@ -1320,9 +1493,9 @@ export async function cleanupWorktree(
   );
   logPaths.push(pruneResult.logPath);
 
-  let after = await listRegisteredWorktrees(root, logDir, { track });
-  logPaths.push(...after.logPaths);
-  if (!after.ok) {
+  let afterGit = await listRegisteredWorktreesViaGit(root, logDir, track);
+  logPaths.push(...afterGit.logPaths);
+  if (!afterGit.ok) {
     const admin = await worktreeAdminDir(root, logDir, track);
     logPaths.push(admin.logPath);
     if (
@@ -1339,8 +1512,27 @@ export async function cleanupWorktree(
         ),
       );
       logPaths.push(pruneAgain.logPath);
-      after = await listRegisteredWorktrees(root, logDir, { track });
-      logPaths.push(...after.logPaths);
+      afterGit = await listRegisteredWorktreesViaGit(root, logDir, track);
+      logPaths.push(...afterGit.logPaths);
+    }
+  }
+  // The half-written-entry repair above always gets its chance against
+  // the real `git worktree list` failure first, whether or not the
+  // gitdir-files fallback below could also verify the outcome: the
+  // repair fixes git's own admin state for every future listing on
+  // this repository, which the fallback (a read, never a write) cannot
+  // do. Only a listing still broken after that falls further back to
+  // the third source.
+  let after: RegisteredWorktrees = afterGit;
+  if (!afterGit.ok) {
+    const viaGitdir = await listRegisteredWorktreesViaGitdirFiles(
+      root,
+      logDir,
+      track,
+    );
+    if (viaGitdir !== undefined) {
+      logPaths.push(...viaGitdir.logPaths);
+      after = viaGitdir;
     }
   }
   const stillOnDisk = fs.existsSync(worktreePath);

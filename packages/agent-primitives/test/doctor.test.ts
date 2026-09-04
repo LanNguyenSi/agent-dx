@@ -634,6 +634,54 @@ describe("doctor: stale-worktree check", () => {
     );
   });
 
+  it("not ok when a worktree marker's pid is alive but recycled: a marker dated past the owner bound names the leftover and the manual command whatever its pid says", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const root = resolveDeepestExisting(containmentRoot(cwd));
+    const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: worktreePath,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: process.pid,
+        timestamp: "2020-01-01T00:00:00.000Z",
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(worktreePath);
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${worktreePath}`,
+    );
+    expect(check?.detail).toContain("was interrupted");
+  });
+
+  it("ok when a worktree marker's pid is alive and its own timestamp is fresh, even though the target it names is not registered", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const root = resolveDeepestExisting(containmentRoot(cwd));
+    const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      JSON.stringify({
+        targetPath: worktreePath,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: process.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).not.toContain(worktreePath);
+  });
+
   it("a dead marker naming a path that is not of the probe's scratch shape is reported as a marker to inspect and delete, never with a removal command for that path", async () => {
     const lockDir = makeTmpDir();
     const cwd = makeTmpDir();

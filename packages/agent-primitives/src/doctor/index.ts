@@ -13,6 +13,7 @@ import {
   GIT_MIN_VERSION_WORKTREE_LIST_Z,
   GIT_MIN_VERSION_WORKTREE_SYNC,
   isScratchWorktreePath,
+  isTimestampPastBound,
   liveForeignOwner,
   parseWorktreeListLines,
   parseWorktreeListZ,
@@ -510,7 +511,10 @@ export async function doctor(
     warnings.push(
       `git worktree list could not run for ${markerRoot} ` +
         `(${registry.detail ?? "unknown"}); a worktree a previous probe ` +
-        `left registered cannot be reported`,
+        `left registered cannot be reported (this synchronous listing has ` +
+        `no gitdir-files fallback the way \`probe\`'s own async listing ` +
+        `does; run \`agent-primitives probe -i worktree\` on this ` +
+        `repository instead, which can still recover a leftover this way)`,
     );
   }
   const registeredScratch = registry.paths;
@@ -518,8 +522,16 @@ export async function doctor(
   const worktreeMarker = listMarkers(options.lockDir).find(
     (m) => path.basename(m.markerPath) === worktreeMarkerFileName,
   );
+  // A marker's pid alone is not enough: pids recycle, and a worktree
+  // marker's own `timestamp` field (written when the marker is created,
+  // never the marker file's mtime) is what the SAME `isTimestampPastBound`
+  // the scratch owner record uses below bounds it against, so a marker
+  // whose pid happens to still resolve to *something* long after its
+  // own probe ended cannot hide a leftover behind it forever.
   const markerAlive =
-    worktreeMarker !== undefined && isPidAlive(worktreeMarker.pid);
+    worktreeMarker !== undefined &&
+    isPidAlive(worktreeMarker.pid) &&
+    !isTimestampPastBound(worktreeMarker.timestamp, Date.now());
   const markerTarget =
     worktreeMarker !== undefined &&
     typeof worktreeMarker.targetPath === "string"
@@ -689,7 +701,19 @@ function runWorktreeList(
  * `rejectsOption` the probe's listing uses (the one copy of that
  * predicate). Not ok when neither form ran to a parse: this is a
  * report, and a listing that could not run is something to warn about,
- * never an empty registry. */
+ * never an empty registry.
+ *
+ * Deliberately WITHOUT the `gitdir-files` third source
+ * `listRegisteredWorktrees` falls back to when both of those forms
+ * fail: that source needs `git rev-parse --git-common-dir` (already
+ * synchronous here through `runWorktreeList`-style spawns, so sharing
+ * it would be straightforward) plus a synchronous directory read,
+ * neither of which this function has been extended to do, so a `doctor`
+ * run under a fully broken `git worktree list` still reports the
+ * registry as unknown rather than recovering it the way `probe -i
+ * worktree`'s own async listing now can (see the warning above, which
+ * names this gap and points at `probe` as the path that still finds a
+ * leftover this way). */
 function listScratchWorktreesSync(
   root: string,
   gitPath: string | undefined,
