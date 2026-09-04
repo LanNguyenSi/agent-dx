@@ -40,9 +40,16 @@ describe("okf-kit cli", () => {
   });
 
   it("emits parsable JSON with summary counts", () => {
+    const bundleDir = path.join(FIXTURES_DIR, "broken-link");
     const result = runCli([
       "check",
-      path.join(FIXTURES_DIR, "broken-link"),
+      bundleDir,
+      // Keep this count assertion independent of whether the package test
+      // suite itself is running inside a git checkout. Without an explicit
+      // root, a package-only extract correctly adds citations-resolve's
+      // "not inside a git work tree" notice.
+      "--repo-root",
+      bundleDir,
       "--json",
     ]);
     const parsed = JSON.parse(result.stdout) as {
