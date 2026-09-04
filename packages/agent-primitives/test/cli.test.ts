@@ -12,6 +12,7 @@ import {
   mapTopLevelError,
   writeAndExitTo,
   parseExecOverride,
+  withOptionHint,
   writeFullVerifyResult,
   type ResolvedGlobal,
   type StdoutSink,
@@ -985,6 +986,64 @@ describe("mapTopLevelError", () => {
     expect(exitCode).toBe(2);
     expect((envelope as { message?: string }).message).toBe("unknown option");
   });
+
+  it("appends the --json alias hint to an unknown-option message naming --json, and reports format_conflict's own reason", () => {
+    const err = new CommanderError(
+      1,
+      "commander.unknownOption",
+      "error: unknown option '--json'",
+    );
+    const { envelope } = mapTopLevelError(err, global, Date.now());
+    expect((envelope as { message?: string }).message).toBe(
+      "error: unknown option '--json' (use -f json (json is the default))",
+    );
+  });
+});
+
+describe("withOptionHint", () => {
+  it("appends the --json alias hint to an unknown-option message naming --json", () => {
+    expect(withOptionHint("error: unknown option '--json'")).toBe(
+      "error: unknown option '--json' (use -f json (json is the default))",
+    );
+  });
+
+  it("appends the -f text alias hint to an unknown-option message naming --text", () => {
+    expect(withOptionHint("error: unknown option '--text'")).toBe(
+      "error: unknown option '--text' (use -f text)",
+    );
+  });
+
+  it("leaves an unknown-option message with no known alias unchanged", () => {
+    const message = "error: unknown option '--bogus'";
+    expect(withOptionHint(message)).toBe(message);
+  });
+
+  it("adds the --file hint to an invalid -f value that looks like a path (contains /)", () => {
+    const message =
+      "error: option '-f, --format <format>' argument 'src/foo.js' is invalid. format must be \"json\" or \"text\" (got \"src/foo.js\")";
+    expect(withOptionHint(message)).toBe(
+      `${message} (probe's file option is --file; -f is the global --format)`,
+    );
+  });
+
+  it("adds the --file hint to an invalid -f value that looks like a path (ends in a file extension, no slash)", () => {
+    const message =
+      "error: option '-f, --format <format>' argument 'mutant.patch' is invalid. format must be \"json\" or \"text\" (got \"mutant.patch\")";
+    expect(withOptionHint(message)).toBe(
+      `${message} (probe's file option is --file; -f is the global --format)`,
+    );
+  });
+
+  it("does not add the --file hint to an invalid -f value that is not path-like", () => {
+    const message =
+      "error: option '-f, --format <format>' argument 'xml' is invalid. format must be \"json\" or \"text\" (got \"xml\")";
+    expect(withOptionHint(message)).toBe(message);
+  });
+
+  it("leaves an unrelated message unchanged", () => {
+    const message = "cwd does not exist: /nope";
+    expect(withOptionHint(message)).toBe(message);
+  });
 });
 
 describe("writeFullVerifyResult", () => {
@@ -1426,6 +1485,257 @@ describe("cli: probe", () => {
     ]);
     expect(run.code).toBe(2);
     expect(JSON.parse(run.stdout).status).toBe("usage_error");
+  });
+
+  it("-r without --file/-n is still a usage error, exit 2: -r has nothing to derive them from", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "-r",
+      "y",
+      "-t",
+      "node -e 1",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toContain("--file is required");
+  });
+
+  it("-M/-w without --file/-n is still a usage error, exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "-M",
+      "x",
+      "-w",
+      "y",
+      "-t",
+      "node -e 1",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toContain("--file is required");
+  });
+
+  it("-r with --file but no -n is still a usage error naming -n/--line, exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-r",
+      "y",
+      "-t",
+      "node -e 1",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toContain("-n/--line is required");
+  });
+
+  it("-p alone (no --file, no -n) derives both from the patch and runs the probe end to end through the built CLI", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = path.join(repo, "mutant.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+      ].join("\n") + "\n",
+    );
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "-p",
+      patchPath,
+      "-t",
+      "node fixture.test.js",
+    ]);
+
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(parsed.mutant.form).toBe("patch");
+    expect(parsed.mutant.line).toBe(1);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+      before,
+    );
+  });
+
+  it("a -p patch touching two paths, no --file: usage_error/patch_file_ambiguous, exit 2, through the built CLI", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      ["function isPositive(n) {", "  return n > 0;", "}", ""].join("\n"),
+    );
+    fs.writeFileSync(path.join(repo, "fixture.test.js"), "x\n");
+    commitAll(repo);
+    const patchPath = path.join(repo, "ambiguous.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+        "diff --git a/fixture.test.js b/fixture.test.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.test.js",
+        "+++ b/fixture.test.js",
+        "@@ -1 +1 @@",
+        "-x",
+        "+y",
+      ].join("\n") + "\n",
+    );
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "-p",
+      patchPath,
+      "-t",
+      "node -e 1",
+    ]);
+
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("patch_file_ambiguous");
+  });
+
+  it("probe --help's first paragraph states the --file/-f split and that global options may precede the subcommand", async () => {
+    const run = await spawnCli(["probe", "--help"]);
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain(
+      "--file is long-only: the global -f is --format",
+    );
+    expect(run.stdout).toContain("may precede the subcommand");
+  });
+
+  it("--json is accepted (a no-op alias for -f json) even after the subcommand", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-r",
+      "y",
+      "-t",
+      "node -e 1",
+      "--json",
+    ]);
+    expect(run.code).not.toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).not.toBe("usage_error");
+  });
+
+  it("--json together with -f text is usage_error/format_conflict, exit 2", async () => {
+    const run = await spawnCli(["-f", "text", "--json", "doctor"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("format_conflict");
+  });
+
+  it("-f json --json is accepted (the two agree)", async () => {
+    // -r "" -o "": nothing to check, so doctor's own verdict (which
+    // depends on what happens to be on the test sandbox's fixed PATH) is
+    // not what this test is about -- only that --json plus -f json never
+    // usage_errors.
+    const run = await spawnCli([
+      "-f",
+      "json",
+      "--json",
+      "doctor",
+      "-r",
+      "",
+      "-o",
+      "",
+    ]);
+    expect(run.code).toBe(0);
+  });
+
+  it("an unknown --text option's message suggests -f text", async () => {
+    const run = await spawnCli(["--text", "doctor"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toContain("unknown option '--text'");
+    expect(parsed.message).toContain("use -f text");
+  });
+
+  it("-f with a path-like invalid value adds the --file hint", async () => {
+    const run = await spawnCli(["-f", "src/foo.js", "doctor"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toContain("probe's file option is --file");
+    expect(parsed.message).toContain("-f is the global --format");
+  });
+
+  it("-f with a non-path-like invalid value does not add the --file hint", async () => {
+    const run = await spawnCli(["-f", "xml", "doctor"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).not.toContain("probe's file option is --file");
   });
 });
 

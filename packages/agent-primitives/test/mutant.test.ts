@@ -7,8 +7,10 @@ import {
   applyPatchForReal,
   computeMutant,
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
+  deriveLineFromPatch,
   formatMutantSummary,
   formatVerifiedAppliedVia,
+  listPatchTouchedPaths,
   parseNumstatPaths,
 } from "../src/probe/mutant.js";
 import { runArgv } from "../src/probe/run.js";
@@ -527,5 +529,109 @@ describe("git apply invocations", () => {
     expect(result.reasonCode).toBe("git_apply_timeout");
     expect(result.reason).toContain("hit its timeout");
     expect(result.reason).not.toContain("failed to parse");
+  });
+});
+
+describe("deriveLineFromPatch", () => {
+  it("returns the first hunk's new-file start line (+c) from a full a,b/c,d header", () => {
+    const patch = [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -12,7 +12,7 @@",
+      " context",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+    expect(deriveLineFromPatch(patch)).toBe(12);
+  });
+
+  it("returns the new-file start line when the hunk header omits the ,d length (a single-line hunk)", () => {
+    const patch = [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+    expect(deriveLineFromPatch(patch)).toBe(1);
+  });
+
+  it("returns undefined for a patch with no hunk header (e.g. a rename-only patch)", () => {
+    const patch = [
+      "diff --git a/old.js b/new.js",
+      "similarity index 100%",
+      "rename from old.js",
+      "rename to new.js",
+      "",
+    ].join("\n");
+    expect(deriveLineFromPatch(patch)).toBeUndefined();
+  });
+
+  it("returns undefined for an empty patch", () => {
+    expect(deriveLineFromPatch("")).toBeUndefined();
+  });
+});
+
+describe("listPatchTouchedPaths", () => {
+  it("lists the single path a one-file patch touches", async () => {
+    const { root, relPath } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    writeValidPatch(patchPath, relPath);
+
+    const result = await listPatchTouchedPaths(patchPath, makeTmpDir(), {});
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.paths).toEqual([relPath]);
+  });
+
+  it("lists every path a multi-file patch touches, in numstat order", async () => {
+    const { root, relPath } = initRepoWithFile();
+    const patchPath = path.join(root, "two-file.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+        "diff --git a/extra.js b/extra.js",
+        "new file mode 100644",
+        "index 0000000..0000000",
+        "--- /dev/null",
+        "+++ b/extra.js",
+        "@@ -0,0 +1 @@",
+        "+extra file content",
+      ].join("\n") + "\n",
+    );
+
+    const result = await listPatchTouchedPaths(patchPath, makeTmpDir(), {});
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.paths).toEqual([relPath, "extra.js"]);
+  });
+
+  it("reports a not-ok result naming the log path when the patch does not parse", async () => {
+    const patchPath = path.join(makeTmpDir(), "garbage.patch");
+    fs.writeFileSync(patchPath, "not a real patch\n");
+
+    const result = await listPatchTouchedPaths(patchPath, makeTmpDir(), {});
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("failed to parse");
+    expect(fs.existsSync(result.logPath)).toBe(true);
   });
 });

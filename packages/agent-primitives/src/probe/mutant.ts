@@ -224,6 +224,98 @@ export function parseNumstatPaths(stdout: string): string[] {
     });
 }
 
+export interface PatchTouchedPathsListing {
+  ok: true;
+  /** Paths the patch touches, in `git apply --numstat` order. */
+  paths: string[];
+  logPath: string;
+}
+
+export interface PatchTouchedPathsFailure {
+  ok: false;
+  reason: string;
+  reasonCode?: "mutant_not_applicable" | "git_apply_timeout" | "aborted";
+  logPath: string;
+}
+
+export type PatchTouchedPathsResult =
+  | PatchTouchedPathsListing
+  | PatchTouchedPathsFailure;
+
+/**
+ * Lists the paths a patch touches via `git apply --numstat`, with the
+ * same argv discipline (an argv array run through `run.ts`, `--` before
+ * the path, no shell) and timeout/abort handling every other `git apply`
+ * in this module uses. Used by `probe/index.ts`'s `-p` derivation path,
+ * which needs this listing before `--file` (and so `computePatch`
+ * itself) is even known -- `computePatch` keeps its own, differently
+ * shaped extra-path check once `--file` (explicit or derived) is known,
+ * since that one also has to compare each touched path against it.
+ *
+ * Run from a scratch directory rather than the containment root: like
+ * `computePatch`'s own numstat call, this only parses the patch's own
+ * recorded paths and never touches disk, so `git apply --numstat` does
+ * not require its cwd to be a git repository, or to contain anything the
+ * patch names.
+ */
+export async function listPatchTouchedPaths(
+  patchPath: string,
+  logDir: string,
+  gitApply: GitApplyOptions,
+): Promise<PatchTouchedPathsResult> {
+  fs.mkdirSync(logDir, { recursive: true });
+  const scratchDir = fs.mkdtempSync(path.join(logDir, "patch-list-"));
+  const absPatchPath = path.resolve(patchPath);
+  const numstatResult = await runArgv(
+    "git",
+    ["apply", "--numstat", "--", absPatchPath],
+    {
+      cwd: scratchDir,
+      logDir: scratchDir,
+      timeoutMs: gitApply.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS,
+      ...(gitApply.signal ? { signal: gitApply.signal } : {}),
+    },
+  );
+  if (numstatResult.exitCode !== 0) {
+    const stopped = stoppedReason(numstatResult);
+    return {
+      ok: false,
+      reason: stopped
+        ? `git apply --numstat ${stopped.label} and was killed; see ${numstatResult.logPath}`
+        : `git apply --numstat failed to parse the patch; see ${numstatResult.logPath}`,
+      ...(stopped ? { reasonCode: stopped.reasonCode } : {}),
+      logPath: numstatResult.logPath,
+    };
+  }
+  if (numstatResult.outputTruncated) {
+    return {
+      ok: false,
+      reason: `git apply --numstat produced more output than can be checked for the path(s) it touches; see ${numstatResult.logPath}`,
+      logPath: numstatResult.logPath,
+    };
+  }
+  return {
+    ok: true,
+    paths: parseNumstatPaths(numstatResult.stdout),
+    logPath: numstatResult.logPath,
+  };
+}
+
+/** Parses the first hunk header (`@@ -a,b +c,d @@`) of a unified diff and
+ * returns its new-file start line (`c`), the informational `-n` this
+ * package derives for the `patch` form when the caller gives none. The
+ * hunk length (`,d`, and `,b` on the old side) is optional per the
+ * unified-diff grammar -- a single-line hunk omits it -- so only the `+c`
+ * start is required to match. Returns `undefined` when the patch has no
+ * hunk header at all (e.g. a patch that only renames or touches file
+ * modes with no content change). */
+export function deriveLineFromPatch(patchContent: string): number | undefined {
+  const match = patchContent.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/m);
+  if (!match) return undefined;
+  const n = Number(match[1]);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 /**
  * Dry-runs a unified diff against a scratch copy of the file (never the
  * real target) via `git apply`, so applicability (and the resulting

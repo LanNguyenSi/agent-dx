@@ -82,6 +82,15 @@ Every subcommand accepts:
 - `-l, --log-dir <dir>`: directory for logs and full (untruncated)
   results (defaults to `$AGENT_PRIMITIVES_LOG_DIR`, or a fresh directory
   under the OS temp dir otherwise).
+- `--json`: a no-op alias for `-f json` (already the default), for the
+  common instinct to ask for JSON explicitly. Combined with an explicit
+  `-f text` it is `status: "usage_error"`, `reason: "format_conflict"`,
+  exit `2`; `-f json --json` is accepted, since the two agree.
+
+An unrecognized option's message names a common alias when it has one
+(`--json` -> use `-f json`; `--text` -> use `-f text`), and an invalid
+`-f`/`--format` value that looks like a path adds a hint that `-f` is
+the global `--format` and `probe`'s file option is `--file`.
 
 ## `doctor`
 
@@ -266,8 +275,19 @@ agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
   -t 'npm test'
 agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
   -t 'npm test' -i inplace
-agent-primitives probe --file src/foo.js -n 1 -p mutant.patch -t 'npm test'
+agent-primitives probe -p mutant.patch -t 'npm test'
 ```
+
+The third form derives `--file` and `-n` from the patch itself when it
+touches exactly one path: `--file` from that path (resolved against the
+containment root), `-n` from the first hunk's new-file start line
+(`@@ -a,b +c,d @@` -> `c`). A patch touching two or more paths without
+an explicit `--file` is `status: "usage_error"`,
+`reason: "patch_file_ambiguous"`, exit `2`, naming the touched paths in
+a warning; pass `--file` naming the one to mutate to resolve it (the
+extra-path refusal below then applies as it always has). A patch with
+no hunk header and no explicit `-n` is `status: "inconclusive"`,
+`reason: "mutant_not_applicable"`.
 
 `-i worktree` is the default: `--file` is mutated in a detached git
 worktree, never in the working tree itself. Every git invocation this
@@ -423,12 +443,16 @@ from that backup afterward (on normal completion, on any error, and on
 exported `probe()` restores and returns control instead, unless the
 caller passes `exitOnSignal: true`).
 
-`--file` is long-only (the global `-f` is `--format`). Exactly one mutant
-form is required: `-r, --replace` (replace the whole line), `-M, --match`
-with `-w, --with` (replace the first occurrence of a substring on the
-line), or `-p, --patch` (apply a unified diff via `git apply`, applied
-against the worktree for `-i worktree`, against the working tree itself
-for `-i inplace`).
+`--file` is long-only (the global `-f` is `--format`), and every global
+option (`-f`, `-C`, `-m`, `-l`) may precede the subcommand. Exactly one
+mutant form is required: `-r, --replace` (replace the whole line),
+`-M, --match` with `-w, --with` (replace the first occurrence of a
+substring on the line), or `-p, --patch` (apply a unified diff via
+`git apply`, applied against the worktree for `-i worktree`, against
+the working tree itself for `-i inplace`). `--file` and `-n, --line`
+are required for `-r` and for `-M`/`-w`, which have nothing to derive
+them from; `-p` alone can omit either or both, deriving them from the
+patch as described above.
 
 The dist trap: a project whose test command runs built output
 (`dist/`, `lib/`, ...) rather than `--file` itself needs `--pre` to
@@ -609,7 +633,9 @@ warning. `-p, --patch` combined with `--allow-outside` is rejected
 outright as `status: "usage_error"`,
 `reason: "patch_allow_outside_unsupported"`, exit `2`: a patch's own
 relative paths could otherwise escape the scratch directory used for its
-dry run.
+dry run. `-p` touching two or more paths with no explicit `--file` to
+say which one is the target is `status: "usage_error"`,
+`reason: "patch_file_ambiguous"`, exit `2`.
 
 Output beside the envelope: `status` (`killed`, `survived`, or
 `inconclusive`), `reason` (when inconclusive), `mutant: { file, line,

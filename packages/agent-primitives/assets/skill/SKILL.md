@@ -64,3 +64,21 @@ as a risk in the output rather than silently working around its absence.
   untruncated result lives at the path(s) in `logs`.
 - `status: "usage_error"` means the invocation itself was wrong (a bad
   flag, a missing argument), never a finding about the code under test.
+
+## 6. Invocation templates
+
+Copy one of these rather than reading `--help` first:
+
+```bash
+agent-primitives probe --file <path> -n <line> -r '<replacement>' -t '<test command>'
+agent-primitives probe --file <path> -n <line> -M '<substring>' -w '<replacement>' -t '<test command>'
+agent-primitives probe -p <patch> -t '<test command>'
+agent-primitives verify -c build,typecheck,lint,test
+agent-primitives doctor
+```
+
+The third form (`-p`) derives `--file` and `-n` from the patch itself
+when a patch touches exactly one path; pass them explicitly only when
+the patch touches more than one path, or when the derived line is
+wrong. `--file` is long-only, since the global `-f` is `--format`;
+every global option (`-f`, `-C`, `-m`, `-l`) may precede the subcommand.

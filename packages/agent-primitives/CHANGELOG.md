@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe -p/--patch` now derives `--file` (from the single path the
+  patch touches) and `-n/--line` (from the patch's first hunk header)
+  whenever either is omitted, so `-p <patch> -t '<cmd>'` alone is enough
+  for a single-path patch; `--file` and `-n` are still required for
+  `-r` and `-M`/`-w`, which have nothing to derive them from. A patch
+  touching two or more paths with no explicit `--file` is
+  `status: "usage_error"`, `reason: "patch_file_ambiguous"`, exit `2`.
+- A global `--json` option: a no-op alias for `-f json` (already the
+  default). Combined with an explicit `-f text` it is
+  `status: "usage_error"`, `reason: "format_conflict"`, exit `2`.
+- An unrecognized option's `usage_error` message now names a common
+  alias when it has one (`--json` -> `-f json`; `--text` -> `-f text`),
+  and an invalid `-f`/`--format` value that looks like a path adds a
+  hint pointing at `probe`'s `--file` instead.
+- `probe --help`'s description now states that `--file` is long-only
+  because the global `-f` is `--format`, and that every global option
+  may precede the subcommand; the packaged skill (`assets/skill/
+  SKILL.md`) and the README gained an "Invocation templates" section
+  with a copy-pasteable line for each mutant form plus `verify` and
+  `doctor`.
+
 ## [0.1.0] - 2026-09-04
 
 ### Added

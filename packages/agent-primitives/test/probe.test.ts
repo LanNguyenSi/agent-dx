@@ -1473,6 +1473,272 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
   });
 });
 
+describe("probe(): -p derives --file and -n when neither is given", () => {
+  it("derives --file (the single path the patch touches) and -n (the first hunk's new-file start line), mirroring the explicit --file end-to-end patch test", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const fixtureLines = FIXTURE_JS.split("\n");
+    const patchPath = path.join(makeTmpDir(), "derive-single-file.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${fixtureLines[0]}`,
+        `-${fixtureLines[1]}`,
+        "+  return false;",
+        ` ${fixtureLines[2]}`,
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.mutant).toMatchObject({
+      file: path.join(repo, "fixture.js"),
+      line: 1,
+      form: "patch",
+    });
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("resolves the derived path against the containment root, not cwd, when run from a subdirectory of the repo", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const workdir = path.join(repo, "workdir");
+    fs.mkdirSync(workdir);
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const fixtureLines = FIXTURE_JS.split("\n");
+    const patchPath = path.join(makeTmpDir(), "derive-from-subdir.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${fixtureLines[0]}`,
+        `-${fixtureLines[1]}`,
+        "+  return false;",
+        ` ${fixtureLines[2]}`,
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+        cwd: workdir,
+        testCommand: `node ${JSON.stringify(path.join(repo, "fixture.test.js"))}`,
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.mutant?.file).toBe(path.join(repo, "fixture.js"));
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("usage_error/patch_file_ambiguous, with the touched paths in a warning and nothing applied, when the patch touches two or more paths and --file is not given", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const beforeFixture = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const beforeTest = fs.readFileSync(
+      path.join(repo, "fixture.test.js"),
+      "utf8",
+    );
+    const fixtureLines = FIXTURE_JS.split("\n");
+    const testLines = FIXTURE_TEST_JS.split("\n");
+    const patchPath = path.join(makeTmpDir(), "ambiguous.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${fixtureLines[0]}`,
+        `-${fixtureLines[1]}`,
+        "+  return false;",
+        ` ${fixtureLines[2]}`,
+        "diff --git a/fixture.test.js b/fixture.test.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.test.js",
+        "+++ b/fixture.test.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${testLines[0]}`,
+        `-${testLines[1]}`,
+        "+const { isPositive } = require('./fixture.js'); // touched",
+        ` ${testLines[2]}`,
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("patch_file_ambiguous");
+    expect(
+      result.warnings.some(
+        (w) => w.includes("fixture.js") && w.includes("fixture.test.js"),
+      ),
+    ).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+      beforeFixture,
+    );
+    expect(fs.readFileSync(path.join(repo, "fixture.test.js"), "utf8")).toBe(
+      beforeTest,
+    );
+  });
+
+  it("with --file naming one of two touched paths, the existing extra-path refusal is unchanged", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const beforeFixture = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const fixtureLines = FIXTURE_JS.split("\n");
+    const testLines = FIXTURE_TEST_JS.split("\n");
+    const patchPath = path.join(makeTmpDir(), "two-files-explicit.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${fixtureLines[0]}`,
+        `-${fixtureLines[1]}`,
+        "+  return false;",
+        ` ${fixtureLines[2]}`,
+        "diff --git a/fixture.test.js b/fixture.test.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.test.js",
+        "+++ b/fixture.test.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${testLines[0]}`,
+        `-${testLines[1]}`,
+        "+const { isPositive } = require('./fixture.js'); // touched",
+        ` ${testLines[2]}`,
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: "fixture.js",
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("mutant_not_applicable");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("touches paths other than --file") &&
+          w.includes("fixture.test.js"),
+      ),
+    ).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+      beforeFixture,
+    );
+  });
+
+  it("inconclusive/mutant_not_applicable when the patch has no hunk header to derive -n from", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = path.join(makeTmpDir(), "no-hunk.patch");
+    // A rename-only patch: touches exactly one path (so derivation of
+    // --file succeeds) but has no `@@` hunk header to derive -n from.
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/renamed.js",
+        "similarity index 100%",
+        "rename from fixture.js",
+        "rename to renamed.js",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("mutant_not_applicable");
+    expect(
+      result.warnings.some((w) => w.includes("no hunk header")),
+    ).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("file_outside_root inconclusive, never applied, when the patch's single derived path resolves outside the containment root", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const patchPath = path.join(makeTmpDir(), "outside.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/../outside.txt b/../outside.txt",
+        "index 0000000..1111111 100644",
+        "--- a/../outside.txt",
+        "+++ b/../outside.txt",
+        "@@ -1 +1 @@",
+        "-original",
+        "+mutated",
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.some((w) => w.includes("outside.txt"))).toBe(true);
+  });
+});
+
 describe("probe(): -p combined with --allow-outside", () => {
   it("usage_error when -p is combined with --allow-outside", async () => {
     useLockDir();

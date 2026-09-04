@@ -191,6 +191,25 @@ describe("init", () => {
     expect(written).toMatch(/^---\nname: agent-primitives\n/);
   });
 
+  it("installs an Invocation templates block with all three probe forms, a verify line, and a doctor line", () => {
+    const dir = makeTmpDir();
+    const result = init({ targetDir: dir });
+    expect(result.status).toBe("written");
+    const written = fs.readFileSync(result.targets[0]!.path, "utf8");
+    expect(written).toContain("## 6. Invocation templates");
+    expect(written).toContain(
+      "agent-primitives probe --file <path> -n <line> -r '<replacement>' -t '<test command>'",
+    );
+    expect(written).toContain(
+      "agent-primitives probe --file <path> -n <line> -M '<substring>' -w '<replacement>' -t '<test command>'",
+    );
+    expect(written).toContain(
+      "agent-primitives probe -p <patch> -t '<test command>'",
+    );
+    expect(written).toContain("agent-primitives verify -c ");
+    expect(written).toContain("agent-primitives doctor");
+  });
+
   describe("a symlink at the target file path itself", () => {
     function claudeFilePath(dir: string): string {
       return path.join(
