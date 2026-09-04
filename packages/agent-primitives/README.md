@@ -17,7 +17,19 @@ its primary caller is another agent, not a terminal.
 
 ## Install
 
-This package is not published yet. Build it from source:
+```bash
+npx agent-primitives doctor
+```
+
+For a binary that stays on `PATH`, so that a subagent started as an
+ordinary child process finds it too:
+
+```bash
+npm install -g agent-primitives
+agent-primitives doctor
+```
+
+To work on the package itself, build it from source:
 
 ```bash
 git clone https://github.com/LanNguyenSi/agent-dx.git
@@ -26,11 +38,6 @@ npm install
 npm run build
 node dist/cli.js doctor
 ```
-
-Once published, the usual `npx agent-primitives doctor` / `npm install -g
-agent-primitives` paths will work too. Publishing this package's first
-tag requires its own npm Trusted Publisher entry, separate from any
-other package published out of the same repository.
 
 Requires Node >= 20.
 
