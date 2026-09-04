@@ -199,7 +199,7 @@ export interface ResolveInitInputsParams {
    * `stickyPreChecked`'s doc comment), the operator still sees which
    * harness is actually on disk, because labelling is a hint, not an
    * intent signal, so it is safe to annotate what the pre-check itself
-   * must not read (agent-tasks fe834823, fix round 3). `init`'s call site
+   * must not read. `init`'s call site
    * omits this field and gets its own `detectHarnesses(targetDir)` result
    * via this default; `apply`'s call site passes a fresh
    * `detectHarnesses(targetDir)` call explicitly, since its own
