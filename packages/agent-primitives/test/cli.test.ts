@@ -2772,7 +2772,7 @@ describe("cli: probe --plan", () => {
     }
   }, 120000);
 
-  it("a 55-mutant plan at the default -m still carries a complete plan.summary within the bound (H2: per-mutant log paths no longer inflate the protected top-level logs)", async () => {
+  it("a 55-mutant plan at the default -m still carries a complete plan.summary within the bound (per-mutant log paths do not inflate the protected top-level logs)", async () => {
     // Measured false before the H2 fix: at 55 mutants (default log dir)
     // the per-mutant log paths flattened into the envelope's protected
     // top-level `logs` grew the reduction floor past what the reduction
@@ -2806,15 +2806,15 @@ describe("cli: probe --plan", () => {
     expect(full.plan.results).toHaveLength(count);
   }, 180000);
 
-  it("H3: a 40-mutant plan under a tight -m still carries a complete plan.summary (keepWhole discriminates where the default -m does not)", async () => {
+  it("a 40-mutant plan under a tight -m still carries a complete plan.summary (the bound where keepWhole decides the outcome)", async () => {
     // At the package default `-m 8000`, this host's per-mutant entry
     // size converges the reduction search on a scale whose `maxKeys`
     // (shared with `maxArray`) stays well above 5, the summary object's
     // own key count -- so a 12- or even 55-mutant plan (see the test
     // above) never actually needs `keepWhole` to keep `plan.summary`
-    // whole: it would survive the reduction regardless. That is what the
-    // round-2 finding means by "does not discriminate": passing before
-    // and after the fix proves nothing. A much tighter bound forces the
+    // whole: it would survive the reduction regardless, so a test at
+    // that bound cannot tell whether `keepWhole` works: passing with
+    // and without it proves nothing. A much tighter bound forces the
     // same reduction machinery down to a scale where `maxKeys` (and so a
     // plain object's own key budget) drops below 5, which is where
     // `keepWhole` actually earns its keep. Measured directly (not
@@ -2945,7 +2945,7 @@ describe("cli: probe --plan", () => {
     expect(fs.readdirSync(lockDir)).toEqual([]);
   }, 40000);
 
-  it("H1: on SIGTERM during a baseline that rewrites both targets of a 2-file plan, both are left exactly as the baseline wrote them", async () => {
+  it("on SIGTERM during a baseline that rewrites both targets of a 2-file plan, both are left exactly as the baseline wrote them", async () => {
     // Round-2 finding: the shared setup arms the signal handler's
     // restore slot once per target as it opens each one (`openTarget`),
     // so by the time the baseline runs the slot is still armed to

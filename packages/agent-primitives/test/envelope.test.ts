@@ -1479,7 +1479,7 @@ describe("keepWhole: a named path is reported whole, never reduced", () => {
     );
   });
 
-  it("a held value too large to fit even alone is dropped in total loss, not shown past the bound (H2 round 3)", () => {
+  it("a held value too large to fit even alone is dropped in total loss, not shown past the bound", () => {
     // A held path is exempt from every cap (it is copied uncapped into
     // every candidate the search tries), but it is not exempt from the
     // bound check itself: a candidate that includes it and still

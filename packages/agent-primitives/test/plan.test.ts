@@ -1120,8 +1120,8 @@ describe("probePlan(): an unexpected error while a mutant is applied", () => {
     // The in-flight (second) mutant's own dry-run logs (its `patch`
     // form's numstat and dry-run `git apply`, computed before the
     // mutant was ever applied) are carried on its own result rather
-    // than dropped by the emergency path -- the other dropped field the
-    // round-1 finding named, beside `dryRunLogPaths` above.
+    // than dropped by the emergency path, the same way the baseline's
+    // own log path above survives it.
     expect(result.results[1].logs.length).toBeGreaterThan(0);
     for (const logPath of result.results[1].logs) {
       expect(fs.existsSync(logPath)).toBe(true);
