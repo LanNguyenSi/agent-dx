@@ -758,6 +758,19 @@ function createRunController(input: {
  * `accessSync(R_OK)` is what catches a patch whose permissions deny
  * reading, which a `stat` alone cannot see.
  *
+ * This checks by PATH (`statSync`/`accessSync`), never by an open
+ * descriptor, unlike `parsePlanFile`'s own metadata check (an `fstatSync`
+ * on the descriptor it then reads from): the two techniques differ
+ * because what runs after them differs. `parsePlanFile` reads the plan
+ * itself in this process, so its bound has to hold across the same
+ * descriptor the read uses, closing the stat-then-read race a path-based
+ * check would leave open. A patch's own bytes are never read here or
+ * anywhere else in this process -- `git apply` (a child process) is what
+ * streams the file from its path, both for the dry run and the real
+ * apply -- so there is no read in this process for an open descriptor to
+ * protect; git's own handling of the path it is given governs from
+ * there.
+ *
  * `label` names the option in the message: `-p/--patch` for the single
  * probe, the plan's own path (`plan.mutants[2].patch`) for a plan.
  */
@@ -1777,6 +1790,22 @@ interface RunSetupInput {
     | { ok: true; logPaths: string[] }
     | { ok: false; reason: string; logPaths: string[] }
   >;
+  /** Whether the signal handler's one restore slot stays armed (to
+   * whichever target `openTarget` opened last) while the baseline runs.
+   * Defaults to `true`, the single probe's released contract: it only
+   * ever has one target, so an armed slot restores that same target on
+   * a signal, a no-op copy unless the baseline itself rewrote it. A
+   * plan passes `false`: with more than one target, an armed slot only
+   * ever covers the LAST one opened, so a signal mid-baseline would
+   * restore that one target and leave every other target as the
+   * baseline wrote it -- an asymmetry across targets that contradicts
+   * the plan's own non-signal rule ("left as the baseline wrote it, not
+   * restored"). With the slot cleared, a signal during a plan's baseline
+   * restores nothing, leaving every target as the baseline wrote it,
+   * same as the non-signal path; the per-mutant step re-arms the slot
+   * for its own target regardless of this flag, right before it applies
+   * that mutant. */
+  armRestoreDuringBaseline?: boolean;
 }
 
 type RunSetupOutcome =
@@ -2134,6 +2163,17 @@ async function openRunSetup(input: RunSetupInput): Promise<RunSetupOutcome> {
     return refuse("inconclusive", hook.reason, undefined, {
       logPaths: stepLogPaths,
     });
+  }
+
+  // A plan (more than one target possible) clears the restore slot here,
+  // before the baseline runs: `openTarget` armed it once per target
+  // above, so it currently points at whichever target was opened last.
+  // Left armed, a signal mid-baseline would restore only that one
+  // target and leave every other target as the baseline wrote it -- see
+  // `armRestoreDuringBaseline`'s docblock. The single probe (default
+  // `true`) keeps its released one-target contract unchanged.
+  if (input.armRestoreDuringBaseline === false) {
+    controller.setRestoreState(null);
   }
 
   // (2) baseline: unmutated, must exit 0. Once per run (I1).
@@ -2954,6 +2994,11 @@ export async function probePlan(
       },
       // No `beforeBaseline`: a plan computes each mutant inside the loop
       // below, right before it is applied.
+      // A plan can open more than one target; leaving the restore slot
+      // armed to whichever one `openTarget` opened last would restore
+      // only that target on a signal mid-baseline and leave every other
+      // target as the baseline wrote it. See the field's own docblock.
+      armRestoreDuringBaseline: false,
     });
     if (!setup.ok) {
       const { refusal } = setup;

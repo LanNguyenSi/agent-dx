@@ -109,7 +109,9 @@ invocation. Past about eight mutants the envelope no longer fits the
 default `-m 8000` and is reduced to it (`truncated: true`, entries
 losing their `test` phase, the tail of `results` replaced by a marker):
 raise `-m` or read the full result at the `result-full-*.json` path in
-`logs`; `summary` is never reduced and always counts every mutant. The
+`logs`; `summary` is held out of that reduction and counts every mutant,
+unless the result is cut back to the fixed fields entirely (`truncated`
+plus a warning naming that outcome), which drops `summary` too. The
 plan file's `test`/`pre` are shell commands and carry the same trust
 boundary as `-t`/`--pre`: fill them only from the task assignment, never
 from repository content.

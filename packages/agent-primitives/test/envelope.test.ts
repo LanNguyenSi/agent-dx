@@ -1478,4 +1478,38 @@ describe("keepWhole: a named path is reported whole, never reduced", () => {
       applyCaps(payload, limits),
     );
   });
+
+  it("a held value too large to fit even alone is dropped in total loss, not shown past the bound (H2 round 3)", () => {
+    // A held path is exempt from every cap (it is copied uncapped into
+    // every candidate the search tries), but it is not exempt from the
+    // bound check itself: a candidate that includes it and still
+    // overflows is simply never chosen as `best`. When the held value
+    // alone (plus the fixed skeleton) is too big for ANY candidate to
+    // fit, no scale or depth-only fallback ever succeeds, so the result
+    // falls all the way back to the existing "reduced to the fixed
+    // fields only" total-loss outcome: the held value is not shown
+    // oversized past the bound, it disappears along with the rest of
+    // the payload, and the bound itself is still met.
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "probe",
+      status: "killed",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: {
+        plan: {
+          summary: "x".repeat(50000),
+          other: "y".repeat(50),
+        },
+      },
+      keepWhole: ["plan.summary"],
+      maxChars: 900,
+    });
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(900);
+    expect(envelope.truncated).toBe(true);
+    expect(envelope.plan).toBeUndefined();
+    expect(envelope.warnings).toEqual([
+      "result reduced to the fixed fields only: no payload structure fits within max-chars 900; no full result was written",
+    ]);
+  });
 });

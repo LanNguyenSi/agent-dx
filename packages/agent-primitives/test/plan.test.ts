@@ -1052,6 +1052,18 @@ describe("probePlan(): an unexpected error while a mutant is applied", () => {
     const target = path.join(repo, "fixture.js");
     const actualExec =
       await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    // The middle mutant is the in-flight one this test drives into the
+    // emergency-restore path; a `patch` form (rather than `replace`,
+    // used for the other two) is what gives it its own non-empty `logs`
+    // to assert (`replace`/`match` never produce a dry-run log at all,
+    // per `computeMutant`), applied via `git apply` directly (not
+    // `execCommand`, so it does not shift which invocation the mock
+    // below throws on.
+    const patchPath = realDiffPatch(
+      repo,
+      "fixture.js",
+      FIXTURE_JS.replace("  return n < 0;", "  return true;"),
+    );
     // The third command this plan runs is the SECOND mutant's test (the
     // baseline is the first): it destroys the target, so no restore can
     // succeed, and then fails the way an unexpected internal error does
@@ -1071,7 +1083,7 @@ describe("probePlan(): an unexpected error while a mutant is applied", () => {
     const result = await probePlan(
       planOptions(repo, [
         replaceMutant(2, "  return false;"),
-        replaceMutant(5, "  return true;"),
+        { file: "fixture.js", form: "patch", patchPath },
         replaceMutant(7, "module.exports = {};"),
       ]),
     );
@@ -1103,6 +1115,17 @@ describe("probePlan(): an unexpected error while a mutant is applied", () => {
     // The baseline is still reported, and so is the log path of the
     // baseline run, which the emergency path used to drop.
     expect(result.baseline?.exitCode).toBe(0);
+    expect(typeof result.baseline?.logPath).toBe("string");
+    expect(fs.existsSync(result.baseline?.logPath ?? "")).toBe(true);
+    // The in-flight (second) mutant's own dry-run logs (its `patch`
+    // form's numstat and dry-run `git apply`, computed before the
+    // mutant was ever applied) are carried on its own result rather
+    // than dropped by the emergency path -- the other dropped field the
+    // round-1 finding named, beside `dryRunLogPaths` above.
+    expect(result.results[1].logs.length).toBeGreaterThan(0);
+    for (const logPath of result.results[1].logs) {
+      expect(fs.existsSync(logPath)).toBe(true);
+    }
   }, 30000);
 });
 

@@ -1059,12 +1059,16 @@ async function runProbePlanCommand(
     durationMs: Date.now() - start,
     cwd: global.cwd,
     warnings: result.warnings,
+    // Only the baseline log, the plan's own setup/dry-run logs and (once
+    // reduction runs) the result-full path belong at the top level: this
+    // `logs` is a PROTECTED_KEYS field the envelope never cuts, so
+    // anything folded in here raises the reduction floor for every
+    // mutant added to the plan. A per-mutant log path (its dry run, its
+    // real apply) stays inside that mutant's own `plan.results[i].logs`
+    // / `.test.logPath`, which the normal reduction can still cap or
+    // drop like any other payload field.
     logs: [
       ...(result.baseline !== undefined ? [result.baseline.logPath] : []),
-      ...result.results.flatMap((r) => [
-        ...(r.test !== undefined ? [r.test.logPath] : []),
-        ...r.logs,
-      ]),
       ...(result.dryRunLogPaths ?? []),
     ],
     extra: {

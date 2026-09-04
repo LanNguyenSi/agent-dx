@@ -828,8 +828,11 @@ about eight mutants `truncated` is `true`, entries lose their `test`
 phase and the tail of `results` is replaced by an omitted-items marker),
 so for a plan that size either raise `-m` or read the full, unreduced
 result at the `result-full-<run-id>.json` path the envelope's `logs`
-names. `summary` is never reduced: its counts always cover every mutant
-of the plan, including the entries the envelope no longer shows.
+names. `summary` is held out of that reduction, so its counts cover
+every mutant of the plan, including the entries the envelope no longer
+shows -- unless the result is cut back to the fixed fields (`truncated`
+plus a warning naming that outcome), which drops `summary` along with
+everything else rather than showing it past the bound.
 
 Exit codes stay `0` ok, `1` a finding, `2` could not conclude, read one
 step stricter than for a single probe: `0` only when EVERY mutant was

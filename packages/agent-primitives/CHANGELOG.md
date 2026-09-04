@@ -44,9 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their `test` phase, the tail of `results` replaced by a marker): raise
   `-m` or read the full result at the `result-full-<run-id>.json` path
   the envelope's `logs` names. `plan.summary` is held out of that
-  reduction (see `keepWhole` below), so its counts always cover every
-  mutant of the plan, including the entries the envelope no longer
-  shows. Plan validation (unknown keys, a missing `test`, an empty
+  reduction (see `keepWhole` below), so its counts cover every mutant of
+  the plan, including the entries the envelope no longer shows -- unless
+  the whole result is cut back to the fixed fields (`truncated` plus a
+  warning naming that outcome), which drops `plan.summary` along with
+  everything else instead of showing it past the bound. Plan validation (unknown keys, a missing `test`, an empty
   `mutants`, a mutant with two forms or none, a file outside the
   containment root, an unusable plan file) runs before the lock, the
   marker, the baseline or any worktree and names the offending path
@@ -62,12 +64,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `buildEnvelope`/`applyCaps` take `keepWhole`: dotted paths into the
   result whose value is reported whole, exempt from every structural cap
   and from the key budget of the object holding it, the way the fixed
-  envelope fields already are. The bound is unaffected (every candidate
-  is measured after the held path is folded in), so this only spends the
-  budget on that value instead of another; it is for the small field a
-  reader cannot do without once the rest was cut. `probe --plan` names
-  `plan.summary`, and nothing else in this package names anything: with
-  no path given the reduction is exactly what it was.
+  envelope fields already are. Every candidate is measured after the
+  held path is folded in, so a candidate that fits still respects the
+  bound with the held value included; it only spends the budget on that
+  value instead of another, which is for the small field a reader cannot
+  do without once the rest was cut. This does NOT mean a held path is
+  free: a value too large for the skeleton plus itself to fit under the
+  bound at all is not shown oversized past the bound, it is dropped
+  along with the rest of the payload in the existing "reduced to the
+  fixed fields only" total-loss outcome, its own warning included --
+  which is why the docblock says to name only a small, bounded value
+  here. `probe --plan` names `plan.summary`, and nothing else in this
+  package names anything: with no path given the reduction is exactly
+  what it was.
 - `listRegisteredWorktrees` (`-i worktree`'s registry listing, used by
   the removal, the leftover recovery, and `cleanupWorktree`'s
   assertion) falls back to a third source, the `gitdir` files under
@@ -197,6 +206,27 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   `O_EXCL`, so a target planted in that gap is revalidated rather than
   truncated; zero-progress writes report `target_write_failed` after closing
   the descriptor.
+- `probe --plan`: the signal handler's restore slot is cleared before a
+  plan's baseline runs (it was still armed to whichever target
+  `openTarget` opened last). A plan whose baseline rewrites more than
+  one target, signalled mid-baseline, previously restored only that one
+  target and left every other target as the baseline wrote it -- an
+  asymmetry across targets that contradicted the plan's own non-signal
+  rule ("left as the baseline wrote it, not restored"). A signal
+  mid-baseline now restores nothing for a plan, same as the non-signal
+  path, and the per-mutant step still re-arms the slot for its own
+  target right before applying it. The single probe (always one target)
+  is unaffected: its restore slot stays armed through its own baseline,
+  the released contract.
+- `probe --plan`'s envelope no longer flattens every mutant's own log
+  paths (`test.logPath`, `logs`) into the top-level `logs`, which the
+  envelope's reduction never cuts: at 55 mutants (default `-m 8000`,
+  default log dir) that per-mutant growth alone pushed the reduction
+  floor past the bound, dropping `plan` (summary included) rather than
+  reducing it. The top level now carries only the baseline log, the
+  plan's own setup logs and, once reduction runs, the full-result path;
+  a mutant's own log paths stay on `plan.results[i]`, which the normal
+  reduction can still cap or drop like any other field.
 
 ## [0.1.0] - 2026-09-04
 
