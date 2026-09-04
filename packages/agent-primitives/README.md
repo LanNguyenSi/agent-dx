@@ -426,7 +426,7 @@ apart from the paths that do (never folded in as though still
 registered): a stale entry naming a worktree `cleanupWorktree` just
 removed must read as gone, not as still there. A `gitdir` file written
 relative to its own admin entry directory (`worktree.useRelativePaths`,
-git &gt;= 2.48) is resolved against that directory -- git's own
+git 2.48 or newer) is resolved against that directory -- git's own
 semantics for the file, never the calling process's working
 directory -- so it is read the same as an absolute one, not treated as
 odd. An entry whose `gitdir` file is missing, unreadable, or empty
@@ -434,7 +434,13 @@ makes the WHOLE listing not ok rather than being silently dropped from
 an otherwise ok one, named by id and reason instead: an ok result from
 this source means every admin entry was read to a parse, so an entry's
 absence from the paths it lists can be trusted to mean it really is
-gone, not merely that this source could not read it. Once this source
+gone, not merely that this source could not read it. The cost of that
+all-or-nothing rule: a single unreadable admin entry makes the whole
+fallback registry unusable for that repository, so a leftover outside
+this run's `--log-dir` is refused rather than removed and a leftover
+the registry would otherwise have named is not recovered either; a
+manual `git worktree prune` or repair of the unreadable entry restores
+it. Once this source
 can list something (ok), the removal is asserted against it exactly as
 it would be against a genuine `git worktree list` -- which also makes
 a scratch-shaped worktree this source reports as registered eligible

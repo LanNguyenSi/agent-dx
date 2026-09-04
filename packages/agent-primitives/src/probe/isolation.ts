@@ -1144,7 +1144,15 @@ async function listRegisteredWorktreesViaGit(
  * this helper existed, `removeHalfWrittenAdminEntry` also assumed an
  * absolute path and so never matched an entry written under that
  * config). Returns `undefined` for empty or whitespace-only content --
- * nothing to resolve -- never a throw. */
+ * nothing to resolve -- never a throw. Also `undefined` when the
+ * resolved content does not actually name a `.git` FILE: git always
+ * writes this file as `<worktree>/.git`, so a resolved path whose
+ * basename is not `.git`, or whose directory resolves back to
+ * `adminEntryDir` itself (the shape junk content like a stray word
+ * takes once resolved relative to the admin entry's own directory --
+ * `path.dirname` of `<adminEntryDir>/<junk>` is `adminEntryDir`), is
+ * never a real worktree, so the caller must treat it the same as an
+ * unreadable entry rather than list it as a registered one. */
 function worktreeDirFromGitdirFile(
   adminEntryDir: string,
   raw: string,
@@ -1154,7 +1162,10 @@ function worktreeDirFromGitdirFile(
   const absoluteGitdir = path.isAbsolute(gitdir)
     ? gitdir
     : path.resolve(adminEntryDir, gitdir);
-  return path.dirname(absoluteGitdir);
+  if (path.basename(absoluteGitdir) !== ".git") return undefined;
+  const worktreeDir = path.dirname(absoluteGitdir);
+  if (worktreeDir === adminEntryDir) return undefined;
+  return worktreeDir;
 }
 
 /** The third listing source: `<git-common-dir>/worktrees/<id>/gitdir`
@@ -1221,7 +1232,11 @@ async function listRegisteredWorktreesViaGitdirFiles(
     }
     const worktreeDir = worktreeDirFromGitdirFile(entryDir, raw);
     if (worktreeDir === undefined) {
-      odd.push(`${id}: gitdir file is empty`);
+      odd.push(
+        raw.trim().length === 0
+          ? `${id}: gitdir file is empty`
+          : `${id}: gitdir file does not name a .git file`,
+      );
       continue;
     }
     const resolved = resolveDeepestExisting(worktreeDir);
@@ -1619,9 +1634,9 @@ export async function cleanupWorktree(
       (after.goneTargets?.includes(target) ?? false);
     const detail = ok
       ? staleAdminEntry
-        ? `the target is gone, but its admin entry under this repository's ` +
-          `worktrees directory still exists (git worktree prune could not ` +
-          `clear it); a future git worktree prune on this repository clears it`
+        ? `its admin entry under this repository's worktrees directory ` +
+          `still exists (git worktree prune could not clear it); a future ` +
+          `git worktree prune on this repository clears it`
         : undefined
       : stillRegistered
         ? `git still reports it as a worktree after the removal; see ${removeResult.logPath}`

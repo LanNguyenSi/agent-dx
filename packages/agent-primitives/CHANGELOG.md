@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exists on disk apart from the entries that still do, so a stale entry
   naming a worktree just removed reads as gone, never as still
   registered; a `gitdir` file written relative (`worktree.useRelativePaths`,
-  git &gt;= 2.48) is resolved against its own admin entry directory,
+  git 2.48 or newer) is resolved against its own admin entry directory,
   git's own semantics, never the calling process's `cwd`. An entry
   whose `gitdir` file is missing, unreadable, or empty makes the WHOLE
   listing `ok: false` rather than being silently dropped from an

@@ -1517,8 +1517,87 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     },
   );
 
+  it("does not report an entry whose gitdir file names no .git file at all as a registered worktree: junk content resolves, relative to the admin entry's own directory, to that same directory, never to a real worktree", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const good = scratchPath(logDir);
+    addScratchWorktree(repo, good);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [entryId] = fs.readdirSync(adminDir);
+    expect(entryId).toBeDefined();
+
+    const junkId = "bogus-junk";
+    const junkDir = path.join(adminDir, junkId);
+    fs.mkdirSync(junkDir, { recursive: true });
+    // Content that is non-empty and, resolved relative to `junkDir`
+    // the way a relative `gitdir` file is, still names no `.git` file
+    // anywhere -- `path.dirname` of the resolved path lands back on
+    // `junkDir` itself. Before this validation, this resolved to
+    // `junkDir` and was reported as a registered worktree in an
+    // `ok: true` listing.
+    fs.writeFileSync(
+      path.join(junkDir, "gitdir"),
+      "this is not a path at all\n",
+    );
+
+    const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    expect(listed.ok).toBe(false);
+    expect(listed.form).toBe("gitdir-files");
+    expect(listed.paths).toEqual([]);
+    expect(listed.goneTargets).toBeUndefined();
+    expect(listed.detail).toContain(junkId);
+    expect(listed.detail).toContain("does not name a .git file");
+  });
+
+  // Root-independent: neither case below needs a chmod, so this must
+  // run (and fail on a mutated `ok = true`) whether or not the suite
+  // is running as root, unlike the chmod-000 case below, which needs
+  // root excluded to actually leave the file unreadable (see
+  // `isRoot`). Split out so the `const ok = odd.length === 0` rule
+  // (round 1's fix) has coverage that survives a root CI runner: it
+  // used to live only inside the two `it.skipIf(isRoot)` tests here,
+  // so on a root runner the rule had no test at all.
+  it("reports the gitdir-files listing as not ok, naming every admin entry whose gitdir file is missing or empty by id and reason, rather than silently dropping them from an otherwise ok result", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const good = scratchPath(logDir);
+    addScratchWorktree(repo, good);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [goodEntry] = fs.readdirSync(adminDir);
+    expect(goodEntry).toBeDefined();
+
+    const missingId = "bogus-missing";
+    fs.mkdirSync(path.join(adminDir, missingId), { recursive: true });
+    // No gitdir file at all in this one.
+
+    const emptyId = "bogus-empty";
+    fs.mkdirSync(path.join(adminDir, emptyId), { recursive: true });
+    fs.writeFileSync(path.join(adminDir, emptyId, "gitdir"), "");
+
+    const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    // Not ok: this source cannot vouch that `good` is really the ONLY
+    // registered worktree when two other entries could not be read at
+    // all -- a caller must not trust an empty-looking `paths` here the
+    // way it would trust a fully known one.
+    expect(listed.ok).toBe(false);
+    expect(listed.form).toBe("gitdir-files");
+    expect(listed.paths).toEqual([]);
+    expect(listed.goneTargets).toBeUndefined();
+    for (const id of [missingId, emptyId]) {
+      expect(listed.detail).toContain(id);
+    }
+    expect(listed.detail).toContain("gitdir file is empty");
+    expect(listed.detail).toContain("could not be read");
+  });
+
   it.skipIf(isRoot)(
-    "reports the gitdir-files listing as not ok, naming every admin entry it could not read by id and reason, rather than silently dropping them from an otherwise ok result",
+    "reports the gitdir-files listing as not ok, naming an unreadable admin entry by id and reason, rather than silently dropping it from an otherwise ok result",
     async () => {
       const repo = initRepo();
       const logDir = makeTmpDir();
@@ -1527,14 +1606,6 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
       const adminDir = path.join(repo, ".git", "worktrees");
       const [goodEntry] = fs.readdirSync(adminDir);
       expect(goodEntry).toBeDefined();
-
-      const missingId = "bogus-missing";
-      fs.mkdirSync(path.join(adminDir, missingId), { recursive: true });
-      // No gitdir file at all in this one.
-
-      const emptyId = "bogus-empty";
-      fs.mkdirSync(path.join(adminDir, emptyId), { recursive: true });
-      fs.writeFileSync(path.join(adminDir, emptyId, "gitdir"), "");
 
       const unreadableId = "bogus-unreadable";
       fs.mkdirSync(path.join(adminDir, unreadableId), { recursive: true });
@@ -1549,17 +1620,14 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
         );
 
         // Not ok: this source cannot vouch that `good` is really the
-        // ONLY registered worktree when three other entries could not
-        // be read at all -- a caller must not trust an empty-looking
+        // ONLY registered worktree when another entry could not be
+        // read at all -- a caller must not trust an empty-looking
         // `paths` here the way it would trust a fully known one.
         expect(listed.ok).toBe(false);
         expect(listed.form).toBe("gitdir-files");
         expect(listed.paths).toEqual([]);
         expect(listed.goneTargets).toBeUndefined();
-        for (const id of [missingId, emptyId, unreadableId]) {
-          expect(listed.detail).toContain(id);
-        }
-        expect(listed.detail).toContain("gitdir file is empty");
+        expect(listed.detail).toContain(unreadableId);
         expect(listed.detail).toContain("could not be read");
       } finally {
         fs.chmodSync(unreadableGitdir, 0o644);
