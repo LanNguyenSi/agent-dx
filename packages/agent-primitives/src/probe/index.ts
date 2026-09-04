@@ -2958,7 +2958,10 @@ export async function probePlan(
     if (!setup.ok) {
       const { refusal } = setup;
       if (refusal.logPaths !== undefined) setupLogPaths = refusal.logPaths;
-      const results = resultsSoFar();
+      // Nothing was collected yet, so these are all `not_run` -- the
+      // same helper the loop's own returns and the emergency path use,
+      // rather than a second way of saying it.
+      const entries = resultsSoFar();
       return {
         status: refusal.status,
         reason: refusal.reason,
@@ -2966,8 +2969,8 @@ export async function probePlan(
         ...(refusal.baseline !== undefined
           ? { baseline: refusal.baseline }
           : {}),
-        results,
-        summary: summarize(results),
+        results: entries,
+        summary: summarize(entries),
         isolation: isolationField,
         ...(setupLogPaths.length > 0 ? { dryRunLogPaths: setupLogPaths } : {}),
       };
