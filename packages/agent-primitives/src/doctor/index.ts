@@ -513,8 +513,8 @@ export async function doctor(
         `(${registry.detail ?? "unknown"}); a worktree a previous probe ` +
         `left registered cannot be reported (this synchronous listing has ` +
         `no gitdir-files fallback the way \`probe\`'s own async listing ` +
-        `does; run \`agent-primitives probe -i worktree\` on this ` +
-        `repository instead, which can still recover a leftover this way)`,
+        `does; the next \`probe -i worktree\` run on this repository can ` +
+        `still recover a leftover this way)`,
     );
   }
   const registeredScratch = registry.paths;

@@ -660,6 +660,35 @@ describe("doctor: stale-worktree check", () => {
     expect(check?.detail).toContain("was interrupted");
   });
 
+  it("not ok when a worktree marker has no timestamp field at all (an older marker shape): stale by definition, whatever its pid says, never read as fresh", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const root = resolveDeepestExisting(containmentRoot(cwd));
+    const worktreePath = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
+    fs.writeFileSync(
+      path.join(lockDir, `${lockKey(root)}.marker.json`),
+      // No `timestamp` field: an older marker shape predating it.
+      // `isTimestampPastBound` treats this as stale by an explicit
+      // `undefined` check, not merely because `Date.parse(undefined)`
+      // happens to yield `NaN`.
+      JSON.stringify({
+        targetPath: worktreePath,
+        backupPath: root,
+        preHash: "",
+        mutatedHash: "",
+        pid: process.pid,
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-worktree");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(worktreePath);
+    expect(check?.detail).toContain(
+      `worktree remove --force --force -- ${worktreePath}`,
+    );
+    expect(check?.detail).toContain("was interrupted");
+  });
+
   it("ok when a worktree marker's pid is alive and its own timestamp is fresh, even though the target it names is not registered", async () => {
     const lockDir = makeTmpDir();
     const cwd = makeTmpDir();
@@ -1085,7 +1114,11 @@ describe("doctor: stale-worktree check on a git that rejects -z, and on one whos
       result.warnings.some(
         (w) =>
           w.includes(`git worktree list could not run for ${root}`) &&
-          w.includes("git worktree list --porcelain -z exited 128"),
+          w.includes("git worktree list --porcelain -z exited 128") &&
+          // Anchors the AC6 limitation clause: this synchronous
+          // listing has no gitdir-files fallback the way `probe`'s own
+          // async listing does, so deleting that clause fails this.
+          w.includes("gitdir-files"),
       ),
     ).toBe(true);
     const check = result.checks.find((c) => c.name === "stale-worktree");
@@ -1112,7 +1145,10 @@ describe("doctor: stale-worktree check on a git that rejects -z, and on one whos
       result.warnings.some(
         (w) =>
           w.includes(`git worktree list could not run for ${root}`) &&
-          w.includes("exited 128"),
+          w.includes("exited 128") &&
+          // Anchors the AC6 limitation clause; see the same assertion
+          // in the -z-dies test above.
+          w.includes("gitdir-files"),
       ),
     ).toBe(true);
     const check = result.checks.find((c) => c.name === "stale-worktree");

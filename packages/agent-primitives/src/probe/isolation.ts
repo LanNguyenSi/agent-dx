@@ -809,14 +809,24 @@ export type ScratchOwnerState = "none" | "self" | "dead" | "expired" | "live";
 
 /** True when `timestamp` (the record's own, never the file's mtime) does
  * not parse or lies more than `SCRATCH_OWNER_MAX_AGE_HOURS` away from
- * `now`. A future-dated record is as untrustworthy as a stale one. The
- * one bound this package applies to a record's own age, shared by the
- * scratch owner record's classification below and by `doctor`'s
- * `stale-worktree` check, which applies it to a probe marker's
- * `timestamp` field (never the marker file's mtime, the same choice
- * made here) the same way: a marker whose pid happens to still resolve
- * to *something* must not be read as vouching for a run forever. */
-export function isTimestampPastBound(timestamp: string, now: number): boolean {
+ * `now`. A future-dated record is as untrustworthy as a stale one, and
+ * so is a record with no `timestamp` field at all -- an older marker
+ * shape predating this field, `undefined` here rather than a string
+ * despite the field's declared type, since a hand-parsed JSON file is
+ * never guaranteed to carry every field its type says it must -- which
+ * is stale by definition, an explicit branch rather than a value that
+ * merely happens to make `Date.parse` return `NaN`. The one bound this
+ * package applies to a record's own age, shared by the scratch owner
+ * record's classification below and by `doctor`'s `stale-worktree`
+ * check, which applies it to a probe marker's `timestamp` field (never
+ * the marker file's mtime, the same choice made here) the same way: a
+ * marker whose pid happens to still resolve to *something* must not be
+ * read as vouching for a run forever. */
+export function isTimestampPastBound(
+  timestamp: string | undefined,
+  now: number,
+): boolean {
+  if (timestamp === undefined) return true;
   const written = Date.parse(timestamp);
   return (
     !Number.isFinite(written) ||
@@ -1011,19 +1021,24 @@ export interface RegisteredWorktrees {
    * when neither `git worktree list` form ran to a parse. Absent when
    * nothing ran to a parse at all. */
   form?: "nul" | "newline" | "gitdir-files";
-  /** For `form: "gitdir-files"` only: every admin entry whose target
-   * directory no longer exists on disk, resolved through
-   * `resolveDeepestExisting` like `paths`. Kept apart from `paths`
-   * rather than folded into it, so a leftover admin entry for a
+  /** For `form: "gitdir-files"` when `ok` is true only: every admin
+   * entry whose target directory no longer exists on disk, resolved
+   * through `resolveDeepestExisting` like `paths`. Kept apart from
+   * `paths` rather than folded into it, so a leftover admin entry for a
    * worktree `cleanupWorktree` just removed reads as "gone", not as
-   * "still registered". Absent for `nul`/`newline`, and when the
-   * gitdir-files listing found no such entry. */
+   * "still registered". Absent for `nul`/`newline`, when `ok` is
+   * false, and when the gitdir-files listing found no such entry. */
   goneTargets?: string[];
-  /** Why `ok` is false; for a `gitdir-files` listing that is otherwise
-   * `ok: true`, names any admin entry whose `gitdir` file could not be
-   * read, was empty, or did not parse, and any entry in
-   * `goneTargets`, so a caller can report them rather than silently
-   * drop them. */
+  /** Why `ok` is false; for a `gitdir-files` listing, also names any
+   * admin entry in `goneTargets` even when that leaves `ok` true (a
+   * gone target is fully known, not an error). An admin entry whose
+   * `gitdir` file could not be read, was missing, or was empty (a
+   * relative path is resolved, never one of these -- see
+   * `worktreeDirFromGitdirFile`) makes the WHOLE gitdir-files listing
+   * `ok: false`, named here by id and reason: `ok: true` for this form
+   * means every entry was read to a parse, so a caller can trust an
+   * entry's absence from `paths` to mean it really is gone, never that
+   * this source merely could not read it. */
   detail?: string;
   /** The log of the last listing attempted. */
   logPath: string;
@@ -1113,15 +1128,43 @@ async function listRegisteredWorktreesViaGit(
   };
 }
 
+/** Resolves one admin entry's `gitdir` file content (`raw`, as read
+ * from disk, untrimmed) to the worktree directory it names. `gitdir`
+ * names the linked worktree's own `.git` FILE, one level below the
+ * worktree itself, so the worktree directory is that file's own
+ * `path.dirname`. Git writes this file as an ABSOLUTE path by default;
+ * under `worktree.useRelativePaths` (git >= 2.48) it writes every
+ * `gitdir` file relative to the admin entry's OWN directory instead
+ * (`adminEntryDir`, e.g. `<git-common-dir>/worktrees/<id>`) -- git's
+ * own resolution semantics for this file, never the calling process's
+ * `cwd`, which a plain `path.resolve` would otherwise pick up by
+ * accident. Shared by `listRegisteredWorktreesViaGitdirFiles` and
+ * `removeHalfWrittenAdminEntry`, which both read this same file, so
+ * relative content is resolved the same way in both places (before
+ * this helper existed, `removeHalfWrittenAdminEntry` also assumed an
+ * absolute path and so never matched an entry written under that
+ * config). Returns `undefined` for empty or whitespace-only content --
+ * nothing to resolve -- never a throw. */
+function worktreeDirFromGitdirFile(
+  adminEntryDir: string,
+  raw: string,
+): string | undefined {
+  const gitdir = raw.trim();
+  if (gitdir.length === 0) return undefined;
+  const absoluteGitdir = path.isAbsolute(gitdir)
+    ? gitdir
+    : path.resolve(adminEntryDir, gitdir);
+  return path.dirname(absoluteGitdir);
+}
+
 /** The third listing source: `<git-common-dir>/worktrees/<id>/gitdir`
  * read directly, with no `git worktree list` invocation at all, so it
  * still answers when that command is broken outright (any exit status,
  * any option) rather than only when it rejects `-z`. `gitdir` names the
- * linked worktree's own `.git` FILE, one level below the worktree
- * itself, so `resolveDeepestExisting(path.dirname(gitdir))` (the same
- * read `removeHalfWrittenAdminEntry` already does for the one entry it
- * repairs) is the worktree path. Two things this source cannot do that
- * `git worktree list` can: it never names the MAIN worktree (git's
+ * linked worktree's own `.git` FILE, resolved to the worktree directory
+ * through `worktreeDirFromGitdirFile` (which also handles a relative
+ * `gitdir` file -- see that function). Two things this source cannot do
+ * that `git worktree list` can: it never names the MAIN worktree (git's
  * admin directory carries no entry for it -- only a linked worktree
  * gets one), and it does not know whether an entry is locked or
  * prunable, so an admin entry `git worktree prune` would clear is
@@ -1131,10 +1174,16 @@ async function listRegisteredWorktreesViaGit(
  * stale entry naming a target `cleanupWorktree` just removed must read
  * as "not registered", never as "still registered".
  *
- * An entry whose `gitdir` file is missing, empty, or does not name an
- * absolute path is reported in `detail` (never silently dropped as
- * though it simply were not there) and excluded from both `paths` and
- * `goneTargets`, since neither is known for it.
+ * An entry whose `gitdir` file is missing, unreadable, empty, or
+ * otherwise fails to resolve to a worktree directory makes the WHOLE
+ * listing `ok: false` (never a silent drop from an otherwise `ok: true`
+ * result): `ok: true` for this form means every admin entry was read,
+ * so a caller can trust an entry's ABSENCE from `paths` to mean it
+ * really is gone, not merely that this source could not read it. Such
+ * an entry is still named, by id and reason, in `detail`, so a caller
+ * that only logs the failure still has something concrete to report. A
+ * RELATIVE `gitdir` file is no longer one of these odd cases -- it is
+ * resolved (see `worktreeDirFromGitdirFile`), not rejected.
  *
  * Returns `undefined` when even this cannot run: `git rev-parse
  * --git-common-dir` itself failed (see `worktreeAdminDir`), or the
@@ -1159,7 +1208,8 @@ async function listRegisteredWorktreesViaGitdirFiles(
   const goneTargets: string[] = [];
   const odd: string[] = [];
   for (const id of ids) {
-    const gitdirFile = path.join(admin.dir, id, "gitdir");
+    const entryDir = path.join(admin.dir, id);
+    const gitdirFile = path.join(entryDir, "gitdir");
     let raw: string;
     try {
       raw = fs.readFileSync(gitdirFile, "utf8");
@@ -1169,17 +1219,12 @@ async function listRegisteredWorktreesViaGitdirFiles(
       );
       continue;
     }
-    const gitdir = raw.trim();
-    if (gitdir.length === 0) {
+    const worktreeDir = worktreeDirFromGitdirFile(entryDir, raw);
+    if (worktreeDir === undefined) {
       odd.push(`${id}: gitdir file is empty`);
       continue;
     }
-    const worktreeDir = path.dirname(gitdir);
-    if (!path.isAbsolute(worktreeDir)) {
-      odd.push(`${id}: gitdir file does not name an absolute path (${gitdir})`);
-      continue;
-    }
-    const resolved = resolveDeepestExisting(path.resolve(worktreeDir));
+    const resolved = resolveDeepestExisting(worktreeDir);
     if (fs.existsSync(worktreeDir)) {
       paths.push(resolved);
     } else {
@@ -1199,11 +1244,21 @@ async function listRegisteredWorktreesViaGitdirFiles(
         `a target that no longer exists on disk: ${goneTargets.join(", ")}`,
     );
   }
+  // `ok: true` for this form means every admin entry was read to a
+  // parse: any entry this source could not read at all (`odd`) leaves
+  // the registry only PARTIALLY known, which must not be reported the
+  // same as a fully known, merely smaller, one -- a caller (notably
+  // `cleanupWorktree`'s post-removal assertion) that took an empty or
+  // short `paths` at face value here would misread a leftover admin
+  // entry this source simply could not read as "not registered". A
+  // `goneTargets` entry is not one of these: its target is fully known
+  // (resolved and confirmed gone), just reported apart from `paths`.
+  const ok = odd.length === 0;
   return {
-    ok: true,
-    paths,
+    ok,
+    paths: ok ? paths : [],
     form: "gitdir-files",
-    ...(goneTargets.length > 0 ? { goneTargets } : {}),
+    ...(ok && goneTargets.length > 0 ? { goneTargets } : {}),
     ...(detailParts.length > 0 ? { detail: detailParts.join("; ") } : {}),
     logPath: admin.logPath,
     logPaths,
@@ -1288,7 +1343,11 @@ async function worktreeAdminDir(
  * `prune` from clearing the entry, so every `git worktree` command in
  * the repository fails until the entry is gone, and nothing short of
  * deleting it clears it. Only an entry naming the already-gated
- * `target` is ever touched. Returns true when one was removed. */
+ * `target` is ever touched: `gitdir` is resolved through the same
+ * `worktreeDirFromGitdirFile` the listing above uses, so an entry
+ * written under `worktree.useRelativePaths` (a relative `gitdir` file)
+ * matches here too, not only an absolute one. Returns true when one
+ * was removed. */
 function removeHalfWrittenAdminEntry(
   adminDir: string,
   target: string,
@@ -1302,13 +1361,14 @@ function removeHalfWrittenAdminEntry(
   let removed = false;
   for (const id of ids) {
     const entry = path.join(adminDir, id);
-    let gitdir: string;
+    let raw: string;
     try {
-      gitdir = fs.readFileSync(path.join(entry, "gitdir"), "utf8").trim();
+      raw = fs.readFileSync(path.join(entry, "gitdir"), "utf8");
     } catch {
       continue;
     }
-    if (gitdir.length === 0) continue;
+    const worktreeDir = worktreeDirFromGitdirFile(entry, raw);
+    if (worktreeDir === undefined) continue;
     if (!fs.existsSync(path.join(entry, "locked"))) continue;
     let commondirBytes: number;
     try {
@@ -1317,7 +1377,7 @@ function removeHalfWrittenAdminEntry(
       continue;
     }
     if (commondirBytes > 0) continue;
-    if (resolveDeepestExisting(path.dirname(gitdir)) !== target) continue;
+    if (resolveDeepestExisting(worktreeDir) !== target) continue;
     try {
       fs.rmSync(entry, { recursive: true, force: true });
       removed = true;
@@ -1358,7 +1418,12 @@ export interface CleanupWorktreeResult {
   /** True when the path failed the gate below and nothing at all was
    * run against it. */
   refused: boolean;
-  /** Why `ok` is false, or why an `ok` result is unverified. */
+  /** Why `ok` is false, or why an `ok` result is unverified; also set
+   * on an `ok: true`, `verified: true` result when the `gitdir-files`
+   * listing found the target's admin entry still on disk in
+   * `goneTargets` (the target itself is gone, but `git worktree prune`
+   * has not cleared its registration yet), so a caller can still surface
+   * that survivor even though the removal itself is a clean success. */
   detail?: string;
   logPaths: string[];
 }
@@ -1539,8 +1604,25 @@ export async function cleanupWorktree(
   if (after.ok) {
     const stillRegistered = after.paths.includes(target);
     const ok = !stillRegistered && !stillOnDisk;
+    // A `gitdir-files` listing keeps a gone target apart from `paths`
+    // (see `RegisteredWorktrees.goneTargets`), so `stillRegistered` is
+    // false for it and `ok` above reads as a clean removal; but the
+    // ADMIN ENTRY itself is still on disk (git's own `remove`/`prune`
+    // could not clear it -- the very reason this fallback listing was
+    // needed at all), so the outcome, while correctly `ok`, is worth a
+    // `detail` naming that survivor rather than none at all: a future
+    // `git worktree prune` on this repository clears it once `git
+    // worktree list` works again.
+    const staleAdminEntry =
+      ok &&
+      after.form === "gitdir-files" &&
+      (after.goneTargets?.includes(target) ?? false);
     const detail = ok
-      ? undefined
+      ? staleAdminEntry
+        ? `the target is gone, but its admin entry under this repository's ` +
+          `worktrees directory still exists (git worktree prune could not ` +
+          `clear it); a future git worktree prune on this repository clears it`
+        : undefined
       : stillRegistered
         ? `git still reports it as a worktree after the removal; see ${removeResult.logPath}`
         : "something is still on disk at the path after the removal";

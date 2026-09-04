@@ -19,12 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries no entry for) and keeps an admin entry whose target no longer
   exists on disk apart from the entries that still do, so a stale entry
   naming a worktree just removed reads as gone, never as still
-  registered; an entry whose `gitdir` file is missing, empty, or not an
-  absolute path is reported rather than silently dropped.
+  registered; a `gitdir` file written relative (`worktree.useRelativePaths`,
+  git &gt;= 2.48) is resolved against its own admin entry directory,
+  git's own semantics, never the calling process's `cwd`. An entry
+  whose `gitdir` file is missing, unreadable, or empty makes the WHOLE
+  listing `ok: false` rather than being silently dropped from an
+  otherwise `ok: true` one, named by id and reason in `detail`:
+  `ok: true` for this form means every admin entry was read to a
+  parse, so an entry's absence from `paths` can be trusted to mean it
+  really is gone.
   `cleanupWorktree`'s previously-unverified double-fault outcome (both
   `git worktree list` forms dead, the target never registered in the
   first place) is now asserted (`verified: true`) whenever this source
-  can list something.
+  can list something -- which also makes a scratch-shaped worktree this
+  source reports as registered eligible for removal even when it sits
+  outside the current run's `--log-dir`, the same as one a real
+  `git worktree list` reported.
 - `doctor`'s `stale-worktree` check and the marker's own
   `SCRATCH_OWNER_MAX_AGE_HOURS`-bound age check (previously applied
   only to the scratch owner record) now also bound the repository-keyed

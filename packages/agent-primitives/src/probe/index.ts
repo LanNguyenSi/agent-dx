@@ -865,9 +865,13 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       }));
       if (result.ok) {
         removeMarkerFor(realRoot);
-        if (!result.verified) {
+        if (!result.verified || result.detail !== undefined) {
           // Gone as far as could be checked, but not asserted against
-          // git's registry: said so, never presented as asserted.
+          // git's registry: said so, never presented as asserted. A
+          // `verified: true` result can still carry a `detail` (a
+          // gitdir-files-listed admin entry surviving `git worktree
+          // prune`, see `cleanupWorktree`), which is worth surfacing
+          // even though the removal itself is a clean success.
           warnings.push(
             `the worktree at ${worktreePathForCleanup} was removed, but ` +
               `${result.detail ?? "the removal could not be verified"}`,
@@ -1188,7 +1192,10 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         }));
         if (cleanup.ok) {
           recovered += 1;
-          if (!cleanup.verified) {
+          if (!cleanup.verified || cleanup.detail !== undefined) {
+            // See the same-shaped warning in `cleanupWtSession` above:
+            // a `verified: true` result can still carry a `detail`
+            // worth surfacing (a surviving gitdir-files admin entry).
             warnings.push(
               `the leftover worktree at ${leftover.path} was removed, but ` +
                 `${cleanup.detail ?? "the removal could not be verified"}`,

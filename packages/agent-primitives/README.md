@@ -424,15 +424,27 @@ would have pruned is read the same as a live one, UNLESS its own
 target directory no longer exists on disk, in which case it is kept
 apart from the paths that do (never folded in as though still
 registered): a stale entry naming a worktree `cleanupWorktree` just
-removed must read as gone, not as still there. An entry whose `gitdir`
-file is missing, empty, or does not name an absolute path is reported
-rather than silently dropped. Once this source can list something, the
-removal is asserted against it exactly as it would be against a
-genuine `git worktree list`, `cleanupWorktree`'s half-written-entry
-repair (below) having already had its own chance against the real
-listing failure first, since that repair fixes git's own admin state
-for every future listing on the repository, which a read-only fallback
-cannot do. When this source cannot run either (`git rev-parse` itself
+removed must read as gone, not as still there. A `gitdir` file written
+relative to its own admin entry directory (`worktree.useRelativePaths`,
+git &gt;= 2.48) is resolved against that directory -- git's own
+semantics for the file, never the calling process's working
+directory -- so it is read the same as an absolute one, not treated as
+odd. An entry whose `gitdir` file is missing, unreadable, or empty
+makes the WHOLE listing not ok rather than being silently dropped from
+an otherwise ok one, named by id and reason instead: an ok result from
+this source means every admin entry was read to a parse, so an entry's
+absence from the paths it lists can be trusted to mean it really is
+gone, not merely that this source could not read it. Once this source
+can list something (ok), the removal is asserted against it exactly as
+it would be against a genuine `git worktree list` -- which also makes
+a scratch-shaped worktree this source reports as registered eligible
+for removal even when it sits outside the current run's `--log-dir`,
+the same as one a real `git worktree list` reported -- `cleanupWorktree`'s
+half-written-entry repair (below) having already had its own chance
+against the real listing failure first, since that repair fixes git's
+own admin state for every future listing on the repository, which a
+read-only fallback cannot do. When this source cannot run either
+(`git rev-parse` itself
 fails, or the repository has no `worktrees/` admin directory to read
 at all -- true of a repository that has never had a linked worktree,
 and also true right after the LAST linked worktree of a repository is
