@@ -6926,3 +6926,9 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   the pre-release baseline (master `56f34c6`, same worktree comparison
   method as prior rounds; the anchor-family jq filter from `ci.yml`
   reports 0 findings both before and after).
+
+- 2026-09-04: re-verified and re-stamped install-fence-mechanics.md,
+  model-preselection.md, and operator-install-and-registry.md after the
+  cli-inputs.ts sticky-comment consolidation; their source claims and
+  repointed anchors match the current implementation. `okf-kit check
+  docs/okf --strict` reports 0 errors and 0 warnings.

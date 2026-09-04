@@ -14,8 +14,7 @@ import { DEFAULT_MODELS, DEFAULT_PROFILE } from "../src/models.js";
  * action so the sticky-branch wiring it produces
  * (`stickyPreChecked: []`, never `chosenHarnesses`) is pinned by a direct,
  * targeted test rather than only indirectly through the much larger
- * `resolveInitInputs`/interactive-prompt suite (agent-tasks fe834823, fix
- * round 3, review finding 1).
+ * `resolveInitInputs`/interactive-prompt suite.
  */
 
 function fakePrevious(overrides: Partial<Manifest> = {}): Manifest {
