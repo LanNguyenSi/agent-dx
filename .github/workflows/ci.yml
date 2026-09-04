@@ -20,7 +20,12 @@ permissions:
 jobs:
   placement-guard:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    # 5 minutes, not 2: installing slop-detector's dependencies alone takes
+    # around 100 seconds on a slow registry day, and npm ci's implicit audit
+    # request can stall on the registry's advisory endpoint. --no-audit keeps
+    # the install from waiting on that endpoint at all; the audit is not what
+    # this job is for.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
 
@@ -32,7 +37,7 @@ jobs:
 
       - name: Install slop-detector
         working-directory: packages/slop-detector
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Build slop-detector
         working-directory: packages/slop-detector
