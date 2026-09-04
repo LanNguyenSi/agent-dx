@@ -2524,6 +2524,10 @@ export async function probePlan(
       },
     };
   });
+  // The plan's own setup logs (the worktree sync), folded into every
+  // return from here on so a refusal after the sync still names the logs
+  // it produced. Declared ahead of `refuse` below, which reads it.
+  let setupLogPaths: string[] = [];
   const notRunResult = (item: PlannedMutant): PlanMutantResult => ({
     index: item.index,
     file: item.displayFile,
@@ -2546,6 +2550,7 @@ export async function probePlan(
       results,
       summary: summarize(results),
       isolation: isolationField,
+      ...(setupLogPaths.length > 0 ? { dryRunLogPaths: setupLogPaths } : {}),
     };
   };
 
@@ -2676,7 +2681,6 @@ export async function probePlan(
   const { execController, track, crashHandlers, cleanupWtSession } = controller;
   const exitOnSignalFlag = opts.exitOnSignal ?? false;
   let caughtError: unknown;
-  let setupLogPaths: string[] = [];
 
   try {
     // Stale in-flight markers, one per distinct target: the same
@@ -2930,7 +2934,11 @@ export async function probePlan(
         continue;
       }
       const target = targets.get(item.absFile);
-      /* c8 ignore next 4 -- every planned mutant's file was opened above */
+      // Unreachable in practice: every planned mutant's file was opened
+      // above, and this map is keyed by the same resolved path. Kept as
+      // a typed narrowing that reports `not_run` rather than throwing,
+      // so a future caller that plans a target it never opened cannot
+      // turn that into an unhandled exception mid-plan.
       if (target === undefined) {
         results.push(notRunResult(item));
         continue;

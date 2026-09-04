@@ -948,7 +948,7 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
  * no honest precedence between them. The run-shaping options (`-i`,
  * `--expect`, `--timeout`, `--link`, `--allow-outside`) are NOT in this
  * set: they override the plan's own value when given (see
- * `resolvePlanOverrides`). */
+ * `runProbePlanCommand`'s own docblock for that precedence). */
 const PLAN_EXCLUSIVE_OPTIONS: readonly {
   flag: string;
   key: keyof ProbeCliOptions;
