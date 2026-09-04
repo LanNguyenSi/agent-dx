@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -13,8 +14,7 @@ import { DEFAULT_MODELS, DEFAULT_PROFILE } from "../src/models.js";
  * action so the sticky-branch wiring it produces
  * (`stickyPreChecked: []`, never `chosenHarnesses`) is pinned by a direct,
  * targeted test rather than only indirectly through the much larger
- * `resolveInitInputs`/interactive-prompt suite (agent-tasks fe834823, fix
- * round 3, review finding 1).
+ * `resolveInitInputs`/interactive-prompt suite.
  */
 
 function fakePrevious(overrides: Partial<Manifest> = {}): Manifest {
@@ -108,5 +108,24 @@ describe("buildApplyInitInputs", () => {
     );
 
     expect(result.stickyAnnotateDetected).toEqual([]);
+  });
+});
+
+describe("apply's CLI action hands buildApplyInitInputs's result straight to resolveInitInputs", () => {
+  // See `buildApplyInitInputs`'s doc comment for the sticky-branch invariant.
+  const cliSource = readFileSync(
+    fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
+    "utf8",
+  );
+
+  it("calls resolveInitInputs with the bare builder result, no spread and no adjacent sticky override", () => {
+    const direct =
+      /resolveInitInputs\(\s*(?:\/\/[^\n]*\n\s*)*buildApplyInitInputs\(\s*targetDir,\s*chosenHarnesses,\s*previous,\s*interactive,\s*opts,\s*Boolean\(repoManifest\),?\s*\),?\s*\)/;
+    expect(direct.test(cliSource)).toBe(true);
+    expect(cliSource).not.toMatch(/\.\.\.buildApplyInitInputs\(/);
+    expect(cliSource).not.toMatch(
+      /buildApplyInitInputs\([\s\S]*?\)\s*,\s*sticky/,
+    );
+    expect(cliSource).not.toMatch(/\{\s*\.\.\.\s*buildApplyInitInputs/);
   });
 });
