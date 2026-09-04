@@ -1934,43 +1934,17 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
-  it.skipIf(os.platform() === "win32")(
-    "usage_error/patch_not_readable, never opening it, for a FIFO passed as -p/--patch and no --file",
-    async () => {
-      // No writer is ever opened against the FIFO. If the upfront stat
-      // ever regressed back to reading the patch directly,
-      // `fs.readFileSync` on a FIFO with no writer blocks forever (this
-      // was measured: it survives `SIGTERM` and needs `SIGKILL`), so
-      // this test would hang until the timeout below rather than fail
-      // fast -- the timeout is what turns that regression into a
-      // reported failure instead of a stuck run.
-      useLockDir();
-      const { repo } = initRepo();
-      const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
-      const patchPath = path.join(makeTmpDir(), "patch.fifo");
-      execFileSync("mkfifo", [patchPath]);
-
-      const result = await probe(
-        baseOptions(repo, {
-          form: "patch",
-          replaceText: undefined,
-          patchPath,
-          file: undefined,
-          line: undefined,
-        }),
-      );
-
-      expect(result.status).toBe("usage_error");
-      expect(result.reason).toBe("patch_not_readable");
-      expect(
-        result.warnings.some((w) => w.includes("not a regular file")),
-      ).toBe(true);
-      expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
-        before,
-      );
-    },
-    15_000,
-  );
+  // The FIFO case (never opening it, so a regression that reads the
+  // patch directly cannot hang the probe) is NOT covered here: an
+  // in-process test cannot enforce that. `fs.readFileSync` blocks
+  // synchronously, which freezes this runner's own event loop along
+  // with the call under test, so a same-process `it(..., timeout)`
+  // never gets the chance to fire (measured directly: it needed an
+  // external `SIGKILL` of the whole process, same as by hand). The
+  // regression test that actually proves this lives in cli.test.ts
+  // ("cli: probe -p targeting a FIFO"), where the CLI is spawned as a
+  // real subprocess and bounded with an external watchdog that can
+  // kill it regardless of what its own event loop is doing.
 
   it("usage_error/patch_not_readable naming the size and the cap, for a -p/--patch over PATCH_MAX_BYTES", async () => {
     useLockDir();

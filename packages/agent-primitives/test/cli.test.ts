@@ -1764,6 +1764,46 @@ const HAS_MKFIFO = (() => {
   }
 })();
 
+describe("cli: probe -p targeting a FIFO", () => {
+  it.skipIf(!HAS_MKFIFO)(
+    "usage_error/patch_not_readable, and does not block on it, for a FIFO passed as -p/--patch (needs mkfifo; skipped where the host has none)",
+    async () => {
+      // Mirrors the `init` FIFO regression above and for the same
+      // reason: opening a writer-less FIFO for reading blocks forever,
+      // and (unlike an async operation) that block cannot be preempted
+      // by an in-process vitest timeout -- `fs.readFileSync` is
+      // synchronous, so it freezes the whole runner's event loop along
+      // with it, not just the one test (measured directly against this
+      // scenario: a same-process test with its own `it(..., timeout)`
+      // never got the chance to time out, and only an external kill of
+      // the whole process stopped it). Spawning the real CLI and
+      // bounding it from outside the process is what turns a
+      // regression here into a failed assertion instead of a stalled
+      // suite.
+      const dir = makeTmpDir();
+      const patchPath = path.join(dir, "patch.fifo");
+      execFileSync("mkfifo", [patchPath]);
+
+      const run = await spawnCliBounded(
+        ["probe", "-p", patchPath, "-t", "node -e 1"],
+        5000,
+      );
+      expect(run.timedOut).toBe(false);
+      expect(run.code).toBe(2);
+      const parsed = JSON.parse(run.stdout);
+      expect(parsed.command).toBe("probe");
+      expect(parsed.status).toBe("usage_error");
+      expect(parsed.reason).toBe("patch_not_readable");
+      expect(
+        (parsed.warnings as string[]).some((w) =>
+          w.includes("not a regular file"),
+        ),
+      ).toBe(true);
+    },
+    20000,
+  );
+});
+
 describe("cli: init", () => {
   it("the four-step smoke sequence: written, then unchanged, then conflicted, then --force written", async () => {
     const dir = makeTmpDir();
