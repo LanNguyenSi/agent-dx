@@ -1049,8 +1049,12 @@ describe("placement-slop: the actual repo-root slop.config.yml (agent-dx #80e474
     "..",
     "slop.config.yml",
   );
+  const repoRootConfigExists = fs.existsSync(repoRootConfigPath);
+  const rootConfigTestName = repoRootConfigExists
+    ? "covers packages/*/README.md and keeps '~/' as the only bare home-idiom allow entry"
+    : "covers packages/*/README.md and keeps '~/' as the only bare home-idiom allow entry (skipped: missing repo-root marker slop.config.yml)";
 
-  it("covers packages/*/README.md and keeps '~/' as the only bare home-idiom allow entry", () => {
+  it.skipIf(!repoRootConfigExists)(rootConfigTestName, () => {
     const cfg = loadConfig(repoRootConfigPath);
 
     expect(cfg.placement?.instructionGlobs).toContain("packages/*/README.md");
