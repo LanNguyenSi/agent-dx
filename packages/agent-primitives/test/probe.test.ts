@@ -2315,6 +2315,39 @@ describe("probe(): the line a -p patch reports is the line the applied diff chan
     expect(fs.readFileSync(path.join(repo, "long.js"), "utf8")).toBe(before);
   });
 
+  it("an append to a file with no trailing newline: the line is one past the original's last line and `before` is empty, since the original has no such line to quote", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    commitFile(repo, "tail.txt", "a\nb");
+    const before = fs.readFileSync(path.join(repo, "tail.txt"), "utf8");
+    const patchPath = realDiffPatch(repo, "tail.txt", "a\nb\nc\n");
+    expect(fs.readFileSync(patchPath, "utf8")).toContain(
+      "\\ No newline at end of file",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    // The original has two lines; the first difference is the third,
+    // which exists only in the applied result. This is the one shape
+    // where `originalLines[line - 1]` has nothing to compare against,
+    // so the fields are asserted directly rather than through
+    // expectLineQuotesBefore.
+    expect(result.mutant?.line).toBe(3);
+    expect(result.mutant?.before).toBe("");
+    expect(result.mutant?.after).toBe("c");
+    expect(before.split("\n")).toHaveLength(2);
+    expect(fs.readFileSync(path.join(repo, "tail.txt"), "utf8")).toBe(before);
+  });
+
   it("a multi-hunk patch: the first hunk's changed line decides", async () => {
     useLockDir();
     const { repo } = initRepo();

@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `probe --help`'s description now states that `--file` is long-only
   because the global `-f` is `--format`, and that every global option
   may precede the subcommand; the packaged skill (`assets/skill/
-  SKILL.md`) and the README gained an "Invocation templates" section
+SKILL.md`) and the README gained an "Invocation templates" section
   with a copy-pasteable line for each mutant form plus `verify` and
   `doctor`.
 
@@ -54,9 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `probe -r/--replace` and `-M/--match` (with `-w/--with`) without
   `--file`/`-n` now report `status: "usage_error"` with the message
   `probe: --file is required for -r/--replace (only -p/--patch can
-  derive it from the patch)` / `probe: -n/--line is required for
-  -r/--replace (...)`, instead of commander's own `required option
-  '--file <path>' not specified`; `status: "usage_error"` and exit `2`
+derive it from the patch)` / `probe: -n/--line is required for
+-r/--replace (...)`, instead of commander's own `required option
+'--file <path>' not specified`; `status: "usage_error"` and exit `2`
   are unchanged.
 - `probe -p/--patch` no longer reports
   `-p/--patch has no hunk header to derive -n from; pass -n explicitly`:
@@ -66,12 +66,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rename's destination, which does not exist yet, so the run ends in
   `status: "usage_error"`, `reason: "file_not_found"` naming that path,
   instead of `inconclusive`/`mutant_not_applicable`.
+- `probe -p/--patch` with an explicit `-n/--line` reports the patch's
+  first changed line as `mutant.line` instead of echoing `-n`, and
+  warns when the two differ (`-n 5 differs from the patch's first
+changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
+  mutate exactly the line `-n` names.
 
 ### Fixed
 
 - `probe -p/--patch`'s dry-run `git apply` (the scratch-directory check
   that decides applicability before anything real is touched) now pins
-  `-c core.autocrlf=false`. The scratch directory has no `.git` of its
+  `-c core.autocrlf=false` and `-c apply.whitespace=nowarn`. The
+  scratch directory has no `.git` of its
   own, so it previously inherited whichever ambient global/system git
   config the machine running `probe` happened to have; under a global
   `core.autocrlf = true` (a common Windows default) the write would
@@ -159,13 +165,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read correctly, including an all-failing, all-skipped, or `it.fails`
   run, `expected fail` folded into `summary.passed`; ` FAIL  file > name`
   blocks with the assertion on the following line, or ` FAIL  file [
-  file ]` with no name for a file that fails to collect; and the `No
-  test files found` / `Tests  no tests` cases), `tsc` (`file(line,col):
-  error TSnnnn: message`, identically whether or not `--pretty false` was
+file ]` with no name for a file that fails to collect; and the `No
+test files found` / `Tests  no tests` cases), `tsc` (`file(line,col):
+error TSnnnn: message`, identically whether or not `--pretty false` was
   passed; `summary.errors` counts the diagnostics), and `eslint`'s
   stylish formatter (a file header line, structurally matched so a path
   containing a space is still recognized; `line:col  severity  message[
-  rule]` rows, the rule id optional so a rule-less row such as a
+rule]` rows, the rule id optional so a rule-less row such as a
   `Parsing error: ...` is still a failure; `error` rows populate
   `failures`, `warning` rows count into `summary.warnings` alone and
   never become a failure). Every file-path capture across the three
@@ -205,7 +211,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused with the rest instead of registering a phantom path. A listing
   that cannot run in any form is an unknown registry, never "still
   registered": the removal is then judged by the disk alone (never by `git
-  worktree remove`'s exit status, which is non-zero for a path git never
+worktree remove`'s exit status, which is non-zero for a path git never
   registered, so a marker naming such a path is recovered instead of
   stopping every later run), reported as done but unverified in a warning,
   and the marker is cleared, so a git that cannot list no longer turns a
@@ -278,7 +284,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loop that gave up after a fixed number of tries. A field whose value
   JSON omits (`undefined`, a function) is measured as contributing nothing
   instead of throwing mid-reduction and turning the command into `status:
-  error`. A result that cannot be copied or serialized at all (a function
+error`. A result that cannot be copied or serialized at all (a function
   value, a BigInt, a cycle, a graph too deep) yields the skeleton plus a
   warning naming the reason, keeping the command's real status instead of
   reporting `status: error`. `buildEnvelope` deep-copies `extra` before
@@ -462,7 +468,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   containment check and the lock/marker key, so an in-repo symlink to an
   outside file can no longer bypass containment; a `-p` patch that
   touches any path other than `--file` (checked via `git apply
-  --numstat` after the dry run) is `mutant_not_applicable` instead of
+--numstat` after the dry run) is `mutant_not_applicable` instead of
   silently mutating extra files with nothing to restore them; the lock
   directory is uid-scoped (`agent-primitives-<uid>/locks`) and created
   `0700`, and one that exists but is not owned by (or writable by) the
@@ -597,14 +603,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixed name reused across invocations that happen to share `--log-dir`.
   The worktree is synced to the actual working tree state, not just
   `HEAD`: tracked modifications are captured with `git diff HEAD
-  --binary --output=<scratch file>` (written by git directly to that
+--binary --output=<scratch file>` (written by git directly to that
   file, never through this process's own output capture) and replayed
   with `git -C <worktree> apply --allow-empty` -- run unconditionally,
   even against an empty diff, so a clean tree and a dirty one exercise
   the same steps; the file count reported in `isolation.syncedTrackedFiles`
   comes from a separate `git diff HEAD --numstat -z`, never from the
   diff's own text. Every untracked, non-ignored path (`git ls-files
-  --others --exclude-standard`) is synced by its own type: a regular
+--others --exclude-standard`) is synced by its own type: a regular
   file is copied, a symlink (dangling or not) is recreated as a
   symlink, a directory that is itself a git repository is skipped with
   a warning, any other entry is skipped with a warning naming it, and
@@ -648,7 +654,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including a signal that lands while the worktree is still being
   synced or while `git worktree add` itself is running: whatever is on
   disk at the path is deleted, then `git worktree remove --force
-  --force` runs (with the directory gone git accepts a missing
+--force` runs (with the directory gone git accepts a missing
   worktree, and the second `--force` clears the `locked` registration
   an interrupted add leaves behind, which a single `--force` refuses
   and `git worktree prune` skips), then `git worktree prune`, with the
@@ -677,7 +683,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   naming the fallback. `doctor` gained a `stale-worktree` check
   reporting a leftover worktree for the current repository, from the
   marker and from `git worktree list`, naming the manual `git worktree
-  remove --force --force` command. Submodule contents are not synced by
+remove --force --force` command. Submodule contents are not synced by
   either sync step; a submodule directory is tracked as a gitlink, not
   walked into.
 

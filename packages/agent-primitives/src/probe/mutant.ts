@@ -238,6 +238,11 @@ function computeMatch(
  * `undefined` means the two are identical, which for a dry run means
  * the patch applied but changed nothing: the same condition as
  * `a === b`, since splitting on `"\n"` and rejoining is lossless.
+ *
+ * When the first difference lies past `a`'s last line (a patch that
+ * appends to a file with no trailing newline), `line` is one past
+ * `a`'s line count and `before` is the empty string: the original has
+ * no such line, so there is nothing to quote.
  */
 function firstDiffLine(
   a: string,
@@ -457,9 +462,21 @@ async function computePatch(
   // spurious differences from the first line on, not just the hunk's
   // own change). Pinned here rather than relying on the caller's own
   // repository config, since the scratch copy is not that repository.
+  // `-c apply.whitespace=nowarn` for the same reason: under a global
+  // `apply.whitespace = fix`, `git apply` would strip trailing
+  // whitespace the patch adds, so a whitespace-only mutant would read
+  // back as "no content change" on that machine and not on another.
   const result = await runArgv(
     "git",
-    ["-c", "core.autocrlf=false", "apply", "--", absPatchPath],
+    [
+      "-c",
+      "core.autocrlf=false",
+      "-c",
+      "apply.whitespace=nowarn",
+      "apply",
+      "--",
+      absPatchPath,
+    ],
     { cwd: scratchDir, ...runOptions },
   );
   const logPaths = [numstatResult.logPath, result.logPath];

@@ -521,11 +521,22 @@ describe("git apply invocations", () => {
     expect(runner.mock.calls.map((c) => [c[0], c[1]])).toEqual([
       ["git", ["apply", "--numstat", "--", patchPath]],
       // The apply that actually writes the scratch file pins
-      // `core.autocrlf=false` (see the comment at its call site in
-      // mutant.ts): the scratch directory has no `.git` of its own, so
-      // without this it would otherwise inherit the machine's ambient
-      // global/system config.
-      ["git", ["-c", "core.autocrlf=false", "apply", "--", patchPath]],
+      // `core.autocrlf=false` and `apply.whitespace=nowarn` (see the
+      // comment at its call site in mutant.ts): the scratch directory
+      // has no `.git` of its own, so without this it would otherwise
+      // inherit the machine's ambient global/system config.
+      [
+        "git",
+        [
+          "-c",
+          "core.autocrlf=false",
+          "-c",
+          "apply.whitespace=nowarn",
+          "apply",
+          "--",
+          patchPath,
+        ],
+      ],
     ]);
 
     runner.mockClear();
