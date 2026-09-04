@@ -660,6 +660,54 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
     ).toHaveLength(1);
   });
 
+  it("a leftover worktree marker is recovered whatever its pid says, even an alive one, once the lock has already ruled out a live probe of its own for this repository", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    // Same shape as the test above, but with an ALIVE pid (this
+    // process's own) under a timestamp far in the past: the
+    // repository-keyed worktree marker's own `pid` field is never
+    // consulted by this recovery path (see `probe/index.ts`'s
+    // stale-worktree recovery), on the same reasoning `doctor`'s
+    // `stale-worktree` check now applies its own bound for -- a pid
+    // that still resolves to *something* proves nothing about whether
+    // THIS marker's probe is still running, and the lock already
+    // excludes a second live probe on this repository under this lock
+    // directory regardless.
+    const staleLogDir = makeTmpDir();
+    const stalePath = path.join(staleLogDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(stalePath), { recursive: true });
+    const staleAdd = spawnSync(
+      "git",
+      ["worktree", "add", "--detach", "--", stalePath, "HEAD"],
+      { cwd: repo },
+    );
+    expect(staleAdd.status).toBe(0);
+
+    const realRoot = resolveDeepestExisting(repo);
+    writeMarker(realRoot, {
+      targetPath: stalePath,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: process.pid,
+      timestamp: "2020-01-01T00:00:00.000Z",
+      scratchRoot: staleLogDir,
+    });
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    expect(result.status).toBe("killed");
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    expect(fs.existsSync(stalePath)).toBe(false);
+    expect(
+      worktreeList(repo)
+        .split("\n\n")
+        .filter((b) => b.trim().length > 0),
+    ).toHaveLength(1);
+  });
+
   it("a leftover whose registration is still `locked initializing` (the add died with the process) is recovered by the next invocation", async () => {
     useLockDir();
     const { repo } = initRepo();
@@ -1942,6 +1990,183 @@ describe("probe(): worktree isolation on a git that rejects -z (older than 2.36)
 });
 
 describe("probe(): worktree isolation when git worktree list cannot run in any form", () => {
+  it("warns with the surviving-admin-entry detail, never an 'unverified' one, when the probe's own worktree cleanup finds its target only in goneTargets: a clean, verified removal that git worktree prune has not cleared the registration for yet (probe/index.ts's own cleanupWtSession path)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    mockRun.mockImplementation(async (file, args, options) => {
+      if (file === "git" && args[0] === "worktree" && args[1] === "add") {
+        const result = await actualRun.runArgv(file, args, options);
+        if (result.exitCode === 0) {
+          // Lock the entry `git worktree add` just wrote, the shape an
+          // interrupted add leaves behind: `git worktree prune` then
+          // skips it even once the target directory is gone, which is
+          // what leaves the admin entry surviving for this test.
+          const adminDir = path.join(repo, ".git", "worktrees");
+          for (const entry of fs.readdirSync(adminDir)) {
+            const lockedPath = path.join(adminDir, entry, "locked");
+            if (!fs.existsSync(lockedPath)) {
+              fs.writeFileSync(lockedPath, "initializing");
+            }
+          }
+        }
+        return result;
+      }
+      if (file === "git" && args[0] === "worktree" && args[1] === "remove") {
+        // Double `--force` on a real git can clear even a locked
+        // entry; shimmed to fail so the admin entry above survives
+        // for the gitdir-files fallback to find, the same technique
+        // `test/isolation.test.ts`'s own `shimRemoveToFail` uses.
+        return {
+          exitCode: 128,
+          durationMs: 0,
+          stdout: "",
+          stderr: "shimmed: the removal did not run",
+          logPath: path.join(options.logDir, "shimmed-remove.log"),
+          timedOut: false,
+          aborted: false,
+          outputTruncated: false,
+          logWriteFailed: false,
+          stdioClosed: true,
+        };
+      }
+      return actualRun.runArgv(file, args, options);
+    });
+
+    try {
+      const result = await withPathPrepended(shimDir, () =>
+        probe(baseOptions(repo)),
+      );
+
+      expect(result.status).toBe("killed");
+      const worktreePath = result.isolation.path as string;
+      expect(worktreePath).toBeTruthy();
+      // A clean, verified removal: never the "unverified" wording the
+      // sibling test below asserts for a registry that could not be
+      // read at all.
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(`the worktree at ${worktreePath} was removed, but`) &&
+            w.includes("unverified"),
+        ),
+      ).toBe(false);
+      expect(result.warnings.some((w) => w.includes("was not removed"))).toBe(
+        false,
+      );
+      const match = result.warnings.filter(
+        (w) =>
+          w.includes(`the worktree at ${worktreePath} was removed, but`) &&
+          w.includes("admin entry") &&
+          w.includes("worktree prune") &&
+          // G4: the composed message drops the redundant leading
+          // clause ("was removed," already says the target is gone).
+          !w.includes("but the target is gone, but"),
+      );
+      expect(match).toHaveLength(1);
+      expect(fs.existsSync(worktreePath)).toBe(false);
+    } finally {
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
+      );
+      git(repo, ["worktree", "prune"]);
+    }
+  });
+
+  it("warns with the surviving-admin-entry detail, never an 'unverified' one, when the recovery loop's own cleanup of a marker-named leftover finds its target only in goneTargets (probe/index.ts's own recovery-loop path)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realRoot = resolveDeepestExisting(repo);
+    const staleLogDir = makeTmpDir();
+    const stalePath = path.join(staleLogDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(stalePath), { recursive: true });
+    const staleAdd = spawnSync(
+      "git",
+      ["worktree", "add", "--detach", "--", stalePath, "HEAD"],
+      { cwd: repo },
+    );
+    expect(staleAdd.status).toBe(0);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [adminEntry] = fs.readdirSync(adminDir);
+    // Locked the way an interrupted add leaves it, so `git worktree
+    // prune` (which `cleanupWorktree` itself runs as part of the
+    // recovery) skips it even once the target directory is gone.
+    fs.writeFileSync(path.join(adminDir, adminEntry, "locked"), "initializing");
+    writeMarker(realRoot, {
+      targetPath: stalePath,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: deadPid(),
+      timestamp: new Date().toISOString(),
+      scratchRoot: staleLogDir,
+    });
+
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    mockRun.mockImplementation(async (file, args, options) => {
+      if (file === "git" && args[0] === "worktree" && args[1] === "remove") {
+        // Same technique as the sibling test above: double `--force`
+        // on a real git would otherwise clear the locked entry itself.
+        return {
+          exitCode: 128,
+          durationMs: 0,
+          stdout: "",
+          stderr: "shimmed: the removal did not run",
+          logPath: path.join(options.logDir, "shimmed-remove.log"),
+          timedOut: false,
+          aborted: false,
+          outputTruncated: false,
+          logWriteFailed: false,
+          stdioClosed: true,
+        };
+      }
+      return actualRun.runArgv(file, args, options);
+    });
+
+    try {
+      const result = await withPathPrepended(shimDir, () =>
+        probe(baseOptions(repo)),
+      );
+
+      expect(result.status).toBe("killed");
+      expect(result.warnings).toContain("recovered_stale_worktree");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(
+              `the leftover worktree at ${stalePath} was removed, but`,
+            ) && w.includes("unverified"),
+        ),
+      ).toBe(false);
+      const match = result.warnings.filter(
+        (w) =>
+          w.includes(
+            `the leftover worktree at ${stalePath} was removed, but`,
+          ) &&
+          w.includes("admin entry") &&
+          w.includes("worktree prune") &&
+          !w.includes("but the target is gone, but"),
+      );
+      expect(match).toHaveLength(1);
+      expect(readMarkerFor(realRoot)).toBeUndefined();
+      expect(fs.existsSync(stalePath)).toBe(false);
+    } finally {
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
+      );
+    }
+  });
+
   it("reports the removal as done but unverified, clears its marker, and the next probe is not stale_worktree", async () => {
     useLockDir();
     const { repo } = initRepo();
@@ -1995,7 +2220,11 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
     const logDir = makeTmpDir();
     // The shape an add killed before it registered anything leaves: a
     // marker naming a scratch directory under this run's log dir that
-    // git never listed, with no listing to check it against.
+    // git never listed, with no listing to check it against. No other
+    // worktree is ever registered against this repository, so it has
+    // no `worktrees/` admin directory either: not even the
+    // gitdir-files fallback can help, and the outcome stays genuinely
+    // unverified (see the next test for the case where it can).
     const planted = path.join(logDir, `wt-${randomUUID()}`, "wt");
     fs.mkdirSync(planted, { recursive: true });
     fs.writeFileSync(path.join(planted, "stale.txt"), "leftover\n");
@@ -2045,6 +2274,60 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
     expect(second.warnings).not.toContain("recovered_stale_worktree");
     expect(readMarkerFor(realRoot)).toBeUndefined();
     expect(worktreeBlocks(repo)).toHaveLength(1);
+  });
+
+  it("recovers a marker-named scratch directory git never registered as a VERIFIED removal, through the gitdir-files fallback, when the repository has another linked worktree keeping its admin directory readable", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realRoot = resolveDeepestExisting(repo);
+    // A second, unrelated linked worktree, never of the probe's own
+    // scratch shape, added for real before the shim goes up: it is
+    // never touched by the recovery (filtered out immediately by
+    // `isScratchWorktreePath`) but its admin entry keeps this
+    // repository's `worktrees/` directory non-empty, which is what
+    // lets the gitdir-files fallback list anything at all once `git
+    // worktree list` itself cannot run in any form.
+    const sibling = path.join(makeTmpDir(), "sibling-worktree");
+    git(repo, ["worktree", "add", "--detach", "--", sibling, "HEAD"]);
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+    const logDir = makeTmpDir();
+    // The same never-registered leftover shape as the test above: a
+    // marker naming a scratch directory git never listed, planted
+    // directly rather than through `git worktree add`.
+    const planted = path.join(logDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(planted, { recursive: true });
+    fs.writeFileSync(path.join(planted, "stale.txt"), "leftover\n");
+    writeMarker(realRoot, {
+      targetPath: planted,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: deadPid(),
+      timestamp: new Date().toISOString(),
+      scratchRoot: logDir,
+    });
+
+    const result = await withPathPrepended(shimDir, () =>
+      probe(baseOptions(repo, { logDir })),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.warnings).toContain("recovered_stale_worktree");
+    // A VERIFIED removal gets no "was removed, but ... unverified"
+    // warning at all (see `probe/index.ts`'s recovery loop): the
+    // gitdir-files fallback found nothing named `planted` among the
+    // admin entries (it was never registered), so `cleanupWorktree`
+    // asserts the removal instead of falling back to the disk alone.
+    expect(result.warnings.some((w) => w.includes(planted))).toBe(false);
+    expect(result.warnings.some((w) => w.includes("was not removed"))).toBe(
+      false,
+    );
+    expect(fs.existsSync(planted)).toBe(false);
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+    // The main worktree and the untouched sibling, never `planted`
+    // (which was never a block of its own).
+    expect(worktreeBlocks(repo)).toHaveLength(2);
   });
 
   // Root deletes through a read-only parent, so the leftover cannot be

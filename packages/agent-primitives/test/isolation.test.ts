@@ -23,11 +23,28 @@ import {
 } from "../src/probe/isolation.js";
 import { resolveDeepestExisting } from "../src/probe/containment.js";
 import { runArgv } from "../src/probe/run.js";
+import { parseGitVersion } from "../src/doctor/index.js";
 import {
   withPathPrepended,
   writeGitShim,
   type GitShimMode,
 } from "./helpers/git-shim.js";
+
+const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
+/** True when the host git is new enough to understand `git worktree
+ * add --relative-paths` / `worktree.useRelativePaths` (git >= 2.48,
+ * which writes every admin entry's `gitdir` file relative to its own
+ * directory rather than absolute). Gates the one test that exercises
+ * this through a real git rather than a hand-written fixture, so an
+ * older git (e.g. the 2.30 container in CI) skips it instead of
+ * failing on an option it does not have. */
+function gitSupportsRelativePaths(): boolean {
+  const out = execFileSync("git", ["--version"], { encoding: "utf8" });
+  const version = parseGitVersion(out);
+  if (version === undefined) return false;
+  return version.major > 2 || (version.major === 2 && version.minor >= 48);
+}
 
 // Call-through mock (the same shape probe-worktree.test.ts uses): every
 // call runs the real runner, and the recorded calls are what lets a test
@@ -963,6 +980,48 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
     }
   });
 
+  it("reports ok:true with a detail naming the surviving admin entry when the gitdir-files fallback finds the target only in goneTargets: the removal is a clean success, but git worktree prune has not cleared its registration yet", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const worktreePath = scratchPath(logDir);
+    addLockedWorktree(repo, worktreePath);
+    const restoreRemove = await shimRemoveToFail();
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+
+    try {
+      const cleanup = await withPathPrepended(shimDir, () =>
+        cleanupWorktree(repo, worktreePath, logDir, { scratchRoot: logDir }),
+      );
+
+      // The shimmed `remove` never really ran, and the real `prune`
+      // (unshimmed: only `worktree list` is intercepted here) skips a
+      // locked entry, so the admin entry survives; `git worktree list`
+      // itself cannot run at all, so the outcome is asserted through
+      // the gitdir-files fallback instead, which finds the entry's own
+      // target gone (the recursive delete really ran) and reports it
+      // in `goneTargets`, not `paths`: a clean, verified removal, but
+      // with a detail naming the surviving entry rather than none at
+      // all -- distinct from the `still reports it as a worktree`
+      // case above, where the real listing itself could still run.
+      expect(cleanup.ok).toBe(true);
+      expect(cleanup.verified).toBe(true);
+      expect(cleanup.detail).toContain("admin entry");
+      expect(cleanup.detail).toContain("worktree prune");
+      expect(fs.existsSync(worktreePath)).toBe(false);
+    } finally {
+      restoreRemove();
+      git(repo, [
+        "worktree",
+        "remove",
+        "--force",
+        "--force",
+        "--",
+        worktreePath,
+      ]);
+    }
+  });
+
   it("clears the registration of an add that died before writing the worktree's own .git file (locked, no HEAD, a directory git refuses to validate)", async () => {
     const repo = initRepo();
     const logDir = makeTmpDir();
@@ -1021,7 +1080,44 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
     expect(fs.existsSync(path.join(adminDir, adminEntry))).toBe(false);
   });
 
-  it("leaves a half-written entry that names some other path alone, and reports its own removal as unverified", async () => {
+  it("clears the same half-written entry when its gitdir file is written relative to its own admin entry directory (worktree.useRelativePaths), matching the target through the same resolution the gitdir-files listing uses", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const worktreePath = scratchPath(logDir);
+    addLockedWorktree(repo, worktreePath);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [adminEntry] = fs.readdirSync(adminDir);
+    const entryDir = path.join(adminDir, adminEntry);
+    const originalGitdir = fs
+      .readFileSync(path.join(entryDir, "gitdir"), "utf8")
+      .trim();
+    fs.writeFileSync(
+      path.join(entryDir, "gitdir"),
+      `${path.relative(entryDir, originalGitdir)}\n`,
+    );
+    // git creates `commondir` before it writes the content, so a kill
+    // in between leaves it empty (never missing, which git tolerates).
+    fs.writeFileSync(path.join(entryDir, "commondir"), "");
+    fs.rmSync(path.join(entryDir, "HEAD"), { force: true });
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+    // git is stuck on this entry: even the listing dies on it.
+    const listing = spawnSync("git", ["worktree", "list", "--porcelain"], {
+      cwd: repo,
+      encoding: "utf8",
+    });
+    expect(listing.status).not.toBe(0);
+    expect(listing.stderr).toContain("commondir");
+
+    const cleanup = await cleanupWorktree(repo, worktreePath, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.ok).toBe(true);
+    expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
+    expect(fs.existsSync(entryDir)).toBe(false);
+  });
+
+  it("leaves a half-written entry that names some other path alone, and asserts its own removal through the gitdir-files fallback", async () => {
     const repo = initRepo();
     const logDir = makeTmpDir();
     const other = path.join(makeTmpDir(), `wt-${randomUUID()}`, "wt");
@@ -1036,15 +1132,17 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
       scratchRoot: logDir,
     });
 
-    // git is stuck on the other entry, so nothing about `ours` can be
-    // listed: its removal is judged by the disk alone and said to be.
+    // git is stuck on the other entry (its own `commondir` is
+    // corrupt), so `git worktree list` cannot run for this repository
+    // at all; but the OTHER entry's `gitdir` file is intact (only its
+    // `commondir` was zeroed), and `ours` was never registered by git
+    // in the first place, so the gitdir-files fallback reads the admin
+    // directory fine, finds `other` and nothing named `ours`, and the
+    // removal is asserted rather than left unverified.
     expect(cleanup.ok).toBe(true);
-    expect(cleanup.verified).toBe(false);
+    expect(cleanup.verified).toBe(true);
     expect(cleanup.refused).toBe(false);
-    expect(cleanup.detail).toContain("could not run after the removal");
-    expect(cleanup.detail).toContain(
-      "the directory is gone; the registration could not be checked",
-    );
+    expect(cleanup.detail).toBeUndefined();
     expect(fs.existsSync(path.join(adminDir, adminEntry, "gitdir"))).toBe(true);
     expect(fs.existsSync(ours)).toBe(false);
   });
@@ -1267,21 +1365,28 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     expect(listCalls()).toHaveLength(2);
   });
 
-  it("does not fall back when the -z listing dies with a fatal message and any other status: the registry is unknown, and the newline-separated listing never runs", async () => {
+  it("does not retry as the newline-separated form when the -z listing dies with a fatal message and any other status, but still falls back to the gitdir-files third source", async () => {
     const repo = initRepo();
     const logDir = makeTmpDir();
-    addScratchWorktree(repo, scratchPath(logDir));
+    const wt = scratchPath(logDir);
+    addScratchWorktree(repo, wt);
 
     const listed = await withPathPrepended(shimDir("fail-z"), () =>
       listRegisteredWorktrees(repo, logDir),
     );
 
-    expect(listed.ok).toBe(false);
-    expect(listed.form).toBeUndefined();
-    expect(listed.paths).toEqual([]);
-    expect(listed.detail).toBe("git worktree list --porcelain -z exited 128");
-    expect(listed.logPaths).toHaveLength(1);
+    // The newline-separated `worktree list` form is never tried (a
+    // failure of git's own, not an option rejection, is never one to
+    // retry with different args): exactly one `worktree list` call.
     expect(listCalls()).toHaveLength(1);
+    // But the gitdir-files fallback, which needs no `worktree list`
+    // call at all, still runs and succeeds: linked worktrees only, so
+    // the main worktree is absent from `paths`.
+    expect(listed.ok).toBe(true);
+    expect(listed.form).toBe("gitdir-files");
+    expect(listed.paths).toEqual([resolveDeepestExisting(wt)]);
+    expect(listed.detail).toBeUndefined();
+    expect(listed.goneTargets).toBeUndefined();
   });
 
   it("lists through the newline-separated --porcelain fallback when git rejects -z, reporting the paths the -z form reports", async () => {
@@ -1308,19 +1413,332 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     );
   });
 
-  it("reports an unknown registry (ok false, the reason, no paths) when no listing form runs, never an empty one", async () => {
+  it("falls back to the gitdir-files third source, rather than reporting an unknown registry, when no listing form runs but a linked worktree's admin entry is still on disk", async () => {
     const repo = initRepo();
     const logDir = makeTmpDir();
-    addScratchWorktree(repo, scratchPath(logDir));
+    const wt = scratchPath(logDir);
+    addScratchWorktree(repo, wt);
+
+    const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    expect(listed.ok).toBe(true);
+    expect(listed.form).toBe("gitdir-files");
+    expect(listed.paths).toEqual([resolveDeepestExisting(wt)]);
+    expect(listed.detail).toBeUndefined();
+  });
+
+  it("reports an unknown registry (ok false, the reason, no paths) when no listing form runs and the repository has no linked worktree at all, never an empty one", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+
+    const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    // No `git worktree add` was ever run against this repository, so
+    // it has no `worktrees/` admin directory at all for the
+    // gitdir-files fallback to read either: the registry stays
+    // genuinely unknown.
+    expect(listed.ok).toBe(false);
+    expect(listed.paths).toEqual([]);
+    expect(listed.form).toBeUndefined();
+    expect(listed.detail).toContain("exited 128");
+  });
+
+  it("resolves a gitdir file rewritten relative to its own admin entry directory, the form `worktree.useRelativePaths` (git >= 2.48) writes, never against process.cwd()", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const good = scratchPath(logDir);
+    addScratchWorktree(repo, good);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [entryId] = fs.readdirSync(adminDir);
+    expect(entryId).toBeDefined();
+    const entryDir = path.join(adminDir, entryId);
+    const originalGitdir = fs
+      .readFileSync(path.join(entryDir, "gitdir"), "utf8")
+      .trim();
+    expect(path.isAbsolute(originalGitdir)).toBe(true);
+    // The form git writes under `worktree.useRelativePaths`: relative
+    // to the admin entry's OWN directory (verified against a real git
+    // in the next test), never against the calling process's `cwd`,
+    // which at this point (wherever the test runner started) is
+    // nowhere near `entryDir` or `good` -- a resolution against
+    // `process.cwd()` instead would land far from `good` and fail the
+    // assertions below.
+    const relativeGitdir = path.relative(entryDir, originalGitdir);
+    fs.writeFileSync(path.join(entryDir, "gitdir"), `${relativeGitdir}\n`);
+
+    const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    expect(listed.ok).toBe(true);
+    expect(listed.form).toBe("gitdir-files");
+    expect(listed.paths).toEqual([resolveDeepestExisting(good)]);
+    expect(listed.goneTargets).toBeUndefined();
+    expect(listed.detail).toBeUndefined();
+  });
+
+  it.skipIf(!gitSupportsRelativePaths())(
+    "resolves a gitdir file a real `git worktree add --relative-paths` wrote, on a git that supports it",
+    async () => {
+      const repo = initRepo();
+      const logDir = makeTmpDir();
+      const good = scratchPath(logDir);
+      fs.mkdirSync(path.dirname(good), { recursive: true });
+      git(repo, [
+        "worktree",
+        "add",
+        "--relative-paths",
+        "--detach",
+        "--",
+        good,
+        "HEAD",
+      ]);
+      const adminDir = path.join(repo, ".git", "worktrees");
+      const [entryId] = fs.readdirSync(adminDir);
+      const raw = fs.readFileSync(
+        path.join(adminDir, entryId, "gitdir"),
+        "utf8",
+      );
+      // Confirms the fixture really exercises the relative form, not
+      // an absolute path this git wrote anyway.
+      expect(path.isAbsolute(raw.trim())).toBe(false);
+
+      const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
+        listRegisteredWorktrees(repo, logDir),
+      );
+
+      expect(listed.ok).toBe(true);
+      expect(listed.form).toBe("gitdir-files");
+      expect(listed.paths).toEqual([resolveDeepestExisting(good)]);
+    },
+  );
+
+  it("does not report an entry whose gitdir file names no .git file at all as a registered worktree: junk content resolves, relative to the admin entry's own directory, to that same directory, never to a real worktree", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const good = scratchPath(logDir);
+    addScratchWorktree(repo, good);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [entryId] = fs.readdirSync(adminDir);
+    expect(entryId).toBeDefined();
+
+    const junkId = "bogus-junk";
+    const junkDir = path.join(adminDir, junkId);
+    fs.mkdirSync(junkDir, { recursive: true });
+    // Content that is non-empty and, resolved relative to `junkDir`
+    // the way a relative `gitdir` file is, still names no `.git` file
+    // anywhere -- `path.dirname` of the resolved path lands back on
+    // `junkDir` itself. Without the validation this resolves to
+    // `junkDir` and is reported as a registered worktree in an
+    // `ok: true` listing. This entry alone does not discriminate the
+    // basename check from the "resolves back to the admin entry dir"
+    // check below it (both reject it), so the two entries below
+    // isolate each check on its own.
+    fs.writeFileSync(
+      path.join(junkDir, "gitdir"),
+      "this is not a path at all\n",
+    );
+
+    const selfId = "bogus-self";
+    const selfDir = path.join(adminDir, selfId);
+    fs.mkdirSync(selfDir, { recursive: true });
+    // Content whose basename IS `.git`, so only the "resolves back to
+    // the admin entry dir" check rejects it: `.git` relative to the
+    // entry's own directory is `<entry>/.git`, whose `path.dirname` is
+    // the entry itself, never a worktree.
+    fs.writeFileSync(path.join(selfDir, "gitdir"), ".git\n");
+
+    const elsewhereId = "bogus-elsewhere";
+    const elsewhereDir = path.join(adminDir, elsewhereId);
+    fs.mkdirSync(elsewhereDir, { recursive: true });
+    // Absolute content whose resolved directory is NOT the admin entry
+    // dir, so only the basename check rejects it: with that check
+    // dropped, this would resolve to a plausible-looking worktree
+    // directory (which merely does not exist on disk, landing it in
+    // `goneTargets` rather than `odd`) instead of being flagged odd.
+    fs.writeFileSync(
+      path.join(elsewhereDir, "gitdir"),
+      "/definitely/not/a/worktree/not-a-dot-git-file\n",
+    );
 
     const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
       listRegisteredWorktrees(repo, logDir),
     );
 
     expect(listed.ok).toBe(false);
+    expect(listed.form).toBe("gitdir-files");
     expect(listed.paths).toEqual([]);
-    expect(listed.form).toBeUndefined();
-    expect(listed.detail).toContain("exited 128");
+    expect(listed.goneTargets).toBeUndefined();
+    for (const id of [junkId, elsewhereId, selfId]) {
+      expect(listed.detail).toContain(id);
+    }
+    expect(listed.detail).toContain("does not name a .git file");
+  });
+
+  // Root-independent: neither case below needs a chmod, so this must
+  // run (and fail on a mutated `ok = true`) whether or not the suite
+  // is running as root, unlike the chmod-000 case below, which needs
+  // root excluded to actually leave the file unreadable (see
+  // `isRoot`). Split out so the `const ok = odd.length === 0` rule
+  // keeps coverage on a root CI runner, where the chmod cases skip.
+  it("reports the gitdir-files listing as not ok, naming every admin entry whose gitdir file is missing or empty by id and reason, rather than silently dropping them from an otherwise ok result", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const good = scratchPath(logDir);
+    addScratchWorktree(repo, good);
+    const adminDir = path.join(repo, ".git", "worktrees");
+    const [goodEntry] = fs.readdirSync(adminDir);
+    expect(goodEntry).toBeDefined();
+
+    const missingId = "bogus-missing";
+    fs.mkdirSync(path.join(adminDir, missingId), { recursive: true });
+    // No gitdir file at all in this one.
+
+    const emptyId = "bogus-empty";
+    fs.mkdirSync(path.join(adminDir, emptyId), { recursive: true });
+    fs.writeFileSync(path.join(adminDir, emptyId, "gitdir"), "");
+
+    const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    // Not ok: this source cannot vouch that `good` is really the ONLY
+    // registered worktree when two other entries could not be read at
+    // all -- a caller must not trust an empty-looking `paths` here the
+    // way it would trust a fully known one.
+    expect(listed.ok).toBe(false);
+    expect(listed.form).toBe("gitdir-files");
+    expect(listed.paths).toEqual([]);
+    expect(listed.goneTargets).toBeUndefined();
+    for (const id of [missingId, emptyId]) {
+      expect(listed.detail).toContain(id);
+    }
+    expect(listed.detail).toContain("gitdir file is empty");
+    expect(listed.detail).toContain("could not be read");
+  });
+
+  it.skipIf(isRoot)(
+    "reports the gitdir-files listing as not ok, naming an unreadable admin entry by id and reason, rather than silently dropping it from an otherwise ok result",
+    async () => {
+      const repo = initRepo();
+      const logDir = makeTmpDir();
+      const good = scratchPath(logDir);
+      addScratchWorktree(repo, good);
+      const adminDir = path.join(repo, ".git", "worktrees");
+      const [goodEntry] = fs.readdirSync(adminDir);
+      expect(goodEntry).toBeDefined();
+
+      const unreadableId = "bogus-unreadable";
+      fs.mkdirSync(path.join(adminDir, unreadableId), { recursive: true });
+      const unreadableGitdir = path.join(adminDir, unreadableId, "gitdir");
+      fs.writeFileSync(unreadableGitdir, "/some/fake/.git\n");
+      fs.chmodSync(unreadableGitdir, 0o000);
+
+      try {
+        const listed = await withPathPrepended(
+          shimDir("no-worktree-list"),
+          () => listRegisteredWorktrees(repo, logDir),
+        );
+
+        // Not ok: this source cannot vouch that `good` is really the
+        // ONLY registered worktree when another entry could not be
+        // read at all -- a caller must not trust an empty-looking
+        // `paths` here the way it would trust a fully known one.
+        expect(listed.ok).toBe(false);
+        expect(listed.form).toBe("gitdir-files");
+        expect(listed.paths).toEqual([]);
+        expect(listed.goneTargets).toBeUndefined();
+        expect(listed.detail).toContain(unreadableId);
+        expect(listed.detail).toContain("could not be read");
+      } finally {
+        fs.chmodSync(unreadableGitdir, 0o644);
+      }
+    },
+  );
+
+  it.skipIf(isRoot)(
+    "cleanupWorktree reports the removal as ok but unverified, naming the unreadable admin entry, when the gitdir-files fallback cannot read every entry after the removal",
+    async () => {
+      const repo = initRepo();
+      const logDir = makeTmpDir();
+      const wt = scratchPath(logDir);
+      addScratchWorktree(repo, wt);
+      const adminDir = path.join(repo, ".git", "worktrees");
+      // A second, unrelated admin entry with an unreadable gitdir
+      // file, LOCKED so `git worktree prune` (which cleanupWorktree
+      // itself runs, for real, as part of its own removal) leaves it
+      // alone: without the lock, prune clears a broken, unlocked
+      // entry eagerly on its own -- even one it cannot itself read --
+      // before the gitdir-files fallback ever gets a chance to see it.
+      const otherId = "bogus-unreadable";
+      const otherDir = path.join(adminDir, otherId);
+      fs.mkdirSync(otherDir, { recursive: true });
+      const otherGitdir = path.join(otherDir, "gitdir");
+      fs.writeFileSync(otherGitdir, "/some/fake/.git\n");
+      fs.chmodSync(otherGitdir, 0o000);
+      fs.writeFileSync(path.join(otherDir, "locked"), "bogus");
+
+      try {
+        const cleanup = await withPathPrepended(
+          shimDir("no-worktree-list"),
+          () => cleanupWorktree(repo, wt, logDir, { scratchRoot: logDir }),
+        );
+
+        expect(cleanup.ok).toBe(true);
+        expect(cleanup.verified).toBe(false);
+        expect(cleanup.detail).toContain("could not run after the removal");
+        expect(cleanup.detail).toContain(otherId);
+        expect(cleanup.detail).toContain("could not be read as a gitdir file");
+        expect(fs.existsSync(wt)).toBe(false);
+      } finally {
+        fs.chmodSync(otherGitdir, 0o644);
+      }
+    },
+  );
+
+  it("keeps an admin entry whose target no longer exists apart from paths, in goneTargets, so cleanupWorktree never reads it as still registered", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const present = scratchPath(logDir);
+    addScratchWorktree(repo, present);
+    const goneParent = makeTmpDir();
+    const gone = scratchPath(goneParent);
+    addScratchWorktree(repo, gone);
+    const goneResolved = resolveDeepestExisting(gone);
+    // The target directory is removed by hand, never through git, so
+    // its admin entry is left dangling exactly the way one would be
+    // between `git worktree remove` unregistering a locked entry only
+    // partway and a `prune` that has not run yet.
+    fs.rmSync(gone, { recursive: true, force: true });
+
+    const listed = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      listRegisteredWorktrees(repo, logDir),
+    );
+
+    expect(listed.ok).toBe(true);
+    expect(listed.form).toBe("gitdir-files");
+    expect(listed.paths).toEqual([resolveDeepestExisting(present)]);
+    expect(listed.paths).not.toContain(goneResolved);
+    expect(listed.goneTargets).toEqual([goneResolved]);
+    expect(listed.detail).toContain(goneResolved);
+    expect(listed.detail).toContain("no longer exists on disk");
+
+    // `gone` sits outside this run's own log dir, so cleanupWorktree's
+    // gate can only admit it on the "registered" clause; the
+    // gone-target entry must not read as that, so it is refused, and
+    // refused for "not registered", never for "still registered".
+    const cleanup = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      cleanupWorktree(repo, gone, logDir, { scratchRoot: logDir }),
+    );
+    expect(cleanup.refused).toBe(true);
+    expect(cleanup.detail).toContain(
+      "git does not report it as a worktree of this repository",
+    );
+    expect(cleanup.detail).not.toContain("still reports it as a worktree");
   });
 
   it("cleanupWorktree asserts the removal through the fallback listing on a git that rejects -z: ok, verified, nothing registered afterwards", async () => {
@@ -1390,11 +1808,41 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
   });
 
-  it("cleanupWorktree refuses a registered scratch worktree outside the current log dir when its registration cannot be checked: nothing is deleted", async () => {
+  it("cleanupWorktree removes a registered scratch worktree outside the current log dir, found through the gitdir-files fallback, even though git worktree list itself cannot run", async () => {
     const repo = initRepo();
     const logDir = makeTmpDir();
     const elsewhere = scratchPath(makeTmpDir());
     addScratchWorktree(repo, elsewhere);
+    fs.writeFileSync(path.join(elsewhere, "precious.txt"), "keep me\n");
+
+    const cleanup = await withPathPrepended(shimDir("no-worktree-list"), () =>
+      cleanupWorktree(repo, elsewhere, logDir, { scratchRoot: logDir }),
+    );
+
+    // The gate admits `elsewhere` on the "registered" clause, not the
+    // "contained in scratchRoot" one: the gitdir-files fallback finds
+    // its admin entry before the removal, so the path is eligible
+    // whether or not it sits under this run's `--log-dir`.
+    expect(cleanup.refused).toBe(false);
+    expect(cleanup.ok).toBe(true);
+    expect(fs.existsSync(elsewhere)).toBe(false);
+    // Once `elsewhere` is removed, the repository has no linked
+    // worktree left at all, so the admin directory itself disappears
+    // and the post-removal listing has nothing to read even through
+    // the fallback: the removal is reported as done but unverified,
+    // exactly like a repository whose registry could never be checked.
+    expect(cleanup.verified).toBe(false);
+    expect(cleanup.detail).toContain("could not run after the removal");
+    expect(registeredPaths(repo)).not.toContain(
+      resolveDeepestExisting(elsewhere),
+    );
+  });
+
+  it("cleanupWorktree refuses a scratch-shaped worktree outside the current log dir that was never registered and whose repository has no admin directory for the gitdir-files fallback to read: nothing is deleted", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const elsewhere = scratchPath(makeTmpDir());
+    fs.mkdirSync(elsewhere, { recursive: true });
     fs.writeFileSync(path.join(elsewhere, "precious.txt"), "keep me\n");
 
     const cleanup = await withPathPrepended(shimDir("no-worktree-list"), () =>
@@ -1408,7 +1856,7 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     expect(fs.readFileSync(path.join(elsewhere, "precious.txt"), "utf8")).toBe(
       "keep me\n",
     );
-    expect(registeredPaths(repo)).toContain(resolveDeepestExisting(elsewhere));
+    expect(fs.existsSync(elsewhere)).toBe(true);
   });
 });
 
