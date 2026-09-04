@@ -60,6 +60,19 @@ export type MutantComputeResult = MutantComputed | MutantNotApplicable;
  */
 export const DEFAULT_GIT_APPLY_TIMEOUT_MS = 10_000;
 
+/**
+ * Upper bound on how large a `-p/--patch` file `probe/index.ts` will read
+ * into memory up front (the `patch_not_readable` stat-and-read that runs
+ * once, before either the `--file`/`-n` derivation or `git apply` itself
+ * gets to stream the patch). Neither of this package's own existing
+ * subprocess-output caps is a byte-sized file-read cap that this value
+ * could reuse directly: `src/exec.ts` streams a child's stdout/stderr
+ * with no cap of its own, and `src/probe/run.ts`'s `MAX_CAPTURED_CHARS`
+ * (1,000,000) bounds captured subprocess *characters*, not bytes read
+ * from a file. So this falls back to a flat 8 MiB.
+ */
+export const PATCH_MAX_BYTES = 8 * 1024 * 1024;
+
 /** What every `git apply` here is given beyond its argv: the caller's
  * abort signal (so an interrupted apply is killed rather than left to
  * land after the emergency restore) and the bound above. */
@@ -300,52 +313,99 @@ export async function listPatchTouchedPaths(
   };
 }
 
-/** Parses the first hunk header (`@@ -a,b +c,d @@`) of a unified diff and
- * returns the new-file line of the hunk's first CHANGED (`+`/`-`) body
- * line -- the informational `-n` this package derives for the `patch`
- * form when the caller gives none. That is `c` (the header's new-file
- * start) plus the number of leading unchanged (` `-prefixed, or blank --
- * `git apply` also accepts a context line whose leading space was
- * stripped) context lines between the header and that first `+`/`-`
- * line: git's default 3 lines of context means `c` itself is usually a
- * context line, not the changed one, so returning `c` unadjusted (the
- * pre-fix behaviour) cites the wrong line whenever a hunk carries any
- * leading context. A `\ No
- * newline at end of file` marker line is not itself a body line -- it
- * annotates the line before it -- so it is skipped without counting
- * toward the offset or ending the scan. The hunk length (`,d`, and `,b`
- * on the old side) is optional per the unified-diff grammar -- a
- * single-line hunk omits it -- so only the `+c` start is required to
- * match. Returns `undefined` when the patch has no hunk header at all
- * (e.g. a patch that only renames or touches file modes with no content
- * change). */
+/** Matches one hunk header line: `@@ -a,b +c,d @@` with the `,b`/`,d`
+ * lengths optional (a single-line hunk omits them) and, deliberately, no
+ * trailing anchor -- git's function-context hint (`@@ ... @@ <context>`)
+ * and anything else after the closing `@@` is not part of what this
+ * matches on, it is ignored. */
+const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+
+/**
+ * Parses the first hunk of a unified diff and returns the new-file line
+ * of its first CHANGED (`+`/`-`) body line -- the informational `-n`
+ * this package derives for the `patch` form when the caller gives none.
+ * That is `c` (the header's new-file start) plus the number of leading
+ * unchanged (` `-prefixed, or blank -- `git apply` also accepts a
+ * context line whose leading space was stripped) context lines between
+ * the header and that first `+`/`-` line, or `c` itself, unadjusted,
+ * when the hunk's body never reaches a changed line at all (a
+ * header-only patch, or one truncated to context lines only): git's
+ * default 3 lines of context means `c` alone is usually a context line
+ * and not the changed one, but a hunk with nothing beyond its header has
+ * no better answer than the header's own start.
+ *
+ * Works as a small line-by-line parser rather than a single regex plus
+ * a scan of raw split lines: (1) split into lines, dropping exactly one
+ * trailing empty element when the content ends in a newline, so that
+ * element is never miscounted as a trailing context line; (2) find the
+ * first line matching `HUNK_HEADER_RE`; (3) walk the lines after it
+ * until the next hunk header, a `diff --git`/`---`/`+++` file header, or
+ * the end of the patch; (4) classify each of those body lines by its
+ * first character: ` ` or empty (a whitespace-stripped blank context
+ * line git apply still accepts) is context and keeps the scan going; `+`
+ * or `-` is the changed line the scan is looking for and stops it;
+ * `\` (`\ No newline at end of file`) annotates the previous line, not a
+ * body line of its own, and is skipped without counting or stopping;
+ * anything else is a malformed body and ends the scan the same as
+ * running out of lines. The file-header prefixes in (3) are checked
+ * before the first-character classification in (4) because `---`/`+++`
+ * would otherwise be misread as `-`/`+` changed lines belonging to this
+ * hunk.
+ *
+ * Returns `undefined` when the patch has no hunk header at all (e.g. a
+ * patch that only renames or touches file modes with no content
+ * change).
+ */
 export function deriveLineFromPatch(patchContent: string): number | undefined {
-  const match = patchContent.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@.*$/m);
-  if (!match) return undefined;
-  const start = Number(match[1]);
-  if (!Number.isFinite(start)) return undefined;
-  const headerEnd = (match.index ?? 0) + match[0].length;
-  const afterHeader = patchContent.slice(headerEnd).replace(/^\r?\n/, "");
+  let lines = patchContent.split(/\r?\n/);
+  if (patchContent.endsWith("\n")) {
+    // `"a\nb\n".split(/\r?\n/)` is `["a", "b", ""]`: exactly one
+    // trailing empty element for content that ends in a newline (CRLF
+    // included, since `\r\n` also ends in `\n`). Drop it so it is never
+    // counted as one more leading-context line than the patch actually
+    // has.
+    lines = lines.slice(0, -1);
+  }
+
+  let headerIdx = -1;
+  let start: number | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(HUNK_HEADER_RE);
+    if (match) {
+      headerIdx = i;
+      start = Number(match[1]);
+      break;
+    }
+  }
+  if (headerIdx === -1 || start === undefined || !Number.isFinite(start)) {
+    return undefined;
+  }
+
   let contextLines = 0;
-  for (const line of afterHeader.split(/\r?\n/)) {
-    if (line === "" || line.startsWith(" ")) {
-      // A blank line inside the leading-context run is still a context
-      // line: `git apply` accepts a whitespace-stripped blank context
-      // line (its leading space trimmed by whatever mangled the patch,
-      // e.g. an editor that strips trailing whitespace), so treating it
-      // as "the body started" would end the scan early and understate
-      // the offset.
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (HUNK_HEADER_RE.test(line)) break; // the next hunk; this one is done
+    if (
+      line.startsWith("diff --git") ||
+      line.startsWith("---") ||
+      line.startsWith("+++")
+    ) {
+      break; // a file header follows; this hunk had no changed line
+    }
+    const head = line.charAt(0);
+    if (line === "" || head === " ") {
       contextLines += 1;
       continue;
     }
-    if (line.startsWith("\\")) {
-      // "\ No newline at end of file" -- annotates the previous line,
-      // not a body line of its own; keep scanning past it.
-      continue;
+    if (head === "+" || head === "-") {
+      return start + contextLines;
     }
-    break;
+    if (head === "\\") {
+      continue; // "\ No newline at end of file" -- not a body line
+    }
+    break; // malformed body line: treat as the end of this hunk
   }
-  return start + contextLines;
+  return start;
 }
 
 /**
@@ -439,10 +499,21 @@ async function computePatch(
     };
   }
 
-  const result = await runArgv("git", ["apply", "--", absPatchPath], {
-    cwd: scratchDir,
-    ...runOptions,
-  });
+  // `-c core.autocrlf=false`: the scratch directory has no `.git` of its
+  // own, so without this it inherits whichever ambient global/system
+  // git config the machine running this happens to have. Under a global
+  // `core.autocrlf = true` (a common Windows default), this write would
+  // otherwise convert the scratch file's LF endings to CRLF as `git
+  // apply` writes it -- corrupting the very content `newContent` below
+  // reads back and compares against `originalContent` (measured:
+  // spurious differences from the first line on, not just the hunk's
+  // own change). Pinned here rather than relying on the caller's own
+  // repository config, since the scratch copy is not that repository.
+  const result = await runArgv(
+    "git",
+    ["-c", "core.autocrlf=false", "apply", "--", absPatchPath],
+    { cwd: scratchDir, ...runOptions },
+  );
   const logPaths = [numstatResult.logPath, result.logPath];
   if (result.exitCode !== 0) {
     const stopped = stoppedReason(result);

@@ -37,6 +37,7 @@ import {
   formatMutantSummary,
   formatVerifiedAppliedVia,
   listPatchTouchedPaths,
+  PATCH_MAX_BYTES,
   type MutantForm,
   type MutantSpec,
 } from "./mutant.js";
@@ -605,9 +606,60 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   // paired with a bad `-p` -- shares the same `patch_not_readable`
   // diagnosis instead of three different ones. The content read here is
   // reused for the `-n` derivation below rather than read a second time.
+  //
+  // `fs.statSync` runs first (and, unlike `fs.readFileSync`, cannot
+  // block: querying a FIFO's metadata does not open it for reading) so
+  // a `-p` that is not a regular file -- a FIFO or a socket someone
+  // handed this option, most concretely -- is refused before anything
+  // tries to read its bytes; an unbounded `readFileSync` on a FIFO with
+  // no writer blocks forever (measured: it outlives `SIGTERM` and needs
+  // `SIGKILL`). This deliberately follows symlinks (same as
+  // `fs.readFileSync` below, and same as `fs.lstatSync` would not), so
+  // a symlink to a regular file is accepted and a symlink to a FIFO or
+  // directory is still rejected by what it resolves to. The size check
+  // below runs before the read for the same reason: `PATCH_MAX_BYTES`
+  // (`mutant.js`) is this package's bound on how much of any one `-p`
+  // file it will hold in memory at once.
   let readPatchContent: string | undefined;
   if (opts.form === "patch") {
     const absPatchPathForRead = path.resolve(opts.patchPath ?? "");
+    let patchStat: fs.Stats;
+    try {
+      patchStat = fs.statSync(absPatchPathForRead);
+    } catch {
+      return {
+        status: "usage_error",
+        reason: "patch_not_readable",
+        warnings: [
+          ...warnings,
+          `-p/--patch could not be read: ${absPatchPathForRead}`,
+        ],
+        isolation: isolationField,
+      };
+    }
+    if (!patchStat.isFile()) {
+      return {
+        status: "usage_error",
+        reason: "patch_not_readable",
+        warnings: [
+          ...warnings,
+          `-p/--patch is not a regular file: ${absPatchPathForRead}`,
+        ],
+        isolation: isolationField,
+      };
+    }
+    if (patchStat.size > PATCH_MAX_BYTES) {
+      return {
+        status: "usage_error",
+        reason: "patch_not_readable",
+        warnings: [
+          ...warnings,
+          `-p/--patch is ${String(patchStat.size)} bytes, over the ` +
+            `${String(PATCH_MAX_BYTES)}-byte cap: ${absPatchPathForRead}`,
+        ],
+        isolation: isolationField,
+      };
+    }
     try {
       readPatchContent = fs.readFileSync(absPatchPathForRead, "utf8");
     } catch {

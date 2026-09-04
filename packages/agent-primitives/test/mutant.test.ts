@@ -431,7 +431,12 @@ describe("git apply invocations", () => {
     expect(computed.applicable).toBe(true);
     expect(runner.mock.calls.map((c) => [c[0], c[1]])).toEqual([
       ["git", ["apply", "--numstat", "--", patchPath]],
-      ["git", ["apply", "--", patchPath]],
+      // The apply that actually writes the scratch file pins
+      // `core.autocrlf=false` (see the comment at its call site in
+      // mutant.ts): the scratch directory has no `.git` of its own, so
+      // without this it would otherwise inherit the machine's ambient
+      // global/system config.
+      ["git", ["-c", "core.autocrlf=false", "apply", "--", patchPath]],
     ]);
 
     runner.mockClear();
@@ -532,64 +537,21 @@ describe("git apply invocations", () => {
   });
 });
 
-describe("deriveLineFromPatch", () => {
-  it("returns the header's new-file start line (+c) unadjusted when the hunk has no leading context (full a,b/c,d header, first body line a '-' line)", () => {
-    const patch = [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -12,7 +12,7 @@",
-      "-old",
-      "+new",
-      "",
-    ].join("\n");
-    expect(deriveLineFromPatch(patch)).toBe(12);
-  });
+// Table-driven: each case names one shape of hunk body the small parser
+// in `deriveLineFromPatch` has to classify correctly. Redesigned in
+// round 4 (from a header regex plus a scan of raw split lines with
+// accumulated one-off rules) specifically so a new shape is one more
+// table row, not one more special case in the parser itself.
+interface DeriveLineCase {
+  name: string;
+  patch: string;
+  expected: number | undefined;
+}
 
-  it("returns the new-file start line when the hunk header omits the ,d length (a single-line hunk, no leading context)", () => {
-    const patch = [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -1 +1 @@",
-      "-old",
-      "+new",
-      "",
-    ].join("\n");
-    expect(deriveLineFromPatch(patch)).toBe(1);
-  });
-
-  it("adds the leading-context offset to the header's start line before the first changed line (full a,b/c,d header, 3 leading context lines, first body line a '-' line)", () => {
-    // `git diff`'s default 3 lines of context puts the header 3 lines
-    // before the actual change, so the header's own `+c` (9) is a
-    // context line, not the changed one (12).
-    const patch = [
-      "diff --git a/fixture.js b/fixture.js",
-      "index 0000000..0000000 100644",
-      "--- a/fixture.js",
-      "+++ b/fixture.js",
-      "@@ -9,6 +9,6 @@",
-      " pad1",
-      " pad2",
-      " pad3",
-      "-old",
-      "+new",
-      " pad4",
-      "",
-    ].join("\n");
-    expect(deriveLineFromPatch(patch)).toBe(12);
-  });
-
-  it("adds the leading-context offset when the hunk header carries git's function-context hint after the second @@ (`@@ ... @@ <context>`)", () => {
-    // Git appends a hint of the enclosing function/context to the hunk
-    // header when a funcname pattern matches (e.g. `git diff` on a
-    // source file): `@@ -9,7 +9,7 @@ const l8 = 8;`. The header regex
-    // has to match through that trailing text, not just up to the bare
-    // `@@`, or the whole header fails to match and `-n` cannot be
-    // derived at all.
-    const patch = [
+const deriveLineCases: DeriveLineCase[] = [
+  {
+    name: "3 leading context lines plus git's function-context header hint (@@ ... @@ <context>) -> header start (9) + 3 context = 12",
+    patch: [
       "diff --git a/fixture.js b/fixture.js",
       "index 0000000..0000000 100644",
       "--- a/fixture.js",
@@ -603,40 +565,40 @@ describe("deriveLineFromPatch", () => {
       " pad4",
       " pad5",
       "",
-    ].join("\n");
-    expect(deriveLineFromPatch(patch)).toBe(12);
-  });
-
-  it("treats a blank line inside the leading-context run as a context line (a whitespace-stripped context line git apply still accepts)", () => {
-    // Some patch producers/editors strip trailing whitespace, turning a
-    // context line that was just " " (a single space, git's marker for
-    // a blank source line) into "" -- `git apply` still accepts that,
-    // so `deriveLineFromPatch` has to keep counting it as context
-    // rather than treating it as the start of the hunk body.
-    const patch = [
+    ].join("\n"),
+    expected: 12,
+  },
+  {
+    name: "0 leading context, first body line a '-' line -> header start unadjusted",
+    patch: [
       "diff --git a/fixture.js b/fixture.js",
       "index 0000000..0000000 100644",
       "--- a/fixture.js",
       "+++ b/fixture.js",
-      "@@ -9,6 +9,6 @@",
-      " pad1",
-      " pad2",
-      "",
+      "@@ -12,7 +12,7 @@",
       "-old",
       "+new",
-      " pad4",
       "",
-    ].join("\n");
-    expect(deriveLineFromPatch(patch)).toBe(12);
-  });
-
-  it("skips a `\\ No newline at end of file` marker between the header and the first body line without ending the leading-context scan", () => {
-    // The marker sits between two context lines (not last, so a scan
-    // that stopped there instead of skipping past it would undercount):
-    // it is not itself a body line, so it must not count toward the
-    // offset, and it must not be mistaken for "the body started" either
-    // (which would end the scan before `pad3`, one short of 12).
-    const patch = [
+    ].join("\n"),
+    expected: 12,
+  },
+  {
+    name: "0 leading context, first body line a '+' line (pure-addition hunk) -> header start unadjusted",
+    patch: [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -0,0 +1,2 @@",
+      "+new1",
+      "+new2",
+      "",
+    ].join("\n"),
+    expected: 1,
+  },
+  {
+    name: "'\\ No newline at end of file' marker between the header and the first changed line -> not counted as context",
+    patch: [
       "diff --git a/fixture.js b/fixture.js",
       "index 0000000..0000000 100644",
       "--- a/fixture.js",
@@ -650,23 +612,156 @@ describe("deriveLineFromPatch", () => {
       "+new",
       " pad4",
       "",
-    ].join("\n");
-    expect(deriveLineFromPatch(patch)).toBe(12);
-  });
-
-  it("returns undefined for a patch with no hunk header (e.g. a rename-only patch)", () => {
-    const patch = [
+    ].join("\n"),
+    expected: 12,
+  },
+  {
+    name: "'\\ No newline at end of file' marker after the first changed line -> irrelevant, the scan already stopped",
+    patch: [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -12,7 +12,7 @@",
+      "-old",
+      "+new",
+      "\\ No newline at end of file",
+      "",
+    ].join("\n"),
+    expected: 12,
+  },
+  {
+    name: "a whitespace-stripped blank context line inside the leading-context run -> still counted as context",
+    patch: [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,6 +9,6 @@",
+      " pad1",
+      " pad2",
+      "",
+      "-old",
+      "+new",
+      " pad4",
+      "",
+    ].join("\n"),
+    expected: 12,
+  },
+  {
+    name: "header-only patch, no body at all -> the header's own start (not start + 1 for the trailing split element)",
+    patch: [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,6 +9,6 @@",
+      "",
+    ].join("\n"),
+    expected: 9,
+  },
+  {
+    name: "truncated body (context lines only, no changed line ever reached) -> the header's own start, the accumulated context is discarded",
+    patch: [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,6 +9,6 @@",
+      " pad1",
+      " pad2",
+      " pad3",
+      "",
+    ].join("\n"),
+    expected: 9,
+  },
+  {
+    name: "multi-hunk patch -> the first hunk decides, a later hunk's header is never reached",
+    patch: [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,6 +9,6 @@",
+      " pad1",
+      "-old",
+      "+new",
+      "@@ -40,3 +40,4 @@",
+      " pad9",
+      "+another",
+      " pad10",
+      "",
+    ].join("\n"),
+    expected: 10,
+  },
+  {
+    name: "CRLF line endings throughout -> same result as the LF-terminated equivalent",
+    patch: [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,6 +9,6 @@",
+      " pad1",
+      " pad2",
+      " pad3",
+      "-old",
+      "+new",
+      " pad4",
+      "",
+    ].join("\r\n"),
+    expected: 12,
+  },
+  {
+    name: "hunk header without the ,d length on either side (a single-line hunk), no leading context",
+    patch: [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n"),
+    expected: 1,
+  },
+  {
+    name: "a body line that is itself the next hunk header, immediately after the first (an empty first-hunk body) -> the first header's own start",
+    patch: [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,6 +9,6 @@",
+      "@@ -40,3 +40,4 @@",
+      " pad9",
+      "+another",
+      "",
+    ].join("\n"),
+    expected: 9,
+  },
+  {
+    name: "no hunk header at all (a rename-only patch) -> undefined",
+    patch: [
       "diff --git a/old.js b/new.js",
       "similarity index 100%",
       "rename from old.js",
       "rename to new.js",
       "",
-    ].join("\n");
-    expect(deriveLineFromPatch(patch)).toBeUndefined();
-  });
+    ].join("\n"),
+    expected: undefined,
+  },
+  {
+    name: "empty patch -> undefined",
+    patch: "",
+    expected: undefined,
+  },
+];
 
-  it("returns undefined for an empty patch", () => {
-    expect(deriveLineFromPatch("")).toBeUndefined();
+describe("deriveLineFromPatch", () => {
+  it.each(deriveLineCases)("$name", ({ patch, expected }) => {
+    expect(deriveLineFromPatch(patch)).toBe(expected);
   });
 });
 

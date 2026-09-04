@@ -16,11 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-r` and `-M`/`-w`, which have nothing to derive them from. A patch
   touching two or more paths with no explicit `--file` is
   `status: "usage_error"`, `reason: "patch_file_ambiguous"`, exit `2`.
-  A `-p, --patch` path that cannot be read (missing, a directory,
-  unreadable permissions) is `status: "usage_error"`,
-  `reason: "patch_not_readable"`, exit `2`, checked once before either
-  derivation runs, so it applies the same whether `--file`/`-n` were
-  given explicitly or are themselves derived from the patch.
+  A `-p, --patch` path that cannot be read (missing, not a regular
+  file -- a FIFO, a socket, a directory -- unreadable permissions, or
+  larger than the 8&nbsp;MiB `PATCH_MAX_BYTES` cap this package reads a
+  patch's bytes up to) is `status: "usage_error"`,
+  `reason: "patch_not_readable"`, exit `2`, checked once (a `stat`
+  before any read, so a FIFO is never opened for reading and never
+  blocks the probe, and an oversized file is never loaded into memory)
+  before either derivation runs, so it applies the same whether
+  `--file`/`-n` were given explicitly or are themselves derived from the
+  patch.
 - A global `--json` option: a no-op alias for `-f json` (already the
   default). Combined with an explicit `-f text` it is
   `status: "usage_error"`, `reason: "format_conflict"`, exit `2`.
@@ -45,6 +50,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   -r/--replace (...)`, instead of commander's own `required option
   '--file <path>' not specified`; `status: "usage_error"` and exit `2`
   are unchanged.
+
+### Fixed
+
+- `probe -p/--patch`'s dry-run `git apply` (the scratch-directory check
+  that decides applicability before anything real is touched) now pins
+  `-c core.autocrlf=false`. The scratch directory has no `.git` of its
+  own, so it previously inherited whichever ambient global/system git
+  config the machine running `probe` happened to have; under a global
+  `core.autocrlf = true` (a common Windows default) the write would
+  silently convert the scratch copy's LF line endings to CRLF, making
+  the dry run compare corrupted content against the original and derive
+  the wrong before/after text for `mutation_probe.mutant`.
 
 ## [0.1.0] - 2026-09-04
 

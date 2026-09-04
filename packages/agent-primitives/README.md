@@ -294,7 +294,9 @@ a warning; pass `--file` naming the one to mutate to resolve it (the
 extra-path refusal below then applies as it always has). A patch with
 no hunk header and no explicit `-n` is `status: "inconclusive"`,
 `reason: "mutant_not_applicable"`; `-p, --patch` naming a path that
-cannot be read at all (missing, a directory, unreadable permissions) is
+cannot be read at all (missing, not a regular file -- a directory, a
+FIFO, a socket -- unreadable permissions, or over the 8&nbsp;MiB
+`PATCH_MAX_BYTES` cap this package reads a patch's bytes up to) is
 `status: "usage_error"`, `reason: "patch_not_readable"`, exit `2`,
 whether or not `--file`/`-n` were also given.
 
@@ -656,10 +658,13 @@ relative paths could otherwise escape the scratch directory used for its
 dry run. `-p` touching two or more paths with no explicit `--file` to
 say which one is the target is `status: "usage_error"`,
 `reason: "patch_file_ambiguous"`, exit `2`. `-p, --patch` naming a path
-that cannot be read (missing, a directory, unreadable permissions) is
-`status: "usage_error"`, `reason: "patch_not_readable"`, exit `2`,
-checked once up front so it applies the same whether `--file`/`-n` were
-given explicitly or are themselves derived from the patch.
+that cannot be read (missing, not a regular file -- a directory, a
+FIFO, a socket -- unreadable permissions, or larger than the 8&nbsp;MiB
+`PATCH_MAX_BYTES` cap) is `status: "usage_error"`,
+`reason: "patch_not_readable"`, exit `2`, checked once up front (a
+`stat` before any read, so a FIFO is never opened and a large file is
+never loaded) so it applies the same whether `--file`/`-n` were given
+explicitly or are themselves derived from the patch.
 
 Output beside the envelope: `status` (`killed`, `survived`, or
 `inconclusive`), `reason` (when inconclusive), `mutant: { file, line,

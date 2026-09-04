@@ -19,6 +19,7 @@ import {
   applyPatchForReal,
   computeMutant,
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
+  PATCH_MAX_BYTES,
 } from "../src/probe/mutant.js";
 import { beginInplace } from "../src/probe/isolation.js";
 
@@ -142,6 +143,16 @@ function initRepo(): { repo: string } {
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.email", "test@example.com"]);
   git(repo, ["config", "user.name", "test"]);
+  // Pin the config the real-`git diff` fixture below depends on
+  // (headers with a `a/`/`b/` prefix, LF line endings) against whatever
+  // the ambient global git config on the machine running these tests
+  // happens to be: measured failures under a global `diff.noprefix =
+  // true` (drops the `a/`/`b/` prefix `git apply`/this repo's own
+  // fixtures assume) and `core.autocrlf = true` (rewrites LF to CRLF on
+  // checkout, so the diff no longer matches what was written).
+  git(repo, ["config", "diff.noprefix", "false"]);
+  git(repo, ["config", "diff.mnemonicPrefix", "false"]);
+  git(repo, ["config", "core.autocrlf", "false"]);
   fs.writeFileSync(path.join(repo, "fixture.js"), FIXTURE_JS);
   fs.writeFileSync(path.join(repo, "fixture.test.js"), FIXTURE_TEST_JS);
   git(repo, ["add", "-A"]);
@@ -1920,6 +1931,75 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
 
     expect(result.status).toBe("usage_error");
     expect(result.reason).toBe("patch_not_readable");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it.skipIf(os.platform() === "win32")(
+    "usage_error/patch_not_readable, never opening it, for a FIFO passed as -p/--patch and no --file",
+    async () => {
+      // No writer is ever opened against the FIFO. If the upfront stat
+      // ever regressed back to reading the patch directly,
+      // `fs.readFileSync` on a FIFO with no writer blocks forever (this
+      // was measured: it survives `SIGTERM` and needs `SIGKILL`), so
+      // this test would hang until the timeout below rather than fail
+      // fast -- the timeout is what turns that regression into a
+      // reported failure instead of a stuck run.
+      useLockDir();
+      const { repo } = initRepo();
+      const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+      const patchPath = path.join(makeTmpDir(), "patch.fifo");
+      execFileSync("mkfifo", [patchPath]);
+
+      const result = await probe(
+        baseOptions(repo, {
+          form: "patch",
+          replaceText: undefined,
+          patchPath,
+          file: undefined,
+          line: undefined,
+        }),
+      );
+
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("patch_not_readable");
+      expect(
+        result.warnings.some((w) => w.includes("not a regular file")),
+      ).toBe(true);
+      expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+        before,
+      );
+    },
+    15_000,
+  );
+
+  it("usage_error/patch_not_readable naming the size and the cap, for a -p/--patch over PATCH_MAX_BYTES", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = path.join(makeTmpDir(), "oversized.patch");
+    fs.writeFileSync(patchPath, "@@ -1 +1 @@\n-old\n+new\n");
+    const oversizedBytes = PATCH_MAX_BYTES + 1;
+    fs.truncateSync(patchPath, oversizedBytes);
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("patch_not_readable");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(String(oversizedBytes)) &&
+          w.includes(String(PATCH_MAX_BYTES)),
+      ),
+    ).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
