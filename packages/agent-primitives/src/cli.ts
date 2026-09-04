@@ -56,6 +56,11 @@ interface GlobalOptions {
   cwd?: string;
   maxChars: string;
   logDir?: string;
+  /** `--json`: a no-op alias for `-f json` (already the default),
+   * present so the common instinct to ask for JSON explicitly is never
+   * an unknown-option error. `true` only when the flag was actually
+   * given; conflicts with an explicit `-f text` (see `resolveGlobal`). */
+  json?: boolean;
 }
 
 export interface ResolvedGlobal {
@@ -193,10 +198,34 @@ function bestEffortGlobal(opts: GlobalOptions): ResolvedGlobal {
   return { format: opts.format, cwd, maxChars, logDir };
 }
 
+/**
+ * A `UsageError` carrying a specific machine-readable `reason` for the
+ * envelope, for a CLI-level usage error more specific than the generic
+ * `"usage_error"` `mapTopLevelError` otherwise reports. Mirrors
+ * `InitFsUsageError`'s own `reason` field, minus that class's
+ * per-target bookkeeping, which has no equivalent outside `init`.
+ */
+class CliReasonedUsageError extends UsageError {
+  constructor(
+    message: string,
+    public readonly reason: string,
+  ) {
+    super(message);
+  }
+}
+
 /** Resolves and validates the global options. Throws UsageError when `-C`
- * names a path that does not exist or is not a directory. */
+ * names a path that does not exist or is not a directory, or when
+ * `--json` (a no-op alias for `-f json`) is combined with an explicit
+ * `-f text` -- the two disagree about which format the caller wants. */
 function resolveGlobal(opts: GlobalOptions): ResolvedGlobal {
   const global = bestEffortGlobal(opts);
+  if (opts.json && global.format === "text") {
+    throw new CliReasonedUsageError(
+      "--json conflicts with -f text (use one or the other)",
+      "format_conflict",
+    );
+  }
   let stat: fs.Stats;
   try {
     stat = fs.statSync(global.cwd);
@@ -522,6 +551,10 @@ program
   .option(
     "-l, --log-dir <dir>",
     "directory for logs and full (untruncated) results (defaults to $AGENT_PRIMITIVES_LOG_DIR or <tmpdir>/agent-primitives/<run-id>/)",
+  )
+  .option(
+    "--json",
+    "alias for -f json (json is already the default); conflicts with -f text",
   );
 
 program
@@ -795,8 +828,14 @@ function renderDoctorText(result: DoctorResult): string {
 }
 
 interface ProbeCliOptions {
-  file: string;
-  line: number;
+  /** Optional at the option-parser level so `-p/--patch` alone can
+   * derive it; `resolveMutantForm` still requires it for `-r` and
+   * `-M`/`-w`, which have nothing to derive it from. */
+  file?: string;
+  /** Optional for the same reason, except that `-p` does not derive a
+   * line so much as report the one the patch changed: passing it with
+   * `-p` neither moves the mutation nor changes what is reported. */
+  line?: number;
   replace?: string;
   match?: string;
   with?: string;
@@ -843,6 +882,26 @@ type MutantChoice =
   | { form: "match"; matchText: string; withText: string }
   | { form: "patch"; patchPath: string };
 
+/** `-r/--replace` and `-M/--match` (with `-w/--with`) mutate a line the
+ * caller names outright, so unlike `-p/--patch` they have nothing to
+ * derive `--file`/`-n` from: both stay required for them. Commander's
+ * own `requiredOption` no longer enforces this, since `--file` and `-n`
+ * had to become plain options so `-p` alone could omit them; checked
+ * here instead, as a plain `UsageError` that flows through the same
+ * `mapTopLevelError` path as every other usage error in this CLI. */
+function requireFileAndLine(opts: ProbeCliOptions, flag: string): void {
+  if (opts.file === undefined) {
+    throw new UsageError(
+      `probe: --file is required for ${flag} (only -p/--patch can derive it from the patch)`,
+    );
+  }
+  if (opts.line === undefined) {
+    throw new UsageError(
+      `probe: -n/--line is required for ${flag} (only -p/--patch can derive it from the patch)`,
+    );
+  }
+}
+
 /**
  * Exactly one mutant form is required: `-r`, or `-M` together with `-w`,
  * or `-p`. Anything else (none, more than one, or `-M`/`-w` given
@@ -867,9 +926,11 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
         "probe: -M/--match and -w/--with must be given together",
       );
     }
+    requireFileAndLine(opts, "-M/--match and -w/--with");
     return { form: "match", matchText: opts.match, withText: opts.with };
   }
   if (hasReplace) {
+    requireFileAndLine(opts, "-r/--replace");
     return { form: "replace", replaceText: opts.replace as string };
   }
   return { form: "patch", patchPath: opts.patch as string };
@@ -878,13 +939,18 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
 program
   .command("probe")
   .description(
-    "Confirm the unmutated test passes (the baseline), apply one mutant, run the test again and check it reacts per --expect (fails by default), then restore the file",
+    "--file is long-only: the global -f is --format, and every global option (-f, -C, -m, -l) may precede the subcommand.\n\n" +
+      "Confirm the unmutated test passes (the baseline), apply one mutant, run the test again and check it reacts per --expect (fails by default), then restore the file",
   )
-  .requiredOption(
+  .option(
     "--file <path>",
-    "path to the file to mutate (long-only: the global -f is --format)",
+    "path to the file to mutate (long-only: the global -f is --format); required unless -p derives it from a single-path patch",
   )
-  .requiredOption("-n, --line <n>", "1-indexed line number", parseLine)
+  .option(
+    "-n, --line <n>",
+    "1-indexed line number; required except with -p, whose reported line is always the patch's first changed line",
+    parseLine,
+  )
   .option("-r, --replace <text>", "replace the whole line with this text")
   .option("-M, --match <substr>", "substring to find on the line (requires -w)")
   .option("-w, --with <text>", "replacement for the first match of -M")
@@ -1094,6 +1160,49 @@ const PASSTHROUGH_EXIT_CODES = new Set([
   "commander.version",
 ]);
 
+// A small table from a commonly-tried but wrong option spelling to the
+// form that actually works, appended to commander's own "unknown option"
+// message. `--text` is a real trap: there is no such flag, `-f text` is
+// the only way. Rows belong here only for a spelling that is not
+// registered anywhere in this CLI: a registered alias (`--json` since
+// AC4 made it a real global option) is parsed by commander itself and
+// so never reaches "unknown option" -> never reaches this table.
+const UNKNOWN_OPTION_HINTS: Record<string, string> = {
+  "--text": "use -f text",
+};
+
+/** True when a value looks like it was meant for `--file` rather than
+ * `-f`: a path-shaped string with a `/` or a recognizable file
+ * extension. Used only to add a hint to `-f`'s own invalid-argument
+ * message; `-f`'s two valid values (`json`, `text`) are never even
+ * close to path-shaped. */
+function looksPathLike(value: string): boolean {
+  return value.includes("/") || /\.[A-Za-z0-9]{1,8}$/.test(value);
+}
+
+/**
+ * Appends a short, targeted hint to a raw commander error message when
+ * it recognizes the shape of a common mistake: an unknown option with a
+ * known alias in `UNKNOWN_OPTION_HINTS`, or an invalid `-f`/`--format`
+ * value that looks like it was meant for `probe`'s `--file` instead.
+ * Returns the message unchanged when neither shape matches, so it is
+ * always safe to call on any error message, not only a commander one.
+ */
+export function withOptionHint(message: string): string {
+  const unknownOption = message.match(/unknown option '(--?[^']+)'/);
+  if (unknownOption) {
+    const hint = UNKNOWN_OPTION_HINTS[unknownOption[1]];
+    if (hint) return `${message} (${hint})`;
+  }
+  const formatArg = message.match(
+    /option '-f, --format <format>' argument '([^']*)' is invalid/,
+  );
+  if (formatArg && looksPathLike(formatArg[1])) {
+    return `${message} (probe's file option is --file; -f is the global --format)`;
+  }
+  return message;
+}
+
 /**
  * Maps any error thrown out of `program.parseAsync()` to an envelope:
  * a CommanderError or UsageError becomes `status: "usage_error"`, anything
@@ -1109,6 +1218,8 @@ export function mapTopLevelError(
 ): EnvelopeOutput {
   const durationMs = Date.now() - start;
   if (err instanceof CommanderError || err instanceof UsageError) {
+    const reason =
+      err instanceof CliReasonedUsageError ? err.reason : "usage_error";
     return buildEnvelope({
       version: VERSION,
       command: "unknown",
@@ -1117,7 +1228,7 @@ export function mapTopLevelError(
       cwd: global.cwd,
       warnings: [],
       logs: [],
-      extra: { reason: "usage_error", message: err.message },
+      extra: { reason, message: withOptionHint(err.message) },
       maxChars: global.maxChars,
       logDir: global.logDir,
     });

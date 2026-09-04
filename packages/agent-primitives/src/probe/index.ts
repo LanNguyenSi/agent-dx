@@ -35,6 +35,8 @@ import {
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
   formatMutantSummary,
   formatVerifiedAppliedVia,
+  listPatchTouchedPaths,
+  PATCH_MAX_BYTES,
   type MutantForm,
   type MutantSpec,
 } from "./mutant.js";
@@ -43,9 +45,18 @@ export type IsolationMode = "worktree" | "inplace";
 export type ExpectVerdict = "fail" | "pass";
 
 export interface ProbeOptions {
-  /** As given on the CLI; resolved against `cwd`. */
-  file: string;
-  line: number;
+  /** As given on the CLI; resolved against `cwd`. Optional only for
+   * `form: "patch"`: when omitted, derived from the single path the
+   * patch touches (`git apply --numstat`), resolved against the
+   * containment root. Every other form still requires it. */
+  file?: string;
+  /** 1-indexed line number of the line to mutate. Required for every
+   * form except `patch`, whose line is decided by the patch itself: the
+   * reported `mutant.line` is always the first line the applied diff
+   * changes, and a `line` passed alongside `form: "patch"` is neither
+   * used nor echoed -- when it names a different line, that disagreement
+   * is reported as a warning. */
+  line?: number;
   form: MutantForm;
   replaceText?: string;
   matchText?: string;
@@ -545,19 +556,180 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   }
 
   const cwd = path.resolve(opts.cwd);
-  const displayFile = path.resolve(cwd, opts.file);
   // The git work-tree root when there is one, else `cwd`: the same value
   // `containmentRoot` computes, kept in two variables because the lock
   // below has to tell "in a repository" from "not in one".
   const gitRoot = findGitRoot(cwd);
   const root = gitRoot ?? path.resolve(cwd);
-  const links = opts.links ?? [];
-  const displayLinks = links.map((l) => path.resolve(cwd, l));
   // `--timeout` is the caller saying how long any step of this probe may
   // run, so every `git apply` gets that same bound; without one they
   // keep the fixed default, since an apply that hangs would otherwise
-  // sit under an in-flight marker forever.
+  // sit under an in-flight marker forever. Computed here, ahead of where
+  // it used to sit (right before the containment/lock block below),
+  // because the `-p` derivation immediately below runs its own `git
+  // apply --numstat` and needs the same bound. That derivation (both the
+  // `--file` numstat listing and the `-n` hunk-header read) runs before
+  // `execController` below exists, so unlike every later `git apply`/
+  // test invocation in this function it is not wired to the signal
+  // handler's abort; `--timeout` (`gitApplyTimeoutMs`) is the only bound
+  // on how long it may run.
   const gitApplyTimeoutMs = opts.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS;
+
+  // `-p/--patch` derives `--file` from the single path `git apply
+  // --numstat` reports the patch touches, resolved against the
+  // containment root -- `root`, never `cwd`, since they differ when
+  // `--cwd` is a subdirectory of the repository, and never the patch
+  // file's own directory, since a patch is portable and carries no base
+  // directory of its own. It has to run before the containment check
+  // below, which needs `displayFile`. Two or more touched paths without
+  // an explicit `--file` is ambiguous and refused outright, rather than
+  // guessed at: the caller has to say which one is the mutation target.
+  //
+  // `-n/--line` is NOT derived here, and for the `patch` form it is not
+  // required at all: the line a patch changes is whatever the applied
+  // diff changed, which the dry run below reports back as
+  // `computed.line`. Nothing between here and there needs it.
+  let displayFile: string;
+  const line = opts.line;
+  let derivationLogPaths: string[] = [];
+  // Check the `-p/--patch` path once here, before anything else looks
+  // at it: an unusable `-p` (missing, a directory or another
+  // non-regular file, unreadable permissions, or larger than this
+  // package accepts) is a caller usage error, not something for `git
+  // apply --numstat` to diagnose. Without this check, a bad `-p` given
+  // without `--file` fell into the `--file` derivation's own `git apply
+  // --numstat` failure below and came back as
+  // `inconclusive`/`mutant_not_applicable` ("failed to parse the
+  // patch") -- a diagnosis that points at the patch's *content*, not at
+  // the path itself being wrong. Doing it once, ahead of the numstat
+  // listing (and ahead of the lock, the in-flight marker and any
+  // worktree, so a refusal here leaves nothing behind), means every
+  // path that hands this patch to `git apply` -- `--file` derivation,
+  // the dry run, the real apply -- shares the same `patch_not_readable`
+  // diagnosis instead of several different ones.
+  //
+  // Every check here is metadata-only: nothing in this process opens
+  // the patch or reads its bytes (`git apply` streams it in a child of
+  // its own). That is deliberate. `fs.statSync` cannot block --
+  // querying a FIFO's metadata does not open it -- while an unbounded
+  // read of a writer-less FIFO blocks forever (measured: it outlives
+  // `SIGTERM` and needs `SIGKILL`), so a FIFO or socket handed to `-p`
+  // is refused by `isFile()` before anything can wait on it, and an
+  // oversized file is refused by its recorded size without being
+  // loaded. `statSync` and `accessSync` both follow symlinks (unlike
+  // `lstatSync`), so a symlink to a regular readable file is accepted
+  // and a symlink to a FIFO or a directory is still rejected by what it
+  // resolves to. `accessSync(R_OK)` is what catches a patch whose
+  // permissions deny reading, which a `stat` alone cannot see.
+  if (opts.form === "patch") {
+    const absPatchPathForRead = path.resolve(opts.patchPath ?? "");
+    let patchStat: fs.Stats;
+    try {
+      patchStat = fs.statSync(absPatchPathForRead);
+    } catch {
+      return {
+        status: "usage_error",
+        reason: "patch_not_readable",
+        warnings: [
+          ...warnings,
+          `-p/--patch could not be read: ${absPatchPathForRead}`,
+        ],
+        isolation: isolationField,
+      };
+    }
+    if (!patchStat.isFile()) {
+      return {
+        status: "usage_error",
+        reason: "patch_not_readable",
+        warnings: [
+          ...warnings,
+          `-p/--patch is not a regular file: ${absPatchPathForRead}`,
+        ],
+        isolation: isolationField,
+      };
+    }
+    if (patchStat.size > PATCH_MAX_BYTES) {
+      return {
+        status: "usage_error",
+        reason: "patch_not_readable",
+        warnings: [
+          ...warnings,
+          `-p/--patch is ${String(patchStat.size)} bytes, over the ` +
+            `${String(PATCH_MAX_BYTES)}-byte cap: ${absPatchPathForRead}`,
+        ],
+        isolation: isolationField,
+      };
+    }
+    try {
+      fs.accessSync(absPatchPathForRead, fs.constants.R_OK);
+    } catch {
+      return {
+        status: "usage_error",
+        reason: "patch_not_readable",
+        warnings: [
+          ...warnings,
+          `-p/--patch could not be read: ${absPatchPathForRead}`,
+        ],
+        isolation: isolationField,
+      };
+    }
+  }
+  if (opts.file !== undefined) {
+    displayFile = path.resolve(cwd, opts.file);
+  } else if (opts.form === "patch") {
+    const listing = await listPatchTouchedPaths(
+      opts.patchPath ?? "",
+      opts.logDir,
+      { timeoutMs: gitApplyTimeoutMs },
+    );
+    derivationLogPaths = [listing.logPath];
+    if (!listing.ok) {
+      return {
+        status: "inconclusive",
+        reason: listing.reasonCode ?? "mutant_not_applicable",
+        warnings: [...warnings, listing.reason],
+        isolation: isolationField,
+        dryRunLogPaths: derivationLogPaths,
+      };
+    }
+    if (listing.paths.length !== 1) {
+      return {
+        status: "usage_error",
+        reason: "patch_file_ambiguous",
+        warnings: [
+          ...warnings,
+          `-p/--patch touches ${listing.paths.length} paths and no --file ` +
+            `names which one to mutate: ${listing.paths.join(", ")}`,
+        ],
+        isolation: isolationField,
+        dryRunLogPaths: derivationLogPaths,
+      };
+    }
+    displayFile = path.resolve(root, listing.paths[0]);
+  } else {
+    return {
+      status: "usage_error",
+      reason: "file_required",
+      warnings: [
+        ...warnings,
+        "--file is required unless -p/--patch derives it from a single-path patch",
+      ],
+      isolation: isolationField,
+    };
+  }
+  // `patch` is exempt: its line comes from the applied diff, so there is
+  // nothing for the caller to be required to supply.
+  if (line === undefined && opts.form !== "patch") {
+    return {
+      status: "usage_error",
+      reason: "line_required",
+      warnings: [...warnings, "-n/--line is required"],
+      isolation: isolationField,
+      dryRunLogPaths: derivationLogPaths,
+    };
+  }
+  const links = opts.links ?? [];
+  const displayLinks = links.map((l) => path.resolve(cwd, l));
 
   // Containment and the lock/marker key are resolved through realpath
   // (before either check), so an in-repo symlink pointing outside the
@@ -820,6 +992,10 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
               .join(", ")}`,
           ],
           isolation: isolationField,
+          // Carries a `-p`-derived `--file`'s own numstat log path
+          // through, same as every other early return above; empty for
+          // an explicit `--file`, which never runs that listing.
+          dryRunLogPaths: derivationLogPaths,
         };
       }
     }
@@ -1237,7 +1413,9 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     const mutantSpec: MutantSpec = {
       form: opts.form,
       file: displayFile,
-      line: opts.line,
+      // `undefined` only ever reaches here for the `patch` form, which
+      // ignores it; every other form was refused above without one.
+      line,
       replaceText: opts.replaceText,
       matchText: opts.matchText,
       withText: opts.withText,
@@ -1264,11 +1442,14 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     // Folded in once, here, so every downstream `dryRunLogPaths:
     // computed.logPaths` (every return from this point on) also carries
     // the worktree setup's own exec logs (`git worktree add`, the
-    // tracked-diff sync, the untracked-file listing) without touching
-    // each of those return sites individually.
+    // tracked-diff sync, the untracked-file listing) and the `-p`
+    // derivation's own `git apply --numstat` log (empty unless `--file`
+    // was derived) without touching each of those return sites
+    // individually.
     if (wtSession) {
       computed.logPaths = [...wtSession.logPaths, ...computed.logPaths];
     }
+    computed.logPaths = [...derivationLogPaths, ...computed.logPaths];
     if (!computed.applicable) {
       if (computed.reasonCode === "aborted") {
         // Ordering only: nothing has mutated the target yet at this
@@ -1288,22 +1469,39 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       };
     }
 
+    // `computed.line` -- never the caller's `-n` -- is what every piece
+    // of reported evidence uses, so the line number and the `before`
+    // content quoted beside it always come from the same comparison and
+    // can never name different lines. For `replace`/`match` it IS the
+    // caller's `-n` (that is the line those forms mutate); for `patch`
+    // it is the first line the applied diff changed, which the caller
+    // has no say over. An `-n` passed with `-p` anyway is neither used
+    // nor silently swallowed: when it names a different line, both
+    // numbers go into a warning, so a caller who expected the probe to
+    // target their line finds out rather than reading their own number
+    // back from the result.
+    if (opts.form === "patch" && line !== undefined && line !== computed.line) {
+      warnings.push(
+        `-n ${String(line)} differs from the patch's first changed line ` +
+          `${String(computed.line)}; mutant.line reports ${String(computed.line)}`,
+      );
+    }
     mutantField = {
       file: displayFile,
-      line: opts.line,
+      line: computed.line,
       before: computed.before,
       after: computed.after,
       form: opts.form,
     };
     mutantSummary = formatMutantSummary(
       displayFile,
-      opts.line,
+      computed.line,
       computed.before,
       computed.after,
     );
     verifiedAppliedVia = formatVerifiedAppliedVia(
       displayFile,
-      opts.line,
+      computed.line,
       computed.before,
       computed.after,
     );

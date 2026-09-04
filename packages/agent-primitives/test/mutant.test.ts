@@ -9,6 +9,7 @@ import {
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
   formatMutantSummary,
   formatVerifiedAppliedVia,
+  listPatchTouchedPaths,
   parseNumstatPaths,
 } from "../src/probe/mutant.js";
 import { runArgv } from "../src/probe/run.js";
@@ -198,7 +199,7 @@ describe("computeMutant: patch form", () => {
       ].join("\n") + "\n",
     );
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(result.applicable).toBe(true);
@@ -226,7 +227,7 @@ describe("computeMutant: patch form", () => {
       ].join("\n") + "\n",
     );
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(result.applicable).toBe(false);
@@ -260,7 +261,7 @@ describe("computeMutant: patch form", () => {
       ].join("\n") + "\n",
     );
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(result.applicable).toBe(false);
@@ -289,7 +290,7 @@ describe("computeMutant: patch form", () => {
       ].join("\n") + "\n",
     );
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(result.applicable).toBe(true);
@@ -297,6 +298,96 @@ describe("computeMutant: patch form", () => {
     for (const logPath of result.logPaths) {
       expect(fs.existsSync(logPath)).toBe(true);
     }
+  });
+});
+
+describe("computeMutant: the reported line", () => {
+  it("replace form reports the line it was asked to mutate", async () => {
+    const result = await computeMutant(
+      {
+        form: "replace",
+        file: "/x/fixture.js",
+        line: 2,
+        replaceText: "  return false;",
+      },
+      { root: "/x", logDir: makeTmpDir(), originalContent: ORIGINAL },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.line).toBe(2);
+    expect(ORIGINAL.split("\n")[result.line - 1]).toBe(result.before);
+  });
+
+  it("match form reports the line it was asked to mutate", async () => {
+    const result = await computeMutant(
+      {
+        form: "match",
+        file: "/x/fixture.js",
+        line: 2,
+        matchText: "n > 0",
+        withText: "false",
+      },
+      { root: "/x", logDir: makeTmpDir(), originalContent: ORIGINAL },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.line).toBe(2);
+    expect(ORIGINAL.split("\n")[result.line - 1]).toBe(result.before);
+  });
+
+  it("patch form reports the first line the applied diff changed, not the hunk header's own start line", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    // The hunk starts at line 1 and its first CHANGED line is line 2:
+    // a result reporting the header's start would say 1 here.
+    writeValidPatch(patchPath, relPath);
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.line).toBe(2);
+    expect(content.split("\n")[result.line - 1]).toBe(result.before);
+    expect(result.before).toBe("  return n > 0;");
+  });
+
+  it("patch form treats a change that only appends trailing whitespace as a real change on that line", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "trailing-space.patch");
+    // `git apply` warns about the added trailing whitespace and applies
+    // it anyway (exit 0). The comparison that decides `line`/`before`/
+    // `after` has to be exact: a trimmed comparison would see the two
+    // lines as equal, walk past them, find no other difference, and
+    // report this patch as one that "produced no content change".
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return n > 0; ",
+        " }",
+      ].join("\n") + "\n",
+    );
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.line).toBe(2);
+    expect(content.split("\n")[result.line - 1]).toBe(result.before);
+    expect(result.before).toBe("  return n > 0;");
+    expect(result.after).toBe("  return n > 0; ");
   });
 });
 
@@ -384,7 +475,7 @@ describe("computeMutant: a --numstat listing that did not fit", () => {
     });
 
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
 
@@ -423,13 +514,29 @@ describe("git apply invocations", () => {
 
     runner.mockClear();
     const computed = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     expect(computed.applicable).toBe(true);
     expect(runner.mock.calls.map((c) => [c[0], c[1]])).toEqual([
       ["git", ["apply", "--numstat", "--", patchPath]],
-      ["git", ["apply", "--", patchPath]],
+      // The apply that actually writes the scratch file pins
+      // `core.autocrlf=false` and `apply.whitespace=nowarn` (see the
+      // comment at its call site in mutant.ts): the scratch directory
+      // has no `.git` of its own, so without this it would otherwise
+      // inherit the machine's ambient global/system config.
+      [
+        "git",
+        [
+          "-c",
+          "core.autocrlf=false",
+          "-c",
+          "apply.whitespace=nowarn",
+          "apply",
+          "--",
+          patchPath,
+        ],
+      ],
     ]);
 
     runner.mockClear();
@@ -447,7 +554,7 @@ describe("git apply invocations", () => {
 
     runner.mockClear();
     await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
     await applyPatchForReal(patchPath, root, makeTmpDir());
@@ -459,7 +566,7 @@ describe("git apply invocations", () => {
 
     runner.mockClear();
     await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       {
         root,
         logDir: makeTmpDir(),
@@ -484,7 +591,7 @@ describe("git apply invocations", () => {
 
     runner.mockClear();
     await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       {
         root,
         logDir: makeTmpDir(),
@@ -518,7 +625,7 @@ describe("git apply invocations", () => {
     });
 
     const result = await computeMutant(
-      { form: "patch", file: absFile, line: 0, patchPath },
+      { form: "patch", file: absFile, patchPath },
       { root, logDir: makeTmpDir(), originalContent: content },
     );
 
@@ -527,5 +634,63 @@ describe("git apply invocations", () => {
     expect(result.reasonCode).toBe("git_apply_timeout");
     expect(result.reason).toContain("hit its timeout");
     expect(result.reason).not.toContain("failed to parse");
+  });
+});
+
+describe("listPatchTouchedPaths", () => {
+  it("lists the single path a one-file patch touches", async () => {
+    const { root, relPath } = initRepoWithFile();
+    const patchPath = path.join(root, "mutant.patch");
+    writeValidPatch(patchPath, relPath);
+
+    const result = await listPatchTouchedPaths(patchPath, makeTmpDir(), {});
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.paths).toEqual([relPath]);
+  });
+
+  it("lists every path a multi-file patch touches, in numstat order", async () => {
+    const { root, relPath } = initRepoWithFile();
+    const patchPath = path.join(root, "two-file.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,3 +1,3 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+        "diff --git a/extra.js b/extra.js",
+        "new file mode 100644",
+        "index 0000000..0000000",
+        "--- /dev/null",
+        "+++ b/extra.js",
+        "@@ -0,0 +1 @@",
+        "+extra file content",
+      ].join("\n") + "\n",
+    );
+
+    const result = await listPatchTouchedPaths(patchPath, makeTmpDir(), {});
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.paths).toEqual([relPath, "extra.js"]);
+  });
+
+  it("reports a not-ok result naming the log path when the patch does not parse", async () => {
+    const patchPath = path.join(makeTmpDir(), "garbage.patch");
+    fs.writeFileSync(patchPath, "not a real patch\n");
+
+    const result = await listPatchTouchedPaths(patchPath, makeTmpDir(), {});
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("failed to parse");
+    expect(fs.existsSync(result.logPath)).toBe(true);
   });
 });

@@ -82,6 +82,16 @@ Every subcommand accepts:
 - `-l, --log-dir <dir>`: directory for logs and full (untruncated)
   results (defaults to `$AGENT_PRIMITIVES_LOG_DIR`, or a fresh directory
   under the OS temp dir otherwise).
+- `--json`: a no-op alias for `-f json` (already the default), for the
+  common instinct to ask for JSON explicitly. Combined with an explicit
+  `-f text` it is `status: "usage_error"`, `reason: "format_conflict"`,
+  exit `2`; `-f json --json` is accepted, since the two agree.
+
+An unrecognized option's message names a common alias when it has one
+(`--text` -> use `-f text`; `--json` is itself a real global option, so
+it never reaches this hint), and an invalid `-f`/`--format` value that
+looks like a path adds a hint that `-f` is the global `--format` and
+`probe`'s file option is `--file`.
 
 ## `doctor`
 
@@ -266,8 +276,46 @@ agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
   -t 'npm test'
 agent-primitives probe --file src/foo.js -n 12 -M 'n > 0' -w 'n >= 0' \
   -t 'npm test' -i inplace
-agent-primitives probe --file src/foo.js -n 1 -p mutant.patch -t 'npm test'
+agent-primitives probe -p mutant.patch -t 'npm test'
+agent-primitives verify -c build,typecheck,lint,test
+agent-primitives doctor
 ```
+
+The third form needs neither `--file` nor `-n`. `--file` is derived from
+the single path the patch touches (resolved against the containment
+root) when the patch touches exactly one. `-n` is not derived at all:
+the reported `mutant.line` is the first line at which the patch's
+applied result differs from the original, taken from the dry run itself,
+so the line number and the `before` content quoted beside it always name
+the same line -- whatever the diff's shape (leading context or none, a
+removed `---`, an added `++`, a pure deletion, several hunks). Passing
+`-n` alongside `-p` neither moves the mutation nor changes what is
+reported; when it names a different line than the patch changes, both
+numbers appear in a warning.
+
+A patch touching two or more paths without an explicit `--file` is
+`status: "usage_error"`, `reason: "patch_file_ambiguous"`, exit `2`,
+naming the touched paths in a warning; pass `--file` naming the one to
+mutate to resolve it (the extra-path refusal below then applies as it
+always has). `-p, --patch` naming a path that cannot be used at all
+(missing, not a regular file -- a directory, a FIFO, a socket --
+unreadable permissions, or over the 8&nbsp;MiB `PATCH_MAX_BYTES` cap) is
+`status: "usage_error"`, `reason: "patch_not_readable"`, exit `2`,
+whether or not `--file`/`-n` were also given. A patch that changes no
+content at all (a rename-only patch, say) has nothing for a mutation
+probe to mutate: its derived `--file` is the rename's destination, which
+does not exist yet, so it ends in `reason: "file_not_found"`.
+
+A patch made with `git diff --relative` from a subdirectory records
+paths relative to that subdirectory, not the repository root; the
+derivation above always resolves the derived `--file` against the
+containment root, so a patch made that way ends in
+`reason: "file_not_found"` rather than being detected as mis-based.
+
+`file_required` and `line_required` are `reason` values a library
+caller of `probe()` can see when it omits `--file`/`-n` for a form that
+cannot derive them; the CLI never emits either, since `requireFileAndLine`
+(see `cli.ts`) rejects that case before `probe()` is even called.
 
 `-i worktree` is the default: `--file` is mutated in a detached git
 worktree, never in the working tree itself. Every git invocation this
@@ -423,12 +471,15 @@ from that backup afterward (on normal completion, on any error, and on
 exported `probe()` restores and returns control instead, unless the
 caller passes `exitOnSignal: true`).
 
-`--file` is long-only (the global `-f` is `--format`). Exactly one mutant
-form is required: `-r, --replace` (replace the whole line), `-M, --match`
-with `-w, --with` (replace the first occurrence of a substring on the
-line), or `-p, --patch` (apply a unified diff via `git apply`, applied
-against the worktree for `-i worktree`, against the working tree itself
-for `-i inplace`).
+`--file` is long-only (the global `-f` is `--format`), and every global
+option (`-f`, `-C`, `-m`, `-l`) may precede the subcommand. Exactly one
+mutant form is required: `-r, --replace` (replace the whole line),
+`-M, --match` with `-w, --with` (replace the first occurrence of a
+substring on the line), or `-p, --patch` (apply a unified diff via
+`git apply`, applied against the worktree for `-i worktree`, against
+the working tree itself for `-i inplace`). `--file` and `-n, --line`
+are required for `-r` and for `-M`/`-w`, which have nothing to derive
+them from; `-p` alone needs neither, as described above.
 
 The dist trap: a project whose test command runs built output
 (`dist/`, `lib/`, ...) rather than `--file` itself needs `--pre` to
@@ -609,7 +660,19 @@ warning. `-p, --patch` combined with `--allow-outside` is rejected
 outright as `status: "usage_error"`,
 `reason: "patch_allow_outside_unsupported"`, exit `2`: a patch's own
 relative paths could otherwise escape the scratch directory used for its
-dry run.
+dry run. `-p` touching two or more paths with no explicit `--file` to
+say which one is the target is `status: "usage_error"`,
+`reason: "patch_file_ambiguous"`, exit `2`. `-p, --patch` naming a path
+that cannot be used (missing, not a regular file -- a directory, a
+FIFO, a socket -- unreadable permissions, or larger than the 8&nbsp;MiB
+`PATCH_MAX_BYTES` cap) is `status: "usage_error"`,
+`reason: "patch_not_readable"`, exit `2`, decided once up front from the
+path's metadata alone (a `stat` for the kind of file and its size, an
+access check for the permissions; nothing in this process ever opens the
+patch, so a FIFO cannot block it and a large file is never loaded) and
+before the containment check, the lock, the in-flight marker or any
+worktree, so a refusal leaves nothing behind and applies the same
+whether `--file` was given explicitly or is derived from the patch.
 
 Output beside the envelope: `status` (`killed`, `survived`, or
 `inconclusive`), `reason` (when inconclusive), `mutant: { file, line,
