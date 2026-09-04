@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -19,10 +20,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // doc comment for why the pin bump needs to be mechanical at all).
 
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const SCRIPT_SOURCE = readFileSync(
-  join(REPO_ROOT, "scripts", "bump-okf-kit-pin.mjs"),
-  "utf8",
-);
+const SCRIPT_PATH = join(REPO_ROOT, "scripts", "bump-okf-kit-pin.mjs");
+const HAS_REPO_SCRIPT = existsSync(SCRIPT_PATH);
+const SCRIPT_SOURCE = HAS_REPO_SCRIPT ? readFileSync(SCRIPT_PATH, "utf8") : "";
 
 interface RunResult {
   status: number;
@@ -128,7 +128,10 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("bump-okf-kit-pin.mjs", () => {
+// This is a repository integration test for a root-level release helper, not
+// an okf-kit package test. A package-only source extract intentionally has no
+// ../../scripts directory, so keep that supported test environment green.
+describe.runIf(HAS_REPO_SCRIPT)("bump-okf-kit-pin.mjs", () => {
   it("rewrites the pin line in both ci.yml and okf-staleness.yml to the target version", () => {
     scaffoldRepo(dir, { version: "0.9.0" });
 
