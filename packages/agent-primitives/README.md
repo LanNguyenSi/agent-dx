@@ -280,14 +280,29 @@ agent-primitives probe -p mutant.patch -t 'npm test'
 
 The third form derives `--file` and `-n` from the patch itself when it
 touches exactly one path: `--file` from that path (resolved against the
-containment root), `-n` from the first hunk's new-file start line
-(`@@ -a,b +c,d @@` -> `c`). A patch touching two or more paths without
-an explicit `--file` is `status: "usage_error"`,
-`reason: "patch_file_ambiguous"`, exit `2`, naming the touched paths in
-a warning; pass `--file` naming the one to mutate to resolve it (the
-extra-path refusal below then applies as it always has). A patch with
-no hunk header and no explicit `-n` is `status: "inconclusive"`,
-`reason: "mutant_not_applicable"`.
+containment root), `-n` from the first hunk's first changed (`+`/`-`)
+line -- the header's own new-file start (`@@ -a,b +c,d @@` -> `c`) plus
+however many leading unchanged (` `-prefixed) context lines come before
+it, since `c` itself is only the changed line when the hunk has no
+leading context. A patch touching two or more paths without an explicit
+`--file` is `status: "usage_error"`, `reason: "patch_file_ambiguous"`,
+exit `2`, naming the touched paths in a warning; pass `--file` naming
+the one to mutate to resolve it (the extra-path refusal below then
+applies as it always has). A patch with no hunk header and no explicit
+`-n` is `status: "inconclusive"`, `reason: "mutant_not_applicable"`; a
+patch path that cannot even be read to look for one is
+`status: "usage_error"`, `reason: "patch_not_readable"`.
+
+A patch made with `git diff --relative` from a subdirectory records
+paths relative to that subdirectory, not the repository root; the
+derivation above always resolves the derived `--file` against the
+containment root, so a patch made that way ends in
+`reason: "file_not_found"` rather than being detected as mis-based.
+
+`file_required` and `line_required` are `reason` values a library
+caller of `probe()` can see when it omits `--file`/`-n` for a form that
+cannot derive them; the CLI never emits either, since `requireFileAndLine`
+(see `cli.ts`) rejects that case before `probe()` is even called.
 
 `-i worktree` is the default: `--file` is mutated in a detached git
 worktree, never in the working tree itself. Every git invocation this

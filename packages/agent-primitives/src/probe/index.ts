@@ -564,7 +564,12 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   // sit under an in-flight marker forever. Computed here, ahead of where
   // it used to sit (right before the containment/lock block below),
   // because the `-p` derivation immediately below runs its own `git
-  // apply --numstat` and needs the same bound.
+  // apply --numstat` and needs the same bound. That derivation (both the
+  // `--file` numstat listing and the `-n` hunk-header read) runs before
+  // `execController` below exists, so unlike every later `git apply`/
+  // test invocation in this function it is not wired to the signal
+  // handler's abort; `--timeout` (`gitApplyTimeoutMs`) is the only bound
+  // on how long it may run.
   const gitApplyTimeoutMs = opts.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS;
 
   // `-p/--patch` derives `--file` (from the single path `git apply
@@ -629,14 +634,26 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     };
   }
   if (line === undefined && opts.form === "patch") {
+    const absPatchPath = path.resolve(opts.patchPath ?? "");
     let patchContent: string;
     try {
-      patchContent = fs.readFileSync(
-        path.resolve(opts.patchPath ?? ""),
-        "utf8",
-      );
+      patchContent = fs.readFileSync(absPatchPath, "utf8");
     } catch {
-      patchContent = "";
+      // Distinct from "no hunk header" below: the patch could not even
+      // be read to look for one (missing, a directory, unreadable
+      // permissions). Kept apart so the warning does not tell the
+      // caller to "pass -n explicitly" for a patch path that is simply
+      // wrong.
+      return {
+        status: "usage_error",
+        reason: "patch_not_readable",
+        warnings: [
+          ...warnings,
+          `-p/--patch could not be read to derive -n: ${absPatchPath}`,
+        ],
+        isolation: isolationField,
+        dryRunLogPaths: derivationLogPaths,
+      };
     }
     line = deriveLineFromPatch(patchContent);
     if (line === undefined) {
@@ -925,6 +942,10 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
               .join(", ")}`,
           ],
           isolation: isolationField,
+          // Carries a `-p`-derived `--file`'s own numstat log path
+          // through, same as every other early return above; empty for
+          // an explicit `--file`, which never runs that listing.
+          dryRunLogPaths: derivationLogPaths,
         };
       }
     }

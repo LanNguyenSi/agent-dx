@@ -1161,12 +1161,11 @@ const PASSTHROUGH_EXIT_CODES = new Set([
 // A small table from a commonly-tried but wrong option spelling to the
 // form that actually works, appended to commander's own "unknown option"
 // message. `--text` is a real trap: there is no such flag, `-f text` is
-// the only way. `--json` is kept here too even though AC4 above makes it
-// a real, always-recognized global option: it documents the mapping for
-// a reader who has not made that connection yet, and costs nothing to
-// keep since `withOptionHint` only ever adds text, never removes any.
+// the only way. Rows belong here only for a spelling that is not
+// registered anywhere in this CLI: a registered alias (`--json` since
+// AC4 made it a real global option) is parsed by commander itself and
+// so never reaches "unknown option" -> never reaches this table.
 const UNKNOWN_OPTION_HINTS: Record<string, string> = {
-  "--json": "use -f json (json is the default)",
   "--text": "use -f text",
 };
 

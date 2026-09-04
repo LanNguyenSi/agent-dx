@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a copy-pasteable line for each mutant form plus `verify` and
   `doctor`.
 
+### Changed
+
+- `probe -r/--replace` and `-M/--match` (with `-w/--with`) without
+  `--file`/`-n` now report `status: "usage_error"` with the message
+  `probe: --file is required for -r/--replace (only -p/--patch can
+  derive it from the patch)` / `probe: -n/--line is required for
+  -r/--replace (...)`, instead of commander's own `required option
+  '--file <path>' not specified`; `status: "usage_error"` and exit `2`
+  are unchanged.
+
 ## [0.1.0] - 2026-09-04
 
 ### Added

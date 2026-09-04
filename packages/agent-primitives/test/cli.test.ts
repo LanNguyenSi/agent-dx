@@ -986,27 +986,9 @@ describe("mapTopLevelError", () => {
     expect(exitCode).toBe(2);
     expect((envelope as { message?: string }).message).toBe("unknown option");
   });
-
-  it("appends the --json alias hint to an unknown-option message naming --json, and reports format_conflict's own reason", () => {
-    const err = new CommanderError(
-      1,
-      "commander.unknownOption",
-      "error: unknown option '--json'",
-    );
-    const { envelope } = mapTopLevelError(err, global, Date.now());
-    expect((envelope as { message?: string }).message).toBe(
-      "error: unknown option '--json' (use -f json (json is the default))",
-    );
-  });
 });
 
 describe("withOptionHint", () => {
-  it("appends the --json alias hint to an unknown-option message naming --json", () => {
-    expect(withOptionHint("error: unknown option '--json'")).toBe(
-      "error: unknown option '--json' (use -f json (json is the default))",
-    );
-  });
-
   it("appends the -f text alias hint to an unknown-option message naming --text", () => {
     expect(withOptionHint("error: unknown option '--text'")).toBe(
       "error: unknown option '--text' (use -f text)",
@@ -1020,7 +1002,7 @@ describe("withOptionHint", () => {
 
   it("adds the --file hint to an invalid -f value that looks like a path (contains /)", () => {
     const message =
-      "error: option '-f, --format <format>' argument 'src/foo.js' is invalid. format must be \"json\" or \"text\" (got \"src/foo.js\")";
+      'error: option \'-f, --format <format>\' argument \'src/foo.js\' is invalid. format must be "json" or "text" (got "src/foo.js")';
     expect(withOptionHint(message)).toBe(
       `${message} (probe's file option is --file; -f is the global --format)`,
     );
@@ -1028,7 +1010,7 @@ describe("withOptionHint", () => {
 
   it("adds the --file hint to an invalid -f value that looks like a path (ends in a file extension, no slash)", () => {
     const message =
-      "error: option '-f, --format <format>' argument 'mutant.patch' is invalid. format must be \"json\" or \"text\" (got \"mutant.patch\")";
+      'error: option \'-f, --format <format>\' argument \'mutant.patch\' is invalid. format must be "json" or "text" (got "mutant.patch")';
     expect(withOptionHint(message)).toBe(
       `${message} (probe's file option is --file; -f is the global --format)`,
     );
@@ -1036,7 +1018,7 @@ describe("withOptionHint", () => {
 
   it("does not add the --file hint to an invalid -f value that is not path-like", () => {
     const message =
-      "error: option '-f, --format <format>' argument 'xml' is invalid. format must be \"json\" or \"text\" (got \"xml\")";
+      'error: option \'-f, --format <format>\' argument \'xml\' is invalid. format must be "json" or "text" (got "xml")';
     expect(withOptionHint(message)).toBe(message);
   });
 
@@ -1601,10 +1583,8 @@ describe("cli: probe", () => {
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("killed");
     expect(parsed.mutant.form).toBe("patch");
-    expect(parsed.mutant.line).toBe(1);
-    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
-      before,
-    );
+    expect(parsed.mutant.line).toBe(2);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
   it("a -p patch touching two paths, no --file: usage_error/patch_file_ambiguous, exit 2, through the built CLI", async () => {

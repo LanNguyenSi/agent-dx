@@ -1474,7 +1474,7 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
 });
 
 describe("probe(): -p derives --file and -n when neither is given", () => {
-  it("derives --file (the single path the patch touches) and -n (the first hunk's new-file start line), mirroring the explicit --file end-to-end patch test", async () => {
+  it("derives --file (the single path the patch touches) and -n (the first hunk's changed line, header start plus its one leading context line), mirroring the explicit --file end-to-end patch test", async () => {
     useLockDir();
     const { repo } = initRepo();
     const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
@@ -1508,11 +1508,162 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
     expect(result.status).toBe("killed");
     expect(result.mutant).toMatchObject({
       file: path.join(repo, "fixture.js"),
-      line: 1,
+      line: 2,
       form: "patch",
     });
     expect(result.mutation_probe?.restored_verified).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("derives the hunk's changed line, not the header's own start line, for a hunk with leading context that does not start at line 1 (round-1 review repro); mutation_probe.mutant quotes that line's content", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const fixtureLines = FIXTURE_JS.split("\n");
+    const patchPath = path.join(makeTmpDir(), "derive-mid-file.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -2,5 +2,5 @@",
+        ` ${fixtureLines[1]}`,
+        ` ${fixtureLines[2]}`,
+        ` ${fixtureLines[3]}`,
+        `-${fixtureLines[4]}`,
+        "+  return 999;",
+        ` ${fixtureLines[5]}`,
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.mutant).toMatchObject({
+      file: path.join(repo, "fixture.js"),
+      line: 5,
+      form: "patch",
+    });
+    expect(result.mutation_probe?.mutant).toContain(fixtureLines[4].trim());
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("runs end to end under -i inplace: the real file is mutated for real, then restored", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const fixtureLines = FIXTURE_JS.split("\n");
+    const patchPath = path.join(makeTmpDir(), "derive-inplace.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${fixtureLines[0]}`,
+        `-${fixtureLines[1]}`,
+        "+  return false;",
+        ` ${fixtureLines[2]}`,
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+        isolation: "inplace",
+      }),
+    );
+
+    expect(result.isolation.mode).toBe("inplace");
+    expect(result.status).toBe("killed");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("file_outside_root when the derived path is an in-repo symlink resolving outside the containment root, target untouched", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outsideDir = makeTmpDir();
+    const outsideFile = path.join(outsideDir, "outside.js");
+    fs.writeFileSync(outsideFile, "module.exports = {};\n");
+    const linkPath = path.join(repo, "link-to-outside.js");
+    fs.symlinkSync(outsideFile, linkPath);
+    const patchPath = path.join(makeTmpDir(), "derive-symlink.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/link-to-outside.js b/link-to-outside.js",
+        "index 0000000..1111111 100644",
+        "--- a/link-to-outside.js",
+        "+++ b/link-to-outside.js",
+        "@@ -1 +1 @@",
+        "-module.exports = {};",
+        "+module.exports = { mutated: true };",
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(fs.readFileSync(outsideFile, "utf8")).toBe("module.exports = {};\n");
+  });
+
+  it("usage_error/file_not_found, nothing created, for a new-file patch whose path does not exist yet", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const newFilePath = path.join(repo, "brand-new.js");
+    const patchPath = path.join(makeTmpDir(), "new-file.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/brand-new.js b/brand-new.js",
+        "new file mode 100644",
+        "index 0000000..1111111",
+        "--- /dev/null",
+        "+++ b/brand-new.js",
+        "@@ -0,0 +1,2 @@",
+        "+module.exports = {};",
+        "+// new",
+      ].join("\n") + "\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        file: undefined,
+        line: undefined,
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("file_not_found");
+    expect(fs.existsSync(newFilePath)).toBe(false);
   });
 
   it("resolves the derived path against the containment root, not cwd, when run from a subdirectory of the repo", async () => {
@@ -1558,7 +1709,10 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
   it("usage_error/patch_file_ambiguous, with the touched paths in a warning and nothing applied, when the patch touches two or more paths and --file is not given", async () => {
     useLockDir();
     const { repo } = initRepo();
-    const beforeFixture = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const beforeFixture = fs.readFileSync(
+      path.join(repo, "fixture.js"),
+      "utf8",
+    );
     const beforeTest = fs.readFileSync(
       path.join(repo, "fixture.test.js"),
       "utf8",
@@ -1607,6 +1761,10 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
         (w) => w.includes("fixture.js") && w.includes("fixture.test.js"),
       ),
     ).toBe(true);
+    // The `git apply --numstat` listing's own log path (used to derive
+    // the ambiguity) is carried into the result's logs, not dropped.
+    expect(result.dryRunLogPaths?.length).toBeGreaterThan(0);
+    expect(result.dryRunLogPaths?.some((p) => fs.existsSync(p))).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
       beforeFixture,
     );
@@ -1618,7 +1776,10 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
   it("with --file naming one of two touched paths, the existing extra-path refusal is unchanged", async () => {
     useLockDir();
     const { repo } = initRepo();
-    const beforeFixture = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const beforeFixture = fs.readFileSync(
+      path.join(repo, "fixture.js"),
+      "utf8",
+    );
     const fixtureLines = FIXTURE_JS.split("\n");
     const testLines = FIXTURE_TEST_JS.split("\n");
     const patchPath = path.join(makeTmpDir(), "two-files-explicit.patch");
@@ -1700,9 +1861,9 @@ describe("probe(): -p derives --file and -n when neither is given", () => {
 
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("mutant_not_applicable");
-    expect(
-      result.warnings.some((w) => w.includes("no hunk header")),
-    ).toBe(true);
+    expect(result.warnings.some((w) => w.includes("no hunk header"))).toBe(
+      true,
+    );
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 

@@ -533,14 +533,13 @@ describe("git apply invocations", () => {
 });
 
 describe("deriveLineFromPatch", () => {
-  it("returns the first hunk's new-file start line (+c) from a full a,b/c,d header", () => {
+  it("returns the header's new-file start line (+c) unadjusted when the hunk has no leading context (full a,b/c,d header, first body line a '-' line)", () => {
     const patch = [
       "diff --git a/fixture.js b/fixture.js",
       "index 0000000..0000000 100644",
       "--- a/fixture.js",
       "+++ b/fixture.js",
       "@@ -12,7 +12,7 @@",
-      " context",
       "-old",
       "+new",
       "",
@@ -548,7 +547,7 @@ describe("deriveLineFromPatch", () => {
     expect(deriveLineFromPatch(patch)).toBe(12);
   });
 
-  it("returns the new-file start line when the hunk header omits the ,d length (a single-line hunk)", () => {
+  it("returns the new-file start line when the hunk header omits the ,d length (a single-line hunk, no leading context)", () => {
     const patch = [
       "diff --git a/fixture.js b/fixture.js",
       "index 0000000..0000000 100644",
@@ -560,6 +559,28 @@ describe("deriveLineFromPatch", () => {
       "",
     ].join("\n");
     expect(deriveLineFromPatch(patch)).toBe(1);
+  });
+
+  it("adds the leading-context offset to the header's start line before the first changed line (full a,b/c,d header, 3 leading context lines, first body line a '-' line)", () => {
+    // Mirrors the reproduction from the round-1 review: `git diff`'s
+    // default 3 lines of context puts the header 3 lines before the
+    // actual change, so the header's own `+c` (9) is a context line,
+    // not the changed one (12).
+    const patch = [
+      "diff --git a/fixture.js b/fixture.js",
+      "index 0000000..0000000 100644",
+      "--- a/fixture.js",
+      "+++ b/fixture.js",
+      "@@ -9,6 +9,6 @@",
+      " pad1",
+      " pad2",
+      " pad3",
+      "-old",
+      "+new",
+      " pad4",
+      "",
+    ].join("\n");
+    expect(deriveLineFromPatch(patch)).toBe(12);
   });
 
   it("returns undefined for a patch with no hunk header (e.g. a rename-only patch)", () => {

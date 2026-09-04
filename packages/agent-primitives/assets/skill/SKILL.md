@@ -78,7 +78,10 @@ agent-primitives doctor
 ```
 
 The third form (`-p`) derives `--file` and `-n` from the patch itself
-when a patch touches exactly one path; pass them explicitly only when
-the patch touches more than one path, or when the derived line is
-wrong. `--file` is long-only, since the global `-f` is `--format`;
-every global option (`-f`, `-C`, `-m`, `-l`) may precede the subcommand.
+when a patch touches exactly one path: `-n` is the first line the patch
+changes, not just the hunk header's own start line, so it stays correct
+even when the hunk carries leading context. Pass `--file`/`-n`
+explicitly only when the patch touches more than one path, or to target
+a different line than the one the patch changes. `--file` is long-only,
+since the global `-f` is `--format`; every global option (`-f`, `-C`,
+`-m`, `-l`) may precede the subcommand.

@@ -239,8 +239,7 @@ export interface PatchTouchedPathsFailure {
 }
 
 export type PatchTouchedPathsResult =
-  | PatchTouchedPathsListing
-  | PatchTouchedPathsFailure;
+  PatchTouchedPathsListing | PatchTouchedPathsFailure;
 
 /**
  * Lists the paths a patch touches via `git apply --numstat`, with the
@@ -302,18 +301,43 @@ export async function listPatchTouchedPaths(
 }
 
 /** Parses the first hunk header (`@@ -a,b +c,d @@`) of a unified diff and
- * returns its new-file start line (`c`), the informational `-n` this
- * package derives for the `patch` form when the caller gives none. The
- * hunk length (`,d`, and `,b` on the old side) is optional per the
- * unified-diff grammar -- a single-line hunk omits it -- so only the `+c`
- * start is required to match. Returns `undefined` when the patch has no
- * hunk header at all (e.g. a patch that only renames or touches file
- * modes with no content change). */
+ * returns the new-file line of the hunk's first CHANGED (`+`/`-`) body
+ * line -- the informational `-n` this package derives for the `patch`
+ * form when the caller gives none. That is `c` (the header's new-file
+ * start) plus the number of leading unchanged (` `-prefixed) context
+ * lines between the header and that first `+`/`-` line: git's default 3
+ * lines of context means `c` itself is usually a context line, not the
+ * changed one, so returning `c` unadjusted (the pre-fix behaviour) cites
+ * the wrong line whenever a hunk carries any leading context. A `\ No
+ * newline at end of file` marker line is not itself a body line -- it
+ * annotates the line before it -- so it is skipped without counting
+ * toward the offset or ending the scan. The hunk length (`,d`, and `,b`
+ * on the old side) is optional per the unified-diff grammar -- a
+ * single-line hunk omits it -- so only the `+c` start is required to
+ * match. Returns `undefined` when the patch has no hunk header at all
+ * (e.g. a patch that only renames or touches file modes with no content
+ * change). */
 export function deriveLineFromPatch(patchContent: string): number | undefined {
-  const match = patchContent.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/m);
+  const match = patchContent.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@.*$/m);
   if (!match) return undefined;
-  const n = Number(match[1]);
-  return Number.isFinite(n) ? n : undefined;
+  const start = Number(match[1]);
+  if (!Number.isFinite(start)) return undefined;
+  const headerEnd = (match.index ?? 0) + match[0].length;
+  const afterHeader = patchContent.slice(headerEnd).replace(/^\r?\n/, "");
+  let contextLines = 0;
+  for (const line of afterHeader.split(/\r?\n/)) {
+    if (line.startsWith(" ")) {
+      contextLines += 1;
+      continue;
+    }
+    if (line.startsWith("\\")) {
+      // "\ No newline at end of file" -- annotates the previous line,
+      // not a body line of its own; keep scanning past it.
+      continue;
+    }
+    break;
+  }
+  return start + contextLines;
 }
 
 /**
