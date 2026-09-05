@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-05T14:57:36Z
+timestamp: 2026-09-05T19:38:01Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -24,7 +24,7 @@ One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:76#"  05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
 (SKILL.md:81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:125-130#"one directory per unit of work, newest = active";
-packages/orchestrator-workflow/INSTALL-AGENT.md:64-65#"(new files).",173-178). The newest run
+packages/orchestrator-workflow/INSTALL-AGENT.md:64-65#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:173-178#"instead: it sources its defaults from the operator"). The newest run
 directory is the active one unless a `.ai/run` pointer names one
 (SKILL.md:83#"older directories are the auditable history. Do not", see the pointer section below); older
 directories are the auditable history and
@@ -63,7 +63,7 @@ semantics" (0.24.0 placement pass dropped the pinned `0.6.0` version
 number from this pointer; the CHANGELOG's 0.9.0 entry above still carries
 the version-specific historical claim), so external reader internals are
 not verified from this repo). Introduced in 0.9.0
-(`CHANGELOG.md:#[0.9.0]`). Pinned by template-markers.test.ts:19#"const runBaseRe = /solution-acceptance:\s*run-base\s*=\s",33-37 (exactly
+(`CHANGELOG.md:#[0.9.0]`). Pinned by template-markers.test.ts:19#"const runBaseRe = /solution-acceptance:\s*run-base\s*=\s"; template-markers.test.ts:33#"00-goal.md has exactly one run-base marker, defaulting to TODO" (exactly
 one `run-base` marker, defaulting to `TODO`) and template-markers.test.ts:39-41#"<!-- solution-acceptance: run-base = TODO -->" (the literal line,
 wrapper included).
 
@@ -103,8 +103,8 @@ Step 1 of the Workflow carries the matching instruction to write the pointer
 in every worktree the run touches
 (SKILL.md:136#"in every worktree the run touches."), and each of the
 three per-harness bullets under Harness notes repeats that the pointer rule
-applies unchanged regardless of harness (SKILL.md:501#"applies unchanged.";
-SKILL.md:504#"pointer rule from Run state applies unchanged."; SKILL.md:519#"pointer rule from Run state applies unchanged.").
+applies unchanged regardless of harness (SKILL.md:527#"applies unchanged.";
+SKILL.md:530#"pointer rule from Run state applies unchanged."; SKILL.md:545#"pointer rule from Run state applies unchanged.").
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
@@ -166,22 +166,22 @@ the seven checks (all but the SKILL.md Run state contract check itself)
 route through one `expectPointerMention` helper that asserts the exact
 phrase "`.ai/run` pointer" rather than the bare, incident-prone substring
 `.ai/run`
-(docs-consistency.test.ts:381-388#"expect(slice).toContain("):
+(docs-consistency.test.ts:392-399#"expect(slice).toContain("):
 SKILL.md Run state documents the `.ai/run` contract with its own specific
-phrases (docs-consistency.test.ts:390-396#"make sure it is ignored") and
+phrases (docs-consistency.test.ts:401-407#"make sure it is ignored") and
 carries the keyed example verbatim
-(docs-consistency.test.ts:399-400#"run-base[<repo-basename>] = <sha>");
+(docs-consistency.test.ts:410-411#"run-base[<repo-basename>] = <sha>");
 step 1 mentions the pointer via the helper
-(docs-consistency.test.ts:410-416#"expectPointerMention(step1)"); each of
+(docs-consistency.test.ts:421-427#"expectPointerMention(step1)"); each of
 the three harness bullets mentions it via the helper, in a loop
-(docs-consistency.test.ts:419-436#"expectPointerMention(bullet)"); the
+(docs-consistency.test.ts:430-447#"expectPointerMention(bullet)"); the
 policy-section bullet carries both facts
-(docs-consistency.test.ts:440-447#"run-base[<repo-basename>]"); and the
+(docs-consistency.test.ts:451-458#"run-base[<repo-basename>]"); and the
 README and both INSTALL-AGENT.md write-surface listings mention the pointer
 via the helper and `.gitignore` by substring
-(docs-consistency.test.ts:450-456#"expectPointerMention(section)";
-docs-consistency.test.ts:460-466#"expectPointerMention(section)";
-docs-consistency.test.ts:470-476#"expectPointerMention(section)").
+(docs-consistency.test.ts:461-467#"expectPointerMention(section)";
+docs-consistency.test.ts:471-477#"expectPointerMention(section)";
+docs-consistency.test.ts:481-487#"expectPointerMention(section)").
 
 ## The verdict markers: acceptance signals, fail CLOSED
 
@@ -199,10 +199,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (SKILL.md:277#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (SKILL.md:294#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per SKILL.md:275#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per SKILL.md:292#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:21-22#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:27-28#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -252,7 +252,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and
 SKILL.md's step 7 carries the same one-sentence rule
-(SKILL.md:218#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(SKILL.md:230#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -290,12 +290,12 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (SKILL.md:265#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (SKILL.md:282#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:261#"guidance: when the repo carries a curated knowledge",252-253). Since 0.24.0 (placement rule) step 9 also
+(SKILL.md:278#"guidance: when the repo carries a curated knowledge"; SKILL.md:282-283#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (SKILL.md:271#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (SKILL.md:288#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
@@ -305,12 +305,12 @@ hand-mapping terrain, SKILL.md:141#"with an index) before mapping terrain by han
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
 (`CHANGELOG.md:#[0.12.0]`). Pinned by
-docs-consistency.test.ts:300-305#"apply this optional guidance: when the repo carries a" (the hook's opening phrase, anchored so a
+docs-consistency.test.ts:311-316#"apply this optional guidance: when the repo carries a" (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
-"docs/okf/" also occur in the Discover-step test), docs-consistency.test.ts:309-311#"whether the change touches paths any bundle doc claims as sources" (source-overlap
-check phrase), docs-consistency.test.ts:315-317#"update the affected docs (re-verify and re-stamp) or record a follow-up task" (both responses named), docs-consistency.test.ts:321-322#"run the bundle validator when one is available" (validator-run
-phrase, `okf-kit check` framed as an example), docs-consistency.test.ts:326-328#"Repos without a bundle are unaffected" (non-gate
-optionality phrase), and docs-consistency.test.ts:331-334#"Outcome: updated | not affected | follow-up filed." (the template section, its outcome
+"docs/okf/" also occur in the Discover-step test), docs-consistency.test.ts:320-322#"whether the change touches paths any bundle doc claims as sources" (source-overlap
+check phrase), docs-consistency.test.ts:326-328#"update the affected docs (re-verify and re-stamp) or record a follow-up task" (both responses named), docs-consistency.test.ts:332-333#"run the bundle validator when one is available" (validator-run
+phrase, `okf-kit check` framed as an example), docs-consistency.test.ts:337-339#"Repos without a bundle are unaffected" (non-gate
+optionality phrase), and docs-consistency.test.ts:342-345#"Outcome: updated | not affected | follow-up filed." (the template section, its outcome
 vocabulary, and that it is marked Optional and bundle-scoped).
 
 ## Where the shapes are pinned, and what belongs to sibling docs
@@ -332,9 +332,9 @@ anything inside it.
 (role enumeration, review-gate wording, instruction trust boundary,
 subagent misfire rule, task-slicer/subagent-contract field superset); only
 its `run-base fill instruction ships in the skill`
-(docs-consistency.test.ts:349-355#"before the first implementation commit") and
+(docs-consistency.test.ts:360-366#"before the first implementation commit") and
 `hand off keeps a curated knowledge bundle current`
-(docs-consistency.test.ts:296-344#"Optional") `describe` blocks are this doc's topic.
+(docs-consistency.test.ts:307-355#"Optional") `describe` blocks are this doc's topic.
 The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see

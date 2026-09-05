@@ -216,7 +216,7 @@
   relationship has a dedicated equality-and-superset test suite" was already
   false at the doc's own 2026-08-17 stamp, since the reviewer pair had a
   byte-for-byte `reproduction`-field test since 0.14.0
-  (`test/docs-consistency.test.ts:920-933#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
+  (`test/docs-consistency.test.ts:931-944#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
   current set of three guarded pairs (task-slicer/subagent-input, reviewer,
   implementer — the last two by byte-for-byte field-block equality tests)
   and names explorer as the one pair still without a dedicated guard; (2)
@@ -2570,12 +2570,14 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:159#"the keyed placeholder line's exact text,"`,
-re-pointed by 21 lines since this account was first written, by T-002's own
+(`CHANGELOG.md:175#"the keyed placeholder line's exact text,"`,
+re-pointed by 28 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
-it, and a further +2-line shift from the 0.28.0 release commit inserting
-the `## [0.28.0]` heading above it) grew
+it, the +2-line shift from the 0.28.0 release commit inserting
+the `## [0.28.0]` heading above it, and this bundle's own fix-round-2
+CHANGELOG.md edit above it (net +7 lines: the probe-replay Unreleased
+bullet grew from 8 to 13 lines) grew
 by a net 3
 lines relative to the pre-round-2 base commit (`5a33adb`, `git diff
 --stat 5a33adb -- CHANGELOG.md`: 17 insertions, 14 deletions), shifting
@@ -6998,3 +7000,147 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   docs/okf --require-anchors` reported 0 errors, 0 warnings, and 23 notices;
   the exact CI anchor-family filter reported 0 findings across the entire
   bundle, without historical exemptions.
+
+- 2026-09-05T18:30:28Z (fix-round mutation probe replay): added the
+  round-2-and-later mutation-probe-replay rule to SKILL.md steps 6 and 7,
+  a fifth `replayed` sub-field to both implementer output-contract copies
+  (SKILL.md and implementer.md), and a new docs-consistency describe block
+  pinning both files plus the unchanged reviewer prompt. Re-stamped
+  `subagent-contracts-superset.md`, `review-gate-and-waivers.md`, and
+  `run-state-lifecycle-and-markers.md` after the SKILL.md/implementer.md
+  line shifts, added a new Fix-round mutation probe replay section to
+  `subagent-contracts-superset.md`, and corrected the one line-shifted
+  `CHANGELOG.md` citation this edit's new Unreleased bullet displaced.
+  `npx vitest run test/docs-consistency.test.ts` passed all 246 tests;
+  `npm test` passed all 696 tests; `npm run typecheck` was clean. `okf-kit
+  check --json --require-anchors packages/orchestrator-workflow/docs/okf`
+  actually reported 0 errors, 2 warnings, and 23 notices at this commit
+  (correction, found in review): alongside the pre-existing
+  `install-fence-mechanics.md` staleness warning, this pass's
+  `test/docs-consistency.test.ts` edit newly staled `model-preselection.md`
+  (it lists that test file in `sources:`); the entry above wrongly
+  described the count as "the unchanged 1 historical staleness warning".
+  See the following entry for the re-verification and re-stamp.
+
+- 2026-09-05T19:03:26Z (fix-round mutation probe replay, review round 2):
+  addressed the prior entry's regression plus review findings on the same
+  change. Re-verified `model-preselection.md`'s `test/docs-consistency.
+  test.ts` citations (ranges 2160-2305, unaffected: the new describe block
+  was appended after line 4170) and re-stamped its timestamp; corrected
+  the prior log entry's wrong count above rather than rewriting history.
+  Reworded the replay trigger in both SKILL.md step 6 and implementer.md
+  from the ambiguous "a fix round after the first" to "any round after
+  the task's first ... (on the task's first round there are none)", added
+  a regression-signal consequence for a replayed probe that now survives
+  or can no longer be applied (`result` `survived` or `not_applicable`,
+  resolved before the next reviewer spawn), replaced step 7's undeliverable
+  reviewer permission with a briefing instruction (the orchestrator's
+  reviewer briefing names the replayed-and-killed probes with their
+  `mutant`/`verified_applied_via` values), added a Mutation Probes
+  subsection to `04-implementation-summary.md` (pinned in
+  `test/template-markers.test.ts`), and fixed the L1/L2/L3 wording and
+  test findings (four-evidence-fields-plus-replayed wording, the negative
+  reviewer-prompt pin's name, a shared `extractMutationProbesBlock`
+  helper, `replayed` added to the exact-sub-field pin, and a new
+  fixed-sub-field-order pin). Editing SKILL.md, implementer.md, and
+  `test/docs-consistency.test.ts` shifted lines throughout those files;
+  re-pointed every citation the shift broke (subagent-contracts-
+  superset.md, run-state-lifecycle-and-markers.md, model-preselection.md,
+  review-gate-and-waivers.md) by locating each anchor's exact quoted text
+  at its new line rather than by uniform arithmetic, verified by re-running
+  the full docs-consistency suite until clean. Also fixed the run-state-
+  lifecycle-and-markers.md continuation citation at (then) line 295:
+  `,252-253` pointed at unrelated prose ("high/critical or other
+  ineligible finding") instead of the claim's actual continuation
+  ("Repos without a bundle are unaffected", `,274-275`); by-hand-checked
+  the file's other two continuation citations (lines 27 and 66): line 66's
+  `,33-37` into `test/template-markers.test.ts` matches (the run-base
+  exactly-one-marker test); line 27's `,173-178` into `INSTALL-AGENT.md`
+  is a looser but not wrong continuation (the apply-instead-of-init
+  installer path, same general claim), left as is.
+  `npx vitest run test/docs-consistency.test.ts` passed all 249 tests;
+  `npm test` passed all 701 tests; `npm run typecheck` was clean. `okf-kit
+  check docs/okf` initially reported 0 errors, 3 warnings, 23 notices: the
+  pre-existing `install-fence-mechanics.md` staleness warning, plus two
+  new `citations-resolve` warnings against citations in this `log.md`
+  file itself (a `test/docs-consistency.test.ts:920-933` citation and a
+  `CHANGELOG.md:168` citation, both line-shifted by this pass's edits).
+  Correction (found in review): this bundle's convention, per this same
+  pass's own H1 fix above and the sibling T-002 pass, is to re-point a
+  `log.md` citation shifted by the current change rather than leave it
+  (the log records how a class recurred; its anchors are expected to
+  resolve): re-pointed both to the same content at head, both bounds
+  checked: `test/docs-consistency.test.ts:920-933` (the reproduction-field
+  byte-for-byte equality `it` block, "expect(skillBlock).toBe
+  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:168` (the
+  probe-replay `[Unreleased]` bullet's own citation of `test/template-
+  markers.test.ts`'s "the keyed placeholder line's exact text,") moved to
+  `175`, the further +7-line shift coming from this bundle's own
+  fix-round-2 CHANGELOG.md edit (the bullet grew from 8 to 13 lines).
+  Re-verified: `okf-kit check --json --require-anchors packages/
+  orchestrator-workflow/docs/okf` now reports 0 errors, 1 warning
+  (`install-fence-mechanics.md` staleness), 23 notices. Base comparison
+  (`agent-dx` at e35d0ce, pre-task): the same command reported 0 errors,
+  1 warning (the identical `install-fence-mechanics.md` entry), 23
+  notices. Per-finding comparison: the single warning's message and
+  target are byte-identical between the two runs, and the 23 notices are
+  the same `citations-resolve`/`unresolved-ambiguous` set in both (all
+  `SKILL.md`/`init.ts`/`cli.ts`/`test/init.test.ts` ambiguous-candidate
+  citations, unaffected by this pass); this pass's delta versus base is
+  now exactly zero findings.
+
+Fix round 3 (review round 2 halt: the same continuation-citation class
+recurred a second time in `run-state-lifecycle-and-markers.md`, closing
+the class rather than the individual case). Checked okf-kit's own
+grammar first (`--help`, then the "Continuation citations" and "Anchored
+citations" sections of the okf-kit README): a continuation
+(`` `:N` ``/`` `:N-M` ``, `` -`M` ``/`` (`N`) ``) is structurally
+anchor-less and can never carry its own `#anchor` (`--require-anchors`
+flags this `anchor-required-continuation`, remedy: "lift the
+continuation into its own full `path:N-M#anchor` citation"). The
+bundle's three bare, non-backtick `,N-M` continuations (never actually
+parsed as citations by the grammar at all, since none match
+`` `:N` ``/`` -`M` ``/`` (`N`) ``, hence invisible to every prior pass's
+check) were each split into a second full, independently anchored
+citation instead: `run-state-lifecycle-and-markers.md`'s INSTALL-AGENT.md
+reference (line 27, `,173-178` re-anchored to its own
+`INSTALL-AGENT.md:173-178#"instead: it sources its defaults"`), its
+template-markers.test.ts reference (line 66, `,33-37` re-anchored to
+`template-markers.test.ts:33#"00-goal.md has exactly one run-base marker, defaulting to TODO"`,
+the run-base exactly-one-marker `it` block's own description, chosen over
+a range into the block's body since that body's `expect` line is
+duplicated three other times in the same file and so is too collision-
+prone for a load-bearing anchor), and the one
+this class recurred on (line 295, `,274-275` for "Repos without a bundle
+are unaffected", which at this round's head sits at
+`packages/orchestrator-workflow/assets/skill/SKILL.md:282-283`,
+re-anchored to its own
+`packages/orchestrator-workflow/assets/skill/SKILL.md:282-283#"without a bundle are unaffected"`).
+This closes the class: every bare continuation
+in this bundle's non-reserved docs now has its own anchor via a full
+citation (`index.md` and `log.md` are append-only journals and keep their
+historical forms), so a future
+line-shift of the same paragraph fails loudly instead of drifting
+silently. The same round's SKILL.md step 6 edit (a new clause recording
+each mutation probe into `04-implementation-summary.md`'s Mutation
+Probes subsection) shifted every SKILL.md line at or after 207 by +2,
+breaking 65 citations across `review-gate-and-waivers.md`,
+`run-state-lifecycle-and-markers.md`, and `subagent-contracts-superset.md`
+(plus this round's own docs-consistency.test.ts test insertions shifting
+that file's line-numbered citations in `subagent-contracts-superset.md`);
+all were re-derived against the final tree, both bounds, content-verified
+rather than computed blindly. Measured after the round-3 commit:
+`okf-kit check --json --require-anchors packages/orchestrator-workflow/docs/okf`
+reported 25 findings (0 errors, 2 warnings, 23 notices), one more than
+the base comparison (`agent-dx` at e35d0ce): the round's own
+docs-consistency.test.ts edit had made `model-preselection.md` stale
+against a declared source, the same class the round-1 review found
+(reviewer round 3, repeated). The closing delta re-stamps
+`model-preselection.md` (its citations into the test file were
+re-verified and are unchanged) and extends one short anchor in
+`subagent-contracts-superset.md`; measured after that commit the
+validator reports the base's 24 findings again (0 errors, 1 warning, the
+identical `install-fence-mechanics.md` staleness entry, 23 notices).
+Follow-up filed: a mechanical guard that fails when a bundle doc's
+timestamp is older than the last commit of any declared source, since
+the warn-only staleness workflow let this class recur twice.

@@ -28,6 +28,12 @@ not_started | in_progress | done | partial | blocked
 
 <!-- Explain why, if applicable. -->
 
+### Mutation Probes
+
+| Round | Mutant | Verified Applied Via | Result | Restored Verified | Replayed |
+|---|---|---|---|---|---|
+| <!-- round --> | <!-- mutant --> | <!-- verified_applied_via --> | <!-- result --> | <!-- restored_verified --> | <!-- replayed --> |
+
 ## Risks / Notes
 
 - <!-- note -->

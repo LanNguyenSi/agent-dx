@@ -28,6 +28,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` sections 5(b) and
   7(v).
 
+- On any round after a task's first, the orchestrator's briefing names
+  every mutation probe named in an earlier round of this task, and the
+  implementer replays each one, not only the round's new probes, before
+  the next reviewer spawn, reporting each replayed probe in
+  `mutation_probes` with a new `replayed` sub-field. A replayed probe
+  whose mutant now survives or can no longer be applied is a regression
+  signal, reported as such and resolved before the next reviewer spawn.
+  `04-implementation-summary.md` gained a Mutation Probes subsection
+  under Test Evidence to hold this evidence across rounds. The
+  orchestrator's reviewer briefing names the replayed probes the
+  implementer reports as killed, together with their `mutant` and
+  `verified_applied_via` values, so the reviewer may skip re-running
+  those; the reviewer output contract is unchanged. Anchored by the
+  analysis in `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md`
+  section 7(ii).
+
 ## [0.29.0] - 2026-09-05
 
 ### Added

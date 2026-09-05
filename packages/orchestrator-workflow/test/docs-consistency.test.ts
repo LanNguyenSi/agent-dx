@@ -23,6 +23,17 @@ function readDoc(name: string): string {
 const sortedRoles = [...ROLES].sort();
 
 /**
+ * Shared by every describe block that compares the `mutation_probes` output
+ * contract block between SKILL.md and implementer.md, so the extraction
+ * regex itself cannot drift between call sites.
+ */
+function extractMutationProbesBlock(raw: string): string {
+  const match = raw.match(/^mutation_probes:\n(?: {2}.+\n)*/m);
+  expect(match, "mutation_probes block not found").toBeTruthy();
+  return (match as RegExpMatchArray)[0];
+}
+
+/**
  * Guards the enumeration sites that actually drifted when the explorer role
  * was added in 0.4.0. Each check targets the specific list, not the whole
  * document, so a role missing from one enumeration fails even while the role
@@ -993,11 +1004,6 @@ describe("mutation probes requirement ships in the skill and the implementer pro
   });
 
   it("both implementer output contracts carry an identical mutation_probes field (raw, not line-unwrapped)", () => {
-    const extractMutationProbesBlock = (raw: string): string => {
-      const match = raw.match(/^mutation_probes:\n(?: {2}.+\n)*/m);
-      expect(match, "mutation_probes block not found").toBeTruthy();
-      return (match as RegExpMatchArray)[0];
-    };
     const skillBlock = extractMutationProbesBlock(readAsset("skill/SKILL.md"));
     const implementerBlock = extractMutationProbesBlock(
       readAsset("agents/implementer.md"),
@@ -1049,7 +1055,7 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
 
   it("both copies pin the mutation_probes field block by its exact sub-field names, not just cross-copy equality", () => {
     const field =
-      'mutation_probes: - mutant: "" verified_applied_via: "" result: "" restored_verified: ""';
+      'mutation_probes: - mutant: "" verified_applied_via: "" result: "" restored_verified: "" replayed: false | true';
     expect(skillMd).toContain(field);
     expect(implementerMd).toContain(field);
   });
@@ -4168,5 +4174,131 @@ describe("docs-only closing deltas stay narrowly bounded", () => {
       expect(rule).toContain("Decision");
       expect(rule).toContain("`accepted`");
     }
+  });
+});
+
+/**
+ * A fix round replayed only that round's own new mutation probes, letting a
+ * regression a prior round's probe would have caught slip back in
+ * unnoticed between rounds. This pins the replay rule: step 6's
+ * assignment-time instruction to name every mutation probe named in an
+ * earlier round of this task (sourced from `04-implementation-summary.md`;
+ * on the task's first round there are none to name), the regression-signal
+ * consequence for a replayed probe that now survives or can no longer be
+ * applied, the `replayed` sub-field added to both output contract copies
+ * (byte-identical, the same rigor applied to the other `mutation_probes`
+ * sub-fields above), the same rule sentence in the installed
+ * implementer.md prompt, and the reviewer-briefing instruction in step 7
+ * that lets a reviewer skip re-running a probe the implementer's replay
+ * already reports as killed without changing the reviewer contract itself
+ * (review round 2: the trigger's ordinal was ambiguous, a replayed-but-now-
+ * surviving probe had no reporting consequence, and the step 7 permission
+ * had no delivery path since the reviewer never reads SKILL.md). Anchored
+ * by a measurement; see the CHANGELOG entry for this rule.
+ */
+describe("fix-round mutation probe replay ships in step 6, step 7, and both implementer contracts", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+
+  it("step 6 instructs replaying every mutation probe named in an earlier round of this task", () => {
+    expect(skillMd).toContain(
+      "On any round after the task's first, the briefing also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`",
+    );
+    expect(skillMd).toContain(
+      "the implementer replays each one, not only the round's new probes, before the next reviewer spawn, and reports each in `mutation_probes` with the four evidence fields plus `replayed: true`",
+    );
+  });
+
+  it("step 6 treats a replayed probe that now survives or cannot be applied as a regression signal", () => {
+    expect(skillMd).toContain(
+      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal, reported as such (`result` `survived` or `not_applicable` with the reason) and resolved before the next reviewer spawn.",
+    );
+  });
+
+  it("the installed implementer prompt carries the same replay rule", () => {
+    expect(implementerMd).toContain(
+      "On any round after the task's first, the assignment also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`",
+    );
+    expect(implementerMd).toContain(
+      "Replay each one, not only this round's new probes, before returning your report, and report each replayed probe in `mutation_probes` with the four evidence fields plus `replayed: true`",
+    );
+  });
+
+  it("the installed implementer prompt carries the same regression-signal consequence", () => {
+    expect(implementerMd).toContain(
+      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal: report it as such (`result` `survived` or `not_applicable` with the reason) and resolve it before the next reviewer spawn.",
+    );
+  });
+
+  it("SKILL.md's output-contract prose paragraph (a third copy of the replay rule) also states the trigger", () => {
+    expect(skillMd).toContain(
+      "On any round after the task's first, the implementer replays every probe named in an earlier round of this task (on the task's first round there are none), not only this round's new probes, before the next reviewer spawn, reporting each one in `mutation_probes` alongside the round's new probes.",
+    );
+  });
+
+  it("SKILL.md's output-contract prose paragraph also states the regression-signal consequence", () => {
+    expect(skillMd).toContain(
+      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal, reported as such and resolved before the next reviewer spawn.",
+    );
+  });
+
+  it("SKILL.md's output-contract prose paragraph states the `replayed` semantics (false for new, true for a replayed prior-round probe)", () => {
+    expect(skillMd).toContain(
+      "Each item also carries `replayed`: `false` for a probe newly introduced this round, `true` for a prior round's probe replayed this round under the replay rule in step 6.",
+    );
+  });
+
+  it("implementer.md states the `replayed` semantics for a newly introduced probe", () => {
+    expect(implementerMd).toContain(
+      "Each item also carries `replayed`: `false` for a probe newly introduced this round.",
+    );
+  });
+
+  it("step 6 instructs recording each mutation probe as a row in 04-implementation-summary.md's Mutation Probes subsection", () => {
+    expect(skillMd).toContain(
+      "recording each probe the implementer reports as a row in `04-implementation-summary.md`'s Mutation Probes subsection, with the round it was named in.",
+    );
+  });
+
+  it("both output contract copies carry a byte-identical mutation_probes block including the replayed sub-field", () => {
+    const skillBlock = extractMutationProbesBlock(readAsset("skill/SKILL.md"));
+    const implementerBlock = extractMutationProbesBlock(
+      readAsset("agents/implementer.md"),
+    );
+    expect(skillBlock).toContain('replayed: false | true');
+    expect(skillBlock).toBe(implementerBlock);
+  });
+
+  it("step 7 tells the orchestrator to name the replayed-and-killed probes in the reviewer briefing so the reviewer may skip re-running them, without changing the reviewer contract", () => {
+    expect(skillMd).toContain(
+      "the orchestrator's reviewer briefing names the replayed probes the implementer reports as killed together with their `mutant` and `verified_applied_via` values; the reviewer may then skip re-running those. The reviewer output contract itself is unchanged.",
+    );
+  });
+
+  it("the reviewer prompt's output-contract yaml block gains no `replayed` field", () => {
+    const reviewerMd = readAsset("agents/reviewer.md");
+    const match = reviewerMd.match(/```yaml\n([\s\S]*?)```/);
+    expect(match, "reviewer output-contract yaml block not found").toBeTruthy();
+    const outputContractBlock = (match as RegExpMatchArray)[1];
+    expect(outputContractBlock).not.toContain("replayed");
+  });
+
+  it("both copies' mutation_probes block has exactly the five sub-fields in a fixed order", () => {
+    const skillBlock = extractMutationProbesBlock(readAsset("skill/SKILL.md"));
+    const implementerBlock = extractMutationProbesBlock(
+      readAsset("agents/implementer.md"),
+    );
+    const subFieldNames = (block: string): string[] =>
+      [...block.matchAll(/^\s*(?:- )?(\w+):/gm)].map((m) => m[1]);
+    const expectedOrder = [
+      "mutation_probes",
+      "mutant",
+      "verified_applied_via",
+      "result",
+      "restored_verified",
+      "replayed",
+    ];
+    expect(subFieldNames(skillBlock)).toEqual(expectedOrder);
+    expect(subFieldNames(implementerBlock)).toEqual(expectedOrder);
   });
 });
