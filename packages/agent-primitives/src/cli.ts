@@ -421,7 +421,7 @@ const shutdownController = new AbortController();
  * shortcut while a descendant that left the process group still holds
  * the pipes, and only true closure means every write the run had in
  * flight has actually landed (the same distinction `probe`'s own signal
- * handler makes; see `src/probe/index.ts`).
+ * handler makes; see `src/probe/session.ts`'s `createRunController`).
  */
 let inFlightExec: Promise<ExecResult> | null = null;
 let inFlightExecClosed: Promise<void> | null = null;
