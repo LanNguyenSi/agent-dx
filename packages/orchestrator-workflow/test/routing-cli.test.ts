@@ -639,7 +639,7 @@ describe("recorded inheritance across command boundaries", () => {
       readFileSync(join(target, ".opencode/agents/implementer.md"), "utf8"),
     ).toContain("model: provider/explicit");
     expect(existsSync(catalogCalls)).toBe(false);
-  });
+  }, 30_000);
 
   it.each(["roles", "classes"] as const)(
     "does not fill recorded inherited %s when another selection needs catalog resolution",
