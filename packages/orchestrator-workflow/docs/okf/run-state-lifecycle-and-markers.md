@@ -23,8 +23,8 @@ sources:
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:65-76#"05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(SKILL.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:116-121#"one directory per unit of work, newest = active";
-packages/orchestrator-workflow/INSTALL-AGENT.md:59-60#"(new files).",173-178). The newest run
+(SKILL.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:125-130#"one directory per unit of work, newest = active";
+packages/orchestrator-workflow/INSTALL-AGENT.md:64-65#"(new files).",173-178). The newest run
 directory is the active one unless a `.ai/run` pointer names one
 (SKILL.md:80-83#"older directories are the auditable history. Do not", see the pointer section below); older
 directories are the auditable history and
@@ -104,11 +104,11 @@ in every worktree the run touches
 (SKILL.md:135-136#"in every worktree the run touches."), and each of the
 three per-harness bullets under Harness notes repeats that the pointer rule
 applies unchanged regardless of harness (SKILL.md:483-488#"applies unchanged.";
-SKILL.md:489-491#"applies unchanged."; SKILL.md:492-495#"applies unchanged.").
+SKILL.md:489-491#"applies unchanged."; SKILL.md:494-506#"applies unchanged.").
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
-run (packages/orchestrator-workflow/assets/agents-md-section.md:159-161#"marker per repository for multi-repo runs").
+run (packages/orchestrator-workflow/assets/agents-md-section.md:160-162#"marker per repository for multi-repo runs").
 
 For a run that touches more than one repository, the orchestrator records
 one keyed marker per repository on its own line beside the unkeyed one,
@@ -134,9 +134,9 @@ read as-is and the verdict layer blocks it, since `<sha>` is not a commit
 sha. Unlike the pointer, this marker line is written into a
 tracked run file, not gitignored: the README and the manual-install doc both
 note the pointer is machine-local and add it to `.gitignore`
-(packages/orchestrator-workflow/README.md:125-127#"it to the repository's";
-packages/orchestrator-workflow/INSTALL-AGENT.md:60-63#"repository's";
-packages/orchestrator-workflow/INSTALL-AGENT.md:175-177#"repository's").
+(packages/orchestrator-workflow/README.md:134-136#"it to the repository's";
+packages/orchestrator-workflow/INSTALL-AGENT.md:65-68#"repository's";
+packages/orchestrator-workflow/INSTALL-AGENT.md:198-200#"repository's").
 
 The template-markers.test.ts property test that checks the shipped keyed
 line against the consumer's shape no longer mirrors a tightened subset of
@@ -152,11 +152,11 @@ single-repo run carries only the one marker it always carried.
 Two describe blocks pin the shipped shapes. In
 `template-markers.test.ts`, one test pins the keyed placeholder line
 byte-exactly
-(template-markers.test.ts:55-59#"<!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->"),
+(template-markers.test.ts:55-57#"<!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->"),
 a second pins that it is a standalone whole-line comment, not embedded in
-prose (template-markers.test.ts:61-70#"trimmed.endsWith("), a third pins
+prose (template-markers.test.ts:61-69#"trimmed.endsWith("), a third pins
 that it sits directly below the unkeyed marker
-(template-markers.test.ts:72-81#"run-base[<repo-basename>] = <sha>"), and a
+(template-markers.test.ts:72-79#"run-base[<repo-basename>] = <sha>"), and a
 fourth pins that the existing unkeyed-marker regex still matches exactly
 once, i.e. the keyed line's bracket does not get mistaken for the unkeyed
 one (template-markers.test.ts:83-84#"goalTemplate.matchAll(runBaseRe)"). In
@@ -168,15 +168,15 @@ phrase "`.ai/run` pointer" rather than the bare, incident-prone substring
 `.ai/run`
 (docs-consistency.test.ts:381-388#"expect(slice).toContain("):
 SKILL.md Run state documents the `.ai/run` contract with its own specific
-phrases (docs-consistency.test.ts:390-397#"make sure it is ignored") and
+phrases (docs-consistency.test.ts:390-396#"make sure it is ignored") and
 carries the keyed example verbatim
-(docs-consistency.test.ts:399-401#"run-base[<repo-basename>] = <sha>");
+(docs-consistency.test.ts:399-400#"run-base[<repo-basename>] = <sha>");
 step 1 mentions the pointer via the helper
-(docs-consistency.test.ts:410-417#"expectPointerMention(step1)"); each of
+(docs-consistency.test.ts:410-416#"expectPointerMention(step1)"); each of
 the three harness bullets mentions it via the helper, in a loop
-(docs-consistency.test.ts:419-438#"expectPointerMention(bullet)"); the
+(docs-consistency.test.ts:419-436#"expectPointerMention(bullet)"); the
 policy-section bullet carries both facts
-(docs-consistency.test.ts:440-448#"run-base[<repo-basename>]"); and the
+(docs-consistency.test.ts:440-447#"run-base[<repo-basename>]"); and the
 README and both INSTALL-AGENT.md write-surface listings mention the pointer
 via the helper and `.gitignore` by substring
 (docs-consistency.test.ts:450-456#"expectPointerMention(section)";

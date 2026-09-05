@@ -1059,3 +1059,32 @@ describe("safeRealpath", () => {
     expect(safeRealpath(gone)).toBe(gone);
   });
 });
+
+describe("operator legacy opencode compatibility maps", () => {
+  it("preserves validated compatibility maps and treats malformed stored maps as unreadable", () => {
+    const manifest = createOperatorManifest({
+      harnesses: ["opencode"],
+      profile: "minimal",
+      tiers: true,
+      models: {},
+      opencodeModels: { implementer: "local-model" },
+      opencodeClassModels: { large: "local-large" },
+    });
+    writeOperatorManifest(home, manifest);
+    expect(readOperatorManifest(home)?.defaults.opencodeModels).toEqual({
+      implementer: "local-model",
+    });
+    expect(readOperatorManifest(home)?.defaults.opencodeClassModels).toEqual({
+      large: "local-large",
+    });
+    const invalid = {
+      ...manifest,
+      defaults: {
+        ...manifest.defaults,
+        opencodeClassModels: { unknown: "bad" },
+      },
+    };
+    writeFileSync(join(home, "manifest.json"), JSON.stringify(invalid));
+    expect(readOperatorManifest(home)).toBeUndefined();
+  });
+});

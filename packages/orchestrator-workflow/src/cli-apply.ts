@@ -2,6 +2,7 @@ import type { ResolveInitInputsParams } from "./cli-inputs.js";
 import { detectHarnesses } from "./detect.js";
 import type { Harness } from "./detect.js";
 import type { Manifest } from "./init.js";
+import type { HarnessRouting } from "./routing.js";
 
 /** The subset of `apply`'s commander options that feed input resolution. */
 export interface ApplyResolutionOptions {
@@ -10,6 +11,7 @@ export interface ApplyResolutionOptions {
   profile?: string;
   opencodeProvider?: string;
   tiers?: boolean;
+  routing?: HarnessRouting;
 }
 
 /**

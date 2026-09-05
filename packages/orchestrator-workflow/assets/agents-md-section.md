@@ -155,7 +155,8 @@ Workflow state lives under `.ai/`:
   The newest run directory is the active one; older ones are the auditable
   history.
 - `.ai/workflow/manifest.json` records the installed kit version, the chosen
-  harnesses, and the per-role model preferences.
+  harnesses, legacy model preferences, and the exact per-harness role/tier
+  routing selections.
 - Every worktree a run touches carries a `.ai/run` pointer (absolute path of
   the run directory, gitignored) and `00-goal.md` carries one
   `run-base[<repo-basename>]` marker per repository for multi-repo runs.
@@ -164,9 +165,20 @@ Workflow state lives under `.ai/`:
 
 - The orchestrator runs on the session's main model. Use the strongest
   reasoning model available.
-- Per-role model preferences (explorer, task slicer, implementer, reviewer,
-  advisor) are recorded in `.ai/workflow/manifest.json` and, where the
-  harness supports per-agent models, in the subagent definitions themselves.
+- Per-role and per-tier model/effort selections (explorer, task slicer,
+  implementer, reviewer, advisor) are recorded in
+  `.ai/workflow/manifest.json` and in the harness subagent definitions.
+- Preserve recorded routing choices across re-installs. Change a model only
+  through a deliberate role/tier override; never treat a newer model as an
+  automatic upgrade. The prior routing is the rollback input.
+- For Codex, inspect the native delegation capabilities before dispatch. Use
+  an installed named agent when selection is supported; otherwise, when spawn
+  accepts explicit model and effort, read the installed role TOML and pass its
+  model, effort, developer instructions, and narrow contract into a fresh
+  task-local spawn. Apply the TOML sandbox request only when that spawn surface
+  accepts it; otherwise the role inherits the caller's sandbox and its prompt
+  is the edit guard. If native spawning is unavailable, run the contract
+  inline and sequentially. Only the orchestrator delegates.
 
 ### Definition of done
 

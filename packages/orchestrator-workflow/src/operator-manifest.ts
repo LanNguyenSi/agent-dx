@@ -21,6 +21,10 @@ import {
   assertValidModelId,
   isProfile,
 } from "./models.js";
+import { parseRouting } from "./routing.js";
+import { parseOpencodeModelMaps } from "./routing-state.js";
+import type { OpencodeModelMaps } from "./routing-state.js";
+import type { HarnessRouting } from "./routing.js";
 
 export const OPERATOR_HOME_DIRNAME = ".orchestrator-workflow";
 export const OPERATOR_HOME_ENV = "ORCHESTRATOR_WORKFLOW_HOME";
@@ -34,11 +38,13 @@ export const OPERATOR_MANIFEST_FILENAME = "manifest.json";
  * some roles, and the rest should fall back to `DEFAULT_MODELS` at the call
  * site rather than forcing every role to be present here.
  */
-export interface OperatorManifestDefaults {
+export interface OperatorManifestDefaults extends OpencodeModelMaps {
   harnesses: Harness[];
   profile: Profile;
   tiers: boolean;
   models: Partial<Record<Role, string>>;
+  /** Explicit or resolved per-harness selections, carried additively. */
+  routing?: HarnessRouting;
 }
 
 /** One target directory this operator has applied the kit to. */
@@ -151,6 +157,24 @@ export function readOperatorManifest(
   const tiers =
     typeof rawDefaults.tiers === "boolean" ? rawDefaults.tiers : false;
 
+  let opencodeMaps: OpencodeModelMaps;
+  try {
+    opencodeMaps = parseOpencodeModelMaps(rawDefaults);
+  } catch {
+    return undefined;
+  }
+  let routing: HarnessRouting | undefined;
+  if ("routing" in rawDefaults) {
+    try {
+      routing = parseRouting(rawDefaults.routing);
+    } catch {
+      // Unlike legacy aliases, an invalid routing map could silently change
+      // native Codex agents on a future install. Treat the whole operator
+      // manifest as unreadable so setup/apply cannot overwrite it by guess.
+      return undefined;
+    }
+  }
+
   const targets: OperatorTarget[] = (
     Array.isArray(candidate.targets) ? candidate.targets : []
   ).filter((value): value is OperatorTarget => {
@@ -167,7 +191,14 @@ export function readOperatorManifest(
   return {
     kit: "orchestrator-workflow",
     schemaVersion: 1,
-    defaults: { harnesses, profile, tiers, models },
+    defaults: {
+      harnesses,
+      profile,
+      tiers,
+      models,
+      ...(routing !== undefined ? { routing } : {}),
+      ...opencodeMaps,
+    },
     targets,
     createdAt:
       typeof candidate.createdAt === "string" ? candidate.createdAt : "",
@@ -211,6 +242,7 @@ function writeOperatorManifestUnlocked(
     home,
     `${OPERATOR_MANIFEST_FILENAME}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
   );
+  parseOpencodeModelMaps(manifest.defaults);
   writeFileSync(tmpPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   renameSync(tmpPath, path);
 }
@@ -682,6 +714,9 @@ export function upsertOperatorTarget(
       defaults: {
         ...manifest.defaults,
         models: { ...manifest.defaults.models },
+        ...(manifest.defaults.routing !== undefined
+          ? { routing: manifest.defaults.routing }
+          : {}),
       },
       targets,
     },

@@ -6932,3 +6932,34 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   cli-inputs.ts sticky-comment consolidation; their source claims and
   repointed anchors match the current implementation. `okf-kit check
   docs/okf --strict` reports 0 errors and 0 warnings.
+
+- 2026-09-05T05:31:52Z (Codex routing documentation): documented the
+  harness-specific role/tier routing schema, native Codex agent files and
+  capability-aware dispatch, additive routing input, offline catalog input,
+  persisted selection and rollback behavior, and agent-led installation as
+  the recommended entry point. The first review's authorization, sandbox,
+  and repeated-source-anchor findings were corrected without waiver, and a
+  docs-consistency regression now prevents blanket `--force` confirmation
+  after authority has already been granted. A subsequent review's Claude
+  variant citation was corrected within the named composer, and the docs now
+  distinguish strict qualified routing from the compatibility maps that
+  retain supported bare legacy opencode ids. Re-stamped affected source and
+  test citations after the routing implementation froze. `agent-primitives
+  verify -c docs -x 'docs=npx vitest run test/docs-consistency.test.ts
+  test/template-markers.test.ts'` passed all 253 tests. `okf-kit check
+  packages/orchestrator-workflow/docs/okf --json` reported 0 errors, 10
+  historical warnings, and 36 notices; the notices for the new routing and
+  Codex sources reflect their uncommitted state in this worktree.
+
+- 2026-09-05T06:00:58Z (routing inheritance follow-up): re-stamped live source
+  citations after the shared routing-state fixes, preserving the named Claude
+  and opencode variant composer context. Replaced the obsolete compatibility
+  helper citation and documented the distinction between recorded session
+  inheritance and unknown legacy resolution. Citation-order tests now accept
+  changing line numbers while retaining their exact anchors and semantic-order
+  checks. `agent-primitives verify -c docs,testtypes -x 'docs=npx vitest run
+  test/docs-consistency.test.ts test/template-markers.test.ts' -x
+  'testtypes=npm run typecheck:test'` passed all 253 focused tests and the
+  test typecheck. `okf-kit check packages/orchestrator-workflow/docs/okf
+  --json --require-anchors` reported 0 errors, the unchanged 10 historical
+  log warnings, and 36 notices; all live module citations resolve.

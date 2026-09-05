@@ -6,6 +6,7 @@ import type { Manifest } from "./init.js";
 import type { ModelClass, Profile, Role } from "./models.js";
 import {
   CLASS_MODELS,
+  DEFAULT_TIER,
   DEFAULT_MODELS,
   DEFAULT_PROFILE,
   MODEL_ALIASES,
@@ -15,6 +16,16 @@ import {
   parseProfile,
   rolesForProfile,
 } from "./models.js";
+import { mergeRouting, parseRouting } from "./routing.js";
+import {
+  legacyRouting,
+  normalizeRoutingState,
+  selectedTiers,
+  parseOpencodeModelMaps,
+  recordedOpencodeInheritance,
+} from "./routing-state.js";
+import type { OpencodeModelMaps } from "./routing-state.js";
+import type { HarnessRouting } from "./routing.js";
 import {
   detectProvider,
   loadOpencodeCatalog,
@@ -135,6 +146,7 @@ export interface InitResolutionOptions {
   profile?: string;
   opencodeProvider?: string;
   tiers?: boolean;
+  routing?: HarnessRouting;
 }
 
 export interface ResolveInitInputsParams {
@@ -210,13 +222,12 @@ export interface ResolveInitInputsParams {
   stickyAnnotateDetected?: Harness[];
 }
 
-export interface ResolvedInitInputs {
+export interface ResolvedInitInputs extends OpencodeModelMaps {
   harnesses: Harness[];
   profile: Profile;
   models: Record<Role, string>;
   tiers: boolean;
-  opencodeModels?: Record<Role, string | undefined>;
-  opencodeClassModels?: Record<ModelClass, string | undefined>;
+  routing: HarnessRouting;
   /**
    * Warning lines to print, in order, exactly as `init` printed them to
    * stderr before this extraction (each written as `${line}\n`). Returned
@@ -224,6 +235,17 @@ export interface ResolvedInitInputs {
    * print them.
    */
   warnings: string[];
+}
+
+function modelOverrideRoles(spec: string): Role[] {
+  const roles: Role[] = [];
+  for (const item of spec.split(",")) {
+    const role = item.trim().split("=", 1)[0]?.trim();
+    if (role && rolesForProfile("full").includes(role as Role)) {
+      roles.push(role as Role);
+    }
+  }
+  return [...new Set(roles)];
 }
 
 /**
@@ -253,6 +275,13 @@ export async function resolveInitInputs(
     stickyPreChecked,
     stickyAnnotateDetected,
   } = params;
+
+  const routingPatch =
+    opts.routing === undefined ? undefined : parseRouting(opts.routing);
+  const previousRouting =
+    previous?.routing === undefined
+      ? undefined
+      : parseRouting(previous.routing);
 
   let harnesses: Harness[];
   if (opts.harness) {
@@ -332,8 +361,17 @@ export async function resolveInitInputs(
     ...(previous?.models ?? {}),
   };
   if (opts.models) models = parseModelsSpec(opts.models, models);
-  if (interactive && !opts.models)
+  const promptLegacyModels =
+    interactive &&
+    !opts.models &&
+    harnesses.some((harness) => harness === "claude" || harness === "opencode");
+  if (promptLegacyModels)
     models = await promptModels(models, rolesForProfile(profile));
+  const legacyOverrideRoles = opts.models
+    ? modelOverrideRoles(opts.models)
+    : promptLegacyModels
+      ? rolesForProfile(profile)
+      : [];
 
   // Explicit --tiers/--no-tiers always override; a plain re-run (neither
   // flag passed) keeps whatever the previous install had (default false
@@ -350,10 +388,29 @@ export async function resolveInitInputs(
   // Resolve opencode model aliases against the live catalog when the opencode
   // harness is selected. The shell-out stays reachable only from this
   // resolution step, keeping runInit pure.
-  let opencodeModels: Record<Role, string | undefined> | undefined;
-  let opencodeClassModels: Record<ModelClass, string | undefined> | undefined;
+  const previousMaps = parseOpencodeModelMaps(previous ?? {});
+  let opencodeModels = previousMaps.opencodeModels;
+  let opencodeClassModels = previousMaps.opencodeClassModels;
   const warnings: string[] = [];
-  if (harnesses.includes("opencode")) {
+  const availableRouting = mergeRouting(
+    legacyRouting(harnesses, models, opencodeModels, opencodeClassModels),
+    previousRouting,
+    routingPatch,
+  );
+  const needsOpencodeResolution =
+    harnesses.includes("opencode") &&
+    (opts.opencodeProvider !== undefined ||
+      legacyOverrideRoles.some(
+        (role) => !routingPatch?.opencode?.[role]?.[DEFAULT_TIER[role]],
+      ) ||
+      rolesForProfile(profile).some((role) =>
+        selectedTiers(role, tiers).some(
+          (tier) =>
+            !availableRouting.opencode?.[role]?.[tier] &&
+            !recordedOpencodeInheritance(previousMaps, role, tier),
+        ),
+      ));
+  if (needsOpencodeResolution) {
     const catalog = loadOpencodeCatalog();
     const { resolved, warnings: modelWarnings } = resolveOpencodeModels(
       models,
@@ -362,7 +419,12 @@ export async function resolveInitInputs(
         explicitProvider: opts.opencodeProvider,
       },
     );
-    opencodeModels = resolved;
+    opencodeModels =
+      previousMaps.opencodeModels !== undefined && !opts.opencodeProvider
+        ? { ...previousMaps.opencodeModels }
+        : resolved;
+    for (const role of legacyOverrideRoles)
+      opencodeModels[role] = resolved[role];
     for (const w of modelWarnings) {
       warnings.push(`Warning: ${w}`);
     }
@@ -374,11 +436,16 @@ export async function resolveInitInputs(
       opencodeClassModels = {} as Record<ModelClass, string | undefined>;
       for (const modelClass of MODEL_CLASSES) {
         const alias = CLASS_MODELS[modelClass];
-        const resolvedModel = providerResult.provider
-          ? resolveAlias(providerResult.provider, alias, catalog)
-          : undefined;
+        const recordedClass =
+          previousMaps.opencodeClassModels !== undefined &&
+          !opts.opencodeProvider;
+        const resolvedModel = recordedClass
+          ? previousMaps.opencodeClassModels?.[modelClass]
+          : providerResult.provider
+            ? resolveAlias(providerResult.provider, alias, catalog)
+            : undefined;
         opencodeClassModels[modelClass] = resolvedModel;
-        if (resolvedModel !== undefined) continue;
+        if (resolvedModel !== undefined || recordedClass) continue;
         // One warning per unresolved model class: without it, every
         // effort-tier variant keyed to this class is silently skipped
         // (init.ts skips the variant write entirely when the class
@@ -400,6 +467,19 @@ export async function resolveInitInputs(
     }
   }
 
+  const routing = normalizeRoutingState({
+    harnesses,
+    models,
+    opencodeModels,
+    opencodeClassModels,
+    previousRouting,
+    routing: routingPatch,
+    legacyOverrideRoles,
+    // Changing provider is an explicit request to resolve all opencode leaves.
+    updateOpencodeModels: opts.opencodeProvider !== undefined,
+    updateOpencodeClassModels: opts.opencodeProvider !== undefined,
+  });
+
   return {
     harnesses,
     profile,
@@ -407,6 +487,7 @@ export async function resolveInitInputs(
     tiers,
     opencodeModels,
     opencodeClassModels,
+    routing,
     warnings,
   };
 }

@@ -66,9 +66,9 @@ describe("docs enumerate every installed role", () => {
     expect(Object.keys(manifest.models).sort()).toEqual(sortedRoles);
   });
 
-  it("agents-md-section per-role model preferences bullet lists every role", () => {
+  it("agents-md-section per-role routing bullet lists every role", () => {
     const match = agentsMdSection.match(
-      /Per-role model preferences \(([^)]+)\)/,
+      /Per-role and per-tier model\/effort selections \(([^)]+)\)/,
     );
     expect(match).toBeTruthy();
     const listed = (match as RegExpMatchArray)[1]
@@ -635,7 +635,10 @@ describe("README names the Bash residual honestly", () => {
   it("states instruction-only guarding for Bash without claiming closure", () => {
     const readmeMd = unwrap(readDoc("README.md"));
     expect(readmeMd).toContain("guarded by instruction only");
-    expect(readmeMd).toContain("nothing technically prevents it");
+    expect(readmeMd).toContain("role definition itself does not prevent it");
+    expect(readmeMd).toContain(
+      "A native read-only sandbox can block those writes",
+    );
     expect(readmeMd).toContain("out of this kit's scope");
   });
 });
@@ -3575,7 +3578,7 @@ describe("operator-install-and-registry.md names the real operator manifest sche
 
   function sampleManifest() {
     return createOperatorManifest(
-      { harnesses: [], profile: "full", tiers: false, models: {} },
+      { harnesses: [], profile: "full", tiers: false, models: {}, routing: {} },
       "2020-01-01T00:00:00.000Z",
     );
   }
@@ -3600,12 +3603,13 @@ describe("operator-install-and-registry.md names the real operator manifest sche
 
   it("names every OperatorManifestDefaults key", () => {
     // Literal mirrors the doc's own "carries `harnesses`, `profile`,
-    // `tiers`, and `models`" sentence.
+    // `tiers`, legacy `models`, and optional `routing`" sentence.
     expect(Object.keys(sampleManifest().defaults)).toEqual([
       "harnesses",
       "profile",
       "tiers",
       "models",
+      "routing",
     ]);
     for (const key of Object.keys(sampleManifest().defaults)) {
       expect(doc).toContain(`\`${key}\``);
@@ -3863,11 +3867,11 @@ describe("operator-install-and-registry.md's apply section states the pin gate's
     expect(applySection).toContain(
       "The pin gate returns before the install is ever attempted",
     );
-    const gateCitation = applySection.indexOf(
-      'cli.ts:745-751#"Repository is pinned at"',
+    const gateCitation = applySection.search(
+      /cli\.ts:\d+(?:-\d+)?#"Repository is pinned at"/,
     );
-    const runInitCitation = applySection.indexOf(
-      'cli.ts:840#"const report = runInit({"',
+    const runInitCitation = applySection.search(
+      /cli\.ts:\d+(?:-\d+)?#"const report = runInit\(\{"/,
     );
     expect(gateCitation, "pin-gate citation missing").toBeGreaterThanOrEqual(0);
     expect(runInitCitation, "runInit citation missing").toBeGreaterThan(
@@ -3882,8 +3886,8 @@ describe("operator-install-and-registry.md's apply section states the pin gate's
     expect(applySection).toContain(
       "Once the install has actually run, registration can still fail without a second install attempt",
     );
-    expect(applySection).toContain(
-      'cli.ts:904-908#"the kit was installed but the target was not registered"',
+    expect(applySection).toMatch(
+      /cli\.ts:\d+(?:-\d+)?#"the kit was installed but the target was not registered"/,
     );
     expect(applySection).toContain("applyRegistrationFailureMessage");
   });
@@ -4013,5 +4017,78 @@ describe("roles prefer connected structural search, verify, and mutation-probe r
         expect(doc).not.toContain(name);
       }
     }
+  });
+});
+
+describe("Codex routing and agent-led installation stay documented", () => {
+  const installAgentMd = unwrap(readDoc("INSTALL-AGENT.md"));
+  const readmeMd = unwrap(readDoc("README.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+
+  it("documents the native Codex agent surface and its fallback", () => {
+    for (const doc of [readmeMd, installAgentMd, skillMd]) {
+      expect(doc).toContain("`.codex/agents/");
+    }
+    expect(readmeMd).toContain("`model_reasoning_effort`");
+    expect(skillMd).toContain("inline and sequentially");
+    expect(skillMd).toContain("When a named-agent selector is available");
+    expect(skillMd).toContain(
+      "When spawning accepts explicit model and reasoning effort but has no named selector",
+    );
+    expect(skillMd).toContain("fresh task-local spawn");
+    expect(agentsMdSection).toContain(
+      "inspect the native delegation capabilities before dispatch",
+    );
+  });
+
+  it("keeps Codex reviewer sandbox claims precise", () => {
+    for (const doc of [readmeMd, skillMd]) {
+      expect(doc.toLowerCase()).toContain(
+        "reviewer inherits the caller's sandbox",
+      );
+      expect(doc.toLowerCase()).toContain("prohibits source edits");
+    }
+  });
+
+  it("documents deterministic routing inputs and preservation", () => {
+    for (const doc of [readmeMd, installAgentMd]) {
+      expect(doc).toContain("--routing");
+      expect(doc).toContain("--codex-catalog");
+      expect(doc).toContain("rollback");
+    }
+    expect(agentsMdSection).toContain("Preserve recorded routing choices");
+    expect(agentsMdSection).toContain(
+      "never treat a newer model as an automatic upgrade",
+    );
+  });
+
+  it("makes the agent-led path infer known choices and ask only for unresolved material decisions", () => {
+    expect(installAgentMd).toContain(
+      "Existing authorization and preferences remain valid",
+    );
+    expect(installAgentMd).toContain(
+      "ask the operator only when a material preference, authority boundary, or conflict remains unresolved",
+    );
+    expect(installAgentMd).toContain(
+      "Do not open a GUI or change global or fleet configuration",
+    );
+  });
+
+  it("reuses existing overwrite authority before asking about --force", () => {
+    expect(installAgentMd).toContain(
+      "reuse prior overwrite authority for the same scope",
+    );
+    expect(installAgentMd).toContain(
+      "ask before `--force` only when authority or scope remains unresolved",
+    );
+    expect(installAgentMd).not.toContain("asks before any `--force` re-run");
+  });
+
+  it("does not claim the legacy --models input configures Codex", () => {
+    expect(readmeMd).toContain("It does not configure Codex");
+    expect(installAgentMd).toContain(
+      "`--models` is a backward-compatible input for Claude Code and opencode only; never use it to configure Codex",
+    );
   });
 });

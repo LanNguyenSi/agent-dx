@@ -44,11 +44,19 @@ describe("setup", () => {
     const manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
     expect(manifest.kit).toBe("orchestrator-workflow");
     expect(manifest.schemaVersion).toBe(1);
-    expect(manifest.defaults).toEqual({
+    expect(manifest.defaults).toMatchObject({
       harnesses: ["claude"],
       profile: "full",
       tiers: false,
       models: DEFAULT_MODELS,
+    });
+    expect(manifest.defaults.routing.codex.implementer.medium).toEqual({
+      model: "gpt-5.6-terra",
+      effort: "medium",
+    });
+    expect(manifest.defaults.routing.claude.reviewer.high).toEqual({
+      model: "opus",
+      effort: "high",
     });
     expect(manifest.targets).toEqual([]);
     expect(manifest.createdAt).toBeTruthy();

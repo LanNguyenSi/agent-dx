@@ -20,12 +20,11 @@ them.
 - [Install fence mechanics](install-fence-mechanics.md), the marker-fence,
   hash-ledger, and manifest.json contract that makes `init`/`uninstall`
   idempotent, reversible, and safe against local edits and path traversal.
-- [Model preselection](model-preselection.md), how each subagent role's
-  model is chosen (defaults, `--models`, interactive prompt), persisted in
-  `manifest.json`, composed into Claude/opencode/Codex frontmatter, preserved
-  across re-installs, and kept in sync with docs by consistency tests; since
-  0.19.0 also covers the opt-in `--tiers` effort-tier subagent variants
-  (`<role>-<tier>.md`) rendered alongside each role's base file.
+- [Model preselection and routing](model-preselection.md), how legacy
+  `--models` choices and harness-specific `--routing` model/effort leaves are
+  validated, persisted, and composed into Claude/opencode Markdown or Codex
+  TOML definitions; it also covers profile/tier filtering, capability-aware
+  Codex dispatch, offline catalog validation, and reinstall preservation.
 - [Operator install and target registry](operator-install-and-registry.md),
   the operator-level home, its manifest schema and read states, the single
   locked read-modify-write API and its lock semantics, the target registry,

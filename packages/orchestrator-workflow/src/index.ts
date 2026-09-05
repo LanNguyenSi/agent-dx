@@ -30,3 +30,11 @@ export {
 export type { ModelAlias, ModelClass, Profile, Role, Tier } from "./models.js";
 export type { Report } from "./writers.js";
 export { PACKAGE_VERSION } from "./assets.js";
+export {
+  defaultCodexRouting,
+  mergeRouting,
+  parseRouting,
+  validateCodexCatalog,
+} from "./routing.js";
+export type { HarnessRouting, ModelSelection } from "./routing.js";
+export { composeCodexAgent } from "./codex.js";
