@@ -6,5 +6,13 @@
   "check": "npm test",
   "status": "passed",
   "exit": 0,
-  "criteria": ["P1-AC1"]
+  "criteria": [
+    "P1-AC1"
+  ],
+  "baseline": {
+    "id": "baseline-demo",
+    "revision": "r1"
+  },
+  "expectedOutcome": "exit 0",
+  "abort": null
 }

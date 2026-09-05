@@ -40,7 +40,8 @@ them.
   contract is duplicated and by which tests, the
   task-slicer-output-is-a-lossless-superset invariant, and the 0.11.0
   subagent misfire rule; its v1 acceptance records are propagated as nested
-  full records, not criterion strings.
+  full records, followed by an implementer baseline/criterion-evidence index.
+  The recorded original string-list contract remains available for older runs.
 - [Review gate and waiver semantics](review-gate-and-waivers.md), the
   review-never-skipped invariant: severity ladder, critical/high waiver
   rules, the Decision-column legend, and the three synced surfaces (policy,

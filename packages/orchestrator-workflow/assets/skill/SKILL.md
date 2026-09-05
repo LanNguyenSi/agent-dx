@@ -140,7 +140,8 @@ directory and the subagents.
    `acceptance_criteria` records. Existing runs continue under their recorded
    original contract; missing v1 fields neither identify a legacy run nor
    impose a migration. If adoption or contract provenance is unknown, report
-   that uncertainty rather than inventing a version.
+   that uncertainty and resolve it before dependent delegation rather than
+   inventing a version. Communicate the recorded selection in every delegation.
    All acceptance-baseline/v1-specific obligations below apply only to a run
    with that explicit declaration; they do not retroactively add a blocker to
    an existing run.
@@ -162,9 +163,10 @@ directory and the subagents.
    rollback considerations where relevant.
 4. **Slice tasks.** For non-trivial changes, fill `02-tasks.md`. Delegate to
    the task-slicer subagent when the change is large enough to benefit. Each
-   an explicitly adopted v1 task carries: id, title, goal, acceptance baseline, acceptance criteria,
+   explicitly adopted v1 task carries: id, title, goal, acceptance baseline, acceptance criteria,
    relevant files, relevant docs, constraints, suggested tests, allowed changes, forbidden
-   changes, dependencies, risk. A high-risk task whose acceptance criteria
+   changes, dependencies, risk. Apply Contract selection below for a recorded
+   original contract. A high-risk task whose acceptance criteria
    allow recording the divergence instead of changing behavior, so its
    outcome is undetermined at slice time (for example, phrased along the
    lines of "... or record the divergence as a deliberate, documented
@@ -227,12 +229,16 @@ directory and the subagents.
    prompt requires replaying it locally under the shell the step actually
    runs, with the expected-success and the expected-failure inputs, before
    treating it as tested.
-   For every required criterion in an explicitly adopted v1 run, index a resolvable result artifact in the
-   implementation summary against its baseline ID/revision. Automated results
+   For an explicitly adopted v1 run, index the implementer's returned
+   `criterion_evidence` references for each assigned criterion in the
+   implementation summary against its baseline ID/revision. Empty references
+   remain unresolved with a reason; required unresolved criteria block
+   acceptance. Automated results
    identify attempt, repository, checked revision including relevant dirty
    state, cwd, applied check definition, status, exit/abort information, and
-   checked criteria. Manual results identify the artifact revision, reviewer,
-   method, pass/fail standard, and reasoned result and remain explicitly
+   baseline/criterion identities. Manual results identify the artifact revision, reviewer,
+   method, pass/fail standard, reasoned result, and baseline/criterion
+   identities and remain explicitly
    manual. Missing, aborted, skipped, unresolved, wrong-state, or
    wrong-baseline evidence remains an open required residual and blocks
    acceptance; the coverage index is not a results database or acceptance
@@ -365,7 +371,22 @@ open_questions:
 recommendation: ""
 ```
 
+## Contract selection
+
+Contract selection: use `acceptance-baseline/v1` only when the orchestrator
+recorded `Acceptance contract: acceptance-baseline/v1` in `00-goal.md` at run
+creation, before slicing, and communicated that selection in the delegation.
+Existing runs use their recorded original contract. Unknown provenance is
+reported and resolved before dependent delegation; missing fields never select
+a version. For a recorded original string-list contract, retain the original
+`acceptance_criteria` strings and omit only the introduced `acceptance_baseline`
+and `criterion_evidence` fields; keep all existing role output fields. This
+selection governs the rules and every YAML block below.
+
 ## Subagent input contract
+
+Use this v1 block subject to Contract selection above, retaining the complete
+input envelope and scope fields for the selected contract.
 
 ```yaml
 role: advisor | explorer | implementer | reviewer | task_slicer
@@ -395,10 +416,19 @@ expected_output:
 
 ## Implementer output contract
 
+Use this v1 block subject to Contract selection above.
+
 ```yaml
 status: done | partial | blocked
 role: implementer
 task_id: T-000
+acceptance_baseline:
+  id: ""
+  revision: ""
+criterion_evidence:
+  - criterion_id: ""
+    evidence_refs:
+      - ""
 summary:
   - ""
 changed_files:
@@ -426,6 +456,18 @@ commits:
   - ""
 ```
 
+For v1, return the delegated baseline identity and one `criterion_evidence`
+entry for every assigned criterion. Each `evidence_refs` string resolves
+relative to the directory containing the owning `04-implementation-summary.md`
+and includes a precise artifact or fragment locator when needed. Empty
+`evidence_refs: []` means unresolved; explain why in `risks` or `open_questions`.
+These fields index producer artifacts, without copying their result metadata.
+An automated artifact identifies its attempt, repository, checked revision
+including relevant dirty-state identity, cwd, applied check definition, status,
+exit or abort information, and baseline/criterion identities. A manual artifact
+identifies the reviewed artifact and revision, reviewer, method, pass/fail
+standard, reasoned result, and baseline/criterion identities; it stays manual.
+
 When the task assignment names mutation probes to run, the implementer
 reports each one in the `mutation_probes` field (mutant,
 verified_applied_via, result, restored_verified); when the assignment
@@ -448,6 +490,10 @@ omitting the field, so 'did not commit' is distinguishable from
 'forgot to report'.
 
 ## Reviewer output contract
+
+The output shape remains the same for either selected contract. Compare the
+delegated versioned records and producer evidence under Contract selection
+above; a recommendation does not replace orchestrator acceptance.
 
 ```yaml
 status: reviewed
@@ -484,6 +530,8 @@ round every finding is `new` by definition. This is what feeds the
 Review-round escalation budget's trigger.
 
 ## Task slicer output contract
+
+Use this v1 block subject to Contract selection above for every task.
 
 ```yaml
 status: done | partial | blocked
@@ -529,7 +577,9 @@ acceptance_baseline, acceptance_criteria, relevant_files, relevant_docs,
 constraints, allowed_changes, and forbidden_changes 1:1 into the subagent
 input contract when delegating implementation, rather than inventing new field
 values. The copied criterion records retain `id`, `required`, `text`,
-`verification`, and `negative_space` unchanged.
+`verification`, and `negative_space` unchanged. For a recorded original
+contract, preserve its original strings and the same 1:1 field mapping with
+the transformation under Contract selection above.
 
 ## Advisor output contract
 

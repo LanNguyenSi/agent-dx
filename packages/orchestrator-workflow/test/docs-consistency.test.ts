@@ -732,6 +732,47 @@ describe("task slicer output schema is a superset of the implementer input contr
     expect(block).toMatch(criterionRecordsShape());
   });
 
+  function requiredTaskFields(block: string): string[] {
+    // Only the explicit delegation envelope is excluded. Scan the WHOLE
+    // block for top-level fields, including those following context.
+    const envelope = ["role", "task_id", "context", "expected_output"];
+    const topLevel = [...block.matchAll(/^(\w+):/gm)].map((match) => match[1]);
+    const context =
+      block.match(/^context:\n((?:[ \t]+[^\n]*\n|\n)*)/m)?.[1] ?? "";
+    const children = [...context.matchAll(/^ {2}(\w+):/gm)].map(
+      (match) => match[1],
+    );
+    return [
+      ...topLevel.filter((field) => !envelope.includes(field)),
+      ...children,
+    ];
+  }
+
+  it("derives fields after context and excludes only immediate envelope fields", () => {
+    const input = yamlBlockAfter(skillMdRaw, "## Subagent input contract");
+    const extended = input.replace(
+      "expected_output:",
+      "future_task_field:\n  nested: value\nexpected_output:",
+    );
+    expect(requiredTaskFields(extended)).toEqual([
+      "goal",
+      "acceptance_baseline",
+      "acceptance_criteria",
+      "constraints",
+      "allowed_changes",
+      "forbidden_changes",
+      "future_task_field",
+      "relevant_files",
+      "relevant_docs",
+    ]);
+    const slicer = yamlBlockAfter(skillMdRaw, "## Task slicer output contract");
+    expect(() => {
+      for (const field of requiredTaskFields(extended)) {
+        expect(slicer).toMatch(new RegExp(`^ {4}${field}:`, "m"));
+      }
+    }).toThrow();
+  });
+
   it("no field required by the subagent input contract is absent from the slicer output schema", () => {
     const subagentBlock = yamlBlockAfter(
       skillMdRaw,
@@ -741,34 +782,20 @@ describe("task slicer output schema is a superset of the implementer input contr
       skillMdRaw,
       "## Task slicer output contract",
     );
-    // Derive the required set from the subagent input contract itself so a
-    // field added there cannot silently go missing from the slicer output.
-    // Delegation mechanics are what the orchestrator supplies when spawning
-    // (role, task_id, the context/expected_output wrappers), not per-task
-    // planning output the slicer must produce.
-    const delegationMechanics = [
-      "role",
-      "task_id",
-      "context",
-      "expected_output",
-      "format",
-    ];
-    const beforeContext = subagentBlock.slice(0, subagentBlock.indexOf("context:"));
-    const topLevel = [...beforeContext.matchAll(/^(\w+):/gm)].map((m) => m[1]);
-    const contextBlock = subagentBlock.slice(
-      subagentBlock.indexOf("context:"),
-      subagentBlock.indexOf("expected_output:"),
-    );
-    const contextChildren = [...contextBlock.matchAll(/^ {2}(\w+):/gm)].map(
-      (m) => m[1],
-    );
-    const required = [...topLevel, ...contextChildren].filter(
-      (field) => !delegationMechanics.includes(field),
-    );
-    // Guard the extraction itself: these two must be part of the derived set,
-    // otherwise the regexes above rotted and the loop below proves nothing.
-    expect(required).toContain("relevant_docs");
-    expect(required).toContain("goal");
+    const required = requiredTaskFields(subagentBlock);
+    // Guard both sides of context: later scope fields must remain covered.
+    for (const field of [
+      "goal",
+      "acceptance_baseline",
+      "acceptance_criteria",
+      "relevant_files",
+      "relevant_docs",
+      "constraints",
+      "allowed_changes",
+      "forbidden_changes",
+    ]) {
+      expect(required).toContain(field);
+    }
     expect(
       subagentBlock.match(/^acceptance_criteria:/gm),
       "the subagent input contract must not silently override record criteria with a second key",
@@ -864,7 +891,6 @@ describe("task slicer output schema is a superset of the implementer input contr
     const proseFields = [
       "title",
       "goal",
-      "acceptance baseline",
       "relevant files",
       "relevant docs",
       "acceptance",
@@ -4281,7 +4307,7 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     const implementerBlock = extractMutationProbesBlock(
       readAsset("agents/implementer.md"),
     );
-    expect(skillBlock).toContain('replayed: false | true');
+    expect(skillBlock).toContain("replayed: false | true");
     expect(skillBlock).toBe(implementerBlock);
   });
 
@@ -4344,10 +4370,15 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
   const changelogMd = readDoc("CHANGELOG.md");
 
-  const startPhrase = "any diff that adds or changes a GitHub Actions `run:` step";
+  const startPhrase =
+    "any diff that adds or changes a GitHub Actions `run:` step";
   const endPhrase = "never paste untrusted event data into your shell.";
 
-  const implementerSlice = phraseBoundedSlice(implementerMd, startPhrase, endPhrase);
+  const implementerSlice = phraseBoundedSlice(
+    implementerMd,
+    startPhrase,
+    endPhrase,
+  );
   const reviewerSlice = phraseBoundedSlice(reviewerMd, startPhrase, endPhrase);
 
   const sharedElements = [
@@ -4380,13 +4411,21 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
     expect(reviewerMd).toContain(
       "Do the replay in a scratch copy of the repository outside the reviewed working tree",
     );
-    expect(reviewerMd).toContain("this keeps the replay compatible with the read-only Bash rule");
-    expect(implementerMd).not.toContain("scratch copy of the repository outside the reviewed working tree");
+    expect(reviewerMd).toContain(
+      "this keeps the replay compatible with the read-only Bash rule",
+    );
+    expect(implementerMd).not.toContain(
+      "scratch copy of the repository outside the reviewed working tree",
+    );
   });
 
   it("only the reviewer prompt reports the replay in the reproduction field", () => {
-    expect(reviewerMd).toContain("Report the replay in the `reproduction` field");
-    expect(implementerMd).not.toContain("Report the replay in the `reproduction` field");
+    expect(reviewerMd).toContain(
+      "Report the replay in the `reproduction` field",
+    );
+    expect(implementerMd).not.toContain(
+      "Report the replay in the `reproduction` field",
+    );
   });
 
   it("the reviewer prompt's reproduction trigger names the shell replay as a second, non-probabilistic trigger", () => {
@@ -4419,7 +4458,9 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
   });
 
   it("docs/okf/subagent-contracts-superset.md names the shell replay as the reproduction field's second trigger", () => {
-    const subagentContractsMd = readDoc("docs/okf/subagent-contracts-superset.md").replace(/\s+/g, " ");
+    const subagentContractsMd = readDoc(
+      "docs/okf/subagent-contracts-superset.md",
+    ).replace(/\s+/g, " ");
     expect(subagentContractsMd).toContain(
       "The GitHub Actions run-step shell replay named in both installed prompts (see CHANGELOG's `[Unreleased]` entry) is a second, explicitly non-probabilistic trigger for the same field: `sample_size: not_applicable` is allowed when the replay itself has no meaningful sample size",
     );

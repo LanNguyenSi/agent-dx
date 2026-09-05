@@ -21,7 +21,7 @@ new_record:
   negative_space: Does not establish command output.
 ```
 
-- Invalidated evidence: `reviews/release-note-r7.md`; rerun required and pending.
-- Carry-forward comparison for P1-AC1: command `npm test`, repository state
-  `abc123+dirty:sha256:example`, and artifact `results/attempt-01.json` are
-  unchanged between r1 and r2; its evidence remains valid.
+- Invalidated evidence: [prior manual review](reviews/release-note-r7.md); rerun required and pending for P1-AC2 at r2.
+- Revised frozen records: [r2 baseline](revised-00-goal.md) and [r2 task](revised-02-tasks.md).
+- Carry-forward for P1-AC1: [verified comparison](reviews/carry-forward-r2.md) compares the unchanged record, producer artifact, repository state, and check definition; only that evidence remains valid at r2.
+- Acceptance: pending; the invalidated required manual criterion still blocks acceptance.
