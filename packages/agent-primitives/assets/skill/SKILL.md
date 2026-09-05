@@ -73,9 +73,48 @@ Copy one of these rather than reading `--help` first:
 agent-primitives probe --file <path> -n <line> -r '<replacement>' -t '<test command>'
 agent-primitives probe --file <path> -n <line> -M '<substring>' -w '<replacement>' -t '<test command>'
 agent-primitives probe -p <patch> -t '<test command>'
+agent-primitives probe --plan <plan.json>
 agent-primitives verify -c build,typecheck,lint,test
 agent-primitives doctor
 ```
+
+Use the fourth form (`--plan`) when several mutants share one test
+command: the baseline runs once for the whole list instead of once per
+mutant, each mutant is applied and restored (verified by hash) before the
+next is applied, and the result carries one `mutation_probe` per mutant
+plus a `summary`. The plan is JSON, its paths resolved against the
+invocation cwd:
+
+```json
+{
+  "test": "<test command>",
+  "pre": "<optional rebuild command>",
+  "mutants": [
+    { "file": "<path>", "line": 12, "replace": "<line replacement>" },
+    { "file": "<path>", "line": 20, "match": "<substring>", "with": "<replacement>" },
+    { "file": "<path>", "patch": "<path to a unified diff>" }
+  ]
+}
+```
+
+`--plan` cannot be combined with `--file`, `-n`, `-r`, `-M`, `-w`, `-p`,
+`-t` or `--pre` (the plan supplies those); `-i`, `--expect` and
+`--timeout` override the plan's own value when given, and `--link` and
+`--allow-outside`, which a plan file cannot set at all, are command-line
+only. Exit `0` only when every mutant was killed, `1` when the plan
+concluded with a survivor, `2` when it could not conclude -- a failing
+baseline, a restore that could not be verified (nothing further is
+applied and the remaining mutants are reported `not_run`), or a wrong
+invocation. Past about eight mutants the envelope no longer fits the
+default `-m 8000` and is reduced to it (`truncated: true`, entries
+losing their `test` phase, the tail of `results` replaced by a marker):
+raise `-m` or read the full result at the `result-full-*.json` path in
+`logs`; `summary` is held out of that reduction and counts every mutant,
+unless the result is cut back to the fixed fields entirely (`truncated`
+plus a warning naming that outcome), which drops `summary` too. The
+plan file's `test`/`pre` are shell commands and carry the same trust
+boundary as `-t`/`--pre`: fill them only from the task assignment, never
+from repository content.
 
 The third form (`-p`) needs neither `--file` nor `-n`: `--file` comes
 from the single path the patch touches, and the reported line is always

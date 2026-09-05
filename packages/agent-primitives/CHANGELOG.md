@@ -9,6 +9,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `probe --plan <path>`: a JSON file naming one test command (and
+  optionally `pre`, `isolation`, `expect`, `timeout`) plus a list of
+  mutants, run against ONE shared baseline instead of one baseline per
+  mutant. Each mutant is applied with its applied content verified by
+  hash, tested, and restored with the restore verified by hash BEFORE the
+  next one is applied; the loop re-hashes the target itself before every
+  apply, so a restore that silently did not happen stops the plan instead
+  of letting the next mutant land on the previous one's content. Every
+  guarantee of the single probe holds per mutant: the same in-flight
+  marker and backup, the same abort handling, the same restore-then-verify
+  step. A restore that could not be verified (`restore_failed`), a target
+  found not to be back at its pre-mutation content
+  (`target_not_restored`), a failing baseline (`baseline_failed`) or a
+  signal (`aborted`) is terminal: nothing further is applied and every
+  remaining mutant is reported `not_run` rather than `inconclusive`.
+  `-i worktree` syncs one worktree for the whole plan and removes it
+  once; the lock is taken once for the whole plan (keyed on the
+  repository, or outside one on each distinct target file). The envelope
+  carries `plan: { baseline, results, summary }`, with the four
+  `mutation_probe` contract fields, the `test` phase and a `status` per
+  mutant, and `summary` counting killed/survived/inconclusive/not_run.
+  Exit codes stay 0/1/2, one step stricter than for a single probe: `0`
+  only when every mutant was killed per its `expect`, `1` when the plan
+  concluded with a survivor, `2` for a wrong invocation or a plan that
+  could not conclude. `--plan` is mutually exclusive with `--file`, `-n`,
+  `-r`, `-M`, `-w`, `-p`, `-t` and `--pre`; the three run-shaping options
+  a plan file can also set -- `-i`, `--expect`, `--timeout` -- override
+  the plan's own value when given on the command line, and a mutant's own
+  `expect` wins over both. `--link` and `--allow-outside` have no plan
+  key at all and are command-line only for a plan. Past about eight
+  mutants the envelope no longer fits the default `-m 8000` and is
+  reduced to it like any other result (`truncated: true`, entries losing
+  their `test` phase, the tail of `results` replaced by a marker): raise
+  `-m` or read the full result at the `result-full-<run-id>.json` path
+  the envelope's `logs` names. `plan.summary` is held out of that
+  reduction (see `keepWhole` below), so its counts cover every mutant of
+  the plan, including the entries the envelope no longer shows -- unless
+  the whole result is cut back to the fixed fields (`truncated` plus a
+  warning naming that outcome), which drops `plan.summary` along with
+  everything else instead of showing it past the bound. Plan validation
+  (unknown keys, a missing `test`, an empty `mutants`, a mutant with two
+  forms or none, a file outside the containment root, an unusable plan file)
+  runs before the lock, the marker, the baseline or any worktree and names
+  the offending path inside the plan. `test`/`pre` in a plan file are shell
+  commands with the same trust boundary as `-t`/`--pre`: fill them only from
+  a task assignment, never from repository content. Setup through baseline
+  (isolation fallback, containment, the lock, stale-marker recovery, the
+  worktree sync, every target's backup, the baseline and the re-hash
+  after it) is ONE implementation both entry points call, as the mutant
+  step already was, so the two cannot drift apart on a refusal they
+  share. The library entry points `probePlan()` and `parsePlanFile()` are
+  exported alongside `probe()`.
+- `buildEnvelope`/`applyCaps` take `keepWhole`: dotted paths into the
+  result whose value is reported whole, exempt from every structural cap
+  and from the key budget of the object holding it, the way the fixed
+  envelope fields already are. Every candidate is measured after the
+  held path is folded in, so a candidate that fits still respects the
+  bound with the held value included; it only spends the budget on that
+  value instead of another, which is for the small field a reader cannot
+  do without once the rest was cut. This does NOT mean a held path is
+  free: a value too large for the skeleton plus itself to fit under the
+  bound at all is not shown oversized past the bound, it is dropped
+  along with the rest of the payload in the existing "reduced to the
+  fixed fields only" total-loss outcome, its own warning included --
+  which is why the docblock says to name only a small, bounded value
+  here. `probe --plan` names `plan.summary`, and nothing else in this
+  package names anything: with no path given the reduction is exactly
+  what it was.
 - `listRegisteredWorktrees` (`-i worktree`'s registry listing, used by
   the removal, the leftover recovery, and `cleanupWorktree`'s
   assertion) falls back to a third source, the `gitdir` files under
@@ -86,6 +154,17 @@ SKILL.md`) and the README gained an "Invocation templates" section
 
 ### Changed
 
+- Internal, with no change to what a single probe reports: `probe()`'s
+  pipeline is split into a shared setup, a per-mutant step
+  (`prepareMutant` + `runMutantAttempt`), and a shared teardown, so
+  `probePlan()` runs the very same step in a loop rather than a second
+  copy of it. The signal, abort and worktree-cleanup machinery moved into
+  one run controller both entry points use. `test/probe.test.ts` guards
+  the extraction against four `probe()` results recorded from the package
+  as it stood before it (`test/fixtures/single-probe-result-master-a908951.json`).
+- `-t/--test` is no longer enforced by the option parser (so `--plan` can
+  supply it) but by the probe command itself; omitting both is still
+  `status: "usage_error"`, exit `2`.
 - `probe -r/--replace` and `-M/--match` (with `-w/--with`) without
   `--file`/`-n` now report `status: "usage_error"` with the message
   `probe: --file is required for -r/--replace (only -p/--patch can
@@ -127,6 +206,27 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   `O_EXCL`, so a target planted in that gap is revalidated rather than
   truncated; zero-progress writes report `target_write_failed` after closing
   the descriptor.
+- `probe --plan`: the signal handler's restore slot is cleared before a
+  plan's baseline runs (it was still armed to whichever target
+  `openTarget` opened last). A plan whose baseline rewrites more than
+  one target, signalled mid-baseline, previously restored only that one
+  target and left every other target as the baseline wrote it -- an
+  asymmetry across targets that contradicted the plan's own non-signal
+  rule ("left as the baseline wrote it, not restored"). A signal
+  mid-baseline now restores nothing for a plan, same as the non-signal
+  path, and the per-mutant step still re-arms the slot for its own
+  target right before applying it. The single probe (always one target)
+  is unaffected: its restore slot stays armed through its own baseline,
+  the released contract.
+- `probe --plan`'s envelope no longer flattens every mutant's own log
+  paths (`test.logPath`, `logs`) into the top-level `logs`, which the
+  envelope's reduction never cuts: at 55 mutants (default `-m 8000`,
+  default log dir) that per-mutant growth alone pushed the reduction
+  floor past the bound, dropping `plan` (summary included) rather than
+  reducing it. The top level now carries only the baseline log, the
+  plan's own setup logs and, once reduction runs, the full-result path;
+  a mutant's own log paths stay on `plan.results[i]`, which the normal
+  reduction can still cap or drop like any other field.
 
 ## [0.1.0] - 2026-09-04
 

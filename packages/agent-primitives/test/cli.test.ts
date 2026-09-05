@@ -1381,6 +1381,38 @@ describe("cli: probe", () => {
     );
   });
 
+  it("-t/--test is required without --plan: exit 2, usage_error, message naming the flag", async () => {
+    // `-t` is optional at the option-parser level so `--plan` can supply
+    // it instead; the action checks it. Without the check a probe with
+    // no test command would run its baseline against `undefined`.
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      "const a = 1;\nconst b = 2;\n",
+    );
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "const b = 3;",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    // Thrown out of the action rather than by the option parser, so the
+    // top-level mapper builds this envelope and the message is in
+    // `message` (`command` is "unknown" there, as for every UsageError
+    // raised past option parsing).
+    expect(parsed.message).toContain("-t/--test is required");
+    expect(parsed.message).toContain("--plan");
+  });
+
   it("exactly one mutant form is required: none given is usage_error, exit 2", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
@@ -2424,5 +2456,626 @@ describe("cli signal handling: a check that traps the signal", () => {
     expect(fs.readFileSync(heartbeat, "utf8")).toBe(countAtExit);
 
     expect(result.code).toBe(130);
+  }, 40000);
+});
+
+describe("cli: probe --plan", () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync("git", args, { cwd });
+  }
+
+  /** A repository with two functions and a test that catches a mutant of
+   * either, plus a `runs.txt` the test appends to on every invocation:
+   * the count is what proves how many times the command ran (one
+   * baseline plus one run per mutant), and the absence of a fourth entry
+   * is what proves a mutant was never reached. */
+  function initPlanRepo(): { repo: string; before: string } {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    const fixture = [
+      "function isPositive(n) {",
+      "  return n > 0;",
+      "}",
+      "function isNegative(n) {",
+      "  return n < 0;",
+      "}",
+      "module.exports = { isPositive, isNegative };",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(repo, "fixture.js"), fixture);
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "fs.appendFileSync('runs.txt', 'run\\n');",
+        "if (content.includes('SLOW_MARKER')) {",
+        "  const { spawn } = require('node:child_process');",
+        "  spawn(process.execPath, ['heartbeat-worker.js'], {",
+        "    stdio: 'inherit',",
+        "  });",
+        "  setTimeout(() => { process.exit(0); }, 15000);",
+        "  return;",
+        "}",
+        "const { isPositive, isNegative } = require('./fixture.js');",
+        "if (isPositive(5) !== true) process.exit(1);",
+        "if (isPositive(-5) !== false) process.exit(1);",
+        "if (isNegative(-5) !== true) process.exit(1);",
+        "if (isNegative(5) !== false) process.exit(1);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "heartbeat-worker.js"),
+      [
+        "const fs = require('node:fs');",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        "  fs.writeFileSync('heartbeat.txt', String(n));",
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo, before: fixture };
+  }
+
+  function writePlan(repo: string, plan: unknown): string {
+    const planPath = path.join(repo, "plan.json");
+    fs.writeFileSync(planPath, JSON.stringify(plan, null, 2));
+    return planPath;
+  }
+
+  function runsIn(repo: string): number {
+    const runsFile = path.join(repo, "runs.txt");
+    if (!fs.existsSync(runsFile)) return 0;
+    return fs.readFileSync(runsFile, "utf8").split("\n").filter(Boolean).length;
+  }
+
+  it("runs every mutant against one baseline, exits 0 when all are killed, and carries plan.baseline/results/summary", async () => {
+    const { repo, before } = initPlanRepo();
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [
+        { file: "fixture.js", line: 2, replace: "  return false;" },
+        { file: "fixture.js", line: 5, replace: "  return true;" },
+      ],
+    });
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.command).toBe("probe");
+    expect(parsed.status).toBe("killed");
+    expect(parsed.plan.baseline.exitCode).toBe(0);
+    expect(parsed.plan.summary).toEqual({
+      total: 2,
+      killed: 2,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+    });
+    expect(parsed.plan.results).toHaveLength(2);
+    for (const entry of parsed.plan.results) {
+      expect(entry.mutation_probe.result).toBe("killed");
+      expect(entry.mutation_probe.restored_verified).toBe(true);
+      expect(typeof entry.mutation_probe.mutant).toBe("string");
+      expect(typeof entry.mutation_probe.verified_applied_via).toBe("string");
+      expect(entry.test.command).toBe("node fixture.test.js");
+      // Each mutant's own log paths stay on its own result, not on the
+      // envelope's top-level `logs`: before per-mutant log paths were
+      // kept out of the protected top-level `logs`, the top level grew
+      // by one entry per mutant and raised the reduction floor; the top
+      // level now only carries the baseline and the plan's own setup
+      // logs, so it does not grow per mutant.
+      expect(typeof entry.test.logPath).toBe("string");
+      expect(Array.isArray(entry.logs)).toBe(true);
+    }
+    // One baseline, then one run per mutant.
+    expect(runsIn(repo)).toBe(3);
+    // Top-level `logs` carries only the baseline log (no worktree setup
+    // logs for `isolation: inplace`); per-mutant logs live on
+    // `plan.results[i]` instead, asserted above.
+    expect(parsed.logs).toEqual([parsed.plan.baseline.logPath]);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  }, 30000);
+
+  it("exits 1 when a mutant survives, with the survivor named in plan.results", async () => {
+    const { repo } = initPlanRepo();
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [
+        { file: "fixture.js", line: 2, replace: "  return false;" },
+        {
+          file: "fixture.js",
+          line: 7,
+          replace: "module.exports = { isPositive, isNegative, extra: 1 };",
+        },
+      ],
+    });
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("survived");
+    expect(parsed.plan.results[0].status).toBe("killed");
+    expect(parsed.plan.results[1].status).toBe("survived");
+  }, 30000);
+
+  it("refuses --plan beside a single-mutant option as usage_error, naming the conflict, exit 2", async () => {
+    const { repo } = initPlanRepo();
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "-t",
+      "node fixture.test.js",
+      "--file",
+      "fixture.js",
+    ]);
+
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(JSON.stringify(parsed)).toContain("--file");
+    expect(JSON.stringify(parsed)).toContain("-t/--test");
+    expect(runsIn(repo)).toBe(0);
+  });
+
+  it("reports an unusable plan file as usage_error/plan_not_readable and an empty one as plan_empty, exit 2, before anything runs", async () => {
+    const { repo } = initPlanRepo();
+
+    const missing = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      path.join(repo, "no-such-plan.json"),
+    ]);
+    expect(missing.code).toBe(2);
+    expect(JSON.parse(missing.stdout).status).toBe("usage_error");
+    expect(JSON.parse(missing.stdout).reason).toBe("plan_not_readable");
+
+    const emptyPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      mutants: [],
+    });
+    const empty = await spawnCli(["-C", repo, "probe", "--plan", emptyPath]);
+    expect(empty.code).toBe(2);
+    expect(JSON.parse(empty.stdout).reason).toBe("plan_empty");
+    expect(runsIn(repo)).toBe(0);
+  });
+
+  it("lets -i on the command line override the plan's own isolation", async () => {
+    const { repo } = initPlanRepo();
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const asPlanned = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+    expect(JSON.parse(asPlanned.stdout).isolation.mode).toBe("inplace");
+
+    const overridden = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "-i",
+      "worktree",
+    ]);
+    expect(overridden.code).toBe(0);
+    expect(JSON.parse(overridden.stdout).isolation.mode).toBe("worktree");
+  }, 30000);
+
+  /** A repository whose fixture carries `count` one-line functions and a
+   * test that catches a mutant of any of them: enough mutants for one
+   * plan envelope to exceed the default `-m`. */
+  function initWidePlanRepo(
+    count: number,
+    root?: string,
+  ): { repo: string; planPath: string } {
+    // `root` lets a test that measures the envelope against a tight
+    // bound place the repository under a short, fixed path, since the
+    // repository path appears in the envelope (`cwd`, every mutant's
+    // `file`) and would otherwise vary with the ambient `TMPDIR`.
+    let repo: string;
+    if (root === undefined) {
+      repo = makeTmpDir();
+    } else {
+      repo = fs.mkdtempSync(path.join(root, "ap-cli-test-repo-"));
+      tmpDirs.push(repo);
+    }
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    const fns = Array.from(
+      { length: count },
+      (_v, i) => `function f${String(i)}(n) { return n + ${String(i)}; }`,
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        ...fns,
+        `module.exports = { ${fns.map((_f, i) => `f${String(i)}`).join(", ")} };`,
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const m = require('./fixture.js');",
+        `for (let i = 0; i < ${String(count)}; i++) {`,
+        "  if (m['f' + i](1) !== 1 + i) process.exit(1);",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: Array.from({ length: count }, (_v, i) => ({
+        file: "fixture.js",
+        line: i + 1,
+        replace: `function f${String(i)}(n) { return 999; }`,
+      })),
+    });
+    return { repo, planPath };
+  }
+
+  it("a plan past a handful of mutants is reduced to the default -m: truncated, summary still complete, and the full result named in logs", async () => {
+    const count = 12;
+    const { repo, planPath } = initWidePlanRepo(count);
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    // The envelope does not fit the default bound and says so...
+    expect(parsed.truncated).toBe(true);
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    // ...and what it cut is `plan.results`: fewer entries than mutants,
+    // the rest behind an honest marker.
+    expect(parsed.plan.results.length).toBeLessThan(count);
+    // The counts are never cut, so they still cover every mutant,
+    // including the entries no longer shown.
+    expect(parsed.plan.summary).toEqual({
+      total: count,
+      killed: count,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+    });
+    // The full result is on disk and named in `logs`, carrying every
+    // mutant's four contract fields.
+    const fullPath = (parsed.logs as string[]).find((log) =>
+      /result-full-.*\.json$/.test(log),
+    );
+    expect(fullPath).toBeDefined();
+    const full = JSON.parse(fs.readFileSync(fullPath as string, "utf8"));
+    expect(full.plan.results).toHaveLength(count);
+    for (const entry of full.plan.results) {
+      expect(typeof entry.mutation_probe.mutant).toBe("string");
+      expect(typeof entry.mutation_probe.verified_applied_via).toBe("string");
+      expect(entry.mutation_probe.result).toBe("killed");
+      expect(entry.mutation_probe.restored_verified).toBe(true);
+    }
+  }, 120000);
+
+  it("a 55-mutant plan at the default -m still carries a complete plan.summary within the bound (per-mutant log paths do not inflate the protected top-level logs)", async () => {
+    // Before per-mutant log paths were kept out of the protected
+    // top-level `logs`, flattening them in there at 55 mutants (default
+    // log dir) grew the reduction floor past what the reduction could
+    // recover from, and the whole `plan` field (summary included) was
+    // dropped, missing the 8000-char bound by 186 chars. Measured false
+    // then; this test pins the fix.
+    const count = 55;
+    const { repo, planPath } = initWidePlanRepo(count);
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(parsed.truncated).toBe(true);
+    // The counts survive the reduction at 55 mutants, where they did not
+    // before the fix.
+    expect(parsed.plan.summary).toEqual({
+      total: count,
+      killed: count,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+    });
+    expect(parsed.plan.results.length).toBeLessThan(count);
+    const fullPath = (parsed.logs as string[]).find((log) =>
+      /result-full-.*\.json$/.test(log),
+    );
+    expect(fullPath).toBeDefined();
+    const full = JSON.parse(fs.readFileSync(fullPath as string, "utf8"));
+    expect(full.plan.results).toHaveLength(count);
+  }, 180000);
+
+  it("a 40-mutant plan under a tight -m still carries a complete plan.summary (the bound where keepWhole decides the outcome)", async () => {
+    // At the package default `-m 8000`, this host's per-mutant entry
+    // size converges the reduction search on a scale whose `maxKeys`
+    // (shared with `maxArray`) stays well above 5, the summary object's
+    // own key count -- so a 12- or even 55-mutant plan (see the test
+    // above) never actually needs `keepWhole` to keep `plan.summary`
+    // whole: it would survive the reduction regardless, so a test at
+    // that bound cannot tell whether `keepWhole` works: passing with
+    // and without it proves nothing. A much tighter bound forces the
+    // same reduction machinery down to a scale where `maxKeys` (and so a
+    // plain object's own key budget) drops below 5, which is where
+    // `keepWhole` actually earns its keep. Measured directly (not
+    // through this test) with `keepWhole` disabled at this same `-m`:
+    // `plan.summary` differs from the full count and `plan.results` is
+    // reduced to a handful of entries INSTEAD of the summary, rather
+    // than beside it.
+    //
+    // Without an explicit `--log-dir`, the default log dir is
+    // `<os.tmpdir()>/agent-primitives/<run-id>`, and that path's length
+    // eats into the same 900-char bound the reduction has to fit within
+    // -- long enough on some hosts (a longer ambient `TMPDIR`) to drop
+    // the bound below what `plan.summary` needs and fail this test for a
+    // reason that has nothing to do with `keepWhole`. A short, fixed
+    // `--log-dir` AND a short, fixed repository path (both built from
+    // `/tmp` directly rather than `os.tmpdir()`, so they stay short even
+    // when `TMPDIR` itself is long: the repository path appears in the
+    // envelope's `cwd` and in every mutant's `file`) remove that
+    // dependency, which is what lets the `stdout.length` bound be
+    // asserted here as well.
+    const count = 40;
+    const { repo, planPath } = initWidePlanRepo(count, "/tmp");
+    const maxChars = 900;
+    const logDir = fs.mkdtempSync(path.join("/tmp", "ap-cli-test-"));
+    tmpDirs.push(logDir);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      String(maxChars),
+      "-l",
+      logDir,
+      "probe",
+      "--plan",
+      planPath,
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.plan.summary).toEqual({
+      total: count,
+      killed: count,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+    });
+  }, 60000);
+
+  it("on SIGINT during mutant 2 of 3: restores the in-flight mutant, never applies the third, exits 130 with no output", async () => {
+    const { repo, before } = initPlanRepo();
+    const lockDir = makeTmpDir();
+    const heartbeat = path.join(repo, "heartbeat.txt");
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [
+        { file: "fixture.js", line: 2, replace: "  return false;" },
+        {
+          file: "fixture.js",
+          line: 5,
+          replace: "  return true; // SLOW_MARKER",
+        },
+        { file: "fixture.js", line: 7, replace: "module.exports = {};" },
+      ],
+    });
+
+    const child = spawnCliRaw(["-C", repo, "probe", "--plan", planPath], {
+      env: { AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+    });
+    const run = collectCli(child);
+
+    // Readiness: the heartbeat file only appears once the SECOND
+    // mutant's test run is actually running, so the signal below lands
+    // mid-plan rather than at a guessed moment.
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    child.kill("SIGINT");
+    const result = await run;
+
+    expect(result.code).toBe(130);
+    expect(result.stdout).toBe("");
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+    expect(runsIn(repo)).toBe(3);
+    expect(fs.readdirSync(lockDir)).toEqual([]);
+  }, 40000);
+
+  it("on SIGTERM during mutant 2 of 3: restores the in-flight mutant, never applies the third, exits 143 with no output", async () => {
+    const { repo, before } = initPlanRepo();
+    const lockDir = makeTmpDir();
+    const heartbeat = path.join(repo, "heartbeat.txt");
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      isolation: "inplace",
+      mutants: [
+        { file: "fixture.js", line: 2, replace: "  return false;" },
+        {
+          file: "fixture.js",
+          line: 5,
+          replace: "  return true; // SLOW_MARKER",
+        },
+        { file: "fixture.js", line: 7, replace: "module.exports = {};" },
+      ],
+    });
+
+    const child = spawnCliRaw(["-C", repo, "probe", "--plan", planPath], {
+      env: { AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+    });
+    const run = collectCli(child);
+
+    // Readiness: the heartbeat file only appears once the SECOND
+    // mutant's test run is actually running, so the signal below lands
+    // mid-plan rather than at a guessed moment.
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    child.kill("SIGTERM");
+    const result = await run;
+
+    expect(result.code).toBe(143);
+    // No envelope at all: the handler ends the process before anything
+    // could print a verdict it is about to make moot.
+    expect(result.stdout).toBe("");
+    // The in-flight (second) mutant was restored...
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+    // ...the third mutant never ran (baseline + two mutant runs only)...
+    expect(runsIn(repo)).toBe(3);
+    // ...and neither a lock nor a marker was left behind.
+    expect(fs.readdirSync(lockDir)).toEqual([]);
+  }, 40000);
+
+  it("on SIGTERM during a baseline that rewrites both targets of a 2-file plan, both are left exactly as the baseline wrote them", async () => {
+    // The shared setup arms the signal handler's restore slot once per
+    // target as it opens each one (`openTarget`), so by the time the
+    // baseline runs the slot is still armed to whichever target was
+    // opened LAST. Left armed through a plan's baseline, a signal there
+    // used to restore only that last target and leave the others as the
+    // baseline wrote them -- an asymmetry across targets. A plan clears
+    // the slot before its baseline runs, so a signal there restores
+    // nothing and every target is left exactly as the baseline wrote
+    // it, the same as the non-signal `target_changed_during_baseline`
+    // path already does.
+    const repo = makeTmpDir();
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: repo,
+    });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+    execFileSync("git", ["config", "core.autocrlf", "false"], { cwd: repo });
+    const beforeA = "module.exports = { a: 1 };\n";
+    const beforeB = "module.exports = { b: 2 };\n";
+    fs.writeFileSync(path.join(repo, "fileA.js"), beforeA);
+    fs.writeFileSync(path.join(repo, "fileB.js"), beforeB);
+    // The shared baseline command: rewrites BOTH targets (a
+    // formatter/codegen stand-in), then a heartbeat worker signals
+    // readiness and keeps the process alive long enough for the signal
+    // below to land mid-run, well after both targets were rewritten.
+    fs.writeFileSync(
+      path.join(repo, "baseline-worker.js"),
+      [
+        "const fs = require('node:fs');",
+        "fs.appendFileSync('fileA.js', '// baseline-touched\\n');",
+        "fs.appendFileSync('fileB.js', '// baseline-touched\\n');",
+        "const { spawn } = require('node:child_process');",
+        "spawn(process.execPath, ['heartbeat-worker.js'], { stdio: 'inherit' });",
+        "setTimeout(() => { process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "heartbeat-worker.js"),
+      [
+        "const fs = require('node:fs');",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        "  fs.writeFileSync('heartbeat.txt', String(n));",
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+      { cwd: repo },
+    );
+    const planPath = writePlan(repo, {
+      test: "node baseline-worker.js",
+      isolation: "inplace",
+      mutants: [
+        { file: "fileA.js", line: 1, replace: "// mutantA" },
+        { file: "fileB.js", line: 1, replace: "// mutantB" },
+      ],
+    });
+    const lockDir = makeTmpDir();
+    const heartbeat = path.join(repo, "heartbeat.txt");
+
+    const child = spawnCliRaw(["-C", repo, "probe", "--plan", planPath], {
+      env: { AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+    });
+    const run = collectCli(child);
+
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    child.kill("SIGTERM");
+    const result = await run;
+
+    expect(result.code).toBe(143);
+    expect(result.stdout).toBe("");
+    const afterA = fs.readFileSync(path.join(repo, "fileA.js"), "utf8");
+    const afterB = fs.readFileSync(path.join(repo, "fileB.js"), "utf8");
+    // Both targets are left exactly as the baseline wrote them -- NEITHER
+    // reverted to its pre-baseline content, whichever of the two the
+    // shared setup happened to open (and arm the restore slot to) last.
+    expect(afterA).toBe(beforeA + "// baseline-touched\n");
+    expect(afterB).toBe(beforeB + "// baseline-touched\n");
+    // Nothing was mutated (the baseline never even finished), so no
+    // in-flight marker was ever written; the lock is released too.
+    expect(fs.readdirSync(lockDir)).toEqual([]);
   }, 40000);
 });

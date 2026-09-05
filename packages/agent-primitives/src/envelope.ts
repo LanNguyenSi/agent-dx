@@ -91,6 +91,25 @@ export interface EnvelopeInput {
   /** Subcommand-specific fields, merged into the envelope alongside the base fields. */
   extra?: Record<string, unknown>;
   /**
+   * Dotted paths into `extra` whose value is reported WHOLE: exempt from
+   * every structural cap and from the key budget of the object holding
+   * it, the same treatment the fixed envelope fields get.
+   *
+   * For the one or two small fields of a result a reader cannot do
+   * without once the rest was cut. `probe --plan` names `plan.summary`
+   * here: its five counts are what says how much of the reduced
+   * `results` array is missing, and at a few dozen mutants the reduction
+   * would otherwise drop keys from the summary itself. A held path never
+   * weakens the bound -- every candidate is measured after it is folded
+   * in -- it only spends the budget on that value instead of another.
+   *
+   * Keep what is named here small and bounded by construction: a held
+   * path is copied uncapped, so naming an unbounded value would be a way
+   * to blow past `maxChars` (the overrun warning would then name the
+   * true length, but the envelope would be that large).
+   */
+  keepWhole?: readonly string[];
+  /**
    * Requested serialized-envelope bound. Defaults to 8000. This is a
    * request, not an unconditional guarantee: the fixed envelope fields
    * (see PROTECTED_KEYS below) are never cut, so the real floor is
@@ -247,6 +266,44 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
+/** A tree of payload paths reported whole. A node is either a leaf of a
+ * kept path (`whole`: its value is copied with no cap at all) or a
+ * container on the way to one (its own other keys are still capped). */
+interface KeepWholeNode {
+  whole: boolean;
+  children: Map<string, KeepWholeNode>;
+}
+
+/** The caps a held-out value is copied under: none. */
+const UNCAPPED_LIMITS: CapLimits = {
+  maxString: Number.POSITIVE_INFINITY,
+  maxArray: Number.POSITIVE_INFINITY,
+  maxKeys: Number.POSITIVE_INFINITY,
+  maxDepth: Number.POSITIVE_INFINITY,
+};
+
+/** Builds the tree `capObject` walks from dotted paths (`plan.summary`).
+ * An empty list (the usual case) yields `undefined`, which is the
+ * "nothing is held out" fast path through the whole reduction. */
+function parseKeepWhole(paths: readonly string[]): KeepWholeNode | undefined {
+  const root: KeepWholeNode = { whole: false, children: new Map() };
+  for (const dotted of paths) {
+    const segments = dotted.split(".").filter((segment) => segment !== "");
+    if (segments.length === 0) continue;
+    let node = root;
+    for (const segment of segments) {
+      let next = node.children.get(segment);
+      if (next === undefined) {
+        next = { whole: false, children: new Map() };
+        node.children.set(segment, next);
+      }
+      node = next;
+    }
+    node.whole = true;
+  }
+  return root.children.size > 0 ? root : undefined;
+}
+
 function capString(value: string, maxString: number): string {
   if (value.length <= maxString) return value;
   const capped =
@@ -265,7 +322,9 @@ function capArray(
   const keep = Math.min(items.length, Math.max(0, limits.maxArray));
   const out: unknown[] = new Array<unknown>(keep);
   for (let i = 0; i < keep; i++) {
-    out[i] = capValue(items[i], limits, depth + 1);
+    // Array elements are never held out: `keepWhole` names object keys,
+    // and an index is not a stable name for the value under it.
+    out[i] = capValue(items[i], limits, depth + 1, undefined);
   }
   if (keep < items.length) out.push(arrayMarker(items.length - keep));
   return out;
@@ -300,24 +359,55 @@ function capObject(
   obj: Record<string, unknown>,
   limits: CapLimits,
   depth: number,
+  keepWhole: KeepWholeNode | undefined,
 ): Record<string, unknown> {
   const entries = Object.entries(obj);
-  const keep = Math.min(entries.length, Math.max(0, limits.maxKeys));
+  const budget = Math.max(0, limits.maxKeys);
   const out: Record<string, unknown> = {};
-  for (let i = 0; i < keep; i++) {
-    const entry = entries[i];
-    defineEntry(out, entry[0], capValue(entry[1], limits, depth + 1));
+  let kept = 0;
+  let omitted = 0;
+  for (const entry of entries) {
+    const held = keepWhole?.children.get(entry[0]);
+    if (held !== undefined) {
+      // Held out of the reduction: a leaf of the kept path is copied
+      // whole, a container on the way to one is walked with the caps
+      // still applied to its OWN other keys. Neither consumes the key
+      // budget, so a held path survives every scale the search tries.
+      defineEntry(
+        out,
+        entry[0],
+        held.whole
+          ? capValue(entry[1], UNCAPPED_LIMITS, depth + 1, undefined)
+          : capValue(entry[1], limits, depth + 1, held),
+      );
+      continue;
+    }
+    if (kept < budget) {
+      defineEntry(
+        out,
+        entry[0],
+        capValue(entry[1], limits, depth + 1, undefined),
+      );
+      kept++;
+    } else {
+      omitted++;
+    }
   }
-  if (keep < entries.length) {
+  if (omitted > 0) {
     // A payload that already carries a literal "..." key among the kept
     // ones loses it to the marker here. The count stays honest about how
     // many keys were dropped, which is what the marker is for.
-    defineEntry(out, OMITTED_KEYS_MARKER, objectMarker(entries.length - keep));
+    defineEntry(out, OMITTED_KEYS_MARKER, objectMarker(omitted));
   }
   return out;
 }
 
-function capValue(value: unknown, limits: CapLimits, depth: number): unknown {
+function capValue(
+  value: unknown,
+  limits: CapLimits,
+  depth: number,
+  keepWhole: KeepWholeNode | undefined,
+): unknown {
   if (typeof value === "string") return capString(value, limits.maxString);
   const isArray = Array.isArray(value);
   if (!isArray && !isPlainObject(value)) return value;
@@ -325,10 +415,14 @@ function capValue(value: unknown, limits: CapLimits, depth: number): unknown {
   // string with a placeholder would make the result bigger, not smaller.
   // Because the depth limit is finite, this also terminates on a cyclic
   // graph, though `buildEnvelope` rejects one before reduction ever runs.
-  if (depth > limits.maxDepth) return depthMarker(depth);
+  // A container carrying a held-out path is exempt: pruning it would
+  // take that path with it.
+  if (depth > limits.maxDepth && keepWhole === undefined) {
+    return depthMarker(depth);
+  }
   return isArray
     ? capArray(value, limits, depth)
-    : capObject(value as Record<string, unknown>, limits, depth);
+    : capObject(value as Record<string, unknown>, limits, depth, keepWhole);
 }
 
 /**
@@ -348,8 +442,13 @@ function capValue(value: unknown, limits: CapLimits, depth: number): unknown {
 export function applyCaps(
   payload: Record<string, unknown>,
   limits: CapLimits,
+  /** Dotted paths into `payload` whose value is reported whole, exempt
+   * from every cap and from the key budget of the object holding it (see
+   * `EnvelopeInput.keepWhole`). Empty by default: with no path named,
+   * this is exactly the reduction it always was. */
+  keepWhole: readonly string[] = [],
 ): Record<string, unknown> {
-  return capObject(payload, limits, 0);
+  return capObject(payload, limits, 0, parseKeepWhole(keepWhole));
 }
 
 /**
@@ -667,7 +766,10 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
 
   const fitsWithLimits = (limits: CapLimits): boolean => {
     passes++;
-    const candidate = { ...base, ...applyCaps(payload, limits) };
+    const candidate = {
+      ...base,
+      ...applyCaps(payload, limits, input.keepWhole ?? []),
+    };
     if (serializedLength(candidate) > effectiveMaxChars) return false;
     best = candidate;
     return true;

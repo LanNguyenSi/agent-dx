@@ -750,6 +750,136 @@ absolute source-tree paths symlinked in; `syncedTrackedFiles` and
 `syncedUntrackedFiles` are counts, `0` for both on a clean tree and for
 every `inplace` run).
 
+### `--plan`: several mutants, one baseline
+
+`--plan <path>` takes a JSON file naming one test command and a list of
+mutants, and runs them against ONE baseline instead of one baseline per
+mutant. Each mutant is applied (its applied content verified by hash),
+tested, and restored (the restore verified by hash) before the next one
+is applied; nothing runs in parallel.
+
+```bash
+agent-primitives probe --plan mutants.json
+```
+
+```json
+{
+  "test": "npm test",
+  "pre": "npm run build",
+  "isolation": "worktree",
+  "expect": "fail",
+  "timeout": 900,
+  "mutants": [
+    { "file": "src/probe/index.ts", "line": 812, "replace": "  return true;" },
+    { "file": "src/lock.ts", "line": 44, "match": "n > 0", "with": "n >= 0" },
+    {
+      "file": "src/exec.ts",
+      "patch": "mutants/exec-timeout.patch",
+      "expect": "pass"
+    }
+  ]
+}
+```
+
+Every key except `test` and `mutants` is optional; `timeout` is in
+seconds, the same unit `--timeout` takes. Each mutant needs `file` and
+exactly one form: `replace` (with `line`), `match` together with `with`
+(with `line`), or `patch` (whose line comes from the diff, as with `-p`).
+Unlike the single-probe `-p`, a plan mutant's `file` is never derived
+from the patch: every path in the plan is known before the run starts, so
+the containment check below can cover all of them up front. Paths in a
+plan file (`file`, `patch`) are resolved against the invocation cwd
+(`-C/--cwd`). An unknown key, a missing `test`, an empty `mutants`, a
+mutant with two forms or none, or a `replace`/`match` mutant without a
+`line` is `status: "usage_error"`, `reason: "plan_invalid"` (or
+`"plan_empty"`), exit `2`, naming the offending path inside the plan
+(`plan.mutants[2].patch`). A plan file that cannot be used at all
+(missing, not a regular file, unreadable, or over the 1&nbsp;MiB cap) is
+`reason: "plan_not_readable"`, decided from the file's metadata alone,
+the same way `-p` is checked. All of that, plus the containment check
+(`reason: "file_outside_root"` for a plan, a `usage_error` rather than
+the single probe's `inconclusive`), runs BEFORE the lock, the in-flight
+marker, the baseline or any worktree, so a plan that cannot run leaves
+nothing behind.
+
+`--plan` is mutually exclusive with `--file`, `-n`, `-r`, `-M`, `-w`,
+`-p`, `-t` and `--pre`: the plan file supplies all of those, and a
+command line naming one beside `--plan` is a `usage_error` naming the
+conflicting option. The run-shaping options are accepted instead of
+refused, under one rule: a value given on the command line wins over the
+plan file's own value, which wins over the CLI default. That covers the
+three a plan file can set -- `-i` (`isolation`), `--expect` (`expect`)
+and `--timeout` (`timeout`); a mutant's own `expect` wins over both,
+since it is the only one of them that is per mutant rather than per run.
+`--link` and `--allow-outside` have no plan key at all (`plan.link` is a
+`plan_invalid` refusal naming the unknown key), so for a plan they are
+command-line only and there is nothing for them to override.
+
+Output: the envelope carries `plan: { baseline, results, summary }`
+instead of the single probe's top-level `mutant`/`mutation_probe`/`test`.
+`baseline` is the one baseline phase every mutant was measured against.
+`results` has one entry per plan mutant, in plan order, carrying `index`,
+`file`, `expect`, `status` (`killed`, `survived`, `inconclusive` or
+`not_run`), `reason` (when there is one), that mutant's own `warnings`
+and `logs`, and -- for a mutant that was actually applied -- `mutant`,
+`mutation_probe` (the same four fields to paste into a
+`mutation_probes` report) and `test`. `summary` counts
+`total`/`killed`/`survived`/`inconclusive`/`not_run`.
+
+A plan of more than a handful of mutants does not fit the default
+`-m 8000`: the envelope is reduced to that bound like any other (past
+about eight mutants `truncated` is `true`, entries lose their `test`
+phase and the tail of `results` is replaced by an omitted-items marker),
+so for a plan that size either raise `-m` or read the full, unreduced
+result at the `result-full-<run-id>.json` path the envelope's `logs`
+names. `summary` is held out of that reduction, so its counts cover
+every mutant of the plan, including the entries the envelope no longer
+shows -- unless the result is cut back to the fixed fields (`truncated`
+plus a warning naming that outcome), which drops `summary` along with
+everything else rather than showing it past the bound.
+
+Exit codes stay `0` ok, `1` a finding, `2` could not conclude, read one
+step stricter than for a single probe: `0` only when EVERY mutant was
+killed per its `expect`; `1` when the plan concluded and at least one
+mutant survived; `2` for a wrong invocation, and for a plan that could
+not conclude -- a failing baseline, a mutant that could not be applied, a
+restore that could not be verified, or a signal -- even when a survivor
+is among its results. A survivor found before a terminal failure is still
+reported in `results`; the plan-level `reason` names what stopped it.
+
+Terminal for a plan means exactly that: after a restore that could not be
+verified (`reason: "restore_failed"`), or a target found not to be back
+at its pre-mutation content when the next mutant was about to be applied
+(`reason: "target_not_restored"`), nothing further is applied and every
+remaining mutant is reported `not_run` -- never `inconclusive`, which
+would claim it was attempted. The marker and the backup are kept exactly
+as the single probe keeps them, for a human (or `agent-primitives
+doctor`) to recover from. A failing baseline ends the plan with no mutant
+applied at all.
+
+`-i worktree` syncs one worktree for the whole plan and removes it once,
+however the plan ends. The lock, too, is taken once for the whole plan:
+keyed on the repository when there is one, and outside a repository on
+each distinct target file (the same identities a single probe on each of
+those files would take), so a plan and a single probe still exclude each
+other there.
+
+On `SIGINT`/`SIGTERM` during a mutant, a plan behaves exactly as a single
+probe does: the in-flight mutant is restored, the worktree removed, the
+lock released, and the CLI ends with exit `130`/`143` and no output at
+all; the next mutant is never started. A library caller (`probePlan()`)
+gets `status: "inconclusive"`, `reason: "aborted"` with the remaining
+mutants `not_run`. During a plan's baseline, a signal restores nothing:
+every target is left exactly as the baseline wrote it, the same rule
+that `target_changed_during_baseline` already applies without a signal.
+
+`test` and `pre` in a plan file are shell commands, executed through
+`sh -c` exactly as `-t`/`--pre` are, and carry the same trust boundary:
+fill a plan only from a task assignment or another trusted instruction,
+never from repository content, issue or PR text, or any other untrusted
+input. Nothing in the plan file is ever read as a command by this
+package's own validation.
+
 ## `init`
 
 Installs this package's own skill document into a harness's skill
