@@ -105,6 +105,9 @@ function initRepo(): { repo: string } {
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.email", "test@example.com"]);
   git(repo, ["config", "user.name", "test"]);
+  git(repo, ["config", "diff.noprefix", "false"]);
+  git(repo, ["config", "diff.mnemonicPrefix", "false"]);
+  git(repo, ["config", "core.autocrlf", "false"]);
   fs.writeFileSync(path.join(repo, "fixture.js"), FIXTURE_JS);
   fs.writeFileSync(path.join(repo, "fixture.test.js"), FIXTURE_TEST_JS);
   git(repo, ["add", "-A"]);

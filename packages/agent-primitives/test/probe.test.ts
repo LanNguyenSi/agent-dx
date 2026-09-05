@@ -171,7 +171,18 @@ function patchFromWorkingCopy(
 ): void {
   const target = path.join(repo, "fixture.js");
   fs.writeFileSync(target, nextContent);
-  fs.writeFileSync(patchPath, gitOutput(repo, ["diff", "--", "fixture.js"]));
+  fs.writeFileSync(
+    patchPath,
+    gitOutput(repo, [
+      "-c",
+      "diff.noprefix=false",
+      "-c",
+      "diff.mnemonicPrefix=false",
+      "diff",
+      "--",
+      "fixture.js",
+    ]),
+  );
   fs.writeFileSync(target, originalContent);
 }
 
