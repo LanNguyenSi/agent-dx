@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Task-slicing guidance now requires briefs to enumerate every file and doc
+  site that references an identifier, config value, build context, or
+  documented command the task will change, using annotated `relevant_files`
+  and `relevant_docs` entries for sites outside the edit set. Anchored by
+  thin n=3 evidence in
+  `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` sections 5(b) and
+  7(v).
+
 ## [0.29.0] - 2026-09-05
 
 ### Added

@@ -4092,3 +4092,32 @@ describe("Codex routing and agent-led installation stay documented", () => {
     );
   });
 });
+
+describe("task briefs enumerate reference sites for changed values", () => {
+  const skillMd = readAsset("skill/SKILL.md");
+  const taskSlicerMd = readAsset("agents/task-slicer.md");
+
+  it("requires reference sites to be annotated in the existing task fields", () => {
+    const instruction =
+      "For every identifier, config value, build context, or documented command";
+    const expected = [
+      "enumerate every file and doc site that references it",
+      "`relevant_files` or `relevant_docs`",
+      "annotation for a site the task will not edit",
+    ];
+    for (const doc of [skillMd, taskSlicerMd].map(unwrap)) {
+      const start = doc.indexOf(instruction);
+      expect(
+        start,
+        "reference-site instruction missing from asset",
+      ).toBeGreaterThanOrEqual(0);
+      const sentence = doc.slice(start, doc.indexOf(".", start) + 1);
+      for (const phrase of expected) {
+        expect(
+          sentence,
+          `reference-site instruction missing "${phrase}"`,
+        ).toContain(phrase);
+      }
+    }
+  });
+});
