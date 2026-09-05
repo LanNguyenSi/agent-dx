@@ -242,9 +242,10 @@ export type BeginWorktreeResult = WorktreeSyncSuccess | WorktreeSyncFailure;
 
 /** Registers one started child run, together with a promise of when its
  * stdio has truly closed, as the caller's one in-flight run. The same
- * hook `probe/index.ts` passes its `--pre`, `-t`, and `git apply` calls,
- * so a signal handler can wait for whatever this function has running
- * before it acts. */
+ * hook `probe/session.ts`'s `createRunController` produces and
+ * `probe/step.ts`/`probe/setup.ts` pass along to its own `--pre`, `-t`,
+ * and `git apply` calls, so a signal handler can wait for whatever this
+ * function has running before it acts. */
 export type TrackGitCall = <T>(
   started: Promise<T>,
   closed: Promise<void>,
@@ -381,7 +382,7 @@ function gitArgv(
 /** Registers one already-started git call with the caller's tracking
  * hook. `run.ts` settles only on `close`, so the call's own settling
  * already IS true stdio closure and `closed` just mirrors it (the same
- * reasoning `probe/index.ts`'s `startRunArgvTracked` states for the
+ * reasoning `probe/session.ts`'s `startRunArgvTracked` states for the
  * `git apply` calls). */
 function trackGit(
   track: TrackGitCall,
@@ -468,8 +469,8 @@ function yieldToEventLoop(): Promise<void> {
  * Every `node_modules` directory (or directory symlink) up to
  * `NODE_MODULES_LINK_DEPTH` plus every `--link` extra is symlinked. Any
  * non-zero git exit, or a genuine I/O failure while copying, is
- * `worktree_sync_failed`; the caller (`probe/index.ts`) never treats a
- * sync failure as a verdict.
+ * `worktree_sync_failed`; the caller (`probe/session.ts`'s
+ * `prepareWorktreeSession`) never treats a sync failure as a verdict.
  *
  * The whole sync runs under the caller's `signal` and through its
  * `track` hook: every git call below is killed when the signal fires

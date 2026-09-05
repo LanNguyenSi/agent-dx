@@ -162,6 +162,24 @@ SKILL.md`) and the README gained an "Invocation templates" section
   one run controller both entry points use. `test/probe.test.ts` guards
   the extraction against four `probe()` results recorded from the package
   as it stood before it (`test/fixtures/single-probe-result-master-a908951.json`).
+- Internal, no behavior change: `src/probe/index.ts` (formerly one
+  ~3300-line file) is split into `probe/session.ts` (the run controller:
+  signal/abort handling, the in-flight-run tracking the handler waits
+  on, the `-i worktree` session, and `openTarget`'s per-file
+  backup/restore, plus the shared field-shape result types every layer
+  needs to name), `probe/step.ts` (the per-mutant step, `prepareMutant`
+  + `runMutantAttempt`, built on `session.ts`), and `probe/setup.ts`
+  (the shared `openRunSetup`: isolation fallback, refusals, containment,
+  the lock, stale-marker recovery, the worktree sync, every target's
+  backup, the baseline), with `index.ts` left holding the CLI-facing
+  option/result types and the two entry points, `probe()` and
+  `probePlan()`. Import direction is one way,
+  `session.ts <- step.ts <- setup.ts <- index.ts`; in this codebase
+  `setup.ts` ends up needing only `session.ts` (the mutant step it runs
+  before its own baseline is supplied by its caller). The package's
+  public surface (`src/index.ts`'s exports, `dist/index.d.ts`) is
+  unchanged; the same identity fixture above still passes without
+  regeneration.
 - `-t/--test` is no longer enforced by the option parser (so `--plan` can
   supply it) but by the probe command itself; omitting both is still
   `status: "usage_error"`, exit `2`.
