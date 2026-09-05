@@ -46,11 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The installed implementer and reviewer prompts now carry a checklist item
   for any diff that adds or changes a GitHub Actions `run:` step: replay it
-  locally under the runner's shell before treating it as tested, with the
-  expected-success and the expected-failure inputs, replaying a job's steps
-  in their committed order, and guarding a step that expects a non-zero
-  command inside an `if` or a `set +e`/`set -e` block. SKILL.md points to the
-  installed implementer prompt for the rule. Anchored by the analysis in
+  locally under the shell the step actually runs (`bash --noprofile --norc
+  -eo pipefail` when `shell: bash` is set on the step or via
+  `defaults.run.shell`, `bash -e` otherwise) before treating it as tested,
+  with the expected-success and the expected-failure inputs, replaying a
+  job's steps in their committed order, and guarding a step that expects a
+  non-zero command inside an `if` or a `set +e`/`set -e` block. The
+  reviewer's `reproduction` field now names this replay as a second,
+  explicitly non-probabilistic trigger alongside empirical/probabilistic
+  evidence, with `sample_size: not_applicable` allowed. SKILL.md points to
+  the installed implementer prompt for the rule. Anchored by the analysis in
   `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section 7(vi).
 
 ## [0.29.0] - 2026-09-05
