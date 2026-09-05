@@ -1,5 +1,91 @@
 # Bundle log
 
+- 2026-09-05T20:47:02Z (identifier-drift item, reworded generic after
+  rebase): rebased the identifier-drift reviewer checklist item onto
+  master (`94cc1d2`, the squash-merge of PR #194); resolved the
+  resulting conflicts in
+  `reviewer.md`, `log.md`, `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`, and
+  `subagent-contracts-superset.md` by taking the upstream (T-002) side for
+  every `docs/okf/*.md` file and redoing the identifier-drift additions
+  against the rebased tree. Reworded the reviewer.md item to stay
+  tool-agnostic per decision D-026 (the kit ships tool-agnostic; the
+  existing docs-consistency guard banning product names, including
+  `agent-primitives`, from installed assets stays untouched): the item now
+  names the trigger and the check generically and, when a drift check is
+  connected, says to run it over the base..head range and judge every site
+  it reports, with no product name in the sentence. Reverted the guard
+  test's narrow exception back to its upstream form (banning
+  `agent-primitives` across all four assets uninterrupted) and rewrote the
+  item's own pinning describe block against the new wording. The
+  CHANGELOG's `[Unreleased]` bullet keeps the concrete name ("the
+  mechanical guard is `agent-primitives drift` (see the agent-primitives
+  package)"), still anchored at `ow-kit-effort-analysis.md` section
+  7(iv). Inserting the identifier-drift item added 8 lines to
+  `reviewer.md` above its existing `Rules:` section, shifting every
+  line-anchored citation into `reviewer.md` from `review-gate-and-
+  waivers.md` and `subagent-contracts-superset.md` at or after the
+  insertion point by +8 (re-derived: 51-57 to 59-65, 72-82 to 80-90,
+  83 to 91, 104 to 112, 105-108 to 113-116, 84-110 to 92-118); the
+  citation into `reviewer.md:30` above the insertion point was
+  unaffected. Adding the CHANGELOG bullet (10 lines including its
+  trailing blank line) further shifted this log's own historical
+  self-citation into `CHANGELOG.md` (anchored on the keyed placeholder
+  line's exact text, previously line 192) to line 202, re-pointed in
+  place (see that entry's account, updated in this same edit).
+  Validation: `npx vitest run
+  test/docs-consistency.test.ts` passed all 268 tests; `npm test` passed
+  all 721 tests across 17 files; `npm run typecheck` was clean. `okf-kit
+  check --json --require-anchors docs/okf` on the committed tree reported
+  0 errors, 1 warning (`install-fence-mechanics.md` staleness, the
+  pre-existing baseline entry), 23 notices; measured against a temporary
+  detached worktree of the rebase target `94cc1d2` alone, the same
+  command reported the identical 0/1/23 summary, so this task's own edits
+  introduce no new okf-kit finding.
+
+- 2026-09-05T21:05:58Z (T-003b, agent-dx 503136a4: review-round-1 fixes):
+  closed a delta after the first reviewer round on the entry above.
+  Corrected that entry's own rebase base, previously stated as T-002's
+  pre-squash branch commit `f059e98`; the real rebase target is master
+  `94cc1d2` (the squash-merge of PR #194), corrected in both places it was
+  cited. Corrected that entry's timestamp from a local-time-with-`Z`
+  stamp (`22:47:00Z`) to the real UTC committer time (`20:47:02Z`).
+  Reworded the reviewer.md item's closing parenthetical from an
+  unconditional claim ("its allowlist covers released changelog sections
+  and historical phrasing") to a conditional check ("if it allowlists
+  released changelog sections or historical phrasing, check that its
+  allowlist matches the change under review"), since a negative-control
+  probe showed the old wording was unpinned and could be rewritten
+  freely; the replacement holds the same 8 lines (`reviewer.md:50-57`),
+  so no downstream `reviewer.md` citation shifted. Added one sentence to
+  `SKILL.md` step 7, beside the GitHub Actions shell-replay reference it
+  shares a paragraph with, mirroring the reviewer.md identifier-drift
+  item for the orchestrator's own trivial-rename review path (Scaling
+  delegation lets the orchestrator review a trivial rename without a
+  reviewer spawn, and `SKILL.md` otherwise mirrors reviewer checks for
+  Placement at step 9 and the Actions replay at steps 6/7). The insertion
+  added a net +5 lines after old line 245 (before old line 246); every
+  line-anchored `SKILL.md` citation at or after old line 246, in both
+  bounds of every range, shifted by +5 across
+  `review-gate-and-waivers.md`, `subagent-contracts-superset.md`, and
+  `run-state-lifecycle-and-markers.md` (103 citations re-derived
+  mechanically and spot-checked against the rebased tree's exact text;
+  none below old line 246 moved). Re-stamped those three docs, whose
+  sources changed in this edit; left `model-preselection.md`'s stamp
+  untouched, since this branch has never edited it and master already
+  carries the same stamp. Added a test pin for the new `SKILL.md`
+  sentence and for the reworded allowlist parenthetical (mutation
+  probes (e) and (f) below). Re-anchored the CHANGELOG identifier-drift
+  test on the bullet's own opening and closing text instead of the
+  `## [Unreleased]`-to-next-heading span, so the pin survives the bullet
+  moving under a version heading on release; dropped the identifier-drift
+  describe block's redundant local `flat` helper (the module-level
+  `unwrap` already does the same whitespace collapse) and the no-op
+  `flat()` wrapped around an already-`unwrap`ped string. Validation:
+  `npx vitest run test/docs-consistency.test.ts` passed all 270 tests
+  (268 plus the two new pins); `npm test` passed all 723 tests across 17
+  files; `npm run typecheck` was clean.
+
 - 2026-09-05 (docs-only closing delta): re-verified and re-stamped
   review-gate-and-waivers.md after the review gate gained a narrowly bounded
   post-review closure option for an entirely explanatory docs/comments/
@@ -1548,7 +1634,7 @@
   contracts), and found the citation fix had in fact been a blind +8-line
   shift rather than a genuine re-derivation, still wrong in 44 changed
   lines across the four docs (examples: review-gate-and-waivers.md's
-  `SKILL.md:310` for the reviewer severity field, true `317`;
+  `SKILL.md:315` for the reviewer severity field, true `317`;
   subagent-contracts-superset.md's five output-contract-block ranges, each
   missing its own closing fence line, e.g. the explorer block's true end
   is `248`, not `245`). The fix round reworded the rule to cite only
@@ -1566,7 +1652,7 @@
   the wrong `describe` block boundaries (the advisor-escalation-policy and
   advisor-byte-identical blocks moved when an earlier fix-round inserted
   lines above them); all three were corrected against the current test
-  file. One citation, `SKILL.md:448-450` on the pre-0.21.0
+  file. One citation, `SKILL.md:453-455` on the pre-0.21.0
   model-correlation clause explicitly marked historical, had been wrongly
   shifted by the earlier blind offset even though it documents a past
   state rather than the live file; it was restored to its true historical
@@ -2570,14 +2656,18 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:192#"the keyed placeholder line's exact text,"`,
-re-pointed by 28 lines since this account was first written, by T-002's own
+(`CHANGELOG.md:202#"the keyed placeholder line's exact text,"`,
+re-pointed by 38 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
 it, the +2-line shift from the 0.28.0 release commit inserting
-the `## [0.28.0]` heading above it, and this bundle's own fix-round-2
+the `## [0.28.0]` heading above it, this bundle's own fix-round-2
 CHANGELOG.md edit above it (net +7 lines: the probe-replay Unreleased
-bullet grew from 8 to 13 lines) grew
+bullet grew from 8 to 13 lines), and (round 2 of the identifier-drift
+task, after the T-002 rebase) a further +10-line shift from this task's
+own identifier-drift `[Unreleased]` bullet inserted above it (re-pointed
+in this same edit, restoring `okf-kit check`'s 0-error/1-warning/23-notice
+baseline) grew
 by a net 3
 lines relative to the pre-round-2 base commit (`5a33adb`, `git diff
 --stat 5a33adb -- CHANGELOG.md`: 17 insertions, 14 deletions), shifting
@@ -6327,9 +6417,9 @@ red (installed `claude` instead); restored, green again.
   subagent-contracts-superset.md, and model-preselection.md against package
   version 0.26.0+ (Unreleased). Review round 2 found the round-1 pass had
   extended neither of the "Where each contract lives" bullet's two spans
-  (`SKILL.md:313-340` and `implementer.md:41-66`) past the newly added
+  (`SKILL.md:318-345` and `implementer.md:41-66`) past the newly added
   field, so both citations' cited ranges ended one field short of the
-  block's actual last field line; fixed to `SKILL.md:313-341` and
+  block's actual last field line; fixed to `SKILL.md:318-346` and
   `implementer.md:41-67` (the block's true last content line is the
   `commits:` key itself, not its `- ""` placeholder value, which repeats
   too often across the contract to serve as a unique anchor). Added a new
@@ -7113,9 +7203,9 @@ duplicated three other times in the same file and so is too collision-
 prone for a load-bearing anchor), and the one
 this class recurred on (line 295, `,274-275` for "Repos without a bundle
 are unaffected", which at this round's head sits at
-`packages/orchestrator-workflow/assets/skill/SKILL.md:290`,
+`packages/orchestrator-workflow/assets/skill/SKILL.md:295`,
 re-anchored to its own
-`packages/orchestrator-workflow/assets/skill/SKILL.md:290#"without a bundle are unaffected"`).
+`packages/orchestrator-workflow/assets/skill/SKILL.md:295#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
 in this bundle's non-reserved docs now has its own anchor via a full
 citation (`index.md` and `log.md` are append-only journals and keep their

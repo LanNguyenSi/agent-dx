@@ -61,6 +61,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prompt for the rule. Anchored by the analysis in
   `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section 7(vi).
 
+- The installed reviewer prompt now carries a checklist item for identifier
+  drift: after a change that deletes or renames an exported identifier,
+  type, config key or file, comments, README, CHANGELOG `[Unreleased]`
+  prose, and doc comments that still describe the old name as current are
+  drift and are findings. Names the check to run, when connected, as a
+  drift check over the base..head range; the mechanical guard is
+  `agent-primitives drift` (see the agent-primitives package). Anchored by
+  the analysis in `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md`
+  section 7(iv).
+
 ## [0.29.0] - 2026-09-05
 
 ### Added

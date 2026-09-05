@@ -242,7 +242,12 @@ directory and the subagents.
    GitHub Actions shell replay named in step 6 is a second, explicitly
    non-probabilistic trigger for the same field, with `sample_size:
    not_applicable` allowed when the replay itself has no meaningful sample
-   size. When this is not the task's first review round, name the round
+   size. A change that deletes or renames an exported identifier, type, config
+   key, or file is also checked for identifier drift (docs or comments still
+   describing the old name as current), by the reviewer or by the orchestrator
+   itself when it reviews a trivial rename per Scaling delegation, using a
+   connected drift check when one exists. When this is not the task's first
+   review round, name the round
    number in the briefing; the reviewer marks each finding's `recurrence` as
    `new` or `repeated` against the earlier rounds it was told about, which is
    what lets the orchestrator detect the Review-round escalation budget's

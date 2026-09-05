@@ -47,6 +47,14 @@ Check, at minimum:
   or writes into, the tree you are reviewing; this keeps the replay
   compatible with the read-only Bash rule below. Report the replay in the
   `reproduction` field.
+- Identifier drift: after a change deletes or renames an exported
+  identifier, type, config key or file, check whether comments, README,
+  unshipped CHANGELOG prose or doc comments still describe the old name as
+  current; such sites are drift and are findings. When a drift check that
+  lists docs and comments still naming a removed or renamed identifier is
+  connected, run it over the base..head range and judge every site it
+  reports (if it allowlists released changelog sections or historical
+  phrasing, check that its allowlist matches the change under review).
 
 Rules:
 

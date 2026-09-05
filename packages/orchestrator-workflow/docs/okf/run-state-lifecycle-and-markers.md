@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-05T22:40:00Z
+timestamp: 2026-09-05T21:05:58Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -103,8 +103,8 @@ Step 1 of the Workflow carries the matching instruction to write the pointer
 in every worktree the run touches
 (SKILL.md:136#"in every worktree the run touches."), and each of the
 three per-harness bullets under Harness notes repeats that the pointer rule
-applies unchanged regardless of harness (SKILL.md:534#"applies unchanged.";
-SKILL.md:537#"pointer rule from Run state applies unchanged."; SKILL.md:552#"pointer rule from Run state applies unchanged.").
+applies unchanged regardless of harness (SKILL.md:539#"applies unchanged.";
+SKILL.md:542#"pointer rule from Run state applies unchanged."; SKILL.md:557#"pointer rule from Run state applies unchanged.").
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
@@ -199,10 +199,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (SKILL.md:301#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (SKILL.md:306#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per SKILL.md:299#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per SKILL.md:304#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:21-22#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:27-28#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -290,12 +290,12 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (SKILL.md:289#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (SKILL.md:294#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:285#"guidance: when the repo carries a curated knowledge"; SKILL.md:290#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
+(SKILL.md:290#"guidance: when the repo carries a curated knowledge"; SKILL.md:295#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (SKILL.md:295#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (SKILL.md:300#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
