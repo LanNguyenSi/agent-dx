@@ -7012,5 +7012,64 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   `npx vitest run test/docs-consistency.test.ts` passed all 246 tests;
   `npm test` passed all 696 tests; `npm run typecheck` was clean. `okf-kit
   check --json --require-anchors packages/orchestrator-workflow/docs/okf`
-  reported 0 errors, the unchanged 1 historical staleness warning, and 23
-  notices.
+  actually reported 0 errors, 2 warnings, and 23 notices at this commit
+  (correction, found in review): alongside the pre-existing
+  `install-fence-mechanics.md` staleness warning, this pass's
+  `test/docs-consistency.test.ts` edit newly staled `model-preselection.md`
+  (it lists that test file in `sources:`); the entry above wrongly
+  described the count as "the unchanged 1 historical staleness warning".
+  See the following entry for the re-verification and re-stamp.
+
+- 2026-09-05T19:03:26Z (fix-round mutation probe replay, review round 2):
+  addressed the prior entry's regression plus review findings on the same
+  change. Re-verified `model-preselection.md`'s `test/docs-consistency.
+  test.ts` citations (ranges 2160-2305, unaffected: the new describe block
+  was appended after line 4170) and re-stamped its timestamp; corrected
+  the prior log entry's wrong count above rather than rewriting history.
+  Reworded the replay trigger in both SKILL.md step 6 and implementer.md
+  from the ambiguous "a fix round after the first" to "any round after
+  the task's first ... (on the task's first round there are none)", added
+  a regression-signal consequence for a replayed probe that now survives
+  or can no longer be applied (`result` `survived` or `not_applicable`,
+  resolved before the next reviewer spawn), replaced step 7's undeliverable
+  reviewer permission with a briefing instruction (the orchestrator's
+  reviewer briefing names the replayed-and-killed probes with their
+  `mutant`/`verified_applied_via` values), added a Mutation Probes
+  subsection to `04-implementation-summary.md` (pinned in
+  `test/template-markers.test.ts`), and fixed the L1/L2/L3 wording and
+  test findings (four-evidence-fields-plus-replayed wording, the negative
+  reviewer-prompt pin's name, a shared `extractMutationProbesBlock`
+  helper, `replayed` added to the exact-sub-field pin, and a new
+  fixed-sub-field-order pin). Editing SKILL.md, implementer.md, and
+  `test/docs-consistency.test.ts` shifted lines throughout those files;
+  re-pointed every citation the shift broke (subagent-contracts-
+  superset.md, run-state-lifecycle-and-markers.md, model-preselection.md,
+  review-gate-and-waivers.md) by locating each anchor's exact quoted text
+  at its new line rather than by uniform arithmetic, verified by re-running
+  the full docs-consistency suite until clean. Also fixed the run-state-
+  lifecycle-and-markers.md continuation citation at (then) line 295:
+  `,252-253` pointed at unrelated prose ("high/critical or other
+  ineligible finding") instead of the claim's actual continuation
+  ("Repos without a bundle are unaffected", `,274-275`); by-hand-checked
+  the file's other two continuation citations (lines 27 and 66): line 66's
+  `,33-37` into `test/template-markers.test.ts` matches (the run-base
+  exactly-one-marker test); line 27's `,173-178` into `INSTALL-AGENT.md`
+  is a looser but not wrong continuation (the apply-instead-of-init
+  installer path, same general claim), left as is.
+  `npx vitest run test/docs-consistency.test.ts` passed all 249 tests;
+  `npm test` passed all 701 tests; `npm run typecheck` was clean. `okf-kit
+  check docs/okf` now reports 0 errors, 3 warnings, 23 notices: the
+  pre-existing `install-fence-mechanics.md` staleness warning, plus two
+  new `citations-resolve` warnings against historical entries in this
+  `log.md` file itself (a `test/docs-consistency.test.ts:920-933` citation
+  and a `CHANGELOG.md:168` citation, both now line-shifted by this pass's
+  edits) — left uncorrected per this bundle's convention that historical
+  evidence retains the source tokens it recorded rather than being
+  rewritten to match a later state; `log.md` is excluded from the
+  stricter docs-consistency test suite for the same reason. Base
+  comparison (`agent-dx` at e35d0ce, pre-task): `okf-kit check docs/okf`
+  reported 0 errors, 1 warning (the same pre-existing
+  `install-fence-mechanics.md` entry), 23 notices — so this pass's delta
+  is exactly the two new log.md-only warnings just described; no
+  per-finding change in the live bundle docs' own staleness or citation
+  errors versus base.

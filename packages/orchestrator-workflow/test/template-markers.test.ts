@@ -224,3 +224,40 @@ describe("05-review-findings.md placeholder-row fail-closed convention", () => {
     expect(reviewTemplate).toMatch(/zero-findings review, delete this row/i);
   });
 });
+
+/**
+ * The fix-round mutation-probe replay rule (SKILL.md step 6,
+ * assets/agents/implementer.md) names 04-implementation-summary.md as the
+ * source of prior rounds' probes, but the template previously had no slot
+ * to hold them. This pins the added "Mutation Probes" subsection under
+ * Test Evidence, one row per probe with the round it was named in and the
+ * `replayed` flag, so a task's evidence has somewhere to actually live.
+ */
+describe("04-implementation-summary.md Mutation Probes subsection", () => {
+  const implementationTemplate = readAsset(
+    "templates/04-implementation-summary.md",
+  );
+
+  it("carries a Mutation Probes subsection under Test Evidence", () => {
+    expect(implementationTemplate).toContain("### Mutation Probes");
+  });
+
+  it("carries a header row with Round, Mutant, Verified Applied Via, Result, Restored Verified, and Replayed columns", () => {
+    const headerRow = implementationTemplate
+      .split(/\r?\n/)
+      .find((line) => line.trim().startsWith("|") && /round/i.test(line));
+    expect(headerRow).toBeDefined();
+    const cells = (headerRow ?? "")
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim().toLowerCase());
+    expect(cells).toEqual([
+      "round",
+      "mutant",
+      "verified applied via",
+      "result",
+      "restored verified",
+      "replayed",
+    ]);
+  });
+});

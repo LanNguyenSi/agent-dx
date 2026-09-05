@@ -192,12 +192,16 @@ directory and the subagents.
    for real, observe the named test fail, restore, re-verify). Hold the
    implementer's report to the claim-only-what-was-measured rule too: treat any
    verification claim there that is not backed by a check it actually ran as
-   unverified. On a fix round after the first, the briefing also names the
-   prior rounds' mutation probes to replay, drawn from the run's
-   `04-implementation-summary.md`; the implementer replays every one of
-   them, not only the round's new probes, before the next reviewer spawn,
-   and reports each replayed probe in `mutation_probes` with the same four
-   fields, marked `replayed`. Record meaningful decisions in
+   unverified. On any round after the task's first, the briefing also names
+   every mutation probe named in an earlier round of this task (on the
+   task's first round there are none), drawn from the run's
+   `04-implementation-summary.md`; the implementer replays each one, not
+   only the round's new probes, before the next reviewer spawn, and
+   reports each in `mutation_probes` with the four evidence fields plus
+   `replayed: true`. A replayed probe whose mutant now survives or can no
+   longer be applied is a regression signal, reported as such (`result`
+   `survived` or `not_applicable` with the reason) and resolved before the
+   next reviewer spawn. Record meaningful decisions in
    `03-decisions.md` and consolidate evidence in
    `04-implementation-summary.md`.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
@@ -235,8 +239,10 @@ directory and the subagents.
    lets the orchestrator detect the Review-round escalation budget's
    trigger (see below) without re-deriving it by hand. When the
    implementer's report replays a prior round's mutation probe, the
-   reviewer may skip re-running a probe the replay already reports as
-   killed; the reviewer output contract itself is unchanged.
+   orchestrator's reviewer briefing names the replayed probes the
+   implementer reports as killed together with their `mutant` and
+   `verified_applied_via` values; the reviewer may then skip re-running
+   those. The reviewer output contract itself is unchanged.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high
@@ -373,11 +379,13 @@ names none, it returns `mutation_probes: []` rather than omitting the
 field, so 'none asked for' is distinguishable from 'asked for and not
 reported'. Each item also carries `replayed`: `false` for a probe newly
 introduced this round, `true` for a prior round's probe replayed this
-round under the round-2-and-later replay rule in step 6. On a fix round
-after the first, the implementer replays every probe named across the
-task's earlier rounds, not only this round's new probes, before the next
-reviewer spawn, reporting each one in `mutation_probes` alongside the
-round's new probes.
+round under the replay rule in step 6. On any round after the task's
+first, the implementer replays every probe named in an earlier round of
+this task (on the task's first round there are none), not only this
+round's new probes, before the next reviewer spawn, reporting each one in
+`mutation_probes` alongside the round's new probes. A replayed probe
+whose mutant now survives or can no longer be applied is a regression
+signal, reported as such and resolved before the next reviewer spawn.
 
 The `commits` field lists the full sha of every commit the implementer
 produced on the task branch, in the order produced; when the task
