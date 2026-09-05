@@ -189,15 +189,15 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
     throw new UsageError(`drift: ${cwd} is not inside a git work tree`);
   }
   // Every git call below runs with `gitRoot` as its cwd, not the caller's
-  // `cwd` (which may be a subdirectory of the work tree): `git diff`
-  // already reports root-relative paths regardless of cwd, but `git
-  // grep` reports paths relative to ITS OWN cwd, and `git show <rev>:
-  // <path>` resolves `<path>` relative to the work tree root. Mixing a
-  // subdirectory cwd for grep with root-relative paths everywhere else
-  // means a heading/released-section lookup can silently read the wrong
-  // file (or none), and an `--allow` glob written against a root-relative
-  // path never matches. Rooting every call here keeps every path in this
-  // module root-relative, uniformly.
+  // `cwd` (which may be a subdirectory of the work tree). `git diff` and
+  // `git show <rev>:<path>` are already root-relative regardless of cwd,
+  // but `git grep` reports paths relative to ITS OWN cwd: left alone, a
+  // subdirectory cwd would make a heading/released-section lookup
+  // silently read the wrong file (or none), and an `--allow` glob
+  // written against a root-relative path would never match. Rooting the
+  // grep call here, alongside the diff and show calls that already are
+  // root-relative, keeps every path in this module root-relative,
+  // uniformly.
   if (!revExists(gitRoot, options.base)) {
     throw new UsageError(`drift: --base revision not found: ${options.base}`);
   }

@@ -53,10 +53,13 @@ export function nearestHeading(
 }
 
 /**
- * Small, documented word list that marks a mention as historical rather
- * than a claim that the identifier is current. Matched case-insensitively
- * against the whole line's text (not just "near" the identifier): a
- * prototype-scope simplification, noted in the README.
+ * Small, documented vocabulary of words that mark a mention as
+ * historical rather than a claim that the identifier is current. This
+ * list only names the words; it decides nothing about WHERE on a line
+ * one has to appear relative to the identifier's own mention to count -
+ * `historicalPhraseMatch` below checks the whole of whatever text it is
+ * given, while `historicalPhraseNearIdentifier` is the caller that
+ * bounds that text to a span near a specific occurrence.
  */
 export const HISTORICAL_PHRASES: readonly string[] = [
   "former",
@@ -86,33 +89,50 @@ export function historicalPhraseMatch(text: string): string | undefined {
 
 /** How far back (in characters) the historical-phrase window looks from
  * the start of an identifier occurrence, before any closer sentence
- * boundary cuts it short. Pinned against the real triologue f6c0f244
- * CHANGELOG.md:15 case: an unrelated "no longer" (about a different
- * identifier) sits well outside this range, but an unrelated "was "
- * (from "...when it was set:...", also about that other identifier)
- * sits only 69 characters back - a window has to stay under that to
- * exclude it too, not just the more obviously distant phrase. */
+ * boundary cuts it short. Pinned against a real, motivating case: an
+ * unrelated historical word about a different identifier sat 69
+ * characters before the mention on a real 996-character changelog line
+ * - well past a careless "just look nearby" guess, so the window has to
+ * stay under that distance to exclude it. */
 const WINDOW_BEFORE_CHARS = 60;
 
 /** How far past the end of an identifier occurrence the historical-phrase
  * window still looks. */
 const WINDOW_AFTER_CHARS = 20;
 
-/** Escapes every regex-special character in `s` (a plain literal match,
- * unlike `globToRegExp` below which interprets glob metacharacters). */
-function escapeRegExpLiteral(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+/** A "word" character, per `git grep -w`'s own notion: `[A-Za-z0-9_]`. */
+const WORD_CHAR_RE = /[A-Za-z0-9_]/;
 
-/** The 0-indexed start offsets of every whole-word occurrence of
- * `identifier` in `text`, in order. */
+/** The 0-indexed start offsets of every occurrence of `identifier` in
+ * `text` that is not itself immediately adjacent to another word
+ * character on either side, in order. Checked with an explicit
+ * character comparison rather than a `\b...\b` RegExp: `\b` requires a
+ * word/non-word transition positioned at the pattern's own first and
+ * last character, so it never matches at all when `identifier` itself
+ * starts or ends with a non-word character (a `$`-prefixed identifier, a
+ * dotted JSON key like `.eslintrc`) even though the occurrence in `text`
+ * is otherwise a clean, isolated mention. Mirroring `git grep -w`'s own
+ * word-character set here, instead, keeps this reachable for exactly the
+ * identifiers `git grep -w` itself would report a match for. */
 function wholeWordOccurrences(text: string, identifier: string): number[] {
   if (identifier.length === 0) return [];
-  const re = new RegExp(`\\b${escapeRegExpLiteral(identifier)}\\b`, "g");
   const offsets: number[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    offsets.push(m.index);
+  let from = 0;
+  for (;;) {
+    const idx = text.indexOf(identifier, from);
+    if (idx === -1) break;
+    const before = idx > 0 ? text[idx - 1] : undefined;
+    const after =
+      idx + identifier.length < text.length
+        ? text[idx + identifier.length]
+        : undefined;
+    if (
+      (before === undefined || !WORD_CHAR_RE.test(before)) &&
+      (after === undefined || !WORD_CHAR_RE.test(after))
+    ) {
+      offsets.push(idx);
+    }
+    from = idx + 1;
   }
   return offsets;
 }

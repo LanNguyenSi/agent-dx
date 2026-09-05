@@ -1007,7 +1007,8 @@ whole-word (`RuntimeError` never matches `setRuntimeError`), so a
 mention only reports when the removed name reappears as its own word.
 `--base`/`--head`/`--allow` and every reported path are resolved
 against the git work tree's root, whatever subdirectory `-C`/`--cwd`
-itself points at.
+itself points at: the whole work tree is always scanned, never only the
+named subdirectory.
 
 Removed-identifier extraction is a regex over one diff line, not a
 parser, and is prototype scope: a top-level or exported TS/JS
@@ -1075,7 +1076,12 @@ file is never a site; a removed-identifier declaration split across
 more than one line, or a name bound by destructuring, is missed; a
 deleted file's basename that is short or all-lowercase-with-no-
 separator (`db`, `api`) is never reported even when it is a real
-identifier elsewhere; no cross-repo scanning.
+identifier elsewhere; no cross-repo scanning. The historical-phrase
+window's converse failure mode: a legitimate historical mention more
+than about 60 characters before the identifier's own mention (or behind
+a `. `/`; ` sentence boundary within that lookback), or more than about
+20 characters after it, is still reported rather than allowlisted; use
+`--allow` or reword the mention to bring it inside the window.
 
 ## Output shape
 

@@ -295,6 +295,31 @@ describe("parseRemovedIdentifiers", () => {
       { name: "OldThing", kind: "declaration", file: "src/thing.ts", line: 2 },
     ]);
   });
+
+  it("treats an added line whose content starts with '++ ' as content too (not a header), so the added declaration right after it is still attributed to the right file", () => {
+    // "++ note..." as file content becomes the diff line
+    // "+++ note..." once prefixed with the diff's own leading "+" - the
+    // `+++ ` counterpart of the "-- " trap above. Gated on the same
+    // `!sawHunk`, it must be read as content, not as a `+++ b/<path>`
+    // header that would overwrite `newPath` and misattribute the
+    // OldThing re-declaration right after it to the wrong (extension-
+    // less) file, which would make it wrongly stay "removed" instead of
+    // "moved" (its file would fail the source-extension check).
+    const diff = [
+      "diff --git a/src/thing.ts b/src/thing.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/thing.ts",
+      "+++ b/src/thing.ts",
+      "@@ -1,1 +1,2 @@",
+      "-export const OldThing = 1;",
+      "+++ note: trailing comment marker",
+      "+export const OldThing = 2;",
+      "",
+    ].join("\n");
+    const result = parseRemovedIdentifiers(diff);
+    expect(result.movedNames).toEqual(["OldThing"]);
+    expect(result.removed).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------
@@ -340,9 +365,9 @@ describe("allowlist helpers", () => {
     expect(headings.map((h) => h.text)).toEqual(["Real Heading", "Migration"]);
   });
 
-  it("historicalPhraseNearIdentifier: modeled on the real triologue f6c0f244 pair - an unrelated historical phrase far from the identifier's own mention does not allowlist it, but one right next to the mention does", () => {
-    // Models the real case: "no longer" (about a different identifier,
-    // `runError`) sits ~180 chars before "mirroring FilesPage's
+  it("historicalPhraseNearIdentifier: an unrelated historical phrase far from the identifier's own mention does not allowlist it, but one right next to the mention does", () => {
+    // Models a real, motivating case: "no longer" (about a different
+    // identifier, `runError`) sits well before "mirroring FilesPage's
     // RuntimeError" on the same long line - too far to allowlist a
     // present-tense mention of RuntimeError.
     const longLine =
@@ -361,6 +386,54 @@ describe("allowlist helpers", () => {
     expect(historicalPhraseNearIdentifier(nearbyLine, "RuntimeError")).toBe(
       "former",
     );
+  });
+
+  it("historicalPhraseNearIdentifier: pins the window geometry against a real, motivating 996-character changelog line - an unrelated historical word 69 characters before the mention, and a second one 128 characters after it, both stay outside the default window", () => {
+    // Built to exact offsets, not eyeballed: identifier mention starts at
+    // 155; an unrelated "was " sits at 86 (69 chars before the mention);
+    // an unrelated "no longer" sits at 295 (128 chars after the
+    // mention's own end at 167). Both are well past the default 60
+    // chars before / 20 chars after window, so neither allowlists it.
+    const identifier = "RuntimeError";
+    let text = "x".repeat(86);
+    expect(text.length).toBe(86);
+    text += "was ";
+    text += "x".repeat(64) + " "; // pads to just before the mention, offset 155
+    expect(text.length).toBe(155);
+    text += identifier;
+    expect(text.length).toBe(167);
+    text += " " + "x".repeat(127); // pads to offset 295
+    expect(text.length).toBe(295);
+    text += "no longer";
+    text += "x".repeat(996 - text.length);
+    expect(text.length).toBe(996);
+
+    expect(historicalPhraseNearIdentifier(text, identifier)).toBeUndefined();
+  });
+
+  it("historicalPhraseNearIdentifier: a historical phrase inside the 60-char lookback but behind a sentence boundary does not allowlist the mention", () => {
+    // "removed" sits at offset 30, well within the 60-char lookback from
+    // the mention at offset 90 (floor = 30), but a ". " sentence
+    // boundary at offset 37 cuts the span short before it, so the span
+    // actually checked never reaches back far enough to see it.
+    const identifier = "RuntimeError";
+    let text = "x".repeat(30);
+    text += "removed";
+    text += ". ";
+    text += "x".repeat(50) + " "; // pads to just before the mention, offset 90
+    expect(text.length).toBe(90);
+    text += identifier;
+    text += " " + "x".repeat(10);
+
+    expect(historicalPhraseNearIdentifier(text, identifier)).toBeUndefined();
+  });
+
+  it("historicalPhraseNearIdentifier finds a $-prefixed identifier's own occurrence rather than falling back to a whole-line scan, which would falsely allowlist it on a distant, unrelated phrase", () => {
+    const text =
+      "$store still drives every read here without exception in current code, " +
+      "and elsewhere in this same file an unrelated helper was removed a while " +
+      "back and is no longer referenced by anything at all.";
+    expect(historicalPhraseNearIdentifier(text, "$store")).toBeUndefined();
   });
 });
 
@@ -426,7 +499,7 @@ describe("drift usage errors", () => {
 });
 
 // ---------------------------------------------------------------------
-// drift(): the synthetic repo modeling the real triologue RuntimeError
+// drift(): the synthetic repo modeling a real, motivating RuntimeError
 // case (README, a comment, a released vs. an unreleased CHANGELOG
 // section, a historical phrase, a migration doc by path and by heading,
 // a moved declaration, a deleted file's basename, and a word-boundary
@@ -685,6 +758,30 @@ describe("drift (synthetic repo)", () => {
     const result = await drift({ cwd: repo, base, head });
     expect(result.sites).toEqual([]);
     expect(result.status).toBe("ok");
+  });
+});
+
+// ---------------------------------------------------------------------
+// drift(): a matched line longer than 300 characters is capped, with a
+// trailing "..." marker, so a single dense line never dominates the
+// envelope's size budget.
+// ---------------------------------------------------------------------
+
+describe("drift (site text capped at 300 chars)", () => {
+  it("caps a long matched line's site text at 300 chars with a trailing '...' marker", async () => {
+    const repo = initRepo();
+    const longLine = "OldThing " + "z".repeat(400);
+    writeFile(repo, "NOTES.md", ["# Notes", "", longLine, ""].join("\n"));
+    writeFile(repo, "src/old.ts", "export const OldThing = 1;\n");
+    const base = commit(repo, "base");
+    writeFile(repo, "src/old.ts", "export const NewThing = 1;\n");
+    const head = commit(repo, "head");
+
+    const result = await drift({ cwd: repo, base, head });
+    const site = findSite(result.sites, "NOTES.md", 3);
+    expect(site).toBeDefined();
+    expect(site?.text).toHaveLength(303);
+    expect(site?.text.endsWith("...")).toBe(true);
   });
 });
 
