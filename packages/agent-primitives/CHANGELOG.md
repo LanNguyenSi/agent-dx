@@ -188,16 +188,21 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
 
 ### Fixed
 
+- `probe -p/--patch` now also pins its real `git apply`, the `-i
+  worktree` checkout, and the tracked-diff sync apply with `-c
+  core.autocrlf=false` and `-c apply.whitespace=nowarn`. A global
+  setting for either key could otherwise make a real patch probe
+  inconclusive despite its pinned dry run succeeding.
 - `probe -p/--patch`'s dry-run `git apply` (the scratch-directory check
   that decides applicability before anything real is touched) now pins
   `-c core.autocrlf=false` and `-c apply.whitespace=nowarn`. The
-  scratch directory has no `.git` of its
-  own, so it previously inherited whichever ambient global/system git
-  config the machine running `probe` happened to have; under a global
-  `core.autocrlf = true` (a common Windows default) the write would
-  silently convert the scratch copy's LF line endings to CRLF, making
-  the dry run compare corrupted content against the original and derive
-  the wrong line and before/after text for `mutation_probe.mutant`.
+  scratch directory has no `.git` of its own, so it previously inherited
+  whichever ambient global/system git config the machine running `probe`
+  happened to have; under a global `core.autocrlf = true` (a common
+  Windows default) the write would silently convert the scratch copy's
+  LF line endings to CRLF, making the dry run compare corrupted content
+  against the original and derive the wrong line and before/after text
+  for `mutation_probe.mutant`.
 - `init` now distinguishes unreadable targets from unwritable ones with
   `target_not_readable`, maps otherwise-unclassified read failures into the
   same command-specific envelope, revalidates identical targets before

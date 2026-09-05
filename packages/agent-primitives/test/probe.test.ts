@@ -116,6 +116,76 @@ function gitOutput(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
 
+/** Runs one assertion with only the hostile global settings this probe
+ * must contain: fixture repositories deliberately have no local config
+ * override for either setting. */
+async function withHostileGitWriteConfig<T>(run: () => Promise<T>): Promise<T> {
+  const configPath = path.join(makeTmpDir(), "global.gitconfig");
+  fs.writeFileSync(
+    configPath,
+    ["[core]", "\tautocrlf = true", "[apply]", "\twhitespace = fix", ""].join(
+      "\n",
+    ),
+  );
+  const previous = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = configPath;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previous;
+  }
+}
+
+/** A repo with no local core.autocrlf/apply.whitespace override. The
+ * temporary identity is supplied only to the commit process, so the
+ * fixture's config cannot mask the hostile global configuration. */
+function initHostileGitConfigRepo(): string {
+  const repo = makeTmpDir();
+  git(repo, ["init", "-q"]);
+  fs.writeFileSync(path.join(repo, "fixture.js"), FIXTURE_JS);
+  fs.writeFileSync(path.join(repo, "fixture.test.js"), FIXTURE_TEST_JS);
+  git(repo, ["add", "-A"]);
+  git(repo, [
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "user.name=test",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    "init",
+  ]);
+  return repo;
+}
+
+/** Creates a real git diff without checking it out again, so the target
+ * bytes are exactly the LF bytes the patch applies against. */
+function patchFromWorkingCopy(
+  repo: string,
+  nextContent: string,
+  patchPath: string,
+  originalContent = FIXTURE_JS,
+): void {
+  const target = path.join(repo, "fixture.js");
+  fs.writeFileSync(target, nextContent);
+  fs.writeFileSync(
+    patchPath,
+    gitOutput(repo, [
+      "-c",
+      "diff.noprefix=false",
+      "-c",
+      "diff.mnemonicPrefix=false",
+      "diff",
+      "--",
+      "fixture.js",
+    ]),
+  );
+  fs.writeFileSync(target, originalContent);
+}
+
 // Permission bits mean nothing to root (it bypasses them), so the
 // unreadable-patch case below only discriminates as a non-root user.
 const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
@@ -2414,6 +2484,86 @@ describe("probe(): the line a -p patch reports is the line the applied diff chan
     expect(result.mutant?.after).toBe("line3-mutated\r");
     expectLineQuotesBefore(before, result.mutant);
     expect(fs.readFileSync(path.join(repo, "crlf.txt"), "utf8")).toBe(before);
+  });
+});
+
+describe("probe(): patch writes ignore hostile global autocrlf and whitespace settings", () => {
+  it("kills an inplace whitespace-only patch under GIT_CONFIG_GLOBAL and restores the LF target", async () => {
+    useLockDir();
+    const repo = initHostileGitConfigRepo();
+    const logDir = makeTmpDir();
+    const patchPath = path.join(logDir, "mutant.patch");
+    patchFromWorkingCopy(
+      repo,
+      FIXTURE_JS.replace("  return n > 0;", "  return n > 0;  "),
+      patchPath,
+    );
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+
+    const result = await withHostileGitWriteConfig(() =>
+      probe({
+        form: "patch",
+        patchPath,
+        testCommand:
+          "node -e \"if (require('fs').readFileSync('fixture.js','utf8').includes('return n > 0;  \\n')) process.exit(1)\"",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir,
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("kills a worktree patch after syncing a whitespace-sensitive tracked diff under GIT_CONFIG_GLOBAL", async () => {
+    useLockDir();
+    const repo = initHostileGitConfigRepo();
+    const logDir = makeTmpDir();
+    const dirty = FIXTURE_JS.replace("  return n > 0;", "  return n > 0; ");
+    fs.writeFileSync(path.join(repo, "fixture.js"), dirty);
+    git(repo, ["add", "fixture.js"]);
+    git(repo, [
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "user.name=test",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "patch base",
+    ]);
+    const patchPath = path.join(logDir, "mutant.patch");
+    patchFromWorkingCopy(
+      repo,
+      dirty.replace("  return n > 0; ", "  return n > 0;  "),
+      patchPath,
+      dirty,
+    );
+    git(repo, ["reset", "--hard", "HEAD~1"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), dirty);
+
+    const result = await withHostileGitWriteConfig(() =>
+      probe({
+        form: "patch",
+        patchPath,
+        testCommand:
+          "node -e \"if (require('fs').readFileSync('fixture.js','utf8').includes('return n > 0;  \\n')) process.exit(1)\"",
+        isolation: "worktree",
+        expect: "fail",
+        cwd: repo,
+        logDir,
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.syncedTrackedFiles).toBe(1);
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(dirty);
   });
 });
 

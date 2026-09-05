@@ -72,6 +72,18 @@ export type MutantComputeResult = MutantComputed | MutantNotApplicable;
  */
 export const DEFAULT_GIT_APPLY_TIMEOUT_MS = 10_000;
 
+/** Global git settings that can rewrite content while a probe's own git
+ * command writes it. These are command-line settings because a scratch
+ * directory and a detached worktree must not depend on the caller's
+ * repository config. Shared with worktree setup so its checkout and
+ * tracked-diff apply cannot drift from either patch apply. */
+export const GIT_CONTENT_WRITE_CONFIG_ARGS = [
+  "-c",
+  "core.autocrlf=false",
+  "-c",
+  "apply.whitespace=nowarn",
+] as const;
+
 /**
  * Upper bound on how large a `-p/--patch` file `probe/index.ts` accepts
  * at all: the `patch_not_readable` `stat` that runs once, before the
@@ -468,15 +480,7 @@ async function computePatch(
   // back as "no content change" on that machine and not on another.
   const result = await runArgv(
     "git",
-    [
-      "-c",
-      "core.autocrlf=false",
-      "-c",
-      "apply.whitespace=nowarn",
-      "apply",
-      "--",
-      absPatchPath,
-    ],
+    [...GIT_CONTENT_WRITE_CONFIG_ARGS, "apply", "--", absPatchPath],
     { cwd: scratchDir, ...runOptions },
   );
   const logPaths = [numstatResult.logPath, result.logPath];
@@ -582,12 +586,16 @@ export function applyPatchForReal(
   gitApply: GitApplyOptions = {},
 ) {
   const absPatchPath = path.resolve(patchPath);
-  return runArgv("git", ["apply", "--", absPatchPath], {
-    cwd: root,
-    logDir,
-    timeoutMs: gitApply.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS,
-    ...(gitApply.signal ? { signal: gitApply.signal } : {}),
-  });
+  return runArgv(
+    "git",
+    [...GIT_CONTENT_WRITE_CONFIG_ARGS, "apply", "--", absPatchPath],
+    {
+      cwd: root,
+      logDir,
+      timeoutMs: gitApply.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS,
+      ...(gitApply.signal ? { signal: gitApply.signal } : {}),
+    },
+  );
 }
 
 /** Formats the `mutant: "<file>:<line>: <before> -> <after>"` string
