@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `agent-primitives drift --base <rev> --head <rev>`: a prototype-scope
+  identifier-drift guard. Collects the identifiers whose declaration a
+  git range removed (a regex over `git diff -U0`'s removed lines: a
+  top-level/exported TS/JS declaration, a top-level JSON/YAML config
+  key, or a wholly deleted file's own basename; an identifier declared
+  again on an added line anywhere in the same diff is treated as MOVED,
+  not removed), then reports every mention of those identifiers still
+  present at `--head` in a doc file or a source comment, word-boundary
+  matched so `RuntimeError` never matches `setRuntimeError`. A site is
+  allowlisted by default (`--strict` reports it too, flagged) when it
+  matches an `--allow` glob, sits in a released CHANGELOG section (never
+  `## [Unreleased]`), sits under a `docs/**/migration*` path or a
+  Markdown heading naming "migration", or its line carries a small,
+  documented historical-phrase word list (`former`, `no longer`, `used
+  to`, ...). Envelope carries `removed_identifiers`, `sites`,
+  `allowlisted` (each with a `reason` on an allowlisted entry) and
+  `counts`; exit `0` no site reported, `1` at least one site reported,
+  `2` a usage error (`cwd` outside a git work tree, a bad `--base`/
+  `--head`, or a failing `git diff`). Motivated by, and its synthetic
+  test fixture modeled on, a real case: a deleted local error type that
+  several docs and source comments across a repository kept describing
+  as current after the deletion, including two sites a human reviewer's
+  own pass had missed. Known limits: only TS/JS/JSON/YAML declarations
+  and only `.md`/`.mdx`/`.txt` docs plus a fixed list of comment-bearing
+  source extensions are scanned; a declaration split across more than
+  one line, or a name bound by destructuring, is missed; no cross-repo
+  scanning.
 - `probe --plan <path>`: a JSON file naming one test command (and
   optionally `pre`, `isolation`, `expect`, `timeout`) plus a list of
   mutants, run against ONE shared baseline instead of one baseline per
@@ -250,6 +277,39 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   plan's own setup logs and, once reduction runs, the full-result path;
   a mutant's own log paths stay on `plan.results[i]`, which the normal
   reduction can still cap or drop like any other field.
+- `drift`'s historical-phrase allowlist check is now windowed to a
+  bounded span around the identifier's own mention on a line (roughly
+  60 characters before it, cut short at the nearest sentence boundary,
+  plus 20 after) instead of the whole line, so an unrelated historical
+  phrase far away on a long line no longer suppresses a present-tense
+  mention of the identifier.
+- `drift` no longer reports every wholly deleted file's basename as a
+  removed identifier: a basename now only qualifies when its file
+  extension is a recognized source extension AND the basename itself
+  looks like an identifier; every basename skipped for either reason is
+  named in a warning instead of silently dropped.
+- `drift` resolves `--base`/`--head`/`--allow` and every underlying
+  `git diff`/`git grep`/`git show` call against the git work tree's
+  root rather than the caller's `cwd`, so running it from a
+  subdirectory no longer risks a heading/released-section decision
+  reading the wrong file, or an `--allow` glob written against a
+  root-relative path failing to match.
+- The removed-declaration regex now also recognizes `export async
+  function`, `export abstract class`, and a generator `function*`
+  (including `export async function*`).
+- `drift`'s envelope keeps `counts` whole under `--max-chars`
+  reduction, and each site's `text` is capped at 300 characters, so a
+  large result's site count stays visible instead of disappearing
+  along with a partially-cut `sites` array.
+- `drift`'s migration-doc-path check now requires an actual `docs/**`
+  subtree (a loose substring match previously also matched a path like
+  `migration/docs/x.md`), and its heading parser skips fenced ``` /
+  ~~~ code blocks so a `#`-prefixed line inside one is never read as a
+  Markdown heading.
+- `drift`'s diff parser no longer misreads a removed line whose own
+  content starts with `-- ` (or an added line starting with `++ `) as
+  a `--- `/`+++ ` file header: those are now recognized as headers only
+  before a file's first hunk.
 
 ## [0.1.0] - 2026-09-04
 

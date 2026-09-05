@@ -89,3 +89,14 @@ export type {
   InitTargetResult,
   InitTargetStatus,
 } from "./init/index.js";
+export { drift } from "./drift/index.js";
+export type {
+  DriftCounts,
+  DriftKind,
+  DriftOptions,
+  DriftResult,
+  DriftSite,
+  DriftStatus,
+  RemovedIdentifier,
+  RemovedIdentifierKind,
+} from "./drift/index.js";

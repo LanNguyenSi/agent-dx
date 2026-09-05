@@ -40,6 +40,7 @@ import {
   type Harness,
   type InitResult,
 } from "./init/index.js";
+import { drift, type DriftResult } from "./drift/index.js";
 
 function readVersion(): string {
   try {
@@ -1326,6 +1327,109 @@ program
       exitCode,
       { format: global.format, maxChars: global.maxChars },
       () => renderInitText(result),
+    );
+  });
+
+interface DriftCliOptions {
+  base: string;
+  head: string;
+  allow: string[];
+  strict?: boolean;
+}
+
+function collectAllow(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+function renderDriftText(result: DriftResult): string {
+  const lines: string[] = [];
+  lines.push(`status: ${result.status}`);
+  lines.push("");
+  const byIdentifier = new Map<string, DriftResult["sites"]>();
+  for (const site of result.sites) {
+    const group = byIdentifier.get(site.identifier) ?? [];
+    group.push(site);
+    byIdentifier.set(site.identifier, group);
+  }
+  for (const [identifier, group] of byIdentifier) {
+    for (const site of group) {
+      const flag = site.allowlisted ? " [allowlisted]" : "";
+      lines.push(
+        `${site.path}:${site.line}: ${identifier}${flag} ${site.text}`,
+      );
+    }
+  }
+  lines.push("");
+  lines.push(
+    `${String(result.counts.removed)} removed identifier(s), ${String(result.counts.sites)} site(s) reported, ${String(result.counts.allowlisted)} allowlisted`,
+  );
+  if (result.warnings.length > 0) {
+    lines.push("");
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+program
+  .command("drift")
+  .description(
+    "Report docs and comments that still describe an identifier a git range removed or renamed",
+  )
+  .requiredOption("--base <rev>", "base revision")
+  .requiredOption("--head <rev>", "head revision")
+  .option(
+    "--allow <glob>",
+    "glob to allowlist (repeatable)",
+    collectAllow,
+    [] as string[],
+  )
+  .option(
+    "--strict",
+    "also report allowlisted sites in sites[], flagged with allowlisted/allowlistReason",
+  )
+  .action(async (opts: DriftCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    const result = await drift({
+      cwd: global.cwd,
+      base: opts.base,
+      head: opts.head,
+      allow: opts.allow,
+      strict: Boolean(opts.strict),
+    });
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "drift",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs: [],
+      extra: {
+        base: result.base,
+        head: result.head,
+        removed_identifiers: result.removedIdentifiers,
+        sites: result.sites,
+        allowlisted: result.allowlisted,
+        counts: result.counts,
+      },
+      // `sites`/`allowlisted` are the fields a large real-tree result cuts
+      // first under reduction (a site's `text` can be a whole long
+      // CHANGELOG bullet); `counts` is three small numbers that tell a
+      // reader how much of `sites` they are still looking at, so it must
+      // never disappear along with the array it describes (same idiom as
+      // `probe`'s own `plan.summary`, see its own comment above).
+      keepWhole: ["counts"],
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(
+      envelope,
+      exitCode,
+      { format: global.format, maxChars: global.maxChars },
+      () => renderDriftText(result),
     );
   });
 
