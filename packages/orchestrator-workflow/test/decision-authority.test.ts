@@ -88,7 +88,8 @@ describe("decision authority contract", () => {
   });
 
   it("resolves illustrative routine, baseline-revision, and critical-waiver decisions", () => {
-    const document = readFileSync(join(FIXTURE, "03-decisions.md"), "utf8");
+    const decisionsPath = join(FIXTURE, "decision-records.md");
+    const document = readFileSync(decisionsPath, "utf8");
     const revisionPath = join(FIXTURE, "baseline-revision.md");
     const waiverPath = join(FIXTURE, "critical-waiver.md");
     const revision = readFileSync(revisionPath, "utf8");
@@ -100,7 +101,7 @@ describe("decision authority contract", () => {
     expect(byId.get("D-002")?.[4]).toContain("Operator approval");
     expect(byId.get("D-002")?.[6]).toBe("D-001");
     expect(byId.get("D-003")?.[4]).toContain("Operator approval");
-    const decisionLinks = links(document, join(FIXTURE, "03-decisions.md"));
+    const decisionLinks = links(document, decisionsPath);
     const scopePath = decisionLinks.find((path) => path.endsWith("scope-request.md"));
     const waiverRecordPath = decisionLinks.find((path) =>
       path.endsWith("critical-waiver.md"),
