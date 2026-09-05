@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { isPidAlive } from "../lock.js";
 import { isPathContained, resolveDeepestExisting } from "./containment.js";
+import { GIT_CONTENT_WRITE_CONFIG_ARGS } from "./mutant.js";
 import { runArgv, type RunArgvResult } from "./run.js";
 
 /** The oldest git whose `git apply --allow-empty` the worktree sync
@@ -521,7 +522,15 @@ export async function beginWorktree(
 
   opts.onWorktreeAttempt?.(worktreePath);
   const addResult = await runGit(
-    ["worktree", "add", "--detach", "--", worktreePath, "HEAD"],
+    [
+      ...GIT_CONTENT_WRITE_CONFIG_ARGS,
+      "worktree",
+      "add",
+      "--detach",
+      "--",
+      worktreePath,
+      "HEAD",
+    ],
     "worktree-add.log",
     root,
   );
@@ -592,7 +601,15 @@ export async function beginWorktree(
   // exits 128 on empty input), and the clean-tree path has to exercise
   // the same exec call as every other tree state.
   const applyResult = await runGit(
-    ["-C", worktreePath, "apply", "--allow-empty", "--", diffPath],
+    [
+      ...GIT_CONTENT_WRITE_CONFIG_ARGS,
+      "-C",
+      worktreePath,
+      "apply",
+      "--allow-empty",
+      "--",
+      diffPath,
+    ],
     "worktree-apply.log",
     root,
   );

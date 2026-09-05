@@ -2000,7 +2000,12 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
     >("../src/probe/run.js");
     const mockRun = vi.mocked(runArgv);
     mockRun.mockImplementation(async (file, args, options) => {
-      if (file === "git" && args[0] === "worktree" && args[1] === "add") {
+      const worktreeIndex = args.indexOf("worktree");
+      if (
+        file === "git" &&
+        worktreeIndex !== -1 &&
+        args[worktreeIndex + 1] === "add"
+      ) {
         const result = await actualRun.runArgv(file, args, options);
         if (result.exitCode === 0) {
           // Lock the entry `git worktree add` just wrote, the shape an
@@ -2017,7 +2022,11 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
         }
         return result;
       }
-      if (file === "git" && args[0] === "worktree" && args[1] === "remove") {
+      if (
+        file === "git" &&
+        worktreeIndex !== -1 &&
+        args[worktreeIndex + 1] === "remove"
+      ) {
         // Double `--force` on a real git can clear even a locked
         // entry; shimmed to fail so the admin entry above survives
         // for the gitdir-files fallback to find, the same technique

@@ -542,7 +542,18 @@ describe("git apply invocations", () => {
     runner.mockClear();
     await applyPatchForReal(patchPath, root, makeTmpDir());
     expect(runner.mock.calls.map((c) => [c[0], c[1]])).toEqual([
-      ["git", ["apply", "--", patchPath]],
+      [
+        "git",
+        [
+          "-c",
+          "core.autocrlf=false",
+          "-c",
+          "apply.whitespace=nowarn",
+          "apply",
+          "--",
+          patchPath,
+        ],
+      ],
     ]);
   });
 

@@ -292,6 +292,13 @@ removed `---`, an added `++`, a pure deletion, several hunks). Passing
 reported; when it names a different line than the patch changes, both
 numbers appear in a warning.
 
+The probe pins its own content-writing git commands with `-c
+core.autocrlf=false` and `-c apply.whitespace=nowarn`: the patch dry
+run, the real patch apply, the worktree checkout, and the tracked-diff
+apply. A machine's global `core.autocrlf` or `apply.whitespace` setting
+therefore cannot rewrite content while the probe is checking, applying,
+or syncing a mutation.
+
 A patch touching two or more paths without an explicit `--file` is
 `status: "usage_error"`, `reason: "patch_file_ambiguous"`, exit `2`,
 naming the touched paths in a warning; pass `--file` naming the one to
@@ -323,6 +330,9 @@ untracked-file listing, and the worktree removal) runs through an argv
 array with no shell involved, the same as `-p`'s patch path: a `--file`,
 `--log-dir`, or `--link` value containing `$(...)` or a backtick reaches
 `git` as one opaque argument, never as something a shell could expand.
+The add that checks out the worktree and the apply that replays the
+tracked diff also use the content-write pins above; the capture and
+listing calls do not alter checkout content.
 
 `-i worktree` needs git 2.35 or newer: the sync relies on `git apply
 --allow-empty`, which an older git rejects, so the run ends in

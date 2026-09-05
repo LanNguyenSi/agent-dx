@@ -347,6 +347,34 @@ describe("beginWorktree / cleanupWorktree", () => {
     expect(list).not.toContain(result.worktreePath);
   });
 
+  it("pins content-writing worktree add and tracked-diff apply against ambient autocrlf and whitespace settings", async () => {
+    const repo = initRepo();
+    const result = await beginWorktree({
+      root: repo,
+      cwd: repo,
+      logDir: makeTmpDir(),
+      links: [],
+    });
+
+    expect(result.ok).toBe(true);
+    const contentWriteCalls = gitCalls()
+      .map((call) => call[1])
+      .filter(
+        (args) =>
+          args.includes("worktree") ||
+          (args.includes("apply") && args.includes("--allow-empty")),
+      );
+    expect(contentWriteCalls).toHaveLength(2);
+    for (const args of contentWriteCalls) {
+      expect(args.slice(0, 4)).toEqual([
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "apply.whitespace=nowarn",
+      ]);
+    }
+  });
+
   it("syncs an uncommitted tracked modification and reports its count", async () => {
     const repo = initRepo();
     fs.writeFileSync(
