@@ -6,11 +6,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   probe,
-  installCrashHandlers,
-  signalSettleBoundMs,
   type ProbeOptions,
   type ProbeResult,
 } from "../src/probe/index.js";
+import {
+  installCrashHandlers,
+  signalSettleBoundMs,
+} from "../src/probe/session.js";
 import { readMarkerFor, writeMarker } from "../src/lock.js";
 import { sha256File } from "../src/hash.js";
 import { stdioWatchBoundMs } from "../src/exec.js";

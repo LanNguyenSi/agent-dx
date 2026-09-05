@@ -670,7 +670,7 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
     // Same shape as the test above, but with an ALIVE pid (this
     // process's own) under a timestamp far in the past: the
     // repository-keyed worktree marker's own `pid` field is never
-    // consulted by this recovery path (see `probe/index.ts`'s
+    // consulted by this recovery path (see `probe/session.ts`'s
     // stale-worktree recovery), on the same reasoning `doctor`'s
     // `stale-worktree` check now applies its own bound for -- a pid
     // that still resolves to *something* proves nothing about whether
@@ -1993,7 +1993,7 @@ describe("probe(): worktree isolation on a git that rejects -z (older than 2.36)
 });
 
 describe("probe(): worktree isolation when git worktree list cannot run in any form", () => {
-  it("warns with the surviving-admin-entry detail, never an 'unverified' one, when the probe's own worktree cleanup finds its target only in goneTargets: a clean, verified removal that git worktree prune has not cleared the registration for yet (probe/index.ts's own cleanupWtSession path)", async () => {
+  it("warns with the surviving-admin-entry detail, never an 'unverified' one, when the probe's own worktree cleanup finds its target only in goneTargets: a clean, verified removal that git worktree prune has not cleared the registration for yet (probe/session.ts's own cleanupWtSession path)", async () => {
     useLockDir();
     const { repo } = initRepo();
     const shimDir = makeTmpDir();
@@ -2090,7 +2090,7 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
     }
   });
 
-  it("warns with the surviving-admin-entry detail, never an 'unverified' one, when the recovery loop's own cleanup of a marker-named leftover finds its target only in goneTargets (probe/index.ts's own recovery-loop path)", async () => {
+  it("warns with the surviving-admin-entry detail, never an 'unverified' one, when the recovery loop's own cleanup of a marker-named leftover finds its target only in goneTargets (probe/session.ts's own recovery-loop path)", async () => {
     useLockDir();
     const { repo } = initRepo();
     const realRoot = resolveDeepestExisting(repo);
@@ -2327,7 +2327,7 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
     expect(result.status).toBe("killed");
     expect(result.warnings).toContain("recovered_stale_worktree");
     // A VERIFIED removal gets no "was removed, but ... unverified"
-    // warning at all (see `probe/index.ts`'s recovery loop): the
+    // warning at all (see `probe/session.ts`'s recovery loop): the
     // gitdir-files fallback found nothing named `planted` among the
     // admin entries (it was never registered), so `cleanupWorktree`
     // asserts the removal instead of falling back to the disk alone.
