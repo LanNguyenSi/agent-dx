@@ -2570,7 +2570,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:175#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:192#"the keyed placeholder line's exact text,"`,
 re-pointed by 28 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
@@ -7064,7 +7064,7 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   pre-existing `install-fence-mechanics.md` staleness warning, plus two
   new `citations-resolve` warnings against citations in this `log.md`
   file itself (a `test/docs-consistency.test.ts:920-933` citation and a
-  `CHANGELOG.md:168` citation, both line-shifted by this pass's edits).
+  `CHANGELOG.md:185` citation, both line-shifted by this pass's edits).
   Correction (found in review): this bundle's convention, per this same
   pass's own H1 fix above and the sibling T-002 pass, is to re-point a
   `log.md` citation shifted by the current change rather than leave it
@@ -7072,7 +7072,7 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   resolve): re-pointed both to the same content at head, both bounds
   checked: `test/docs-consistency.test.ts:920-933` (the reproduction-field
   byte-for-byte equality `it` block, "expect(skillBlock).toBe
-  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:168` (the
+  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:185` (the
   probe-replay `[Unreleased]` bullet's own citation of `test/template-
   markers.test.ts`'s "the keyed placeholder line's exact text,") moved to
   `175`, the further +7-line shift coming from this bundle's own
@@ -7113,9 +7113,9 @@ duplicated three other times in the same file and so is too collision-
 prone for a load-bearing anchor), and the one
 this class recurred on (line 295, `,274-275` for "Repos without a bundle
 are unaffected", which at this round's head sits at
-`packages/orchestrator-workflow/assets/skill/SKILL.md:282-283`,
+`packages/orchestrator-workflow/assets/skill/SKILL.md:290`,
 re-anchored to its own
-`packages/orchestrator-workflow/assets/skill/SKILL.md:282-283#"without a bundle are unaffected"`).
+`packages/orchestrator-workflow/assets/skill/SKILL.md:290#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
 in this bundle's non-reserved docs now has its own anchor via a full
 citation (`index.md` and `log.md` are append-only journals and keep their
@@ -7144,3 +7144,82 @@ identical `install-fence-mechanics.md` staleness entry, 23 notices).
 Follow-up filed: a mechanical guard that fails when a bundle doc's
 timestamp is older than the last commit of any declared source, since
 the warn-only staleness workflow let this class recur twice.
+
+## 2026-09-05 (agent-dx c17e4093, task T-002, implementer, GitHub Actions run-step shell replay)
+
+T-002 adds a checklist item to the installed implementer and reviewer
+prompts, and to SKILL.md's step 6/7 narrative: any diff that adds or
+changes a GitHub Actions `run:` step must be replayed locally under the
+shell the step actually runs (`bash --noprofile --norc -eo pipefail` when
+`shell: bash` is set on the step or via `defaults.run.shell`, `bash -e`
+otherwise on Linux and macOS runners; Windows runners default to pwsh)
+before treating it as tested, with the expected-success and the
+expected-failure inputs, replaying a job's steps in their committed
+order, and guarding a step that expects a non-zero command inside an
+`if` or a `set +e`/`set -e` block. The reviewer's copy replays in a
+scratch copy of the repository outside the reviewed working tree (a
+temporary clone or a copied checkout in its scratchpad directory), never
+a `git worktree` (dropped in this pass, see below), keeping the replay
+compatible with its read-only Bash rule. Round 2's own fix (commit
+`cd0198e`) worded the pipefail-selecting condition precisely against
+Actions' real defaulting behavior and added the rule's second effect:
+the reviewer output contract's `reproduction` field (0.14.0) gained a
+second, explicitly non-probabilistic trigger for this same replay, with
+`sample_size: not_applicable` allowed when the replay itself has no
+meaningful sample size, mirrored into SKILL.md's step 7 reproduction
+paragraph and into this doc's own Reproduction requirement section.
+Round 2 re-pointed every OKF citation into `implementer.md`,
+`reviewer.md`, and `SKILL.md` shifted by its own insertions; that
+round's commit message claimed it also appended this log entry and
+re-stamped the affected docs, but neither happened (verified by direct
+diff against `c7e0c80`): this entry restores the missing account.
+
+Review round 3 (`accept_with_notes`, two medium docs findings plus four
+low) found: (M1) this doc, `review-gate-and-waivers.md`, and
+`run-state-lifecycle-and-markers.md` were re-pointed by round 3's own
+edits without a matching re-stamp, and this `log.md` file itself carried
+three stale citations shifted by round 3's own CHANGELOG.md and SKILL.md
+edits: an unrelated earlier pass's own entry above, twice, plus that same
+entry's anchored quote of "the keyed placeholder line's exact text,"
+into CHANGELOG.md, all re-pointed to the lines that now carry that
+content, shifted by this task's own 17-line CHANGELOG.md `[Unreleased]`
+bullet; and a bare/anchored pair in the fix-round-3 account above, into
+SKILL.md, re-pointed the same way, shifted by round 3's own SKILL.md
+edits and this closing delta's step-7 re-flow below; (M2) the
+reproduction-field second-trigger sentence was not yet named in this
+doc's own Reproduction requirement section, only in SKILL.md and
+reviewer.md; (L1) SKILL.md step 7 carried an orphaned two-word line ("as
+`new` or" alone) that round 3's own commit message claimed to have
+re-wrapped but had not (re-flowed in this closing delta, shifting every
+SKILL.md line at or after 246 by -1, requiring every downstream citation
+across `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+and `subagent-contracts-superset.md` to be re-derived against the final
+tree rather than by uniform arithmetic); (L2) round 1-3's commit
+messages each claimed OKF/log work their diffs did not contain,
+addressed by this note and by this delta's own commit message stating
+only what its tree actually contains; (L3) `reviewer.md`'s scratch-copy
+enumeration named `git worktree add` as a mechanism alongside a
+temporary clone or a copied checkout, in tension with the same file's
+read-only Bash rule (a worktree still mutates the shared repository's
+refs); dropped from the enumeration; (L4) round 3's own re-pointing pass
+had introduced several self-range citations in
+`subagent-contracts-superset.md` (a line number repeated as both the
+start and end of a range, for example into SKILL.md's explorer output
+contract heading), normalized to the bare single-line form used
+everywhere else in the bundle; a missing test pinning the CHANGELOG
+bullet's platform wording ("on Linux and macOS runners", "pwsh") was
+added.
+
+Verification: `npx vitest run test/docs-consistency.test.ts` passed all
+263 tests (one new assertion added, pinning that this doc names the
+shell replay as the reproduction field's second trigger); `npm test` and
+`npm run typecheck` were run clean. `okf-kit check --json
+--require-anchors packages/orchestrator-workflow/docs/okf` measured
+after this closing delta's commit reported 0 errors, 1 warning
+(`install-fence-mechanics.md` staleness, the pre-existing baseline
+entry), 23 notices; per-finding comparison against the base run at the
+read-only `agent-dx` checkout (commit `9bd68b3`, `c7e0c80` plus an
+unrelated agent-primitives merge with no OKF-bundle change) found the
+warning's message and target byte-identical and the 23 notices the same
+`citations-resolve`/`unresolved-ambiguous` set in both runs: this
+closing delta's finding-set delta against base is zero.

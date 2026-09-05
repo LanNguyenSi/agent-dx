@@ -4401,4 +4401,11 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
     const section = changelogMd.slice(start, next === -1 ? undefined : next);
     expect(section).toContain("ow-kit-effort-analysis.md` section 7(vi)");
   });
+
+  it("docs/okf/subagent-contracts-superset.md names the shell replay as the reproduction field's second trigger", () => {
+    const subagentContractsMd = readDoc("docs/okf/subagent-contracts-superset.md").replace(/\s+/g, " ");
+    expect(subagentContractsMd).toContain(
+      "The GitHub Actions run-step shell replay named in both installed prompts (see CHANGELOG's `[Unreleased]` entry) is a second, explicitly non-probabilistic trigger for the same field: `sample_size: not_applicable` is allowed when the replay itself has no meaningful sample size",
+    );
+  });
 });

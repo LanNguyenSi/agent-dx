@@ -243,16 +243,15 @@ directory and the subagents.
    non-probabilistic trigger for the same field, with `sample_size:
    not_applicable` allowed when the replay itself has no meaningful sample
    size. When this is not the task's first review round, name the round
-   number in the briefing; the reviewer marks each finding's `recurrence`
-   as `new` or
-   `repeated` against the earlier rounds it was told about, which is what
-   lets the orchestrator detect the Review-round escalation budget's
-   trigger (see below) without re-deriving it by hand. When the
-   implementer's report replays a prior round's mutation probe, the
-   orchestrator's reviewer briefing names the replayed probes the
-   implementer reports as killed together with their `mutant` and
-   `verified_applied_via` values; the reviewer may then skip re-running
-   those. The reviewer output contract itself is unchanged.
+   number in the briefing; the reviewer marks each finding's `recurrence` as
+   `new` or `repeated` against the earlier rounds it was told about, which is
+   what lets the orchestrator detect the Review-round escalation budget's
+   trigger (see below) without re-deriving it by hand. When the implementer's
+   report replays a prior round's mutation probe, the orchestrator's reviewer
+   briefing names the replayed probes the implementer reports as killed
+   together with their `mutant` and `verified_applied_via` values; the reviewer
+   may then skip re-running those. The reviewer output contract itself is
+   unchanged.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high
