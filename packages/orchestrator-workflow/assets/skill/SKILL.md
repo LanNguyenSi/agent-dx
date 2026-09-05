@@ -163,6 +163,10 @@ directory and the subagents.
    shipping should not wait on it. Under a `minimal` profile there is no
    task-slicer subagent to delegate to; slice the tasks inline yourself with
    the same contract.
+   For every identifier, config value, build context, or documented command
+   the task will change, enumerate every file and doc site that references it
+   in `relevant_files` or `relevant_docs`, with an annotation for a site the
+   task will not edit.
 5. **Validate tasks.** Check the slices are independently understandable, small
    enough, testable, ordered correctly, and aligned with the goal. Fix the
    slicing before any implementation starts.

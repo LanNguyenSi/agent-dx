@@ -1,5 +1,17 @@
 # Bundle log
 
+- 2026-09-05T14:57:36Z (brief reference sites): re-verified and re-stamped
+  subagent-contracts-superset.md after the Slice tasks rule and canonical
+  task-slicer prompt began requiring annotated `relevant_files`/
+  `relevant_docs` entries for every reference site of a changed identifier,
+  config value, build context, or documented command. The invariant keeps its
+  lossless-superset shape; this is guidance for populating existing fields,
+  not a schema addition. Added a focused docs-consistency regression pin for
+  both assets. Re-stamped model-preselection.md, review-gate-and-waivers.md,
+  and run-state-lifecycle-and-markers.md after their live source citations
+  shifted. Validation results are recorded with this task's implementation
+  evidence.
+
 - 2026-07-16: Bundle created (pilot for the agent-dx per-package granularity
   decision). Five docs authored and verified against package version 0.12.0
   (master 1982917): run-state-lifecycle-and-markers, install-fence-mechanics,
@@ -2544,7 +2556,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:116-138#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:126-148#"the keyed placeholder line's exact text,"`,
 re-pointed by 21 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
