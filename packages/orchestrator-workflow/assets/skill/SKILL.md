@@ -205,7 +205,11 @@ directory and the subagents.
    `03-decisions.md` and consolidate evidence in
    `04-implementation-summary.md`, recording each probe the implementer
    reports as a row in `04-implementation-summary.md`'s Mutation Probes
-   subsection, with the round it was named in.
+   subsection, with the round it was named in. For any diff that adds or
+   changes a GitHub Actions `run:` step, the installed `implementer.md`
+   prompt requires replaying it locally under the shell the step actually
+   runs, with the expected-success and the expected-failure inputs, before
+   treating it as tested.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed
@@ -234,17 +238,20 @@ directory and the subagents.
    implementer's log — and record the method, sample size, and result against
    the implementer's claim in the reviewer output contract's `reproduction`
    field. This does not apply to deterministic checks (a single test run,
-   `tsc`, lint): only claims that could vary run to run trigger it. When
-   this is not the task's first review round, name the round number in the
-   briefing; the reviewer marks each finding's `recurrence` as `new` or
-   `repeated` against the earlier rounds it was told about, which is what
-   lets the orchestrator detect the Review-round escalation budget's
-   trigger (see below) without re-deriving it by hand. When the
-   implementer's report replays a prior round's mutation probe, the
-   orchestrator's reviewer briefing names the replayed probes the
-   implementer reports as killed together with their `mutant` and
-   `verified_applied_via` values; the reviewer may then skip re-running
-   those. The reviewer output contract itself is unchanged.
+   `tsc`, lint): only claims that could vary run to run trigger it. The
+   GitHub Actions shell replay named in step 6 is a second, explicitly
+   non-probabilistic trigger for the same field, with `sample_size:
+   not_applicable` allowed when the replay itself has no meaningful sample
+   size. When this is not the task's first review round, name the round
+   number in the briefing; the reviewer marks each finding's `recurrence` as
+   `new` or `repeated` against the earlier rounds it was told about, which is
+   what lets the orchestrator detect the Review-round escalation budget's
+   trigger (see below) without re-deriving it by hand. When the implementer's
+   report replays a prior round's mutation probe, the orchestrator's reviewer
+   briefing names the replayed probes the implementer reports as killed
+   together with their `mutant` and `verified_applied_via` values; the reviewer
+   may then skip re-running those. The reviewer output contract itself is
+   unchanged.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high

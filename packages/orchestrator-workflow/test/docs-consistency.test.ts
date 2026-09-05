@@ -4302,3 +4302,110 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     expect(subFieldNames(implementerBlock)).toEqual(expectedOrder);
   });
 });
+
+/**
+ * Pins the GitHub Actions run-step shell-replay checklist item, each element
+ * bounded via `phraseBoundedSlice` to the rule's own sentences in
+ * `implementer.md` and `reviewer.md` (from the trigger phrase through the
+ * untrusted-event-data clause) so an unrelated match elsewhere in either
+ * file cannot satisfy the check. Covers: the trigger phrase; the condition
+ * that selects the pipefail form (the `-eo pipefail` invocation when
+ * `shell: bash` is set on the step or via `defaults.run.shell`, since a bare
+ * `run:` step with no `shell:` key defaults to `bash -e` with no pipefail);
+ * the platform note that the `bash -e` default holds on Linux and macOS
+ * runners while Windows runners default to pwsh; the expected-success/
+ * expected-failure replay; the in-order job replay; the non-zero-exit guard
+ * requirement; and the `${{ }}` substitution/untrusted-data clause. Also
+ * pins that the reviewer prompt alone replays in a scratch copy outside the
+ * reviewed working tree (keeping its read-only Bash rule intact), that only
+ * the reviewer prompt's copy points to the `reproduction` field, SKILL.md's
+ * one-sentence reference to the installed implementer prompt, and the
+ * CHANGELOG citation the rule's `[Unreleased]` bullet carries.
+ */
+describe("GitHub Actions run-step shell replay ships in the implementer prompt, the reviewer prompt, and SKILL.md", () => {
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const changelogMd = readDoc("CHANGELOG.md");
+
+  const startPhrase = "any diff that adds or changes a GitHub Actions `run:` step";
+  const endPhrase = "never paste untrusted event data into your shell.";
+
+  const implementerSlice = phraseBoundedSlice(implementerMd, startPhrase, endPhrase);
+  const reviewerSlice = phraseBoundedSlice(reviewerMd, startPhrase, endPhrase);
+
+  const sharedElements = [
+    "any diff that adds or changes a GitHub Actions `run:` step",
+    "--noprofile --norc -eo pipefail",
+    "when `shell: bash` is set on the step or via",
+    "`defaults.run.shell`",
+    "`bash -e` otherwise on Linux and macOS runners (Actions'",
+    "Windows runners default to pwsh",
+    "the expected-success and the expected-failure inputs",
+    "replay its steps in their committed order",
+    "captures the status inside an `if` or a `set +e`/`set -e` guard",
+    "Substitute `${{ }}` expressions with representative values before replaying",
+    "never paste untrusted event data into your shell",
+  ];
+
+  it("the installed implementer prompt's own rule sentences carry the shell-replay rule", () => {
+    for (const element of sharedElements) {
+      expect(implementerSlice).toContain(element);
+    }
+  });
+
+  it("the installed reviewer prompt's own rule sentences carry the same shell-replay rule", () => {
+    for (const element of sharedElements) {
+      expect(reviewerSlice).toContain(element);
+    }
+  });
+
+  it("the reviewer prompt's copy replays in a scratch copy outside the reviewed working tree, keeping the read-only Bash rule intact", () => {
+    expect(reviewerMd).toContain(
+      "Do the replay in a scratch copy of the repository outside the reviewed working tree",
+    );
+    expect(reviewerMd).toContain("this keeps the replay compatible with the read-only Bash rule");
+    expect(implementerMd).not.toContain("scratch copy of the repository outside the reviewed working tree");
+  });
+
+  it("only the reviewer prompt reports the replay in the reproduction field", () => {
+    expect(reviewerMd).toContain("Report the replay in the `reproduction` field");
+    expect(implementerMd).not.toContain("Report the replay in the `reproduction` field");
+  });
+
+  it("the reviewer prompt's reproduction trigger names the shell replay as a second, non-probabilistic trigger", () => {
+    expect(reviewerMd).toContain(
+      "The GitHub Actions shell replay above is a second, explicitly non-probabilistic trigger for the same field",
+    );
+  });
+
+  it("SKILL.md carries one sentence pointing to the installed implementer prompt", () => {
+    expect(skillMd).toContain(
+      "the installed `implementer.md` prompt requires replaying it locally under the shell the step actually runs",
+    );
+    expect(skillMd).toContain(
+      "with the expected-success and the expected-failure inputs, before treating it as tested",
+    );
+  });
+
+  it("SKILL.md mirrors the reviewer's second reproduction trigger", () => {
+    expect(skillMd).toContain(
+      "The GitHub Actions shell replay named in step 6 is a second, explicitly non-probabilistic trigger for the same field",
+    );
+  });
+
+  it("the CHANGELOG's Unreleased section carries the ow-kit-effort-analysis.md section 7(vi) citation", () => {
+    const start = changelogMd.indexOf("## [Unreleased]");
+    const next = changelogMd.indexOf("\n## [", start + 1);
+    expect(start).toBeGreaterThan(-1);
+    const section = changelogMd.slice(start, next === -1 ? undefined : next);
+    expect(section).toContain("ow-kit-effort-analysis.md` section 7(vi)");
+  });
+
+  it("docs/okf/subagent-contracts-superset.md names the shell replay as the reproduction field's second trigger", () => {
+    const subagentContractsMd = readDoc("docs/okf/subagent-contracts-superset.md").replace(/\s+/g, " ");
+    expect(subagentContractsMd).toContain(
+      "The GitHub Actions run-step shell replay named in both installed prompts (see CHANGELOG's `[Unreleased]` entry) is a second, explicitly non-probabilistic trigger for the same field: `sample_size: not_applicable` is allowed when the replay itself has no meaningful sample size",
+    );
+  });
+});

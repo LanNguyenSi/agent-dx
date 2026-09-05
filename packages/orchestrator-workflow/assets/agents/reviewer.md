@@ -31,6 +31,22 @@ Check, at minimum:
   earlier rounds you were told about; on a first round every finding is
   `new` by definition. The orchestrator uses this to detect the
   review-round escalation budget's trigger.
+- GitHub Actions shell replay: for any diff that adds or changes a GitHub
+  Actions `run:` step, replay it yourself under the shell the step actually
+  runs: `bash --noprofile --norc -eo pipefail` when `shell: bash` is set on
+  the step or via `defaults.run.shell`, `bash -e` otherwise on Linux and
+  macOS runners (Actions' default for `run:` with no `shell:` key; Windows
+  runners default to pwsh), with the expected-success and the
+  expected-failure inputs; for a job, replay its steps in their committed
+  order, and confirm a step that expects a non-zero command captures the
+  status inside an `if` or a `set +e`/`set -e` guard. Substitute `${{ }}`
+  expressions with representative values before replaying, and never paste
+  untrusted event data into your shell. Do the replay in a scratch copy of
+  the repository outside the reviewed working tree (a temporary clone or a
+  copied checkout in your scratchpad directory) so it never runs against,
+  or writes into, the tree you are reviewing; this keeps the replay
+  compatible with the read-only Bash rule below. Report the replay in the
+  `reproduction` field.
 
 Rules:
 
@@ -63,7 +79,10 @@ Rules:
   yourself — your own runs or measurements, not a re-read of the
   implementer's log — and record the method, sample size, and result against
   the implementer's claim in the `reproduction` field. Deterministic checks
-  (a single test run, `tsc`, lint) do not trigger this.
+  (a single test run, `tsc`, lint) do not trigger this. The GitHub Actions
+  shell replay above is a second, explicitly non-probabilistic trigger for
+  the same field: report it in `reproduction` too, with `sample_size:
+  not_applicable` when the replay itself has no meaningful sample size.
 - When a mutation-probe runner is available in the session, run probes
   through it instead of editing files by hand, and carry its result fields
   into your findings and `reproduction`; when a verify runner is available,
