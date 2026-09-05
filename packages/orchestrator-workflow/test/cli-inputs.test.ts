@@ -852,3 +852,72 @@ describe("resolveInitInputs: apply's sticky prompt still shows ' (detected)' via
 // detection F4 originally pinned: both call sites share one resolution
 // inside `resolveInitInputs` now (`stickyPreChecked ?? []`,
 // `stickyAnnotateDetected ?? detected`).
+
+describe("routing input and interactive harness selection", () => {
+  afterEach(() => vi.mocked(inquirer.prompt).mockReset());
+
+  it("does not ask legacy model questions for Codex-only selection", async () => {
+    vi.mocked(inquirer.prompt).mockImplementation(async (questions) => {
+      const q = (questions as { name: string }[])[0];
+      if (q.name === "harnesses") return { harnesses: ["codex"] };
+      if (q.name === "profile") return { profile: "minimal" };
+      throw new Error(`Unexpected legacy model prompt: ${q.name}`);
+    });
+    const result = await resolveInitInputs({
+      detected: [],
+      interactive: true,
+      previous: undefined,
+      opts: {},
+    });
+    expect(result.harnesses).toEqual(["codex"]);
+    expect(
+      vi
+        .mocked(inquirer.prompt)
+        .mock.calls.map(
+          ([questions]) => (questions as { name: string }[])[0].name,
+        ),
+    ).toEqual(["harnesses", "profile"]);
+    expect(result.routing.codex?.implementer?.medium?.model).toBe(
+      "gpt-5.6-terra",
+    );
+  });
+
+  it("still asks legacy model questions when Claude is selected alongside Codex", async () => {
+    vi.mocked(inquirer.prompt).mockImplementation(async (questions) => {
+      const q = (questions as { name: string }[])[0];
+      if (q.name === "harnesses") return { harnesses: ["claude", "codex"] };
+      if (q.name === "profile") return { profile: "minimal" };
+      if (q.name === "choice") return { choice: "haiku" };
+      throw new Error(`Unexpected prompt: ${q.name}`);
+    });
+    const result = await resolveInitInputs({
+      detected: [],
+      interactive: true,
+      previous: undefined,
+      opts: {},
+    });
+    expect(
+      vi
+        .mocked(inquirer.prompt)
+        .mock.calls.map(
+          ([questions]) => (questions as { name: string }[])[0].name,
+        ),
+    ).toEqual(["harnesses", "profile", "choice", "choice"]);
+    expect(result.routing.claude?.implementer?.medium?.model).toBe("haiku");
+    expect(result.routing.codex?.implementer?.medium?.model).toBe(
+      "gpt-5.6-terra",
+    );
+  });
+
+  it("rejects untyped routing input before any prompt", async () => {
+    await expect(
+      resolveInitInputs({
+        detected: [],
+        interactive: true,
+        previous: undefined,
+        opts: { routing: { codxe: {} } } as never,
+      }),
+    ).rejects.toThrow(/Unknown harness/);
+    expect(inquirer.prompt).not.toHaveBeenCalled();
+  });
+});

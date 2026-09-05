@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+import ts from "typescript";
 
 import { buildInitInitInputs } from "../src/cli-init.js";
 import type { Manifest } from "../src/init.js";
@@ -64,18 +65,46 @@ describe("init's CLI action hands buildInitInitInputs's result straight to resol
   // The builder pins the sticky-branch wiring, but a call site that spreads
   // the builder's result into a fresh object literal (`{ ...build(...),
   // stickyPreChecked: detected }`) could restore the pre-D-002 behaviour
-  // with every other test green. This source assertion closes that door.
+  // with every other test green. Inspecting the call tree closes that door
+  // without coupling the assertion to formatting or the shape of opts.
   const cliSource = readFileSync(
     fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
     "utf8",
   );
 
-  it("calls resolveInitInputs with the bare builder result, no spread and no adjacent object literal", () => {
-    const direct =
-      /resolveInitInputs\(\s*(?:\/\/[^\n]*\n\s*)*buildInitInitInputs\(detected, previous, interactive, opts\),?\s*\)/;
-    expect(cliSource).toMatch(direct);
-    expect(cliSource).not.toMatch(/\.\.\.buildInitInitInputs\(/);
-    expect(cliSource).not.toMatch(/buildInitInitInputs\([^)]*\)\s*,\s*sticky/);
-    expect(cliSource).not.toMatch(/\{\s*\.\.\.\s*buildInitInitInputs/);
+  it("passes the builder call directly as resolveInitInputs's only argument", () => {
+    const source = ts.createSourceFile(
+      "cli.ts",
+      cliSource,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const builders: ts.CallExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "buildInitInitInputs"
+      )
+        builders.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    expect(builders).toHaveLength(1);
+    const builder = builders[0];
+    const parent = builder.parent;
+    expect(ts.isCallExpression(parent)).toBe(true);
+    if (!ts.isCallExpression(parent))
+      throw new Error(
+        "Builder result must be passed directly to resolveInitInputs",
+      );
+    expect(parent.expression.getText(source)).toBe("resolveInitInputs");
+    expect(parent.arguments).toHaveLength(1);
+    expect(parent.arguments[0]).toBe(builder);
+    expect(
+      builder.arguments.slice(0, 3).map((argument) => argument.getText(source)),
+    ).toEqual(["detected", "previous", "interactive"]);
+    expect(builder.arguments).toHaveLength(4);
   });
 });

@@ -25,6 +25,16 @@ import {
   opencodeModelValue,
   rolesForProfile,
 } from "./models.js";
+import { composeCodexAgent } from "./codex.js";
+import { parseRouting } from "./routing.js";
+import type { HarnessRouting, ModelSelection } from "./routing.js";
+import {
+  codexCatalogWarnings,
+  normalizeRoutingState,
+  legacyOpencodeFallbacks,
+  parseOpencodeModelMaps,
+} from "./routing-state.js";
+import type { OpencodeModelMaps } from "./routing-state.js";
 import type { Report } from "./writers.js";
 import {
   emptyReport,
@@ -47,11 +57,14 @@ export interface InitOptions {
   /**
    * Resolved fully-qualified opencode model ids per role, or `undefined` to
    * omit the `model:` frontmatter line (subagent inherits the session model).
-   * When this field is absent the fallback is `opencodeModelValue(models[role])`,
-   * which passes through a fully-qualified id and returns `undefined` for bare
-   * aliases, producing the same inherit-session-model behaviour for bare inputs.
+   * Qualified values persist in routing; legacy bare IDs persist in the
+   * manifest compatibility map of the same name. A present map records
+   * inheritance for missing keys unless routing supplies that selection.
+   * When absent, prior
+   * selections survive; otherwise `opencodeModelValue(models[role])` passes
+   * through a qualified id or leaves bare aliases inheriting the session model.
    */
-  opencodeModels?: Record<Role, string | undefined>;
+  opencodeModels?: Partial<Record<Role, string | undefined>>;
   /**
    * Renders additional per-role effort-tier subagent variants
    * (`<role>-<tier>.md`) alongside the default agent file. Defaults to
@@ -65,9 +78,29 @@ export interface InitOptions {
    * that variant. Only consulted when `tiers` is true and the `opencode`
    * harness is selected; mirrors `opencodeModels` but keyed by model class
    * instead of role, since a tier variant's model is chosen by class, not
-   * by the role's own preselected model.
+   * by the role's own preselected model. Resolved ids are persisted per tier
+   * and retained on a later install that omits this field. Legacy bare IDs
+   * persist in the manifest compatibility map of the same name.
    */
-  opencodeClassModels?: Record<ModelClass, string | undefined>;
+  opencodeClassModels?: Partial<Record<ModelClass, string | undefined>>;
+  /**
+   * Per-harness role/tier selections. This is an additive, partial map: the
+   * installer preserves previous leaves and fills remaining omissions from
+   * deterministic harness defaults. An explicit leaf wins over legacy inputs.
+   */
+  routing?: HarnessRouting;
+  /**
+   * "patch" (default) preserves previous routing leaves. "replace" accepts
+   * an authoritative resolved map and excludes all previous routing, as used
+   * by CLI resolution and apply --sync. Omitted leaves still use defaults.
+   */
+  routingMode?: "patch" | "replace";
+  /**
+   * Optional, explicitly supplied Codex capability catalog. The installer
+   * never contacts a live service; when this is present it is validated
+   * before any kit-owned file is written.
+   */
+  codexCatalog?: unknown;
   /**
    * Repo kit-version pin (distinct from the actually-installed `version`),
    * so a later `apply` command can gate on it. A `string` sets a new
@@ -82,7 +115,7 @@ export interface InitOptions {
 const SKILL_NAME = "orchestrator-workflow";
 export const MANIFEST_PATH = join(".ai", "workflow", "manifest.json"); // shared with doctor.ts/cli.ts (L9); see readInstalledManifest below
 
-export interface Manifest {
+export interface Manifest extends OpencodeModelMaps {
   kit: string;
   version: string;
   harnesses: Harness[];
@@ -91,6 +124,8 @@ export interface Manifest {
   profile: Profile;
   /** Whether per-role effort-tier subagent variants were rendered. */
   tiers: boolean;
+  /** Exact resolved harness/role/tier selections from the install. */
+  routing?: HarnessRouting;
   /**
    * sha256 of every kit-owned file as installed. This is how a re-run tells
    * "upstream changed, safe to update" apart from "user edited, conflict".
@@ -212,6 +247,15 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   // throwing on a legacy manifest.
   const tiers = typeof candidate.tiers === "boolean" ? candidate.tiers : false;
 
+  // Routing is intentionally stricter than the legacy per-role `models`
+  // map. A malformed routing record must stop a re-install instead of
+  // silently replacing the operator's explicit selections with new defaults.
+  const opencodeMaps = parseOpencodeModelMaps(candidate);
+  let routing: HarnessRouting | undefined;
+  if ("routing" in candidate) {
+    routing = parseRouting(candidate.routing);
+  }
+
   // A hand-written or damaged manifest may carry a non-string `pin`; that
   // degrades to "no recorded pin" here (the same per-field-degradation
   // style as `profile`/`tiers` above) rather than throwing. An empty or
@@ -226,6 +270,8 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     models: models as Record<Role, string>,
     profile,
     tiers,
+    ...(routing !== undefined ? { routing } : {}),
+    ...opencodeMaps,
     files,
     installedAt:
       typeof candidate.installedAt === "string" ? candidate.installedAt : "",
@@ -240,6 +286,20 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
 
 function yamlQuote(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function yamlModelScalar(value: string): string {
+  // Keep ordinary legacy aliases and provider ids byte-compatible, but quote
+  // values YAML would otherwise coerce when they originate in routing JSON.
+  if (
+    /^(?:true|false|null|yes|no|on|off|~)$/i.test(value) ||
+    /^[-+]?\d+(?:\.\d+)?$/.test(value) ||
+    value.includes(":") ||
+    value.includes("#")
+  ) {
+    return yamlQuote(value);
+  }
+  return value;
 }
 
 /**
@@ -258,14 +318,18 @@ function yamlQuote(value: string): string {
  * opencode's family-based `opencodeEffortLine` has, so there is no second,
  * potentially-diverging computation here to guard against.
  */
-function composeClaudeAgent(role: Role, model: string): string {
+function composeClaudeAgent(
+  role: Role,
+  model: string,
+  selection?: ModelSelection,
+): string {
   const asset = readAgentAsset(role);
   const frontmatter = [
     "---",
     `name: ${asset.name}`,
     `description: ${yamlQuote(asset.description)}`,
-    `model: ${claudeModelValue(model)}`,
-    `effort: ${TIER_DEFS[DEFAULT_TIER[role]].effort}`,
+    `model: ${selection ? yamlModelScalar(selection.model) : claudeModelValue(model)}`,
+    `effort: ${selection?.effort ?? TIER_DEFS[DEFAULT_TIER[role]].effort}`,
   ];
   // Read-only roles keep every read/search tool but cannot mutate files.
   if (READ_ONLY_ROLES.has(role)) {
@@ -297,7 +361,7 @@ function composeOpencodeAgent(
   // Only emit `model:` when a resolved, non-empty FQ id is available.
   // Omitting it lets the subagent inherit the session/default model.
   if (modelValue) {
-    frontmatter.push(`model: ${modelValue}`);
+    frontmatter.push(`model: ${yamlModelScalar(modelValue)}`);
   }
   if (effortLine) {
     frontmatter.push(effortLine);
@@ -307,6 +371,15 @@ function composeOpencodeAgent(
   }
   frontmatter.push("---");
   return [...frontmatter, "", asset.body.trimEnd(), ""].join("\n");
+}
+
+function routingSelection(
+  routing: HarnessRouting,
+  harness: "claude" | "codex" | "opencode",
+  role: Role,
+  tier: Tier,
+): ModelSelection | undefined {
+  return routing[harness]?.[role]?.[tier];
 }
 
 function tierDescriptionSuffix(
@@ -322,15 +395,19 @@ function tierDescriptionSuffix(
  * `DEFAULT_TIER`), so `composeClaudeAgent`'s own output (pinned default
  * effort included) stays byte-identical whether or not tiers are on.
  */
-function composeClaudeAgentVariant(role: Role, tier: Tier): string {
+function composeClaudeAgentVariant(
+  role: Role,
+  tier: Tier,
+  selection?: ModelSelection,
+): string {
   const asset = readAgentAsset(role);
   const def = TIER_DEFS[tier];
   const frontmatter = [
     "---",
     `name: ${asset.name}-${tier}`,
     `description: ${yamlQuote(tierDescriptionSuffix(asset, tier))}`,
-    `model: ${claudeModelValue(CLASS_MODELS[def.modelClass])}`,
-    `effort: ${def.effort}`,
+    `model: ${selection ? yamlModelScalar(selection.model) : claudeModelValue(CLASS_MODELS[def.modelClass])}`,
+    `effort: ${selection?.effort ?? def.effort}`,
   ];
   if (READ_ONLY_ROLES.has(role)) {
     frontmatter.push("disallowedTools: Edit, Write, NotebookEdit");
@@ -404,7 +481,7 @@ function composeOpencodeAgentVariant(
     "mode: subagent",
   ];
   if (modelValue) {
-    frontmatter.push(`model: ${modelValue}`);
+    frontmatter.push(`model: ${yamlModelScalar(modelValue)}`);
   }
   if (effortLine) {
     frontmatter.push(effortLine);
@@ -430,6 +507,50 @@ export function runInit(options: InitOptions): Report {
   const report = emptyReport();
 
   const previous = readInstalledManifest(targetDir);
+  const suppliedMaps = parseOpencodeModelMaps(options);
+  const previousMaps =
+    options.routingMode === "replace"
+      ? {}
+      : parseOpencodeModelMaps(previous ?? {});
+  const opencodeModels =
+    suppliedMaps.opencodeModels ??
+    (previousMaps.opencodeModels !== undefined
+      ? { ...previousMaps.opencodeModels }
+      : undefined);
+  if (opencodeModels && options.opencodeModels === undefined && previous) {
+    for (const role of ROLES) {
+      if (options.models[role] !== previous.models[role])
+        opencodeModels[role] = opencodeModelValue(options.models[role]);
+    }
+  }
+  const opencodeClassModels =
+    suppliedMaps.opencodeClassModels ?? previousMaps.opencodeClassModels;
+  const compatibility = legacyOpencodeFallbacks({
+    opencodeModels,
+    opencodeClassModels,
+  });
+  const routing = normalizeRoutingState({
+    harnesses: options.harnesses,
+    models: options.models,
+    opencodeModels,
+    opencodeClassModels,
+    previousRouting: previous?.routing,
+    routing: options.routing,
+    routingMode: options.routingMode,
+    legacyOverrideRoles: previous
+      ? ROLES.filter((role) => options.models[role] !== previous.models[role])
+      : [],
+    updateOpencodeModels: options.opencodeModels !== undefined,
+    updateOpencodeClassModels: options.opencodeClassModels !== undefined,
+  });
+  // Check only rendered selections before the first mutation.
+  for (const warning of codexCatalogWarnings(
+    routing,
+    { harnesses: options.harnesses, profile, tiers },
+    options.codexCatalog,
+  )) {
+    report.notes.push(`Codex catalog: ${warning}`);
+  }
   // `null` clears an existing pin, a string sets a new one, and omitted
   // (`undefined`) carries the previous manifest's pin forward unchanged. An
   // empty or whitespace-only string is normalized to a clear as well: it can
@@ -460,10 +581,20 @@ export function runInit(options: InitOptions): Report {
   // sitting on disk and still becoming untracked either way. The ledger
   // (`previous.files`/`previous.harnesses`) is the only source of truth for
   // "what did the previous install actually put on disk."
-  const previousHarnessDirs = (previous?.harnesses ?? []).filter(
-    (harness): harness is "claude" | "opencode" =>
-      harness === "claude" || harness === "opencode",
-  );
+  const previousHarnessDirs = (previous?.harnesses ?? [])
+    .map((harness) =>
+      harness === "claude"
+        ? { dir: ".claude", extension: ".md" }
+        : harness === "opencode"
+          ? { dir: ".opencode", extension: ".md" }
+          : harness === "codex"
+            ? { dir: ".codex", extension: ".toml" }
+            : undefined,
+    )
+    .filter(
+      (entry): entry is { dir: string; extension: ".md" | ".toml" } =>
+        entry !== undefined,
+    );
 
   // A full -> minimal downgrade drops explorer/task-slicer from the roles
   // installed, but (like dropping a harness from --harness) existing role
@@ -474,11 +605,13 @@ export function runInit(options: InitOptions): Report {
     const droppedRoles = rolesForProfile(previous.profile).filter(
       (role) => !rolesForProfile(profile).includes(role),
     );
-    for (const harnessDir of previousHarnessDirs.map((harness) =>
-      harness === "claude" ? ".claude" : ".opencode",
-    )) {
+    for (const harnessDir of previousHarnessDirs) {
       for (const role of droppedRoles) {
-        const relativePath = join(harnessDir, "agents", `${role}.md`);
+        const relativePath = join(
+          harnessDir.dir,
+          "agents",
+          `${role}${harnessDir.extension}`,
+        );
         if (previous.files[relativePath] !== undefined) {
           report.notes.push(
             `${relativePath}: now untracked after the full -> ${profile} profile downgrade; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
@@ -492,7 +625,11 @@ export function runInit(options: InitOptions): Report {
         // check above/below is what decides whether a note is actually due.
         for (const tier of ROLE_TIERS[role]) {
           if (tier === DEFAULT_TIER[role]) continue;
-          const variantPath = join(harnessDir, "agents", `${role}-${tier}.md`);
+          const variantPath = join(
+            harnessDir.dir,
+            "agents",
+            `${role}-${tier}${harnessDir.extension}`,
+          );
           if (previous.files[variantPath] !== undefined) {
             report.notes.push(
               `${variantPath}: now untracked after the full -> ${profile} profile downgrade; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
@@ -510,13 +647,15 @@ export function runInit(options: InitOptions): Report {
   // there is no overlap between the two loops). Surface it the same way:
   // a note per file instead of a silent, unexplained leftover.
   if (previous && previous.tiers && !tiers) {
-    for (const harnessDir of previousHarnessDirs.map((harness) =>
-      harness === "claude" ? ".claude" : ".opencode",
-    )) {
+    for (const harnessDir of previousHarnessDirs) {
       for (const role of rolesForProfile(profile)) {
         for (const tier of ROLE_TIERS[role]) {
           if (tier === DEFAULT_TIER[role]) continue;
-          const relativePath = join(harnessDir, "agents", `${role}-${tier}.md`);
+          const relativePath = join(
+            harnessDir.dir,
+            "agents",
+            `${role}-${tier}${harnessDir.extension}`,
+          );
           if (previous.files[relativePath] !== undefined) {
             report.notes.push(
               `${relativePath}: now untracked after tiers were turned off; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
@@ -550,16 +689,17 @@ export function runInit(options: InitOptions): Report {
   // harness with no files in the ledger under its prefix produces no notes
   // either way, whether or not `previous.harnesses` ever named it.
   if (previous) {
-    const harnessDirs: Record<Harness, string> = {
-      claude: ".claude",
-      codex: ".agents",
-      opencode: ".opencode",
+    const harnessDirs: Record<Harness, string[]> = {
+      claude: [".claude"],
+      codex: [".agents", ".codex"],
+      opencode: [".opencode"],
     };
     for (const harness of HARNESSES) {
       if (options.harnesses.includes(harness)) continue;
-      const prefix = harnessDirs[harness] + sep;
       for (const relativePath of Object.keys(previous.files)) {
-        if (relativePath.startsWith(prefix)) {
+        if (
+          harnessDirs[harness].some((dir) => relativePath.startsWith(dir + sep))
+        ) {
           report.notes.push(
             `${relativePath}: now untracked after --harness dropped ${harness}; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
           );
@@ -580,7 +720,9 @@ export function runInit(options: InitOptions): Report {
     const hadTrackedHarnessFiles = Object.keys(previous.files).some(
       (relativePath) =>
         HARNESSES.some((harness) =>
-          relativePath.startsWith(harnessDirs[harness] + sep),
+          harnessDirs[harness].some((dir) =>
+            relativePath.startsWith(dir + sep),
+          ),
         ),
     );
     if (hadTrackedHarnessFiles && options.harnesses.length === 0) {
@@ -648,14 +790,22 @@ export function runInit(options: InitOptions): Report {
     for (const role of rolesForProfile(profile)) {
       installKitFile(
         join(".claude", "agents", `${role}.md`),
-        composeClaudeAgent(role, options.models[role]),
+        composeClaudeAgent(
+          role,
+          options.models[role],
+          routingSelection(routing, "claude", role, DEFAULT_TIER[role]),
+        ),
       );
       if (tiers) {
         for (const tier of ROLE_TIERS[role]) {
           if (tier === DEFAULT_TIER[role]) continue;
           installKitFile(
             join(".claude", "agents", `${role}-${tier}.md`),
-            composeClaudeAgentVariant(role, tier),
+            composeClaudeAgentVariant(
+              role,
+              tier,
+              routingSelection(routing, "claude", role, tier),
+            ),
           );
         }
       }
@@ -665,17 +815,53 @@ export function runInit(options: InitOptions): Report {
 
   if (options.harnesses.includes("codex")) {
     installKitFile(join(".agents", "skills", SKILL_NAME, "SKILL.md"), skill);
+    for (const role of rolesForProfile(profile)) {
+      const defaultSelection = routingSelection(
+        routing,
+        "codex",
+        role,
+        DEFAULT_TIER[role],
+      );
+      // `defaultCodexRouting` makes every default-tier selection complete;
+      // retain this guard so a hand-constructed partial routing object cannot
+      // produce an invalid native agent file through the public runInit API.
+      if (!defaultSelection) {
+        throw new Error(
+          `Missing Codex routing for ${role}/${DEFAULT_TIER[role]}`,
+        );
+      }
+      installKitFile(
+        join(".codex", "agents", `${role}.toml`),
+        composeCodexAgent(role, defaultSelection),
+      );
+      if (tiers) {
+        for (const tier of ROLE_TIERS[role]) {
+          if (tier === DEFAULT_TIER[role]) continue;
+          const selection = routingSelection(routing, "codex", role, tier);
+          if (!selection) {
+            throw new Error(`Missing Codex routing for ${role}/${tier}`);
+          }
+          installKitFile(
+            join(".codex", "agents", `${role}-${tier}.toml`),
+            composeCodexAgent(role, selection, tier),
+          );
+        }
+      }
+    }
   }
 
   if (options.harnesses.includes("opencode")) {
     installKitFile(join(".opencode", "skills", SKILL_NAME, "SKILL.md"), skill);
     for (const role of rolesForProfile(profile)) {
       const modelValue =
-        options.opencodeModels !== undefined
-          ? options.opencodeModels[role]
-          : opencodeModelValue(options.models[role]);
+        routingSelection(routing, "opencode", role, DEFAULT_TIER[role])
+          ?.model ??
+        (opencodeModels !== undefined
+          ? opencodeModels[role]
+          : opencodeModelValue(options.models[role]));
       const defaultEffortLine = opencodeEffortLine(
-        DEFAULT_TIER[role],
+        routingSelection(routing, "opencode", role, DEFAULT_TIER[role])
+          ?.effort ?? DEFAULT_TIER[role],
         modelValue,
       );
       installKitFile(
@@ -685,8 +871,10 @@ export function runInit(options: InitOptions): Report {
       if (tiers) {
         for (const tier of ROLE_TIERS[role]) {
           if (tier === DEFAULT_TIER[role]) continue;
+          const selection = routingSelection(routing, "opencode", role, tier);
           const modelClass = TIER_DEFS[tier].modelClass;
-          const variantModelValue = options.opencodeClassModels?.[modelClass];
+          const variantModelValue =
+            selection?.model ?? opencodeClassModels?.[modelClass];
           if (variantModelValue === undefined) {
             // No model resolved for this class: opencodeEffortLine always
             // returns undefined too when its modelValue argument is
@@ -702,7 +890,10 @@ export function runInit(options: InitOptions): Report {
             // rules in opencodeEffortLine above.
             continue;
           }
-          const effortLine = opencodeEffortLine(tier, variantModelValue);
+          const effortLine = opencodeEffortLine(
+            selection?.effort ?? tier,
+            variantModelValue,
+          );
           installKitFile(
             join(".opencode", "agents", `${role}-${tier}.md`),
             composeOpencodeAgentVariant(
@@ -726,6 +917,8 @@ export function runInit(options: InitOptions): Report {
     models: options.models,
     profile,
     tiers,
+    routing,
+    ...compatibility,
     files: installedFiles,
     ...(pin !== undefined ? { pin } : {}),
   };
@@ -739,6 +932,8 @@ export function runInit(options: InitOptions): Report {
       models: previous.models,
       profile: previous.profile,
       tiers: previous.tiers,
+      ...(previous.routing !== undefined ? { routing: previous.routing } : {}),
+      ...legacyOpencodeFallbacks(previous),
       files: previous.files,
       ...(previous.pin !== undefined ? { pin: previous.pin } : {}),
     }) === JSON.stringify(desired)

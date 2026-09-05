@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Native Codex custom agents under `.codex/agents/`, including profile-scoped
+  roles and optional effort-tier variants with explicit model and effort.
+  The initial routing uses Astra for review/advice and implementation
+  escalation, Sol for discovery/slicing, Terra for regular implementation,
+  and Luna for narrowly scoped low-tier work.
+- Harness-specific role/tier routing overrides through `--routing <file>`
+  on `init`, `setup`, and `apply`, persisted alongside the legacy `models`
+  configuration. Optional `--codex-catalog <file>` checks selected Codex
+  model/effort pairs against a supplied catalog before installation writes.
+
+### Changed
+
+- Agent-led installation and deliberate model refresh are the recommended
+  entry point. The agent inspects capabilities and existing preferences,
+  applies authorized scoped changes through the CLI, and reports verification
+  gaps. The CLI remains available as the reproducible installation backend.
+- Codex workflow guidance uses native role delegation when supported, with an
+  explicit inline fallback for environments without native subagents. Normal
+  reinstallation preserves recorded routing; model changes use explicit
+  overrides or documented operator synchronization.
+
+
 ## [0.28.0] - 2026-09-04
 
 ### Added

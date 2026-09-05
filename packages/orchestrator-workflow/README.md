@@ -52,6 +52,25 @@ Two effects fall out of this shape:
 
 ## Install
 
+### Recommended: agent-led installation
+
+Give a coding agent this line:
+
+```text
+Follow the install instructions at https://raw.githubusercontent.com/LanNguyenSi/agent-dx/master/packages/orchestrator-workflow/INSTALL-AGENT.md
+```
+
+The agent inspects installed harnesses, reusable preferences, authorization,
+and available model capabilities. It presents the exact CLI invocation and
+routing diff, asks only about unresolved material decisions, applies the
+authorized change, and verifies the supported dispatch path. Existing routing
+is preserved unless you explicitly change it, and a newer model is never an
+automatic upgrade. [INSTALL-AGENT.md](INSTALL-AGENT.md) makes the write surface
+and fallback behavior auditable. The link tracks `master`; pin it to a commit
+SHA for a stable audit.
+
+### Manual and advanced CLI installation
+
 ```bash
 npx orchestrator-workflow init
 ```
@@ -62,14 +81,17 @@ resolved target (`Installing into ...`) before it writes anything and warns
 when the target is not a git repository root; pass `init <dir>` to install
 into a different directory. The installer is interactive by default: it
 locates existing harness configs (`.claude/`, `CLAUDE.md`, `.opencode/`,
-`opencode.json`, `.agents/`, `.codex/`), preselects what it found, and asks
-which model each subagent role should use.
+`opencode.json`, `.agents/`, `.codex/`) and preselects what it found. For a
+guided install, use the agent-led path above: the agent inspects the repository
+and available harness capabilities, prepares the exact CLI invocation and
+routing diff, and asks only about choices or authority it cannot infer safely.
 
 Non-interactive:
 
 ```bash
 npx orchestrator-workflow init --yes
 npx orchestrator-workflow init --harness claude,codex,opencode --models "implementer=sonnet,reviewer=opus" --yes
+npx orchestrator-workflow init --harness codex --routing ./routing.json --codex-catalog ./codex-models.json --tiers --yes
 npx orchestrator-workflow init --profile minimal --yes
 ```
 
@@ -98,26 +120,13 @@ harness to install it.
 npx orchestrator-workflow init --harness none --yes
 ```
 
-To let a coding agent do the install, give it this single line:
-
-```text
-Follow the install instructions at https://raw.githubusercontent.com/LanNguyenSi/agent-dx/master/packages/orchestrator-workflow/INSTALL-AGENT.md
-```
-
-The agent then asks you the harness and model questions in chat and runs the
-non-interactive CLI (manual scaffolding where npx is unavailable).
-[INSTALL-AGENT.md](INSTALL-AGENT.md) documents, step by step, what the
-linked instructions make the agent do and which files it may touch, so the
-prompt can be audited before delegating. The link tracks `master`; pin it
-to a commit SHA for a stable audit.
-
 ## What gets installed
 
 ```text
 .ai/
   workflow/
     templates/        00-goal.md ... 06-handoff.md (canonical run templates)
-    manifest.json     kit version, chosen harnesses, role profile, per-role models
+    manifest.json     kit version, harnesses, profile, legacy models, exact routing
   runs/               one directory per unit of work, newest = active
 AGENTS.md             marker-fenced "Agentic Coding Workflow" policy section
 ```
@@ -131,17 +140,19 @@ Per selected harness:
 | Harness | Files | Notes |
 |---|---|---|
 | Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter; the read-only explorer, reviewer, and advisor also get `disallowedTools: Edit, Write, NotebookEdit`. |
-| OpenAI Codex | `.agents/skills/orchestrator-workflow/SKILL.md` | Codex reads `AGENTS.md` natively. There is no standardized project-level subagent definition; the skill instructs running the roles inline with the same contracts. |
+| OpenAI Codex | `.agents/skills/orchestrator-workflow/SKILL.md`, `.codex/agents/{explorer,task-slicer,implementer,reviewer,advisor}.toml` | Codex reads `AGENTS.md` natively. Native custom-agent files carry the canonical role instructions plus `model` and `model_reasoning_effort`. Explorer and advisor request a read-only sandbox; reviewer inherits the caller's sandbox so it can run temporary/build checks, while its prompt prohibits source edits. |
 | opencode | `.opencode/skills/orchestrator-workflow/SKILL.md`, `.opencode/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` | opencode reads `AGENTS.md` natively. Subagents get `mode: subagent`; the read-only explorer, reviewer, and advisor also get `permission: edit: deny`. Model resolution is described below. |
 
-**Read-only posture, honestly stated.** For the explorer, reviewer, and
-advisor the read-only posture is enforced at the tool level only for the
-file-mutation tools (`disallowedTools: Edit, Write, NotebookEdit` on Claude
-Code, `permission: edit: deny` on opencode). Bash stays available because
-these roles must run tests and linters, so shell-level mutation (`git checkout`,
+**Read-only posture, honestly stated.** Claude Code disables file-mutation
+tools for explorer, reviewer, and advisor; opencode denies edits for those
+roles. Codex requests a read-only sandbox for explorer and advisor. Its
+reviewer inherits the caller's sandbox so temporary/build checks remain
+possible, while its prompt prohibits source edits. In inherited or otherwise
+write-enabled sandboxes, shell-level mutation (`git checkout`,
 `git restore`, `git clean`, `git stash`, `git reset`, `sed -i`, redirecting
 output into a file) is guarded by instruction only: the agent prompts forbid
-it explicitly, but nothing technically prevents it. This residual has bitten in practice (a
+it explicitly, but the role definition itself does not prevent it. A native
+read-only sandbox can block those writes. This residual has bitten in practice (a
 reviewer ran `git checkout` and discarded uncommitted work), which is why the
 prompts now name the forbidden commands instead of just saying "read-only".
 Marker- or verdict-style enforcement of the Bash residual (sandboxing,
@@ -149,8 +160,8 @@ PreToolUse hooks) is harness territory and out of this kit's scope.
 
 ## Role profile
 
-`--profile` selects which subagent roles get installed (Claude Code and
-opencode only; Codex has no per-role files to select from):
+`--profile` selects which subagent roles get installed for Claude Code, Codex,
+and opencode:
 
 | Profile | Roles installed | When to use it |
 |---|---|---|
@@ -206,7 +217,33 @@ without reporting them at all.
 
 ## Model preselection
 
-Each subagent role gets a model, chosen interactively or via `--models`:
+Routing is a harness-specific map from role and tier to a complete
+`{model, effort}` selection. Pass a JSON file with `--routing`; the CLI deep
+merges only the leaves you provide and records the resulting effective map in
+`.ai/workflow/manifest.json`. The role's default-tier key configures its
+unsuffixed file; another allowed key configures the corresponding
+`<role>-<tier>` variant when `--tiers` is enabled. For example:
+
+```json
+{
+  "codex": {
+    "implementer": {
+      "medium": { "model": "gpt-5.6-terra", "effort": "medium" },
+      "xhigh": { "model": "gpt-6-astra", "effort": "xhigh" }
+    }
+  }
+}
+```
+
+An omitted `--routing` preserves the exact persisted map on a re-install.
+Changing one leaf leaves the others intact, which makes a previous manifest a
+usable rollback record. Model updates are deliberate per role and tier: the
+installer never interprets a newer model as automatically better and never
+rewrites a preserved choice merely because another model exists.
+
+`--models` remains as the backward-compatible, per-role input for Claude Code
+and opencode. It does not configure Codex. Existing manifests that contain
+only `models` continue to produce the same Claude Code and opencode defaults:
 
 | Role | Default | Why |
 |---|---|---|
@@ -216,9 +253,41 @@ Each subagent role gets a model, chosen interactively or via `--models`:
 | reviewer | `opus` | skeptical review benefits from the strongest model |
 | advisor | `opus` | escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default |
 
-The orchestrator itself runs on the session's main model; use the strongest
-reasoning model available. The chosen mapping is recorded in
-`.ai/workflow/manifest.json` and reused as the default on later re-runs.
+The orchestrator itself runs on the session's main model. For Codex, start the
+orchestrator on `gpt-6-astra` at `high` effort; use `xhigh` for demanding work.
+The installer does not mutate global or fleet Codex configuration to enforce
+that recommendation.
+
+**Codex defaults.** Codex uses native `.codex/agents/*.toml` custom agents.
+The file shape follows the
+[official Codex subagent configuration](https://learn.chatgpt.com/docs/agent-configuration/subagents).
+The shipped routing is:
+
+| Role | Tier | Model | Effort |
+|---|---|---|---|
+| explorer | low | `gpt-5.6-luna` | low |
+| explorer | medium (default) | `gpt-5.6-sol` | medium |
+| explorer | high | `gpt-5.6-sol` | high |
+| task-slicer | low | `gpt-5.6-luna` | low |
+| task-slicer | medium (default) | `gpt-5.6-sol` | medium |
+| task-slicer | high | `gpt-5.6-sol` | high |
+| implementer | low | `gpt-5.6-luna` | low |
+| implementer | medium (default) | `gpt-5.6-terra` | medium |
+| implementer | high | `gpt-5.6-terra` | high |
+| implementer | xhigh | `gpt-6-astra` | xhigh |
+| reviewer | medium | `gpt-5.6-terra` | medium |
+| reviewer | high (default) | `gpt-6-astra` | high |
+| reviewer | xhigh | `gpt-6-astra` | xhigh |
+| advisor | high (default) | `gpt-6-astra` | high |
+| advisor | xhigh | `gpt-6-astra` | xhigh |
+
+When you have a deterministic Codex model catalog, pass it with
+`--codex-catalog <json-file>`. The CLI validates the selected Codex model and
+effort pairs before writing. Without a supplied catalog it performs no online
+entitlement check; offline or account-specific availability remains unknown.
+Use the harness's native capability commands, such as `codex debug models`, to
+refresh a catalog before installation when appropriate. A bundled-capability
+view describes what the binary knows and does not prove account entitlement.
 
 **opencode model resolution.** opencode requires fully-qualified `provider/model-id`
 strings (e.g. `github-copilot/claude-sonnet-4.6`). At install time the CLI
@@ -242,14 +311,14 @@ be supplied as a fully-qualified `--models` entry, e.g.
 `--tiers` renders an additional per-role subagent definition for each
 non-default effort tier, alongside the one default (unsuffixed) agent file
 `--profile` already installs. Each tier variant is a standalone subagent
-definition, not a modification of the default file: the default file
-(`<role>.md`) stays byte-identical to what a tiers-off install already
-produces, and each variant lives next to it as `<role>-<tier>.md`.
+definition, not a modification of the default file. Claude Code and opencode
+use `<role>.md` / `<role>-<tier>.md`; Codex uses `<role>.toml` /
+`<role>-<tier>.toml`.
 
 **Every default file carries its own pinned effort, independent of
-`--tiers`.** Since 0.22.0, `composeClaudeAgent`/`composeOpencodeAgent` add
-the role's own `TIER_DEFS[DEFAULT_TIER[role]].effort` to the default
-(unsuffixed) file unconditionally: `effort: medium` for explorer,
+`--tiers`.** The harness composers add the role's own default routing
+selection to the unsuffixed file. In the legacy Claude/opencode path this is
+`TIER_DEFS[DEFAULT_TIER[role]].effort`: `effort: medium` for explorer,
 task-slicer, and implementer; `effort: high` for reviewer and advisor
 (opencode: a `variant: high` line when the resolved model is Claude-family,
 following the same dispatch rule tier variants use, `reasoningEffort:
@@ -271,7 +340,8 @@ no variant files unless asked. `--tiers` turns the feature on for that run,
 `--no-tiers` turns it off; a plain re-run with neither flag keeps whatever
 the previous install had, the same override-vs-persist rule already used
 for `--profile` and `--models`. There is no interactive prompt for it:
-`tiers` is opt-in/off via the flags only.
+`tiers` is opt-in/off via the flags only. Neither Codex nor the other harnesses
+get `max` or `ultra` variants from this kit.
 
 ```bash
 npx orchestrator-workflow init --tiers --yes
@@ -346,6 +416,19 @@ warning are opencode-scoped only; Claude Code variants resolve `model:` from
 a plain alias (`haiku`/`sonnet`/`opus`) and need no live catalog lookup, so
 they are unaffected.
 
+Codex variants carry `model` and `model_reasoning_effort` from their exact
+routing leaf. The canonical role prompt becomes `developer_instructions`.
+Runtime dispatch follows the client's actual capabilities: select the named
+installed agent when supported; otherwise, if spawning supports explicit model
+and effort, read the installed TOML and pass its selection, developer
+instructions, and narrow task contract into a fresh task-local spawn. A
+full-history spawn may not permit a model override. If that explicit spawn
+cannot accept a sandbox override, explorer and advisor inherit the caller's
+sandbox and their prompt is the edit guard. When native spawning is
+unavailable, run the same contract inline and sequentially. The orchestrator
+alone spawns agents. In particular, it must not choose `implementer-low` when
+the task requires a test, typecheck, lint, build, or named mutation probe.
+
 **Warning: `CLAUDE_CODE_EFFORT_LEVEL` overrides every agent's frontmatter
 `effort:`, tier variants included.** Claude Code's `effort:` frontmatter
 field does work: it reaches the model request as `output_config.effort`.
@@ -379,12 +462,13 @@ orchestrator-workflow apply --target /path/to/repo
 ```
 
 **`setup`** writes or updates this operator's default install options
-(harnesses, profile, models, tiers) as the baseline for future installs; it
+(harnesses, profile, legacy models, routing, tiers) as the baseline for future installs; it
 touches no repository. A flag always wins; a flag-less re-run keeps the
 previously stored values; a first-ever `setup` falls back to `claude` /
-`full` / the kit's default models / tiers off. `setup` takes the same
-option flags as `init` (`--harness`, `--profile`, `--models`, `--tiers` /
-`--no-tiers`, `--opencode-provider`, `--yes`). The defaults live in
+`full` / the kit's default routing / tiers off. `setup` takes the same
+option flags as `init` (`--harness`, `--profile`, `--models`, `--routing`,
+`--codex-catalog`, `--tiers` / `--no-tiers`, `--opencode-provider`, `--yes`).
+The defaults live in
 `<operator home>/manifest.json`, where the operator home is
 `~/.orchestrator-workflow/` unless the `ORCHESTRATOR_WORKFLOW_HOME`
 environment variable names a different directory.
@@ -404,15 +488,17 @@ an **interactive** re-run on such a target still prompts, with the same
 nothing-pre-checked behaviour described in "Templates-only mode" above
 (it applies identically to `apply`).
 Pass `--sync` to invert that for
-profile, tiers, and models: the operator's defaults then win over whatever
+profile, tiers, legacy models, and routing: the operator's defaults then win over whatever
 the target already had recorded. A target pinned to a kit version other
 than the one being applied is skipped rather than touched (see the pin
 rule below). `apply` also takes the same install options as `init` (`--harness`,
-`--profile`, `--models`, `--tiers` / `--no-tiers`, `--opencode-provider`,
-`--force`, `--yes`), which feed the precedence rule above.
+`--profile`, `--models`, `--routing`, `--codex-catalog`, `--tiers` /
+`--no-tiers`, `--opencode-provider`, `--force`, `--yes`), which feed the
+precedence rule above. An explicit routing file is the highest-precedence
+deep patch; leaves it omits retain their resolved baseline values.
 
 **`doctor [--json] [--prune]`** reports every operator-registered target's
-status: `clean`, `divergent` (from the operator defaults), `version-lag`,
+status: `clean`, `divergent` (from the operator defaults, including routing), `version-lag`,
 `drift` (installed files edited, deleted, or unreadable since install),
 `missing`, `no-manifest`, or `unverifiable`. It exits `2` when the operator
 manifest is missing or unreadable, or, with `--prune`, when the operator
@@ -424,6 +510,10 @@ version. `--prune` removes `missing` and `no-manifest` targets from the
 registry before reporting (never an `unverifiable` one, since that status
 means the check itself was inconclusive, not that the target is confirmed
 gone) and rewrites the manifest file in its normalized form.
+For a legacy opencode leaf without a recorded provider-qualified model id,
+doctor reports `Routing comparison incomplete` and includes
+`routingComparisonGaps` in JSON instead of declaring a false routing
+divergence. The gap alone does not change the target status.
 
 **`adopt [dir] [--json]`** brings a repository that already has the kit installed,
 by hand or by an earlier `init`, under the operator's management without

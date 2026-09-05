@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { PACKAGE_VERSION } from "../src/assets.js";
 import { runDoctor } from "../src/doctor.js";
-import { runInit } from "../src/init.js";
+import { readInstalledManifest, runInit } from "../src/init.js";
 import { DEFAULT_MODELS } from "../src/models.js";
 import type { Profile } from "../src/models.js";
 import {
@@ -916,5 +916,118 @@ describe("operator-manifest-unreadable", () => {
     expect(result.stderr).toContain("is unreadable; back it up and repair it");
     expect(result.stderr).not.toContain("No operator setup found");
     expect(result.stdout).toBe("");
+  });
+});
+
+describe("doctor routing normalization", () => {
+  it("does not abort or prune a malformed routing target while checking healthy targets", () => {
+    const malformed = makeRepo();
+    const healthy = makeRepo();
+    setManifestField(malformed, { routing: { codxe: {} } });
+    registerHome(defaults(), [malformed, healthy]);
+    const report = runDoctor(home, { prune: true });
+    expect(
+      report.targets.find((target) => target.path === malformed),
+    ).toMatchObject({ status: "unverifiable", reason: "manifest unreadable" });
+    expect(
+      report.targets.find((target) => target.path === healthy)?.status,
+    ).toBe("clean");
+    expect(report.pruned).toEqual([]);
+    expect(
+      JSON.parse(readFileSync(join(home, "manifest.json"), "utf8")).targets,
+    ).toHaveLength(2);
+    expect(() =>
+      runInit({
+        targetDir: malformed,
+        harnesses: ["claude"],
+        models: { ...DEFAULT_MODELS },
+      }),
+    ).toThrow(/Unknown harness/);
+  });
+
+  it("treats materialized Claude routing as equivalent to legacy defaults", () => {
+    const repo = makeRepo();
+    registerHome(defaults(), [repo]);
+    expect(
+      readInstalledManifest(repo)?.routing?.claude?.implementer?.medium?.model,
+    ).toBe("sonnet");
+    expect(runDoctor(home, {}).targets[0]).toMatchObject({
+      status: "clean",
+      divergence: { models: false },
+    });
+    expect(runDoctor(home, {}).targets[0].divergence?.routing).toBeUndefined();
+  });
+
+  it("ignores routing outside the installed harness, profile, and tier scope", () => {
+    const repo = makeRepo({ profile: "minimal" });
+    registerHome(
+      defaults({
+        profile: "minimal",
+        routing: {
+          codex: {
+            implementer: { medium: { model: "gpt-custom", effort: "high" } },
+          },
+          claude: {
+            explorer: { medium: { model: "haiku", effort: "high" } },
+            implementer: { xhigh: { model: "haiku", effort: "medium" } },
+          },
+        },
+      }),
+      [repo],
+    );
+    expect(runDoctor(home, {}).targets[0].status).toBe("clean");
+  });
+
+  it("compares opencode ids when recorded and reports offline gaps for legacy aliases", () => {
+    const repo = makeRepo({ profile: "minimal" });
+    const routing = {
+      opencode: {
+        implementer: {
+          medium: { model: "provider/pinned", effort: "medium" as const },
+        },
+        reviewer: {
+          high: { model: "provider/pinned", effort: "high" as const },
+        },
+      },
+    };
+    runInit({
+      targetDir: repo,
+      harnesses: ["opencode"],
+      models: { ...DEFAULT_MODELS },
+      profile: "minimal",
+      routing,
+    });
+    registerHome(defaults({ harnesses: ["opencode"], profile: "minimal" }), [
+      repo,
+    ]);
+    const unknown = runDoctor(home, {}).targets[0];
+    expect(unknown.divergence?.routing).toBeUndefined();
+    expect(unknown.routingComparisonGaps).toHaveLength(2);
+    expect(unknown.routingComparisonGaps?.[0]).toContain(
+      "opencode/implementer/medium",
+    );
+    registerHome(
+      defaults({ harnesses: ["opencode"], profile: "minimal", routing }),
+      [repo],
+    );
+    const equal = runDoctor(home, {}).targets[0];
+    expect(equal.status).toBe("clean");
+    expect(equal.routingComparisonGaps).toBeUndefined();
+    registerHome(
+      defaults({
+        harnesses: ["opencode"],
+        profile: "minimal",
+        routing: {
+          opencode: {
+            ...routing.opencode,
+            implementer: {
+              medium: { model: "provider/other", effort: "medium" },
+            },
+          },
+        },
+      }),
+      [repo],
+    );
+    expect(runDoctor(home, {}).targets[0].divergence?.routing).toBe(true);
   });
 });

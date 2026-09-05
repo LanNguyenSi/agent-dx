@@ -120,7 +120,7 @@ describe("apply's CLI action hands buildApplyInitInputs's result straight to res
 
   it("calls resolveInitInputs with the bare builder result, no spread and no adjacent sticky override", () => {
     const direct =
-      /resolveInitInputs\(\s*(?:\/\/[^\n]*\n\s*)*buildApplyInitInputs\(\s*targetDir,\s*chosenHarnesses,\s*previous,\s*interactive,\s*opts,\s*Boolean\(repoManifest\),?\s*\),?\s*\)/;
+      /resolveInitInputs\(\s*(?:\/\/[^\n]*\n\s*)*buildApplyInitInputs\(\s*targetDir,\s*chosenHarnesses,\s*previous,\s*interactive,\s*(?:\/\/[^\n]*\n\s*)*\{\s*\.\.\.opts,\s*routing:\s*routingPatch\s*\},\s*Boolean\(repoManifest\),?\s*\),?\s*\)/;
     expect(direct.test(cliSource)).toBe(true);
     expect(cliSource).not.toMatch(/\.\.\.buildApplyInitInputs\(/);
     expect(cliSource).not.toMatch(

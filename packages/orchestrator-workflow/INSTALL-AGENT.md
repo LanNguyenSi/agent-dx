@@ -17,21 +17,23 @@ which is mutable. For a stable audit, pin the URL to a commit SHA instead
 
 ## What the linked instructions do
 
-1. **Locate existing harness configs** in the repo root and report them to
-   you (Claude Code, opencode, Codex marker files; full list in step 1
-   below).
-2. **Ask you, not guess**: which harnesses should get adapters, which role
-   profile to install (`full` — every role, or `minimal` — implementer and
-   reviewer only; the reviewer is never optional), which model each
-   installed subagent role should use, and whether to also render effort-tier
-   subagent variants (`--tiers`; off by default, no per-tier model prompt
-   since tier models are chosen automatically). Suggested defaults: profile
-   `full`; explorer `sonnet`, task-slicer `sonnet`, implementer `sonnet`,
-   reviewer `opus`, advisor `opus`; tiers off.
-3. **Run the non-interactive installer** with your answers:
-   `npx orchestrator-workflow init --yes --harness ... --profile ... --models ... [--tiers]`.
-   If the installer reports conflicts with locally edited files, the agent
-   shows them to you and asks before any `--force` re-run. **The operator
+1. **Inspect the repository and installed state**: detect harness configs,
+   read an existing workflow manifest, and inspect native model capabilities
+   where the harness provides them. Existing choices and authorization are
+   evidence; the agent does not make you answer them again.
+2. **Prepare a concrete configuration diff**: selected harnesses, profile,
+   tier variants, and the complete per-harness role/tier routing that will be
+   persisted. Existing routing leaves remain exact unless you asked to change
+   them. The agent records the prior routing in its handoff as the rollback
+   input and never treats "latest" or "newer" as a reason to change models.
+3. **Ask only when needed**, for a material preference, missing authority, or
+   a conflict that changes the result. Then run the non-interactive CLI with
+   `--routing <json-file>` for the reviewed deep patch and, when available,
+   `--codex-catalog <json-file>` for deterministic Codex capability checking.
+   If the installer reports conflicts with locally edited files, inspect the
+   concrete files and reuse any overwrite authority already granted for that
+   scope. Ask before a `--force` re-run only when authority or conflict scope
+   remains unresolved. **The operator
    path**: when an operator has already run `orchestrator-workflow setup`
    on this machine (an operator manifest exists at
    `<operator home>/manifest.json`, where the operator home is
@@ -48,9 +50,12 @@ which is mutable. For a stable audit, pin the URL to a commit SHA instead
    following the byte-precise rules in step 4 below. This manual path
    covers `init` only; there is no manual equivalent for `apply` or
    `adopt`, both of which require the installed CLI.
-5. **Report back**: which harnesses were installed, which profile and model
-   each role uses, whether effort-tier variants were rendered, and any
-   conflicts left in place.
+5. **Verify and report back**: describe the applied routing, prior routing
+   rollback input, installed profile and variants, and the supported dispatch
+   path (named selection, explicit model/effort spawn from the installed TOML,
+   or inline/sequential fallback). Include checks run, unknown capability or
+   entitlement gaps, and conflicts left in place. The workflow never opens a
+   GUI or changes fleet or global harness configuration.
 
 ### Write surface
 
@@ -77,24 +82,26 @@ The install creates or touches only these paths:
   is created with a short heading when absent (Claude Code harness only)
 - `.claude/skills/orchestrator-workflow/SKILL.md` and
   `.claude/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` (Claude Code)
-- `.agents/skills/orchestrator-workflow/SKILL.md` (Codex)
+- `.agents/skills/orchestrator-workflow/SKILL.md` and
+  `.codex/agents/{explorer,task-slicer,implementer,reviewer,advisor}.toml` (Codex)
 - `.opencode/skills/orchestrator-workflow/SKILL.md` and
   `.opencode/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` (opencode)
 
 The per-role agent files above are the `full` profile (the default); the
-`minimal` profile writes only the `implementer` and `reviewer` files for
-Claude Code and opencode and skips `task-slicer`, `explorer`, and `advisor`
-entirely. Codex has no per-role files, so the profile choice does not change
-what it gets. When `--tiers` is on, each installed Claude Code and opencode role
+`minimal` profile writes only the `implementer` and `reviewer` files for all
+three harnesses and skips `task-slicer`, `explorer`, and `advisor` entirely.
+When `--tiers` is on, each installed role
 additionally gets one subagent file per non-default effort tier, named
-`<role>-<tier>.md` (never a file for the role's own default tier, which
-would collide with the plain `<role>.md` file); see the package README's
+`<role>-<tier>.md` for Claude Code/opencode or `<role>-<tier>.toml` for Codex
+(never a file for the role's own default tier, which would collide with the
+plain role file); see the package README's
 "Effort tiers" section for the full role/tier table and the per-harness
 frontmatter shape. `--tiers` is off by default and has no interactive
 prompt equivalent in the manual fallback below (nor does its negation,
 `--no-tiers`): the automated installer is the only path that renders
 tier-variant files; a manual scaffold (step 4) does not cover them.
-Nothing else in the repository is modified. Locally edited files are
+The manifest records the complete effective routing map, including exact
+Codex model and effort selections. Nothing else in the repository is modified. Locally edited files are
 reported as conflicts and left alone, never overwritten silently; the
 exceptions are the kit-owned surfaces: `.ai/workflow/manifest.json` (the
 kit's state file, rewritten whenever the applied state changes) and the
@@ -103,52 +110,64 @@ is fully reversible: `npx orchestrator-workflow uninstall` removes exactly
 this write surface again, keeping run history under `.ai/runs/` and any
 locally edited files. Network access is limited to the npm registry (for
 `npx`) and, in the manual fallback, this repository on github.com /
-raw.githubusercontent.com.
+raw.githubusercontent.com. Native harness capability inspection is read-only;
+the workflow does not open a GUI or mutate global or fleet configuration.
 
 ## Instructions for the agent
 
 You are a coding agent that was pointed at this file. Execute the following
 steps in the repository you were asked to install into.
 
-1. Detect existing harness configs in the repo root: `.claude/` or
-   `CLAUDE.md` (Claude Code), `.opencode/`, `opencode.json` or
-   `opencode.jsonc` (opencode), `.agents/` or `.codex/` (Codex). Tell the
-   operator what you found.
+1. Inspect the target before proposing changes:
+   - Detect `.claude/` or `CLAUDE.md` (Claude Code), `.opencode/`,
+     `opencode.json` or `opencode.jsonc` (opencode), and `.agents/` or
+     `.codex/` (Codex).
+   - Read `.ai/workflow/manifest.json` when present. Treat its harnesses,
+     profile, tiers, legacy models, and exact routing as the reinstall
+     baseline. Preserve them unless the operator already requested a change.
+   - Inspect native model capabilities when the installed harness exposes a
+     read-only command. For Codex, a refreshed `codex debug models` catalog
+     can be supplied to the installer with `--codex-catalog`; a bundled-only
+     view does not prove account entitlement. Do not invent a minimum harness
+     version. If the catalog or entitlement is unavailable offline, report
+     that gap instead of claiming validation.
+   - Check for an operator manifest as described under "Operator path" below.
+     Existing authorization and preferences remain valid. Do not open a GUI
+     or change global or fleet configuration.
 
-2. Ask the operator, do not guess:
-   - Which harnesses should get adapters: claude, codex, opencode?
-     Suggest the detected ones.
-   - Which role profile: `full` (explorer, task-slicer, implementer,
-     reviewer, advisor — the default) or `minimal` (implementer and reviewer
-     only; the reviewer is never optional under either profile)?
-   - Which model for each role the chosen profile installs? Suggest the
-     defaults: explorer `sonnet`, task-slicer `sonnet`, implementer
-     `sonnet`, reviewer `opus`, advisor `opus`. Accept the aliases `sonnet`,
-     `opus`, `haiku` or a full model id. Skip asking about a role's model
-     when the chosen profile does not install that role.
-   - Whether to also render effort-tier subagent variants (`--tiers`)?
-     Default: off. There is no per-tier model question: tier models are
-     chosen automatically from the tier (see the package README's "Effort
-     tiers" section for the role/tier table and the model-class mapping).
+2. Prepare a concrete, reviewable configuration diff. Infer the harness set
+   from installed state and detected configs; infer the existing profile,
+   tiers, and routing from the manifests. Use `full` for a fresh install
+   unless the repository clearly calls for `minimal`. Build a routing JSON
+   deep patch only for leaves that need to change. Its shape is
+   `harness -> role -> tier -> {model, effort}`; the role's default-tier key
+   configures the unsuffixed file. Preserve every omitted leaf. Keep the prior
+   routing in the handoff as the rollback input. Never upgrade a model merely
+   because a newer one exists, and ask the operator only when a material
+   preference, authority boundary, or conflict remains unresolved.
 
-3. Run the non-interactive installer with the operator's answers:
+3. Run the non-interactive installer with the reviewed configuration:
 
    ```bash
    npx orchestrator-workflow init --yes \
      --harness <claude,codex,opencode> \
      --profile <minimal|full> \
-     --models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>,advisor=<model>" \
+     [--models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>,advisor=<model>"] \
+     [--routing <routing.json>] \
+     [--codex-catalog <codex-catalog.json>] \
      [--tiers | --no-tiers]
    ```
 
    Omit `--profile` to keep `full` (or, on a re-run, whatever profile was
-   installed previously); omit the models for roles the chosen profile does
-   not install. Add `--tiers` only when the operator asked for tier
+   installed previously). `--models` is a backward-compatible input for
+   Claude Code and opencode only; never use it to configure Codex. `--routing`
+   is the highest-precedence deep patch. Add `--tiers` only when the operator asked for tier
    variants; add `--no-tiers` only when the operator explicitly wants them
    turned off on a re-run that previously had them on; omit both to keep
    tiers off on a fresh install, or whatever value was previously installed
-   on a re-run. If the command reports conflicts, show them to the operator
-   and ask before re-running with --force.
+   on a re-run. If the command reports conflicts, inspect the concrete files,
+   reuse prior overwrite authority for the same scope, and ask before
+   `--force` only when authority or scope remains unresolved.
 
    **Operator path**: before running `init`, check whether an operator
    manifest already exists on this machine, at
@@ -166,9 +185,13 @@ steps in the repository you were asked to install into.
 4. Only if npx or the registry is unavailable, scaffold manually from
    https://github.com/LanNguyenSi/agent-dx/tree/master/packages/orchestrator-workflow/assets.
    This manual path does not cover `--tiers`: it never renders
-   `<role>-<tier>.md` variant files, regardless of what the operator asked
+   tier variant files, regardless of what the operator asked
    for in step 2; tell the operator tier variants require the automated
-   installer (step 3).
+   installer (step 3). It also cannot safely reproduce native Codex TOML from
+   the Markdown assets without duplicating the installer's serializer. For a
+   Codex manual fallback, install the shared skill only and state that roles
+   must run inline and sequentially until the automated CLI can generate
+   `.codex/agents/*.toml`.
 
    - `.ai/workflow/templates/00-goal.md` through `06-handoff.md` from
      `assets/templates/`, unchanged.
@@ -197,6 +220,8 @@ steps in the repository you were asked to install into.
      directly after the `effort:` line. Ensure `CLAUDE.md` exists and
      contains a line `@AGENTS.md`.
    - Codex: `.agents/skills/orchestrator-workflow/SKILL.md`, same skill file.
+     Do not hand-author `.codex/agents/*.toml`; report the native-agent
+     limitation above and use the inline/sequential role fallback.
    - opencode: `.opencode/skills/orchestrator-workflow/SKILL.md` from
      `assets/skill/SKILL.md`, unchanged.
      For each role in the chosen profile (same set as Claude Code above),
@@ -237,7 +262,7 @@ steps in the repository you were asked to install into.
      ---
      ```
    - `.ai/workflow/manifest.json`, exactly this shape (harnesses MUST be an
-     array, `profile` is `"minimal"` or `"full"`, models keyed by role,
+     array, `profile` is `"minimal"` or `"full"`, legacy models keyed by role,
      version = the kit version you installed, read from this kit's own
      `packages/orchestrator-workflow/package.json` `version` field):
 
@@ -270,6 +295,8 @@ steps in the repository you were asked to install into.
      run then treats existing kit files conservatively and reports conflicts
      rather than overwriting them.
 
-5. Report back to the operator: which harnesses were installed, which model
-   each role uses, whether effort-tier variants were rendered, and any
-   conflicts that were left in place.
+5. Verify the expected files and manifest entries, then report back: which
+   harnesses and roles were installed; the exact model and effort per routed
+   role/tier; whether variants were rendered; the prior routing to use for a
+   rollback; the commands actually run; any offline capability or entitlement
+   gap; and conflicts left in place.

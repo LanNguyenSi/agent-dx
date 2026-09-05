@@ -7,7 +7,8 @@ import { PACKAGE_VERSION } from "./assets.js";
 import type { Manifest } from "./init.js";
 import { MANIFEST_PATH, readInstalledManifest } from "./init.js";
 import type { Profile, Role } from "./models.js";
-import { DEFAULT_MODELS, ROLES } from "./models.js";
+import { DEFAULT_MODELS, rolesForProfile } from "./models.js";
+import { compareRoutingState } from "./routing-state.js";
 import type {
   OperatorManifest,
   OperatorManifestLockOptions,
@@ -51,6 +52,8 @@ export interface TargetDivergence {
   profile: boolean;
   tiers: boolean;
   models: boolean;
+  /** Present only when explicit effective routing differs. */
+  routing?: boolean;
 }
 
 /**
@@ -68,6 +71,8 @@ export interface TargetReport {
   pin: string | null;
   divergence: TargetDivergence | null;
   driftFiles: string[] | null;
+  /** Selected legacy opencode leaves that cannot be compared offline. */
+  routingComparisonGaps?: string[];
   /** Human-output-only: the repo's own profile, or null when unknown. */
   repoProfile: Profile | null;
   /** Human-output-only: the operator default profile, for the comparison line. */
@@ -110,6 +115,8 @@ export interface TargetReportJson {
   pin: string | null;
   divergence: TargetDivergence | null;
   driftFiles: string[] | null;
+  /** Selected legacy opencode leaves that cannot be compared offline. */
+  routingComparisonGaps?: string[];
   versionLag: boolean;
   reason: string | null;
 }
@@ -122,6 +129,9 @@ export function targetReportToJson(report: TargetReport): TargetReportJson {
     pin: report.pin,
     divergence: report.divergence,
     driftFiles: report.driftFiles,
+    ...(report.routingComparisonGaps?.length
+      ? { routingComparisonGaps: report.routingComparisonGaps }
+      : {}),
     versionLag: report.versionLag,
     reason: report.reason,
   };
@@ -336,22 +346,37 @@ export function inspectTarget(
     );
   }
 
-  const manifest = readInstalledManifest(target.path);
+  let manifest: Manifest | undefined;
+  try {
+    manifest = readInstalledManifest(target.path);
+  } catch {
+    // Strict reinstall validation must not abort inspection of other targets.
+    return baseReport(target, operator, "unverifiable", "manifest unreadable");
+  }
   if (!manifest) {
     return baseReport(target, operator, "unverifiable", "manifest unreadable");
   }
 
   const driftFiles = computeDriftFiles(target.path, manifest);
 
-  const divergentModelRoles = ROLES.filter(
+  const divergentModelRoles = rolesForProfile(manifest.profile).filter(
     (role) =>
+      manifest.harnesses.some(
+        (harness) => harness === "claude" || harness === "opencode",
+      ) &&
       resolvedModel(manifest.models, role) !==
-      resolvedModel(operator.defaults.models, role),
+        resolvedModel(operator.defaults.models, role),
   );
+  const routingComparison = compareRoutingState(manifest, operator.defaults, {
+    harnesses: manifest.harnesses,
+    profile: manifest.profile,
+    tiers: manifest.tiers,
+  });
   const divergence: TargetDivergence = {
     profile: manifest.profile !== operator.defaults.profile,
     tiers: manifest.tiers !== operator.defaults.tiers,
     models: divergentModelRoles.length > 0,
+    ...(routingComparison.differs ? { routing: true } : {}),
   };
 
   // A recorded pin suppresses version-lag only when the pin equals the
@@ -371,7 +396,12 @@ export function inspectTarget(
   let status: TargetStatus;
   if (driftFiles.length > 0) {
     status = "drift";
-  } else if (divergence.profile || divergence.tiers || divergence.models) {
+  } else if (
+    divergence.profile ||
+    divergence.tiers ||
+    divergence.models ||
+    divergence.routing
+  ) {
     status = "divergent";
   } else if (versionLag) {
     status = "version-lag";
@@ -386,6 +416,9 @@ export function inspectTarget(
     pin: hasPin ? (manifest.pin as string) : null,
     divergence,
     driftFiles: driftFiles.length > 0 ? driftFiles : null,
+    ...(routingComparison.gaps.length > 0
+      ? { routingComparisonGaps: routingComparison.gaps }
+      : {}),
     repoProfile: manifest.profile,
     operatorProfile: operator.defaults.profile,
     repoTiers: manifest.tiers,

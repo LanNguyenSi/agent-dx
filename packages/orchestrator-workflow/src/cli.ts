@@ -14,6 +14,14 @@ import type { Harness } from "./detect.js";
 import { DEFAULT_MODELS, PROFILES } from "./models.js";
 import { MANIFEST_PATH, readInstalledManifest, runInit } from "./init.js";
 import type { Manifest } from "./init.js";
+import { mergeRouting, parseRouting } from "./routing.js";
+import {
+  codexCatalogWarnings,
+  legacyOpencodeFallbacks,
+  parseOpencodeModelMaps,
+  mergeRoutingStateLayers,
+} from "./routing-state.js";
+import type { HarnessRouting } from "./routing.js";
 import {
   OPERATOR_MANIFEST_FILENAME,
   OperatorManifestLockTimeoutError,
@@ -75,6 +83,21 @@ function requireDirectory(dir: string): string | undefined {
   return targetDir;
 }
 
+function readJsonOption(path: string, option: string): unknown {
+  try {
+    return JSON.parse(readFileSync(resolve(path), "utf8"));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not read ${option} JSON file ${path}: ${reason}`);
+  }
+}
+
+function routingOption(path: string | undefined): HarnessRouting | undefined {
+  return path === undefined
+    ? undefined
+    : parseRouting(readJsonOption(path, "--routing"));
+}
+
 /**
  * `resolveInitInputs` was extracted from `init` and typed against `init`'s
  * per-repo `Manifest` (kit/version/files/installedAt included), since that
@@ -97,6 +120,8 @@ function defaultsAsManifest(
     models: { ...DEFAULT_MODELS, ...defaults.models },
     profile: defaults.profile,
     tiers: defaults.tiers,
+    routing: defaults.routing,
+    ...parseOpencodeModelMaps(defaults),
     files: {},
     installedAt: "",
   };
@@ -120,6 +145,8 @@ function defaultsEqual(
       models: Object.fromEntries(
         Object.entries(d.models).sort(([x], [y]) => x.localeCompare(y)),
       ),
+      routing: d.routing ?? {},
+      ...parseOpencodeModelMaps(d),
     });
   return normalize(a) === normalize(b);
 }
@@ -147,6 +174,11 @@ program
     "--models <spec>",
     'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
   )
+  .option("--routing <json-file>", "harness/role/tier routing patch JSON")
+  .option(
+    "--codex-catalog <json-file>",
+    "optional offline Codex capability catalog JSON to validate before writing",
+  )
   .option(
     "--profile <profile>",
     `subagent role profile (${PROFILES.join(", ")}); default: full, or the previously installed profile on a re-run`,
@@ -171,6 +203,8 @@ program
         force?: boolean;
         harness?: string;
         models?: string;
+        routing?: string;
+        codexCatalog?: string;
         profile?: string;
         opencodeProvider?: string;
         tiers?: boolean;
@@ -179,6 +213,18 @@ program
       const targetDir = requireDirectory(dir);
       if (!targetDir) return;
       const interactive = !opts.yes && isInteractive();
+      let routing: HarnessRouting | undefined;
+      let codexCatalog: unknown;
+      try {
+        routing = routingOption(opts.routing);
+        codexCatalog = opts.codexCatalog
+          ? readJsonOption(opts.codexCatalog, "--codex-catalog")
+          : undefined;
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : error);
+        process.exitCode = 2;
+        return;
+      }
 
       // Say where files will land BEFORE anything is written; an accidental
       // cwd (e.g. $HOME) is the most likely operator mistake.
@@ -216,6 +262,7 @@ program
         tiers,
         opencodeModels,
         opencodeClassModels,
+        routing: resolvedRouting,
         warnings,
       } = await resolveInitInputs(
         // The sticky-branch wiring itself (neither `stickyPreChecked` nor
@@ -223,7 +270,10 @@ program
         // `?? []` / `?? detected` defaults apply) is pinned inside
         // `buildInitInitInputs` and covered by a dedicated test
         // (`test/cli-init.test.ts`), not by this call site.
-        buildInitInitInputs(detected, previous, interactive, opts),
+        buildInitInitInputs(detected, previous, interactive, {
+          ...opts,
+          routing,
+        }),
       );
       for (const w of warnings) {
         process.stderr.write(`${w}\n`);
@@ -238,6 +288,9 @@ program
         opencodeModels,
         tiers,
         opencodeClassModels,
+        routing: resolvedRouting,
+        routingMode: "replace",
+        codexCatalog,
       });
 
       showPaths("Created", report.written);
@@ -268,6 +321,11 @@ program
     "--models <spec>",
     'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
   )
+  .option("--routing <json-file>", "harness/role/tier routing patch JSON")
+  .option(
+    "--codex-catalog <json-file>",
+    "optional offline Codex capability catalog JSON to validate before saving",
+  )
   .option(
     "--profile <profile>",
     `subagent role profile (${PROFILES.join(", ")}); default: full, or the previously stored profile on a re-run`,
@@ -289,12 +347,26 @@ program
       yes?: boolean;
       harness?: string;
       models?: string;
+      routing?: string;
+      codexCatalog?: string;
       profile?: string;
       opencodeProvider?: string;
       tiers?: boolean;
     }) => {
       const interactive = !opts.yes && isInteractive();
       const home = resolveOperatorHome();
+      let routingPatch: HarnessRouting | undefined;
+      let codexCatalog: unknown;
+      try {
+        routingPatch = routingOption(opts.routing);
+        codexCatalog = opts.codexCatalog
+          ? readJsonOption(opts.codexCatalog, "--codex-catalog")
+          : undefined;
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : error);
+        process.exitCode = 2;
+        return;
+      }
       console.log(`Operator home: ${home}`);
 
       const existing = readOperatorManifest(home);
@@ -311,20 +383,44 @@ program
       // No target repository exists to detect harnesses against; "claude"
       // is the same shipped fallback `init` uses for a fresh install with
       // nothing detected and nothing previously recorded.
-      const { harnesses, profile, models, tiers, warnings } =
-        await resolveInitInputs({
-          // No target directory exists to detect against: the stored
-          // harnesses are the baseline, and only a first-ever setup falls
-          // back to claude, so a codex-only default is not widened silently.
-          detected: existing?.defaults.harnesses.length
-            ? existing.defaults.harnesses
-            : ["claude"],
-          interactive,
-          previous: defaultsAsManifest(existing?.defaults),
-          opts,
-        });
+      const {
+        harnesses,
+        profile,
+        models,
+        tiers,
+        routing,
+        warnings,
+        opencodeModels,
+        opencodeClassModels,
+      } = await resolveInitInputs({
+        // No target directory exists to detect against: the stored
+        // harnesses are the baseline, and only a first-ever setup falls
+        // back to claude, so a codex-only default is not widened silently.
+        detected: existing?.defaults.harnesses.length
+          ? existing.defaults.harnesses
+          : ["claude"],
+        interactive,
+        previous: defaultsAsManifest(existing?.defaults),
+        opts: { ...opts, routing: routingPatch },
+      });
       for (const w of warnings) {
         process.stderr.write(`${w}\n`);
+      }
+
+      {
+        try {
+          for (const warning of codexCatalogWarnings(
+            routing,
+            { harnesses, profile, tiers },
+            codexCatalog,
+          )) {
+            process.stderr.write(`Warning: ${warning}\n`);
+          }
+        } catch (error) {
+          console.error(error instanceof Error ? error.message : error);
+          process.exitCode = 2;
+          return;
+        }
       }
 
       const newDefaults: OperatorManifestDefaults = {
@@ -332,6 +428,8 @@ program
         profile,
         tiers,
         models,
+        routing,
+        ...legacyOpencodeFallbacks({ opencodeModels, opencodeClassModels }),
       };
 
       // The prompts and resolution above ran against `existing`, an
@@ -568,6 +666,10 @@ function buildApplyPrevious(
   const tiers = sync
     ? operatorDefaults.tiers
     : (repoManifest?.tiers ?? operatorDefaults.tiers);
+  const { routing, ...compatibility } = mergeRoutingStateLayers(
+    operatorDefaults,
+    ...(!sync && repoManifest ? [repoManifest] : []),
+  );
   return {
     kit: "orchestrator-workflow",
     version: PACKAGE_VERSION,
@@ -582,6 +684,8 @@ function buildApplyPrevious(
     models,
     profile,
     tiers,
+    ...(routing !== undefined ? { routing } : {}),
+    ...compatibility,
     files: {},
     installedAt: "",
   };
@@ -605,6 +709,11 @@ program
   .option(
     "--models <spec>",
     'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
+  )
+  .option("--routing <json-file>", "harness/role/tier routing patch JSON")
+  .option(
+    "--codex-catalog <json-file>",
+    "optional offline Codex capability catalog JSON to validate before writing",
   )
   .option(
     "--profile <profile>",
@@ -645,6 +754,8 @@ program
       force?: boolean;
       harness?: string;
       models?: string;
+      routing?: string;
+      codexCatalog?: string;
       profile?: string;
       opencodeProvider?: string;
       tiers?: boolean;
@@ -653,6 +764,18 @@ program
       pin?: string;
       unpin?: boolean;
     }) => {
+      let routingPatch: HarnessRouting | undefined;
+      let codexCatalog: unknown;
+      try {
+        routingPatch = routingOption(opts.routing);
+        codexCatalog = opts.codexCatalog
+          ? readJsonOption(opts.codexCatalog, "--codex-catalog")
+          : undefined;
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : error);
+        process.exitCode = 2;
+        return;
+      }
       // --pin and --unpin express opposite intents (set a pin vs clear it);
       // accepting both silently would make the effective pin depend on
       // internal option-resolution order, so this is a usage error rather
@@ -783,6 +906,7 @@ program
         tiers,
         opencodeModels,
         opencodeClassModels,
+        routing: resolvedRouting,
         warnings,
       } = await resolveInitInputs(
         // `previous` is always defined here (`buildApplyPrevious` returns a
@@ -810,7 +934,9 @@ program
           chosenHarnesses,
           previous,
           interactive,
-          opts,
+          // Explicit routing is parsed before the first target write and is
+          // the final merge layer after repo/operator sticky resolution.
+          { ...opts, routing: routingPatch },
           Boolean(repoManifest),
         ),
       );
@@ -846,6 +972,9 @@ program
         opencodeModels,
         tiers,
         opencodeClassModels,
+        routing: resolvedRouting,
+        routingMode: "replace",
+        codexCatalog,
         pin,
       });
 
@@ -1117,6 +1246,12 @@ function printTargetDetail(
     if (target.divergence.models) {
       console.log(`  models: ${target.divergentModelRoles.join(", ")}`);
     }
+    if (target.divergence.routing) {
+      console.log("  routing: repo and operator selections differ");
+    }
+  }
+  for (const gap of target.routingComparisonGaps ?? []) {
+    console.log(`  Routing comparison incomplete: ${gap}`);
   }
   const showsVersionLagDetail =
     (target.status === "version-lag" ||
@@ -1160,6 +1295,10 @@ function operatorDefaultsFromRepoManifest(
     profile: repoManifest.profile,
     tiers: repoManifest.tiers,
     models: { ...repoManifest.models },
+    ...parseOpencodeModelMaps(repoManifest),
+    ...(repoManifest.routing !== undefined
+      ? { routing: repoManifest.routing }
+      : {}),
   };
 }
 
