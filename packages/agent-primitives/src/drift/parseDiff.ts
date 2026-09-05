@@ -17,19 +17,28 @@ export interface ParsedDiff {
    * rule (not per-file, not per-line): the identifier just has to
    * reappear as a declaration somewhere in the same diff. */
   movedNames: string[];
+  /** One entry per wholly deleted file whose basename was NOT emitted as
+   * a removed identifier of kind `"file"`, because its extension is not a
+   * recognized source extension, or its basename does not look like an
+   * identifier (see `looksLikeIdentifier`). Reported so a caller can
+   * explain, rather than silently drop, why an obviously-deleted file
+   * contributed nothing. */
+  skippedFileBasenames: { path: string; basename: string }[];
 }
 
 /**
  * TS/JS top-level or exported declaration: `export? default? declare?
- * (type|interface|class|function|const|let|var|enum) Name`. Prototype
- * scope, documented in the package README: a regex over one diff line,
- * not a parser, so it can be fooled by an unusual line break or a
- * declaration split across lines; it never looks past the identifier
- * name (no attempt to resolve its export path, re-export, or a name
- * bound to it by destructuring).
+ * abstract? async? (type|interface|class|function[*]|const|let|var|enum)
+ * Name`. Prototype scope, documented in the package README: a regex over
+ * one diff line, not a parser, so it can be fooled by an unusual line
+ * break or a declaration split across lines; it never looks past the
+ * identifier name (no attempt to resolve its export path, re-export, or a
+ * name bound to it by destructuring). `abstract` and `async` are accepted
+ * ahead of any keyword (not only their usual `class`/`function` pairing)
+ * since this is a permissive line-shape match, not a grammar check.
  */
 const DECL_RE =
-  /^\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:type|interface|class|function|enum|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/;
+  /^\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:type|interface|class|function\*?|enum|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/;
 
 /** A JSON object's top-level key: `"name":` indented by at most two
  * spaces. Cheap and documented as such: it has no notion of nesting
@@ -58,6 +67,18 @@ export function basenameNoExt(filePath: string): string {
   const base = filePath.split("/").pop() ?? filePath;
   const dot = base.lastIndexOf(".");
   return dot > 0 ? base.slice(0, dot) : base;
+}
+
+/** True when `basename` (already extension-stripped) is shaped enough
+ * like an identifier to be worth reporting as one: at least 4 characters,
+ * and containing an uppercase letter, a hyphen, or an underscore. Without
+ * this guard a deleted file's basename floods the report with every
+ * ordinary lowercase prose word that happens to also be a filename
+ * (`index`, `setup`, `logo`, ...). A prototype-scope heuristic, documented
+ * in the README as a known limitation: a short or all-lowercase-no-
+ * separator identifier (`db`, `api`) is never reported this way. */
+function looksLikeIdentifier(basename: string): boolean {
+  return basename.length >= 4 && /[A-Z_-]/.test(basename);
 }
 
 /** Extracts the one declared/keyed identifier a diff line names, per the
@@ -111,11 +132,17 @@ const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
  * produces.
  *
  * A whole deleted file contributes its basename (without extension) as a
- * removed identifier of kind `"file"`, UNLESS a file of the same basename
- * (again without extension, whatever its own extension) was newly added
- * anywhere in the same diff - that is a rename this diff's `git diff`
- * did not detect as one (different content), not a removal, and is
- * therefore also treated as moved.
+ * removed identifier of kind `"file"` only when its extension is one of
+ * `SOURCE_EXTENSIONS` AND the basename looks like an identifier (see
+ * `looksLikeIdentifier`) - guarding against a deleted `docs/setup.md` or
+ * `logo.png` flooding the report with every prose mention of "setup" or
+ * "logo". A basename skipped for either reason is recorded in
+ * `skippedFileBasenames`, not silently dropped. UNLESS a file of the same
+ * basename (again without extension, whatever its own extension) was
+ * newly added anywhere in the same diff - that is a rename this diff's
+ * `git diff` did not detect as one (different content), not a removal,
+ * and is therefore also treated as moved (and never counted as skipped
+ * either, since it was never a candidate to skip).
  *
  * The "moved" rule for declarations/config keys is name-only: an
  * identifier declared on both a removed and an added line anywhere in
@@ -140,6 +167,17 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
   let newFile = false;
   let oldLine = 0;
   let newLine = 0;
+  // True once the current file block's first `@@ ... @@` hunk header has
+  // been seen. A unified diff's `--- `/`+++ ` file headers only ever
+  // appear BEFORE a file's first hunk; a REMOVED line whose own content
+  // happens to start with "-- " (or an ADDED line starting with "++ ")
+  // becomes, once prefixed with the diff's own leading `-`/`+`, a line
+  // that looks exactly like `--- `/`+++ ` - e.g. a removed SQL comment
+  // `-- note` becomes the diff line `--- note`. Gating the header check
+  // on "not seen a hunk yet for this file" is what tells the two apart:
+  // a real header can only occur pre-hunk, so a `--- `/`+++ `-shaped line
+  // seen after the hunk header is unambiguously content, never a header.
+  let sawHunk = false;
 
   const flushBlock = (): void => {
     if (deletedFile && oldPath !== undefined) {
@@ -154,6 +192,7 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
       newPath = undefined;
       deletedFile = false;
       newFile = false;
+      sawHunk = false;
       continue;
     }
     if (raw.startsWith("deleted file mode")) {
@@ -164,12 +203,12 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
       newFile = true;
       continue;
     }
-    if (raw.startsWith("--- ")) {
+    if (!sawHunk && raw.startsWith("--- ")) {
       const p = stripAbPrefix(raw.slice(4));
       oldPath = p === "/dev/null" ? undefined : p;
       continue;
     }
-    if (raw.startsWith("+++ ")) {
+    if (!sawHunk && raw.startsWith("+++ ")) {
       const p = stripAbPrefix(raw.slice(4));
       newPath = p === "/dev/null" ? undefined : p;
       if (newFile && newPath !== undefined) {
@@ -179,11 +218,12 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
     }
     const hunk = HUNK_RE.exec(raw);
     if (hunk) {
+      sawHunk = true;
       oldLine = Number(hunk[1]);
       newLine = Number(hunk[3]);
       continue;
     }
-    if (raw.startsWith("-") && !raw.startsWith("--- ")) {
+    if (raw.startsWith("-")) {
       const content = raw.slice(1);
       const filePath = oldPath ?? newPath;
       if (filePath !== undefined) {
@@ -200,7 +240,7 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
       oldLine++;
       continue;
     }
-    if (raw.startsWith("+") && !raw.startsWith("+++ ")) {
+    if (raw.startsWith("+")) {
       const content = raw.slice(1);
       const filePath = newPath ?? oldPath;
       if (filePath !== undefined) {
@@ -213,10 +253,14 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
   }
   flushBlock();
 
+  const skippedFileBasenames: { path: string; basename: string }[] = [];
   for (const { path } of deletedFiles) {
     const base = basenameNoExt(path);
-    if (!addedFileBasenames.has(base)) {
+    if (addedFileBasenames.has(base)) continue;
+    if (SOURCE_EXTENSIONS.has(extOf(path)) && looksLikeIdentifier(base)) {
       removedCandidates.push({ name: base, kind: "file", file: path, line: 1 });
+    } else {
+      skippedFileBasenames.push({ path, basename: base });
     }
   }
 
@@ -238,5 +282,5 @@ export function parseRemovedIdentifiers(diff: string): ParsedDiff {
     removed.push(candidate);
   }
 
-  return { removed, movedNames };
+  return { removed, movedNames, skippedFileBasenames };
 }

@@ -6,7 +6,7 @@ import {
   type RemovedIdentifier,
 } from "./parseDiff.js";
 import {
-  historicalPhraseMatch,
+  historicalPhraseNearIdentifier,
   matchesAnyGlob,
   nearestHeading,
   parseHeadings,
@@ -17,6 +17,10 @@ import { classifyLine, parseGrepOutput, SCAN_PATHSPECS } from "./scan.js";
 export type { RemovedIdentifier, RemovedIdentifierKind } from "./parseDiff.js";
 
 export interface DriftOptions {
+  /** Any directory inside the target git work tree; every path this
+   * command reports and every `--allow` glob it matches against is
+   * root-relative regardless of where `cwd` itself sits (see `drift()`'s
+   * own doc comment). */
   cwd: string;
   base: string;
   head: string;
@@ -38,6 +42,8 @@ export interface DriftSite {
   line: number;
   identifier: string;
   kind: DriftKind;
+  /** The matched line, trimmed, and capped at 300 characters with a
+   * trailing `"..."` marker when the line itself is longer. */
   text: string;
   allowlisted?: boolean;
   allowlistReason?: string;
@@ -71,13 +77,32 @@ function isChangelogPath(filePath: string): boolean {
   return /changelog/i.test(filePath.split("/").pop() ?? "");
 }
 
+/** Matches the README's documented rule, `docs/**\/migration*`: a
+ * `docs/` path segment (at the start of the path, or after a `/`) with
+ * "migration" appearing somewhere in the remainder of the path. A loose
+ * `includes("docs/") && includes("migration")` (the prior check) also
+ * passed a path like `migration/docs/x.md`, where "docs/" and
+ * "migration" both appear but not in a `docs/**` subtree at all. */
 function isMigrationPath(filePath: string): boolean {
-  const lower = filePath.toLowerCase();
-  return lower.includes("docs/") && lower.includes("migration");
+  return /(^|\/)docs\/.*migration/i.test(filePath);
 }
 
 function isMarkdownPath(filePath: string): boolean {
   return /\.(md|mdx)$/i.test(filePath);
+}
+
+/** The most a `DriftSite.text` ever carries: a site's text is the whole
+ * matched source line, and an ordinary line stays well under this, but an
+ * unusually long line (a dense CHANGELOG bullet, a long comment) would
+ * otherwise dominate the envelope's size and starve `sites`/`counts` out
+ * of the default `--max-chars` budget under reduction. Cut with a
+ * trailing `"..."` marker rather than silently, so a reader can tell the
+ * text was capped rather than that the line itself ended there. */
+const SITE_TEXT_MAX_CHARS = 300;
+
+function capSiteText(text: string): string {
+  if (text.length <= SITE_TEXT_MAX_CHARS) return text;
+  return `${text.slice(0, SITE_TEXT_MAX_CHARS)}...`;
 }
 
 interface SiteAllowDecision {
@@ -90,12 +115,16 @@ interface SiteAllowDecision {
  * this order (first match wins; only one reason is ever reported per
  * site even when more than one would apply): an explicit `--allow` glob,
  * a released CHANGELOG section, a migration doc path or heading, then a
- * historical phrase on the line itself.
+ * historical phrase within a bounded span around `identifier`'s own
+ * occurrence on the line (see `historicalPhraseNearIdentifier`) - never
+ * the whole line, so an unrelated historical phrase far away on a long
+ * line never suppresses a present-tense mention of `identifier`.
  */
 function classifySite(
   filePath: string,
   line: number,
   text: string,
+  identifier: string,
   allowGlobs: readonly string[],
   headings: readonly Heading[],
 ): SiteAllowDecision {
@@ -128,7 +157,7 @@ function classifySite(
       };
     }
   }
-  const phrase = historicalPhraseMatch(text);
+  const phrase = historicalPhraseNearIdentifier(text, identifier);
   if (phrase !== undefined) {
     return {
       allowlisted: true,
@@ -155,17 +184,28 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
   const allowGlobs = options.allow ?? [];
   const warnings: string[] = [];
 
-  if (findGitRoot(cwd) === undefined) {
+  const gitRoot = findGitRoot(cwd);
+  if (gitRoot === undefined) {
     throw new UsageError(`drift: ${cwd} is not inside a git work tree`);
   }
-  if (!revExists(cwd, options.base)) {
+  // Every git call below runs with `gitRoot` as its cwd, not the caller's
+  // `cwd` (which may be a subdirectory of the work tree): `git diff`
+  // already reports root-relative paths regardless of cwd, but `git
+  // grep` reports paths relative to ITS OWN cwd, and `git show <rev>:
+  // <path>` resolves `<path>` relative to the work tree root. Mixing a
+  // subdirectory cwd for grep with root-relative paths everywhere else
+  // means a heading/released-section lookup can silently read the wrong
+  // file (or none), and an `--allow` glob written against a root-relative
+  // path never matches. Rooting every call here keeps every path in this
+  // module root-relative, uniformly.
+  if (!revExists(gitRoot, options.base)) {
     throw new UsageError(`drift: --base revision not found: ${options.base}`);
   }
-  if (!revExists(cwd, options.head)) {
+  if (!revExists(gitRoot, options.head)) {
     throw new UsageError(`drift: --head revision not found: ${options.head}`);
   }
 
-  const diffResult = diffText(cwd, options.base, options.head);
+  const diffResult = diffText(gitRoot, options.base, options.head);
   if (diffResult.error !== undefined || diffResult.status !== 0) {
     throw new UsageError(
       `drift: git diff ${options.base}..${options.head} failed: ` +
@@ -180,6 +220,11 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
       `${parsed.movedNames.length} identifier(s) declared on both a removed and an added line are treated as moved, not removed: ${parsed.movedNames.join(", ")}`,
     );
   }
+  for (const skipped of parsed.skippedFileBasenames) {
+    warnings.push(
+      `deleted file basename skipped, not reported as a removed identifier (not a recognized source extension, or "${skipped.basename}" does not look like an identifier): ${skipped.path}`,
+    );
+  }
 
   const uniqueNames = [...new Set(parsed.removed.map((r) => r.name))];
   const sites: DriftSite[] = [];
@@ -189,14 +234,14 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
   const headingsFor = (filePath: string): Heading[] => {
     const cached = headingsByPath.get(filePath);
     if (cached !== undefined) return cached;
-    const content = showFile(cwd, options.head, filePath);
+    const content = showFile(gitRoot, options.head, filePath);
     const headings = content !== undefined ? parseHeadings(content) : [];
     headingsByPath.set(filePath, headings);
     return headings;
   };
 
   for (const name of uniqueNames) {
-    const grep = grepIdentifier(cwd, options.head, name, SCAN_PATHSPECS);
+    const grep = grepIdentifier(gitRoot, options.head, name, SCAN_PATHSPECS);
     if (grep.error !== undefined || (grep.status !== 0 && grep.status !== 1)) {
       warnings.push(
         `git grep for "${name}" at ${options.head} failed: ${grep.error ?? `git exited ${String(grep.status)}: ${grep.stderr.trim()}`}`,
@@ -214,6 +259,7 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
         match.path,
         match.line,
         match.text,
+        name,
         allowGlobs,
         needsHeadings ? headingsFor(match.path) : [],
       );
@@ -222,7 +268,7 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
         line: match.line,
         identifier: name,
         kind,
-        text: match.text.trim(),
+        text: capSiteText(match.text.trim()),
       };
       if (decision.allowlisted) {
         const flagged: DriftSite = {

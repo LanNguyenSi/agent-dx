@@ -9,6 +9,7 @@ import { parseRemovedIdentifiers } from "../src/drift/parseDiff.js";
 import {
   globToRegExp,
   historicalPhraseMatch,
+  historicalPhraseNearIdentifier,
   matchesAnyGlob,
   nearestHeading,
   parseHeadings,
@@ -202,6 +203,98 @@ describe("parseRemovedIdentifiers", () => {
       { name: "timeout", kind: "config_key", file: "config.yml", line: 1 },
     ]);
   });
+
+  it("recognizes export async function, export abstract class, function*, and export async function*", () => {
+    const diff = [
+      "diff --git a/src/b.ts b/src/b.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/b.ts",
+      "+++ b/src/b.ts",
+      "@@ -1,4 +0,0 @@",
+      "-export async function loadThing() {}",
+      "-export abstract class BaseThing {}",
+      "-function* genThing() {}",
+      "-export async function* streamThing() {}",
+      "",
+    ].join("\n");
+    const result = parseRemovedIdentifiers(diff);
+    expect(result.removed).toEqual([
+      { name: "loadThing", kind: "declaration", file: "src/b.ts", line: 1 },
+      { name: "BaseThing", kind: "declaration", file: "src/b.ts", line: 2 },
+      { name: "genThing", kind: "declaration", file: "src/b.ts", line: 3 },
+      { name: "streamThing", kind: "declaration", file: "src/b.ts", line: 4 },
+    ]);
+  });
+
+  it("does not report a deleted file's basename when its extension is not a recognized source extension, or the basename does not look like an identifier, and names each skipped basename", () => {
+    const diff = [
+      "diff --git a/docs/setup.md b/docs/setup.md",
+      "deleted file mode 100644",
+      "index 1111111..0000000",
+      "--- a/docs/setup.md",
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-old setup notes",
+      "diff --git a/logo.png b/logo.png",
+      "deleted file mode 100644",
+      "index 1111111..0000000",
+      "--- a/logo.png",
+      "+++ /dev/null",
+      "diff --git a/src/index.ts b/src/index.ts",
+      "deleted file mode 100644",
+      "index 1111111..0000000",
+      "--- a/src/index.ts",
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-console.log('bye');",
+      "",
+    ].join("\n");
+    const result = parseRemovedIdentifiers(diff);
+    expect(result.removed.some((r) => r.kind === "file")).toBe(false);
+    expect(result.skippedFileBasenames).toEqual([
+      { path: "docs/setup.md", basename: "setup" },
+      { path: "logo.png", basename: "logo" },
+      { path: "src/index.ts", basename: "index" },
+    ]);
+  });
+
+  it("still reports a deleted file's basename when it looks like an identifier and has a recognized source extension", () => {
+    const diff = [
+      "diff --git a/src/OldModule.ts b/src/OldModule.ts",
+      "deleted file mode 100644",
+      "index 1111111..0000000",
+      "--- a/src/OldModule.ts",
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-export const x = 1;",
+      "",
+    ].join("\n");
+    const result = parseRemovedIdentifiers(diff);
+    expect(result.removed).toContainEqual({
+      name: "OldModule",
+      kind: "file",
+      file: "src/OldModule.ts",
+      line: 1,
+    });
+    expect(result.skippedFileBasenames).toEqual([]);
+  });
+
+  it("treats --- /+++ as file headers only before a file's first hunk, so a removed line whose own content starts with '-- ' is parsed as content, not a header", () => {
+    const diff = [
+      "diff --git a/src/thing.ts b/src/thing.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/thing.ts",
+      "+++ b/src/thing.ts",
+      "@@ -1,2 +0,0 @@",
+      "--- legacy comment marker",
+      "-export const OldThing = 1;",
+      "",
+    ].join("\n");
+    const result = parseRemovedIdentifiers(diff);
+    expect(result.removed).toEqual([
+      { name: "OldThing", kind: "declaration", file: "src/thing.ts", line: 2 },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------
@@ -226,6 +319,48 @@ describe("allowlist helpers", () => {
     const headings = parseHeadings(content);
     expect(nearestHeading(headings, 5, 2)?.text).toBe("Migration");
     expect(nearestHeading(headings, 1, 2)?.text).toBe("Notes");
+  });
+
+  it("parseHeadings never reads a '#' line inside a fenced code block as a heading", () => {
+    const content = [
+      "# Real Heading",
+      "",
+      "```",
+      "#!/bin/sh",
+      "# a shell comment, not a heading",
+      "```",
+      "",
+      "~~~",
+      "# also not a heading, tilde-fenced",
+      "~~~",
+      "",
+      "## Migration",
+    ].join("\n");
+    const headings = parseHeadings(content);
+    expect(headings.map((h) => h.text)).toEqual(["Real Heading", "Migration"]);
+  });
+
+  it("historicalPhraseNearIdentifier: modeled on the real triologue f6c0f244 pair - an unrelated historical phrase far from the identifier's own mention does not allowlist it, but one right next to the mention does", () => {
+    // Models the real case: "no longer" (about a different identifier,
+    // `runError`) sits ~180 chars before "mirroring FilesPage's
+    // RuntimeError" on the same long line - too far to allowlist a
+    // present-tense mention of RuntimeError.
+    const longLine =
+      "runError is no longer part of the public error-handling surface " +
+      "after the refactor collapsed every old boundary component into " +
+      "one shared handler that each page now imports directly instead " +
+      "of wiring its own, mirroring FilesPage's RuntimeError for local display.";
+    expect(
+      historicalPhraseNearIdentifier(longLine, "RuntimeError"),
+    ).toBeUndefined();
+
+    // "former" sits right before the identifier's own mention, so it
+    // still allowlists it.
+    const nearbyLine =
+      "FilesPage's former `RuntimeError` type is referenced here for context.";
+    expect(historicalPhraseNearIdentifier(nearbyLine, "RuntimeError")).toBe(
+      "former",
+    );
   });
 });
 
@@ -554,6 +689,165 @@ describe("drift (synthetic repo)", () => {
 });
 
 // ---------------------------------------------------------------------
+// drift(): the windowed historical-phrase check, end to end (see the
+// `historicalPhraseNearIdentifier` unit tests above for the pure-function
+// pinning of the same real-shaped pair).
+// ---------------------------------------------------------------------
+
+describe("drift (windowed historical-phrase check, end to end)", () => {
+  it("reports a long line whose historical phrase is far from the identifier, but allowlists one whose phrase sits right next to it", async () => {
+    const repo = initRepo();
+    const longLine =
+      "- runError is no longer part of the public error-handling surface " +
+      "after the refactor collapsed every old boundary component into " +
+      "one shared handler that each page now imports directly instead " +
+      "of wiring its own, mirroring FilesPage's RuntimeError for local display.";
+    const nearbyLine =
+      "- FilesPage's former RuntimeError type is referenced here for context.";
+    writeFile(
+      repo,
+      "CHANGELOG.md",
+      ["# Changelog", "", "## [Unreleased]", "", longLine, nearbyLine, ""].join(
+        "\n",
+      ),
+    );
+    writeFile(repo, "src/runError.ts", RUN_ERROR_TS_BASE);
+    const base = commit(repo, "base");
+    writeFile(repo, "src/runError.ts", RUN_ERROR_TS_HEAD);
+    const head = commit(repo, "head");
+
+    const result = await drift({ cwd: repo, base, head });
+
+    expect(findSite(result.sites, "CHANGELOG.md", 5)?.identifier).toBe(
+      "RuntimeError",
+    );
+    const nearby = findSite(result.allowlisted, "CHANGELOG.md", 6);
+    expect(nearby?.identifier).toBe("RuntimeError");
+    expect(nearby?.allowlistReason).toMatch(/historical phrase "former"/);
+    expect(findSite(result.sites, "CHANGELOG.md", 6)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------
+// drift(): a deleted file's basename is only reported as a removed
+// identifier when it looks like one and has a recognized source
+// extension; otherwise it is skipped with a warning naming it.
+// ---------------------------------------------------------------------
+
+describe("drift (deleted-file basename guard)", () => {
+  it("deleting src/index.ts reports zero sites and one warning naming it", async () => {
+    const repo = initRepo();
+    writeFile(repo, "src/index.ts", "console.log('startup');\n");
+    writeFile(repo, "README.md", "# Readme\n\nSome unrelated notes.\n");
+    const base = commit(repo, "base");
+    fs.rmSync(path.join(repo, "src/index.ts"));
+    const head = commit(repo, "head");
+
+    const result = await drift({ cwd: repo, base, head });
+
+    expect(result.sites).toEqual([]);
+    expect(result.status).toBe("ok");
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatch(/src\/index\.ts/);
+    expect(result.warnings[0]).toMatch(/basename skipped/);
+  });
+});
+
+// ---------------------------------------------------------------------
+// drift(): the migration-doc-path check requires an actual `docs/**`
+// subtree, not merely both substrings "docs/" and "migration" anywhere in
+// the path.
+// ---------------------------------------------------------------------
+
+describe("drift (migration path tightened)", () => {
+  it("does not allowlist a path with 'docs/' and 'migration' out of order (migration/docs/x.md)", async () => {
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "migration/docs/note.md",
+      "# Note\n\nOldThing is still mentioned here.\n",
+    );
+    writeFile(repo, "src/old.ts", "export const OldThing = 1;\n");
+    const base = commit(repo, "base");
+    fs.rmSync(path.join(repo, "src/old.ts"));
+    const head = commit(repo, "head");
+
+    const result = await drift({ cwd: repo, base, head });
+    const site = findSite(result.sites, "migration/docs/note.md", 3);
+    expect(site?.identifier).toBe("OldThing");
+    expect(
+      findSite(result.allowlisted, "migration/docs/note.md", 3),
+    ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------
+// drift(): every git call is resolved against the work tree's root, not
+// the caller's `cwd`, so running from a subdirectory still reports
+// root-relative paths and reads the right file for a heading/released-
+// section decision.
+// ---------------------------------------------------------------------
+
+describe("drift (cwd as a subdirectory of the work tree)", () => {
+  function buildRootAndSubdirRepo(): {
+    repo: string;
+    subdir: string;
+    base: string;
+    head: string;
+  } {
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "CHANGELOG.md",
+      [
+        "# Changelog",
+        "",
+        "## 1.2.0",
+        "",
+        "- documents RuntimeError today",
+        "",
+      ].join("\n"),
+    );
+    writeFile(
+      repo,
+      "sub/CHANGELOG.md",
+      [
+        "# Sub Changelog",
+        "",
+        "## [Unreleased]",
+        "",
+        "- still references RuntimeError here",
+        "",
+      ].join("\n"),
+    );
+    writeFile(repo, "sub/src/runError.ts", RUN_ERROR_TS_BASE);
+    const base = commit(repo, "base");
+    writeFile(repo, "sub/src/runError.ts", RUN_ERROR_TS_HEAD);
+    const head = commit(repo, "head");
+    return { repo, subdir: path.join(repo, "sub"), base, head };
+  }
+
+  it("reports root-relative paths and the correct allowlist reason when cwd is a subdirectory", async () => {
+    const { subdir, base, head } = buildRootAndSubdirRepo();
+    const result = await drift({ cwd: subdir, base, head });
+
+    // The nested CHANGELOG's mention is reported at its root-relative
+    // path, not a cwd-relative "CHANGELOG.md" or a malformed one.
+    const nested = findSite(result.sites, "sub/CHANGELOG.md", 5);
+    expect(nested?.identifier).toBe("RuntimeError");
+
+    // The root CHANGELOG's mention is allowlisted for the right reason
+    // (its released "1.2.0" section), which requires reading ITS
+    // headings from the correct, root-relative path.
+    const rootSite = findSite(result.allowlisted, "CHANGELOG.md", 5);
+    expect(rootSite?.identifier).toBe("RuntimeError");
+    expect(rootSite?.allowlistReason).toMatch(
+      /released changelog section "1\.2\.0"/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------
 // CLI: envelope shape and exit codes.
 // ---------------------------------------------------------------------
 
@@ -630,5 +924,162 @@ describe("drift CLI", () => {
     expect(run.code).toBe(0);
     const parsed = JSON.parse(run.stdout) as Record<string, unknown>;
     expect(parsed.status).toBe("ok");
+  });
+
+  function buildAllAllowlistedRepo(): {
+    repo: string;
+    base: string;
+    head: string;
+  } {
+    const repo = initRepo();
+    writeFile(
+      repo,
+      "README.md",
+      "# Readme\n\nOldThing was renamed for clarity.\n",
+    );
+    writeFile(repo, "src/old.ts", "export const OldThing = 1;\n");
+    const base = commit(repo, "base");
+    fs.rmSync(path.join(repo, "src/old.ts"));
+    const head = commit(repo, "head");
+    return { repo, base, head };
+  }
+
+  it("--strict flips the exit code from 0 to 1 when every site would otherwise be allowlisted", async () => {
+    const { repo, base, head } = buildAllAllowlistedRepo();
+
+    const withoutStrict = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+    ]);
+    expect(withoutStrict.code).toBe(0);
+    const withoutStrictParsed = JSON.parse(withoutStrict.stdout) as Record<
+      string,
+      unknown
+    >;
+    expect(withoutStrictParsed.status).toBe("ok");
+
+    const withStrict = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+      "--strict",
+    ]);
+    expect(withStrict.code).toBe(1);
+    const withStrictParsed = JSON.parse(withStrict.stdout) as Record<
+      string,
+      unknown
+    >;
+    expect(withStrictParsed.status).toBe("fail");
+    const sites = withStrictParsed.sites as Array<Record<string, unknown>>;
+    expect(sites).toHaveLength(1);
+    expect(sites[0]?.allowlisted).toBe(true);
+  });
+
+  it("--allow moves an otherwise-reported site into allowlisted, with the glob named in the reason", async () => {
+    const { repo, base, head } = buildSyntheticRepo();
+
+    const withoutAllow = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+    ]);
+    const withoutAllowParsed = JSON.parse(withoutAllow.stdout) as Record<
+      string,
+      unknown
+    >;
+    const sitesBefore = withoutAllowParsed.sites as Array<
+      Record<string, unknown>
+    >;
+    expect(sitesBefore.some((s) => s.path === "notes2.md")).toBe(true);
+
+    const withAllow = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+      "--allow",
+      "notes2.md",
+    ]);
+    const withAllowParsed = JSON.parse(withAllow.stdout) as Record<
+      string,
+      unknown
+    >;
+    const sitesAfter = withAllowParsed.sites as Array<Record<string, unknown>>;
+    expect(sitesAfter.some((s) => s.path === "notes2.md")).toBe(false);
+    const allowlistedAfter = withAllowParsed.allowlisted as Array<
+      Record<string, unknown>
+    >;
+    const moved = allowlistedAfter.find((s) => s.path === "notes2.md");
+    expect(moved?.allowlistReason).toMatch(/matched --allow glob "notes2\.md"/);
+  });
+
+  it("-f text renders a path:line:identifier line per site and the counts summary line", async () => {
+    const { repo, base, head } = buildSyntheticRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-f",
+      "text",
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+    ]);
+    expect(run.code).toBe(1);
+    expect(run.stdout).toMatch(/README\.md:3: RuntimeError\b/);
+    expect(run.stdout).toMatch(
+      /3 removed identifier\(s\), 5 site\(s\) reported, 5 allowlisted/,
+    );
+  });
+
+  it("names the moved identifier in warnings on the synthetic repo", async () => {
+    const { repo, base, head } = buildSyntheticRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+    ]);
+    const parsed = JSON.parse(run.stdout) as Record<string, unknown>;
+    const warnings = parsed.warnings as string[];
+    expect(warnings.some((w) => w.includes("MovedThing"))).toBe(true);
+  });
+
+  it("keeps counts whole under a tight --max-chars even though sites/allowlisted are cut", async () => {
+    const { repo, base, head } = buildSyntheticRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      "1200",
+      "drift",
+      "--base",
+      base,
+      "--head",
+      head,
+    ]);
+    const parsed = JSON.parse(run.stdout) as Record<string, unknown>;
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.counts).toEqual({ removed: 3, sites: 5, allowlisted: 5 });
   });
 });

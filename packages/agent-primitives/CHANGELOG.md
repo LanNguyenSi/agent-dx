@@ -277,6 +277,39 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   plan's own setup logs and, once reduction runs, the full-result path;
   a mutant's own log paths stay on `plan.results[i]`, which the normal
   reduction can still cap or drop like any other field.
+- `drift`'s historical-phrase allowlist check is now windowed to a
+  bounded span around the identifier's own mention on a line (roughly
+  60 characters before it, cut short at the nearest sentence boundary,
+  plus 20 after) instead of the whole line, so an unrelated historical
+  phrase far away on a long line no longer suppresses a present-tense
+  mention of the identifier.
+- `drift` no longer reports every wholly deleted file's basename as a
+  removed identifier: a basename now only qualifies when its file
+  extension is a recognized source extension AND the basename itself
+  looks like an identifier; every basename skipped for either reason is
+  named in a warning instead of silently dropped.
+- `drift` resolves `--base`/`--head`/`--allow` and every underlying
+  `git diff`/`git grep`/`git show` call against the git work tree's
+  root rather than the caller's `cwd`, so running it from a
+  subdirectory no longer risks a heading/released-section decision
+  reading the wrong file, or an `--allow` glob written against a
+  root-relative path failing to match.
+- The removed-declaration regex now also recognizes `export async
+  function`, `export abstract class`, and a generator `function*`
+  (including `export async function*`).
+- `drift`'s envelope keeps `counts` whole under `--max-chars`
+  reduction, and each site's `text` is capped at 300 characters, so a
+  large result's site count stays visible instead of disappearing
+  along with a partially-cut `sites` array.
+- `drift`'s migration-doc-path check now requires an actual `docs/**`
+  subtree (a loose substring match previously also matched a path like
+  `migration/docs/x.md`), and its heading parser skips fenced ``` /
+  ~~~ code blocks so a `#`-prefixed line inside one is never read as a
+  Markdown heading.
+- `drift`'s diff parser no longer misreads a removed line whose own
+  content starts with `-- ` (or an added line starting with `++ `) as
+  a `--- `/`+++ ` file header: those are now recognized as headers only
+  before a file's first hunk.
 
 ## [0.1.0] - 2026-09-04
 

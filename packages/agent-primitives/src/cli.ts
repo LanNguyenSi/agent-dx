@@ -1415,6 +1415,13 @@ program
         allowlisted: result.allowlisted,
         counts: result.counts,
       },
+      // `sites`/`allowlisted` are the fields a large real-tree result cuts
+      // first under reduction (a site's `text` can be a whole long
+      // CHANGELOG bullet); `counts` is four small numbers that tell a
+      // reader how much of `sites` they are still looking at, so it must
+      // never disappear along with the array it describes (same idiom as
+      // `probe`'s own `plan.summary`, see its own comment above).
+      keepWhole: ["counts"],
       maxChars: global.maxChars,
       logDir: global.logDir,
     });
