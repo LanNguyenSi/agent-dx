@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-06T00:00:00Z
+timestamp: 2026-09-05T22:41:37Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -112,9 +112,13 @@ below.
   orchestrator-recorded rationale.
 - Recorded in
   `packages/orchestrator-workflow/assets/templates/03-decisions.md`, whose
-  only structure is a `Date | Decision | Reason | Consequences` table
-  (`03-decisions.md:5#"| ID | Date | Trigger / Evidence |"`); the Authority / Source cell is where the sign-off or rationale
-  text lives, there is no separate waiver schema.
+  decision table has seven columns: `ID`, `Date`, `Trigger / Evidence`,
+  `Decision`, `Authority / Source`, `Consequences`, and `Supersedes`
+  (`03-decisions.md:5#"| ID | Date | Trigger / Evidence |"`). The Authority /
+  Source cell records the sign-off or rationale, and `Supersedes` links a
+  revision to its prior decision. Its separate Review-round escalation table
+  (`03-decisions.md:14#"## Review-round escalation"`) remains unchanged; there
+  is no additional waiver schema.
 - Summarized in `06-handoff.md`'s Accepted Waivers section
   (`agents-md-section.md:103#"the Accepted Waivers section of"`; `SKILL.md:303#"the Accepted Waivers section of"`), instructed to "Mirror
   03-decisions.md"

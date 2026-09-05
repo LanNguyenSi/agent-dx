@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-09-06T00:00:00Z (decision authority): re-verified the decision,
+- 2026-09-05T22:41:37Z (decision authority): re-verified the decision,
   reviewer, and review-gate surfaces after `03-decisions.md` gained its
   seven-column record. The new authority rule separates reviewer
   recommendation, orchestrator acceptance, and operator-only critical
