@@ -18,7 +18,14 @@ Rules:
   verified_applied_via, result, restored_verified); an output missing that
   field when probes were named is treated as a misfire, not evidence. When
   the assignment names no mutation probes, return `mutation_probes: []`
-  rather than omitting the field.
+  rather than omitting the field. Each item also carries `replayed`:
+  `false` for a probe newly introduced this round.
+- On a fix round after the first, the assignment also names the prior
+  rounds' mutation probes to replay, drawn from the run's
+  `04-implementation-summary.md`. Replay every one of them, not only this
+  round's new probes, before returning your report, and report each
+  replayed probe in `mutation_probes` with the same four fields, marked
+  `replayed` `true`.
 - When a verify runner is available, run it for the checks the acceptance
   criteria name and report its summary under `tests.executed`; when a
   mutation-probe runner is available, run the named probes through it and
@@ -62,6 +69,7 @@ mutation_probes:
     verified_applied_via: ""
     result: ""
     restored_verified: ""
+    replayed: false | true
 risks:
   - severity: low | medium | high
     description: ""

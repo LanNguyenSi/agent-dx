@@ -4170,3 +4170,66 @@ describe("docs-only closing deltas stay narrowly bounded", () => {
     }
   });
 });
+
+/**
+ * A fix round after the first replayed only that round's own mutation
+ * probes, letting a regression a prior round's probe would have caught
+ * slip back in unnoticed between rounds. This pins the round-2-and-later
+ * replay rule: step 6's assignment-time instruction to name prior rounds'
+ * probes (sourced from `04-implementation-summary.md`), the `replayed`
+ * sub-field added to both output contract copies (byte-identical, the same
+ * rigor applied to the other `mutation_probes` sub-fields above), the same
+ * rule sentence in the installed implementer.md prompt, and the reviewer
+ * paragraph in step 7 permitting a reviewer to skip re-running a probe the
+ * replay already reports as killed without changing the reviewer contract
+ * itself. Anchored by the analysis in
+ * `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section 7(ii); see
+ * CHANGELOG for the pointer.
+ */
+describe("fix-round mutation probe replay ships in step 6, step 7, and both implementer contracts", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+
+  it("step 6 instructs replaying every prior round's mutation probe on a fix round after the first", () => {
+    expect(skillMd).toContain(
+      "On a fix round after the first, the briefing also names the prior rounds' mutation probes to replay, drawn from the run's `04-implementation-summary.md`",
+    );
+    expect(skillMd).toContain(
+      "the implementer replays every one of them, not only the round's new probes, before the next reviewer spawn, and reports each replayed probe in `mutation_probes` with the same four fields, marked `replayed`",
+    );
+  });
+
+  it("the installed implementer prompt carries the same replay rule", () => {
+    expect(implementerMd).toContain(
+      "On a fix round after the first, the assignment also names the prior rounds' mutation probes to replay, drawn from the run's `04-implementation-summary.md`",
+    );
+    expect(implementerMd).toContain(
+      "Replay every one of them, not only this round's new probes, before returning your report, and report each replayed probe in `mutation_probes` with the same four fields, marked `replayed` `true`",
+    );
+  });
+
+  it("both output contract copies carry a byte-identical mutation_probes block including the replayed sub-field", () => {
+    const extractMutationProbesBlock = (raw: string): string => {
+      const match = raw.match(/^mutation_probes:\n(?: {2}.+\n)*/m);
+      expect(match, "mutation_probes block not found").toBeTruthy();
+      return (match as RegExpMatchArray)[0];
+    };
+    const skillBlock = extractMutationProbesBlock(readAsset("skill/SKILL.md"));
+    const implementerBlock = extractMutationProbesBlock(
+      readAsset("agents/implementer.md"),
+    );
+    expect(skillBlock).toContain('replayed: false | true');
+    expect(skillBlock).toBe(implementerBlock);
+  });
+
+  it("step 7 lets the reviewer skip re-running a probe the replay already reports as killed, without changing the reviewer contract", () => {
+    expect(skillMd).toContain(
+      "When the implementer's report replays a prior round's mutation probe, the reviewer may skip re-running a probe the replay already reports as killed; the reviewer output contract itself is unchanged.",
+    );
+  });
+
+  it("does not touch the reviewer prompt asset", () => {
+    const reviewerMd = readAsset("agents/reviewer.md");
+    expect(reviewerMd).not.toContain("replayed");
+  });
+});

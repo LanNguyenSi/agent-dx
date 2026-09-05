@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` sections 5(b) and
   7(v).
 
+- On every review-fix round after the first, the orchestrator's briefing
+  names the prior rounds' mutation probes to replay, and the implementer
+  replays every one of them, not only the round's new probes, before the
+  next reviewer spawn, reporting each replayed probe in `mutation_probes`
+  with a new `replayed` sub-field. The reviewer may skip re-running a
+  probe the replay already reports as killed; the reviewer output contract
+  is unchanged. Anchored by the analysis in
+  `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section 7(ii).
+
 ## [0.29.0] - 2026-09-05
 
 ### Added

@@ -2570,7 +2570,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:159#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:168#"the keyed placeholder line's exact text,"`,
 re-pointed by 21 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
@@ -6998,3 +6998,19 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   docs/okf --require-anchors` reported 0 errors, 0 warnings, and 23 notices;
   the exact CI anchor-family filter reported 0 findings across the entire
   bundle, without historical exemptions.
+
+- 2026-09-05T18:30:28Z (fix-round mutation probe replay): added the
+  round-2-and-later mutation-probe-replay rule to SKILL.md steps 6 and 7,
+  a fifth `replayed` sub-field to both implementer output-contract copies
+  (SKILL.md and implementer.md), and a new docs-consistency describe block
+  pinning both files plus the unchanged reviewer prompt. Re-stamped
+  `subagent-contracts-superset.md`, `review-gate-and-waivers.md`, and
+  `run-state-lifecycle-and-markers.md` after the SKILL.md/implementer.md
+  line shifts, added a new Fix-round mutation probe replay section to
+  `subagent-contracts-superset.md`, and corrected the one line-shifted
+  `CHANGELOG.md` citation this edit's new Unreleased bullet displaced.
+  `npx vitest run test/docs-consistency.test.ts` passed all 246 tests;
+  `npm test` passed all 696 tests; `npm run typecheck` was clean. `okf-kit
+  check --json --require-anchors packages/orchestrator-workflow/docs/okf`
+  reported 0 errors, the unchanged 1 historical staleness warning, and 23
+  notices.
