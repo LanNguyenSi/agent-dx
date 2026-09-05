@@ -216,7 +216,7 @@
   relationship has a dedicated equality-and-superset test suite" was already
   false at the doc's own 2026-08-17 stamp, since the reviewer pair had a
   byte-for-byte `reproduction`-field test since 0.14.0
-  (`test/docs-consistency.test.ts:920-933#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
+  (`test/docs-consistency.test.ts:931-944#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
   current set of three guarded pairs (task-slicer/subagent-input, reviewer,
   implementer — the last two by byte-for-byte field-block equality tests)
   and names explorer as the one pair still without a dedicated guard; (2)
@@ -2570,12 +2570,14 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:168#"the keyed placeholder line's exact text,"`,
-re-pointed by 21 lines since this account was first written, by T-002's own
+(`CHANGELOG.md:175#"the keyed placeholder line's exact text,"`,
+re-pointed by 28 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
-it, and a further +2-line shift from the 0.28.0 release commit inserting
-the `## [0.28.0]` heading above it) grew
+it, the +2-line shift from the 0.28.0 release commit inserting
+the `## [0.28.0]` heading above it, and this bundle's own fix-round-2
+CHANGELOG.md edit above it (net +7 lines: the probe-replay Unreleased
+bullet grew from 8 to 13 lines) grew
 by a net 3
 lines relative to the pre-round-2 base commit (`5a33adb`, `git diff
 --stat 5a33adb -- CHANGELOG.md`: 17 insertions, 14 deletions), shifting
@@ -7058,18 +7060,31 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   installer path, same general claim), left as is.
   `npx vitest run test/docs-consistency.test.ts` passed all 249 tests;
   `npm test` passed all 701 tests; `npm run typecheck` was clean. `okf-kit
-  check docs/okf` now reports 0 errors, 3 warnings, 23 notices: the
+  check docs/okf` initially reported 0 errors, 3 warnings, 23 notices: the
   pre-existing `install-fence-mechanics.md` staleness warning, plus two
-  new `citations-resolve` warnings against historical entries in this
-  `log.md` file itself (a `test/docs-consistency.test.ts:920-933` citation
-  and a `CHANGELOG.md:168` citation, both now line-shifted by this pass's
-  edits) — left uncorrected per this bundle's convention that historical
-  evidence retains the source tokens it recorded rather than being
-  rewritten to match a later state; `log.md` is excluded from the
-  stricter docs-consistency test suite for the same reason. Base
-  comparison (`agent-dx` at e35d0ce, pre-task): `okf-kit check docs/okf`
-  reported 0 errors, 1 warning (the same pre-existing
-  `install-fence-mechanics.md` entry), 23 notices — so this pass's delta
-  is exactly the two new log.md-only warnings just described; no
-  per-finding change in the live bundle docs' own staleness or citation
-  errors versus base.
+  new `citations-resolve` warnings against citations in this `log.md`
+  file itself (a `test/docs-consistency.test.ts:920-933` citation and a
+  `CHANGELOG.md:168` citation, both line-shifted by this pass's edits).
+  Correction (found in review): this bundle's convention, per this same
+  pass's own H1 fix above and the sibling T-002 pass, is to re-point a
+  `log.md` citation shifted by the current change rather than leave it
+  (the log records how a class recurred; its anchors are expected to
+  resolve) — re-pointed both to the same content at head, both bounds
+  checked: `test/docs-consistency.test.ts:920-933` (the reproduction-field
+  byte-for-byte equality `it` block, "expect(skillBlock).toBe
+  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:168` (the
+  probe-replay `[Unreleased]` bullet's own citation of `test/template-
+  markers.test.ts`'s "the keyed placeholder line's exact text,") moved to
+  `175`, the further +7-line shift coming from this bundle's own
+  fix-round-2 CHANGELOG.md edit (the bullet grew from 8 to 13 lines).
+  Re-verified: `okf-kit check --json --require-anchors packages/
+  orchestrator-workflow/docs/okf` now reports 0 errors, 1 warning
+  (`install-fence-mechanics.md` staleness), 23 notices. Base comparison
+  (`agent-dx` at e35d0ce, pre-task): the same command reported 0 errors,
+  1 warning (the identical `install-fence-mechanics.md` entry), 23
+  notices. Per-finding comparison: the single warning's message and
+  target are byte-identical between the two runs, and the 23 notices are
+  the same `citations-resolve`/`unresolved-ambiguous` set in both (all
+  `SKILL.md`/`init.ts`/`cli.ts`/`test/init.test.ts` ambiguous-candidate
+  citations, unaffected by this pass); this pass's delta versus base is
+  now exactly zero findings.
