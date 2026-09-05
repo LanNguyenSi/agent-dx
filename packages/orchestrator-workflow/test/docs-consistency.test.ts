@@ -4194,8 +4194,7 @@ describe("docs-only closing deltas stay narrowly bounded", () => {
  * (review round 2: the trigger's ordinal was ambiguous, a replayed-but-now-
  * surviving probe had no reporting consequence, and the step 7 permission
  * had no delivery path since the reviewer never reads SKILL.md). Anchored
- * by the analysis in `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md`
- * section 7(ii); see CHANGELOG for the pointer.
+ * by a measurement; see the CHANGELOG entry for this rule.
  */
 describe("fix-round mutation probe replay ships in step 6, step 7, and both implementer contracts", () => {
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
@@ -4231,6 +4230,36 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     );
   });
 
+  it("SKILL.md's output-contract prose paragraph (a third copy of the replay rule) also states the trigger", () => {
+    expect(skillMd).toContain(
+      "On any round after the task's first, the implementer replays every probe named in an earlier round of this task (on the task's first round there are none), not only this round's new probes, before the next reviewer spawn, reporting each one in `mutation_probes` alongside the round's new probes.",
+    );
+  });
+
+  it("SKILL.md's output-contract prose paragraph also states the regression-signal consequence", () => {
+    expect(skillMd).toContain(
+      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal, reported as such and resolved before the next reviewer spawn.",
+    );
+  });
+
+  it("SKILL.md's output-contract prose paragraph states the `replayed` semantics (false for new, true for a replayed prior-round probe)", () => {
+    expect(skillMd).toContain(
+      "Each item also carries `replayed`: `false` for a probe newly introduced this round, `true` for a prior round's probe replayed this round under the replay rule in step 6.",
+    );
+  });
+
+  it("implementer.md states the `replayed` semantics for a newly introduced probe", () => {
+    expect(implementerMd).toContain(
+      "Each item also carries `replayed`: `false` for a probe newly introduced this round.",
+    );
+  });
+
+  it("step 6 instructs recording each mutation probe as a row in 04-implementation-summary.md's Mutation Probes subsection", () => {
+    expect(skillMd).toContain(
+      "recording each probe the implementer reports as a row in `04-implementation-summary.md`'s Mutation Probes subsection, with the round it was named in.",
+    );
+  });
+
   it("both output contract copies carry a byte-identical mutation_probes block including the replayed sub-field", () => {
     const skillBlock = extractMutationProbesBlock(readAsset("skill/SKILL.md"));
     const implementerBlock = extractMutationProbesBlock(
@@ -4246,9 +4275,12 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     );
   });
 
-  it("the reviewer prompt asset gains no `replayed` field", () => {
+  it("the reviewer prompt's output-contract yaml block gains no `replayed` field", () => {
     const reviewerMd = readAsset("agents/reviewer.md");
-    expect(reviewerMd).not.toContain("replayed");
+    const match = reviewerMd.match(/```yaml\n([\s\S]*?)```/);
+    expect(match, "reviewer output-contract yaml block not found").toBeTruthy();
+    const outputContractBlock = (match as RegExpMatchArray)[1];
+    expect(outputContractBlock).not.toContain("replayed");
   });
 
   it("both copies' mutation_probes block has exactly the five sub-fields in a fixed order", () => {

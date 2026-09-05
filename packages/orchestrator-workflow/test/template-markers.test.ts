@@ -242,8 +242,26 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
     expect(implementationTemplate).toContain("### Mutation Probes");
   });
 
+  it("places the Mutation Probes subsection between Test Evidence and Risks / Notes", () => {
+    const testEvidenceIndex = implementationTemplate.indexOf(
+      "## Test Evidence",
+    );
+    const mutationProbesIndex = implementationTemplate.indexOf(
+      "### Mutation Probes",
+    );
+    const risksIndex = implementationTemplate.indexOf("## Risks / Notes");
+    expect(testEvidenceIndex).toBeGreaterThanOrEqual(0);
+    expect(mutationProbesIndex).toBeGreaterThan(testEvidenceIndex);
+    expect(risksIndex).toBeGreaterThan(mutationProbesIndex);
+  });
+
   it("carries a header row with Round, Mutant, Verified Applied Via, Result, Restored Verified, and Replayed columns", () => {
-    const headerRow = implementationTemplate
+    const mutationProbesIndex = implementationTemplate.indexOf(
+      "### Mutation Probes",
+    );
+    expect(mutationProbesIndex).toBeGreaterThanOrEqual(0);
+    const tableText = implementationTemplate.slice(mutationProbesIndex);
+    const headerRow = tableText
       .split(/\r?\n/)
       .find((line) => line.trim().startsWith("|") && /round/i.test(line));
     expect(headerRow).toBeDefined();

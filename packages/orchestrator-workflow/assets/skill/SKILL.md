@@ -203,7 +203,9 @@ directory and the subagents.
    `survived` or `not_applicable` with the reason) and resolved before the
    next reviewer spawn. Record meaningful decisions in
    `03-decisions.md` and consolidate evidence in
-   `04-implementation-summary.md`.
+   `04-implementation-summary.md`, recording each probe the implementer
+   reports as a row in `04-implementation-summary.md`'s Mutation Probes
+   subsection, with the round it was named in.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed

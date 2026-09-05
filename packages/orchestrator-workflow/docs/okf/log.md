@@ -7069,7 +7069,7 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   pass's own H1 fix above and the sibling T-002 pass, is to re-point a
   `log.md` citation shifted by the current change rather than leave it
   (the log records how a class recurred; its anchors are expected to
-  resolve) — re-pointed both to the same content at head, both bounds
+  resolve): re-pointed both to the same content at head, both bounds
   checked: `test/docs-consistency.test.ts:920-933` (the reproduction-field
   byte-for-byte equality `it` block, "expect(skillBlock).toBe
   (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:168` (the
@@ -7088,3 +7088,48 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   `SKILL.md`/`init.ts`/`cli.ts`/`test/init.test.ts` ambiguous-candidate
   citations, unaffected by this pass); this pass's delta versus base is
   now exactly zero findings.
+
+Fix round 3 (review round 2 halt: the same continuation-citation class
+recurred a second time in `run-state-lifecycle-and-markers.md`, closing
+the class rather than the individual case). Checked okf-kit's own
+grammar first (`--help`, then the "Continuation citations" and "Anchored
+citations" sections of the okf-kit README): a continuation
+(`` `:N` ``/`` `:N-M` ``, `` -`M` ``/`` (`N`) ``) is structurally
+anchor-less and can never carry its own `#anchor` (`--require-anchors`
+flags this `anchor-required-continuation`, remedy: "lift the
+continuation into its own full `path:N-M#anchor` citation"). The
+bundle's three bare, non-backtick `,N-M` continuations (never actually
+parsed as citations by the grammar at all, since none match
+`` `:N` ``/`` -`M` ``/`` (`N`) ``, hence invisible to every prior pass's
+check) were each split into a second full, independently anchored
+citation instead: `run-state-lifecycle-and-markers.md`'s INSTALL-AGENT.md
+reference (line 27, `,173-178` re-anchored to its own
+`INSTALL-AGENT.md:173-178#"instead: it sources its defaults"`), its
+template-markers.test.ts reference (line 66, `,33-37` re-anchored to
+`template-markers.test.ts:33#"00-goal.md has exactly one run-base marker, defaulting to TODO"`,
+the run-base exactly-one-marker `it` block's own description, chosen over
+a range into the block's body since that body's `expect` line is
+duplicated three other times in the same file and so is too collision-
+prone for a load-bearing anchor), and the one
+this class recurred on (line 295, `,274-275` for "Repos without a bundle
+are unaffected", which at this round's head sits at
+`packages/orchestrator-workflow/assets/skill/SKILL.md:282-283`,
+re-anchored to its own
+`packages/orchestrator-workflow/assets/skill/SKILL.md:282-283#"without a bundle are unaffected"`).
+This closes the class: every bare continuation
+in this bundle now has its own anchor via a full citation, so a future
+line-shift of the same paragraph fails loudly instead of drifting
+silently. The same round's SKILL.md step 6 edit (a new clause recording
+each mutation probe into `04-implementation-summary.md`'s Mutation
+Probes subsection) shifted every SKILL.md line at or after 207 by +2,
+breaking 65 citations across `review-gate-and-waivers.md`,
+`run-state-lifecycle-and-markers.md`, and `subagent-contracts-superset.md`
+(plus this round's own docs-consistency.test.ts test insertions shifting
+that file's line-numbered citations in `subagent-contracts-superset.md`);
+all were re-derived against the final tree, both bounds, content-verified
+rather than computed blindly. Re-verified: `okf-kit check --json
+--require-anchors packages/orchestrator-workflow/docs/okf` now reports
+the same 24 findings as the base comparison (`agent-dx` at e35d0ce): 0
+errors, 1 warning (the identical `install-fence-mechanics.md` staleness
+entry), 23 notices (the same `citations-resolve`/`unresolved-ambiguous`
+set); this round's delta versus base is exactly zero findings.
