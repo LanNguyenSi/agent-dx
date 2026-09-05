@@ -130,6 +130,10 @@ In short:
 - [templates/postmortem-template.md](templates/postmortem-template.md)
 - [templates/ai-directory-template.md](templates/ai-directory-template.md)
 
+### Verification references
+- [Verification handoff contract](references/verification-handoff.md)
+- [First implementation slice: grounding diagnostics](references/verification-handoff-first-slice.md)
+
 ### Repo Standards
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
