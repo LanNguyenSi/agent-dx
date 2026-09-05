@@ -2544,7 +2544,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:114-136#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:116-138#"the keyed placeholder line's exact text,"`,
 re-pointed by 21 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
@@ -6963,3 +6963,12 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   test typecheck. `okf-kit check packages/orchestrator-workflow/docs/okf
   --json --require-anchors` reported 0 errors, the unchanged 10 historical
   log warnings, and 36 notices; all live module citations resolve.
+
+- 2026-09-05T06:25:29Z (release 0.29.0): inserted the release heading while
+  retaining Unreleased, and updated package and lockfile versions. Re-verified
+  the CHANGELOG-backed docs and moved the sole live line-range citation by
+  two lines. `agent-primitives verify` passed build, source and test
+  typechecks, the full test suite, and formatting. `okf-kit check --json
+  docs/okf --require-anchors` reported 0 errors, 0 warnings, and 23 notices;
+  the exact CI anchor-family filter reported 0 findings across the entire
+  bundle, without historical exemptions.
