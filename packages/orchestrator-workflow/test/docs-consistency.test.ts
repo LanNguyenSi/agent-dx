@@ -4409,3 +4409,66 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
     );
   });
 });
+
+/**
+ * Pins the identifier-drift reviewer checklist item added alongside the
+ * GitHub Actions shell-replay item above: after a change deletes or
+ * renames an exported identifier, type, config key or file, comments,
+ * README, unshipped CHANGELOG prose, or doc comments that still describe
+ * the old name as current are drift and are findings; when a drift check
+ * is connected it is run over the base..head range. The item itself stays
+ * tool-agnostic (see the "roles prefer connected structural search, verify,
+ * and mutation-probe runners" describe block's tool-agnosticism guard); the
+ * concrete `agent-primitives drift` guard is named only in CHANGELOG.md.
+ * Appended at the file's end (not inserted mid-file) so no earlier
+ * line-anchored OKF citation into this file shifts.
+ */
+describe("identifier drift ships as a reviewer checklist item", () => {
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+  const changelogMd = readDoc("CHANGELOG.md");
+  const flat = (doc: string) => doc.replace(/\s+/g, " ");
+
+  const driftSlice = flat(
+    phraseBoundedSlice(
+      reviewerMd,
+      "Identifier drift: after a change deletes or renames an exported identifier, type, config key or file",
+      "phrasing).",
+    ),
+  );
+
+  it("the reviewer prompt names the trigger with the exact 'after a change deletes or renames' wording (a mutant broadening it to 'after any change' must fail this)", () => {
+    expect(driftSlice).toContain(
+      "after a change deletes or renames an exported identifier, type, config key or file",
+    );
+    expect(driftSlice).not.toContain("after any change");
+  });
+
+  it("the reviewer prompt states the check: comments, README, unshipped CHANGELOG prose, or doc comments still describing the old name as current are drift and are findings", () => {
+    expect(driftSlice).toContain(
+      "check whether comments, README, unshipped CHANGELOG prose or doc comments still describe the old name as current",
+    );
+    expect(driftSlice).toContain("such sites are drift and are findings");
+  });
+
+  it("the reviewer prompt names the 'drift check ... is connected' clause (a mutant removing this clause must fail this)", () => {
+    expect(driftSlice).toContain(
+      "When a drift check that lists docs and comments still naming a removed or renamed identifier is connected, run it over the base..head range and judge every site it reports",
+    );
+  });
+
+  it("the reviewer prompt stays generic here: no product or binary name is hardcoded in this item", () => {
+    expect(driftSlice).not.toContain("agent-primitives");
+  });
+
+  it("the CHANGELOG's Unreleased section carries the ow-kit-effort-analysis.md section 7(iv) citation and names the agent-primitives drift guard (a mutant re-citing 7(v) must fail this)", () => {
+    const start = changelogMd.indexOf("## [Unreleased]");
+    const next = changelogMd.indexOf("\n## [", start + 1);
+    expect(start).toBeGreaterThan(-1);
+    const section = flat(
+      changelogMd.slice(start, next === -1 ? undefined : next),
+    );
+    expect(section).toContain("ow-kit-effort-analysis.md` section 7(iv)");
+    expect(section).toContain("agent-primitives drift");
+    expect(section).toContain("see the agent-primitives package");
+  });
+});

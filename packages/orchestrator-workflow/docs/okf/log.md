@@ -1,5 +1,47 @@
 # Bundle log
 
+- 2026-09-05T22:47:00Z (identifier-drift item, reworded generic after
+  rebase): rebased the identifier-drift reviewer checklist item onto
+  T-002's restore commit (`f059e98`); resolved the resulting conflicts in
+  `reviewer.md`, `log.md`, `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`, and
+  `subagent-contracts-superset.md` by taking the upstream (T-002) side for
+  every `docs/okf/*.md` file and redoing the identifier-drift additions
+  against the rebased tree. Reworded the reviewer.md item to stay
+  tool-agnostic per decision D-026 (the kit ships tool-agnostic; the
+  existing docs-consistency guard banning product names, including
+  `agent-primitives`, from installed assets stays untouched): the item now
+  names the trigger and the check generically and, when a drift check is
+  connected, says to run it over the base..head range and judge every site
+  it reports, with no product name in the sentence. Reverted the guard
+  test's narrow exception back to its upstream form (banning
+  `agent-primitives` across all four assets uninterrupted) and rewrote the
+  item's own pinning describe block against the new wording. The
+  CHANGELOG's `[Unreleased]` bullet keeps the concrete name ("the
+  mechanical guard is `agent-primitives drift` (see the agent-primitives
+  package)"), still anchored at `ow-kit-effort-analysis.md` section
+  7(iv). Inserting the identifier-drift item added 8 lines to
+  `reviewer.md` above its existing `Rules:` section, shifting every
+  line-anchored citation into `reviewer.md` from `review-gate-and-
+  waivers.md` and `subagent-contracts-superset.md` at or after the
+  insertion point by +8 (re-derived: 51-57 to 59-65, 72-82 to 80-90,
+  83 to 91, 104 to 112, 105-108 to 113-116, 84-110 to 92-118); the
+  citation into `reviewer.md:30` above the insertion point was
+  unaffected. Adding the CHANGELOG bullet (10 lines including its
+  trailing blank line) further shifted this log's own historical
+  self-citation into `CHANGELOG.md` (anchored on the keyed placeholder
+  line's exact text, previously line 192) to line 202, re-pointed in
+  place (see that entry's account, updated in this same edit).
+  Validation: `npx vitest run
+  test/docs-consistency.test.ts` passed all 268 tests; `npm test` passed
+  all 721 tests across 17 files; `npm run typecheck` was clean. `okf-kit
+  check --json --require-anchors docs/okf` on the committed tree reported
+  0 errors, 1 warning (`install-fence-mechanics.md` staleness, the
+  pre-existing baseline entry), 23 notices; measured against a temporary
+  detached worktree of the rebase target `f059e98` alone, the same
+  command reported the identical 0/1/23 summary, so this task's own edits
+  introduce no new okf-kit finding.
+
 - 2026-09-05 (docs-only closing delta): re-verified and re-stamped
   review-gate-and-waivers.md after the review gate gained a narrowly bounded
   post-review closure option for an entirely explanatory docs/comments/
@@ -2570,14 +2612,18 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:192#"the keyed placeholder line's exact text,"`,
-re-pointed by 28 lines since this account was first written, by T-002's own
+(`CHANGELOG.md:202#"the keyed placeholder line's exact text,"`,
+re-pointed by 38 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
 it, the +2-line shift from the 0.28.0 release commit inserting
-the `## [0.28.0]` heading above it, and this bundle's own fix-round-2
+the `## [0.28.0]` heading above it, this bundle's own fix-round-2
 CHANGELOG.md edit above it (net +7 lines: the probe-replay Unreleased
-bullet grew from 8 to 13 lines) grew
+bullet grew from 8 to 13 lines), and (round 2 of the identifier-drift
+task, after the T-002 rebase) a further +10-line shift from this task's
+own identifier-drift `[Unreleased]` bullet inserted above it (re-pointed
+in this same edit, restoring `okf-kit check`'s 0-error/1-warning/23-notice
+baseline) grew
 by a net 3
 lines relative to the pre-round-2 base commit (`5a33adb`, `git diff
 --stat 5a33adb -- CHANGELOG.md`: 17 insertions, 14 deletions), shifting

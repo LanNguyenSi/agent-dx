@@ -51,7 +51,7 @@ rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
 resupply it instead of inferring one from the findings list" (`SKILL.md:
-355-357`; the installed `reviewer.md:51-57#"never leave it blank or omit it."` prompt carries the mirrored
+355-357`; the installed `reviewer.md:59-65#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.
@@ -198,9 +198,9 @@ evidence, the reviewer must reproduce it independently — its own runs or
 measurements — and record method, sample size, and result against the
 implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
-same rule (`reviewer.md:72-82#"lint) do not trigger this."`), and both output contracts gained a matching
+same rule (`reviewer.md:80-90#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`SKILL.md:428#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:105-108#"residual_risks:"`); `matches_implementer_claim`
+field (`SKILL.md:428#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:113-116#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -224,7 +224,7 @@ all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
 `SKILL.md:433#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing — ask the reviewer to resupply it, rather than infer one from the
-findings — and the installed `reviewer.md:51-57#"never leave it blank or omit it."` prompt carries the mirrored
+findings — and the installed `reviewer.md:59-65#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part

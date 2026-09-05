@@ -77,7 +77,7 @@ final output, nothing else" block:
   Both copies also gained a `commits` field; see
   [Commits field](#commits-field) below.
 - Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:428#"matches_implementer_claim: matched | mismatched |"`
-  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:84-110#"reproduction:"`. Both
+  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:92-118#"reproduction:"`. Both
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below. Both
   also gained a per-finding `recurrence` field; see
@@ -314,12 +314,12 @@ Actions run-step shell replay named in both installed prompts (see CHANGELOG's
 same field: `sample_size: not_applicable` is allowed when the replay itself has
 no meaningful sample size
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:242#"GitHub Actions shell replay named in step 6 is a second, explicitly"`;
-`packages/orchestrator-workflow/assets/agents/reviewer.md:83#"shell replay above is a second, explicitly non-probabilistic trigger for"`). The
-installed `packages/orchestrator-workflow/assets/agents/reviewer.md:72-82#"lint) do not trigger this."`
+`packages/orchestrator-workflow/assets/agents/reviewer.md:91#"shell replay above is a second, explicitly non-probabilistic trigger for"`). The
+installed `packages/orchestrator-workflow/assets/agents/reviewer.md:80-90#"lint) do not trigger this."`
 prompt carries the same rule verbatim (second-person voice). Both output
 contracts gained a matching `reproduction` field
 (`method, sample_size, result, matches_implementer_claim`,
-`SKILL.md:428#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:105-108#"residual_risks:"`); `matches_implementer_claim`
+`SKILL.md:428#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:113-116#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
@@ -450,7 +450,7 @@ Unreleased entry for the pointer.
 The reviewer output contract gained a per-finding `recurrence: new |
 repeated` field, added to both copies identically
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:418#"recurrence: new | repeated"` and
-`packages/orchestrator-workflow/assets/agents/reviewer.md:104#"recurrence: new | repeated"`, same field, same
+`packages/orchestrator-workflow/assets/agents/reviewer.md:112#"recurrence: new | repeated"`, same field, same
 line-relative position inside the findings item in both). It classifies
 each finding against earlier review rounds on the same task: `new` for a
 defect class not previously found there, `repeated` for one that already
