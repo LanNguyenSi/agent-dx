@@ -190,7 +190,7 @@
   relationship has a dedicated equality-and-superset test suite" was already
   false at the doc's own 2026-08-17 stamp, since the reviewer pair had a
   byte-for-byte `reproduction`-field test since 0.14.0
-  (`test/docs-consistency.test.ts:822-836`); the doc now states the true
+  (`test/docs-consistency.test.ts:920-933#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
   current set of three guarded pairs (task-slicer/subagent-input, reviewer,
   implementer — the last two by byte-for-byte field-block equality tests)
   and names explorer as the one pair still without a dedicated guard; (2)
@@ -2329,7 +2329,7 @@
   subset. Measured on the round-3-corrected bundle before this round's
   fixes: 16 unique ranges failed it -- 15 straddles (14 where start and end
   land in two different `it()`/`test()` blocks, plus 1,
-  `docs-consistency.test.ts:1891-2038`, where start correctly resolved to a
+  `docs-consistency.test.ts, former lines 1891–2038`, where start correctly resolved to a
   `describe(` block but end escaped past its own close) and 1
   (`subagent-contracts-superset.md`'s citation into
   `docs-consistency.test.ts:523-529`) where the citation starts inside a
@@ -2544,7 +2544,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:90-112#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:114-136#"the keyed placeholder line's exact text,"`,
 re-pointed by 21 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
@@ -2647,7 +2647,7 @@ at the cap) and exactly once inside 147-159.
 
 LOW 6a (this round, attempted, reverted): the brief suggested narrowing
 `install-fence-mechanics.md`'s `PRUNE_CANDIDATES` citation
-(`uninstall.ts:99-117#"export function runUninstall(options: {"`,
+(`uninstall.ts:99-119#"export function runUninstall(options: {"`,
 spanning two declarations) to end at 113 on
 `join(".opencode", "agents"),`. That anchor text is unique in the file
 (1 occurrence) but, like MEDIUM 2 above, contains embedded double
@@ -6532,20 +6532,20 @@ params object inline; it lives in its own module (not `cli.ts` itself)
 because `cli.ts` runs `program.parseAsync(process.argv)` at import time,
 which importing it directly from a unit test would trigger. It also
 carries a new `stickyAnnotateDetected` field
-(`packages/orchestrator-workflow/src/cli-inputs.ts:210-210#"stickyAnnotateDetected?: Harness[];"`)
+(`packages/orchestrator-workflow/src/cli-inputs.ts:222#"stickyAnnotateDetected?: Harness[];"`)
 that restores the "(detected)" label: `promptHarnesses` gained a fourth
 parameter, `annotateDetected` (default: its own first argument, so every
 call site that omits it is unchanged), that drives only the checkbox's
 "(detected)" suffix, independent of what is actually pre-checked
-(`packages/orchestrator-workflow/src/cli-inputs.ts:26-39#"annotateDetected: Harness[] = detected,"`).
+(`packages/orchestrator-workflow/src/cli-inputs.ts:36-42#"annotateDetected: Harness[] = detected,"`).
 `apply`'s sticky-branch call passes a fresh `detectHarnesses(targetDir)`
-call as this field (`cli-apply.ts:43#"stickyAnnotateDetected: detectHarnesses(targetDir),"`)
+call as this field (`cli-apply.ts:45#"stickyAnnotateDetected: detectHarnesses(targetDir),"`)
 while still pre-checking nothing, so an operator sees which harness is on
 disk without a bare Enter re-widening the install.
 
 Docs: `install-fence-mechanics.md` re-pointed `previous.harnessesRecordedEmpty`
 from JSDoc prose to the actual gate
-(`cli-inputs.ts:263-263#"previous.harnessesRecordedEmpty"`), dropped the
+(`cli-inputs.ts:292#"previous.harnessesRecordedEmpty"`), dropped the
 run-internal "decision D-007" label from its prose (the `agent-tasks
 fe834823` pointer alone identifies the task), and now describes the
 `buildApplyInitInputs`/`stickyAnnotateDetected` split. `CHANGELOG.md`'s
@@ -6857,12 +6857,12 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   above claimed "0 warnings, identical to the pre-edit baseline" but that
   measurement was taken before the CHANGELOG.md `[Unreleased]` insertion
   landed; at HEAD the pinned check actually reported 1 warning (the
-  `CHANGELOG.md:78-100` citation in this file, out of range by the
+  `CHANGELOG.md, former lines 78–100` citation in this file, out of range by the
   insertion). Fixed this round: reworded the explorer.md/SKILL.md clause
   so the structural-search preference carries its own availability guard
   instead of riding the semantic tool's conditional; dropped the private
   memory id from the CHANGELOG pointer, keeping only the run directory;
-  re-pointed the `CHANGELOG.md:78-100` citation above to `88-110` (the
+  re-pointed the `CHANGELOG.md, former lines 78–100` citation above to `88-110` (the
   10-line `[Unreleased]` insertion, not 11); shifted the bare trailing
   continuation on `run-state-lifecycle-and-markers.md:295` from `,251-252`
   to `,252-253` to match where "Repos without a bundle are unaffected"
