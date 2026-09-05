@@ -3426,24 +3426,11 @@ describe("probe(): the emergency restore is the last write to the target", () =>
       [
         "const fs = require('node:fs');",
         "fs.appendFileSync('fixture.js', '// baseline-touched\\n');",
-        "const { spawn } = require('node:child_process');",
-        "spawn(process.execPath, ['heartbeat-worker.js'], { stdio: 'inherit' });",
+        // The readiness file is written only after the append above, so
+        // its existence proves the rewrite already happened; one process
+        // idles until the signal arrives.
+        "fs.writeFileSync('heartbeat.txt', '1');",
         "setTimeout(() => { process.exit(0); }, 15000);",
-        "",
-      ].join("\n"),
-    );
-    fs.writeFileSync(
-      path.join(repo, "heartbeat-worker.js"),
-      [
-        "const fs = require('node:fs');",
-        "let n = 0;",
-        "const tick = () => {",
-        "  n += 1;",
-        "  fs.writeFileSync('heartbeat.txt', String(n));",
-        "};",
-        "tick();",
-        "const id = setInterval(tick, 100);",
-        "setTimeout(() => { clearInterval(id); process.exit(0); }, 15000);",
         "",
       ].join("\n"),
     );

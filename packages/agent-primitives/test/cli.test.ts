@@ -2692,8 +2692,21 @@ describe("cli: probe --plan", () => {
   /** A repository whose fixture carries `count` one-line functions and a
    * test that catches a mutant of any of them: enough mutants for one
    * plan envelope to exceed the default `-m`. */
-  function initWidePlanRepo(count: number): { repo: string; planPath: string } {
-    const repo = makeTmpDir();
+  function initWidePlanRepo(
+    count: number,
+    root?: string,
+  ): { repo: string; planPath: string } {
+    // `root` lets a test that measures the envelope against a tight
+    // bound place the repository under a short, fixed path, since the
+    // repository path appears in the envelope (`cwd`, every mutant's
+    // `file`) and would otherwise vary with the ambient `TMPDIR`.
+    let repo: string;
+    if (root === undefined) {
+      repo = makeTmpDir();
+    } else {
+      repo = fs.mkdtempSync(path.join(root, "ap-cli-test-repo-"));
+      tmpDirs.push(repo);
+    }
     git(repo, ["init", "-q"]);
     git(repo, ["config", "user.email", "test@example.com"]);
     git(repo, ["config", "user.name", "test"]);
@@ -2832,13 +2845,14 @@ describe("cli: probe --plan", () => {
     // -- long enough on some hosts (a longer ambient `TMPDIR`) to drop
     // the bound below what `plan.summary` needs and fail this test for a
     // reason that has nothing to do with `keepWhole`. A short, fixed
-    // `--log-dir` (built from `/tmp` directly rather than `os.tmpdir()`,
-    // so it stays short even when `TMPDIR` itself is long) removes that
-    // dependency; the absolute `stdout.length` bound is dropped rather
-    // than asserted, since it is no longer this test's concern -- only
-    // the complete summary and `truncated: true` are.
+    // `--log-dir` AND a short, fixed repository path (both built from
+    // `/tmp` directly rather than `os.tmpdir()`, so they stay short even
+    // when `TMPDIR` itself is long: the repository path appears in the
+    // envelope's `cwd` and in every mutant's `file`) remove that
+    // dependency, which is what lets the `stdout.length` bound be
+    // asserted here as well.
     const count = 40;
-    const { repo, planPath } = initWidePlanRepo(count);
+    const { repo, planPath } = initWidePlanRepo(count, "/tmp");
     const maxChars = 900;
     const logDir = fs.mkdtempSync(path.join("/tmp", "ap-cli-test-"));
     tmpDirs.push(logDir);
@@ -2856,6 +2870,7 @@ describe("cli: probe --plan", () => {
     ]);
 
     expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("killed");
     expect(parsed.truncated).toBe(true);

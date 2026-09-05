@@ -772,7 +772,11 @@ agent-primitives probe --plan mutants.json
   "mutants": [
     { "file": "src/probe/index.ts", "line": 812, "replace": "  return true;" },
     { "file": "src/lock.ts", "line": 44, "match": "n > 0", "with": "n >= 0" },
-    { "file": "src/exec.ts", "patch": "mutants/exec-timeout.patch", "expect": "pass" }
+    {
+      "file": "src/exec.ts",
+      "patch": "mutants/exec-timeout.patch",
+      "expect": "pass"
+    }
   ]
 }
 ```
@@ -867,7 +871,7 @@ all; the next mutant is never started. A library caller (`probePlan()`)
 gets `status: "inconclusive"`, `reason: "aborted"` with the remaining
 mutants `not_run`. During a plan's baseline, a signal restores nothing:
 every target is left exactly as the baseline wrote it, the same rule
-`target_changed_during_baseline` already applies without a signal.
+that `target_changed_during_baseline` already applies without a signal.
 
 `test` and `pre` in a plan file are shell commands, executed through
 `sh -c` exactly as `-t`/`--pre` are, and carry the same trust boundary:
