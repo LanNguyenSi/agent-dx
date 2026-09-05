@@ -1058,7 +1058,7 @@ describe("probePlan(): an unexpected error while a mutant is applied", () => {
     // to assert (`replace`/`match` never produce a dry-run log at all,
     // per `computeMutant`), applied via `git apply` directly (not
     // `execCommand`, so it does not shift which invocation the mock
-    // below throws on.
+    // below throws on).
     const patchPath = realDiffPatch(
       repo,
       "fixture.js",

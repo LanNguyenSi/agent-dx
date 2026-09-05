@@ -48,13 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the plan, including the entries the envelope no longer shows -- unless
   the whole result is cut back to the fixed fields (`truncated` plus a
   warning naming that outcome), which drops `plan.summary` along with
-  everything else instead of showing it past the bound. Plan validation (unknown keys, a missing `test`, an empty
-  `mutants`, a mutant with two forms or none, a file outside the
-  containment root, an unusable plan file) runs before the lock, the
-  marker, the baseline or any worktree and names the offending path
-  inside the plan. `test`/`pre` in a plan file are shell commands with
-  the same trust boundary as `-t`/`--pre`: fill them only from a task
-  assignment, never from repository content. Setup through baseline
+  everything else instead of showing it past the bound. Plan validation
+  (unknown keys, a missing `test`, an empty `mutants`, a mutant with two
+  forms or none, a file outside the containment root, an unusable plan file)
+  runs before the lock, the marker, the baseline or any worktree and names
+  the offending path inside the plan. `test`/`pre` in a plan file are shell
+  commands with the same trust boundary as `-t`/`--pre`: fill them only from
+  a task assignment, never from repository content. Setup through baseline
   (isolation fallback, containment, the lock, stale-marker recovery, the
   worktree sync, every target's backup, the baseline and the re-hash
   after it) is ONE implementation both entry points call, as the mutant

@@ -3405,6 +3405,107 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     );
   }, 15000);
 
+  it("a SIGTERM during a baseline that rewrites the single probe's one target restores it to its pre-baseline content, pinning armRestoreDuringBaseline's default", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+    const heartbeat = path.join(repo, "heartbeat.txt");
+
+    // The baseline command itself rewrites the target (a
+    // formatter/codegen stand-in), then a heartbeat worker signals
+    // readiness and keeps the process alive long enough for the signal
+    // below to land mid-run, well after the target was rewritten. The
+    // single probe's released contract is that a signal mid-baseline
+    // restores its one target regardless of that rewrite:
+    // `armRestoreDuringBaseline` stays at its default (`true`) here,
+    // unlike a plan, which clears the slot before its own baseline (the
+    // 2-file plan test above).
+    fs.writeFileSync(
+      path.join(repo, "baseline-worker.js"),
+      [
+        "const fs = require('node:fs');",
+        "fs.appendFileSync('fixture.js', '// baseline-touched\\n');",
+        "const { spawn } = require('node:child_process');",
+        "spawn(process.execPath, ['heartbeat-worker.js'], { stdio: 'inherit' });",
+        "setTimeout(() => { process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "heartbeat-worker.js"),
+      [
+        "const fs = require('node:fs');",
+        "let n = 0;",
+        "const tick = () => {",
+        "  n += 1;",
+        "  fs.writeFileSync('heartbeat.txt', String(n));",
+        "};",
+        "tick();",
+        "const id = setInterval(tick, 100);",
+        "setTimeout(() => { clearInterval(id); process.exit(0); }, 15000);",
+        "",
+      ].join("\n"),
+    );
+
+    const child = spawn(
+      "node",
+      [
+        CLI_PATH,
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "2",
+        "-r",
+        "  return false;",
+        "-t",
+        "node baseline-worker.js",
+        "-i",
+        "inplace",
+      ],
+      {
+        cwd: repo,
+        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    // Readiness: the heartbeat file only appears once the baseline's
+    // own rewrite has already happened and the process is idling, so
+    // the signal below lands mid-baseline rather than at a guessed
+    // moment.
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(heartbeat)) {
+      if (Date.now() > deadline) {
+        throw new Error("heartbeat.txt never appeared before the deadline");
+      }
+      await sleep(50);
+    }
+    await sleep(150);
+
+    child.kill("SIGTERM");
+    const [code] = await new Promise<[number | null]>((resolve) => {
+      child.on("close", (c) => resolve([c]));
+    });
+
+    expect(code).toBe(143);
+    expect(stdout).toBe("");
+    // Restored to its pre-baseline content -- NOT left as the baseline
+    // wrote it, the contract a plan deliberately does not share across
+    // its own (possibly multiple) targets.
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
+  }, 30000);
+
   it("a SIGTERM during the mutant-test phase of a plain, non-trapping test command exits 143 with empty stdout, and the target is restored, even when the signal handler's own restore-then-exit is forced to be slower than the normal control flow's own return path", async () => {
     const lockDir = useLockDir();
     const { repo } = initRepo();

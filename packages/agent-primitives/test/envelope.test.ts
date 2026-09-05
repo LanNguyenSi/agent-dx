@@ -1489,7 +1489,7 @@ describe("keepWhole: a named path is reported whole, never reduced", () => {
     // falls all the way back to the existing "reduced to the fixed
     // fields only" total-loss outcome: the held value is not shown
     // oversized past the bound, it disappears along with the rest of
-    // the payload, and the bound itself is still met.
+    // the payload, and, in this case, the bound itself is still met.
     const { envelope } = buildEnvelope({
       version: "0.1.0",
       command: "probe",

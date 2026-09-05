@@ -2573,9 +2573,11 @@ describe("cli: probe --plan", () => {
       expect(typeof entry.mutation_probe.verified_applied_via).toBe("string");
       expect(entry.test.command).toBe("node fixture.test.js");
       // Each mutant's own log paths stay on its own result, not on the
-      // envelope's top-level `logs` (see the H2 fix): the top level only
-      // carries the baseline and the plan's own setup logs, so it does
-      // not grow per mutant and raise the reduction floor.
+      // envelope's top-level `logs`: before per-mutant log paths were
+      // kept out of the protected top-level `logs`, the top level grew
+      // by one entry per mutant and raised the reduction floor; the top
+      // level now only carries the baseline and the plan's own setup
+      // logs, so it does not grow per mutant.
       expect(typeof entry.test.logPath).toBe("string");
       expect(Array.isArray(entry.logs)).toBe(true);
     }
@@ -2773,11 +2775,12 @@ describe("cli: probe --plan", () => {
   }, 120000);
 
   it("a 55-mutant plan at the default -m still carries a complete plan.summary within the bound (per-mutant log paths do not inflate the protected top-level logs)", async () => {
-    // Measured false before the H2 fix: at 55 mutants (default log dir)
-    // the per-mutant log paths flattened into the envelope's protected
-    // top-level `logs` grew the reduction floor past what the reduction
-    // could recover from, and the whole `plan` field (summary included)
-    // was dropped, missing the 8000-char bound by 186 chars.
+    // Before per-mutant log paths were kept out of the protected
+    // top-level `logs`, flattening them in there at 55 mutants (default
+    // log dir) grew the reduction floor past what the reduction could
+    // recover from, and the whole `plan` field (summary included) was
+    // dropped, missing the 8000-char bound by 186 chars. Measured false
+    // then; this test pins the fix.
     const count = 55;
     const { repo, planPath } = initWidePlanRepo(count);
 
@@ -2822,22 +2825,37 @@ describe("cli: probe --plan", () => {
     // `plan.summary` differs from the full count and `plan.results` is
     // reduced to a handful of entries INSTEAD of the summary, rather
     // than beside it.
+    //
+    // Without an explicit `--log-dir`, the default log dir is
+    // `<os.tmpdir()>/agent-primitives/<run-id>`, and that path's length
+    // eats into the same 900-char bound the reduction has to fit within
+    // -- long enough on some hosts (a longer ambient `TMPDIR`) to drop
+    // the bound below what `plan.summary` needs and fail this test for a
+    // reason that has nothing to do with `keepWhole`. A short, fixed
+    // `--log-dir` (built from `/tmp` directly rather than `os.tmpdir()`,
+    // so it stays short even when `TMPDIR` itself is long) removes that
+    // dependency; the absolute `stdout.length` bound is dropped rather
+    // than asserted, since it is no longer this test's concern -- only
+    // the complete summary and `truncated: true` are.
     const count = 40;
     const { repo, planPath } = initWidePlanRepo(count);
     const maxChars = 900;
+    const logDir = fs.mkdtempSync(path.join("/tmp", "ap-cli-test-"));
+    tmpDirs.push(logDir);
 
     const run = await spawnCli([
       "-C",
       repo,
       "-m",
       String(maxChars),
+      "-l",
+      logDir,
       "probe",
       "--plan",
       planPath,
     ]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("killed");
     expect(parsed.truncated).toBe(true);
@@ -2946,16 +2964,16 @@ describe("cli: probe --plan", () => {
   }, 40000);
 
   it("on SIGTERM during a baseline that rewrites both targets of a 2-file plan, both are left exactly as the baseline wrote them", async () => {
-    // Round-2 finding: the shared setup arms the signal handler's
-    // restore slot once per target as it opens each one (`openTarget`),
-    // so by the time the baseline runs the slot is still armed to
-    // whichever target was opened LAST. A baseline that rewrites more
-    // than one target, signalled mid-run, used to restore only that
-    // last target and leave the others as the baseline wrote them -- an
-    // asymmetry across targets. The fix clears the slot before a plan's
-    // baseline runs, so a signal there restores nothing and every
-    // target is left exactly as the baseline wrote it, the same as the
-    // non-signal `target_changed_during_baseline` path already does.
+    // The shared setup arms the signal handler's restore slot once per
+    // target as it opens each one (`openTarget`), so by the time the
+    // baseline runs the slot is still armed to whichever target was
+    // opened LAST. Left armed through a plan's baseline, a signal there
+    // used to restore only that last target and leave the others as the
+    // baseline wrote them -- an asymmetry across targets. A plan clears
+    // the slot before its baseline runs, so a signal there restores
+    // nothing and every target is left exactly as the baseline wrote
+    // it, the same as the non-signal `target_changed_during_baseline`
+    // path already does.
     const repo = makeTmpDir();
     execFileSync("git", ["init", "-q"], { cwd: repo });
     execFileSync("git", ["config", "user.email", "test@example.com"], {

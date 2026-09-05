@@ -860,12 +860,14 @@ each distinct target file (the same identities a single probe on each of
 those files would take), so a plan and a single probe still exclude each
 other there.
 
-On `SIGINT`/`SIGTERM` a plan behaves exactly as a single probe does: the
-in-flight mutant is restored, the worktree removed, the lock released,
-and the CLI ends with exit `130`/`143` and no output at all; the next
-mutant is never started. A library caller (`probePlan()`) gets
-`status: "inconclusive"`, `reason: "aborted"` with the remaining mutants
-`not_run`.
+On `SIGINT`/`SIGTERM` during a mutant, a plan behaves exactly as a single
+probe does: the in-flight mutant is restored, the worktree removed, the
+lock released, and the CLI ends with exit `130`/`143` and no output at
+all; the next mutant is never started. A library caller (`probePlan()`)
+gets `status: "inconclusive"`, `reason: "aborted"` with the remaining
+mutants `not_run`. During a plan's baseline, a signal restores nothing:
+every target is left exactly as the baseline wrote it, the same rule
+`target_changed_during_baseline` already applies without a signal.
 
 `test` and `pre` in a plan file are shell commands, executed through
 `sh -c` exactly as `-t`/`--pre` are, and carry the same trust boundary:
