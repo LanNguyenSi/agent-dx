@@ -3,6 +3,44 @@
 <!-- solution-acceptance: run-base = TODO -->
 <!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->
 
+## Acceptance Baseline
+
+For a newly created run that adopts this contract, record this declaration
+before planning, slicing, or delegation:
+
+Acceptance contract: acceptance-baseline/v1
+
+For that recorded v1 selection, freeze the actual delegation input in this
+canonical shape and communicate the selection in every delegation:
+
+```yaml
+acceptance_baseline:
+  id: "" # e.g. acceptance-baseline
+  revision: "" # e.g. r1
+acceptance_criteria:
+  - id: "" # e.g. AC-001
+    required: true
+    text: "" # frozen normative text
+    verification: "" # exact command + expected outcome, or reviewer role + concrete artifact + pass/fail standard
+    negative_space: "" # what this criterion does not establish
+```
+
+The orchestrator freezes these records before delegation. An implementer must
+not change a criterion or its normative verification command. A baseline
+revision records the old and new revisions, affected IDs, decision authority
+and reason, invalidated evidence, and any verified rationale for carrying
+unchanged evidence forward. Scope changes beyond the request need an operator
+decision; invalidated evidence is rerun before acceptance.
+
+This contract applies only to runs that explicitly record the declaration
+above. Existing runs continue under their recorded original contract: missing
+v1 fields neither identify a legacy run nor block it, and uncertain adoption
+or provenance is reported and resolved before dependent delegation rather
+than inferred. For a recorded original string-list contract, retain the
+original `acceptance_criteria` strings and omit the introduced
+`acceptance_baseline` and `criterion_evidence` fields. Keep the existing role
+output fields; do not rewrite an old run to adopt this block.
+
 ## Operator Request
 
 <!-- Original user/operator request. -->

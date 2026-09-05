@@ -150,10 +150,10 @@
   `05-review-findings.md:` citations past that point were re-checked against
   it in the first pass. Review caught four resulting stale citations —
   review-gate-and-waivers.md's `05-review-findings.md`, line 25 (Acceptance
-  Recommendation enum line, should read `:26`) and `27` (the
+  Recommendation enum line, should read `05-review-findings.md:26`) and `27` (the
   acceptance-recommendation marker, should read `:28`), and
   run-state-lifecycle-and-markers.md's matching `27` (marker, `:28`) and
-  `23-25` (heading/blank/enum span, `:24-26`) — all four now corrected and
+  `23-25` (heading/blank/enum span, `05-review-findings.md:24-26`) — all four now corrected and
   re-verified by direct read against the current template. A full sweep of
   every `05-review-findings.md:` citation across the bundle (docs, SKILL.md,
   tests) confirmed these were the only four affected; citations at or before
@@ -302,7 +302,7 @@
   relationship has a dedicated equality-and-superset test suite" was already
   false at the doc's own 2026-08-17 stamp, since the reviewer pair had a
   byte-for-byte `reproduction`-field test since 0.14.0
-  (`test/docs-consistency.test.ts:931-944#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
+  (`test/docs-consistency.test.ts:986#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
   current set of three guarded pairs (task-slicer/subagent-input, reviewer,
   implementer — the last two by byte-for-byte field-block equality tests)
   and names explorer as the one pair still without a dedicated guard; (2)
@@ -766,7 +766,7 @@
   `DEFAULT_MODELS` at 70-75, all in subagent-contracts-superset.md) needed no
   correction at all, confirmed unchanged by direct read: the branch's
   ~55-line tier block is purely appended after the file's old line 142, past
-  every citation into it. `README.md:107-112` (run-state-lifecycle-and-markers.md's
+  every citation into it. `README.md:108-112` (run-state-lifecycle-and-markers.md's
   "What gets installed" code-fence citation, supporting the same
   copy-from-templates claim as the INSTALL-AGENT.md citation below) also
   needed no correction, confirmed byte-identical by direct read: both of the
@@ -2656,7 +2656,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:202#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:213#"the keyed placeholder line's exact text,"`,
 re-pointed by 38 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
@@ -2817,7 +2817,7 @@ clean (395 files scanned).
   `*README.md`/`*INSTALL-AGENT.md` globs rather than the bare exact
   strings: this bundle cites both docs under two different spellings
   (bare README.md line 121 as the file stood then, and the fully-qualified
-  `packages/orchestrator-workflow/README.md:107-112`/`INSTALL-AGENT.md:46-
+  `packages/orchestrator-workflow/README.md:108-112`/`INSTALL-AGENT.md:46-
   47`), and the exact-string form left the two fully-qualified citations
   reporting `anchor-required` (measured: `okf-kit check --json
   packages/orchestrator-workflow/docs/okf --require-anchors
@@ -3176,7 +3176,7 @@ section); subagent-contracts-superset.md:259's `[0.18.0]` citation now
 quotes "Concrete resume-over-respawn workaround" (occurs once in the
 0.18.0 section). Both phrases were verified unique in their section by
 direct grep before being added. Their sibling citations elsewhere in the
-bundle (e.g. run-state-lifecycle-and-markers.md:62's own `[0.9.0]`
+bundle (e.g. run-state-lifecycle-and-markers.md (then line 62)'s own `[0.9.0]`
 citation) still mean the section as a whole and were left without a
 content anchor.
 
@@ -7153,16 +7153,16 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   check docs/okf` initially reported 0 errors, 3 warnings, 23 notices: the
   pre-existing `install-fence-mechanics.md` staleness warning, plus two
   new `citations-resolve` warnings against citations in this `log.md`
-  file itself (a `test/docs-consistency.test.ts:920-933` citation and a
-  `CHANGELOG.md:185` citation, both line-shifted by this pass's edits).
+  file itself (a `test/docs-consistency.test.ts` (then lines 920–933) citation and a
+  `CHANGELOG.md:186` citation, both line-shifted by this pass's edits).
   Correction (found in review): this bundle's convention, per this same
   pass's own H1 fix above and the sibling T-002 pass, is to re-point a
   `log.md` citation shifted by the current change rather than leave it
   (the log records how a class recurred; its anchors are expected to
   resolve): re-pointed both to the same content at head, both bounds
-  checked: `test/docs-consistency.test.ts:920-933` (the reproduction-field
+  checked: `test/docs-consistency.test.ts` (then lines 920–933) (the reproduction-field
   byte-for-byte equality `it` block, "expect(skillBlock).toBe
-  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:185` (the
+  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:186` (the
   probe-replay `[Unreleased]` bullet's own citation of `test/template-
   markers.test.ts`'s "the keyed placeholder line's exact text,") moved to
   `175`, the further +7-line shift coming from this bundle's own
@@ -7205,7 +7205,7 @@ this class recurred on (line 295, `,274-275` for "Repos without a bundle
 are unaffected", which at this round's head sits at
 `packages/orchestrator-workflow/assets/skill/SKILL.md:295`,
 re-anchored to its own
-`packages/orchestrator-workflow/assets/skill/SKILL.md:295#"without a bundle are unaffected"`).
+`packages/orchestrator-workflow/assets/skill/SKILL.md:334#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
 in this bundle's non-reserved docs now has its own anchor via a full
 citation (`index.md` and `log.md` are append-only journals and keep their
@@ -7313,3 +7313,41 @@ unrelated agent-primitives merge with no OKF-bundle change) found the
 warning's message and target byte-identical and the 23 notices the same
 `citations-resolve`/`unresolved-ambiguous` set in both runs: this
 closing delta's finding-set delta against base is zero.
+
+- 2026-09-05 (acceptance-baseline/v1): added the explicit new-run adoption
+  record, canonical criterion records, lossless per-task propagation, and
+  result-artifact coverage guidance. Re-verified the affected lifecycle,
+  contract, and review-gate docs after re-pointing their source citations.
+  Focused contract tests, build, typecheck, test, and test typecheck passed;
+  the baseline-propagation deletion probe was killed and restored. `okf-kit
+  check --json --require-anchors docs/okf` reported 0 errors, 5 warnings, and
+  23 notices; the warnings are existing source-fresh/blank-start-line entries.
+
+- 2026-09-05 (acceptance-baseline/v1 correction, round 3): corrected the
+  actual producer contracts to return matching baseline/criterion-evidence
+  indexes and made recorded version selection apply at every contract block.
+  Added structural checks at each of the five contract boundaries, concrete
+  linked revision examples and real installer preservation of seeded old-run
+  bytes. Corrected current semantic inventories and the obsolete copy-rule
+  quotation. Re-grounded affected source citations, including the install-fence
+  README citation; historical journal coordinates retain their original
+  values where they describe a past location.
+  Measured focused checks, build, typecheck, full tests and test typechecking
+  passed. Both named deletion probes were killed and restoration was verified,
+  including the input-header deletion that previously survived.
+  Correction to the earlier acceptance-baseline entry above: its five warnings
+  were not all pre-existing. The supplied base report had one source-fresh
+  warning; the round-2 report added four blank-start-line warnings in log.md,
+  subsequently fixed. The round-3 pre-edit report had no warnings. The native
+  reports preserve these distinct observations; they are not interchangeable
+  baselines. Final committed documentation verification is recorded below.
+
+  After the substantive commit, focused verification passed and
+  `okf-kit check --json --require-anchors docs/okf` measured 0 errors,
+  0 warnings and 23 notices. Full finding-object comparison against the
+  supplied original baseline found no introduced findings and removed its
+  one install-fence source-fresh warning; comparison against the round-3
+  pre-edit report found identical findings. The five affected consumer docs
+  were re-stamped after source inspection and these checks. Full checks and
+  probe evidence carry forward over this timestamp/journal-only closure: the
+  tested source, assets and fixtures are unchanged.

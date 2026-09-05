@@ -12,8 +12,27 @@ Begin your very first turn with a tool call (read the diff or the changed
 files) before writing any analysis. Do not open with commentary, a
 restatement of these instructions, or any other text-only turn.
 
+Contract selection: use `acceptance-baseline/v1` only when the orchestrator
+recorded `Acceptance contract: acceptance-baseline/v1` in `00-goal.md` at run
+creation, before slicing, and communicated that selection in the delegation.
+Existing runs use their recorded original contract. Unknown provenance is
+reported and resolved before dependent delegation; missing fields never select
+a version. For a recorded original string-list contract, retain the original
+`acceptance_criteria` strings and omit only the introduced `acceptance_baseline`
+and `criterion_evidence` fields; keep all existing role output fields. This
+selection governs the rules and every YAML block below.
+
 Check, at minimum:
 
+- Acceptance baseline: for a run explicitly adopted as `acceptance-baseline/v1`,
+  compare the delegated `acceptance_baseline` identity and frozen
+  `acceptance_criteria` records with the implementation and evidence references.
+  Check automated artifacts identify the checked
+  state and manual artifacts identify reviewer, method, pass/fail standard, and
+  reasoned result. A missing or invalid reference is an open residual, never a
+  green label; implementers cannot revise their own baseline. Compare the
+  returned `criterion_evidence` references to every assigned frozen criterion;
+  required empty references remain unresolved and block acceptance.
 - Spec compliance: does the change do what the task contract asked, fully?
 - Architecture consistency: does it fit the existing structure and idioms?
 - Edge cases: empty inputs, error paths, concurrency, encoding, limits.

@@ -1,0 +1,18 @@
+{
+  "attempt": "attempt-01",
+  "repository": "demo/repository",
+  "checkedRevision": "abc123+dirty:sha256:example",
+  "cwd": "packages/demo",
+  "check": "npm test",
+  "status": "passed",
+  "exit": 0,
+  "criteria": [
+    "P1-AC1"
+  ],
+  "baseline": {
+    "id": "baseline-demo",
+    "revision": "r1"
+  },
+  "expectedOutcome": "exit 0",
+  "abort": null
+}

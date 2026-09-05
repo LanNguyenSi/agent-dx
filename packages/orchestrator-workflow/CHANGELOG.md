@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Acceptance-baseline/v1 is an explicitly adopted, creation-time run contract:
+  canonical baseline and criterion records are propagated unchanged into each
+  delegated task, and coverage references remain links to concrete result
+  artifacts. Implementer returns include the delegated baseline identity and
+  a per-criterion evidence-reference index; required empty references remain
+  unresolved. All input/output blocks select the recorded contract explicitly,
+  preserving original string-list contracts for established older runs.
+  Existing runs are not migrated or classified from missing fields.
+
 ### Changed
 
 - After independent review, a narrowly scoped docs-only closing delta may be
