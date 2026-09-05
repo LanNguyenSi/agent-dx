@@ -2,19 +2,28 @@
 
 ## Delegated Acceptance Baseline
 
-- **Baseline ID / revision:** <!-- copied from 00-goal.md -->
-
-Copy each relevant criterion record from `00-goal.md` unchanged, including its
-stable ID, required status, exact text, verification definition, and negative
-space. The task list is a lossless superset of these delegated records.
-
-| Criterion ID | Required | Exact criterion text | Verification definition | Negative space |
-|---|---|---|---|---|
-| <!-- AC-001 --> | <!-- yes/no --> | <!-- copied unchanged --> | <!-- copied unchanged --> | <!-- copied unchanged --> |
+For a run that explicitly adopted `acceptance-baseline/v1`, each task carries
+the relevant frozen records in its own contract. Copy these canonical fields
+from `00-goal.md` unchanged; the task list is a lossless superset, not a
+second place to revise criteria.
 
 ## Task List
 
 ### T-001: <!-- Title -->
+
+**Delegated Acceptance Contract**
+
+```yaml
+acceptance_baseline:
+  id: "" # copied unchanged from 00-goal.md
+  revision: "" # copied unchanged from 00-goal.md
+acceptance_criteria:
+  - id: "" # copied unchanged
+    required: true # copied unchanged
+    text: "" # copied unchanged
+    verification: "" # copied unchanged
+    negative_space: "" # copied unchanged
+```
 
 **Goal**
 

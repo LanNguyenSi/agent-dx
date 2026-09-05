@@ -679,7 +679,6 @@ describe("task slicer output schema is a superset of the implementer input contr
   const listShapedTaskFields = [
     "relevant_files",
     "relevant_docs",
-    "acceptance_criteria",
     "constraints",
     "suggested_tests",
     "allowed_changes",
@@ -704,6 +703,10 @@ describe("task slicer output schema is a superset of the implementer input contr
     return new RegExp(`^ {4}${field}:\\n {6}- ""$`, "m");
   }
 
+  function criterionRecordsShape(): RegExp {
+    return /^ {4}acceptance_criteria:\n {6}- id: ""\n {8}required: true\n {8}text: ""\n {8}verification: ""\n {8}negative_space: ""$/m;
+  }
+
   it("SKILL.md's task slicer output contract block carries the list-shaped task fields with the mirrored list shape", () => {
     const block = yamlBlockAfter(skillMdRaw, "## Task slicer output contract");
     for (const field of listShapedTaskFields) {
@@ -712,6 +715,7 @@ describe("task slicer output schema is a superset of the implementer input contr
         `missing "${field}:" (or wrong list shape) in SKILL.md's task slicer output contract`,
       ).toMatch(fieldWithListShape(field));
     }
+    expect(block).toMatch(criterionRecordsShape());
   });
 
   it("task-slicer.md's output structure carries the list-shaped task fields with the mirrored list shape", () => {
@@ -725,6 +729,7 @@ describe("task slicer output schema is a superset of the implementer input contr
         `missing "${field}:" (or wrong list shape) in task-slicer.md's output structure`,
       ).toMatch(fieldWithListShape(field));
     }
+    expect(block).toMatch(criterionRecordsShape());
   });
 
   it("no field required by the subagent input contract is absent from the slicer output schema", () => {
@@ -748,8 +753,13 @@ describe("task slicer output schema is a superset of the implementer input contr
       "expected_output",
       "format",
     ];
-    const topLevel = [...subagentBlock.matchAll(/^(\w+):/gm)].map((m) => m[1]);
-    const contextChildren = [...subagentBlock.matchAll(/^ {2}(\w+):/gm)].map(
+    const beforeContext = subagentBlock.slice(0, subagentBlock.indexOf("context:"));
+    const topLevel = [...beforeContext.matchAll(/^(\w+):/gm)].map((m) => m[1]);
+    const contextBlock = subagentBlock.slice(
+      subagentBlock.indexOf("context:"),
+      subagentBlock.indexOf("expected_output:"),
+    );
+    const contextChildren = [...contextBlock.matchAll(/^ {2}(\w+):/gm)].map(
       (m) => m[1],
     );
     const required = [...topLevel, ...contextChildren].filter(
@@ -759,6 +769,10 @@ describe("task slicer output schema is a superset of the implementer input contr
     // otherwise the regexes above rotted and the loop below proves nothing.
     expect(required).toContain("relevant_docs");
     expect(required).toContain("goal");
+    expect(
+      subagentBlock.match(/^acceptance_criteria:/gm),
+      "the subagent input contract must not silently override record criteria with a second key",
+    ).toHaveLength(1);
     for (const field of required) {
       expect(
         slicerBlock,
@@ -786,9 +800,10 @@ describe("task slicer output schema is a superset of the implementer input contr
       "id: T-001",
       "title:",
       "goal:",
+      "acceptance_baseline:",
+      "acceptance_criteria:",
       "relevant_files:",
       "relevant_docs:",
-      "acceptance_criteria:",
       "constraints:",
       "suggested_tests:",
       "allowed_changes:",
@@ -836,7 +851,7 @@ describe("task slicer output schema is a superset of the implementer input contr
   it("SKILL.md documents the 1:1 field mapping from slicer output into the subagent input contract", () => {
     const unwrapped = unwrap(skillMdRaw);
     expect(unwrapped).toContain(
-      "copies each task's goal, relevant_files, relevant_docs, acceptance_criteria, constraints, allowed_changes, and forbidden_changes 1:1 into the subagent input contract",
+      "copies each task's goal, acceptance_baseline, acceptance_criteria, relevant_files, relevant_docs, constraints, allowed_changes, and forbidden_changes 1:1 into the subagent input contract",
     );
   });
 
@@ -849,6 +864,7 @@ describe("task slicer output schema is a superset of the implementer input contr
     const proseFields = [
       "title",
       "goal",
+      "acceptance baseline",
       "relevant files",
       "relevant docs",
       "acceptance",

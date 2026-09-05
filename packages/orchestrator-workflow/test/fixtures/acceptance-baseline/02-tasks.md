@@ -1,10 +1,22 @@
 # Tasks
 
-## Delegated Acceptance Baseline
+### T-001: illustrative delivery
 
-- **Baseline ID / revision:** baseline-demo / r1
+**Delegated Acceptance Contract**
 
-| Criterion ID | Required | Exact criterion text | Verification definition | Negative space |
-|---|---|---|---|---|
-| P1-AC1 | yes | Automated artifact references resolve. | `npm test` exits 0. | Does not establish manual review quality. |
-| P1-AC2 | yes | A reviewer judges the release note. | Reviewer examines `release-note.md`; passes only when the note names the migration boundary. | Does not establish command output. |
+```yaml
+acceptance_baseline:
+  id: baseline-demo
+  revision: r1
+acceptance_criteria:
+  - id: P1-AC1
+    required: true
+    text: Automated artifact references resolve.
+    verification: npm test exits 0.
+    negative_space: Does not establish manual review quality.
+  - id: P1-AC2
+    required: true
+    text: A reviewer judges the release note.
+    verification: Reviewer examines release-note.md; passes only when the note names the migration boundary.
+    negative_space: Does not establish command output.
+```

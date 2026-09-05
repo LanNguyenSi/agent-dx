@@ -32,6 +32,10 @@ identifies the artifact revision, reviewer, method, pass/fail standard, and
 reasoned result; it remains explicitly manual. Coverage never turns a reviewer
 recommendation or accepted risk into automated verification.
 
+Each reference resolves relative to this summary file. It must identify the
+same baseline and criterion as the frozen delegated record; a copied label or
+an optional row cannot stand in for a required criterion.
+
 ## Open Required Residuals
 
 | Criterion ID | Why evidence is not decisive | Acceptance effect |

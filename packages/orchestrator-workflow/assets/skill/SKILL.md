@@ -134,6 +134,16 @@ directory and the subagents.
    including the run-base marker (see Run state): operator request, goal,
    non-goals, constraints, assumptions, open questions. Write the `.ai/run`
    pointer (see Run state) in every worktree the run touches.
+   For a new run adopting the acceptance contract, record `Acceptance contract:
+   acceptance-baseline/v1` in `00-goal.md` before planning, slicing, or
+   delegation, then freeze its canonical `acceptance_baseline` and
+   `acceptance_criteria` records. Existing runs continue under their recorded
+   original contract; missing v1 fields neither identify a legacy run nor
+   impose a migration. If adoption or contract provenance is unknown, report
+   that uncertainty rather than inventing a version.
+   All acceptance-baseline/v1-specific obligations below apply only to a run
+   with that explicit declaration; they do not retroactively add a blocker to
+   an existing run.
    If the task can proceed on reasonable assumptions, proceed without blocking.
 2. **Discover (optional, read-only).** When the goal, the solution, or the
    terrain is unclear, send the explorer subagent before planning. Have it
@@ -152,8 +162,8 @@ directory and the subagents.
    rollback considerations where relevant.
 4. **Slice tasks.** For non-trivial changes, fill `02-tasks.md`. Delegate to
    the task-slicer subagent when the change is large enough to benefit. Each
-   task carries: id, title, goal, relevant files, relevant docs, acceptance
-   criteria, constraints, suggested tests, allowed changes, forbidden
+   an explicitly adopted v1 task carries: id, title, goal, acceptance baseline, acceptance criteria,
+   relevant files, relevant docs, constraints, suggested tests, allowed changes, forbidden
    changes, dependencies, risk. A high-risk task whose acceptance criteria
    allow recording the divergence instead of changing behavior, so its
    outcome is undetermined at slice time (for example, phrased along the
@@ -169,11 +179,14 @@ directory and the subagents.
    task will not edit.
 5. **Validate tasks.** Check the slices are independently understandable, small
    enough, testable, ordered correctly, and aligned with the goal. Fix the
-   slicing before any implementation starts. Freeze the acceptance baseline in
-   `00-goal.md`: its ID/revision and each stable criterion ID, required status,
-   exact text, verification definition, and negative space. Copy the relevant
-   records unchanged into `02-tasks.md`; the sliced task contract is a lossless
-   superset, not an opportunity to revise the criteria.
+   slicing before any implementation starts. For an explicitly adopted v1 run,
+   freeze the acceptance baseline in
+   `00-goal.md`: its canonical `acceptance_baseline: { id, revision }` and each
+   `acceptance_criteria` record with stable ID, required status, exact text,
+   verification definition, and negative space. For an explicitly adopted v1
+   run, copy the relevant records unchanged into each `02-tasks.md` task
+   contract; the sliced task contract is a lossless superset, not an
+   opportunity to revise the criteria.
 6. **Delegate implementation.** Send each implementer subagent one narrow task
    contract (format below). The unsuffixed implementer carries a pinned
    effort: `medium` in its own file, whether or not tier variants are
@@ -214,7 +227,7 @@ directory and the subagents.
    prompt requires replaying it locally under the shell the step actually
    runs, with the expected-success and the expected-failure inputs, before
    treating it as tested.
-   For every required criterion, index a resolvable result artifact in the
+   For every required criterion in an explicitly adopted v1 run, index a resolvable result artifact in the
    implementation summary against its baseline ID/revision. Automated results
    identify attempt, repository, checked revision including relevant dirty
    state, cwd, applied check definition, status, exit/abort information, and
@@ -272,7 +285,7 @@ directory and the subagents.
    briefing names the replayed probes the implementer reports as killed
    together with their `mutant` and `verified_applied_via` values; the reviewer
    may then skip re-running those. The reviewer output contract itself is
-   unchanged. Ask the reviewer to compare the frozen delegated criteria with
+   unchanged. For an explicitly adopted v1 run, ask the reviewer to compare the frozen delegated criteria with
    the referenced evidence and judge semantic adequacy, including whether a
    manual check is actually concrete and reasoned.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
@@ -282,7 +295,7 @@ directory and the subagents.
    or critical finding counts as a waiver and follows the same rules. Record
    all decisions and waivers in `03-decisions.md` and summarize waivers in
    the Accepted Waivers section of `06-handoff.md`. Do not accept while a
-   required baseline criterion has an open residual; a residual retains its ID
+   required baseline criterion in an explicitly adopted v1 run has an open residual; a residual retains its ID
    and cannot be converted away. After independent review,
    the orchestrator may close a docs-only delta without another reviewer round only
    when the entire unreviewed delta contains only explanatory
@@ -358,12 +371,19 @@ recommendation: ""
 role: advisor | explorer | implementer | reviewer | task_slicer
 task_id: T-000
 goal: ""
+acceptance_baseline:
+  id: ""
+  revision: ""
+acceptance_criteria:
+  - id: ""
+    required: true
+    text: ""
+    verification: ""
+    negative_space: ""
 context:
   relevant_files: []
   relevant_docs: []
 constraints:
-  - ""
-acceptance_criteria:
   - ""
 allowed_changes:
   - ""
@@ -474,11 +494,18 @@ tasks:
   - id: T-001
     title: ""
     goal: ""
+    acceptance_baseline:
+      id: ""
+      revision: ""
+    acceptance_criteria:
+      - id: ""
+        required: true
+        text: ""
+        verification: ""
+        negative_space: ""
     relevant_files:
       - ""
     relevant_docs:
-      - ""
-    acceptance_criteria:
       - ""
     constraints:
       - ""
@@ -497,10 +524,12 @@ open_questions:
   - ""
 ```
 
-The orchestrator copies each task's goal, relevant_files, relevant_docs,
-acceptance_criteria, constraints, allowed_changes, and forbidden_changes 1:1
-into the subagent input contract when delegating implementation, rather than
-inventing new field values.
+For an explicitly adopted v1 run, the orchestrator copies each task's goal,
+acceptance_baseline, acceptance_criteria, relevant_files, relevant_docs,
+constraints, allowed_changes, and forbidden_changes 1:1 into the subagent
+input contract when delegating implementation, rather than inventing new field
+values. The copied criterion records retain `id`, `required`, `text`,
+`verification`, and `negative_space` unchanged.
 
 ## Advisor output contract
 

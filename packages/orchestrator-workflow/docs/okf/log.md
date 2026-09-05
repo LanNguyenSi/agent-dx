@@ -302,7 +302,7 @@
   relationship has a dedicated equality-and-superset test suite" was already
   false at the doc's own 2026-08-17 stamp, since the reviewer pair had a
   byte-for-byte `reproduction`-field test since 0.14.0
-  (`test/docs-consistency.test.ts:931-944#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
+  (`test/docs-consistency.test.ts:960#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
   current set of three guarded pairs (task-slicer/subagent-input, reviewer,
   implementer — the last two by byte-for-byte field-block equality tests)
   and names explorer as the one pair still without a dedicated guard; (2)
@@ -2656,7 +2656,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:202#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:209#"the keyed placeholder line's exact text,"`,
 re-pointed by 38 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
@@ -7205,7 +7205,7 @@ this class recurred on (line 295, `,274-275` for "Repos without a bundle
 are unaffected", which at this round's head sits at
 `packages/orchestrator-workflow/assets/skill/SKILL.md:295`,
 re-anchored to its own
-`packages/orchestrator-workflow/assets/skill/SKILL.md:315#"without a bundle are unaffected"`).
+`packages/orchestrator-workflow/assets/skill/SKILL.md:328#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
 in this bundle's non-reserved docs now has its own anchor via a full
 citation (`index.md` and `log.md` are append-only journals and keep their
@@ -7313,3 +7313,12 @@ unrelated agent-primitives merge with no OKF-bundle change) found the
 warning's message and target byte-identical and the 23 notices the same
 `citations-resolve`/`unresolved-ambiguous` set in both runs: this
 closing delta's finding-set delta against base is zero.
+
+- 2026-09-05 (acceptance-baseline/v1): added the explicit new-run adoption
+  record, canonical criterion records, lossless per-task propagation, and
+  result-artifact coverage guidance. Re-verified the affected lifecycle,
+  contract, and review-gate docs after re-pointing their source citations.
+  Focused contract tests, build, typecheck, test, and test typecheck passed;
+  the baseline-propagation deletion probe was killed and restored. `okf-kit
+  check --json --require-anchors docs/okf` reported 0 errors, 5 warnings, and
+  23 notices; the warnings are existing source-fresh/blank-start-line entries.

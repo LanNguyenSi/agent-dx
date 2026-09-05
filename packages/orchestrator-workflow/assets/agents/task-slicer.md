@@ -22,11 +22,15 @@ Rules:
   independently shippable unit) by default, not bundled with a lower-risk
   sibling task.
 - Propose an implementation order.
-- Include the delegated baseline ID/revision and unchanged full relevant
-  criterion records in each task contract. Do not revise the baseline.
+- For a run explicitly adopted as `acceptance-baseline/v1`, include
+  `acceptance_baseline: { id, revision }` and unchanged full
+  `acceptance_criteria` records in each task contract. Each record has `id`,
+  `required`, `text`, `verification`, and `negative_space`; do not revise the
+  baseline. Existing runs without recorded adoption continue under their
+  original contract; missing v1 fields never establish legacy status.
 - Each task must be completable by an implementer subagent with limited
-  context: include id, title, goal, relevant files, relevant docs,
-  acceptance criteria, constraints, suggested tests, allowed changes,
+  context: include id, title, goal, acceptance baseline, acceptance criteria,
+  relevant files, relevant docs, constraints, suggested tests, allowed changes,
   forbidden changes, dependencies, and risk. Allowed changes and forbidden changes are scope
   boundaries for the task — which files or areas the implementer may touch
   and must not touch — not implementation instructions.
@@ -49,11 +53,18 @@ tasks:
   - id: T-001
     title: ""
     goal: ""
+    acceptance_baseline:
+      id: ""
+      revision: ""
+    acceptance_criteria:
+      - id: ""
+        required: true
+        text: ""
+        verification: ""
+        negative_space: ""
     relevant_files:
       - ""
     relevant_docs:
-      - ""
-    acceptance_criteria:
       - ""
     constraints:
       - ""

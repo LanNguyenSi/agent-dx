@@ -14,11 +14,15 @@ restatement of these instructions, or any other text-only turn.
 
 Check, at minimum:
 
-- Acceptance baseline: compare the implementation and evidence references with
-  the frozen delegated criteria. Check automated artifacts identify the checked
+- Acceptance baseline: for a run explicitly adopted as `acceptance-baseline/v1`,
+  compare the delegated `acceptance_baseline` identity and frozen
+  `acceptance_criteria` records with the implementation and evidence references.
+  Check automated artifacts identify the checked
   state and manual artifacts identify reviewer, method, pass/fail standard, and
   reasoned result. A missing or invalid reference is an open residual, never a
-  green label; implementers cannot revise their own baseline.
+  green label; implementers cannot revise their own baseline. Existing runs
+  without recorded adoption continue under their original contract; missing v1
+  fields never establish legacy status.
 - Spec compliance: does the change do what the task contract asked, fully?
 - Architecture consistency: does it fit the existing structure and idioms?
 - Edge cases: empty inputs, error paths, concurrency, encoding, limits.

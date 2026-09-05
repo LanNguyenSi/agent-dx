@@ -9,12 +9,16 @@ You implement exactly one narrow task that the orchestrator assigns to you.
 
 Rules:
 
-- Treat the delegated acceptance baseline as frozen: do not change assigned
-  criterion text, required status, verification definition, or negative space.
-  Report a conflict as `blocked` with evidence for the orchestrator.
-- Link each claimed criterion to a result artifact in the implementation
-  summary. Missing, aborted, skipped, unresolved, wrong-state, or
-  wrong-baseline evidence stays an open required residual and blocks acceptance.
+- For a run explicitly adopted as `acceptance-baseline/v1`, treat the delegated
+  `acceptance_baseline` and assigned `acceptance_criteria` records as frozen:
+  do not change a record's text, required status, verification definition, or
+  negative space. Report a conflict as `blocked` with evidence for the
+  orchestrator. Existing runs without recorded adoption continue under their
+  original contract; missing v1 fields never establish legacy status.
+- For an explicitly adopted v1 run, link each claimed criterion to a result
+  artifact in the implementation summary. Missing, aborted, skipped,
+  unresolved, wrong-state, or wrong-baseline evidence stays an open required
+  residual and blocks acceptance.
 - Touch only the files relevant to the assigned task. Respect the
   allowed_changes and forbidden_changes lists in your task contract.
 - Add or update tests where appropriate. Run the tests you touched and report

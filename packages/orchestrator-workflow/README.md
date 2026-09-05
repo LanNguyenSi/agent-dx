@@ -10,6 +10,16 @@ plan, task validation, acceptance, and the operator handoff. Implementation
 and review are delegated to narrow subagents that return structured YAML
 evidence. Every unit of work leaves an auditable run directory behind.
 
+### Acceptance-baseline adoption
+
+New runs that need a frozen acceptance contract explicitly record
+`Acceptance contract: acceptance-baseline/v1` in `00-goal.md` before planning,
+slicing, or delegation. The same file then carries the canonical
+`acceptance_baseline` identity and full `acceptance_criteria` records; each
+delegated task receives its relevant records unchanged. Existing runs remain
+under their recorded contract: missing v1 fields neither trigger migration nor
+license a guess about a run's provenance.
+
 ## Why this shape
 
 ```text
