@@ -50,6 +50,16 @@ silently reduce it to a selected summary. The envelope also contains:
 - a clear unavailable/error form when the preflight executable cannot run or
   its JSON is absent or malformed.
 
+Use `availability: "available"` only when a parseable producer payload was
+captured; otherwise use `availability: "unavailable"` with the invocation
+error. Availability is not completeness. Retain the original payload and exit
+outcome, and mark diagnostics `complete: false` with missing or anomalous
+fields when the execution outcome and payload disagree. In particular, exit 2
+with `ready: true` is an unknown/error outcome, and a syntactically valid
+`ready: true` payload missing required fields is incomplete. Neither case may
+silently default to complete, and neither can justify omitting a required
+invocation even if the unchanged verdict is ready.
+
 Preserve the producer's semantics: preflight reports a not-ready finding with
 exit 1 and valid JSON. Parse that JSON before deciding whether it is usable.
 Malformed/missing JSON and unavailable execution must be explicit diagnostics,
@@ -79,6 +89,13 @@ but cannot convert them into a ready decision or execute their contents.
 6. The test seam observes exactly one preflight process invocation per
    `evaluateSolution` call.
 7. Tests assert that the written signed marker contains no diagnostics field.
+8. Unit and MCP fixtures for exit 2 plus `ready: true` preserve the exit and
+   original payload, mark available diagnostics erroneous/incomplete, and leave
+   the existing verdict folding, signing, and gate behavior unchanged.
+9. Unit and MCP fixtures for a syntactically valid but incomplete `ready: true`
+   payload preserve it, name missing fields, and never default it to complete.
+10. The single-process assertion applies only after preflight is launched;
+    invalid-id and unresolved-HEAD paths launch zero preflight processes.
 
 Use fixture payloads rather than a live preflight executable. Cover both the
 unit evaluator and MCP round trip where the current tests establish those
@@ -112,13 +129,18 @@ them:
 | `<run-dir>/second-preflight.patch` | Make the evaluator start a second preflight process; the invocation-count test must fail. |
 | `<run-dir>/marker-leak.patch` | Add diagnostics to the marker projection; the signed-marker boundary test must fail. |
 
+Each patch changes only `src/solution-verdict.ts` when applied from
+`packages/grounding-mcp`. Every patch header names the repository-relative
+`packages/grounding-mcp/src/solution-verdict.ts`; every plan mutant declares
+`file: "src/solution-verdict.ts"`, as required by `probe --plan`.
+
 ```json
 {
   "test": "npx vitest run tests/solution-verdict.test.ts tests/grounding-gate-mcp-roundtrip.test.ts",
   "mutants": [
-    { "patch": "<run-dir>/waiver-removed.patch" },
-    { "patch": "<run-dir>/second-preflight.patch" },
-    { "patch": "<run-dir>/marker-leak.patch" }
+    { "file": "src/solution-verdict.ts", "patch": "<run-dir>/waiver-removed.patch" },
+    { "file": "src/solution-verdict.ts", "patch": "<run-dir>/second-preflight.patch" },
+    { "file": "src/solution-verdict.ts", "patch": "<run-dir>/marker-leak.patch" }
   ]
 }
 ```
