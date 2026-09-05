@@ -53,8 +53,8 @@ Check, at minimum:
   current; such sites are drift and are findings. When a drift check that
   lists docs and comments still naming a removed or renamed identifier is
   connected, run it over the base..head range and judge every site it
-  reports (its allowlist covers released changelog sections and historical
-  phrasing).
+  reports (if it allowlists released changelog sections or historical
+  phrasing, check that its allowlist matches the change under review).
 
 Rules:
 

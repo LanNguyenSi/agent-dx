@@ -4416,24 +4416,25 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
  * renames an exported identifier, type, config key or file, comments,
  * README, unshipped CHANGELOG prose, or doc comments that still describe
  * the old name as current are drift and are findings; when a drift check
- * is connected it is run over the base..head range. The item itself stays
- * tool-agnostic (see the "roles prefer connected structural search, verify,
- * and mutation-probe runners" describe block's tool-agnosticism guard); the
- * concrete `agent-primitives drift` guard is named only in CHANGELOG.md.
- * Appended at the file's end (not inserted mid-file) so no earlier
- * line-anchored OKF citation into this file shifts.
+ * is connected it is run over the base..head range, and (T-003b) its
+ * allowlist is checked only conditionally, not asserted as fact for every
+ * connected checker. The item itself stays tool-agnostic (see the "roles
+ * prefer connected structural search, verify, and mutation-probe runners"
+ * describe block's tool-agnosticism guard); the concrete
+ * `agent-primitives drift` guard is named only in CHANGELOG.md. Appended
+ * at the file's end (not inserted mid-file) so no earlier line-anchored
+ * OKF citation into this file shifts. `reviewerMd` is already
+ * whitespace-collapsed by `unwrap`, so slicing it needs no further
+ * flattening.
  */
 describe("identifier drift ships as a reviewer checklist item", () => {
   const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
   const changelogMd = readDoc("CHANGELOG.md");
-  const flat = (doc: string) => doc.replace(/\s+/g, " ");
 
-  const driftSlice = flat(
-    phraseBoundedSlice(
-      reviewerMd,
-      "Identifier drift: after a change deletes or renames an exported identifier, type, config key or file",
-      "phrasing).",
-    ),
+  const driftSlice = phraseBoundedSlice(
+    reviewerMd,
+    "Identifier drift: after a change deletes or renames an exported identifier, type, config key or file",
+    "the change under review).",
   );
 
   it("the reviewer prompt names the trigger with the exact 'after a change deletes or renames' wording (a mutant broadening it to 'after any change' must fail this)", () => {
@@ -4456,19 +4457,57 @@ describe("identifier drift ships as a reviewer checklist item", () => {
     );
   });
 
+  // Narrow on purpose: this only guards the one product name the item must
+  // never hardcode (decision D-026); it is not a general prohibition on
+  // every possible tool or vendor name appearing in this item.
   it("the reviewer prompt stays generic here: no product or binary name is hardcoded in this item", () => {
     expect(driftSlice).not.toContain("agent-primitives");
   });
 
-  it("the CHANGELOG's Unreleased section carries the ow-kit-effort-analysis.md section 7(iv) citation and names the agent-primitives drift guard (a mutant re-citing 7(v) must fail this)", () => {
-    const start = changelogMd.indexOf("## [Unreleased]");
-    const next = changelogMd.indexOf("\n## [", start + 1);
-    expect(start).toBeGreaterThan(-1);
-    const section = flat(
-      changelogMd.slice(start, next === -1 ? undefined : next),
+  it("the reviewer prompt makes the allowlist check conditional, not a blanket claim (a mutant restoring the old unconditional 'its allowlist covers ...' wording must fail this)", () => {
+    expect(driftSlice).toContain(
+      "if it allowlists released changelog sections or historical phrasing, check that its allowlist matches the change under review",
+    );
+    expect(driftSlice).not.toContain(
+      "its allowlist covers released changelog sections and historical phrasing",
+    );
+  });
+
+  it("the CHANGELOG's identifier-drift bullet carries the ow-kit-effort-analysis.md section 7(iv) citation and names the agent-primitives drift guard (a mutant re-citing 7(v) must fail this)", () => {
+    // Anchored on the bullet's own opening and closing text rather than the
+    // `## [Unreleased]`-to-next-heading span, so this still holds once the
+    // bullet is released and moves under a version heading.
+    const section = unwrap(
+      phraseBoundedSlice(
+        changelogMd,
+        "The installed reviewer prompt now carries a checklist item for identifier\n  drift:",
+        "section 7(iv).",
+      ),
     );
     expect(section).toContain("ow-kit-effort-analysis.md` section 7(iv)");
     expect(section).toContain("agent-primitives drift");
     expect(section).toContain("see the agent-primitives package");
+  });
+});
+
+/**
+ * T-003b (agent-dx 503136a4): the identifier-drift item has no SKILL.md
+ * counterpart even though the kit otherwise mirrors reviewer checks there
+ * (Placement at step 9, the Actions replay at steps 6/7), and Scaling
+ * delegation lets the orchestrator review a trivial rename itself, where
+ * the reviewer prompt never loads. SKILL.md step 7 now carries one
+ * sentence covering that gap, beside the Actions-replay reference it
+ * shares a paragraph with.
+ */
+describe("identifier drift is also covered for the orchestrator's own trivial-rename review (SKILL.md step 7)", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  it("step 7 names identifier drift for a deleted or renamed exported identifier, type, config key, or file, covering both the reviewer and the orchestrator's own trivial-rename review (a mutant deleting this sentence must fail this)", () => {
+    expect(skillMd).toContain(
+      "A change that deletes or renames an exported identifier, type, config key, or file is also checked for identifier drift",
+    );
+    expect(skillMd).toContain(
+      "by the reviewer or by the orchestrator itself when it reviews a trivial rename per Scaling delegation, using a connected drift check when one exists",
+    );
   });
 });
