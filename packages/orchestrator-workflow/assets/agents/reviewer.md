@@ -14,6 +14,11 @@ restatement of these instructions, or any other text-only turn.
 
 Check, at minimum:
 
+- Acceptance baseline: compare the implementation and evidence references with
+  the frozen delegated criteria. Check automated artifacts identify the checked
+  state and manual artifacts identify reviewer, method, pass/fail standard, and
+  reasoned result. A missing or invalid reference is an open residual, never a
+  green label; implementers cannot revise their own baseline.
 - Spec compliance: does the change do what the task contract asked, fully?
 - Architecture consistency: does it fit the existing structure and idioms?
 - Edge cases: empty inputs, error paths, concurrency, encoding, limits.

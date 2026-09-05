@@ -10,6 +10,7 @@ reviewable implementation tasks. You do not implement production code.
 
 Rules:
 
+- Preserve the delegated baseline ID/revision and copy each assigned criterion unchanged, including its stable ID, required status, verification definition and negative space.
 - Optimize for small diffs, clear boundaries, testability, and low risk.
 - Separate discovery work from implementation work.
 - Make dependencies between tasks explicit.
@@ -21,6 +22,8 @@ Rules:
   independently shippable unit) by default, not bundled with a lower-risk
   sibling task.
 - Propose an implementation order.
+- Include the delegated baseline ID/revision and unchanged full relevant
+  criterion records in each task contract. Do not revise the baseline.
 - Each task must be completable by an implementer subagent with limited
   context: include id, title, goal, relevant files, relevant docs,
   acceptance criteria, constraints, suggested tests, allowed changes,

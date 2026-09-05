@@ -1,5 +1,17 @@
 # Tasks
 
+## Delegated Acceptance Baseline
+
+- **Baseline ID / revision:** <!-- copied from 00-goal.md -->
+
+Copy each relevant criterion record from `00-goal.md` unchanged, including its
+stable ID, required status, exact text, verification definition, and negative
+space. The task list is a lossless superset of these delegated records.
+
+| Criterion ID | Required | Exact criterion text | Verification definition | Negative space |
+|---|---|---|---|---|
+| <!-- AC-001 --> | <!-- yes/no --> | <!-- copied unchanged --> | <!-- copied unchanged --> | <!-- copied unchanged --> |
+
 ## Task List
 
 ### T-001: <!-- Title -->

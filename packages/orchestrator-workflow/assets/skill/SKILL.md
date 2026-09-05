@@ -169,7 +169,11 @@ directory and the subagents.
    task will not edit.
 5. **Validate tasks.** Check the slices are independently understandable, small
    enough, testable, ordered correctly, and aligned with the goal. Fix the
-   slicing before any implementation starts.
+   slicing before any implementation starts. Freeze the acceptance baseline in
+   `00-goal.md`: its ID/revision and each stable criterion ID, required status,
+   exact text, verification definition, and negative space. Copy the relevant
+   records unchanged into `02-tasks.md`; the sliced task contract is a lossless
+   superset, not an opportunity to revise the criteria.
 6. **Delegate implementation.** Send each implementer subagent one narrow task
    contract (format below). The unsuffixed implementer carries a pinned
    effort: `medium` in its own file, whether or not tier variants are
@@ -210,6 +214,18 @@ directory and the subagents.
    prompt requires replaying it locally under the shell the step actually
    runs, with the expected-success and the expected-failure inputs, before
    treating it as tested.
+   For every required criterion, index a resolvable result artifact in the
+   implementation summary against its baseline ID/revision. Automated results
+   identify attempt, repository, checked revision including relevant dirty
+   state, cwd, applied check definition, status, exit/abort information, and
+   checked criteria. Manual results identify the artifact revision, reviewer,
+   method, pass/fail standard, and reasoned result and remain explicitly
+   manual. Missing, aborted, skipped, unresolved, wrong-state, or
+   wrong-baseline evidence remains an open required residual and blocks
+   acceptance; the coverage index is not a results database or acceptance
+   engine. Only the orchestrator can explicitly revise a baseline, recording
+   old/new revisions, affected IDs, authority and reason, invalidated evidence,
+   and verified rationale for carrying unchanged evidence forward.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed
@@ -256,14 +272,18 @@ directory and the subagents.
    briefing names the replayed probes the implementer reports as killed
    together with their `mutant` and `verified_applied_via` values; the reviewer
    may then skip re-running those. The reviewer output contract itself is
-   unchanged.
+   unchanged. Ask the reviewer to compare the frozen delegated criteria with
+   the referenced evidence and judge semantic adequacy, including whether a
+   manual check is actually concrete and reasoned.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high
    findings require the orchestrator to record a rationale. Deferring a high
    or critical finding counts as a waiver and follows the same rules. Record
    all decisions and waivers in `03-decisions.md` and summarize waivers in
-   the Accepted Waivers section of `06-handoff.md`. After independent review,
+   the Accepted Waivers section of `06-handoff.md`. Do not accept while a
+   required baseline criterion has an open residual; a residual retains its ID
+   and cannot be converted away. After independent review,
    the orchestrator may close a docs-only delta without another reviewer round only
    when the entire unreviewed delta contains only explanatory
    documentation, comments, or citations; contains no source- or test-file
