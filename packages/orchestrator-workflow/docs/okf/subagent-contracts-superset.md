@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-05T22:18:44Z
+timestamp: 2026-09-06T00:00:00Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -17,6 +17,7 @@ sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/test/docs-consistency.test.ts
   - packages/orchestrator-workflow/test/acceptance-baseline.test.ts
+  - packages/orchestrator-workflow/test/decision-authority.test.ts
   - packages/orchestrator-workflow/CHANGELOG.md
 ---
 
@@ -75,6 +76,16 @@ retains its strings and omits only the added baseline/evidence-index fields.
 Existing role output fields remain. Unknown provenance is resolved before
 dependent delegation; absent fields never select a version. Contract sites:
 
+The reviewer’s recommendation remains input to, rather than a substitute for,
+orchestrator acceptance. Its prompt states that neither that recommendation
+nor the orchestrator can authorize a critical waiver; only an operator can
+(`packages/orchestrator-workflow/assets/agents/reviewer.md:80#"A reviewer recommendation is not orchestrator acceptance"`). The generated
+Claude Code, Codex, and opencode reviewer variants all derive from this same
+asset body; `decision-authority.test.ts` renders and checks each installed
+reviewer tier. The rule preserves the existing requirement that every change
+receives review judgment, including the orchestrator's self-review of a
+trivial change.
+
 - Explorer: `packages/orchestrator-workflow/assets/skill/SKILL.md:368#"risk: low | medium | high"`
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:48-70#"recommendation:"`.
@@ -85,7 +96,7 @@ dependent delegation; absent fields never select a version. Contract sites:
   Both copies also gained a `commits` field; see
   [Commits field](#commits-field) below.
 - Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:492#"## Reviewer output contract"`
-  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:122#"role: reviewer"`. Both
+  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:123#"role: reviewer"`. Both
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below. Both
   also gained a per-finding `recurrence` field; see
@@ -353,12 +364,12 @@ Actions run-step shell replay named in both installed prompts (see CHANGELOG's
 same field: `sample_size: not_applicable` is allowed when the replay itself has
 no meaningful sample size
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:277#"GitHub Actions shell replay named in step 6 is a second, explicitly"`;
-`packages/orchestrator-workflow/assets/agents/reviewer.md:110#"shell replay above is a second, explicitly non-probabilistic trigger for"`). The
-installed `packages/orchestrator-workflow/assets/agents/reviewer.md:109#"lint) do not trigger this."`
+`packages/orchestrator-workflow/assets/agents/reviewer.md:111#"shell replay above is a second, explicitly non-probabilistic trigger for"`). The
+installed `packages/orchestrator-workflow/assets/agents/reviewer.md:110#"lint) do not trigger this."`
 prompt carries the same rule verbatim (second-person voice). Both output
 contracts gained a matching `reproduction` field
 (`method, sample_size, result, matches_implementer_claim`,
-`SKILL.md:519#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:135#"residual_risks:"`); `matches_implementer_claim`
+`SKILL.md:519#"matches_implementer_claim: matched | mismatched |"` and `reviewer.md:136#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` for reviews where the narrow trigger never fires, so
 a reviewer is not forced to fabricate a reproduction record for a
 deterministic-only change.
@@ -489,7 +500,7 @@ Unreleased entry for the pointer.
 The reviewer output contract gained a per-finding `recurrence: new |
 repeated` field, added to both copies identically
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:509#"recurrence: new | repeated"` and
-`packages/orchestrator-workflow/assets/agents/reviewer.md:131#"recurrence: new | repeated"`, same field, same
+`packages/orchestrator-workflow/assets/agents/reviewer.md:132#"recurrence: new | repeated"`, same field, same
 line-relative position inside the findings item in both). It classifies
 each finding against earlier review rounds on the same task: `new` for a
 defect class not previously found there, `repeated` for one that already

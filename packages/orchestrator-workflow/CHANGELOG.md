@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Decision records now use stable IDs and retain trigger/evidence, decision,
+  accountable authority/source, consequences, and supersession links. The
+  reviewer recommendation, orchestrator acceptance, and operator-only
+  critical-waiver authority are explicit and remain separate; Markdown
+  records evidence of authority rather than creating it.
+
 - Acceptance-baseline/v1 is an explicitly adopted, creation-time run contract:
   canonical baseline and criterion records are propagated unchanged into each
   delegated task, and coverage references remain links to concrete result

@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-05T22:18:44Z
+timestamp: 2026-09-06T00:00:00Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -14,6 +14,7 @@ sources:
   - packages/orchestrator-workflow/assets/templates/06-handoff.md
   - packages/orchestrator-workflow/test/docs-consistency.test.ts
   - packages/orchestrator-workflow/test/template-markers.test.ts
+  - packages/orchestrator-workflow/test/decision-authority.test.ts
   - packages/orchestrator-workflow/CHANGELOG.md
 ---
 
@@ -31,6 +32,29 @@ identical invariant for ceremony-scaling: "Review judgment still applies to
 every change; only the size of the apparatus changes."
 
 ## Severity ladder and what blocks
+
+## Decision authority is separate from a review recommendation
+
+A reviewer supplies findings and `acceptance_recommendation`; the
+orchestrator decides acceptance after applying the review gate. The new
+reviewer rule makes the boundary explicit: a reviewer recommendation cannot
+become orchestrator acceptance or authorize a critical waiver; only the
+operator may authorize that waiver
+(`packages/orchestrator-workflow/assets/agents/reviewer.md:80#"A reviewer recommendation is not orchestrator acceptance"`). This is a
+human/process authority rule, not a Markdown authorization mechanism.
+
+For newly created records, `03-decisions.md` records each decision with a
+stable ID, trigger/evidence, decision, accountable authority/source,
+consequences, and a supersession reference
+(`03-decisions.md:5#"| ID | Date | Trigger / Evidence |"`). Established runs
+retain their recorded decision format, and an absent new field does not become
+a retroactive acceptance blocker. A
+baseline revision and every accepted waiver link to the applicable decision
+ID. The source cell records concrete approval evidence; a bare role label,
+coverage fact, reviewer recommendation, or illustrative fixture is not proof
+of an operator approval. Routine in-scope decisions remain with the
+orchestrator, while an out-of-scope change and a critical waiver require an
+operator decision.
 
 For a run that explicitly adopts `acceptance-baseline/v1`, an open residual
 for a required baseline criterion blocks acceptance separately from this
@@ -67,7 +91,7 @@ rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
 resupply it instead of inferring one from the findings list" (`SKILL.md:
-355-357`; the installed `reviewer.md:84#"never leave it blank or omit it."` prompt carries the mirrored
+355-357`; the installed `reviewer.md:85#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.
@@ -89,7 +113,7 @@ below.
 - Recorded in
   `packages/orchestrator-workflow/assets/templates/03-decisions.md`, whose
   only structure is a `Date | Decision | Reason | Consequences` table
-  (`03-decisions.md:3#"| Date | Decision | Reason | Consequences |"`); the Reason cell is where the sign-off or rationale
+  (`03-decisions.md:5#"| ID | Date | Trigger / Evidence |"`); the Authority / Source cell is where the sign-off or rationale
   text lives, there is no separate waiver schema.
 - Summarized in `06-handoff.md`'s Accepted Waivers section
   (`agents-md-section.md:103#"the Accepted Waivers section of"`; `SKILL.md:303#"the Accepted Waivers section of"`), instructed to "Mirror
@@ -214,9 +238,9 @@ evidence, the reviewer must reproduce it independently — its own runs or
 measurements — and record method, sample size, and result against the
 implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
-same rule (`reviewer.md:109#"lint) do not trigger this."`), and both output contracts gained a matching
+same rule (`reviewer.md:110#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`SKILL.md:519#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:135#"residual_risks:"`); `matches_implementer_claim`
+field (`SKILL.md:519#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:136#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -240,7 +264,7 @@ all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
 `SKILL.md:524#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing — ask the reviewer to resupply it, rather than infer one from the
-findings — and the installed `reviewer.md:84#"never leave it blank or omit it."` prompt carries the mirrored
+findings — and the installed `reviewer.md:85#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part
@@ -280,14 +304,14 @@ carries the same rule in short form for repos without the full skill text
 loaded.
 
 The choice is recorded in `03-decisions.md`'s new named section
-(`03-decisions.md:7#"## Review-round escalation"`), a one-row-per-task
-table (`03-decisions.md:11#"| Task | Choice | Reason |"`) whose
+(`03-decisions.md:14#"## Review-round escalation"`), a one-row-per-task
+table (`03-decisions.md:18#"| Task | Choice | Reason |"`) whose
 `Choice` column is the enum `n/a | tier_escalation | advisor |
 merge_hold`, because one run carries multiple tasks and each can trigger
 the budget independently. A `review-round-escalation` marker defaulting
 to `n/a` is kept alongside the table as a reader shortcut to the most
 recent choice
-(`03-decisions.md:17#"<!-- review-round-escalation: choice = n/a -->"`).
+(`03-decisions.md:24#"<!-- review-round-escalation: choice = n/a -->"`).
 Unlike the two `solution-acceptance:` verdict markers in
 [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md),
 whose `TODO` default is a fail-closed sentinel that blocks acceptance
