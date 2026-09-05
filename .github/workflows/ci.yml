@@ -87,7 +87,7 @@ jobs:
         # anchor-not-unique-in-range, and test-range-straddles-block (see
         # the "Anchor-citation guard" step further down). Sequencing/
         # coordination evidence: see docs/okf/log.md.
-        run: npm install -g okf-kit@0.9.0
+        run: npm install -g okf-kit@0.9.0 --no-audit --no-fund
 
       - name: Assert CLI is alive (output, not exit code)
         shell: bash
@@ -408,7 +408,7 @@ jobs:
           cache-dependency-path: packages/${{ matrix.package }}/package-lock.json
 
       - name: Install
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck
         run: npm run typecheck --if-present
