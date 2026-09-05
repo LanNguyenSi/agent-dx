@@ -21,12 +21,12 @@ sources:
 # Run-state lifecycle and machine-readable markers
 
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
-`00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:65-76#"05-review-findings.md").
+`00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:76#"  05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(SKILL.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:125-130#"one directory per unit of work, newest = active";
+(SKILL.md:81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:125-130#"one directory per unit of work, newest = active";
 packages/orchestrator-workflow/INSTALL-AGENT.md:64-65#"(new files).",173-178). The newest run
 directory is the active one unless a `.ai/run` pointer names one
-(SKILL.md:80-83#"older directories are the auditable history. Do not", see the pointer section below); older
+(SKILL.md:83#"older directories are the auditable history. Do not", see the pointer section below); older
 directories are the auditable history and
 must not be edited (SKILL.md:83#"older directories are the auditable history. Do not", "Do not edit past runs"). Three of the
 seven files carry a `<!-- solution-acceptance: <key> = <value> -->`
@@ -45,14 +45,14 @@ YAML contracts referenced below live in
 byte-exact by packages/orchestrator-workflow/test/template-markers.test.ts:39-41#"<!-- solution-acceptance: run-base = TODO -->").
 At run creation the orchestrator replaces `TODO` with the pre-change repo
 HEAD (`git rev-parse HEAD`), recorded before the run's first implementation
-commit (SKILL.md:107-108#"recorded before the first implementation commit of the"). Despite sharing the `solution-acceptance:` prefix
+commit (SKILL.md:108#"recorded before the first implementation commit of the"). Despite sharing the `solution-acceptance:` prefix
 with the two verdict markers below, run-base is not a verdict: it is a
 change-binding signal for run-completeness readers, and it fails **open**
-(SKILL.md:110-111#"it does not block anything, the reader just falls back"). Left as `TODO` it does not block anything, the reader
+(SKILL.md:111#"it does not block anything, the reader just falls back"). Left as `TODO` it does not block anything, the reader
 just falls back to a tolerant day-granular date heuristic. When filled, the
 recorded sha must resolve in the repo, be an ancestor of HEAD, and must not
 lie behind the fork point of the change (the merge-base with the remote
-default branch) (SKILL.md:112-114#"change (the merge-base with the remote default branch);"). The in-repo changelog entry adds the
+default branch) (SKILL.md:114#"change (the merge-base with the remote default branch);"). The in-repo changelog entry adds the
 consumer's malformed-value behavior: a valid sha gets an exact binding, a
 malformed value blocks explicitly via a 7-40 hex guard, and only a bare
 `TODO` falls back to the date heuristic
@@ -75,17 +75,17 @@ worktree a run touches, the orchestrator binds it to the run with a pointer
 file, `<worktree-root>/.ai/run`: a plain text file whose first non-empty
 line is the absolute path of the run directory, machine-local, and it
 belongs in `.gitignore`
-(SKILL.md:89-96#"absolute path."). Write it before the first implementation
+(SKILL.md:96#"absolute path."). Write it before the first implementation
 commit, overwrite it at the start of every later run, and remove it when no
 run is active, since a pointer left behind keeps binding that worktree to
-the old run (SKILL.md:85-103#"document, not the kit's.").
+the old run (SKILL.md:103#"document, not the kit's.").
 
 The run-completeness reader resolves the run through the pointer first. When
 no pointer file exists, it falls back to that repository's own `.ai/runs/`
 and takes the run there that sorts newest by directory name; a broken
 pointer (one whose target does not resolve) is rejected outright rather
 than falling back
-(SKILL.md:98-103#"document, not the kit's."). The scan fallback is only
+(SKILL.md:103#"document, not the kit's."). The scan fallback is only
 right when the run actually lives in that repository and sorts last: the
 consumer's own test suite (agent-grounding, packages/grounding-mcp,
 `tests/ow-run-completeness.test.ts`) measures this directly. With no pointer
@@ -101,14 +101,14 @@ by this repo's suite.
 
 Step 1 of the Workflow carries the matching instruction to write the pointer
 in every worktree the run touches
-(SKILL.md:135-136#"in every worktree the run touches."), and each of the
+(SKILL.md:136#"in every worktree the run touches."), and each of the
 three per-harness bullets under Harness notes repeats that the pointer rule
-applies unchanged regardless of harness (SKILL.md:487-492#"applies unchanged.";
-SKILL.md:493-495#"applies unchanged."; SKILL.md:498-510#"applies unchanged.").
+applies unchanged regardless of harness (SKILL.md:501#"applies unchanged.";
+SKILL.md:504#"pointer rule from Run state applies unchanged."; SKILL.md:519#"pointer rule from Run state applies unchanged.").
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
-run (packages/orchestrator-workflow/assets/agents-md-section.md:160-162#"marker per repository for multi-repo runs").
+run (packages/orchestrator-workflow/assets/agents-md-section.md:171#"marker per repository for multi-repo runs").
 
 For a run that touches more than one repository, the orchestrator records
 one keyed marker per repository on its own line beside the unkeyed one,
@@ -118,7 +118,7 @@ repository's basename for a linked worktree) and the value is that
 repository's pre-change HEAD. Write the marker exactly in that form, on its
 own line: a deviating line is either rejected (it blocks the run) or not
 recognised at all (the binding for that repository is silently missing)
-(SKILL.md:122-125#"for that repository is silently missing)."). The consumer's own tests
+(SKILL.md:125#"for that repository is silently missing)."). The consumer's own tests
 measure both halves of that generalisation: a rejected line is `malformed`
 (uppercase field name, whitespace before the colon, and extra dashes in the
 comment opener are each their own malformed-blocker test), and a marker
@@ -199,10 +199,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (SKILL.md:264-268#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (SKILL.md:277#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per SKILL.md:265-266#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per SKILL.md:275#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:21-22#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:27-28#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -252,7 +252,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and
 SKILL.md's step 7 carries the same one-sentence rule
-(SKILL.md:214-218#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(SKILL.md:218#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -272,7 +272,7 @@ oversight to fix later: `02-tasks.md` records a planning artifact (the task
 slices an orchestrator produced before implementation), not an acceptance
 signal like a review recommendation or a final status. SKILL.md's own
 scaling rule allows slicing to be skipped entirely for a small or
-well-understood change (SKILL.md:18-22#"the apparatus changes. When tier variants are", 150-154: task slicing is "for
+well-understood change (SKILL.md:22#"the apparatus changes. When tier variants are", 150-154: task slicing is "for
 non-trivial changes"; a trivial change may skip the run directory
 altogether). Folding `02-tasks.md` into the completeness check would force
 every legitimately slim run — one that correctly skipped slicing — to
@@ -290,18 +290,18 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (SKILL.md:251-256#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (SKILL.md:265#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:251-252#"guidance: when the repo carries a curated knowledge",252-253). Since 0.24.0 (placement rule) step 9 also
+(SKILL.md:261#"guidance: when the repo carries a curated knowledge",252-253). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (SKILL.md:259-262#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (SKILL.md:271#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
 the symmetric counterpart to the 0.8.0
 discovery-side rule (the Discover step already checks `docs/okf/` before
-hand-mapping terrain, SKILL.md:140-141#"with an index) before mapping terrain by hand, treating"); the 0.12.0 changelog entry names it
+hand-mapping terrain, SKILL.md:141#"with an index) before mapping terrain by hand, treating"); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
 (`CHANGELOG.md:#[0.12.0]`). Pinned by

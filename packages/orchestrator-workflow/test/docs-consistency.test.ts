@@ -4121,3 +4121,52 @@ describe("task briefs enumerate reference sites for changed values", () => {
     }
   });
 });
+
+describe("docs-only closing deltas stay narrowly bounded", () => {
+  const closingDeltaRule = (doc: string): string => {
+    const start = doc.indexOf("After independent review");
+    expect(start, "closing-delta rule missing").toBeGreaterThanOrEqual(0);
+    const end = doc.indexOf("`accepted`", start);
+    expect(end, "closing-delta rule has no accepted Decision").toBeGreaterThan(
+      start,
+    );
+    return unwrap(doc.slice(start, end + "`accepted`".length));
+  };
+  const rules = [
+    closingDeltaRule(readAsset("skill/SKILL.md")),
+    closingDeltaRule(readAsset("agents-md-section.md")),
+  ];
+
+  it("requires an independent review and an entirely explanatory unreviewed delta", () => {
+    for (const rule of rules) {
+      expect(rule).toContain("After independent review");
+      expect(rule).toContain("without another reviewer round");
+      expect(rule).toContain("entire unreviewed delta");
+      expect(rule).toContain(
+        "explanatory documentation, comments, or citations",
+      );
+    }
+  });
+
+  it("excludes source/test edits, semantic changes, and ineligible findings", () => {
+    for (const rule of rules) {
+      expect(rule).toContain("source- or test-file edits");
+      expect(rule).toContain(
+        "executable commands, configuration, policy, instructions, or behavior",
+      );
+      expect(rule).toContain(
+        "low/medium documentation or maintainability findings",
+      );
+      expect(rule).toContain("high/critical or other ineligible finding");
+    }
+  });
+
+  it("preserves the review-findings row contract for an eligible closure", () => {
+    for (const rule of rules) {
+      expect(rule).toContain("`05-review-findings.md` row");
+      expect(rule).toContain("Severity and Decision headers unchanged");
+      expect(rule).toContain("Decision");
+      expect(rule).toContain("`accepted`");
+    }
+  });
+});

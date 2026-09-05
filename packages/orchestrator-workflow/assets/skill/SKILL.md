@@ -234,7 +234,16 @@ directory and the subagents.
    findings require the orchestrator to record a rationale. Deferring a high
    or critical finding counts as a waiver and follows the same rules. Record
    all decisions and waivers in `03-decisions.md` and summarize waivers in
-   the Accepted Waivers section of `06-handoff.md`. Watch for the round-2
+   the Accepted Waivers section of `06-handoff.md`. After independent review,
+   the orchestrator may close a docs-only delta without another reviewer round only
+   when the entire unreviewed delta contains only explanatory
+   documentation, comments, or citations; contains no source- or test-file
+   edits and no semantic change to executable commands, configuration,
+   policy, instructions, or behavior; and closes only low/medium
+   documentation or maintainability findings. This option never closes a
+   high/critical or other ineligible finding. Record the concrete verification
+   in a `05-review-findings.md` row, keeping its Severity and Decision headers
+   unchanged and setting Decision to `accepted`. Watch for the round-2
    halt signal across repeated review-fix cycles (see Round-2 halt rule
    below). By the second round-2 halt signal or the third `fix_required`
    review round on the same task, apply the Review-round escalation budget

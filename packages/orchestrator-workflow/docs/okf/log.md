@@ -1,5 +1,20 @@
 # Bundle log
 
+- 2026-09-05 (docs-only closing delta): re-verified and re-stamped
+  review-gate-and-waivers.md after the review gate gained a narrowly bounded
+  post-review closure option for an entirely explanatory docs/comments/
+  citations delta. Source/test edits, semantic command/configuration/policy/
+  instruction/behavior changes, high/critical findings, and any other
+  ineligible finding remain outside it. The option records concrete
+  verification in the existing `05-review-findings.md` row with unchanged
+  Severity/Decision headers and Decision `accepted`; it adds no reader or
+  template schema. Re-verified and re-stamped all affected SKILL.md,
+  agents-md-section.md, docs-consistency.test.ts, and CHANGELOG.md citations
+  across the bundle after their line shifts. The `CHANGELOG.md` rationale
+  points to `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
+  7(iii). Validation results are recorded with this task's implementation
+  evidence.
+
 - 2026-09-05T14:57:36Z (brief reference sites): re-verified and re-stamped
   subagent-contracts-superset.md after the Slice tasks rule and canonical
   task-slicer prompt began requiring annotated `relevant_files`/
@@ -215,7 +230,7 @@
   review-gate-and-waivers.md gained a new "Acceptance-recommendation
   mandatory rule (0.16.0)" section plus a mention in its existing
   `acceptance_recommendation` paragraph, and had three specifically
-  reported stale citations corrected (`SKILL.md:238` for the reviewer
+  reported stale citations corrected (`SKILL.md:248` for the reviewer
   severity enum, now resolving to the implementer contract's `recommendation`
   line, corrected to `:264`; `:242` for the `acceptance_recommendation`
   field, corrected to `:268`; `:330-332` for the misfire rule's review-gate
@@ -1053,7 +1068,7 @@
   `timestamp:` frontmatter bumped to `2026-08-20T23:59:00Z` on the four
   re-verified docs plus, in a second pass below, `install-fence-mechanics.md`
   (model-preselection.md's citation touched was a single flat +6 shift,
-  `agents-md-section.md:104-110` -> `110-116`, itself verified against
+  `agents-md-section.md:104-119` -> `110-116`, itself verified against
   the current file, not computed blind).
 
   Correction (same-day review round 1 on this pass): the "82 total ...
@@ -1534,7 +1549,7 @@
   contracts), and found the citation fix had in fact been a blind +8-line
   shift rather than a genuine re-derivation, still wrong in 44 changed
   lines across the four docs (examples: review-gate-and-waivers.md's
-  `SKILL.md:310` for the reviewer severity field, true `317`;
+  `SKILL.md:320` for the reviewer severity field, true `317`;
   subagent-contracts-superset.md's five output-contract-block ranges, each
   missing its own closing fence line, e.g. the explorer block's true end
   is `248`, not `245`). The fix round reworded the rule to cite only
@@ -1552,7 +1567,7 @@
   the wrong `describe` block boundaries (the advisor-escalation-policy and
   advisor-byte-identical blocks moved when an earlier fix-round inserted
   lines above them); all three were corrected against the current test
-  file. One citation, `SKILL.md:448-450` on the pre-0.21.0
+  file. One citation, `SKILL.md:458-460` on the pre-0.21.0
   model-correlation clause explicitly marked historical, had been wrongly
   shifted by the earlier blind offset even though it documents a past
   state rather than the live file; it was restored to its true historical
@@ -1564,7 +1579,7 @@
   round: 0 errors, 0 warnings (the remaining 21 notices are the pre-existing
   bare-filename ambiguity in this log's own historical narrative, per the
   convention below). log.md's own historical entries (the
-  `agents-md-section.md:104-110 -> 110-116` and `SKILL.md:177-178,172-173`
+  `agents-md-section.md:104-119 -> 110-116` and `SKILL.md:177-178,172-173`
   narrative lines above) were left untouched per the convention noted
   above: they record a past pass's before/after values, not live pointers
   into the current source.
@@ -2556,7 +2571,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:126-148#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:159#"the keyed placeholder line's exact text,"`,
 re-pointed by 21 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
@@ -6311,9 +6326,9 @@ red (installed `claude` instead); restored, green again.
   subagent-contracts-superset.md, and model-preselection.md against package
   version 0.26.0+ (Unreleased). Review round 2 found the round-1 pass had
   extended neither of the "Where each contract lives" bullet's two spans
-  (`SKILL.md:313-340` and `implementer.md:41-66`) past the newly added
+  (`SKILL.md:323-350` and `implementer.md:41-66`) past the newly added
   field, so both citations' cited ranges ended one field short of the
-  block's actual last field line; fixed to `SKILL.md:313-341` and
+  block's actual last field line; fixed to `SKILL.md:323-351` and
   `implementer.md:41-67` (the block's true last content line is the
   `commits:` key itself, not its `- ""` placeholder value, which repeats
   too often across the contract to serve as a unique anchor). Added a new
@@ -6810,10 +6825,10 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
 
   Also swept the remaining bare (unanchored, sometimes not even
   backtick-wrapped) `cli-inputs.ts:*`/`CHANGELOG.md:*` tokens the review
-  named in this log: `CHANGELOG.md:59-81` two entries above (this
+  named in this log: `CHANGELOG.md:70-92` two entries above (this
   round's own fix-round-1 19-line `[Unreleased]` insertion shifted it to
   78-100; re-pointed and anchored, `#"the keyed placeholder line's exact
-  text,"`); `CHANGELOG.md:808-815` in the `okf-kit check` 39-findings
+  text,"`); `CHANGELOG.md:819-826` in the `okf-kit check` 39-findings
   paragraph above (deliberately historical -- frozen to base commit
   `b80c346`'s content, reworded to say so explicitly, so a later sweep
   does not have to re-derive that judgment); `cli-inputs.ts:39-50` in the
