@@ -103,6 +103,15 @@ trivial change.
   the Accepted Waivers section of `06-handoff.md`.
 - Medium and low findings are addressed or consciously accepted at the
   orchestrator's judgment.
+- After independent review, the orchestrator may close a docs-only delta
+  without another reviewer round only when its entire unreviewed delta is explanatory
+  documentation, comments, or citations; has no source- or test-file edits or
+  semantic changes to executable commands, configuration, policy,
+  instructions, or behavior; and closes only low/medium documentation or
+  maintainability findings. It never closes a high/critical or other ineligible
+  finding, and records the concrete verification in a `05-review-findings.md`
+  row with its Severity and Decision headers unchanged and Decision
+  `accepted`.
 - Review-round escalation budget: by the second round-2 halt signal on a
   task, or its third `fix_required` review round, whichever comes first,
   the orchestrator picks one of tier/model escalation (raise the

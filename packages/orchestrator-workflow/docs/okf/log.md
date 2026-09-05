@@ -1,5 +1,19 @@
 # Bundle log
 
+- 2026-09-05 (docs-only closing delta): re-verified and re-stamped
+  review-gate-and-waivers.md after the review gate gained a narrowly bounded
+  post-review closure option for an entirely explanatory docs/comments/
+  citations delta. Source/test edits, semantic command/configuration/policy/
+  instruction/behavior changes, high/critical findings, and any other
+  ineligible finding remain outside it. The option records concrete
+  verification in the existing `05-review-findings.md` row with unchanged
+  Severity/Decision headers and Decision `accepted`; it adds no reader or
+  template schema. Re-verified and re-stamped only live citations affected by
+  the change; historical evidence retains the source tokens it recorded. The
+  live `CHANGELOG.md` rationale points to
+  `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section 7(iii).
+  Validation results are recorded with this task's implementation evidence.
+
 - 2026-09-05T14:57:36Z (brief reference sites): re-verified and re-stamped
   subagent-contracts-superset.md after the Slice tasks rule and canonical
   task-slicer prompt began requiring annotated `relevant_files`/
@@ -2556,7 +2570,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:126-148#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:159#"the keyed placeholder line's exact text,"`,
 re-pointed by 21 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above

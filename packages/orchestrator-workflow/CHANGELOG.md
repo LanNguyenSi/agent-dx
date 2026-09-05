@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- After independent review, a narrowly scoped docs-only closing delta may be
+  accepted without another reviewer round when the entire unreviewed delta is limited
+  to explanatory documentation, comments, or citations. Source/test edits and
+  semantic changes to executable commands, configuration, policy,
+  instructions, or behavior remain ineligible; the option applies only to
+  low/medium documentation or maintainability findings, never high/critical
+  or other ineligible findings. The recorded `05-review-findings.md` row
+  preserves its Severity/Decision headers and records Decision `accepted`.
+  Anchored by the analysis in
+  `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section 7(iii).
+
 - Task-slicing guidance now requires briefs to enumerate every file and doc
   site that references an identifier, config value, build context, or
   documented command the task will change, using annotated `relevant_files`
