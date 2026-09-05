@@ -300,7 +300,7 @@ directory and the subagents.
    findings require the orchestrator to record a rationale. Deferring a high
    or critical finding counts as a waiver and follows the same rules. Record
    all decisions and waivers in `03-decisions.md` and summarize waivers in
-   the Accepted Waivers section of `06-handoff.md`. Do not accept while a
+   the Accepted Waivers section of `06-handoff.md`. A reviewer recommendation is not orchestrator acceptance and cannot authorize a critical waiver; only the operator may authorize a critical waiver. For newly created decision records, identify a stable ID, trigger/evidence, decision, accountable authority/source with concrete approval evidence, consequences, and a superseded decision ID when revising a prior decision. Link baseline revisions and waivers to those decision IDs. Established runs retain their recorded decision format; absent fields never create a retroactive blocker. Routine decisions within the delegated contract remain the orchestrator's responsibility; an out-of-scope change requires an operator decision. Markdown records evidence of real authority and never grant it by themselves. Do not accept while a
    required baseline criterion in an explicitly adopted v1 run has an open residual; a residual retains its ID
    and cannot be converted away. After independent review,
    the orchestrator may close a docs-only delta without another reviewer round only

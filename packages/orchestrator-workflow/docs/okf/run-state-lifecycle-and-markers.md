@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-05T22:18:44Z
+timestamp: 2026-09-05T22:41:37Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -24,7 +24,7 @@ sources:
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:76#"  05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(SKILL.md:81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:152#"one directory per unit of work, newest = active";
+(SKILL.md:81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:160#"one directory per unit of work, newest = active";
 packages/orchestrator-workflow/INSTALL-AGENT.md:64-65#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:173-178#"instead: it sources its defaults from the operator"). The newest run
 directory is the active one unless a `.ai/run` pointer names one
 (SKILL.md:83#"older directories are the auditable history. Do not", see the pointer section below); older
@@ -156,7 +156,7 @@ read as-is and the verdict layer blocks it, since `<sha>` is not a commit
 sha. Unlike the pointer, this marker line is written into a
 tracked run file, not gitignored: the README and the manual-install doc both
 note the pointer is machine-local and add it to `.gitignore`
-(packages/orchestrator-workflow/README.md:158#"it to the repository's";
+(packages/orchestrator-workflow/README.md:166#"it to the repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:65-68#"repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:198-200#"repository's").
 
@@ -228,6 +228,16 @@ run-gate" per SKILL.md:343#"value. That marker line is the machine-readable sign
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:21-22#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:27-28#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
+
+## Decision records are auditable prose, not reader authorization
+
+`03-decisions.md` now has a seven-column decision record with a stable ID,
+trigger/evidence, decision, accountable authority/source, consequences, and
+an optional superseded decision reference (`03-decisions.md:5#"| ID | Date | Trigger / Evidence |"`). Its review-round escalation table and
+`review-round-escalation` marker remain a separate, unchanged reader
+convention. The decision table records the source and approval evidence for a
+baseline revision or waiver; no reader grants approval merely because a row
+exists.
 
 ## The findings-table Severity/Decision header: the machine-read surface behind acceptance-recommendation
 

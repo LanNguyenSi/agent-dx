@@ -32,6 +32,14 @@ remain unresolved, and required unresolved criteria block acceptance. Manual
 evidence stays explicitly manual. Review findings and orchestrator acceptance
 remain separate from this coverage index.
 
+### Decision authority
+
+`03-decisions.md` records decisions with an ID, trigger/evidence, decision,
+accountable authority/source, consequences, and an optional superseded
+decision. It documents real approval evidence; it does not grant authority.
+A reviewer recommendation does not equal orchestrator acceptance, and only
+the operator may authorize a critical waiver.
+
 ## Why this shape
 
 ```text

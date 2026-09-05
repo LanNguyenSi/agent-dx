@@ -77,6 +77,7 @@ Check, at minimum:
 
 Rules:
 
+- A reviewer recommendation is not orchestrator acceptance and cannot authorize a critical waiver; only the operator may authorize a critical waiver.
 - Classify every finding by severity (low, medium, high, critical) and
   category.
 - Recommend a concrete fix per finding.
