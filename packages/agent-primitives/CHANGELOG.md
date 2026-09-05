@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `agent-primitives drift --base <rev> --head <rev>`: a prototype-scope
+  identifier-drift guard. Collects the identifiers whose declaration a
+  git range removed (a regex over `git diff -U0`'s removed lines: a
+  top-level/exported TS/JS declaration, a top-level JSON/YAML config
+  key, or a wholly deleted file's own basename; an identifier declared
+  again on an added line anywhere in the same diff is treated as MOVED,
+  not removed), then reports every mention of those identifiers still
+  present at `--head` in a doc file or a source comment, word-boundary
+  matched so `RuntimeError` never matches `setRuntimeError`. A site is
+  allowlisted by default (`--strict` reports it too, flagged) when it
+  matches an `--allow` glob, sits in a released CHANGELOG section (never
+  `## [Unreleased]`), sits under a `docs/**/migration*` path or a
+  Markdown heading naming "migration", or its line carries a small,
+  documented historical-phrase word list (`former`, `no longer`, `used
+  to`, ...). Envelope carries `removed_identifiers`, `sites`,
+  `allowlisted` (each with a `reason` on an allowlisted entry) and
+  `counts`; exit `0` no site reported, `1` at least one site reported,
+  `2` a usage error (`cwd` outside a git work tree, a bad `--base`/
+  `--head`, or a failing `git diff`). Motivated by, and its synthetic
+  test fixture modeled on, a real case: a deleted local error type that
+  several docs and source comments across a repository kept describing
+  as current after the deletion, including two sites a human reviewer's
+  own pass had missed. Known limits: only TS/JS/JSON/YAML declarations
+  and only `.md`/`.mdx`/`.txt` docs plus a fixed list of comment-bearing
+  source extensions are scanned; a declaration split across more than
+  one line, or a name bound by destructuring, is missed; no cross-repo
+  scanning.
 - `probe --plan <path>`: a JSON file naming one test command (and
   optionally `pre`, `isolation`, `expect`, `timeout`) plus a list of
   mutants, run against ONE shared baseline instead of one baseline per
