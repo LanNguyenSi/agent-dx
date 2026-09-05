@@ -7117,7 +7117,9 @@ are unaffected", which at this round's head sits at
 re-anchored to its own
 `packages/orchestrator-workflow/assets/skill/SKILL.md:282-283#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
-in this bundle now has its own anchor via a full citation, so a future
+in this bundle's non-reserved docs now has its own anchor via a full
+citation (`index.md` and `log.md` are append-only journals and keep their
+historical forms), so a future
 line-shift of the same paragraph fails loudly instead of drifting
 silently. The same round's SKILL.md step 6 edit (a new clause recording
 each mutation probe into `04-implementation-summary.md`'s Mutation
@@ -7127,9 +7129,18 @@ breaking 65 citations across `review-gate-and-waivers.md`,
 (plus this round's own docs-consistency.test.ts test insertions shifting
 that file's line-numbered citations in `subagent-contracts-superset.md`);
 all were re-derived against the final tree, both bounds, content-verified
-rather than computed blindly. Re-verified: `okf-kit check --json
---require-anchors packages/orchestrator-workflow/docs/okf` now reports
-the same 24 findings as the base comparison (`agent-dx` at e35d0ce): 0
-errors, 1 warning (the identical `install-fence-mechanics.md` staleness
-entry), 23 notices (the same `citations-resolve`/`unresolved-ambiguous`
-set); this round's delta versus base is exactly zero findings.
+rather than computed blindly. Measured after the round-3 commit:
+`okf-kit check --json --require-anchors packages/orchestrator-workflow/docs/okf`
+reported 25 findings (0 errors, 2 warnings, 23 notices), one more than
+the base comparison (`agent-dx` at e35d0ce): the round's own
+docs-consistency.test.ts edit had made `model-preselection.md` stale
+against a declared source, the same class the round-1 review found
+(reviewer round 3, repeated). The closing delta re-stamps
+`model-preselection.md` (its citations into the test file were
+re-verified and are unchanged) and extends one short anchor in
+`subagent-contracts-superset.md`; measured after that commit the
+validator reports the base's 24 findings again (0 errors, 1 warning, the
+identical `install-fence-mechanics.md` staleness entry, 23 notices).
+Follow-up filed: a mechanical guard that fails when a bundle doc's
+timestamp is older than the last commit of any declared source, since
+the warn-only staleness workflow let this class recur twice.

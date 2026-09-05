@@ -339,7 +339,7 @@ task assignment; the implementer reports each one in the output contract's
 `mutation_probes` field (apply the mutant for real, observe the named test
 fail, restore, re-verify). Step 6 also carries a short
 orchestrator-checkable reference to the installed implementer prompt's
-claim-only-what-was-measured rule (`SKILL.md:195#"unverified."`): treat a verification
+claim-only-what-was-measured rule (`SKILL.md:195#"unverified. On any round after the task's first"`): treat a verification
 claim in the implementer's report as unverified unless it is backed by a
 check the implementer actually ran. Before this R2 pass step 6 said nothing
 about naming probes at all — the field's only trigger lived in the misfire
