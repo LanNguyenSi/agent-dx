@@ -31,6 +31,13 @@ Check, at minimum:
   earlier rounds you were told about; on a first round every finding is
   `new` by definition. The orchestrator uses this to detect the
   review-round escalation budget's trigger.
+- GitHub Actions shell replay: for any diff that adds or changes a GitHub
+  Actions `run:` step, confirm it was run locally under the runner's shell,
+  `bash --noprofile --norc -eo pipefail`, with the expected-success and the
+  expected-failure inputs; for a job, replay its steps in their committed
+  order, and confirm a step that expects a non-zero command captures the
+  status inside an `if` or a `set +e`/`set -e` guard. Report the replay in
+  the `reproduction` field.
 
 Rules:
 

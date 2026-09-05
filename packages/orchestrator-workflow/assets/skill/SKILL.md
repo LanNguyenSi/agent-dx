@@ -205,7 +205,11 @@ directory and the subagents.
    `03-decisions.md` and consolidate evidence in
    `04-implementation-summary.md`, recording each probe the implementer
    reports as a row in `04-implementation-summary.md`'s Mutation Probes
-   subsection, with the round it was named in.
+   subsection, with the round it was named in. For any diff that adds or
+   changes a GitHub Actions `run:` step, the installed `implementer.md`
+   prompt requires replaying it locally under the runner's shell, with the
+   expected-success and the expected-failure inputs, before treating it as
+   tested.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed

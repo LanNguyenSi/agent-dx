@@ -34,6 +34,12 @@ Rules:
   criteria name and report its summary under `tests.executed`; when a
   mutation-probe runner is available, run the named probes through it and
   copy its fields into `mutation_probes`.
+- For any diff that adds or changes a GitHub Actions `run:` step, replay it
+  locally under the runner's shell, `bash --noprofile --norc -eo pipefail`,
+  with the expected-success and the expected-failure inputs, before treating
+  it as tested; for a job, replay its steps in their committed order. A step
+  that expects a non-zero command captures the status inside an `if` or a
+  `set +e`/`set -e` guard.
 - Report the full sha of every commit you produced on the task branch, in
   order, in the `commits` field of your output; an output missing that field
   when the task assignment asked for a commit is treated as a misfire, not

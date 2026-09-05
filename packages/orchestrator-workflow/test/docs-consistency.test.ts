@@ -4302,3 +4302,54 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     expect(subFieldNames(implementerBlock)).toEqual(expectedOrder);
   });
 });
+
+/**
+ * The same GitHub Actions shell-quoting class surfaced as a defect twice in
+ * one run, in two independently implemented tasks (`lava-ice-logs/
+ * 2026-09-05/ow-kit-effort-analysis.md` section 7(vi)). This pins the
+ * resulting checklist item: the exact runner-shell invocation, the
+ * expected-success/expected-failure replay, the in-order job replay, the
+ * non-zero-exit guard requirement, and the trigger phrase, byte-identical
+ * across `implementer.md` and `reviewer.md` except for the role's own
+ * perspective and the reviewer's added `reproduction`-field instruction; plus
+ * SKILL.md's one-sentence pointer to the installed `implementer.md` prompt.
+ */
+describe("GitHub Actions run-step shell replay ships in the implementer prompt, the reviewer prompt, and SKILL.md", () => {
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  const sharedElements = [
+    "any diff that adds or changes a GitHub Actions `run:` step",
+    "bash --noprofile --norc -eo pipefail",
+    "the expected-success and the expected-failure inputs",
+    "replay its steps in their committed order",
+    "captures the status inside an `if` or a `set +e`/`set -e` guard",
+  ];
+
+  it("the installed implementer prompt carries the shell-replay rule", () => {
+    for (const element of sharedElements) {
+      expect(implementerMd).toContain(element);
+    }
+  });
+
+  it("the installed reviewer prompt carries the same shell-replay rule", () => {
+    for (const element of sharedElements) {
+      expect(reviewerMd).toContain(element);
+    }
+  });
+
+  it("only the reviewer prompt reports the replay in the reproduction field", () => {
+    expect(reviewerMd).toContain("Report the replay in the `reproduction` field");
+    expect(implementerMd).not.toContain("Report the replay in the `reproduction` field");
+  });
+
+  it("SKILL.md carries one sentence pointing to the installed implementer prompt", () => {
+    expect(skillMd).toContain(
+      "the installed `implementer.md` prompt requires replaying it locally under the runner's shell",
+    );
+    expect(skillMd).toContain(
+      "with the expected-success and the expected-failure inputs, before treating it as tested",
+    );
+  });
+});
