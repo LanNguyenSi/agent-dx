@@ -766,7 +766,7 @@
   `DEFAULT_MODELS` at 70-75, all in subagent-contracts-superset.md) needed no
   correction at all, confirmed unchanged by direct read: the branch's
   ~55-line tier block is purely appended after the file's old line 142, past
-  every citation into it. `README.md:107-112` (run-state-lifecycle-and-markers.md's
+  every citation into it. `README.md:108-112` (run-state-lifecycle-and-markers.md's
   "What gets installed" code-fence citation, supporting the same
   copy-from-templates claim as the INSTALL-AGENT.md citation below) also
   needed no correction, confirmed byte-identical by direct read: both of the
@@ -2817,7 +2817,7 @@ clean (395 files scanned).
   `*README.md`/`*INSTALL-AGENT.md` globs rather than the bare exact
   strings: this bundle cites both docs under two different spellings
   (bare README.md line 121 as the file stood then, and the fully-qualified
-  `packages/orchestrator-workflow/README.md:107-112`/`INSTALL-AGENT.md:46-
+  `packages/orchestrator-workflow/README.md:108-112`/`INSTALL-AGENT.md:46-
   47`), and the exact-string form left the two fully-qualified citations
   reporting `anchor-required` (measured: `okf-kit check --json
   packages/orchestrator-workflow/docs/okf --require-anchors
@@ -7154,7 +7154,7 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   pre-existing `install-fence-mechanics.md` staleness warning, plus two
   new `citations-resolve` warnings against citations in this `log.md`
   file itself (a `test/docs-consistency.test.ts:920-933` citation and a
-  `CHANGELOG.md:185` citation, both line-shifted by this pass's edits).
+  `CHANGELOG.md:186` citation, both line-shifted by this pass's edits).
   Correction (found in review): this bundle's convention, per this same
   pass's own H1 fix above and the sibling T-002 pass, is to re-point a
   `log.md` citation shifted by the current change rather than leave it
@@ -7162,7 +7162,7 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   resolve): re-pointed both to the same content at head, both bounds
   checked: `test/docs-consistency.test.ts:920-933` (the reproduction-field
   byte-for-byte equality `it` block, "expect(skillBlock).toBe
-  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:185` (the
+  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:186` (the
   probe-replay `[Unreleased]` bullet's own citation of `test/template-
   markers.test.ts`'s "the keyed placeholder line's exact text,") moved to
   `175`, the further +7-line shift coming from this bundle's own
