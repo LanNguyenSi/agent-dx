@@ -7341,3 +7341,13 @@ closing delta's finding-set delta against base is zero.
   subsequently fixed. The round-3 pre-edit report had no warnings. The native
   reports preserve these distinct observations; they are not interchangeable
   baselines. Final committed documentation verification is recorded below.
+
+  After the substantive commit, focused verification passed and
+  `okf-kit check --json --require-anchors docs/okf` measured 0 errors,
+  0 warnings and 23 notices. Full finding-object comparison against the
+  supplied original baseline found no introduced findings and removed its
+  one install-fence source-fresh warning; comparison against the round-3
+  pre-edit report found identical findings. The five affected consumer docs
+  were re-stamped after source inspection and these checks. Full checks and
+  probe evidence carry forward over this timestamp/journal-only closure: the
+  tested source, assets and fixtures are unchanged.
