@@ -4307,17 +4307,20 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
  * Pins the GitHub Actions run-step shell-replay checklist item, each element
  * bounded via `phraseBoundedSlice` to the rule's own sentences in
  * `implementer.md` and `reviewer.md` (from the trigger phrase through the
- * non-zero-exit guard clause) so an unrelated match elsewhere in either file
- * cannot satisfy the check. Covers: the trigger phrase; the conditional
- * shell clause (the `-eo pipefail` invocation when `shell: bash` is set,
- * `bash -e` otherwise, since GitHub Actions only runs the pipefail form when
- * a step or `defaults.run.shell` opts into `shell: bash` — a bare `run:`
- * step defaults to `bash -e` with no pipefail); the expected-success/
- * expected-failure replay; the in-order job replay; and the non-zero-exit
- * guard requirement. Also pins that only the reviewer prompt's copy points
- * to the `reproduction` field, SKILL.md's one-sentence reference to the
- * installed implementer prompt, and the CHANGELOG citation the rule's
- * `[Unreleased]` bullet carries.
+ * untrusted-event-data clause) so an unrelated match elsewhere in either
+ * file cannot satisfy the check. Covers: the trigger phrase; the condition
+ * that selects the pipefail form (the `-eo pipefail` invocation when
+ * `shell: bash` is set on the step or via `defaults.run.shell`, since a bare
+ * `run:` step with no `shell:` key defaults to `bash -e` with no pipefail);
+ * the platform note that the `bash -e` default holds on Linux and macOS
+ * runners while Windows runners default to pwsh; the expected-success/
+ * expected-failure replay; the in-order job replay; the non-zero-exit guard
+ * requirement; and the `${{ }}` substitution/untrusted-data clause. Also
+ * pins that the reviewer prompt alone replays in a scratch copy outside the
+ * reviewed working tree (keeping its read-only Bash rule intact), that only
+ * the reviewer prompt's copy points to the `reproduction` field, SKILL.md's
+ * one-sentence reference to the installed implementer prompt, and the
+ * CHANGELOG citation the rule's `[Unreleased]` bullet carries.
  */
 describe("GitHub Actions run-step shell replay ships in the implementer prompt, the reviewer prompt, and SKILL.md", () => {
   const implementerMd = unwrap(readAsset("agents/implementer.md"));
@@ -4326,7 +4329,7 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
   const changelogMd = readDoc("CHANGELOG.md");
 
   const startPhrase = "any diff that adds or changes a GitHub Actions `run:` step";
-  const endPhrase = "`set +e`/`set -e` guard.";
+  const endPhrase = "never paste untrusted event data into your shell.";
 
   const implementerSlice = phraseBoundedSlice(implementerMd, startPhrase, endPhrase);
   const reviewerSlice = phraseBoundedSlice(reviewerMd, startPhrase, endPhrase);
@@ -4334,10 +4337,15 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
   const sharedElements = [
     "any diff that adds or changes a GitHub Actions `run:` step",
     "--noprofile --norc -eo pipefail",
-    "`bash -e` otherwise (Actions'",
+    "when `shell: bash` is set on the step or via",
+    "`defaults.run.shell`",
+    "`bash -e` otherwise on Linux and macOS runners (Actions'",
+    "Windows runners default to pwsh",
     "the expected-success and the expected-failure inputs",
     "replay its steps in their committed order",
     "captures the status inside an `if` or a `set +e`/`set -e` guard",
+    "Substitute `${{ }}` expressions with representative values before replaying",
+    "never paste untrusted event data into your shell",
   ];
 
   it("the installed implementer prompt's own rule sentences carry the shell-replay rule", () => {
@@ -4350,6 +4358,14 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
     for (const element of sharedElements) {
       expect(reviewerSlice).toContain(element);
     }
+  });
+
+  it("the reviewer prompt's copy replays in a scratch copy outside the reviewed working tree, keeping the read-only Bash rule intact", () => {
+    expect(reviewerMd).toContain(
+      "Do the replay in a scratch copy of the repository outside the reviewed working tree",
+    );
+    expect(reviewerMd).toContain("this keeps the replay compatible with the read-only Bash rule");
+    expect(implementerMd).not.toContain("scratch copy of the repository outside the reviewed working tree");
   });
 
   it("only the reviewer prompt reports the replay in the reproduction field", () => {

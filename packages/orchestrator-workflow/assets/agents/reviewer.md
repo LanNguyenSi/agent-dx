@@ -34,12 +34,19 @@ Check, at minimum:
 - GitHub Actions shell replay: for any diff that adds or changes a GitHub
   Actions `run:` step, replay it yourself under the shell the step actually
   runs: `bash --noprofile --norc -eo pipefail` when `shell: bash` is set on
-  the step or via `defaults.run.shell`, `bash -e` otherwise (Actions'
-  default for `run:` with no `shell:` key), with the expected-success and
-  the expected-failure inputs; for a job, replay its steps in their
-  committed order, and confirm a step that expects a non-zero command
-  captures the status inside an `if` or a `set +e`/`set -e` guard. Report
-  the replay in the `reproduction` field.
+  the step or via `defaults.run.shell`, `bash -e` otherwise on Linux and
+  macOS runners (Actions' default for `run:` with no `shell:` key; Windows
+  runners default to pwsh), with the expected-success and the
+  expected-failure inputs; for a job, replay its steps in their committed
+  order, and confirm a step that expects a non-zero command captures the
+  status inside an `if` or a `set +e`/`set -e` guard. Substitute `${{ }}`
+  expressions with representative values before replaying, and never paste
+  untrusted event data into your shell. Do the replay in a scratch copy of
+  the repository outside the reviewed working tree (a temporary clone, a
+  separate `git worktree`, or a copied checkout in your scratchpad
+  directory) so it never runs against, or writes into, the tree you are
+  reviewing; this keeps the replay compatible with the read-only Bash rule
+  below. Report the replay in the `reproduction` field.
 
 Rules:
 

@@ -242,9 +242,9 @@ directory and the subagents.
    GitHub Actions shell replay named in step 6 is a second, explicitly
    non-probabilistic trigger for the same field, with `sample_size:
    not_applicable` allowed when the replay itself has no meaningful sample
-   size. When
-   this is not the task's first review round, name the round number in the
-   briefing; the reviewer marks each finding's `recurrence` as `new` or
+   size. When this is not the task's first review round, name the round
+   number in the briefing; the reviewer marks each finding's `recurrence`
+   as `new` or
    `repeated` against the earlier rounds it was told about, which is what
    lets the orchestrator detect the Review-round escalation budget's
    trigger (see below) without re-deriving it by hand. When the

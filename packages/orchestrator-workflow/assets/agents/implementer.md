@@ -37,9 +37,10 @@ Rules:
 - For any diff that adds or changes a GitHub Actions `run:` step, replay it
   locally under the shell the step actually runs: `bash --noprofile --norc
   -eo pipefail` when `shell: bash` is set on the step or via
-  `defaults.run.shell`, `bash -e` otherwise (Actions' default for `run:`
-  with no `shell:` key), with the expected-success and the expected-failure
-  inputs, before treating it as tested; for a job, replay its steps in their
+  `defaults.run.shell`, `bash -e` otherwise on Linux and macOS runners
+  (Actions' default for `run:` with no `shell:` key; Windows runners default
+  to pwsh), with the expected-success and the expected-failure inputs,
+  before treating it as tested; for a job, replay its steps in their
   committed order. A step that expects a non-zero command captures the
   status inside an `if` or a `set +e`/`set -e` guard. Substitute `${{ }}`
   expressions with representative values before replaying, and never paste
