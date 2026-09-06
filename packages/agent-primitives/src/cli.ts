@@ -1096,8 +1096,10 @@ async function runProbePlanCommand(
   // it (see that field's own docblock): a `diff.text` the reduction cut
   // further than this module's own bound already did is corrected here,
   // after the fact, rather than protected from the cut in the first
-  // place.
-  reconcileEnvelopeDiffTruncation(envelope);
+  // place. `result.results` is the PRE-envelope evidence the correction
+  // compares each delivered excerpt against -- `buildEnvelope` deep-copies
+  // its input, so this is untouched by the reduction.
+  reconcileEnvelopeDiffTruncation(envelope, { planResults: result.results });
   emit(envelope, exitCode, {
     format: global.format,
     maxChars: global.maxChars,
@@ -1238,8 +1240,9 @@ program
     // See the plan command's own call to this: a large excerpt can
     // still get cut further by the envelope's own generic string cap,
     // which knows nothing about hunks, and this corrects that case
-    // after the fact.
-    reconcileEnvelopeDiffTruncation(envelope);
+    // after the fact, against the pre-envelope `result.mutant` as
+    // evidence for what was cut.
+    reconcileEnvelopeDiffTruncation(envelope, { mutant: result.mutant });
     emit(envelope, exitCode, {
       format: global.format,
       maxChars: global.maxChars,

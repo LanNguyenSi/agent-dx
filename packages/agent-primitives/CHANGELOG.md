@@ -309,6 +309,59 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   updated; the identity fixture (`-r`, no `diff` field) is unchanged and
   stays byte-identical.
 
+  The bound applies to EVERY hunk, the first one included. It used to
+  keep `hunks[0]` whole no matter how large it was, so a one-hunk change
+  of any size shipped uncut with `truncated: false` while the README,
+  this entry and the field's own docblock all described an unconditional
+  100-line/3,000-character bound. A first hunk that alone exceeds the
+  bound is now cut inside itself, at a line boundary, keeping its `@@`
+  header plus the whole body lines that fit, and says so with a
+  `hunkTruncated` flag distinct from `truncated` (whole hunks dropped);
+  the `--- `/`+++ ` preamble lines are dropped before any hunk content
+  is, since they name only the comparison's own scratch copies; and when
+  not even the header fits, `text` is `""` with `bodyOmitted: true`
+  beside it, so an empty string is never delivered as though it were an
+  excerpt. A `\ No newline at end of file` marker is body of its hunk
+  that the hunk header does not count, so both the bound's own walk and
+  `trimToLastCompleteHunk` step over it instead of spending a count on
+  it; counting it ended a complete end-of-file hunk one line early,
+  dropping the `+` line of a replacement so it read as a pure deletion,
+  and aborted the walk at the marker for anything that followed.
+
+  The whole applied diff is now always written to the probe's own log
+  directory (`mutant-diff-<random>/mutant-diff.patch`) before any bound
+  runs, and named by `mutant.diff.path` and in the mutant's `logs`. What
+  either bound leaves out of `text` is therefore never lost, only moved:
+  the descriptors point at that field rather than pasting the path
+  itself, which is unbounded and would be the same "excerpt paid for
+  twice" defect in another dress.
+
+  `reconcileEnvelopeDiffTruncation` now decides on EVIDENCE rather than
+  on a suffix: `cli.ts` hands it the pre-envelope result beside the
+  envelope, and only a `diff.text` that differs from the one the probe
+  produced is corrected. Recognising the envelope's omission marker
+  instead emptied a legitimate excerpt whose own last line ended in that
+  literal (a mutant adding `...(12 more characters omitted)`), setting a
+  false `truncated` on a text nothing had cut. A text that did change is
+  rebuilt from the ORIGINAL under the same bound rule, inside the
+  character budget the delivered text already occupied, rather than
+  repaired in place -- so the delivered excerpt is always a line-prefix
+  of what the probe produced, ending at a hunk boundary or, when even
+  the first hunk did not fit, at a line boundary inside it. Both
+  descriptor strings are rebuilt from the corrected field, so
+  `mutation_probe.mutant`/`verified_applied_via` can no longer state a
+  truncation state the field contradicts (they were formatted before the
+  envelope ran and never revisited: at `-m 4000` the descriptor read
+  "15 hunks, 30 changed lines ...; see mutant.diff" beside a delivered
+  `diff` of `text: ""`, `truncated: true`). A descriptor the reduction
+  had already cut is re-capped instead of restored, so the correction
+  never adds back characters the envelope removed to meet its bound; and
+  when the reduction dropped the `diff` object entirely, the descriptors
+  stop pointing at it and name `logs`, which is never cut.
+  `reconcileEnvelopeDiffTruncation`, `trimToLastCompleteHunk` and the
+  `MutantDiffField` type are exported from the package root for library
+  callers composing their own envelope.
+
   The excerpt's own `git diff --no-index` read is pinned against ambient
   git config (`-c core.autocrlf=false -c diff.noprefix=false
   --no-ext-diff --no-textconv`, the read-side counterpart to the

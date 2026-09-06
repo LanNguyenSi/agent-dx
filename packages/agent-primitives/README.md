@@ -321,19 +321,41 @@ comparison finds its first disagreement on a line the patch never
 touched at all. `mutant.diff` covers the rest, attached whenever the
 applied change is anything other than exactly one hunk with exactly one
 removed and one added line (the only shape `before`/`after` truly
-cover, a like-for-like line replacement): `{ text, hunkCount, removed,
-added, changedLineCount, truncated }`, a `git diff --no-index
---unified=0` body (every hunk's header and its added/removed lines, no
-surrounding context) bounded to whole hunks -- never mid-hunk -- at 100
-lines / 3,000 characters, so the result stays one bounded JSON object; a
-bigger change is cut to its earliest whole hunks with `truncated: true`,
-while `hunkCount`, `removed`, `added` and `changedLineCount` always
-report the true totals, uncut.
+cover, a like-for-like line replacement): `{ text, path, hunkCount,
+removed, added, changedLineCount, truncated, hunkTruncated?,
+bodyOmitted? }`, a `git diff --no-index --unified=0` body (every hunk's
+header and its added/removed lines, no surrounding context) bounded to
+100 lines / 3,000 characters, so the result stays one bounded JSON
+object, while `hunkCount`, `removed`, `added` and `changedLineCount`
+always report the true totals, uncut.
+
+The bound cuts in this order, and says which of them happened:
+
+- whole hunks are dropped from the end first, so the excerpt ends at a
+  hunk boundary: `truncated: true`;
+- the two `--- `/`+++ ` preamble lines go before any hunk content does,
+  once no whole hunk fits beside them (they name only the comparison's
+  own scratch copies);
+- when the FIRST hunk alone still exceeds the bound, that hunk is cut
+  inside itself, at a line boundary, keeping its `@@` header plus the
+  whole body lines that fit: `hunkTruncated: true` beside
+  `truncated: true`. The bound applies to every hunk, the first one
+  included -- a one-hunk change of any size is bounded like any other;
+- when not even the header fits, `text` is `""` and `bodyOmitted: true`
+  says so, so an empty string is never delivered as if it were an
+  excerpt.
+
+`mutant.diff.path` names the WHOLE applied diff, written to the probe's
+own log directory (`mutant-diff-<random>/mutant-diff.patch`) before any
+bound ran and never bounded itself; it is in the mutant's own `logs`
+too. Whatever either bound leaves out of `text`, that file has. If it
+could not be written, `path` is absent and a warning names why.
 
 `mutant.diff.text` is the SINGLE carrier of the excerpt: nothing else in
 the result repeats it. `mutation_probe.mutant` names the totals
-(`"... (first of 4 changed lines across 1 hunk; see mutant.diff,
-truncated)"`) and, when `removed !== added` (a pure deletion, a pure
+(`"... (first of 4 changed lines across 1 hunk; see mutant.diff
+(truncated); full diff at mutant.diff.path)"`) and, when
+`removed !== added` (a pure deletion, a pure
 insertion, or a mixed edit), drops the `before -> after` pair rather than
 present a false one -- unequal counts mean the two do not correspond to
 each other one for one (see `MutantComputed.diff`'s own docblock on why
@@ -341,7 +363,13 @@ each other one for one (see `MutantComputed.diff`'s own docblock on why
 `mutation_probe.verified_applied_via` is a short, bounded descriptor
 pointing at `mutant.diff`, never a second copy of the excerpt: `"git
 diff --no-index of the before/after scratch copies: 3 hunks, 6 changed
-lines (3 removed, 3 added); see mutant.diff"`. Both are absent for
+lines (3 removed, 3 added); see mutant.diff (whole); full diff at
+mutant.diff.path"`. Both descriptors end on the same clause, built from
+the same field, so they can never make different claims about it: it
+names which of the four states above the delivered excerpt is in, and
+names `mutant.diff.path` as a field rather than pasting the path itself
+(a path is unbounded, and a descriptor that grew with it would be the
+excerpt paid for twice again). Both are absent for
 `-r`/`-M`/`-w` (which only ever change the one line they are given) and
 for an ordinary single-hunk, single-line-replacement patch, so every
 such result -- and the identity fixture built from one -- stays
@@ -364,20 +392,44 @@ no marker to say so, while `truncated` still read the pre-envelope
 once `buildEnvelope` has built the envelope, the CLI walks it (`mutant`
 for a single probe, every `plan.results[].mutant` for a plan -- an
 array, which the envelope's own `keepWhole` cannot protect a nested
-value inside) and, wherever a `diff.text` still carries the envelope's
-own omission-marker suffix, trims it back to the last hunk it can prove
--- from the hunk header's own declared `-a,b +c,d` counts, never from
-character or line counting -- is fully present, and sets
-`truncated: true`. `hunkCount`/`removed`/`added`/`changedLineCount`
-never change: they were fixed, to the true totals, before either bound
-ran. The result: `diff.truncated: false` never sits beside text either
-bound cut, at the default budget or a tighter `-m`. At a budget tight
-enough that the whole `diff` object cannot fit at all (alongside
-everything else in the result), the generic reduction may still drop it
-entirely (a dropped key, or a depth-pruned placeholder) the same way it
-would any other oversized field; that is a different, pre-existing
-outcome the reduction already names as such, not a false `truncated`
-claim.
+value inside) WITH the pre-envelope result beside it, and compares each
+delivered `diff.text` against the one the probe actually produced. Only
+a text that differs is corrected, and it is corrected by rebuilding the
+excerpt from the original under the same bound rule as above, within the
+character budget the delivered text already occupied -- never by
+repairing the cut string, and never on the strength of a trailing
+omission marker alone (a legitimate excerpt can end in that literal, and
+emptying it on that evidence is a false truncation of its own). The
+delivered excerpt is therefore always a line-prefix of what the probe
+produced, ending at a hunk boundary or, when even the first hunk did not
+fit, at a line boundary inside it with `hunkTruncated: true`.
+`hunkCount`/`removed`/`added`/`changedLineCount` never change: they were
+fixed, to the true totals, before either bound ran, and neither does
+`path`, whose file has the whole diff regardless.
+
+Both descriptor strings are rebuilt from the corrected field, so
+`mutation_probe.mutant` and `mutation_probe.verified_applied_via` state
+the excerpt's delivered state rather than the state it had before the
+envelope ran. A descriptor the envelope's own string cap had already cut
+is re-capped rather than restored -- restoring it would put back the
+characters the reduction removed to meet the bound -- so at a tight
+enough `-m` a descriptor can end in the reduction's own omission marker,
+carrying no claim about the excerpt at all; what it can never carry is a
+stale one.
+
+At a budget tight enough that the whole `diff` object cannot fit at all
+(alongside everything else in the result), the generic reduction may
+still drop it entirely (a dropped key, or a depth-pruned placeholder)
+the same way it would any other oversized field. Nothing is put back
+there either, but the descriptors stop pointing at a field that is not
+in the result: they say the excerpt was omitted from this envelope and
+point at `logs`, which is never cut and carries the full result's own
+path whenever anything was.
+
+Library callers composing their own envelope get the same correction:
+`reconcileEnvelopeDiffTruncation(envelope, { mutant })` for a single
+probe result, or `{ planResults }` for a plan's `results` array, both
+exported from the package root alongside the `MutantDiffField` type.
 
 The probe pins its own content-writing git commands with `-c
 core.autocrlf=false` and `-c apply.whitespace=nowarn`: the patch dry

@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   applyPatchForReal,
+  buildBoundedHunkExcerpt,
   computeMutant,
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
   DIFF_EXCERPT_MAX_CHARS,
@@ -541,8 +542,220 @@ async function computeFixedLengthMultiHunkDiff(
   return { root, relPath, result };
 }
 
-describe("computeMutant: patch form multi-hunk diff excerpt, envelope-delivery invariant (T-004 round 3)", () => {
-  it("15 hunks of 61-char lines (the round-2 reviewer's own repro shape): the invariant holds at the default budget", async () => {
+/** The `logs` array a real `probe` invocation carries: a handful of
+ * absolute exec-log paths under the caller's `-l` directory. Long paths
+ * are the realistic case (a run directory under a scratch tree is easily
+ * 120 characters) and they compete with the excerpt for the same
+ * envelope budget, so an envelope-delivery test that passes `logs: []`
+ * is testing a shape the CLI never produces -- nothing gets cut, and the
+ * correction under test never runs. */
+function realisticLogs(count = 4): string[] {
+  const dir =
+    "/private/tmp/agent-primitives-probe-logs/2026-09-06-run/" +
+    "probe-envelope-delivery-fixture/exec";
+  return Array.from(
+    { length: count },
+    (_, i) => `${dir}/exec-0000000000000-${String(i).padStart(4, "0")}.log`,
+  );
+}
+
+/** Builds the single-probe envelope shape `cli.ts` builds, for one
+ * already-computed mutant, and runs `buildEnvelope` plus
+ * `reconcileEnvelopeDiffTruncation` exactly the way the CLI does --
+ * including handing the correction the PRE-envelope `mutant` field as
+ * evidence. */
+function buildProbeEnvelope(
+  relPath: string,
+  root: string,
+  result: {
+    line: number;
+    before: string;
+    after: string;
+    diff?: MutantDiffField;
+  },
+  maxChars: number | undefined,
+): Record<string, unknown> {
+  const mutantField = {
+    file: relPath,
+    line: result.line,
+    before: result.before,
+    after: result.after,
+    form: "patch" as const,
+    ...(result.diff !== undefined ? { diff: result.diff } : {}),
+  };
+  const { envelope } = buildEnvelope({
+    version: "0.0.0-test",
+    command: "probe",
+    status: "survived",
+    durationMs: 1,
+    cwd: root,
+    warnings: [],
+    logs: realisticLogs(),
+    extra: {
+      mutant: mutantField,
+      mutation_probe: {
+        mutant: formatMutantSummary(
+          relPath,
+          result.line,
+          result.before,
+          result.after,
+          result.diff,
+        ),
+        verified_applied_via: formatVerifiedAppliedVia(
+          relPath,
+          result.line,
+          result.before,
+          result.after,
+          result.diff,
+        ),
+        result: "survived",
+        restored_verified: true,
+      },
+    },
+    maxChars,
+    logDir: makeTmpDir(),
+  });
+  reconcileEnvelopeDiffTruncation(envelope, { mutant: mutantField });
+  return envelope;
+}
+
+/** The delivered `diff` object of a single-probe envelope, whatever the
+ * reduction left of it. */
+function deliveredDiff(
+  envelope: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const mutant = envelope.mutant;
+  if (mutant === null || typeof mutant !== "object") return undefined;
+  const diff = (mutant as Record<string, unknown>).diff;
+  if (diff === null || typeof diff !== "object") return undefined;
+  return diff as Record<string, unknown>;
+}
+
+function deliveredProbeField(
+  envelope: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const probeField = envelope.mutation_probe;
+  if (probeField === null || typeof probeField !== "object") return undefined;
+  return probeField as Record<string, unknown>;
+}
+
+/** The pointer clause `describeExcerptPointer` produces, recomputed here
+ * from the DELIVERED flags rather than imported, so "the descriptors
+ * agree with the field" is checked against an independent statement of
+ * what agreement means. */
+function expectedPointer(diff: Record<string, unknown> | undefined): string {
+  if (diff === undefined)
+    return "mutant.diff omitted from this envelope; see logs";
+  const wherePath =
+    typeof diff.path === "string" ? "; full diff at mutant.diff.path" : "";
+  if (diff.bodyOmitted === true)
+    return `see mutant.diff (excerpt omitted)${wherePath}`;
+  if (diff.hunkTruncated === true)
+    return `see mutant.diff (cut mid-hunk)${wherePath}`;
+  if (diff.truncated === true) return `see mutant.diff (truncated)${wherePath}`;
+  return `see mutant.diff (whole)${wherePath}`;
+}
+
+/** Every clause `describeExcerptPointer` can produce, written out here
+ * rather than imported: a descriptor must carry the one the delivered
+ * field calls for, and none of the others. */
+const ALL_POINTER_CLAUSES = [
+  "see mutant.diff (whole)",
+  "see mutant.diff (truncated)",
+  "see mutant.diff (cut mid-hunk)",
+  "see mutant.diff (excerpt omitted)",
+  "mutant.diff omitted from this envelope; see logs",
+];
+
+/** Both descriptor strings end on the clause the DELIVERED field's own
+ * flags call for -- the agreement this whole correction exists to keep
+ * -- unless the envelope's own string cap cut the descriptor itself, in
+ * which case it must carry no clause at all rather than a stale one
+ * (re-inflating it would put back the characters the reduction removed
+ * to meet the bound). */
+function expectDescriptorsAgree(envelope: Record<string, unknown>): void {
+  const probeField = deliveredProbeField(envelope);
+  expect(probeField).toBeDefined();
+  if (probeField === undefined) return;
+  const clause = expectedPointer(deliveredDiff(envelope));
+  for (const key of ["mutant", "verified_applied_via"]) {
+    expectDescriptorCarriesOnly(String(probeField[key]), clause);
+  }
+}
+
+function expectDescriptorCarriesOnly(descriptor: string, clause: string): void {
+  if (descriptor.includes(clause)) return;
+  // Not the clause: then the envelope cut this string, and it may state
+  // nothing about the excerpt at all.
+  expect(descriptor).toMatch(ENVELOPE_MARKER_RE);
+  for (const other of ALL_POINTER_CLAUSES) {
+    if (clause.startsWith(other)) continue;
+    expect(descriptor).not.toContain(other);
+  }
+}
+
+/** Walks a delivered excerpt hunk by hunk, from the hunk headers' own
+ * declared counts, and reports how it ends. Written out here rather than
+ * calling `trimToLastCompleteHunk`, so an assertion about a boundary is
+ * never a comparison of the function under test with itself. */
+function describeExcerptEnd(text: string): {
+  endsAtHunkBoundary: boolean;
+  completeHunks: number;
+  trailingPartialHunk: boolean;
+} {
+  const lines = text.split("\n");
+  let i = 0;
+  while (
+    i < lines.length &&
+    !/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(lines[i])
+  ) {
+    i++;
+  }
+  let completeHunks = 0;
+  let trailingPartialHunk = false;
+  while (i < lines.length) {
+    const match = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(lines[i]);
+    if (match === null) {
+      trailingPartialHunk = true;
+      break;
+    }
+    const removed = match[1] === undefined ? 1 : Number(match[1]);
+    const added = match[2] === undefined ? 1 : Number(match[2]);
+    let wanted = removed + added;
+    let j = i + 1;
+    while (j < lines.length && wanted > 0) {
+      if (!lines[j].startsWith("\\ ")) wanted--;
+      j++;
+    }
+    if (wanted > 0) {
+      trailingPartialHunk = true;
+      break;
+    }
+    while (j < lines.length && lines[j].startsWith("\\ ")) j++;
+    completeHunks++;
+    i = j;
+  }
+  return {
+    endsAtHunkBoundary: !trailingPartialHunk && i === lines.length,
+    completeHunks,
+    trailingPartialHunk,
+  };
+}
+
+/** The delivered excerpt is always a line-prefix of the excerpt the
+ * probe itself produced -- from its start, or from its first hunk header
+ * when the preamble had to go. Nothing is ever added, reordered, or
+ * repaired into it. */
+function expectPrefixOfOriginal(text: string, originalText: string): void {
+  if (text === "") return;
+  const fromHunks = originalText.slice(originalText.indexOf("@@ "));
+  expect(originalText.startsWith(text) || fromHunks.startsWith(text)).toBe(
+    true,
+  );
+}
+
+describe("mutant.diff delivery through the envelope", () => {
+  it("15 hunks of 61-character lines at the default budget: the delivered excerpt is the pre-envelope one, and the descriptors say so", async () => {
     const changedLines = Array.from({ length: 15 }, (_, i) => (i + 1) * 4);
     const { root, relPath, result } = await computeFixedLengthMultiHunkDiff(
       100,
@@ -550,72 +763,63 @@ describe("computeMutant: patch form multi-hunk diff excerpt, envelope-delivery i
       changedLines,
     );
     expect(result.applicable).toBe(true);
-    if (!result.applicable) return;
-    expect(result.diff).toBeDefined();
-    if (result.diff === undefined) return;
+    if (!result.applicable || result.diff === undefined) return;
     expect(result.diff.hunkCount).toBe(15);
     expect(result.diff.changedLineCount).toBe(30);
-    // Git's own hunk header carries a variable-length "section context"
-    // snippet this module does not control, so whether this particular
-    // size crosses the excerpt's own 3,000-character bound is not fixed
-    // by the fixture's own line count/length alone; either way, the
-    // invariant holds: no omission marker while `truncated` is false, a
-    // hunk-boundary-safe cut when it is true.
-    if (!result.diff.truncated) {
-      expect(result.diff.text).not.toMatch(ENVELOPE_MARKER_RE);
-    } else {
-      expect(result.diff.text).toBe(trimToLastCompleteHunk(result.diff.text));
-    }
+    expect(typeof result.diff.path).toBe("string");
 
-    const { envelope } = buildEnvelope({
-      version: "0.0.0-test",
-      command: "probe",
-      status: "survived",
-      durationMs: 1,
-      cwd: root,
-      warnings: [],
-      logs: [],
-      extra: {
-        mutant: {
-          file: relPath,
-          line: result.line,
-          before: result.before,
-          after: result.after,
-          form: "patch",
-          diff: result.diff,
-        },
-        mutation_probe: {
-          mutant: formatMutantSummary(
-            relPath,
-            result.line,
-            result.before,
-            result.after,
-            result.diff,
-          ),
-          verified_applied_via: formatVerifiedAppliedVia(
-            relPath,
-            result.line,
-            result.before,
-            result.after,
-            result.diff,
-          ),
-        },
-      },
-      logDir: makeTmpDir(),
-    });
-    reconcileEnvelopeDiffTruncation(envelope);
-
-    const mutant = envelope.mutant as { diff?: MutantDiffField } | undefined;
-    // The excerpt's own text is well under the default envelope budget
-    // regardless of which way `truncated` fell above, so nothing here
-    // should have cut it further.
-    expect(mutant?.diff?.text).toBe(result.diff.text);
-    expect(mutant?.diff?.truncated).toBe(result.diff.truncated);
-    expect(mutant?.diff?.hunkCount).toBe(15);
-    expect(String(mutant?.diff?.text)).not.toMatch(ENVELOPE_MARKER_RE);
+    const envelope = buildProbeEnvelope(relPath, root, result, undefined);
+    const diff = deliveredDiff(envelope);
+    expect(diff?.text).toBe(result.diff.text);
+    expect(diff?.truncated).toBe(result.diff.truncated);
+    expect(diff?.hunkCount).toBe(15);
+    expect(String(diff?.text)).not.toMatch(ENVELOPE_MARKER_RE);
+    expectDescriptorsAgree(envelope);
   });
 
-  it("20 hunks of 400-char lines: the excerpt's own bound truncates at a hunk boundary, and the envelope delivers that unmodified at the default budget", async () => {
+  it("15 hunks of 61-character lines at -m 4000: the envelope cuts, and what is delivered is whole hunks, non-empty, with the descriptors restated", async () => {
+    const changedLines = Array.from({ length: 15 }, (_, i) => (i + 1) * 4);
+    const { root, relPath, result } = await computeFixedLengthMultiHunkDiff(
+      100,
+      61,
+      changedLines,
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable || result.diff === undefined) return;
+
+    const envelope = buildProbeEnvelope(relPath, root, result, 4000);
+    const diff = deliveredDiff(envelope);
+    expect(diff).toBeDefined();
+    if (diff === undefined) return;
+    const text = String(diff.text);
+    // Cut: shorter than the pre-envelope excerpt, and never left with
+    // the envelope's own character-level omission marker.
+    expect(text.length).toBeLessThan(result.diff.text.length);
+    expect(text).not.toMatch(ENVELOPE_MARKER_RE);
+    expect(diff.truncated).toBe(true);
+    expect(diff.hunkCount).toBe(15);
+    // Never an empty string behind a "see mutant.diff" pointer: either
+    // real hunk content, or `bodyOmitted` saying there is none.
+    if (diff.bodyOmitted === true) {
+      expect(text).toBe("");
+    } else {
+      expect(text.length).toBeGreaterThan(0);
+      expect(text).toContain("@@ ");
+    }
+    const shape = describeExcerptEnd(text);
+    if (diff.hunkTruncated === true) {
+      expect(shape.trailingPartialHunk).toBe(true);
+    } else if (diff.bodyOmitted !== true) {
+      expect(shape.endsAtHunkBoundary).toBe(true);
+      expect(shape.completeHunks).toBeGreaterThan(0);
+    }
+    // Every delivered hunk is a prefix of the pre-envelope excerpt: the
+    // correction only ever takes away.
+    expectPrefixOfOriginal(text, result.diff.text);
+    expectDescriptorsAgree(envelope);
+  });
+
+  it("20 hunks of 400-character lines: the excerpt's own bound cuts at a hunk boundary and the default envelope delivers that unchanged", async () => {
     const changedLines = Array.from({ length: 20 }, (_, i) => (i + 1) * 4);
     const { root, relPath, result } = await computeFixedLengthMultiHunkDiff(
       120,
@@ -623,62 +827,54 @@ describe("computeMutant: patch form multi-hunk diff excerpt, envelope-delivery i
       changedLines,
     );
     expect(result.applicable).toBe(true);
-    if (!result.applicable) return;
-    expect(result.diff).toBeDefined();
-    if (result.diff === undefined) return;
+    if (!result.applicable || result.diff === undefined) return;
     expect(result.diff.hunkCount).toBe(20);
-    // 20 hunks of 400-char removed/added lines each is far past the
-    // excerpt's own 3,000-character bound: this is the case that bound
-    // exists for.
+    // 20 hunks of 400-character lines is far past the excerpt's own
+    // 3,000-character bound: this is the case that bound exists for.
     expect(result.diff.truncated).toBe(true);
+    expect(result.diff.hunkTruncated).toBeUndefined();
     expect(result.diff.text.length).toBeLessThanOrEqual(DIFF_EXCERPT_MAX_CHARS);
-    // Never mid-hunk, even from the excerpt's OWN truncation.
-    expect(result.diff.text).toBe(trimToLastCompleteHunk(result.diff.text));
+    expect(describeExcerptEnd(result.diff.text).endsAtHunkBoundary).toBe(true);
 
-    const { envelope } = buildEnvelope({
-      version: "0.0.0-test",
-      command: "probe",
-      status: "survived",
-      durationMs: 1,
-      cwd: root,
-      warnings: [],
-      logs: [],
-      extra: {
-        mutant: {
-          file: relPath,
-          line: result.line,
-          before: result.before,
-          after: result.after,
-          form: "patch",
-          diff: result.diff,
-        },
-        mutation_probe: {
-          mutant: formatMutantSummary(
-            relPath,
-            result.line,
-            result.before,
-            result.after,
-            result.diff,
-          ),
-          verified_applied_via: formatVerifiedAppliedVia(
-            relPath,
-            result.line,
-            result.before,
-            result.after,
-            result.diff,
-          ),
-        },
-      },
-      logDir: makeTmpDir(),
-    });
-    reconcileEnvelopeDiffTruncation(envelope);
+    const envelope = buildProbeEnvelope(relPath, root, result, undefined);
+    const diff = deliveredDiff(envelope);
+    expect(diff?.text).toBe(result.diff.text);
+    expect(diff?.truncated).toBe(true);
+    expect(diff?.hunkCount).toBe(20);
+    expectDescriptorsAgree(envelope);
+  });
 
-    const mutant = envelope.mutant as { diff?: MutantDiffField } | undefined;
-    // The excerpt's own bound already produced a hunk-boundary-safe cut
-    // well under the envelope's default budget: nothing further to do.
-    expect(mutant?.diff?.text).toBe(result.diff.text);
-    expect(mutant?.diff?.truncated).toBe(true);
-    expect(mutant?.diff?.hunkCount).toBe(20);
+  it("20 hunks of 400-character lines at -m 2000: what survives is still hunk-shaped, non-empty or explicitly omitted, and named as such", async () => {
+    const changedLines = Array.from({ length: 20 }, (_, i) => (i + 1) * 4);
+    const { root, relPath, result } = await computeFixedLengthMultiHunkDiff(
+      120,
+      400,
+      changedLines,
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable || result.diff === undefined) return;
+
+    const envelope = buildProbeEnvelope(relPath, root, result, 2000);
+    const diff = deliveredDiff(envelope);
+    if (diff === undefined) {
+      // The reduction dropped the whole field at this budget: the
+      // descriptors must stop pointing at it.
+      expectDescriptorsAgree(envelope);
+      const probeField = deliveredProbeField(envelope);
+      expect(String(probeField?.verified_applied_via)).toContain(
+        "mutant.diff omitted from this envelope; see logs",
+      );
+      return;
+    }
+    const text = String(diff.text);
+    expect(text).not.toMatch(ENVELOPE_MARKER_RE);
+    expect(diff.truncated).toBe(true);
+    if (diff.bodyOmitted === true) {
+      expect(text).toBe("");
+    } else {
+      expect(text).toContain("@@ ");
+    }
+    expectDescriptorsAgree(envelope);
   });
 });
 
@@ -1269,6 +1465,14 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
     },
     maxChars: number | undefined,
   ): Record<string, unknown> {
+    const mutantField = {
+      file: relPath,
+      line: result.line,
+      before: result.before,
+      after: result.after,
+      form: "patch" as const,
+      diff: result.diff,
+    };
     const { envelope } = buildEnvelope({
       version: "0.0.0-test",
       command: "probe",
@@ -1276,7 +1480,7 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
       durationMs: 1,
       cwd: root,
       warnings: [],
-      logs: [],
+      logs: realisticLogs(),
       extra: {
         plan: {
           results: [
@@ -1285,14 +1489,7 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
               file: relPath,
               expect: "fail",
               status: "survived",
-              mutant: {
-                file: relPath,
-                line: result.line,
-                before: result.before,
-                after: result.after,
-                form: "patch",
-                diff: result.diff,
-              },
+              mutant: mutantField,
               mutation_probe: {
                 mutant: formatMutantSummary(
                   relPath,
@@ -1326,7 +1523,9 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
       maxChars,
       logDir: makeTmpDir(),
     });
-    reconcileEnvelopeDiffTruncation(envelope);
+    reconcileEnvelopeDiffTruncation(envelope, {
+      planResults: [{ mutant: mutantField }],
+    });
     return envelope;
   }
 
@@ -1398,7 +1597,7 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
     expect(String(deliveredVerifiedAppliedVia)).not.toContain("function fn");
   }, 30000);
 
-  it("--plan batch of three multi-hunk mutants: every excerpt's `truncated` stays honest at the default budget", async () => {
+  it("--plan batch of three multi-hunk mutants: every delivered excerpt is hunk-shaped, never empty behind a pointer, and its descriptors restate it", async () => {
     const mutants = await Promise.all(
       [0, 1, 2].map(async (n) => {
         const lineCount = 200;
@@ -1420,6 +1619,18 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
       }),
     );
 
+    // The pre-envelope `mutant` fields, kept by reference: these are the
+    // evidence the correction compares the delivered entries against,
+    // exactly as `cli.ts` passes `result.results`.
+    const originalMutantFields = mutants.map(({ relPath, result }) => ({
+      file: relPath,
+      line: result.line,
+      before: result.before,
+      after: result.after,
+      form: "patch" as const,
+      diff: result.diff,
+    }));
+
     const { envelope } = buildEnvelope({
       version: "0.0.0-test",
       command: "probe",
@@ -1427,7 +1638,7 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
       durationMs: 1,
       cwd: mutants[0].root,
       warnings: [],
-      logs: [],
+      logs: realisticLogs(),
       extra: {
         plan: {
           results: mutants.map(({ relPath, result }, index) => ({
@@ -1435,14 +1646,7 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
             file: relPath,
             expect: "fail",
             status: "survived",
-            mutant: {
-              file: relPath,
-              line: result.line,
-              before: result.before,
-              after: result.after,
-              form: "patch",
-              diff: result.diff,
-            },
+            mutant: originalMutantFields[index],
             mutation_probe: {
               mutant: formatMutantSummary(
                 relPath,
@@ -1474,7 +1678,9 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
       keepWhole: ["plan.summary"],
       logDir: makeTmpDir(),
     });
-    reconcileEnvelopeDiffTruncation(envelope);
+    reconcileEnvelopeDiffTruncation(envelope, {
+      planResults: originalMutantFields.map((mutant) => ({ mutant })),
+    });
 
     const plan = envelope.plan as { results?: Array<Record<string, unknown>> };
     expect(plan.results).toHaveLength(3);
@@ -1483,16 +1689,36 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
       const diff = mutant?.diff;
       expect(diff).toBeDefined();
       if (diff === undefined) continue;
-      const markerFree = !ENVELOPE_MARKER_RE.test(diff.text);
-      // The invariant: `truncated: false` never sits beside text the
-      // envelope itself cut (a trailing omission marker); when
-      // `truncated` is true, the text ends at a hunk boundary.
-      if (!diff.truncated) {
-        expect(markerFree).toBe(true);
+      const original = mutants[index].result;
+      if (!original.applicable || original.diff === undefined) continue;
+      // The envelope's own character-level cut never survives into the
+      // delivered text, whichever way `truncated` fell.
+      expect(diff.text).not.toMatch(ENVELOPE_MARKER_RE);
+      // Never an empty string behind a "see mutant.diff" pointer.
+      if (diff.bodyOmitted === true) {
+        expect(diff.text).toBe("");
       } else {
-        expect(diff.text).toBe(trimToLastCompleteHunk(diff.text));
+        expect(diff.text.length).toBeGreaterThan(0);
+        expect(diff.text).toContain("@@ ");
       }
-      expect(diff.hunkCount).toBe(mutants[index].result.diff?.hunkCount);
+      const shape = describeExcerptEnd(diff.text);
+      if (diff.hunkTruncated === true) {
+        expect(shape.trailingPartialHunk).toBe(true);
+      } else if (diff.bodyOmitted !== true) {
+        expect(shape.endsAtHunkBoundary).toBe(true);
+      }
+      // Only ever a prefix of what the probe itself produced.
+      expectPrefixOfOriginal(diff.text, original.diff.text);
+      expect(diff.hunkCount).toBe(original.diff.hunkCount);
+      const probeField = entry.mutation_probe as Record<string, unknown>;
+      const clause = expectedPointer(
+        diff as unknown as Record<string, unknown>,
+      );
+      expectDescriptorCarriesOnly(String(probeField.mutant), clause);
+      expectDescriptorCarriesOnly(
+        String(probeField.verified_applied_via),
+        clause,
+      );
     }
   }, 30000);
 
@@ -1515,18 +1741,39 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
     if (result.diff === undefined) return;
 
     const envelope = buildPlanEnvelope(relPath, root, result, 2000);
-    const diff = planDiff(envelope);
+    const diff = planDiff(envelope) as Record<string, unknown> | undefined;
     expect(diff).toBeDefined();
     if (diff === undefined) return;
     const text = String(diff.text ?? "");
     expect(ENVELOPE_MARKER_RE.test(text)).toBe(false);
-    if (diff.truncated) {
-      // Ends at a hunk boundary: re-running the boundary trim on the
-      // delivered text reproduces it byte for byte -- nothing partial
-      // was left in.
-      expect(text).toBe(trimToLastCompleteHunk(text));
+    // What is delivered is a prefix of what the probe produced, cut at a
+    // hunk boundary (or, when even the first hunk did not fit, at a line
+    // boundary inside it, flagged `hunkTruncated`, or omitted entirely
+    // and flagged `bodyOmitted`) -- never an empty string behind a
+    // "see mutant.diff" pointer with nothing saying so.
+    expectPrefixOfOriginal(text, result.diff.text);
+    const shape = describeExcerptEnd(text);
+    if (diff.bodyOmitted === true) {
+      expect(text).toBe("");
+    } else if (diff.hunkTruncated === true) {
+      expect(shape.trailingPartialHunk).toBe(true);
+      expect(text).toContain("@@ ");
+    } else {
+      expect(shape.endsAtHunkBoundary).toBe(true);
+      expect(shape.completeHunks).toBeGreaterThan(0);
     }
     expect(diff.hunkCount).toBe(result.diff.hunkCount);
+    const plan = envelope.plan as { results?: Array<Record<string, unknown>> };
+    const probeField = plan.results?.[0]?.mutation_probe as Record<
+      string,
+      unknown
+    >;
+    const clause = expectedPointer(diff);
+    expectDescriptorCarriesOnly(String(probeField.mutant), clause);
+    expectDescriptorCarriesOnly(
+      String(probeField.verified_applied_via),
+      clause,
+    );
   }, 30000);
 });
 
@@ -1843,4 +2090,742 @@ describe("listPatchTouchedPaths", () => {
     expect(result.reason).toContain("failed to parse");
     expect(fs.existsSync(result.logPath)).toBe(true);
   });
+});
+
+/**
+ * The bound rule and the completeness walk, pinned against LITERAL
+ * expected output at small, hand-checkable bounds.
+ *
+ * Every expectation below is a string written out in full, never a
+ * re-application of the function under test to its own result: an
+ * assertion of the shape `expect(f(x)).toBe(f(f(x)))` holds for any `f`
+ * that is idempotent, including one that does the wrong thing, and is
+ * what let a trim-to-the-last-complete-LINE defect sit unnoticed under a
+ * green suite.
+ */
+describe("trimToLastCompleteHunk", () => {
+  const PREAMBLE = ["--- a/before/f.txt", "+++ b/after/f.txt"];
+  const TWO_HUNKS = [
+    ...PREAMBLE,
+    "@@ -1 +1 @@",
+    "-a",
+    "+A",
+    "@@ -5,2 +5,2 @@",
+    "-b",
+    "-c",
+    "+B",
+    "+C",
+  ].join("\n");
+
+  it("returns a diff whose every hunk is complete unchanged", () => {
+    expect(trimToLastCompleteHunk(TWO_HUNKS)).toBe(TWO_HUNKS);
+  });
+
+  it("drops a trailing hunk whose declared body is not fully present", () => {
+    const cut = [
+      ...PREAMBLE,
+      "@@ -1 +1 @@",
+      "-a",
+      "+A",
+      "@@ -5,2 +5,2 @@",
+      "-b",
+      "-c",
+      "+B",
+    ].join("\n");
+    expect(trimToLastCompleteHunk(cut)).toBe(
+      "--- a/before/f.txt\n+++ b/after/f.txt\n@@ -1 +1 @@\n-a\n+A",
+    );
+  });
+
+  it("a cut landing exactly on a hunk boundary is already complete: unchanged", () => {
+    const cut = [...PREAMBLE, "@@ -1 +1 @@", "-a", "+A"].join("\n");
+    expect(trimToLastCompleteHunk(cut)).toBe(
+      "--- a/before/f.txt\n+++ b/after/f.txt\n@@ -1 +1 @@\n-a\n+A",
+    );
+  });
+
+  it("counts a character-level cut's trailing partial line as a body line, which is why a caller handling one drops it first", () => {
+    // The documented contract: this function verifies hunks by their
+    // headers' declared LINE counts, and a partial line is still a line.
+    // `reconcileEnvelopeDiffTruncation` never hands it cut text for
+    // exactly this reason -- it re-bounds the pre-envelope original
+    // instead -- but a caller that does must drop the last line itself.
+    const midLine = [
+      ...PREAMBLE,
+      "@@ -1 +1 @@",
+      "-a",
+      "+A",
+      "@@ -5,2 +5,2 @@",
+      "-b",
+      "-c",
+      "+B",
+      "+", // "+C" cut mid-line
+    ].join("\n");
+    expect(trimToLastCompleteHunk(midLine)).toBe(midLine);
+    const withPartialDropped = midLine.split("\n").slice(0, -1).join("\n");
+    expect(trimToLastCompleteHunk(withPartialDropped)).toBe(
+      "--- a/before/f.txt\n+++ b/after/f.txt\n@@ -1 +1 @@\n-a\n+A",
+    );
+  });
+
+  it("returns the empty string when not even the first hunk is complete", () => {
+    const cut = [...PREAMBLE, "@@ -1,2 +1,2 @@", "-a"].join("\n");
+    expect(trimToLastCompleteHunk(cut)).toBe("");
+  });
+
+  it("returns the empty string for a preamble with no hunk behind it at all", () => {
+    expect(trimToLastCompleteHunk(PREAMBLE.join("\n"))).toBe("");
+  });
+
+  it("reads a zero-count header (`@@ -5,0 +6,2 @@`, a pure insertion) as 0 removed plus 2 added", () => {
+    const complete = [...PREAMBLE, "@@ -5,0 +6,2 @@", "+one", "+two"].join(
+      "\n",
+    );
+    expect(trimToLastCompleteHunk(complete)).toBe(complete);
+    const short = [...PREAMBLE, "@@ -5,0 +6,2 @@", "+one"].join("\n");
+    expect(trimToLastCompleteHunk(short)).toBe("");
+  });
+
+  it("reads a count-omitted header (`@@ -5 +5 @@`) as one line on each side", () => {
+    const complete = [...PREAMBLE, "@@ -5 +5 @@", "-old", "+new"].join("\n");
+    expect(trimToLastCompleteHunk(complete)).toBe(complete);
+    const short = [...PREAMBLE, "@@ -5 +5 @@", "-old"].join("\n");
+    expect(trimToLastCompleteHunk(short)).toBe("");
+  });
+
+  it("treats `\\ No newline at end of file` as body the header does not count: a complete end-of-file hunk stays whole", () => {
+    const eof = [
+      ...PREAMBLE,
+      "@@ -3 +3 @@",
+      "-old last line",
+      "\\ No newline at end of file",
+      "+new last line",
+      "\\ No newline at end of file",
+    ].join("\n");
+    expect(trimToLastCompleteHunk(eof)).toBe(eof);
+  });
+
+  it("does not abort the walk at a marker line between two hunks", () => {
+    const twoWithEofFirst = [
+      ...PREAMBLE,
+      "@@ -1 +1 @@",
+      "-a",
+      "\\ No newline at end of file",
+      "+A",
+      "@@ -9 +9 @@",
+      "-old",
+      "+new",
+    ].join("\n");
+    expect(trimToLastCompleteHunk(twoWithEofFirst)).toBe(twoWithEofFirst);
+  });
+
+  it("still drops an end-of-file hunk whose added line was cut, keeping the hunk before it", () => {
+    const cut = [
+      ...PREAMBLE,
+      "@@ -1 +1 @@",
+      "-a",
+      "+A",
+      "@@ -9 +9 @@",
+      "-old",
+      "\\ No newline at end of file",
+    ].join("\n");
+    expect(trimToLastCompleteHunk(cut)).toBe(
+      "--- a/before/f.txt\n+++ b/after/f.txt\n@@ -1 +1 @@\n-a\n+A",
+    );
+  });
+});
+
+describe("buildBoundedHunkExcerpt", () => {
+  // preamble: 15 characters joined, 2 lines. Each hunk: 3 lines, 21
+  // characters joined. The bound accounting is therefore
+  // 16 (preamble + its joining newline) + 21 per hunk + 1 per join.
+  const PREAMBLE = ["--- a/x", "+++ b/x"];
+  const HUNK_1 = ["@@ -1 +1 @@", "-aaa", "+bbb"];
+  const HUNK_2 = ["@@ -5 +5 @@", "-ccc", "+ddd"];
+
+  it("keeps every hunk when they all fit", () => {
+    const out = buildBoundedHunkExcerpt(PREAMBLE, [HUNK_1, HUNK_2], 100, 100);
+    expect(out.text).toBe(
+      "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-aaa\n+bbb\n@@ -5 +5 @@\n-ccc\n+ddd",
+    );
+    expect(out.text.length).toBe(59);
+    expect(out).toMatchObject({
+      truncated: false,
+      hunkTruncated: false,
+      bodyOmitted: false,
+      keptHunks: 2,
+    });
+  });
+
+  it("drops a whole hunk that does not fit the character bound", () => {
+    const out = buildBoundedHunkExcerpt(PREAMBLE, [HUNK_1, HUNK_2], 100, 50);
+    expect(out.text).toBe("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-aaa\n+bbb");
+    expect(out.text.length).toBe(37);
+    expect(out).toMatchObject({
+      truncated: true,
+      hunkTruncated: false,
+      bodyOmitted: false,
+      keptHunks: 1,
+    });
+  });
+
+  it("drops a whole hunk that does not fit the line bound", () => {
+    const out = buildBoundedHunkExcerpt(PREAMBLE, [HUNK_1, HUNK_2], 5, 1000);
+    expect(out.text).toBe("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-aaa\n+bbb");
+    expect(out).toMatchObject({ truncated: true, keptHunks: 1 });
+  });
+
+  it("cuts the FIRST hunk at a line boundary when it alone exceeds the bound", () => {
+    const big = [
+      "@@ -1,3 +1,3 @@",
+      "-aaaa",
+      "-bbbb",
+      "-cccc",
+      "+AAAA",
+      "+BBBB",
+      "+CCCC",
+    ];
+    const out = buildBoundedHunkExcerpt(PREAMBLE, [big], 100, 40);
+    // The preamble goes first: it names only the comparison's own
+    // scratch paths, and every character it costs is a line of the
+    // actual change that cannot be shown.
+    expect(out.text).toBe("@@ -1,3 +1,3 @@\n-aaaa\n-bbbb\n-cccc\n+AAAA");
+    expect(out.text.length).toBe(39);
+    expect(out.text.length).toBeLessThanOrEqual(40);
+    expect(out).toMatchObject({
+      truncated: true,
+      hunkTruncated: true,
+      bodyOmitted: false,
+      keptHunks: 0,
+    });
+  });
+
+  it("drops the preamble rather than hunk content once no whole hunk fits beside it", () => {
+    const out = buildBoundedHunkExcerpt(PREAMBLE, [HUNK_1], 100, 20);
+    expect(out.text).toBe("@@ -1 +1 @@\n-aaa");
+    expect(out.text.length).toBe(16);
+    expect(out).toMatchObject({
+      truncated: true,
+      hunkTruncated: true,
+      bodyOmitted: false,
+      keptHunks: 0,
+    });
+  });
+
+  it("reports a whole hunk delivered without its preamble as truncated, never as the complete excerpt", () => {
+    // 21 characters is exactly HUNK_1; the 16-character preamble does
+    // not fit beside it.
+    const out = buildBoundedHunkExcerpt(PREAMBLE, [HUNK_1], 100, 21);
+    expect(out.text).toBe("@@ -1 +1 @@\n-aaa\n+bbb");
+    expect(out).toMatchObject({
+      truncated: true,
+      hunkTruncated: false,
+      bodyOmitted: false,
+      keptHunks: 1,
+    });
+  });
+
+  it("delivers an empty text WITH `bodyOmitted` when not even the first hunk's header fits", () => {
+    const out = buildBoundedHunkExcerpt(PREAMBLE, [HUNK_1], 100, 8);
+    expect(out.text).toBe("");
+    expect(out).toMatchObject({
+      truncated: true,
+      hunkTruncated: false,
+      bodyOmitted: true,
+      keptHunks: 0,
+    });
+  });
+
+  it("returns the preamble untruncated when there are no hunks at all", () => {
+    const out = buildBoundedHunkExcerpt(PREAMBLE, [], 100, 100);
+    expect(out.text).toBe("--- a/x\n+++ b/x");
+    expect(out).toMatchObject({ truncated: false, keptHunks: 0 });
+  });
+});
+
+describe("reconcileEnvelopeDiffTruncation", () => {
+  const DIFF_PATH = "/tmp/probe-logs/mutant-diff-abc123/mutant-diff.patch";
+  const ORIGINAL_TEXT =
+    "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-aaa\n+bbb\n@@ -5 +5 @@\n-ccc\n+ddd";
+  const HUNK_1_ONLY = "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-aaa\n+bbb";
+
+  function originalDiff(
+    overrides: Partial<MutantDiffField> = {},
+  ): MutantDiffField {
+    return {
+      text: ORIGINAL_TEXT,
+      path: DIFF_PATH,
+      hunkCount: 2,
+      removed: 2,
+      added: 2,
+      changedLineCount: 4,
+      truncated: false,
+      ...overrides,
+    };
+  }
+
+  function originalMutant(diff: MutantDiffField | undefined): {
+    file: string;
+    line: number;
+    before: string;
+    after: string;
+    diff?: MutantDiffField;
+  } {
+    return {
+      file: "fixture.js",
+      line: 2,
+      before: "old line",
+      after: "new line",
+      ...(diff !== undefined ? { diff } : {}),
+    };
+  }
+
+  /** The envelope shape `cli.ts` hands the correction for a single
+   * probe, with `diff` already in whatever state the reduction left it. */
+  function envelopeWith(
+    deliveredDiff: unknown,
+    descriptors: { mutant: string; verified_applied_via: string },
+  ): Record<string, unknown> {
+    return {
+      mutant: {
+        file: "fixture.js",
+        line: 2,
+        before: "old line",
+        after: "new line",
+        form: "patch",
+        ...(deliveredDiff !== undefined ? { diff: deliveredDiff } : {}),
+      },
+      mutation_probe: {
+        ...descriptors,
+        result: "survived",
+        restored_verified: true,
+      },
+    };
+  }
+
+  const WHOLE_SUMMARY =
+    "fixture.js:2: old line -> new line (first of 4 changed lines across " +
+    "2 hunks; see mutant.diff (whole); full diff at mutant.diff.path)";
+  const WHOLE_VIA =
+    "git diff --no-index of the before/after scratch copies: 2 hunks, 4 " +
+    "changed lines (2 removed, 2 added); see mutant.diff (whole); full " +
+    "diff at mutant.diff.path";
+
+  it("rebuilds a cut excerpt from the pre-envelope original and restates both descriptors", () => {
+    // What `buildEnvelope`'s own generic string cap produces: a prefix
+    // of the excerpt (mid-line, mid-hunk) plus its omission marker.
+    const deliveredText =
+      ORIGINAL_TEXT.slice(0, 45) + "...(14 more characters omitted)";
+    expect(deliveredText).toMatch(ENVELOPE_MARKER_RE);
+    const envelope = envelopeWith(
+      {
+        text: deliveredText,
+        path: DIFF_PATH,
+        hunkCount: 2,
+        removed: 2,
+        added: 2,
+        changedLineCount: 4,
+        truncated: false,
+      },
+      { mutant: WHOLE_SUMMARY, verified_applied_via: WHOLE_VIA },
+    );
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(originalDiff()),
+    });
+
+    const diff = (envelope.mutant as Record<string, unknown>).diff as Record<
+      string,
+      unknown
+    >;
+    // Rebuilt from the ORIGINAL under the delivered text's own budget:
+    // whole hunks, no marker, never a repair of the cut string.
+    expect(diff.text).toBe(HUNK_1_ONLY);
+    expect(diff.truncated).toBe(true);
+    expect(diff.hunkTruncated).toBeUndefined();
+    expect(diff.bodyOmitted).toBeUndefined();
+    // Never revised: they name the true totals, fixed before any bound.
+    expect(diff.hunkCount).toBe(2);
+    expect(diff.removed).toBe(2);
+    expect(diff.added).toBe(2);
+    expect(diff.changedLineCount).toBe(4);
+    expect(diff.path).toBe(DIFF_PATH);
+    // Never longer than the string it replaced.
+    expect(String(diff.text).length).toBeLessThanOrEqual(deliveredText.length);
+
+    const probeField = envelope.mutation_probe as Record<string, unknown>;
+    expect(probeField.mutant).toBe(
+      "fixture.js:2: old line -> new line (first of 4 changed lines across " +
+        "2 hunks; see mutant.diff (truncated); full diff at mutant.diff.path)",
+    );
+    expect(probeField.verified_applied_via).toBe(
+      "git diff --no-index of the before/after scratch copies: 2 hunks, 4 " +
+        "changed lines (2 removed, 2 added); see mutant.diff (truncated); " +
+        "full diff at mutant.diff.path",
+    );
+    // The four contract fields around them are untouched.
+    expect(probeField.result).toBe("survived");
+    expect(probeField.restored_verified).toBe(true);
+  });
+
+  it("leaves an untouched excerpt alone even when its own last line ends in the envelope's omission-marker literal", () => {
+    // A mutant that adds a line quoting the marker text is legitimate
+    // content, not evidence of a cut. Deciding on the suffix alone
+    // emptied the whole excerpt here and set a false `truncated`.
+    const text =
+      "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+log.warn: ...(12 more characters omitted)";
+    expect(text).toMatch(ENVELOPE_MARKER_RE);
+    const diffField: MutantDiffField = {
+      text,
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 1,
+      added: 1,
+      changedLineCount: 2,
+      truncated: false,
+    };
+    const summary =
+      "fixture.js:2: old line -> new line (first of 2 changed lines across " +
+      "1 hunk; see mutant.diff (whole); full diff at mutant.diff.path)";
+    const via =
+      "git diff --no-index of the before/after scratch copies: 1 hunk, 2 " +
+      "changed lines (1 removed, 1 added); see mutant.diff (whole); full " +
+      "diff at mutant.diff.path";
+    const delivered = { ...diffField };
+    const envelope = envelopeWith(delivered, {
+      mutant: summary,
+      verified_applied_via: via,
+    });
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(diffField),
+    });
+
+    expect(delivered).toEqual(diffField);
+    const probeField = envelope.mutation_probe as Record<string, unknown>;
+    expect(probeField.mutant).toBe(summary);
+    expect(probeField.verified_applied_via).toBe(via);
+  });
+
+  it("stops the descriptors pointing at a `diff` the envelope dropped, and puts nothing back", () => {
+    const envelope = envelopeWith(undefined, {
+      mutant: WHOLE_SUMMARY,
+      verified_applied_via: WHOLE_VIA,
+    });
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(originalDiff()),
+    });
+
+    expect((envelope.mutant as Record<string, unknown>).diff).toBeUndefined();
+    const probeField = envelope.mutation_probe as Record<string, unknown>;
+    expect(probeField.mutant).toBe(
+      "fixture.js:2: old line -> new line (first of 4 changed lines across " +
+        "2 hunks; mutant.diff omitted from this envelope; see logs)",
+    );
+    expect(probeField.verified_applied_via).toBe(
+      "git diff --no-index of the before/after scratch copies: 2 hunks, 4 " +
+        "changed lines (2 removed, 2 added); mutant.diff omitted from this " +
+        "envelope; see logs",
+    );
+  });
+
+  it("treats a depth-pruned placeholder in place of `diff` as an omission too", () => {
+    const envelope = envelopeWith("...(subtree pruned at depth 5)", {
+      mutant: WHOLE_SUMMARY,
+      verified_applied_via: WHOLE_VIA,
+    });
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(originalDiff()),
+    });
+
+    expect((envelope.mutant as Record<string, unknown>).diff).toBe(
+      "...(subtree pruned at depth 5)",
+    );
+    expect(
+      String((envelope.mutation_probe as Record<string, unknown>).mutant),
+    ).toContain("mutant.diff omitted from this envelope; see logs");
+  });
+
+  it("treats a `mutant` field the reduction replaced wholesale as an omission", () => {
+    const envelope: Record<string, unknown> = {
+      mutant: "...(subtree pruned at depth 4)",
+      mutation_probe: {
+        mutant: WHOLE_SUMMARY,
+        verified_applied_via: WHOLE_VIA,
+        result: "survived",
+        restored_verified: true,
+      },
+    };
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(originalDiff()),
+    });
+
+    expect(envelope.mutant).toBe("...(subtree pruned at depth 4)");
+    expect(
+      String((envelope.mutation_probe as Record<string, unknown>).mutant),
+    ).toContain("mutant.diff omitted from this envelope; see logs");
+  });
+
+  it("does nothing for a mutant that never had an excerpt", () => {
+    const envelope: Record<string, unknown> = {
+      mutant: {
+        file: "fixture.js",
+        line: 2,
+        before: "old line",
+        after: "new line",
+        form: "replace",
+      },
+      mutation_probe: {
+        mutant: "fixture.js:2: old line -> new line",
+        verified_applied_via: "fixture.js:2\n- old line\n+ new line",
+        result: "killed",
+        restored_verified: true,
+      },
+    };
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(undefined),
+    });
+
+    expect(envelope.mutation_probe).toEqual({
+      mutant: "fixture.js:2: old line -> new line",
+      verified_applied_via: "fixture.js:2\n- old line\n+ new line",
+      result: "killed",
+      restored_verified: true,
+    });
+  });
+
+  it("never re-delivers a mid-hunk tail the excerpt's own bound had already left, as if it were whole", () => {
+    // The pre-envelope excerpt was itself cut inside its only hunk.
+    const midHunkOriginal: MutantDiffField = {
+      text: "--- a/x\n+++ b/x\n@@ -1,4 +1,4 @@\n-aaa\n-bbb",
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 4,
+      added: 4,
+      changedLineCount: 8,
+      truncated: true,
+      hunkTruncated: true,
+    };
+    const delivered = {
+      ...midHunkOriginal,
+      text:
+        midHunkOriginal.text.slice(0, 30) + "...(12 more characters omitted)",
+      truncated: false,
+      hunkTruncated: false,
+    };
+    const envelope = envelopeWith(delivered, {
+      mutant: "unused",
+      verified_applied_via: "unused",
+    });
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(midHunkOriginal),
+    });
+
+    const diff = (envelope.mutant as Record<string, unknown>).diff as Record<
+      string,
+      unknown
+    >;
+    expect(diff.truncated).toBe(true);
+    // Still a cut hunk, never relabelled complete.
+    expect(diff.hunkTruncated === true || diff.bodyOmitted === true).toBe(true);
+    expect(String(diff.text).startsWith("--- a/x\n+++ b/x")).toBe(
+      diff.bodyOmitted !== true,
+    );
+    expect(midHunkOriginal.text.startsWith(String(diff.text))).toBe(true);
+  });
+
+  it("matches a plan's delivered entries to the originals by index, leaving the array marker alone", () => {
+    const cutText =
+      ORIGINAL_TEXT.slice(0, 45) + "...(14 more characters omitted)";
+    const entry = (deliveredText: string): Record<string, unknown> => ({
+      index: 0,
+      mutant: {
+        file: "fixture.js",
+        line: 2,
+        before: "old line",
+        after: "new line",
+        form: "patch",
+        diff: {
+          text: deliveredText,
+          path: DIFF_PATH,
+          hunkCount: 2,
+          removed: 2,
+          added: 2,
+          changedLineCount: 4,
+          truncated: false,
+        },
+      },
+      mutation_probe: {
+        mutant: WHOLE_SUMMARY,
+        verified_applied_via: WHOLE_VIA,
+        result: "survived",
+        restored_verified: true,
+      },
+    });
+    const envelope: Record<string, unknown> = {
+      plan: {
+        results: [
+          entry(ORIGINAL_TEXT),
+          entry(cutText),
+          "...(3 more items omitted)",
+        ],
+      },
+    };
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      planResults: [
+        { mutant: originalMutant(originalDiff()) },
+        { mutant: originalMutant(originalDiff()) },
+      ],
+    });
+
+    const results = (envelope.plan as { results: unknown[] }).results;
+    const first = (results[0] as Record<string, unknown>).mutant as Record<
+      string,
+      unknown
+    >;
+    const second = (results[1] as Record<string, unknown>).mutant as Record<
+      string,
+      unknown
+    >;
+    // Untouched: it was delivered whole.
+    expect((first.diff as Record<string, unknown>).text).toBe(ORIGINAL_TEXT);
+    expect((first.diff as Record<string, unknown>).truncated).toBe(false);
+    // Corrected: it was cut.
+    expect((second.diff as Record<string, unknown>).text).toBe(HUNK_1_ONLY);
+    expect((second.diff as Record<string, unknown>).truncated).toBe(true);
+    expect(results[2]).toBe("...(3 more items omitted)");
+  });
+});
+
+describe("mutant.diff.path: the whole applied diff on disk", () => {
+  it("writes the full diff beside the excerpt, names it in `diff.path` and in the mutant's log paths", async () => {
+    const { root, relPath, absFile, content } = initRepoWithLines(10);
+    const patchPath = path.join(root, "three-hunk-path.patch");
+    writeSparsePatch(patchPath, relPath, [2, 6, 10], 10);
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable || result.diff === undefined) return;
+
+    const diffPath = result.diff.path;
+    expect(typeof diffPath).toBe("string");
+    if (diffPath === undefined) return;
+    expect(fs.existsSync(diffPath)).toBe(true);
+    expect(result.logPaths).toContain(diffPath);
+
+    const full = fs.readFileSync(diffPath, "utf8");
+    // The whole change, not the excerpt: every hunk, and the excerpt is
+    // a prefix of it.
+    expect(full.split("\n").filter((l) => l.startsWith("@@ "))).toHaveLength(3);
+    expect(full).toContain("function fn2() { return 200; }");
+    expect(full).toContain("function fn6() { return 600; }");
+    expect(full).toContain("function fn10() { return 1000; }");
+    expect(full.startsWith(result.diff.text)).toBe(true);
+    expect(full).not.toContain("diff --git ");
+  });
+
+  it("a single oversized hunk is cut inside itself, within the bound, with the whole hunk still on disk", async () => {
+    // 40 contiguous changed lines of 60 characters is one hunk of about
+    // 4,900 characters: past DIFF_EXCERPT_MAX_CHARS on its own, which
+    // used to ship whole with `truncated: false`.
+    const root = makeTmpDir();
+    git(root, ["init", "-q"]);
+    git(root, ["config", "user.email", "test@example.com"]);
+    git(root, ["config", "user.name", "test"]);
+    const relPath = "target.txt";
+    const absFile = path.join(root, relPath);
+    const lineCount = 42;
+    const lines = Array.from({ length: lineCount }, (_, i) =>
+      fixedLengthLine(`  L${String(i + 1)}`, 60),
+    );
+    const content = lines.join("\n") + "\n";
+    fs.writeFileSync(absFile, content);
+    git(root, ["add", "-A"]);
+    git(root, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+
+    const changed = Array.from({ length: 40 }, (_, i) => i + 2);
+    const body: string[] = [
+      `diff --git a/${relPath} b/${relPath}`,
+      "index 0000000..0000000 100644",
+      `--- a/${relPath}`,
+      `+++ b/${relPath}`,
+      `@@ -1,${String(lineCount)} +1,${String(lineCount)} @@`,
+      ` ${lines[0]}`,
+    ];
+    for (const n of changed) body.push(`-${lines[n - 1]}`);
+    for (const n of changed) {
+      body.push(`+${fixedLengthLine(`  M${String(n)}`, 60)}`);
+    }
+    body.push(` ${lines[lineCount - 1]}`);
+    const patchPath = path.join(root, "one-big-hunk.patch");
+    fs.writeFileSync(patchPath, body.join("\n") + "\n");
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable || result.diff === undefined) return;
+
+    expect(result.diff.hunkCount).toBe(1);
+    expect(result.diff.changedLineCount).toBe(80);
+    expect(result.diff.truncated).toBe(true);
+    expect(result.diff.hunkTruncated).toBe(true);
+    expect(result.diff.bodyOmitted).toBeUndefined();
+    // The bound actually holds now, first hunk included.
+    expect(result.diff.text.length).toBeLessThanOrEqual(DIFF_EXCERPT_MAX_CHARS);
+    expect(result.diff.text.split("\n").length).toBeLessThanOrEqual(
+      DIFF_EXCERPT_MAX_LINES,
+    );
+
+    const diffPath = result.diff.path;
+    expect(typeof diffPath).toBe("string");
+    if (diffPath === undefined) return;
+    const full = fs.readFileSync(diffPath, "utf8");
+    // Cut at a LINE boundary, and maximally so: the next line of the
+    // full diff would not have fit. The two preamble lines are dropped
+    // before hunk content is, so the comparison starts at the header.
+    expectPrefixOfOriginal(result.diff.text, full);
+    const keptLines = result.diff.text.split("\n");
+    const fullLines = full.slice(full.indexOf("@@ ")).split("\n");
+    expect(fullLines.slice(0, keptLines.length)).toEqual(keptLines);
+    const nextLine = fullLines[keptLines.length];
+    expect(nextLine).toBeDefined();
+    expect(`${result.diff.text}\n${nextLine}`.length).toBeGreaterThan(
+      DIFF_EXCERPT_MAX_CHARS,
+    );
+    // The header survives, so the reader still sees which lines moved.
+    expect(keptLines[0]).toMatch(/^@@ /);
+    // And the whole hunk is on disk regardless.
+    expect(full).toContain(fixedLengthLine("  M41", 60));
+
+    // The descriptors say "cut mid-hunk", not "whole".
+    const summary = formatMutantSummary(
+      relPath,
+      result.line,
+      result.before,
+      result.after,
+      result.diff,
+    );
+    expect(summary).toContain("see mutant.diff (cut mid-hunk)");
+    expect(summary).toContain("full diff at mutant.diff.path");
+    expect(
+      formatVerifiedAppliedVia(
+        relPath,
+        result.line,
+        result.before,
+        result.after,
+        result.diff,
+      ),
+    ).toContain("see mutant.diff (cut mid-hunk)");
+  }, 30000);
 });

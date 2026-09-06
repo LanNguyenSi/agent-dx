@@ -73,6 +73,18 @@ export type {
   ProbeStatus,
   TestPhaseField,
 } from "./probe/index.js";
+export {
+  reconcileEnvelopeDiffTruncation,
+  trimToLastCompleteHunk,
+  DIFF_EXCERPT_MAX_CHARS,
+  DIFF_EXCERPT_MAX_LINES,
+} from "./probe/mutant.js";
+export type {
+  EnvelopeDiffOriginals,
+  MutantDiffField,
+  MutantOriginal,
+  PlanEntryOriginal,
+} from "./probe/mutant.js";
 export { parsePlanFile, PLAN_MAX_BYTES } from "./probe/plan.js";
 export type {
   PlanMutantSpec,

@@ -62,11 +62,13 @@ export interface MutantComputed {
   /** Set when a multi-line patch's applied-diff excerpt could not be
    * computed, or had to be refused (an unreadable `git diff` exit, its
    * own output too large to read back in full), even though `diff`
-   * would otherwise have been attached: `step.ts` folds this into the
-   * result's own `warnings`, so a missing `diff` is never silent. Never
-   * set when `diff` is present, and never set for the ordinary
-   * single-line-replacement case (`diff` is correctly absent there,
-   * with nothing to warn about). */
+   * would otherwise have been attached, and set -- with `diff` present
+   * -- when the excerpt was computed but the whole diff beside it could
+   * not be written to disk (`diff.path` is then absent). `step.ts`
+   * folds this into the result's own `warnings` either way, so neither
+   * a missing `diff` nor a missing `diff.path` is ever silent. Never set
+   * for the ordinary single-line-replacement case (`diff` is correctly
+   * absent there, with nothing to warn about). */
   diffWarning?: string;
 }
 
@@ -84,18 +86,38 @@ export interface MutantDiffField {
    * context lines (the point is which lines changed, not the lines
    * around them) and no leading `diff --git `/`index ` lines (they would
    * only name this comparison's own throwaway scratch paths and a blob
-   * hash from a repository that does not exist). Bounded to
-   * `DIFF_EXCERPT_MAX_LINES`/`DIFF_EXCERPT_MAX_CHARS`, cut to whole
-   * hunks (never mid-hunk: a hunk is kept only once every line its own
-   * `@@ -a,b +c,d @@` header declares is present) when the applied
-   * change is bigger than that, with `truncated` set. `buildEnvelope`'s
-   * own generic string cap can still cut this further once the result
-   * reaches `cli.ts` (it knows nothing about hunks); `cli.ts` calls
-   * `reconcileEnvelopeDiffTruncation` on the built envelope to correct
-   * that case the same way -- trimmed back to the last hunk it can
-   * prove is fully present, `truncated` set -- so `truncated: false`
-   * can never sit beside text the envelope itself cut. */
+   * hash from a repository that does not exist).
+   *
+   * Bounded to `DIFF_EXCERPT_MAX_LINES`/`DIFF_EXCERPT_MAX_CHARS`. The
+   * bound is unconditional -- it applies to the first hunk as much as to
+   * any other -- and it cuts in this order: whole hunks are dropped from
+   * the end first (`truncated`), and only when the FIRST hunk alone
+   * already exceeds the bound is that hunk itself cut, at a line
+   * boundary, keeping its `@@` header plus as many whole body lines as
+   * fit (`hunkTruncated`). When not even the header fits, `text` is the
+   * empty string and `bodyOmitted` says so, rather than an empty string
+   * sitting silently behind a "see mutant.diff" pointer. `path` below
+   * always names the whole, unbounded diff on disk, whichever of those
+   * happened.
+   *
+   * `buildEnvelope`'s own generic string cap can still cut this further
+   * once the result reaches `cli.ts` (it knows nothing about hunks);
+   * `cli.ts` calls `reconcileEnvelopeDiffTruncation` on the built
+   * envelope, WITH the pre-envelope result beside it, and rebuilds the
+   * delivered excerpt from that original under the same bound rule --
+   * so `truncated`/`hunkTruncated: false` can never sit beside text the
+   * envelope itself cut, and a delivered text that the envelope did not
+   * touch is never rewritten on the strength of a suffix pattern alone
+   * (see `reconcileEnvelopeDiffTruncation`'s own docblock). */
   text: string;
+  /** Absolute path of the whole applied diff, written to the probe's own
+   * log directory (`mutant-diff-<random>/mutant-diff.patch`) before any
+   * bound ran, so the complete mutant is recoverable no matter how much
+   * of `text` survived this module's bound or the envelope's. Present
+   * whenever the file could be written; a failure to write it leaves
+   * this absent and names itself in `MutantComputed.diffWarning`. Also
+   * appended to the mutant's own `logPaths`. */
+  path?: string;
   /** Every hunk the applied change produced, counted before any
    * truncation and never revised afterward (by either bound), so it
    * always names the true total even when `text` shows only a prefix of
@@ -114,7 +136,25 @@ export interface MutantDiffField {
    * read as "the whole change was one line" for a hunk that in fact
    * replaced several. */
   changedLineCount: number;
+  /** True when `text` does not carry every hunk of the applied change:
+   * whole hunks were dropped from the end (and/or the one hunk that is
+   * present was itself cut, see `hunkTruncated`). False only when `text`
+   * is the complete diff. */
   truncated: boolean;
+  /** True when the excerpt was cut INSIDE a hunk rather than between
+   * two: the first hunk alone exceeded the bound, so `text` carries its
+   * `@@` header plus the whole body lines that fit and nothing else.
+   * Distinct from `truncated`, which says whole hunks are missing;
+   * `hunkTruncated` implies `truncated` (a hunk that is cut is not
+   * fully present). Absent when false. */
+  hunkTruncated?: boolean;
+  /** True when `text` carries no hunk at all -- not even the first
+   * hunk's `@@` header fit the bound -- so `text` is `""`. The flag
+   * exists so an empty string is never delivered as if it were an
+   * excerpt: a reader sees the omission named, with `path` (and, once
+   * the envelope has run, `logs`) still naming the whole diff. Absent
+   * when false. */
+  bodyOmitted?: boolean;
 }
 
 /**
@@ -126,6 +166,13 @@ export interface MutantDiffField {
  * to prove its hunks are not just the first one (the fixture this bound
  * is tested against uses three, each two lines), while still being far
  * below `PATCH_MAX_BYTES`.
+ *
+ * It bounds EVERY hunk, the first one included: a single hunk that
+ * replaces a thousand lines is cut at a line boundary inside itself
+ * (`hunkTruncated: true`) rather than shipped whole, which is what makes
+ * this an actual bound on the field rather than a bound on all hunks
+ * but one. `path` still names the whole diff on disk in that case, so
+ * nothing is lost, only moved out of the envelope.
  *
  * This bound alone does not guarantee `verified_applied_via`/`text`
  * survive `envelope.ts`'s own `DEFAULT_MAX_CHARS` (8,000) unmodified --
@@ -600,7 +647,13 @@ async function computeAppliedDiffExcerpt(
       removedCount: number;
       addedCount: number;
       truncated: boolean;
+      hunkTruncated: boolean;
+      bodyOmitted: boolean;
       logPath: string;
+      /** Absolute path of the whole diff on disk, absent only when it
+       * could not be written (`patchWarning` then names why). */
+      patchPath?: string;
+      patchWarning?: string;
     }
   | { warning: string }
 > {
@@ -690,19 +743,41 @@ async function computeAppliedDiffExcerpt(
       removedCount += counts.removed;
       addedCount += counts.added;
     }
-    const { text, truncated } = buildBoundedHunkExcerpt(
+    // Written BEFORE any bound runs, and never bounded itself: whatever
+    // this module's own excerpt bound (and, later, the envelope's) has
+    // to leave out, this file still has. `mutant.diff.path` and the
+    // mutant's `logPaths` both name it, so the whole applied change is
+    // recoverable from any result that carries the field at all.
+    const fullDiffText = bodyLines.join("\n") + "\n";
+    let patchPath: string | undefined;
+    let patchWarning: string | undefined;
+    try {
+      const candidate = path.join(diffDir, "mutant-diff.patch");
+      fs.writeFileSync(candidate, fullDiffText);
+      patchPath = candidate;
+    } catch (err) {
+      patchWarning =
+        "the applied change's full diff could not be written beside the " +
+        `excerpt (${errorMessage(err)}); mutant.diff.path is absent and ` +
+        "only the bounded excerpt is available";
+    }
+    const bounded = buildBoundedHunkExcerpt(
       preamble,
       hunks,
       DIFF_EXCERPT_MAX_LINES,
       DIFF_EXCERPT_MAX_CHARS,
     );
     return {
-      text,
+      text: bounded.text,
       hunkCount: hunks.length,
       removedCount,
       addedCount,
-      truncated,
+      truncated: bounded.truncated,
+      hunkTruncated: bounded.hunkTruncated,
+      bodyOmitted: bounded.bodyOmitted,
       logPath: diffResult.logPath,
+      ...(patchPath !== undefined ? { patchPath } : {}),
+      ...(patchWarning !== undefined ? { patchWarning } : {}),
     };
   } catch (err) {
     cleanupScratchContent();
@@ -742,6 +817,27 @@ function parseHunkHeaderCounts(
   };
 }
 
+/**
+ * `git diff`'s own marker line for a file whose last line has no
+ * terminating newline. It follows the removed or added line it annotates
+ * and is NOT counted by the enclosing hunk's `@@ -a,b +c,d @@` header,
+ * so every walk over a hunk's declared body has to step over it rather
+ * than spend one of the header's counts on it: counting it would end a
+ * complete EOF hunk one line early, dropping the `+` line of a
+ * replacement and leaving a diff that reads as a pure deletion.
+ * Matched by prefix rather than by the whole sentence, since the text
+ * after `\ ` is git's own wording and not part of this module's
+ * contract.
+ */
+const NO_NEWLINE_MARKER_PREFIX = "\\ ";
+
+/** True for a `\ No newline at end of file` marker line (see
+ * `NO_NEWLINE_MARKER_PREFIX`): body content of a hunk, but not one of
+ * the lines its header counts. */
+function isNoNewlineMarker(line: string): boolean {
+  return line.startsWith(NO_NEWLINE_MARKER_PREFIX);
+}
+
 /** Splits a `git diff --unified=0` body (already filtered of the
  * leading `diff --git `/`index ` lines) into its leading `preamble`
  * (the `--- `/`+++ ` file lines, kept whole and always ahead of every
@@ -749,8 +845,9 @@ function parseHunkHeaderCounts(
  * followed by every line up to (not including) the next header. This is
  * what lets the excerpt's own truncation below cut only at hunk
  * boundaries -- a hunk is an atomic unit here, never split across the
- * cut, and the preamble is never mistaken for part of one. */
-function splitDiffBody(bodyLines: string[]): {
+ * cut, and the preamble is never mistaken for part of one. Exported
+ * alongside `buildBoundedHunkExcerpt`, whose input shape it produces. */
+export function splitDiffBody(bodyLines: string[]): {
   preamble: string[];
   hunks: string[][];
 } {
@@ -770,51 +867,160 @@ function splitDiffBody(bodyLines: string[]): {
   return { preamble, hunks };
 }
 
+/** What `buildBoundedHunkExcerpt` produced: the delivered `text` plus
+ * the three flags `MutantDiffField` carries for it, and `keptHunks`,
+ * the number of hunks kept WHOLE (0 when the first hunk itself had to be
+ * cut), which `reconcileEnvelopeDiffTruncation` needs to tell "dropped
+ * the original's own mid-hunk tail" from "kept it". */
+export interface BoundedExcerpt {
+  text: string;
+  truncated: boolean;
+  hunkTruncated: boolean;
+  bodyOmitted: boolean;
+  keptHunks: number;
+}
+
 /**
  * Keeps `preamble` whole and as many of `hunks`, in order, as fit
- * within `maxLines`/`maxChars` alongside it -- WHOLE hunks only, never
- * a prefix of one, so a truncated excerpt always ends at a hunk
- * boundary rather than mid-hunk. Always keeps at least the first hunk,
- * even when it alone (plus the preamble) already exceeds the bound:
- * reporting zero hunks would say less than reporting one hunk over
- * budget, and a caller past this (`buildEnvelope`'s own generic string
- * cap, then `reconcileEnvelopeDiffTruncation` correcting that) still
- * bounds the result overall. Joins exactly the way the excerpt's own
- * `text` always has: `preamble` and every kept hunk, each already its
- * own `"\n"`-joined block, joined to each other by `"\n"` in turn.
+ * within `maxLines`/`maxChars` alongside it -- WHOLE hunks first, never
+ * a prefix of one, so a truncated excerpt ends at a hunk boundary
+ * whenever at least one hunk fits.
+ *
+ * When not even the FIRST hunk fits, the bound still holds: that hunk is
+ * cut inside itself, at a line boundary, keeping its `@@` header plus as
+ * many whole body lines as fit (`hunkTruncated: true`). Shipping it
+ * whole instead -- what this did before -- meant a one-hunk change of
+ * any size was delivered unbounded with `truncated: false`, so the
+ * documented 100-line/3,000-character bound was not in fact a bound on
+ * the field. A cut hunk declares more body lines in its own header than
+ * it carries, which is exactly what makes it recognisable as cut, to a
+ * reader and to `trimToLastCompleteHunk` alike.
+ *
+ * When not even the header line fits, `text` is `""` and `bodyOmitted`
+ * says so (the preamble alone is dropped too: it names only this
+ * comparison's own scratch paths, so it is not the part worth spending
+ * the last characters on). An empty `text` behind a "see mutant.diff"
+ * pointer, with nothing saying it is empty, is the one outcome this
+ * function must never produce silently.
+ *
+ * Joins exactly the way the excerpt's own `text` always has: `preamble`
+ * and every kept hunk, each already its own `"\n"`-joined block, joined
+ * to each other by `"\n"` in turn.
+ *
+ * Exported so the bound rule -- the contract of `MutantDiffField.text`,
+ * and the one rule both the pre-envelope excerpt and
+ * `reconcileEnvelopeDiffTruncation` apply -- can be pinned directly, at
+ * literal small bounds, instead of only through a 3,000-character
+ * end-to-end fixture whose expected output nobody can write down.
  */
-function buildBoundedHunkExcerpt(
+export function buildBoundedHunkExcerpt(
   preamble: string[],
   hunks: string[][],
   maxLines: number,
   maxChars: number,
-): { text: string; truncated: boolean } {
+): BoundedExcerpt {
+  if (hunks.length === 0) {
+    return {
+      text: preamble.join("\n"),
+      truncated: false,
+      hunkTruncated: false,
+      bodyOmitted: false,
+      keptHunks: 0,
+    };
+  }
+  const withPreamble = boundHunksUnder(preamble, hunks, maxLines, maxChars);
+  // The preamble is kept only while at least one WHOLE hunk fits beside
+  // it. Once it does not, those two lines go first: they name only this
+  // comparison's own throwaway scratch paths (`before/x`, `after/x`),
+  // while every character they cost is a character of the actual change
+  // that cannot be shown. At a tight `-m` that is the difference between
+  // an excerpt and an empty string behind a pointer.
+  if (withPreamble.keptHunks > 0 || preamble.length === 0) {
+    return withPreamble;
+  }
+  const withoutPreamble = boundHunksUnder([], hunks, maxLines, maxChars);
+  return {
+    ...withoutPreamble,
+    // Dropping the preamble is itself something the delivered text does
+    // not carry, so this is never reported as an untruncated excerpt --
+    // not even when every hunk then fits.
+    truncated: true,
+  };
+}
+
+/** `buildBoundedHunkExcerpt`'s own body, for one fixed choice of
+ * preamble: whole hunks while they fit, then a line-bounded prefix of
+ * the first hunk, then nothing. */
+function boundHunksUnder(
+  preamble: string[],
+  hunks: string[][],
+  maxLines: number,
+  maxChars: number,
+): BoundedExcerpt {
   const preambleText = preamble.join("\n");
-  if (hunks.length === 0) return { text: preambleText, truncated: false };
-  let kept = 1;
-  let lineTotal = preamble.length + hunks[0].length;
-  let charTotal =
-    (preamble.length > 0 ? preambleText.length + 1 : 0) +
-    hunks[0].join("\n").length;
-  for (let i = 1; i < hunks.length; i++) {
-    const hunkLines = hunks[i].length;
-    const hunkChars = hunks[i].join("\n").length;
-    const nextLineTotal = lineTotal + hunkLines;
-    // `+ 1` for the "\n" that joins this hunk to the previous one.
-    const nextCharTotal = charTotal + 1 + hunkChars;
-    if (nextLineTotal > maxLines || nextCharTotal > maxChars) break;
+  const preambleLines = preamble.length;
+  const preambleChars = preambleLines > 0 ? preambleText.length + 1 : 0;
+  const fits = (lines: number, chars: number): boolean =>
+    preambleLines + lines <= maxLines && preambleChars + chars <= maxChars;
+
+  let kept = 0;
+  let lineTotal = 0;
+  let charTotal = 0;
+  for (const hunk of hunks) {
+    const nextLineTotal = lineTotal + hunk.length;
+    // `+ 1` for the "\n" that joins this hunk to the previous one; the
+    // first hunk is joined to the preamble instead, already paid for in
+    // `preambleChars`.
+    const nextCharTotal =
+      charTotal + (kept > 0 ? 1 : 0) + hunk.join("\n").length;
+    if (!fits(nextLineTotal, nextCharTotal)) break;
     lineTotal = nextLineTotal;
     charTotal = nextCharTotal;
     kept++;
   }
-  const keptHunksText = hunks
-    .slice(0, kept)
-    .map((h) => h.join("\n"))
-    .join("\n");
+
+  if (kept > 0) {
+    const keptHunksText = hunks
+      .slice(0, kept)
+      .map((h) => h.join("\n"))
+      .join("\n");
+    return {
+      text:
+        preambleLines > 0 ? `${preambleText}\n${keptHunksText}` : keptHunksText,
+      truncated: kept < hunks.length,
+      hunkTruncated: false,
+      bodyOmitted: false,
+      keptHunks: kept,
+    };
+  }
+
+  // The first hunk alone does not fit: cut it at a line boundary,
+  // header first.
+  const first = hunks[0];
+  const partial: string[] = [];
+  let partialChars = 0;
+  for (const line of first) {
+    const nextChars = partialChars + (partial.length > 0 ? 1 : 0) + line.length;
+    if (!fits(partial.length + 1, nextChars)) break;
+    partial.push(line);
+    partialChars = nextChars;
+  }
+  if (partial.length === 0) {
+    return {
+      text: "",
+      truncated: true,
+      hunkTruncated: false,
+      bodyOmitted: true,
+      keptHunks: 0,
+    };
+  }
+  const partialText = partial.join("\n");
   return {
-    text:
-      preamble.length > 0 ? `${preambleText}\n${keptHunksText}` : keptHunksText,
-    truncated: kept < hunks.length,
+    text: preambleLines > 0 ? `${preambleText}\n${partialText}` : partialText,
+    truncated: true,
+    hunkTruncated: true,
+    bodyOmitted: false,
+    keptHunks: 0,
   };
 }
 
@@ -969,13 +1175,35 @@ async function computePatch(
     )
       ? {
           text: excerpt.text,
+          ...(excerpt.patchPath !== undefined
+            ? { path: excerpt.patchPath }
+            : {}),
           hunkCount: excerpt.hunkCount,
           removed: excerpt.removedCount,
           added: excerpt.addedCount,
           changedLineCount: excerpt.removedCount + excerpt.addedCount,
           truncated: excerpt.truncated,
+          ...(excerpt.hunkTruncated ? { hunkTruncated: true } : {}),
+          ...(excerpt.bodyOmitted ? { bodyOmitted: true } : {}),
         }
       : undefined;
+  // The full diff's own file joins the mutant's log paths whenever the
+  // field that names it is attached, so a reader who never looks at
+  // `diff.path` still finds the whole applied change among the logs.
+  const excerptLogPaths =
+    diffField !== undefined && excerpt !== undefined
+      ? [
+          ...logPaths,
+          excerpt.logPath,
+          ...(excerpt.patchPath !== undefined ? [excerpt.patchPath] : []),
+        ]
+      : logPaths;
+  // A full diff that could not be written is reported the same way a
+  // missing excerpt is: a warning, never a silently absent field.
+  const combinedWarning =
+    diffField !== undefined && excerpt?.patchWarning !== undefined
+      ? excerpt.patchWarning
+      : excerptWarning;
   return {
     applicable: true,
     line: diff.line,
@@ -983,12 +1211,9 @@ async function computePatch(
     after: diff.after,
     newContent,
     mutatedHash: hashString(newContent),
-    logPaths:
-      diffField !== undefined && excerpt !== undefined
-        ? [...logPaths, excerpt.logPath]
-        : logPaths,
+    logPaths: excerptLogPaths,
     ...(diffField !== undefined ? { diff: diffField } : {}),
-    ...(excerptWarning !== undefined ? { diffWarning: excerptWarning } : {}),
+    ...(combinedWarning !== undefined ? { diffWarning: combinedWarning } : {}),
   };
 }
 
@@ -1108,10 +1333,15 @@ function pluralizeCount(n: number, singular: string, plural: string): string {
  * count alongside the hunk count -- so a single multi-line hunk (e.g.
  * "first of 4 changed lines across 1 hunk") is never misread as "the
  * whole change was one line" the way a hunk count alone would read --
- * and, when the excerpt itself had to be cut, that it was truncated;
- * this one line can never be read as the whole mutant on its own, see
- * `mutant.diff` (`MutantDiffField.text`, the sole carrier) for the full
- * excerpt.
+ * and ends on `describeExcerptPointer`'s clause, which says in what
+ * state the excerpt beside it was delivered (whole, truncated, cut
+ * mid-hunk, omitted) and where the whole diff is. This one line can
+ * never be read as the whole mutant on its own.
+ *
+ * Pure, and re-run by `reconcileEnvelopeDiffTruncation` on the corrected
+ * field after the envelope has cut it, so this string's claim about the
+ * excerpt is always a claim about the excerpt that was actually
+ * delivered.
  *
  * When `diff.removed !== diff.added`, the `before -> after` pair itself
  * is dropped rather than shown alongside the note: an unequal count
@@ -1133,6 +1363,7 @@ export function formatMutantSummary(
   before: string,
   after: string,
   diff?: MutantDiffField,
+  excerptOmittedFromEnvelope = false,
 ): string {
   if (diff === undefined) return `${file}:${line}: ${before} -> ${after}`;
   const lineWord = pluralizeCount(
@@ -1148,8 +1379,8 @@ export function formatMutantSummary(
   const prefix = diff.changedLineCount > 1 ? "first of " : "";
   const tail =
     `(${prefix}${String(diff.changedLineCount)} ${lineWord} across ` +
-    `${String(diff.hunkCount)} ${hunkWord}; see mutant.diff` +
-    `${diff.truncated ? ", truncated" : ""})`;
+    `${String(diff.hunkCount)} ${hunkWord}; ` +
+    `${describeExcerptPointer(diff, excerptOmittedFromEnvelope)})`;
   if (diff.removed !== diff.added) {
     if (diff.added === 0) return `${file}:${line}: ${before} removed ${tail}`;
     if (diff.removed === 0) return `${file}:${line}: ${after} added ${tail}`;
@@ -1169,6 +1400,11 @@ export function formatMutantSummary(
  * already cover), this is unchanged from before: the file:line header
  * plus the original and mutated line, three lines, byte-identical to
  * every existing fixture built from that case.
+ *
+ * Ends on the same `describeExcerptPointer` clause `formatMutantSummary`
+ * does, and is rebuilt from the same corrected field after the envelope
+ * has run, so the two descriptors and the field they describe always
+ * agree.
  */
 export function formatVerifiedAppliedVia(
   file: string,
@@ -1176,6 +1412,7 @@ export function formatVerifiedAppliedVia(
   before: string,
   after: string,
   diff?: MutantDiffField,
+  excerptOmittedFromEnvelope = false,
 ): string {
   if (diff === undefined) {
     return [`${file}:${line}`, `- ${before}`, `+ ${after}`].join("\n");
@@ -1190,22 +1427,70 @@ export function formatVerifiedAppliedVia(
     "git diff --no-index of the before/after scratch copies: " +
     `${String(diff.hunkCount)} ${hunkWord}, ${String(diff.changedLineCount)} ` +
     `${lineWord} (${String(diff.removed)} removed, ${String(diff.added)} ` +
-    "added); see mutant.diff" +
-    (diff.truncated ? " (truncated)" : "")
+    "added); " +
+    describeExcerptPointer(diff, excerptOmittedFromEnvelope)
   );
 }
 
 /**
- * Matches the suffix `envelope.ts`'s own `capString` appends to a string
- * it had to cut (`stringMarker`: `"...(N more character(s) omitted)"`).
- * Used only to recognise, after the fact, that `buildEnvelope`'s generic
- * reduction (which knows nothing about hunks) is what shortened a
- * `diff.text` this module had already bounded to whole hunks -- never
- * produced by this module itself, which never appends a marker to a
- * truncated excerpt (only sets `truncated: true` beside a shorter
- * `text`).
+ * The one clause both descriptors end on, so `mutation_probe.mutant` and
+ * `mutation_probe.verified_applied_via` can never make different claims
+ * about the same field: where the applied diff is, and in what state the
+ * excerpt beside them was delivered.
+ *
+ * `excerptOmittedFromEnvelope` is the case only
+ * `reconcileEnvelopeDiffTruncation` can see: `buildEnvelope`'s own
+ * reduction dropped the whole `diff` object (a dropped key, a
+ * depth-pruned placeholder), so a descriptor still saying "see
+ * mutant.diff" would point at a field that is not in the result. It
+ * points at `logs` instead, which is a protected envelope field the
+ * reduction never cuts and which carries the full, unreduced result's
+ * own path whenever anything was cut at all.
+ *
+ * The variants are deliberately close in length, and the omitted one is
+ * the SHORTEST: the reconciliation rebuilds these strings after the
+ * envelope has already been sized, so a rebuilt descriptor that grew
+ * would push the result past the bound it was just fitted to. See
+ * `reconcileEnvelopeDiffTruncation` for how the few characters the
+ * longer variants can add are paid for out of the excerpt's own budget.
+ *
+ * The full diff's own path is named as a FIELD (`mutant.diff.path`),
+ * never pasted in: the path itself is unbounded (a caller's `-l` can be
+ * any depth), and a descriptor that grows with it would be the same
+ * "excerpt paid for twice" defect in another dress.
  */
-const ENVELOPE_STRING_MARKER_RE = /\.\.\.\(\d+ more characters? omitted\)$/;
+function describeExcerptPointer(
+  diff: MutantDiffField,
+  excerptOmittedFromEnvelope: boolean,
+): string {
+  if (excerptOmittedFromEnvelope) {
+    return "mutant.diff omitted from this envelope; see logs";
+  }
+  const wherePath =
+    diff.path !== undefined ? "; full diff at mutant.diff.path" : "";
+  if (diff.bodyOmitted) return `see mutant.diff (excerpt omitted)${wherePath}`;
+  if (diff.hunkTruncated) return `see mutant.diff (cut mid-hunk)${wherePath}`;
+  if (diff.truncated) return `see mutant.diff (truncated)${wherePath}`;
+  return `see mutant.diff (whole)${wherePath}`;
+}
+
+/** The longest `describeExcerptPointer` can be for a given `diff`, over
+ * every state the reconciliation could move it into. Used to reserve
+ * that many characters before the corrected excerpt is built, so
+ * rebuilding the two descriptors afterwards can never make the delivered
+ * result longer than it already was. */
+function maxExcerptPointerLength(diff: MutantDiffField): number {
+  const states: MutantDiffField[] = [
+    { ...diff, truncated: false, hunkTruncated: false, bodyOmitted: false },
+    { ...diff, truncated: true, hunkTruncated: false, bodyOmitted: false },
+    { ...diff, truncated: true, hunkTruncated: true, bodyOmitted: false },
+    { ...diff, truncated: true, hunkTruncated: false, bodyOmitted: true },
+  ];
+  return Math.max(
+    ...states.map((state) => describeExcerptPointer(state, false).length),
+    describeExcerptPointer(diff, true).length,
+  );
+}
 
 /** True only for a bare object literal (or a null-prototype object,
  * e.g. one parsed by `JSON.parse`/`structuredClone`) -- the same test
@@ -1233,11 +1518,21 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * (the cut that produced `text` can land in the middle of any line, so
  * the very last line surviving the cut may itself be a partial one);
  * it trusts only the hunk headers' own declared counts, the same source
- * `computeAppliedDiffExcerpt`'s hunk counting already uses.
+ * `computeAppliedDiffExcerpt`'s hunk counting already uses. A
+ * `\ No newline at end of file` marker line is body of its hunk but is
+ * not one of the lines the header counts, so the walk steps over it
+ * rather than spending a count on it (see `NO_NEWLINE_MARKER_PREFIX`).
  *
  * Returns `""` when not even the first hunk survives complete -- the
  * safe answer when the cut landed inside the first hunk itself, still
  * honouring "never mid-hunk" over "always non-empty".
+ *
+ * Called by `reconcileEnvelopeDiffTruncation` on the PRE-envelope
+ * excerpt, to separate the part of it whose hunks are provably whole
+ * from a mid-hunk tail this module's own bound may have left
+ * (`hunkTruncated`), so that tail is never re-delivered as if it were
+ * complete. Exported for the same reason `reconcileEnvelopeDiffTruncation`
+ * is: a library caller composing its own envelope can reuse it.
  */
 export function trimToLastCompleteHunk(text: string): string {
   const lines = text.split("\n");
@@ -1255,10 +1550,25 @@ export function trimToLastCompleteHunk(text: string): string {
   while (i < lines.length) {
     const counts = parseHunkHeaderCounts(lines[i]);
     if (counts === undefined) break;
-    const hunkEnd = i + 1 + counts.removed + counts.added;
-    if (hunkEnd > lines.length) break;
-    end = hunkEnd;
-    i = hunkEnd;
+    // Walk the header's declared body: `removed + added` CONTENT lines,
+    // stepping over any `\ No newline at end of file` marker lines,
+    // which are body of the hunk but are not counted by its header.
+    // Counting them would end a complete end-of-file hunk one line
+    // early -- dropping the `+` line of a replacement, so the excerpt
+    // reads as a pure deletion -- and would abort the walk at the
+    // marker for any hunk that follows.
+    let wanted = counts.removed + counts.added;
+    let j = i + 1;
+    while (j < lines.length && wanted > 0) {
+      if (!isNoNewlineMarker(lines[j])) wanted--;
+      j++;
+    }
+    if (wanted > 0) break;
+    // A marker line trailing the hunk's last content line belongs to
+    // this hunk, not to whatever follows.
+    while (j < lines.length && isNoNewlineMarker(lines[j])) j++;
+    end = j;
+    i = j;
   }
   // Not even the first hunk survived complete: a preamble with no hunk
   // behind it is not "at a hunk boundary" either, so this reports
@@ -1268,74 +1578,392 @@ export function trimToLastCompleteHunk(text: string): string {
 }
 
 /**
- * Corrects one `MutantDiffField` that `buildEnvelope`'s own generic
- * string cap cut AFTER this module had already bounded it to whole
- * hunks: detects the envelope's own omission-marker suffix on
- * `diff.text` (`ENVELOPE_STRING_MARKER_RE`), and when present, drops the
- * marker, drops the one trailing line the character-level cut may have
- * left partial (the split on `"\n"` cannot tell a clean cut -- which
- * leaves an empty trailing element -- from a mid-line one, so the last
- * element is always dropped; a clean cut only ever loses an empty
- * string), trims what remains to the last hunk `trimToLastCompleteHunk`
- * can prove is whole, and sets `truncated: true`. A `diff.text` with no
- * such marker is untouched -- including a `diff` this module's own
- * bound already truncated (`truncated` already `true`, and already cut
- * at a hunk boundary by `buildBoundedHunkExcerpt`, so there is nothing
- * for this to correct there).
+ * The pre-envelope mutant fields `reconcileEnvelopeDiffTruncation` needs
+ * as EVIDENCE: what `probe()`/`probePlan()` actually produced, before
+ * `buildEnvelope` copied and reduced it. The delivered envelope alone
+ * cannot say whether a `diff.text` was cut (a legitimate excerpt can end
+ * in the envelope's own omission-marker literal, and a cut one can end
+ * in anything), so the correction is decided by comparing the two, never
+ * by a suffix pattern.
  *
- * `hunkCount` is never touched either way: it already names the true
- * total, fixed once by `computeAppliedDiffExcerpt` before any bound
- * ran, and stays accurate regardless of how much of `text` survives.
+ * Structurally typed on purpose: `cli.ts` passes `result.mutant` and
+ * `result.results` straight through, and a library caller composing its
+ * own envelope can pass any object of the same shape.
  */
-function reconcileDiffField(diff: MutantDiffField): MutantDiffField {
-  if (!ENVELOPE_STRING_MARKER_RE.test(diff.text)) return diff;
-  const withoutMarker = diff.text.replace(ENVELOPE_STRING_MARKER_RE, "");
-  const withoutPartialLine = withoutMarker.split("\n").slice(0, -1).join("\n");
+export interface EnvelopeDiffOriginals {
+  /** The single probe's own pre-envelope `mutant` field, matching
+   * `envelope.mutant`. */
+  mutant?: MutantOriginal | undefined;
+  /** The plan's pre-envelope result entries, in the same order as
+   * `envelope.plan.results`. The envelope's array cap only ever drops a
+   * TAIL (and marks it with a trailing string element), so index `i` of
+   * the delivered array is index `i` of this one. */
+  planResults?: readonly (PlanEntryOriginal | undefined)[] | undefined;
+}
+
+/** The part of a pre-envelope `mutant` field this correction reads: the
+ * excerpt to compare against, and the four values the two descriptor
+ * strings are formatted from (taken from here rather than from the
+ * delivered envelope, whose own copies the reduction may have capped). */
+export interface MutantOriginal {
+  file: string;
+  line: number;
+  before: string;
+  after: string;
+  diff?: MutantDiffField | undefined;
+}
+
+/** One pre-envelope `plan.results[]` entry, as far as this correction
+ * reads it. */
+export interface PlanEntryOriginal {
+  mutant?: MutantOriginal | undefined;
+}
+
+/**
+ * Rebuilds the excerpt the envelope is willing to carry, from the
+ * PRE-envelope text, under the same bound rule
+ * `buildBoundedHunkExcerpt` applies everywhere else -- rather than
+ * repairing the cut string the envelope produced.
+ *
+ * `maxChars` is the character budget the delivered text already occupied,
+ * so the replacement can only be shorter or the same length: the envelope
+ * was sized with that many characters in this slot, and this correction
+ * never spends more than it found there.
+ *
+ * Only the part of the original whose hunks are provably whole is
+ * re-bounded (`trimToLastCompleteHunk`): when this module's own bound had
+ * already cut inside the first hunk (`hunkTruncated`), that mid-hunk tail
+ * must not be re-delivered as if it were a complete hunk. When the
+ * original carries no complete hunk at all, the original text itself is
+ * re-bounded instead, so the first hunk's header and the body lines that
+ * fit still reach the reader rather than nothing at all.
+ */
+function rebuildDeliveredExcerpt(
+  original: MutantDiffField,
+  maxChars: number,
+): MutantDiffField {
+  const completePrefix = trimToLastCompleteHunk(original.text);
+  const source = completePrefix === "" ? original.text : completePrefix;
+  const { preamble, hunks } = splitDiffBody(source.split("\n"));
+  const bounded = buildBoundedHunkExcerpt(
+    preamble,
+    hunks,
+    DIFF_EXCERPT_MAX_LINES,
+    maxChars,
+  );
+  // `truncated`/`hunkTruncated` are ORed with the original's own: a
+  // correction can only ever take more away, never restore what this
+  // module's bound had already dropped. `hunkTruncated` carries over
+  // only while the hunk it describes is still the one being delivered
+  // (`keptHunks === hunks.length` means every hunk of `source` survived,
+  // the last of them the mid-hunk one).
+  const carriedHunkTruncated =
+    original.hunkTruncated === true &&
+    completePrefix === "" &&
+    bounded.keptHunks === hunks.length &&
+    !bounded.bodyOmitted;
+  const truncated = original.truncated || bounded.truncated;
+  const hunkTruncated = bounded.hunkTruncated || carriedHunkTruncated;
   return {
-    ...diff,
-    text: trimToLastCompleteHunk(withoutPartialLine),
-    truncated: true,
+    ...original,
+    text: bounded.text,
+    truncated,
+    ...(hunkTruncated ? { hunkTruncated: true } : { hunkTruncated: undefined }),
+    ...(bounded.bodyOmitted
+      ? { bodyOmitted: true }
+      : { bodyOmitted: undefined }),
   };
 }
 
-/** Mutates `mutantField.diff` in place via `reconcileDiffField`, when
- * `mutantField` is a plain object carrying one; a no-op for anything
- * else (no `diff`, or a shape the envelope's own reduction already
- * replaced with something other than an object -- a depth-pruned
- * placeholder string, say, which is a different, already-visible kind
- * of cut this function has nothing to correct). */
-function reconcileMutantFieldDiff(mutantField: unknown): void {
-  if (!isPlainRecord(mutantField)) return;
-  const diff = mutantField.diff;
-  if (!isPlainRecord(diff) || typeof diff.text !== "string") return;
-  mutantField.diff = reconcileDiffField(diff as unknown as MutantDiffField);
+/** Drops the keys an optional flag was explicitly set to `undefined` on,
+ * so a corrected field never carries `"hunkTruncated": undefined` into
+ * `JSON.stringify` (which would drop it anyway) or into a test's own
+ * deep-equality check (which would not). */
+function withoutUndefined(diff: MutantDiffField): MutantDiffField {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(diff)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out as unknown as MutantDiffField;
+}
+
+/** `envelope.ts`'s own `stringMarker`, rebuilt here for the one thing
+ * this module has to do with it: re-capping a descriptor string the
+ * envelope had ALREADY cut, so a rewritten one is marked exactly the way
+ * the reduction marks its own cuts rather than ending mid-word with no
+ * sign that it does. */
+function envelopeStringMarker(omitted: number): string {
+  return `...(${String(omitted)} more character${omitted === 1 ? "" : "s"} omitted)`;
+}
+
+/**
+ * Caps `value` so its total length (marker included) is at most `total`,
+ * the length of the string it replaces -- the rule that keeps this
+ * correction from growing an envelope that has already been fitted to a
+ * bound. Returns `undefined` when no marked cut fits in `total` at all
+ * (the marker alone is longer than the room there is), which the caller
+ * reads as "leave the delivered string alone".
+ */
+function capToLength(value: string, total: number): string | undefined {
+  if (value.length <= total) return value;
+  for (let kept = total; kept >= 0; kept--) {
+    const marked =
+      value.slice(0, kept) + envelopeStringMarker(value.length - kept);
+    if (marked.length <= total) return marked;
+  }
+  return undefined;
+}
+
+/**
+ * Rewrites `probe.mutant`/`probe.verified_applied_via` in place, from
+ * `original`'s four quoted values and the field as CORRECTED, so the two
+ * descriptors and the field they describe can never make different
+ * claims.
+ *
+ * A descriptor the envelope's own string cap already cut is a different
+ * case: it is no longer the string this module wrote, so replacing it
+ * with a full-length rewrite would add back every character the
+ * reduction had just removed. Such a descriptor is re-capped to exactly
+ * the length it was delivered at instead -- corrected as far as it goes,
+ * never longer than it was, and marked as cut the same way the envelope
+ * marks its own. Which case applies is decided by comparing the
+ * delivered string with the one the probe actually produced, not by
+ * looking for a marker on it.
+ *
+ * Returns the number of characters the two rewrites ADDED (never
+ * negative), so the caller can see it stayed within the budget it
+ * reserved.
+ */
+function rewriteProbeDescriptors(
+  probeField: unknown,
+  original: MutantOriginal,
+  diff: MutantDiffField | undefined,
+  excerptOmittedFromEnvelope: boolean,
+): number {
+  if (!isPlainRecord(probeField)) return 0;
+  let added = 0;
+  const rewrite = (
+    key: "mutant" | "verified_applied_via",
+    format: (diff?: MutantDiffField, omitted?: boolean) => string,
+  ): void => {
+    const delivered = probeField[key];
+    if (typeof delivered !== "string") return;
+    const corrected = format(diff, excerptOmittedFromEnvelope);
+    const wasIntact = delivered === format(original.diff, false);
+    if (wasIntact) {
+      added += Math.max(0, corrected.length - delivered.length);
+      probeField[key] = corrected;
+      return;
+    }
+    const capped = capToLength(corrected, delivered.length);
+    if (capped !== undefined) probeField[key] = capped;
+  };
+  rewrite("mutant", (d, omitted) =>
+    formatMutantSummary(
+      original.file,
+      original.line,
+      original.before,
+      original.after,
+      d,
+      omitted,
+    ),
+  );
+  rewrite("verified_applied_via", (d, omitted) =>
+    formatVerifiedAppliedVia(
+      original.file,
+      original.line,
+      original.before,
+      original.after,
+      d,
+      omitted,
+    ),
+  );
+  return added;
+}
+
+/** The keys the correction is allowed to write back into a delivered
+ * `diff` object: the excerpt and the three flags that describe it.
+ * Everything else the envelope delivered stays exactly as delivered --
+ * `path` above all, whose full value the reduction may itself have
+ * capped (`logs` still carries it whole, which is why it can be), and
+ * restoring the uncapped one here would put back characters the
+ * envelope had just removed to meet its bound. */
+const CORRECTABLE_DIFF_KEYS = [
+  "text",
+  "truncated",
+  "hunkTruncated",
+  "bodyOmitted",
+] as const;
+
+/**
+ * Corrects ONE delivered mutant (`mutantField`) and the descriptor
+ * strings beside it (`probeField`) against what the probe actually
+ * produced (`original`).
+ *
+ * Three cases, decided by evidence rather than by the shape of the
+ * delivered string:
+ *
+ * 1. The delivered `diff.text` equals the original's: the envelope did
+ *    not touch it, so nothing here does either -- including a text whose
+ *    own last line happens to end in the envelope's omission-marker
+ *    literal, which a pattern-matching correction would have emptied.
+ * 2. The delivered `diff.text` differs: the envelope cut it. The excerpt
+ *    is rebuilt from the ORIGINAL under the delivered text's own
+ *    character budget (never longer than what was there), and both
+ *    descriptors are restated from the corrected field, so a `truncated`
+ *    or `hunkTruncated` the correction introduces is stated by all three.
+ * 3. The delivered `diff` is gone (a dropped key, a depth-pruned
+ *    placeholder, or a `mutant` field replaced wholesale): nothing is
+ *    put back -- the reduction dropped it because it did not fit -- but
+ *    the descriptors stop pointing at a field that is not there and name
+ *    `logs` instead, which is a protected envelope field carrying the
+ *    full result's own path whenever anything was cut.
+ *
+ * Budget: an intact descriptor's rewrite can only grow by the difference
+ * between the pointer clause it already carries and the longest one the
+ * correction could put there (`maxExcerptPointerLength`, a dozen
+ * characters); that much is reserved out of the excerpt's own budget
+ * before the excerpt is rebuilt, and a descriptor that was already cut
+ * is re-capped rather than restored. The one case that can still add
+ * characters is case 3 for a mutant whose full diff could not be written
+ * at all (no `path`, so the omission clause is the longer one) -- at
+ * most a few dozen characters, against a `diff` object the reduction had
+ * just dropped whole.
+ */
+function reconcileOneMutant(
+  mutantField: unknown,
+  probeField: unknown,
+  original: MutantOriginal | undefined,
+): void {
+  const originalDiff = original?.diff;
+  // No excerpt was ever produced for this mutant (`replace`/`match`, or
+  // a single-line-replacement patch): nothing to correct, and the
+  // descriptors are the three-line form that never mentions `diff`.
+  if (original === undefined || originalDiff === undefined) return;
+
+  const deliveredDiff = isPlainRecord(mutantField)
+    ? mutantField.diff
+    : undefined;
+  const deliveredText =
+    isPlainRecord(deliveredDiff) && typeof deliveredDiff.text === "string"
+      ? deliveredDiff.text
+      : undefined;
+
+  // Case 3: the envelope removed or replaced the field itself.
+  if (deliveredText === undefined) {
+    rewriteProbeDescriptors(probeField, original, originalDiff, true);
+    return;
+  }
+  // Case 1: byte-identical to what the probe produced. The envelope did
+  // not cut it, whatever its last line looks like.
+  if (deliveredText === originalDiff.text) return;
+
+  // Case 2: cut. Reserve what the descriptors that are still intact may
+  // grow by, rebuild the excerpt from the original within the rest of
+  // the delivered budget, then restate both descriptors.
+  const budget = Math.max(
+    0,
+    deliveredText.length -
+      reservedForDescriptorGrowth(probeField, original, originalDiff),
+  );
+  const corrected = withoutUndefined(
+    rebuildDeliveredExcerpt(originalDiff, budget),
+  );
+  if (isPlainRecord(deliveredDiff)) {
+    for (const key of CORRECTABLE_DIFF_KEYS) {
+      const value = (corrected as unknown as Record<string, unknown>)[key];
+      if (value === undefined) delete deliveredDiff[key];
+      else deliveredDiff[key] = value;
+    }
+  }
+  rewriteProbeDescriptors(probeField, original, corrected, false);
+}
+
+/** How many characters to hold back from the corrected excerpt's budget
+ * so restating the descriptors afterwards cannot make this entry longer
+ * than the envelope already fitted it to: the pointer clause's own
+ * worst-case growth, once per descriptor that is still intact (a
+ * descriptor the envelope already cut is re-capped, never restored, so
+ * it needs no room). */
+function reservedForDescriptorGrowth(
+  probeField: unknown,
+  original: MutantOriginal,
+  originalDiff: MutantDiffField,
+): number {
+  const slack = Math.max(
+    0,
+    maxExcerptPointerLength(originalDiff) -
+      describeExcerptPointer(originalDiff, false).length,
+  );
+  if (slack === 0 || !isPlainRecord(probeField)) return 0;
+  const intact = (key: "mutant" | "verified_applied_via", produced: string) =>
+    probeField[key] === produced;
+  const summaryIntact = intact(
+    "mutant",
+    formatMutantSummary(
+      original.file,
+      original.line,
+      original.before,
+      original.after,
+      originalDiff,
+    ),
+  );
+  const viaIntact = intact(
+    "verified_applied_via",
+    formatVerifiedAppliedVia(
+      original.file,
+      original.line,
+      original.before,
+      original.after,
+      originalDiff,
+    ),
+  );
+  return (summaryIntact ? slack : 0) + (viaIntact ? slack : 0);
 }
 
 /**
  * Called by `cli.ts` on the envelope `buildEnvelope` already returned,
- * for both `probe` (a single `mutant` field at the top level) and
- * `probe --plan` (one `mutant` field per `plan.results[]` entry):
- * corrects any `MutantDiffField` the envelope's own reduction cut
- * further, so `diff.truncated: false` can never sit beside text the
- * envelope silently shortened (see `reconcileDiffField`'s own
- * docblock for the mechanism, and this task's `MutantDiffField.text`
- * docblock for why this runs here rather than trying to prevent the
- * cut in the first place: `keepWhole` cannot reach a value nested
- * inside an array, which `plan.results` always is).
+ * with the pre-envelope result beside it, for both `probe` (a single
+ * `mutant`/`mutation_probe` pair at the top level) and `probe --plan`
+ * (one pair per `plan.results[]` entry).
  *
- * A no-op when `envelope.mutant` and `envelope.plan.results` are absent
- * or already a shape this cannot walk (both defensive, not expected in
- * practice: every `probe`/`probe --plan` envelope carries one or the
- * other whenever a mutant reached `computeMutant`).
+ * What it corrects and why it runs here rather than preventing the cut:
+ * `buildEnvelope`'s reduction knows nothing about hunks, so it can cut a
+ * `diff.text` mid-hunk (and mid-line) while `truncated` still reads the
+ * pre-envelope `false`, and `keepWhole` -- the mechanism that protects
+ * `plan.summary` -- cannot reach a value nested inside an array, which
+ * `plan.results` always is. Holding an excerpt out of the reduction
+ * entirely would also make the WHOLE envelope miss a tight `-m` rather
+ * than only the excerpt.
+ *
+ * Every correction is decided by comparing the delivered value with the
+ * original one this is handed, never by recognising a suffix on the
+ * delivered string: see `reconcileOneMutant` for the three cases.
+ * `hunkCount`/`removed`/`added`/`changedLineCount` are never touched --
+ * they name the true totals, fixed before any bound ran -- and neither
+ * is `path`, which names the whole diff on disk regardless.
+ *
+ * A no-op when `envelope.mutant`/`envelope.plan.results` are absent or a
+ * shape this cannot walk, and for any mutant that never had an excerpt.
  */
 export function reconcileEnvelopeDiffTruncation(
   envelope: Record<string, unknown>,
+  originals: EnvelopeDiffOriginals,
 ): void {
-  reconcileMutantFieldDiff(envelope.mutant);
+  reconcileOneMutant(
+    envelope.mutant,
+    envelope.mutation_probe,
+    originals.mutant,
+  );
   const plan = envelope.plan;
   if (isPlainRecord(plan) && Array.isArray(plan.results)) {
-    for (const entry of plan.results) {
-      if (isPlainRecord(entry)) reconcileMutantFieldDiff(entry.mutant);
-    }
+    plan.results.forEach((entry, index) => {
+      if (!isPlainRecord(entry)) return;
+      reconcileOneMutant(
+        entry.mutant,
+        entry.mutation_probe,
+        originals.planResults?.[index]?.mutant,
+      );
+    });
   }
 }
