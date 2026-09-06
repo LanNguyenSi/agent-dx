@@ -233,6 +233,166 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
 
 ### Fixed
 
+- `probe -p/--patch`'s result now carries the whole applied change for a
+  multi-line patch, not just its first changed line: `mutant.diff`
+  reports every hunk the applied `git diff --no-index` found, plus the
+  total `hunkCount`, `removed`, `added` and `changedLineCount` (removed
+  and added lines, derived from each hunk's own `@@ -a,b +c,d @@`
+  header, never from sniffing `text`'s own `+`/`-` prefixes), bounded to
+  100 lines / 3,000 characters, cut to whole hunks only (never mid-hunk)
+  with a `truncated` flag, when the applied change is bigger than that.
+  Before this, `mutant.before`/`mutant.after` and `verified_applied_via`
+  echoed only the first line a multi-hunk (or multi-line-single-hunk)
+  patch changed, which read as the mutant's whole effect; a reviewer
+  briefing concluded from that echo that a heartbeat-removal mutant had
+  only changed a comment and was therefore impossible to kill, until the
+  patch file itself was read by hand. `diff` is attached whenever the
+  applied change is anything other than exactly one hunk with exactly
+  one removed and one added line -- the only shape `before`/`after`
+  truly cover (a like-for-like line replacement); a one-hunk pure
+  deletion or pure insertion, or a one-hunk change removing/adding more
+  than one line each, previously fell through this gate too, and for
+  exactly those shapes `before`/`after` quote an untouched,
+  merely-shifted neighbouring line as if it were the change itself (a
+  two-line deletion read back as "line10 -> line12", a two-line
+  insertion as "line6 -> inserted_a"). `mutant.line`/`before`/`after`
+  still name only the first changed line (unchanged, and still what a
+  single-hunk, single-line-replacement patch reports on its own, so
+  every existing result -- including the identity fixture -- is
+  unaffected).
+
+  `mutant.diff.text` is the SINGLE carrier of the excerpt:
+  `mutation_probe.verified_applied_via` no longer repeats it. Two
+  earlier passes at this same bullet lowered the excerpt's own bound
+  (200 lines/20,000 characters, then 100/3,000) trying to keep
+  `verified_applied_via` -- built by pasting the excerpt onto a header --
+  under `verify`/`probe`'s own default 8,000-character envelope budget;
+  neither bound size fixed it, because the excerpt was being paid for
+  TWICE in the same result (`mutant.diff.text` and
+  `verified_applied_via`), so `truncated: false` could still sit beside
+  text the envelope's own generic string reduction had cut further, at
+  the default budget for a big enough `--plan` batch and always once
+  `-m`/`--max-chars` was set below the default. Carrying the excerpt once
+  removes that duplication; `verified_applied_via` is now a short, bounded
+  descriptor pointing at `mutant.diff` (`"git diff --no-index of the
+  before/after scratch copies: 3 hunks, 6 changed lines (3 removed, 3
+  added); see mutant.diff"`). That alone still does not GUARANTEE
+  `diff.text` survives the envelope unmodified (the envelope's own
+  reduction, oblivious to hunks, can still cut it further for a large
+  enough `--plan` batch or a tight enough `-m`), so `probe` and
+  `probe --plan` now call a new `reconcileEnvelopeDiffTruncation` on the
+  built envelope, WITH the pre-envelope result beside it: a delivered
+  `diff.text` that DIFFERS from what the probe actually produced is
+  rebuilt from that original under the same bound rule, inside the
+  character budget the delivered text already occupied, and `truncated`
+  is set `true` by construction against the delivered result rather than
+  left at its pre-envelope value; `hunkCount`/`removed`/`added`/
+  `changedLineCount` are never touched, since they already name the true
+  totals fixed before either bound ran. Deciding on this comparison
+  rather than on the envelope's own omission-marker suffix matters: a
+  legitimate excerpt can end in that literal on its own (a mutant adding
+  `...(12 more characters omitted)`), and a suffix-only check would empty
+  it and set a false `truncated` on text nothing had actually cut. This
+  runs after `buildEnvelope` rather than protecting `diff.text` with
+  `keepWhole` (the mechanism already used for `plan.summary`) because
+  `keepWhole` cannot reach into an array (`plan.results[]` always is),
+  and because holding an excerpt bigger than a tight `-m` uncapped would
+  make the WHOLE envelope fail to fit rather than only the excerpt.
+
+  `mutation_probe.mutant`'s one-line summary names the hunk/changed-line
+  totals and points at `mutant.diff` for the full excerpt (`"... (first
+  of 4 changed lines across 1 hunk; see mutant.diff (truncated); full
+  diff at mutant.diff.path)"`), and,
+  when `removed !== added` (a pure deletion, a pure insertion, or a
+  mixed edit), no longer presents a `before -> after` pair at all: an
+  unequal count means the two do not correspond to each other one for
+  one (the same untouched-neighbour risk `before`/`after` already carry
+  for those shapes), so the summary instead names only the side actually
+  removed or added (`"target.txt:5: line05 removed (1 changed line
+  across 1 hunk; see mutant.diff (whole))"`). The pair form survives only when
+  `removed === added` (the `=== 1` case is the one `diff` is never
+  attached for at all). Both descriptor strings, and every existing test
+  asserting the old duplicated `verified_applied_via` content, are
+  updated; the identity fixture (`-r`, no `diff` field) is unchanged and
+  stays byte-identical.
+
+  The bound applies to EVERY hunk, the first one included. It used to
+  keep `hunks[0]` whole no matter how large it was, so a one-hunk change
+  of any size shipped uncut with `truncated: false` while the README,
+  this entry and the field's own docblock all described an unconditional
+  100-line/3,000-character bound. A first hunk that alone exceeds the
+  bound is now cut inside itself, at a line boundary, keeping its `@@`
+  header plus the whole body lines that fit, and says so with a
+  `hunkTruncated` flag distinct from `truncated` (whole hunks dropped);
+  the `--- `/`+++ ` preamble lines are dropped before any hunk content
+  is, since they name only the comparison's own scratch copies; and when
+  not even the header fits, `text` is `""` with `bodyOmitted: true`
+  beside it, so an empty string is never delivered as though it were an
+  excerpt. A `\ No newline at end of file` marker is body of its hunk
+  that the hunk header does not count, so both the bound's own walk and
+  `trimToLastCompleteHunk` step over it instead of spending a count on
+  it; counting it ended a complete end-of-file hunk one line early,
+  dropping the `+` line of a replacement so it read as a pure deletion,
+  and aborted the walk at the marker for anything that followed.
+
+  The whole applied diff is now always written to the probe's own log
+  directory (`mutant-diff-<random>/mutant-diff.patch`) before any bound
+  runs, and named by `mutant.diff.path` and in the mutant's `logs`. What
+  either bound leaves out of `text` is therefore never lost, only moved:
+  the descriptors point at that field rather than pasting the path
+  itself, which is unbounded and would be the same "excerpt paid for
+  twice" defect in another dress.
+
+  Measured before this evidence-based decision replaced an earlier,
+  suffix-matching draft: at `-m 4000` a descriptor read "15 hunks, 30
+  changed lines ...; see mutant.diff" beside a delivered `diff` of
+  `text: ""`, `truncated: true` -- the two had been formatted before the
+  envelope ran and never revisited. Both descriptor strings are rebuilt
+  from the corrected field instead, so `mutation_probe.mutant`/
+  `verified_applied_via` can no longer state a truncation state the field
+  contradicts. A descriptor the reduction had already cut is re-capped
+  instead of restored, so the correction never adds back characters the
+  envelope removed to meet its bound; and when the reduction dropped the
+  `diff` object entirely, the descriptors stop pointing at it and name
+  `logs` instead -- the top-level `logs` specifically, a PROTECTED_KEYS
+  field the reduction never cuts and which carries the full, unreduced
+  result's own path whenever anything was cut at all. In `probe --plan`,
+  a plan entry's OWN `plan.results[i].logs` is a different field, capped
+  like any other array/object value the same as everything else on that
+  entry; the route to the full diff there is the top-level
+  `result-full-<run-id>.json` the top-level `logs` names instead.
+  `reconcileEnvelopeDiffTruncation`, `trimToLastCompleteHunk` and the
+  `MutantDiffField` type are exported from the package root for library
+  callers composing their own envelope.
+
+  The excerpt's own `git diff --no-index` read is pinned against ambient
+  git config (`-c core.autocrlf=false -c diff.noprefix=false
+  --no-ext-diff --no-textconv`, the read-side counterpart to the
+  write-side pins below) so neither a global `diff.external` nor a
+  `core.attributesFile`-assigned `diff.<driver>.textconv` can make the
+  excerpt vanish or fabricate its content silently, and its own output
+  being too large to read back in full refuses the excerpt (with a
+  warning) rather than risking an undercounted `hunkCount`; any other
+  failure computing the excerpt is likewise turned into a warning
+  (`mutant.diffWarning`, folded into the result's own `warnings` by
+  `step.ts`, now covered by a test that forces the underlying `git diff`
+  to fail) rather than a silently missing field or an uncaught
+  exception. The before/after scratch copies this excerpt reads are
+  removed once it has read them back.
+
+  Investigated alongside this: a reviewer also reported one
+  `expect: "pass"` mutant that came back `killed` inside a
+  `probe --plan` batch while the identical single-mutant invocation came
+  back `survived`. It does not reproduce: `probe()` and `probePlan()`
+  share the same classify step (`step.ts`'s `runMutantAttempt`,
+  unchanged by this fix), and a new parity suite (`test/plan.test.ts`)
+  runs the same mutant through both entry points for all four
+  `killed`/`survived` x `expect: "fail"`/`"pass"` combinations, including
+  the exact "leaves the suite green under `expect: pass`" shape the
+  reviewer described; all four agree in both modes. The README now
+  states explicitly what `killed`/`survived` mean under each `expect`
+  value, since the ambiguity that report described is otherwise easy to
+  read as a code defect.
 - `probe -p/--patch` now also pins its real `git apply`, the `-i
   worktree` checkout, and the tracked-diff sync apply with `-c
   core.autocrlf=false` and `-c apply.whitespace=nowarn`. A global

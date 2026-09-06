@@ -19,6 +19,7 @@ import {
   type StdoutSink,
 } from "../src/cli.js";
 import { UsageError } from "../src/envelope.js";
+import { trimToLastCompleteHunk } from "../src/probe/mutant.js";
 import type { VerifyResult, CheckResult } from "../src/verify/index.js";
 import {
   assertArgvWithinLimit,
@@ -58,6 +59,73 @@ function absentNames(count: number): string {
 
 function shQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/** A 61-character original line and a 61-character mutated one, so 15
+ * hunks of them is far past `-m 6000`: the envelope's own generic
+ * reduction MUST cut `mutant.diff.text` further than this module's own
+ * bound already did, which is exactly the shape that pins the CLI's own
+ * `reconcileEnvelopeDiffTruncation` call rather than the function in
+ * isolation (a unit test on the exported function cannot tell whether
+ * `cli.ts` actually calls it). Shared by the single-probe and `--plan`
+ * wiring regression tests below. */
+function buildWideLine(n: number): string {
+  return `line ${String(n).padStart(4, "0")} ${"x".repeat(51)}`;
+}
+function buildMutatedLine(n: number): string {
+  const label = `M${String(n).padStart(3, "0")}`;
+  return `  ${label} ${"y".repeat(54)}`;
+}
+/** A unified diff of 15 single-line hunks against a `lineCount`-line
+ * file, mutating every fifth line starting at line 0 (0-indexed). */
+function buildWidePatch(file: string, lineCount: number): string {
+  const lines = Array.from({ length: lineCount }, (_, i) => buildWideLine(i));
+  const mutationIndices = Array.from({ length: 15 }, (_, i) => i * 5);
+  const hunks = mutationIndices.map((idx, i) => {
+    if (idx === 0) {
+      return [
+        "@@ -1,2 +1,2 @@",
+        `-${lines[0]}`,
+        `+${buildMutatedLine(i)}`,
+        ` ${lines[1]}`,
+      ].join("\n");
+    }
+    return [
+      `@@ -${String(idx)},3 +${String(idx)},3 @@`,
+      ` ${lines[idx - 1]}`,
+      `-${lines[idx]}`,
+      `+${buildMutatedLine(i)}`,
+      ` ${lines[idx + 1]}`,
+    ].join("\n");
+  });
+  return (
+    [
+      `diff --git a/${file} b/${file}`,
+      "index 0000000..0000000 100644",
+      `--- a/${file}`,
+      `+++ b/${file}`,
+      ...hunks,
+    ].join("\n") + "\n"
+  );
+}
+
+/** `envelope.ts`'s own generic string-cap suffix, the same pattern
+ * `reconcileEnvelopeDiffTruncation` looks for on `diff.text`. */
+const ENVELOPE_OMISSION_MARKER_RE = /\.\.\.\(\d+ more characters? omitted\)$/;
+
+/** Asserts a descriptor states the diff's own delivered clause, UNLESS
+ * the envelope's own generic string cap cut the descriptor string
+ * itself down before it ever reached that clause -- a legitimate,
+ * separately-tested outcome of the string cap alone, not a sign the
+ * wiring this test targets ever stopped running. */
+function expectDescriptorStatesClauseUnlessCut(
+  descriptor: unknown,
+  clause: string,
+): void {
+  expect(typeof descriptor).toBe("string");
+  if (typeof descriptor !== "string") return;
+  if (ENVELOPE_OMISSION_MARKER_RE.test(descriptor)) return;
+  expect(descriptor).toContain(clause);
 }
 
 afterEach(() => {
@@ -1620,6 +1688,168 @@ describe("cli: probe", () => {
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
+  it("a three-hunk -p patch reports every hunk in `mutant.diff`, in both -f json and -f text (never just the first changed line)", async () => {
+    const repo = initRepo();
+    const lines = Array.from(
+      { length: 10 },
+      (_, i) => `function fn${String(i)}() { return ${String(i)}; }`,
+    );
+    fs.writeFileSync(path.join(repo, "fixture.js"), lines.join("\n") + "\n");
+    fs.writeFileSync(path.join(repo, "fixture.test.js"), "x\n");
+    commitAll(repo);
+    const patchPath = path.join(repo, "three-hunk.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        " function fn0() { return 0; }",
+        "-function fn1() { return 1; }",
+        "+function fn1() { return 100; }",
+        " function fn2() { return 2; }",
+        "@@ -5,3 +5,3 @@",
+        " function fn4() { return 4; }",
+        "-function fn5() { return 5; }",
+        "+function fn5() { return 500; }",
+        " function fn6() { return 6; }",
+        "@@ -9,2 +9,2 @@",
+        " function fn8() { return 8; }",
+        "-function fn9() { return 9; }",
+        "+function fn9() { return 900; }",
+      ].join("\n") + "\n",
+    );
+
+    const runJson = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "-p",
+      patchPath,
+      "-t",
+      "true",
+      "-i",
+      "inplace",
+    ]);
+    expect(runJson.code).toBe(1);
+    const parsedJson = JSON.parse(runJson.stdout);
+    expect(parsedJson.mutant.line).toBe(2);
+    expect(parsedJson.mutant.before).toBe("function fn1() { return 1; }");
+    expect(parsedJson.mutant.diff.hunkCount).toBe(3);
+    expect(parsedJson.mutant.diff.changedLineCount).toBe(6);
+    expect(parsedJson.mutant.diff.truncated).toBe(false);
+    expect(parsedJson.mutant.diff.text).toContain(
+      "function fn1() { return 1; }",
+    );
+    expect(parsedJson.mutant.diff.text).toContain(
+      "function fn5() { return 500; }",
+    );
+    expect(parsedJson.mutant.diff.text).toContain(
+      "function fn9() { return 900; }",
+    );
+    expect(parsedJson.mutation_probe.mutant).toContain(
+      "first of 6 changed lines across 3 hunks",
+    );
+    // `verified_applied_via` is a short descriptor pointing at
+    // `mutant.diff`, not a second copy of the excerpt: the diff's own
+    // content lives exactly once, in `mutant.diff.text` (asserted
+    // above).
+    expect(parsedJson.mutation_probe.verified_applied_via).toContain("3 hunks");
+    expect(parsedJson.mutation_probe.verified_applied_via).toContain(
+      "see mutant.diff",
+    );
+    expect(parsedJson.mutation_probe.verified_applied_via).not.toContain(
+      "function fn5() { return 500; }",
+    );
+
+    // `-f text` has no dedicated probe renderer, so it is the same
+    // envelope pretty-printed (see the "bounded pretty-JSON fallback"
+    // test above): the multi-hunk diff has to survive that round trip
+    // too, not just the compact `-f json` one.
+    const runText = await spawnCli([
+      "-C",
+      repo,
+      "-f",
+      "text",
+      "probe",
+      "-p",
+      patchPath,
+      "-t",
+      "true",
+      "-i",
+      "inplace",
+    ]);
+    expect(runText.code).toBe(1);
+    expect(runText.stdout).toContain('"hunkCount": 3');
+    expect(runText.stdout).toContain("function fn5() { return 500; }");
+    expect(runText.stdout).toContain("function fn9() { return 900; }");
+    expect(JSON.parse(runText.stdout).mutant.diff.hunkCount).toBe(3);
+  });
+
+  it("wiring regression (single probe): deleting the CLI's own reconcileEnvelopeDiffTruncation call regresses a tight `-m` to a mid-hunk/mid-line cut reported as truncated: false", async () => {
+    const repo = initRepo();
+    const lineCount = 80;
+    fs.writeFileSync(
+      path.join(repo, "wide.txt"),
+      Array.from({ length: lineCount }, (_, i) => buildWideLine(i)).join("\n") +
+        "\n",
+    );
+    commitAll(repo);
+    const patchPath = path.join(repo, "wide.patch");
+    fs.writeFileSync(patchPath, buildWidePatch("wide.txt", lineCount));
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      "6000",
+      "probe",
+      "--file",
+      "wide.txt",
+      "-p",
+      patchPath,
+      "-t",
+      "true",
+      "--expect",
+      "pass",
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(6000);
+    const parsed = JSON.parse(run.stdout);
+    // `-t 'true'` always leaves the test passing, and `--expect pass`
+    // reads that as the mutant behaving as expected: `killed`.
+    expect(parsed.status).toBe("killed");
+    const diff = parsed.mutant.diff;
+    expect(diff.hunkCount).toBe(15);
+    // The envelope's own reduction had to cut this further than this
+    // module's own bound (the whole 15-hunk excerpt is far past 6000
+    // characters on its own): `truncated` must be true, by construction
+    // against the DELIVERED result, never a stale pre-envelope `false`.
+    expect(diff.truncated).toBe(true);
+    // Never the envelope's own omission-marker suffix landing inside the
+    // excerpt itself (that would mean the correction never ran at all).
+    expect(diff.text).not.toMatch(ENVELOPE_OMISSION_MARKER_RE);
+    // Ends at a hunk boundary (every kept hunk provably whole), or is
+    // explicitly marked as cut inside one -- never a silent partial hunk.
+    // The descriptors state whichever clause applies, unless the
+    // envelope's own string cap cut the descriptor itself down first.
+    const clause =
+      diff.hunkTruncated === true
+        ? "see mutant.diff (cut mid-hunk)"
+        : "see mutant.diff (truncated)";
+    if (diff.hunkTruncated !== true) {
+      expect(trimToLastCompleteHunk(diff.text)).toBe(diff.text);
+    }
+    expectDescriptorStatesClauseUnlessCut(parsed.mutation_probe.mutant, clause);
+    expectDescriptorStatesClauseUnlessCut(
+      parsed.mutation_probe.verified_applied_via,
+      clause,
+    );
+  }, 30000);
+
   it("a -p patch touching two paths, no --file: usage_error/patch_file_ambiguous, exit 2, through the built CLI", async () => {
     const repo = initRepo();
     fs.writeFileSync(
@@ -2881,6 +3111,184 @@ describe("cli: probe --plan", () => {
       inconclusive: 0,
       not_run: 0,
     });
+  }, 60000);
+
+  it("wiring regression (--plan): deleting the CLI's own reconcileEnvelopeDiffTruncation call regresses a 3-mutant plan at the DEFAULT budget to a mid-hunk/mid-line cut reported as truncated: false, even with a long -l log directory competing for the same budget", async () => {
+    const lineCount = 80;
+    const repo = fs.mkdtempSync(path.join("/tmp", "ap-cli-test-repo-"));
+    tmpDirs.push(repo);
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(
+      path.join(repo, "wide.txt"),
+      Array.from({ length: lineCount }, (_, i) => buildWideLine(i)).join("\n") +
+        "\n",
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const patchPath = path.join(repo, "wide.patch");
+    fs.writeFileSync(patchPath, buildWidePatch("wide.txt", lineCount));
+    const planPath = writePlan(repo, {
+      test: "true",
+      mutants: [
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+      ],
+    });
+    // A long `-l` directory (roughly 120 characters), so its own path
+    // (repeated per mutant on `plan.results[i].test.logPath`/`.logs`)
+    // competes for the same budget the excerpt does -- the shape that
+    // measurably forced the correction to cut the plan's own default
+    // budget in the reviewed sweep.
+    const logDir = path.join(
+      "/tmp",
+      "ap-cli-test-logdir-wiring-plan-" + "x".repeat(80),
+    );
+    tmpDirs.push(logDir);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logDir,
+      "probe",
+      "--plan",
+      planPath,
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(parsed.plan.results.length).toBeGreaterThan(0);
+    const entry = parsed.plan.results[0];
+    const diff = entry.mutant.diff;
+    expect(diff.hunkCount).toBe(15);
+    expect(diff.truncated).toBe(true);
+    expect(diff.text).not.toMatch(ENVELOPE_OMISSION_MARKER_RE);
+    const clause =
+      diff.hunkTruncated === true
+        ? "see mutant.diff (cut mid-hunk)"
+        : "see mutant.diff (truncated)";
+    if (diff.hunkTruncated !== true) {
+      expect(trimToLastCompleteHunk(diff.text)).toBe(diff.text);
+    }
+    expectDescriptorStatesClauseUnlessCut(entry.mutation_probe.mutant, clause);
+    expectDescriptorStatesClauseUnlessCut(
+      entry.mutation_probe.verified_applied_via,
+      clause,
+    );
+  }, 60000);
+
+  it("bound regression (--plan): dropping the CLI's third `reconcileEnvelopeDiffTruncation` argument (global.maxChars) lets a 2-mutant plan (15 hunks of 61-char lines) exceed a tight `-m`, even with a SHORT -l log directory under which the diff.path pointer clause survives the envelope's own string cap", async () => {
+    // Unlike the wiring-regression test above (a long `-l`, the DEFAULT
+    // `-m`, asserting only that the per-mutant hunk correction ran at
+    // all), this pins the CLI's OWN pass of `global.maxChars` into the
+    // call: with it, `enforceEnvelopeBudget` re-measures the whole
+    // envelope once the per-mutant correction restores bytes the
+    // reduction had dropped, and shrinks the largest excerpt further if
+    // that restoration pushed the envelope back over `-m`. Deleting
+    // just the third argument (not the whole call) leaves the per-mutant
+    // correction running -- so the wiring-regression test above still
+    // passes -- but skips that re-measure, so the envelope silently
+    // ships a few bytes over the bound it was asked for.
+    const lineCount = 80;
+    const repo = fs.mkdtempSync(path.join("/tmp", "ap6-plan-repo-"));
+    tmpDirs.push(repo);
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(
+      path.join(repo, "wide.txt"),
+      Array.from({ length: lineCount }, (_, i) => buildWideLine(i)).join("\n") +
+        "\n",
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const patchPath = path.join(repo, "wide.patch");
+    fs.writeFileSync(patchPath, buildWidePatch("wide.txt", lineCount));
+    const planPath = writePlan(repo, {
+      test: "true",
+      mutants: [
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+      ],
+    });
+    // Short (a handful of random characters under `/tmp`), so the
+    // per-mutant excerpt correction's own `diff.path` pointer clause
+    // survives the envelope's generic string cap -- the same growth
+    // `enforceEnvelopeBudget` has to absorb.
+    const logDir = fs.mkdtempSync(path.join("/tmp", "ap6L-"));
+    tmpDirs.push(logDir);
+    const maxChars = 3650;
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      String(maxChars),
+      "-l",
+      logDir,
+      "probe",
+      "--plan",
+      planPath,
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
+    expect(() => JSON.parse(run.stdout)).not.toThrow();
+  }, 60000);
+
+  it("bound regression (single probe): dropping the CLI's third `reconcileEnvelopeDiffTruncation` argument (global.maxChars) lets a single probe (15 hunks of 61-char lines) exceed a tight `-m`, even with a SHORT -l log directory under which the diff.path pointer clause survives the envelope's own string cap", async () => {
+    // The single-probe mirror of the `--plan` test above: the same
+    // dropped third argument, at the OTHER call site in `cli.ts`
+    // (`envelope.mutant`/`envelope.mutation_probe` at the top level
+    // rather than one entry per `plan.results[]`).
+    const lineCount = 80;
+    const repo = fs.mkdtempSync(path.join("/tmp", "ap6-single-repo-"));
+    tmpDirs.push(repo);
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(
+      path.join(repo, "wide.txt"),
+      Array.from({ length: lineCount }, (_, i) => buildWideLine(i)).join("\n") +
+        "\n",
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const patchPath = path.join(repo, "wide.patch");
+    fs.writeFileSync(patchPath, buildWidePatch("wide.txt", lineCount));
+    const logDir = fs.mkdtempSync(path.join("/tmp", "ap6L2-"));
+    tmpDirs.push(logDir);
+    const maxChars = 2200;
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      String(maxChars),
+      "-l",
+      logDir,
+      "probe",
+      "--file",
+      "wide.txt",
+      "-p",
+      patchPath,
+      "-t",
+      "true",
+      "--expect",
+      "pass",
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
+    expect(() => JSON.parse(run.stdout)).not.toThrow();
   }, 60000);
 
   it("on SIGINT during mutant 2 of 3: restores the in-flight mutant, never applies the third, exits 130 with no output", async () => {

@@ -33,6 +33,7 @@ import {
   type ProbePlanResult,
 } from "./probe/index.js";
 import { parsePlanFile, type ProbePlanSpec } from "./probe/plan.js";
+import { reconcileEnvelopeDiffTruncation } from "./probe/mutant.js";
 import {
   init,
   ALL_HARNESSES,
@@ -1091,6 +1092,21 @@ async function runProbePlanCommand(
     maxChars: global.maxChars,
     logDir: global.logDir,
   });
+  // `plan.results[]` is an array, so `keepWhole` above cannot reach into
+  // it (see that field's own docblock): a `diff.text` the reduction cut
+  // further than this module's own bound already did is corrected here,
+  // after the fact, rather than protected from the cut in the first
+  // place. `result.results` is the PRE-envelope evidence the correction
+  // compares each delivered excerpt against -- `buildEnvelope` deep-copies
+  // its input, so this is untouched by the reduction. `global.maxChars`
+  // is the same bound this envelope was already built with, so the
+  // correction can re-measure and shrink further if writing a field
+  // back pushed the whole envelope past it.
+  reconcileEnvelopeDiffTruncation(
+    envelope,
+    { planResults: result.results },
+    global.maxChars,
+  );
   emit(envelope, exitCode, {
     format: global.format,
     maxChars: global.maxChars,
@@ -1228,6 +1244,17 @@ program
       maxChars: global.maxChars,
       logDir: global.logDir,
     });
+    // See the plan command's own call to this: a large excerpt can
+    // still get cut further by the envelope's own generic string cap,
+    // which knows nothing about hunks, and this corrects that case
+    // after the fact, against the pre-envelope `result.mutant` as
+    // evidence for what was cut, then re-measures against the same
+    // `global.maxChars` this envelope was built with.
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      { mutant: result.mutant },
+      global.maxChars,
+    );
     emit(envelope, exitCode, {
       format: global.format,
       maxChars: global.maxChars,
