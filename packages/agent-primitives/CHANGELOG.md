@@ -181,6 +181,72 @@ SKILL.md`) and the README gained an "Invocation templates" section
 
 ### Changed
 
+- `test/drift.test.ts`'s "'++ ' as content" case now uses a real rename
+  (`src/old-thing.yaml` -> `src/new-thing.ts`, `---`/`+++` naming
+  different paths) instead of a same-path edit: a same-path edit cannot
+  observe a compound mutant that disables the whole `!sawHunk &&
+  raw.startsWith("+++ ")` header branch, since `newPath ?? oldPath`
+  then falls back to the SAME file either way; a same-extension rename
+  is equally unobservable, since `extractIdentifier` classifies purely
+  by extension bucket. Renaming across buckets (a YAML config key
+  becoming a TS declaration) is what makes the fallback path
+  disagree with the real one.
+- `test/import-boundaries.test.ts`: a new guard, parsing each of
+  `src/probe/session.ts`, `step.ts`, `setup.ts` and `index.ts`'s own
+  import specifiers off the real TypeScript AST (`typescript`'s
+  `createSourceFile`, already a devDependency), that fails if
+  `session.ts` imports `step.ts`, `setup.ts` or `index.ts`, if
+  `step.ts` imports `setup.ts` or `index.ts`, or if `setup.ts` imports
+  `step.ts` or `index.ts` -- pinning the one-way layering `index.ts`'s
+  own docblock already describes (`session.ts <- step.ts <- setup.ts
+  <- index.ts`), so far kept only by convention. Parsing the AST
+  (rather than a regex over the source text) is what lets the guard
+  cover every statement form that actually creates a module
+  dependency -- `import ... from "spec"`, `export ... from "spec"`, a
+  bare side-effect `import "spec";`, and a dynamic `import("spec")` /
+  `await import("spec")` -- while never mistaking a `from "..."`
+  inside a comment or an unrelated string literal for one, and treats
+  a relative specifier without an extension (`./index`) as the same
+  module as its `.js`-suffixed form. A `type`-only import counts as
+  forbidden the same as a value import: it is still a structural
+  dependency, and nothing stops it becoming a value import later. The
+  one documented, tolerated exception is the type-only `index.ts` <->
+  `plan.ts` cycle (`PlanMutantSpec` one way, `ExpectVerdict`/
+  `IsolationMode` the other); the guard does not require that cycle to
+  exist, only that if both directions are present, neither is a value
+  import.
+- README's `--plan` example's `mutants` array now names only neutral
+  placeholders (`src/example.ts`, `src/example-two.ts`,
+  `src/example-three.ts`) instead of mixing one placeholder with a
+  real source line (`src/lock.ts` line 44, `n > 0`) that was already
+  inaccurate and drifts with every edit to that file. A one-line
+  caveat next to the snippet says the example illustrates the plan
+  file's shape only; it was never meant to be run as-is.
+- `test/probe-worktree.test.ts` now pins `session.ts`'s stale-worktree
+  marker removal after a successful recovery (`if (staleWt)
+  removeMarkerFor(realRoot)`) with a test that mocks `beginWorktree` to
+  fail before it reaches its own `onWorktreeAttempt` write: the run's
+  own new-worktree attempt always rewrites the same marker on success,
+  which would otherwise mask an inverted condition there entirely. A
+  negative control confirms a normal run with no marker to recover
+  still writes none.
+- `test/doctor.test.ts`'s "hints: is empty when no required tool is
+  missing" case now runs `doctor()` against a fresh `cwd` and `lockDir`
+  fixture, the same isolation every other case in the file already
+  uses, instead of the real defaults (`process.cwd()`, the uid-scoped
+  tmp directory every `agent-primitives` invocation on this machine
+  shares). This case's assertion is exact (`hints.length` must be `0`),
+  so it is the one case in the file a stray hint from unrelated ambient
+  state under those real defaults would actually break. The cause is
+  reproduced, not merely plausible: a concurrent real `agent-primitives
+  probe -i worktree` run against the same checkout (or any live scratch
+  worktree already registered against it) makes `doctor`'s
+  `stale-worktree` check emit exactly one "a live probe (pid N) owns
+  the scratch worktree at ..." hint, because that check reads `git
+  worktree list` for `containmentRoot(cwd)` regardless of `lockDir`;
+  the shared lock directory is a second, weaker channel through the
+  same check's own worktree-marker lookup. Pinning both `cwd` and
+  `lockDir` to fresh, empty fixtures removes both channels.
 - Internal, with no change to what a single probe reports: `probe()`'s
   pipeline is split into a shared setup, a per-mutant step
   (`prepareMutant` + `runMutantAttempt`), and a shared teardown, so

@@ -922,6 +922,9 @@ is applied; nothing runs in parallel.
 agent-primitives probe --plan mutants.json
 ```
 
+This illustrates the plan file's shape only; every path and line below
+is a placeholder, not a real one, and the file is not runnable as-is.
+
 ```json
 {
   "test": "npm test",
@@ -930,11 +933,11 @@ agent-primitives probe --plan mutants.json
   "expect": "fail",
   "timeout": 900,
   "mutants": [
-    { "file": "src/probe/index.ts", "line": 812, "replace": "  return true;" },
-    { "file": "src/lock.ts", "line": 44, "match": "n > 0", "with": "n >= 0" },
+    { "file": "src/example.ts", "line": 42, "replace": "  return true;" },
+    { "file": "src/example-two.ts", "line": 44, "match": "n > 0", "with": "n >= 0" },
     {
-      "file": "src/exec.ts",
-      "patch": "mutants/exec-timeout.patch",
+      "file": "src/example-three.ts",
+      "patch": "mutants/example-three.patch",
       "expect": "pass"
     }
   ]

@@ -296,22 +296,42 @@ describe("parseRemovedIdentifiers", () => {
     ]);
   });
 
-  it("treats an added line whose content starts with '++ ' as content too (not a header), so the added declaration right after it is still attributed to the right file", () => {
+  it("treats an added line whose content starts with '++ ' as content too (not a header), so the added declaration right after it is still attributed to the right file, even across a real rename", () => {
     // "++ note..." as file content becomes the diff line
     // "+++ note..." once prefixed with the diff's own leading "+" - the
     // `+++ ` counterpart of the "-- " trap above. Gated on the same
     // `!sawHunk`, it must be read as content, not as a `+++ b/<path>`
-    // header that would overwrite `newPath` and misattribute the
-    // OldThing re-declaration right after it to the wrong (extension-
-    // less) file, which would make it wrongly stay "removed" instead of
-    // "moved" (its file would fail the source-extension check).
+    // header that would overwrite `newPath`.
+    //
+    // A real rename (`old path !== new path` in the `---`/`+++`
+    // headers, unlike a same-path in-place edit) is what actually
+    // exercises that gate: a compound mutant that disables the whole
+    // `!sawHunk && raw.startsWith("+++ ")` branch (not merely its
+    // `!sawHunk` guard) makes `newPath` never get set from the file's
+    // own real `+++ b/<path>` header either, so every added line falls
+    // back to `oldPath` (`newPath ?? oldPath`) instead. With a same-path
+    // edit that fallback lands on the SAME file and is unobservable; a
+    // same-extension rename (`.ts` -> `.tsx`) still is not observable,
+    // since both land in the same `SOURCE_EXTENSIONS` bucket and
+    // `extractIdentifier` classifies purely by extension. Renaming across
+    // buckets -- here a YAML config key becoming a TS declaration -- is
+    // what makes the two paths disagree on classification: under correct
+    // code the added `export const OldThing = 2;` line is read against
+    // the real new path's `.ts` extension and recognized as a
+    // declaration (so `OldThing` counts as "moved"); under the mutant it
+    // is wrongly read against the old path's `.yaml` extension instead,
+    // `OldThing` never lands in `addedNames`, and it wrongly stays
+    // "removed".
     const diff = [
-      "diff --git a/src/thing.ts b/src/thing.ts",
+      "diff --git a/src/old-thing.yaml b/src/new-thing.ts",
+      "similarity index 40%",
+      "rename from src/old-thing.yaml",
+      "rename to src/new-thing.ts",
       "index 1111111..2222222 100644",
-      "--- a/src/thing.ts",
-      "+++ b/src/thing.ts",
+      "--- a/src/old-thing.yaml",
+      "+++ b/src/new-thing.ts",
       "@@ -1,1 +1,2 @@",
-      "-export const OldThing = 1;",
+      "-OldThing: 1",
       "+++ note: trailing comment marker",
       "+export const OldThing = 2;",
       "",
