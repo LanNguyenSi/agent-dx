@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-05T22:41:37Z
+timestamp: 2026-09-06T04:35:50Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -325,7 +325,7 @@ the budget at all, and a future reader must not read a marker still
 showing `n/a` as "escalation was needed but not recorded" -- it means the
 budget was never hit. This marker is a documented convention only: no
 reader in this package or in grounding-mcp parses it today (see the
-CHANGELOG's `[Unreleased]` entry). Escalating never substitutes for a
+CHANGELOG's `[0.30.0]` entry). Escalating never substitutes for a
 review round: whichever option is chosen, the next attempt still goes
 through the reviewer subagent in full, the same review-never-skipped
 floor stated at the top of this doc.
