@@ -236,19 +236,41 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
 - `probe -p/--patch`'s result now carries the whole applied change for a
   multi-line patch, not just its first changed line: `mutant.diff` (and
   the `mutation_probe.mutant`/`verified_applied_via` strings built from
-  it) reports every hunk the applied `git diff --no-index` found,
-  bounded to 200 lines / 20,000 characters with a `truncated` flag and
-  the true `hunkCount` when the applied change is bigger than that.
-  Before this, `mutant.before`/`mutant.after` and `verified_applied_via`
-  echoed only the first line a multi-hunk (or multi-line-single-hunk)
-  patch changed, which read as the mutant's whole effect; a reviewer
-  briefing concluded from that echo that a heartbeat-removal mutant had
-  only changed a comment and was therefore impossible to kill, until the
-  patch file itself was read by hand. `mutant.line`/`before`/`after`
-  still name only the first changed line (unchanged, and still what a
-  single-hunk, single-line patch reports on its own, so every existing
-  result -- including the identity fixture -- is unaffected); `diff` is
-  the new field that shows the rest. Investigated alongside this: a
+  it) reports every hunk the applied `git diff --no-index` found, plus
+  the total `changedLineCount` (removed and added lines, derived from
+  each hunk's own `@@ -a,b +c,d @@` header, never from sniffing `text`'s
+  own `+`/`-` prefixes), bounded to 100 lines / 3,000 characters with a
+  `truncated` flag and the true `hunkCount` when the applied change is
+  bigger than that. Before this, `mutant.before`/`mutant.after` and
+  `verified_applied_via` echoed only the first line a multi-hunk (or
+  multi-line-single-hunk) patch changed, which read as the mutant's
+  whole effect; a reviewer briefing concluded from that echo that a
+  heartbeat-removal mutant had only changed a comment and was therefore
+  impossible to kill, until the patch file itself was read by hand.
+  `diff` is attached whenever the applied change is anything other than
+  exactly one hunk with exactly one removed and one added line -- the
+  only shape `before`/`after` truly cover (a like-for-like line
+  replacement); a one-hunk pure deletion or pure insertion, or a
+  one-hunk change removing/adding more than one line each, previously
+  fell through this gate too, and for exactly those shapes
+  `before`/`after` quote an untouched, merely-shifted neighbouring line
+  as if it were the change itself (a two-line deletion read back as
+  "line10 -> line12", a two-line insertion as "line6 -> inserted_a").
+  `mutant.line`/`before`/`after` still name only the first changed line
+  (unchanged, and still what a single-hunk, single-line-replacement
+  patch reports on its own, so every existing result -- including the
+  identity fixture -- is unaffected). The excerpt's own `git diff
+  --no-index` read is now pinned against ambient git config
+  (`-c core.autocrlf=false -c diff.noprefix=false --no-ext-diff`, the
+  read-side counterpart to the write-side pins below) so a global
+  `diff.external` cannot make it vanish silently, and its own output
+  being too large to read back in full refuses the excerpt (with a
+  warning) rather than risking an undercounted `hunkCount`; any other
+  failure computing the excerpt is likewise turned into a warning
+  (`mutant.diffWarning`, folded into the result's own `warnings`) rather
+  than a silently missing field or an uncaught exception. The
+  before/after scratch copies this excerpt reads are removed once it has
+  read them back. Investigated alongside this: a
   reviewer also reported one `expect: "pass"` mutant that came back
   `killed` inside a `probe --plan` batch while the identical single-
   mutant invocation came back `survived`. It does not reproduce: `probe()`

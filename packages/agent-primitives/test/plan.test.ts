@@ -1188,8 +1188,8 @@ describe("probePlan(): a target that was never synced into the worktree", () => 
 });
 
 /**
- * Reproduces (and pins the absence of) a discrepancy a reviewer reported
- * (task a42fae2a): inside a `probe --plan` batch, a mutant declared
+ * Reproduces (and pins the absence of) a discrepancy a reviewer once
+ * reported: inside a `probe --plan` batch, a mutant declared
  * `expect: "pass"` came back `killed`, while the identical single-mutant
  * `-p`/`-r` invocation came back `survived` for the same mutant --
  * standalone runs were treated as authoritative. `runMutantAttempt`'s
@@ -1200,9 +1200,10 @@ describe("probePlan(): a target that was never synced into the worktree", () => 
  * this file's other tests already exercise.
  *
  * Every case below ran green on this branch: single and plan agree in
- * all four. The attempted reproduction is recorded in this task's
- * implementation summary rather than a fix, since nothing here
- * reproduces the reported flip.
+ * all four. See this package's own CHANGELOG (Unreleased > Fixed) for
+ * the investigation this suite came out of; nothing here reproduces the
+ * reported flip, so the suite stands as a standing parity guard rather
+ * than a fix.
  */
 describe("probe() and probePlan(): the same mutant and expectation produce the same verdict (parity)", () => {
   const CAUGHT_LINE = 2;
@@ -1320,6 +1321,71 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
     );
     expect(single.status).toBe("survived");
     expect(plan.results[0].status).toBe("survived");
+    expect(plan.results[0].status).toBe(single.status);
+  }, 30000);
+
+  it("a mutant's own `expect` overrides the plan-level default (plan-level fail, mutant-level pass) -- agrees with the single `--expect pass` run", async () => {
+    useLockDir();
+    const single = await runSingle(
+      initRepo().repo,
+      UNCAUGHT_LINE,
+      UNCAUGHT_REPLACEMENT,
+      "pass",
+    );
+    const plan = await probePlan(
+      planOptions(
+        initRepo().repo,
+        [
+          {
+            ...replaceMutant(UNCAUGHT_LINE, UNCAUGHT_REPLACEMENT),
+            expect: "pass",
+          },
+        ],
+        { expect: "fail" },
+      ),
+    );
+    expect(single.status).toBe("killed");
+    expect(plan.results[0].status).toBe("killed");
+    expect(plan.results[0].status).toBe(single.status);
+  }, 30000);
+
+  it("expect: fail, mutant the suite catches, via a real -p/--patch (not just -r/--replace) -- killed in both", async () => {
+    useLockDir();
+    const editedFixture = FIXTURE_JS.split("\n")
+      .map((textLine, i) =>
+        i === CAUGHT_LINE - 1 ? CAUGHT_REPLACEMENT : textLine,
+      )
+      .join("\n");
+
+    const singleRepo = initRepo().repo;
+    const singlePatchPath = realDiffPatch(
+      singleRepo,
+      "fixture.js",
+      editedFixture,
+    );
+    const single = await probe({
+      file: "fixture.js",
+      form: "patch",
+      patchPath: singlePatchPath,
+      testCommand: "node fixture.test.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: singleRepo,
+      logDir: makeTmpDir(),
+    });
+
+    const planRepo = initRepo().repo;
+    const planPatchPath = realDiffPatch(planRepo, "fixture.js", editedFixture);
+    const plan = await probePlan(
+      planOptions(
+        planRepo,
+        [{ file: "fixture.js", form: "patch", patchPath: planPatchPath }],
+        { expect: "fail" },
+      ),
+    );
+
+    expect(single.status).toBe("killed");
+    expect(plan.results[0].status).toBe("killed");
     expect(plan.results[0].status).toBe(single.status);
   }, 30000);
 });

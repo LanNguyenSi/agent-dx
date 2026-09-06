@@ -131,6 +131,12 @@ export async function prepareMutant(
         `${String(computed.line)}; mutant.line reports ${String(computed.line)}`,
     );
   }
+  // A multi-line patch whose applied-diff excerpt could not be computed
+  // (or had to be refused) surfaces here rather than leaving `diff`
+  // silently missing with no trace of why.
+  if (computed.diffWarning !== undefined) {
+    warnings.push(computed.diffWarning);
+  }
   return {
     ok: true,
     computed,

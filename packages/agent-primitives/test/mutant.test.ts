@@ -7,12 +7,15 @@ import {
   applyPatchForReal,
   computeMutant,
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
+  DIFF_EXCERPT_MAX_CHARS,
+  DIFF_EXCERPT_MAX_LINES,
   formatMutantSummary,
   formatVerifiedAppliedVia,
   listPatchTouchedPaths,
   parseNumstatPaths,
 } from "../src/probe/mutant.js";
 import { runArgv } from "../src/probe/run.js";
+import { buildEnvelope } from "../src/envelope.js";
 
 // Call-through partial mock: every `git apply` really runs unless a test
 // overrides one call. The extra-path check below is only a check while it
@@ -494,7 +497,7 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
       result.after,
       result.diff,
     );
-    expect(summary).toContain("first of 3 hunks");
+    expect(summary).toContain("first of 6 changed lines across 3 hunks");
     // The one-line summary still never quotes the second/third hunk --
     // that is `verified_applied_via`'s job, not this one's.
     expect(summary).not.toContain("fn6");
@@ -578,8 +581,386 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
     expect(result.diff).toBeDefined();
     expect(result.diff?.hunkCount).toBe(changedLines.length);
     expect(result.diff?.truncated).toBe(true);
-    expect(result.diff?.text.length).toBeLessThanOrEqual(20_000);
-    expect(result.diff?.text.split("\n").length).toBeLessThanOrEqual(200);
+    expect(result.diff?.text.length).toBeLessThanOrEqual(
+      DIFF_EXCERPT_MAX_CHARS,
+    );
+    expect(result.diff?.text.split("\n").length).toBeLessThanOrEqual(
+      DIFF_EXCERPT_MAX_LINES,
+    );
+  }, 30000);
+
+  it("attaches `diff` for a one-hunk, pure one-line deletion, and does not misreport an untouched shifted line as `after`", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "one-line-deletion.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,3 +1,2 @@",
+        " function isPositive(n) {",
+        "-  return n > 0;",
+        " }",
+      ].join("\n") + "\n",
+    );
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    expect(result.diff?.hunkCount).toBe(1);
+    expect(result.diff?.changedLineCount).toBe(1);
+    expect(result.diff?.text).toContain("return n > 0;");
+    // The naive line-by-line comparison (`before`/`after`) finds its
+    // first disagreement one line early, on `}` -- a line the deletion
+    // never touched, only shifted up. `diff` must name the real removed
+    // line instead of leaving the reader to trust that misleading quote.
+    expect(result.before).toBe("  return n > 0;");
+    expect(result.after).toBe("}");
+    expect(result.diff?.text).not.toContain("+}");
+  });
+
+  it("attaches `diff` for a one-hunk, pure one-line insertion, and does not misreport an untouched shifted line as `before`", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "one-line-insertion.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,2 +1,3 @@",
+        " function isPositive(n) {",
+        "+  console.log(n);",
+        "   return n > 0;",
+      ].join("\n") + "\n",
+    );
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    expect(result.diff?.hunkCount).toBe(1);
+    expect(result.diff?.changedLineCount).toBe(1);
+    expect(result.diff?.text).toContain("console.log(n);");
+    // `before`/`after` alone name the inserted line as the "after" of
+    // the original second line, which is wrong: that line still exists,
+    // just shifted down -- `diff` is what actually shows the insertion.
+    expect(result.before).toBe("  return n > 0;");
+    expect(result.after).toBe("  console.log(n);");
+    expect(result.diff?.text).not.toContain("-  return n > 0;");
+  });
+
+  it("attaches `diff` for a one-hunk, two-line deletion, and does not misreport an untouched shifted line as `after`", async () => {
+    const lineCount = 15;
+    const { root, relPath, absFile, content } = initRepoWithLines(lineCount);
+    const patchPath = path.join(root, "two-line-deletion.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -9,4 +9,2 @@",
+        " function fn9() { return 9; }",
+        "-function fn10() { return 10; }",
+        "-function fn11() { return 11; }",
+        " function fn12() { return 12; }",
+      ].join("\n") + "\n",
+    );
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    expect(result.diff?.hunkCount).toBe(1);
+    expect(result.diff?.changedLineCount).toBe(2);
+    expect(result.diff?.text).toContain("function fn10() { return 10; }");
+    expect(result.diff?.text).toContain("function fn11() { return 11; }");
+    // `before`/`after` alone echo the shifted, untouched `fn12` line as
+    // if it were what `fn10` became -- exactly the "line10 -> line12"
+    // misreport this excerpt exists to correct.
+    expect(result.before).toBe("function fn10() { return 10; }");
+    expect(result.after).toBe("function fn12() { return 12; }");
+  });
+
+  it("attaches `diff` for a one-hunk, two-line insertion, and does not misreport an untouched shifted line as `before`", async () => {
+    const lineCount = 10;
+    const { root, relPath, absFile, content } = initRepoWithLines(lineCount);
+    const patchPath = path.join(root, "two-line-insertion.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -4,3 +4,5 @@",
+        " function fn4() { return 4; }",
+        " function fn5() { return 5; }",
+        "+inserted_a",
+        "+inserted_b",
+        " function fn6() { return 6; }",
+      ].join("\n") + "\n",
+    );
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    expect(result.diff?.hunkCount).toBe(1);
+    expect(result.diff?.changedLineCount).toBe(2);
+    expect(result.diff?.text).toContain("inserted_a");
+    expect(result.diff?.text).toContain("inserted_b");
+    // `before`/`after` alone echo the untouched `fn6` line as the
+    // "after" of `fn6` itself -- the "line6 -> inserted_a" misreport
+    // this excerpt exists to correct.
+    expect(result.before).toBe("function fn6() { return 6; }");
+    expect(result.after).toBe("inserted_a");
+  });
+
+  it("counts a removed line starting with `-- ` and an added line starting with `++ ` correctly (header-derived counts, not prefix sniffing)", async () => {
+    // A dedicated fixture (not `initRepoWithFile`'s): the point is that
+    // the resulting REAL `git diff --no-index --unified=0` -- computed
+    // from the applied before/after content, not from this hand-written
+    // `-p` patch's own text -- produces a removed line reading
+    // `--- odd_before` (marker `-` plus content `-- odd_before`) and an
+    // added line reading `+++ odd_after` (marker `+` plus content
+    // `++ odd_after`): exactly the shapes a `+++ `/`--- ` prefix filter
+    // would misread as the diff's own file-header lines and drop.
+    const root = makeTmpDir();
+    git(root, ["init", "-q"]);
+    git(root, ["config", "user.email", "test@example.com"]);
+    git(root, ["config", "user.name", "test"]);
+    const relPath = "fixture.js";
+    const absFile = path.join(root, relPath);
+    const content = [
+      "context1",
+      "-- odd_before",
+      "normal_before",
+      "context2",
+      "",
+    ].join("\n");
+    fs.writeFileSync(absFile, content);
+    git(root, ["add", "-A"]);
+    git(root, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+
+    const patchPath = path.join(root, "dashdash.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,4 +1,4 @@",
+        " context1",
+        "--- odd_before",
+        "-normal_before",
+        "+++ odd_after",
+        "+normal_after",
+        " context2",
+      ].join("\n") + "\n",
+    );
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    // The hunk header (from the real applied-diff, unified=0) declares
+    // 2 removed, 2 added; a prefix-sniffing count would instead read
+    // the `+++ `/`--- ` lines as non-content and undercount both sides.
+    expect(result.diff?.hunkCount).toBe(1);
+    expect(result.diff?.changedLineCount).toBe(4);
+    expect(result.diff?.text).toContain("odd_before");
+    expect(result.diff?.text).toContain("odd_after");
+  });
+
+  it("does not leave the before/after scratch content behind once the excerpt has been read", async () => {
+    const { root, relPath, absFile, content } = initRepoWithLines(10);
+    const patchPath = path.join(root, "cleanup.patch");
+    writeSparsePatch(patchPath, relPath, [2, 6], 10);
+    const logDir = makeTmpDir();
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir, originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    const diffDirs = fs
+      .readdirSync(logDir)
+      .filter((name) => name.startsWith("mutant-diff-"));
+    expect(diffDirs.length).toBeGreaterThan(0);
+    for (const dirName of diffDirs) {
+      const scratchDir = path.join(logDir, dirName);
+      // The `before/`/`after/` scratch content is removed once `git
+      // diff` has read it back; only the exec log (whatever else
+      // `runArgv` left in the same scratch directory) may remain, since
+      // `result.logPaths` still points into it.
+      expect(fs.existsSync(path.join(scratchDir, "before"))).toBe(false);
+      expect(fs.existsSync(path.join(scratchDir, "after"))).toBe(false);
+    }
+  });
+
+  it("pins ambient git config for the applied-diff excerpt's own `git diff --no-index` (diff.external cannot make it vanish silently)", async () => {
+    const { root, relPath, absFile, content } = initRepoWithLines(10);
+    const patchPath = path.join(root, "hostile-config.patch");
+    writeSparsePatch(patchPath, relPath, [2, 6], 10);
+
+    const prevConfigCount = process.env.GIT_CONFIG_COUNT;
+    const prevConfigKey0 = process.env.GIT_CONFIG_KEY_0;
+    const prevConfigValue0 = process.env.GIT_CONFIG_VALUE_0;
+    process.env.GIT_CONFIG_COUNT = "1";
+    process.env.GIT_CONFIG_KEY_0 = "diff.external";
+    process.env.GIT_CONFIG_VALUE_0 = "/bin/echo";
+    try {
+      const result = await computeMutant(
+        { form: "patch", file: absFile, patchPath },
+        { root, logDir: makeTmpDir(), originalContent: content },
+      );
+
+      expect(result.applicable).toBe(true);
+      if (!result.applicable) return;
+      // `--no-ext-diff` on the call means the hostile `diff.external`
+      // never gets a say: the excerpt is still produced in full, not
+      // silently dropped with an empty `warnings`.
+      expect(result.diff).toBeDefined();
+      expect(result.diff?.text).toContain("function fn2()");
+      expect(result.diffWarning).toBeUndefined();
+    } finally {
+      if (prevConfigCount === undefined) delete process.env.GIT_CONFIG_COUNT;
+      else process.env.GIT_CONFIG_COUNT = prevConfigCount;
+      if (prevConfigKey0 === undefined) delete process.env.GIT_CONFIG_KEY_0;
+      else process.env.GIT_CONFIG_KEY_0 = prevConfigKey0;
+      if (prevConfigValue0 === undefined) delete process.env.GIT_CONFIG_VALUE_0;
+      else process.env.GIT_CONFIG_VALUE_0 = prevConfigValue0;
+    }
+  });
+
+  it("the excerpt's own bound leaves room in the envelope's default budget: `verified_applied_via` survives `buildEnvelope` unmodified at the default max-chars", async () => {
+    const lineCount = 700;
+    const { root, relPath, absFile, content } = initRepoWithLines(lineCount);
+    const changedLines = Array.from(
+      { length: 100 },
+      (_, i) => (i + 1) * 4,
+    ).filter((n) => n <= lineCount);
+    const patchPath = path.join(root, "many-hunks-envelope.patch");
+    writeSparsePatch(patchPath, relPath, changedLines, lineCount);
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    // This fixture's own excerpt is already cut by `DIFF_EXCERPT_MAX_LINES`/
+    // `DIFF_EXCERPT_MAX_CHARS`, the worst case a single `mutation_probe`
+    // entry's diff excerpt can be.
+    expect(result.diff?.truncated).toBe(true);
+
+    const verifiedAppliedVia = formatVerifiedAppliedVia(
+      relPath,
+      result.line,
+      result.before,
+      result.after,
+      result.diff,
+    );
+
+    const { envelope } = buildEnvelope({
+      version: "0.0.0-test",
+      command: "probe",
+      status: "survived",
+      durationMs: 1,
+      cwd: root,
+      warnings: [],
+      logs: [],
+      extra: {
+        plan: {
+          results: [
+            {
+              index: 0,
+              file: relPath,
+              expect: "fail",
+              status: "survived",
+              mutant: {
+                file: relPath,
+                line: result.line,
+                before: result.before,
+                after: result.after,
+                form: "patch",
+                diff: result.diff,
+              },
+              mutation_probe: {
+                mutant: formatMutantSummary(
+                  relPath,
+                  result.line,
+                  result.before,
+                  result.after,
+                  result.diff,
+                ),
+                verified_applied_via: verifiedAppliedVia,
+              },
+              warnings: [],
+              logs: [],
+            },
+          ],
+          summary: {
+            total: 1,
+            killed: 0,
+            survived: 1,
+            not_run: 0,
+            inconclusive: 0,
+          },
+        },
+      },
+      keepWhole: ["plan.summary"],
+      // `maxChars` omitted deliberately: this exercises the real
+      // default (8,000), the shape every `probe`/`probe --plan`
+      // invocation gets unless the caller passes `-m`/`--max-chars`.
+      logDir: makeTmpDir(),
+    });
+
+    const deliveredResults = (
+      envelope as { plan?: { results?: Array<Record<string, unknown>> } }
+    ).plan?.results;
+    expect(deliveredResults).toBeDefined();
+    const deliveredEntry = deliveredResults?.[0] as
+      { mutation_probe?: { verified_applied_via?: unknown } } | undefined;
+    const delivered = deliveredEntry?.mutation_probe?.verified_applied_via;
+    // The excerpt's own `truncated: true` must be the ONLY truncation a
+    // reader ever sees: if the envelope's own generic string reduction
+    // cut this further, `delivered` would end in the envelope's own
+    // "...(N more characters omitted)" marker instead of matching the
+    // fully formatted string byte for byte -- silently disagreeing with
+    // `diff.truncated`.
+    expect(delivered).toBe(verifiedAppliedVia);
   }, 30000);
 });
 

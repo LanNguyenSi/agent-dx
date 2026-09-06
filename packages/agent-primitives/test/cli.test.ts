@@ -1670,6 +1670,7 @@ describe("cli: probe", () => {
     expect(parsedJson.mutant.line).toBe(2);
     expect(parsedJson.mutant.before).toBe("function fn1() { return 1; }");
     expect(parsedJson.mutant.diff.hunkCount).toBe(3);
+    expect(parsedJson.mutant.diff.changedLineCount).toBe(6);
     expect(parsedJson.mutant.diff.truncated).toBe(false);
     expect(parsedJson.mutant.diff.text).toContain(
       "function fn1() { return 1; }",
@@ -1680,7 +1681,9 @@ describe("cli: probe", () => {
     expect(parsedJson.mutant.diff.text).toContain(
       "function fn9() { return 900; }",
     );
-    expect(parsedJson.mutation_probe.mutant).toContain("first of 3 hunks");
+    expect(parsedJson.mutation_probe.mutant).toContain(
+      "first of 6 changed lines across 3 hunks",
+    );
     expect(parsedJson.mutation_probe.verified_applied_via).toContain(
       "function fn5() { return 500; }",
     );
