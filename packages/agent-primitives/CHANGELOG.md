@@ -181,6 +181,20 @@ SKILL.md`) and the README gained an "Invocation templates" section
 
 ### Changed
 
+- `test/doctor.test.ts`'s "hints: is empty when no required tool is
+  missing" case now runs `doctor()` against a fresh `cwd` and `lockDir`
+  fixture, the same isolation every other case in the file already
+  uses, instead of the real defaults (`process.cwd()`, the uid-scoped
+  tmp directory every `agent-primitives` invocation on this machine
+  shares). This case's assertion is exact (`hints.length` must be `0`),
+  so it is the one case in the file a stray hint from unrelated ambient
+  state under those real defaults, most plausibly a `stale-worktree`
+  "live probe" hint from a concurrent or leftover real invocation
+  against this same checkout, would actually break. Ten sequential
+  parallel full-suite runs before this change stayed green, so the fix
+  is preventive: it removes the dependency the code reads back
+  (`doctor`'s `stale-worktree` check, keyed by `containmentRoot(cwd)`
+  and the shared lock directory) rather than one this run reproduced.
 - Internal, with no change to what a single probe reports: `probe()`'s
   pipeline is split into a shared setup, a per-mutant step
   (`prepareMutant` + `runMutantAttempt`), and a shared teardown, so

@@ -326,7 +326,29 @@ describe("doctor: hints", () => {
   });
 
   it("is empty when no required tool is missing", async () => {
-    const result = await doctor({ required: ["node"], optional: [] });
+    // Unlike every other case in this file, this assertion is exact
+    // (`toBe(0)`, not `toBeGreaterThan(0)`), so it is the one case a
+    // stray extra hint from unrelated ambient state would actually
+    // break. `doctor`'s `stale-worktree` check produces a hint for a
+    // registered scratch worktree it finds live-owned (see
+    // `describe("doctor: stale-worktree check")` above): without an
+    // isolated `cwd`/`lockDir`, this call resolves both from real
+    // defaults (`process.cwd()`, the uid-scoped tmp dir every
+    // `agent-primitives` invocation on this machine shares), so a
+    // concurrent real probe run against this same checkout, or a
+    // leftover marker/registered worktree from an earlier one, could
+    // surface as a hint here and fail an assertion this test has
+    // nothing to do with. Pinning both to fresh, empty fixtures (as
+    // every sibling test in this file already does) removes that
+    // dependency regardless of whether it has ever actually fired.
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const result = await doctor({
+      required: ["node"],
+      optional: [],
+      cwd,
+      lockDir,
+    });
     expect(result.hints.length).toBe(0);
   });
 });
