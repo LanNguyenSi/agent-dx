@@ -70,10 +70,14 @@ export interface MutantComputed {
   diffWarning?: string;
 }
 
-/** `MutantComputed.diff`: what `mutation_probe.mutant` and
- * `verified_applied_via` show instead of (never in place of the
- * evidence in) `before`/`after` alone, for a multi-line patch mutant --
- * see `MutantComputed.diff`'s own docblock for when this is present. */
+/** `MutantComputed.diff`: the SINGLE carrier of the applied change's
+ * excerpt. `mutation_probe.verified_applied_via` never repeats this
+ * field's own `text`; it points at this field instead (a short,
+ * bounded descriptor -- see `formatVerifiedAppliedVia`), so a multi-line
+ * patch's diff exists exactly once in a result, never duplicated across
+ * two fields that a bounded envelope then has to fit twice over. See
+ * `MutantComputed.diff`'s own docblock for when this field is present
+ * at all. */
 export interface MutantDiffField {
   /** A `git diff --no-index --unified=0` body: the `--- `/`+++ ` file
    * lines and every `@@ ... @@` hunk with its added/removed lines; no
@@ -81,22 +85,34 @@ export interface MutantDiffField {
    * around them) and no leading `diff --git `/`index ` lines (they would
    * only name this comparison's own throwaway scratch paths and a blob
    * hash from a repository that does not exist). Bounded to
-   * `DIFF_EXCERPT_MAX_LINES`/`DIFF_EXCERPT_MAX_CHARS`; cut to its head
-   * (the earliest hunks) when the applied change is bigger than that,
-   * with `truncated` set. */
+   * `DIFF_EXCERPT_MAX_LINES`/`DIFF_EXCERPT_MAX_CHARS`, cut to whole
+   * hunks (never mid-hunk: a hunk is kept only once every line its own
+   * `@@ -a,b +c,d @@` header declares is present) when the applied
+   * change is bigger than that, with `truncated` set. `buildEnvelope`'s
+   * own generic string cap can still cut this further once the result
+   * reaches `cli.ts` (it knows nothing about hunks); `cli.ts` calls
+   * `reconcileEnvelopeDiffTruncation` on the built envelope to correct
+   * that case the same way -- trimmed back to the last hunk it can
+   * prove is fully present, `truncated` set -- so `truncated: false`
+   * can never sit beside text the envelope itself cut. */
   text: string;
   /** Every hunk the applied change produced, counted before any
-   * truncation, so it stays accurate even when `text` had to be cut. */
+   * truncation and never revised afterward (by either bound), so it
+   * always names the true total even when `text` shows only a prefix of
+   * it. */
   hunkCount: number;
-  /** Every added plus every removed line the applied change produced
-   * (summed from each hunk's own `@@ -a,b +c,d @@` header, never from
-   * sniffing `text`'s own `+`/`-` prefixes -- a removed line that
-   * itself starts with `-- ` or an added line starting with `++ ` would
-   * otherwise be missed), counted before any truncation, the same as
-   * `hunkCount`. Named in `formatMutantSummary`'s one-line summary
-   * alongside the hunk count, so "first of 1 hunks" can never read as
-   * "the whole change was one line" for a hunk that in fact replaced
-   * several. */
+  /** Every removed line the applied change produced, summed from each
+   * hunk's own `@@ -a,b +c,d @@` header (never from sniffing `text`'s
+   * own `-` prefixes -- a removed line that itself starts with `-- `
+   * would otherwise be missed), counted before any truncation. */
+  removed: number;
+  /** Every added line, the `+c,d` half of the same header sum,
+   * `addedCount`'s counterpart to `removed` above. */
+  added: number;
+  /** `removed + added`. Named in `formatMutantSummary`'s one-line
+   * summary alongside the hunk count, so "first of 1 hunks" can never
+   * read as "the whole change was one line" for a hunk that in fact
+   * replaced several. */
   changedLineCount: number;
   truncated: boolean;
 }
@@ -104,28 +120,36 @@ export interface MutantDiffField {
 /**
  * The bound on `MutantDiffField.text`: the result stays one bounded JSON
  * object, so a patch that changes hundreds of lines gets a clearly
- * truncated excerpt (the earliest hunks, `truncated: true`, `hunkCount`
- * still the true total) rather than an unbounded dump. Sized well past
- * what an actual multi-hunk mutation-probe patch needs to prove its
- * hunks are not just the first one (the fixture this bound is tested
- * against uses three, each two lines), while still being far below
- * `PATCH_MAX_BYTES` -- and, unlike the package's original 200-line/
- * 20,000-character bound, sized to actually survive `envelope.ts`'s own
- * `DEFAULT_MAX_CHARS` (8,000): a `verified_applied_via` string built
- * from a diff excerpt anywhere near the old bound would still get cut
- * again by the envelope's own generic string reduction once `-m`/
- * `--max-chars` is left at its default, silently disagreeing with this
- * field's own `truncated: false`. 3,000 characters / 100 lines leaves
- * enough of the default envelope budget for the rest of one
- * `mutation_probe` entry (the fixed envelope fields, `mutant`, the
- * `verified_applied_via` header line, and its siblings in a `--plan`
- * batch) to still fit alongside it; see `test/mutant.test.ts`'s
- * envelope-delivery test. Deliberately its own constants rather than
- * `exec.ts`'s `TAIL_CHARS`/`TAIL_LINES`: those keep a subprocess
- * output's TAIL (the most recent lines), while a diff excerpt keeps its
- * HEAD (the earliest hunks) -- the two bounds happen to hold the same
- * shape of value (a capped text blob) for unrelated reasons and are not
- * meant to move together.
+ * truncated excerpt (the earliest whole hunks, `truncated: true`,
+ * `hunkCount` still the true total) rather than an unbounded dump.
+ * Sized well past what an actual multi-hunk mutation-probe patch needs
+ * to prove its hunks are not just the first one (the fixture this bound
+ * is tested against uses three, each two lines), while still being far
+ * below `PATCH_MAX_BYTES`.
+ *
+ * This bound alone does not guarantee `verified_applied_via`/`text`
+ * survive `envelope.ts`'s own `DEFAULT_MAX_CHARS` (8,000) unmodified --
+ * a large `--plan` batch, several such excerpts each near this bound,
+ * or a caller-supplied `-m`/`--max-chars` below it can all still make
+ * `buildEnvelope`'s own generic string/array reduction cut a `diff.text`
+ * further. That is why the guarantee is not "size this bound small
+ * enough that the envelope never touches it" (which cannot be sized
+ * once `-m` is the caller's to set): `cli.ts` calls
+ * `reconcileEnvelopeDiffTruncation` on the BUILT envelope, after
+ * `buildEnvelope` has already run, and corrects exactly that case --
+ * see that function's own docblock. This bound instead exists so the
+ * common case (the default budget, a handful of mutants) needs no
+ * correction at all: 3,000 characters / 100 lines leaves ample room in
+ * the default envelope budget for the rest of one `mutation_probe`
+ * entry (the fixed envelope fields, `mutant`, the short
+ * `verified_applied_via` descriptor that now points at this field
+ * instead of repeating it, and its siblings in a `--plan` batch); see
+ * `test/mutant.test.ts`'s envelope-delivery tests. Deliberately its own
+ * constants rather than `exec.ts`'s `TAIL_CHARS`/`TAIL_LINES`: those
+ * keep a subprocess output's TAIL (the most recent lines), while a diff
+ * excerpt keeps its HEAD (the earliest hunks) -- the two bounds happen
+ * to hold the same shape of value (a capped text blob) for unrelated
+ * reasons and are not meant to move together.
  */
 export const DIFF_EXCERPT_MAX_LINES = 100;
 export const DIFF_EXCERPT_MAX_CHARS = 3_000;
@@ -186,7 +210,14 @@ export const GIT_CONTENT_WRITE_CONFIG_ARGS = [
  * to the `git diff` invocation itself, so a global `diff.external`
  * cannot divert the comparison to an external tool this process never
  * inspects -- which would otherwise make the excerpt silently vanish
- * (an empty result, no warning) rather than fail loudly. */
+ * (an empty result, no warning) rather than fail loudly. `--no-textconv`
+ * sits beside it for a narrower hostile config `--no-ext-diff` alone
+ * does not cover: a `diff.<driver>.textconv` assigned via a
+ * `core.attributesFile`/`.gitattributes` entry runs even with
+ * `--no-ext-diff`, converting `before/`/`after/`'s content before the
+ * comparison and fabricating hunks from the converted content instead
+ * of what `git apply` actually wrote -- silently (`git diff` still
+ * exits normally; there is nothing here for a warning to catch). */
 export const GIT_DIFF_READ_CONFIG_ARGS = [
   "-c",
   "core.autocrlf=false",
@@ -529,10 +560,10 @@ export async function listPatchTouchedPaths(
  * `--unified=0` (no context lines) is deliberate: this excerpt exists to
  * show which lines changed, not the lines around them, and every context
  * line would spend the same bound the changed lines do. The invocation
- * pins `GIT_DIFF_READ_CONFIG_ARGS` plus `--no-ext-diff` (see that
- * constant's own docblock) so ambient git config cannot make the
- * excerpt vanish or misrepresent it the way it could for the write-side
- * `git apply` calls.
+ * pins `GIT_DIFF_READ_CONFIG_ARGS` plus `--no-ext-diff`/`--no-textconv`
+ * (see that constant's own docblock) so ambient git config cannot make
+ * the excerpt vanish or misrepresent it the way it could for the
+ * write-side `git apply` calls.
  *
  * Returns a `warning` string instead of the excerpt on anything that
  * keeps this from computing correctly: a scratch directory that could
@@ -602,6 +633,7 @@ async function computeAppliedDiffExcerpt(
         ...GIT_DIFF_READ_CONFIG_ARGS,
         "diff",
         "--no-ext-diff",
+        "--no-textconv",
         "--no-index",
         "--unified=0",
         "--",
@@ -638,37 +670,35 @@ async function computeAppliedDiffExcerpt(
     while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1] === "") {
       bodyLines.pop();
     }
-    let hunkCount = 0;
-    let removedCount = 0;
-    let addedCount = 0;
-    for (const line of bodyLines) {
-      const counts = parseHunkHeaderCounts(line);
-      if (counts === undefined) continue;
-      hunkCount++;
-      removedCount += counts.removed;
-      addedCount += counts.added;
-    }
-    if (hunkCount === 0) {
+    const { preamble, hunks } = splitDiffBody(bodyLines);
+    if (hunks.length === 0) {
       return {
         warning:
           "the applied-diff excerpt's own `git diff --no-index` reported " +
           `no hunks for a change already known to differ; see ${diffResult.logPath}`,
       };
     }
-    let lines = bodyLines;
-    let truncated = false;
-    if (lines.length > DIFF_EXCERPT_MAX_LINES) {
-      lines = lines.slice(0, DIFF_EXCERPT_MAX_LINES);
-      truncated = true;
+    let removedCount = 0;
+    let addedCount = 0;
+    for (const hunk of hunks) {
+      // Every hunk's first line is its own header, by construction of
+      // `splitDiffBody` (it only ever starts a new hunk there); the
+      // `undefined` branch is unreachable in practice and only keeps
+      // the arithmetic below from widening to `number | undefined`.
+      const counts = parseHunkHeaderCounts(hunk[0]);
+      if (counts === undefined) continue;
+      removedCount += counts.removed;
+      addedCount += counts.added;
     }
-    let text = lines.join("\n");
-    if (text.length > DIFF_EXCERPT_MAX_CHARS) {
-      text = text.slice(0, DIFF_EXCERPT_MAX_CHARS);
-      truncated = true;
-    }
+    const { text, truncated } = buildBoundedHunkExcerpt(
+      preamble,
+      hunks,
+      DIFF_EXCERPT_MAX_LINES,
+      DIFF_EXCERPT_MAX_CHARS,
+    );
     return {
       text,
-      hunkCount,
+      hunkCount: hunks.length,
       removedCount,
       addedCount,
       truncated,
@@ -709,6 +739,82 @@ function parseHunkHeaderCounts(
   return {
     removed: match[1] === undefined ? 1 : Number(match[1]),
     added: match[2] === undefined ? 1 : Number(match[2]),
+  };
+}
+
+/** Splits a `git diff --unified=0` body (already filtered of the
+ * leading `diff --git `/`index ` lines) into its leading `preamble`
+ * (the `--- `/`+++ ` file lines, kept whole and always ahead of every
+ * hunk) and one array per hunk: each hunk's own `@@ ... @@` header line
+ * followed by every line up to (not including) the next header. This is
+ * what lets the excerpt's own truncation below cut only at hunk
+ * boundaries -- a hunk is an atomic unit here, never split across the
+ * cut, and the preamble is never mistaken for part of one. */
+function splitDiffBody(bodyLines: string[]): {
+  preamble: string[];
+  hunks: string[][];
+} {
+  const preamble: string[] = [];
+  const hunks: string[][] = [];
+  let current: string[] | undefined;
+  for (const line of bodyLines) {
+    if (parseHunkHeaderCounts(line) !== undefined) {
+      current = [line];
+      hunks.push(current);
+    } else if (current !== undefined) {
+      current.push(line);
+    } else {
+      preamble.push(line);
+    }
+  }
+  return { preamble, hunks };
+}
+
+/**
+ * Keeps `preamble` whole and as many of `hunks`, in order, as fit
+ * within `maxLines`/`maxChars` alongside it -- WHOLE hunks only, never
+ * a prefix of one, so a truncated excerpt always ends at a hunk
+ * boundary rather than mid-hunk. Always keeps at least the first hunk,
+ * even when it alone (plus the preamble) already exceeds the bound:
+ * reporting zero hunks would say less than reporting one hunk over
+ * budget, and a caller past this (`buildEnvelope`'s own generic string
+ * cap, then `reconcileEnvelopeDiffTruncation` correcting that) still
+ * bounds the result overall. Joins exactly the way the excerpt's own
+ * `text` always has: `preamble` and every kept hunk, each already its
+ * own `"\n"`-joined block, joined to each other by `"\n"` in turn.
+ */
+function buildBoundedHunkExcerpt(
+  preamble: string[],
+  hunks: string[][],
+  maxLines: number,
+  maxChars: number,
+): { text: string; truncated: boolean } {
+  const preambleText = preamble.join("\n");
+  if (hunks.length === 0) return { text: preambleText, truncated: false };
+  let kept = 1;
+  let lineTotal = preamble.length + hunks[0].length;
+  let charTotal =
+    (preamble.length > 0 ? preambleText.length + 1 : 0) +
+    hunks[0].join("\n").length;
+  for (let i = 1; i < hunks.length; i++) {
+    const hunkLines = hunks[i].length;
+    const hunkChars = hunks[i].join("\n").length;
+    const nextLineTotal = lineTotal + hunkLines;
+    // `+ 1` for the "\n" that joins this hunk to the previous one.
+    const nextCharTotal = charTotal + 1 + hunkChars;
+    if (nextLineTotal > maxLines || nextCharTotal > maxChars) break;
+    lineTotal = nextLineTotal;
+    charTotal = nextCharTotal;
+    kept++;
+  }
+  const keptHunksText = hunks
+    .slice(0, kept)
+    .map((h) => h.join("\n"))
+    .join("\n");
+  return {
+    text:
+      preamble.length > 0 ? `${preambleText}\n${keptHunksText}` : keptHunksText,
+    truncated: kept < hunks.length,
   };
 }
 
@@ -864,6 +970,8 @@ async function computePatch(
       ? {
           text: excerpt.text,
           hunkCount: excerpt.hunkCount,
+          removed: excerpt.removedCount,
+          added: excerpt.addedCount,
           changedLineCount: excerpt.removedCount + excerpt.addedCount,
           truncated: excerpt.truncated,
         }
@@ -992,17 +1100,33 @@ function pluralizeCount(n: number, singular: string, plural: string): string {
   return n === 1 ? singular : plural;
 }
 
-/** Formats the `mutant: "<file>:<line>: <before> -> <after>"` string
+/**
+ * Formats the `mutant: "<file>:<line>: <before> -> <after>"` string
  * used verbatim as `mutation_probe.mutant`. When `diff` is given (a
  * patch mutant whose change spans more than the one line `before`/
- * `after` already quote) a trailing note names the true changed-line
+ * `after` already quote), a trailing note names the true changed-line
  * count alongside the hunk count -- so a single multi-line hunk (e.g.
  * "first of 4 changed lines across 1 hunk") is never misread as "the
  * whole change was one line" the way a hunk count alone would read --
  * and, when the excerpt itself had to be cut, that it was truncated;
  * this one line can never be read as the whole mutant on its own, see
- * `verified_applied_via` (`formatVerifiedAppliedVia`) for the full
- * excerpt. */
+ * `mutant.diff` (`MutantDiffField.text`, the sole carrier) for the full
+ * excerpt.
+ *
+ * When `diff.removed !== diff.added`, the `before -> after` pair itself
+ * is dropped rather than shown alongside the note: an unequal count
+ * means the two do not correspond to each other one for one (a pure
+ * deletion's `after` is really the next, untouched line the deletion
+ * shifted up; a pure insertion's `before` is really the same line
+ * shifted down; a mixed edit has no single pair at all -- see
+ * `MutantComputed.diff`'s own docblock on why `before`/`after` can name
+ * an untouched neighbour in these shapes). Only the side this mutant
+ * actually introduced or removed is quoted. The pair form survives only
+ * when `removed === added` (including the `=== 1` case `diff` is never
+ * attached for at all, and the multi-hunk/multi-line cases where the
+ * two sides are equal in count even if not truly a byte-for-byte
+ * correspondence).
+ */
 export function formatMutantSummary(
   file: string,
   line: number,
@@ -1010,30 +1134,42 @@ export function formatMutantSummary(
   after: string,
   diff?: MutantDiffField,
 ): string {
-  const head = `${file}:${line}: ${before} -> ${after}`;
-  if (diff === undefined) return head;
+  if (diff === undefined) return `${file}:${line}: ${before} -> ${after}`;
   const lineWord = pluralizeCount(
     diff.changedLineCount,
     "changed line",
     "changed lines",
   );
   const hunkWord = pluralizeCount(diff.hunkCount, "hunk", "hunks");
-  return (
-    `${head} (first of ${String(diff.changedLineCount)} ${lineWord} across ` +
-    `${String(diff.hunkCount)} ${hunkWord}; see verified_applied_via for ` +
-    `the full diff${diff.truncated ? ", truncated" : ""})`
-  );
+  // "first of" only when there is more than the one line quoted to be
+  // first OF: at exactly one changed line, the quote already is the
+  // whole change, and "first of 1 changed line" would read as if more
+  // followed.
+  const prefix = diff.changedLineCount > 1 ? "first of " : "";
+  const tail =
+    `(${prefix}${String(diff.changedLineCount)} ${lineWord} across ` +
+    `${String(diff.hunkCount)} ${hunkWord}; see mutant.diff` +
+    `${diff.truncated ? ", truncated" : ""})`;
+  if (diff.removed !== diff.added) {
+    if (diff.added === 0) return `${file}:${line}: ${before} removed ${tail}`;
+    if (diff.removed === 0) return `${file}:${line}: ${after} added ${tail}`;
+    return `${file}:${line}: ${before} changed ${tail}`;
+  }
+  return `${file}:${line}: ${before} -> ${after} ${tail}`;
 }
 
-/** A short, fixed-shape (three lines) snippet proving the mutant was
- * really applied: the file:line header, the original line, and the
- * mutated line. When `diff` is given, this is instead the bounded
- * multi-hunk excerpt (`MutantComputed.diff`'s own docblock covers when
- * that happens): a header naming the file, the true hunk count
- * (correctly pluralized: "1 hunk", not "1 hunks"), and whether the
- * excerpt was truncated, followed by the excerpt's own
- * `git diff --no-index` body -- so a multi-hunk patch mutant is never
- * represented by a single line here either. */
+/**
+ * A short, bounded descriptor pointing at the excerpt, never a copy of
+ * it: `mutant.diff.text` (`MutantDiffField`'s own docblock) is the
+ * SINGLE carrier of a multi-line patch's applied diff, so this string
+ * never repeats it -- a result carrying the excerpt twice is exactly
+ * the defect this redesign removes (see the CHANGELOG). When `diff` is
+ * undefined (every `replace`/`match` mutant, and a `patch` mutant whose
+ * change is the one like-for-like line replacement `before`/`after`
+ * already cover), this is unchanged from before: the file:line header
+ * plus the original and mutated line, three lines, byte-identical to
+ * every existing fixture built from that case.
+ */
 export function formatVerifiedAppliedVia(
   file: string,
   line: number,
@@ -1045,8 +1181,161 @@ export function formatVerifiedAppliedVia(
     return [`${file}:${line}`, `- ${before}`, `+ ${after}`].join("\n");
   }
   const hunkWord = pluralizeCount(diff.hunkCount, "hunk", "hunks");
-  const header =
-    `${file}: ${String(diff.hunkCount)} ${hunkWord}` +
-    (diff.truncated ? " (excerpt truncated)" : "");
-  return [header, diff.text].join("\n");
+  const lineWord = pluralizeCount(
+    diff.changedLineCount,
+    "changed line",
+    "changed lines",
+  );
+  return (
+    "git diff --no-index of the before/after scratch copies: " +
+    `${String(diff.hunkCount)} ${hunkWord}, ${String(diff.changedLineCount)} ` +
+    `${lineWord} (${String(diff.removed)} removed, ${String(diff.added)} ` +
+    "added); see mutant.diff" +
+    (diff.truncated ? " (truncated)" : "")
+  );
+}
+
+/**
+ * Matches the suffix `envelope.ts`'s own `capString` appends to a string
+ * it had to cut (`stringMarker`: `"...(N more character(s) omitted)"`).
+ * Used only to recognise, after the fact, that `buildEnvelope`'s generic
+ * reduction (which knows nothing about hunks) is what shortened a
+ * `diff.text` this module had already bounded to whole hunks -- never
+ * produced by this module itself, which never appends a marker to a
+ * truncated excerpt (only sets `truncated: true` beside a shorter
+ * `text`).
+ */
+const ENVELOPE_STRING_MARKER_RE = /\.\.\.\(\d+ more characters? omitted\)$/;
+
+/** True only for a bare object literal (or a null-prototype object,
+ * e.g. one parsed by `JSON.parse`/`structuredClone`) -- the same test
+ * `envelope.ts`'s own `isPlainObject` makes, duplicated narrowly here
+ * rather than importing a private helper across module boundaries. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value) as object | null;
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Trims `text` (a `diff.text` value that `buildEnvelope`'s own reduction
+ * has already cut, its trailing omission marker already stripped by the
+ * caller) back to the last hunk this function can PROVE is fully
+ * present: scanning forward from the start, a hunk's own `@@ -a,b +c,d
+ * @@` header declares how many body lines follow it, and a hunk counts
+ * as present only when that many lines actually still follow the header
+ * in `text`. The first hunk whose declared body does not fully fit (or
+ * a stray line found before any header, which never happens for this
+ * module's own output but is handled rather than thrown on) ends the
+ * scan; everything from there on is dropped, never partially kept.
+ *
+ * This never trusts character/line COUNTS alone to decide completeness
+ * (the cut that produced `text` can land in the middle of any line, so
+ * the very last line surviving the cut may itself be a partial one);
+ * it trusts only the hunk headers' own declared counts, the same source
+ * `computeAppliedDiffExcerpt`'s hunk counting already uses.
+ *
+ * Returns `""` when not even the first hunk survives complete -- the
+ * safe answer when the cut landed inside the first hunk itself, still
+ * honouring "never mid-hunk" over "always non-empty".
+ */
+export function trimToLastCompleteHunk(text: string): string {
+  const lines = text.split("\n");
+  // Skip a leading preamble (the excerpt's own `--- `/`+++ ` file
+  // lines, or anything else that is not itself a hunk header): kept
+  // whole, never checked for completeness the way a hunk's declared
+  // body is, since only `parseHunkHeaderCounts` gives this function
+  // anything to verify a line count against.
+  let i = 0;
+  while (i < lines.length && parseHunkHeaderCounts(lines[i]) === undefined) {
+    i++;
+  }
+  const preambleEnd = i;
+  let end = preambleEnd;
+  while (i < lines.length) {
+    const counts = parseHunkHeaderCounts(lines[i]);
+    if (counts === undefined) break;
+    const hunkEnd = i + 1 + counts.removed + counts.added;
+    if (hunkEnd > lines.length) break;
+    end = hunkEnd;
+    i = hunkEnd;
+  }
+  // Not even the first hunk survived complete: a preamble with no hunk
+  // behind it is not "at a hunk boundary" either, so this reports
+  // nothing rather than a fragment nothing here can vouch for.
+  if (end === preambleEnd) return "";
+  return lines.slice(0, end).join("\n");
+}
+
+/**
+ * Corrects one `MutantDiffField` that `buildEnvelope`'s own generic
+ * string cap cut AFTER this module had already bounded it to whole
+ * hunks: detects the envelope's own omission-marker suffix on
+ * `diff.text` (`ENVELOPE_STRING_MARKER_RE`), and when present, drops the
+ * marker, drops the one trailing line the character-level cut may have
+ * left partial (the split on `"\n"` cannot tell a clean cut -- which
+ * leaves an empty trailing element -- from a mid-line one, so the last
+ * element is always dropped; a clean cut only ever loses an empty
+ * string), trims what remains to the last hunk `trimToLastCompleteHunk`
+ * can prove is whole, and sets `truncated: true`. A `diff.text` with no
+ * such marker is untouched -- including a `diff` this module's own
+ * bound already truncated (`truncated` already `true`, and already cut
+ * at a hunk boundary by `buildBoundedHunkExcerpt`, so there is nothing
+ * for this to correct there).
+ *
+ * `hunkCount` is never touched either way: it already names the true
+ * total, fixed once by `computeAppliedDiffExcerpt` before any bound
+ * ran, and stays accurate regardless of how much of `text` survives.
+ */
+function reconcileDiffField(diff: MutantDiffField): MutantDiffField {
+  if (!ENVELOPE_STRING_MARKER_RE.test(diff.text)) return diff;
+  const withoutMarker = diff.text.replace(ENVELOPE_STRING_MARKER_RE, "");
+  const withoutPartialLine = withoutMarker.split("\n").slice(0, -1).join("\n");
+  return {
+    ...diff,
+    text: trimToLastCompleteHunk(withoutPartialLine),
+    truncated: true,
+  };
+}
+
+/** Mutates `mutantField.diff` in place via `reconcileDiffField`, when
+ * `mutantField` is a plain object carrying one; a no-op for anything
+ * else (no `diff`, or a shape the envelope's own reduction already
+ * replaced with something other than an object -- a depth-pruned
+ * placeholder string, say, which is a different, already-visible kind
+ * of cut this function has nothing to correct). */
+function reconcileMutantFieldDiff(mutantField: unknown): void {
+  if (!isPlainRecord(mutantField)) return;
+  const diff = mutantField.diff;
+  if (!isPlainRecord(diff) || typeof diff.text !== "string") return;
+  mutantField.diff = reconcileDiffField(diff as unknown as MutantDiffField);
+}
+
+/**
+ * Called by `cli.ts` on the envelope `buildEnvelope` already returned,
+ * for both `probe` (a single `mutant` field at the top level) and
+ * `probe --plan` (one `mutant` field per `plan.results[]` entry):
+ * corrects any `MutantDiffField` the envelope's own reduction cut
+ * further, so `diff.truncated: false` can never sit beside text the
+ * envelope silently shortened (see `reconcileDiffField`'s own
+ * docblock for the mechanism, and this task's `MutantDiffField.text`
+ * docblock for why this runs here rather than trying to prevent the
+ * cut in the first place: `keepWhole` cannot reach a value nested
+ * inside an array, which `plan.results` always is).
+ *
+ * A no-op when `envelope.mutant` and `envelope.plan.results` are absent
+ * or already a shape this cannot walk (both defensive, not expected in
+ * practice: every `probe`/`probe --plan` envelope carries one or the
+ * other whenever a mutant reached `computeMutant`).
+ */
+export function reconcileEnvelopeDiffTruncation(
+  envelope: Record<string, unknown>,
+): void {
+  reconcileMutantFieldDiff(envelope.mutant);
+  const plan = envelope.plan;
+  if (isPlainRecord(plan) && Array.isArray(plan.results)) {
+    for (const entry of plan.results) {
+      if (isPlainRecord(entry)) reconcileMutantFieldDiff(entry.mutant);
+    }
+  }
 }

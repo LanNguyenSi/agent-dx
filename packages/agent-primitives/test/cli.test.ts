@@ -1684,11 +1684,16 @@ describe("cli: probe", () => {
     expect(parsedJson.mutation_probe.mutant).toContain(
       "first of 6 changed lines across 3 hunks",
     );
+    // `verified_applied_via` is a short descriptor pointing at
+    // `mutant.diff`, not a second copy of the excerpt: the diff's own
+    // content lives exactly once, in `mutant.diff.text` (asserted
+    // above).
+    expect(parsedJson.mutation_probe.verified_applied_via).toContain("3 hunks");
     expect(parsedJson.mutation_probe.verified_applied_via).toContain(
-      "function fn5() { return 500; }",
+      "see mutant.diff",
     );
-    expect(parsedJson.mutation_probe.verified_applied_via).toContain(
-      "function fn9() { return 900; }",
+    expect(parsedJson.mutation_probe.verified_applied_via).not.toContain(
+      "function fn5() { return 500; }",
     );
 
     // `-f text` has no dedicated probe renderer, so it is the same

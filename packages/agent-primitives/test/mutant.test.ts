@@ -13,8 +13,13 @@ import {
   formatVerifiedAppliedVia,
   listPatchTouchedPaths,
   parseNumstatPaths,
+  reconcileEnvelopeDiffTruncation,
+  trimToLastCompleteHunk,
+  type MutantComputeResult,
+  type MutantDiffField,
 } from "../src/probe/mutant.js";
 import { runArgv } from "../src/probe/run.js";
+import { prepareMutant } from "../src/probe/step.js";
 import { buildEnvelope } from "../src/envelope.js";
 
 // Call-through partial mock: every `git apply` really runs unless a test
@@ -44,6 +49,9 @@ afterEach(() => {
 const ORIGINAL = ["function isPositive(n) {", "  return n > 0;", "}", ""].join(
   "\n",
 );
+
+/** Matches `envelope.ts`'s own `stringMarker` suffix (`"...(N more character(s) omitted)"`), the same pattern `reconcileEnvelopeDiffTruncation` looks for. */
+const ENVELOPE_MARKER_RE = /\.\.\.\(\d+ more characters? omitted\)$/;
 
 describe("computeMutant: replace form", () => {
   it("replaces the given line and reports before/after and a changed hash", async () => {
@@ -462,6 +470,218 @@ function writeSparsePatch(
   fs.writeFileSync(patchPath, body.join("\n") + "\n");
 }
 
+/** A single line of exactly `targetLen` characters, unique per `tag`
+ * (`L<n>` for the original, `L<n>M` for its mutation): a fixed prefix
+ * naming the tag, padded with `x` out to the requested length, so two
+ * lines of the same length never collide and the excerpt's own
+ * character accounting (this test's real point) is driven by a known,
+ * exact per-line length rather than whatever a fixed source-code
+ * template happens to produce. */
+function fixedLengthLine(tag: string, targetLen: number): string {
+  const prefix = `${tag}:`;
+  return (prefix + "x".repeat(Math.max(0, targetLen - prefix.length))).slice(
+    0,
+    targetLen,
+  );
+}
+
+/** Builds a repo whose file is `lineCount` lines, each exactly
+ * `targetLen` characters (`fixedLengthLine`), and a hand-written patch
+ * that replaces every line in `changedLines` (spaced >= 4 apart, same
+ * constraint `writeSparsePatch` documents) with its own same-length
+ * mutation -- so the REAL applied-diff excerpt this produces has a
+ * known, exact character cost per hunk, letting a test target the
+ * envelope's own byte budget precisely instead of guessing at it from
+ * a source-code fixture's incidental line lengths. */
+async function computeFixedLengthMultiHunkDiff(
+  lineCount: number,
+  targetLen: number,
+  changedLines: number[],
+): Promise<{ root: string; relPath: string; result: MutantComputeResult }> {
+  const root = makeTmpDir();
+  git(root, ["init", "-q"]);
+  git(root, ["config", "user.email", "test@example.com"]);
+  git(root, ["config", "user.name", "test"]);
+  const relPath = "fixture.js";
+  const absFile = path.join(root, relPath);
+  const lines = Array.from({ length: lineCount }, (_, i) =>
+    fixedLengthLine(`L${String(i + 1)}`, targetLen),
+  );
+  const content = lines.join("\n") + "\n";
+  fs.writeFileSync(absFile, content);
+  git(root, ["add", "-A"]);
+  git(root, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+
+  const patchPath = path.join(root, "fixed-length.patch");
+  const body: string[] = [
+    `diff --git a/${relPath} b/${relPath}`,
+    "index 0000000..0000000 100644",
+    `--- a/${relPath}`,
+    `+++ b/${relPath}`,
+  ];
+  for (const n of changedLines) {
+    const hasBefore = n > 1;
+    const hasAfter = n < lineCount;
+    const oldCount = 1 + (hasBefore ? 1 : 0) + (hasAfter ? 1 : 0);
+    const start = hasBefore ? n - 1 : n;
+    body.push(
+      `@@ -${String(start)},${String(oldCount)} +${String(start)},${String(oldCount)} @@`,
+    );
+    if (hasBefore) body.push(` ${lines[n - 2]}`);
+    body.push(`-${lines[n - 1]}`);
+    body.push(`+${fixedLengthLine(`L${String(n)}M`, targetLen)}`);
+    if (hasAfter) body.push(` ${lines[n]}`);
+  }
+  fs.writeFileSync(patchPath, body.join("\n") + "\n");
+
+  const result = await computeMutant(
+    { form: "patch", file: absFile, patchPath },
+    { root, logDir: makeTmpDir(), originalContent: content },
+  );
+  return { root, relPath, result };
+}
+
+describe("computeMutant: patch form multi-hunk diff excerpt, envelope-delivery invariant (T-004 round 3)", () => {
+  it("15 hunks of 61-char lines (the round-2 reviewer's own repro shape): the invariant holds at the default budget", async () => {
+    const changedLines = Array.from({ length: 15 }, (_, i) => (i + 1) * 4);
+    const { root, relPath, result } = await computeFixedLengthMultiHunkDiff(
+      100,
+      61,
+      changedLines,
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    if (result.diff === undefined) return;
+    expect(result.diff.hunkCount).toBe(15);
+    expect(result.diff.changedLineCount).toBe(30);
+    // Git's own hunk header carries a variable-length "section context"
+    // snippet this module does not control, so whether this particular
+    // size crosses the excerpt's own 3,000-character bound is not fixed
+    // by the fixture's own line count/length alone; either way, the
+    // invariant holds: no omission marker while `truncated` is false, a
+    // hunk-boundary-safe cut when it is true.
+    if (!result.diff.truncated) {
+      expect(result.diff.text).not.toMatch(ENVELOPE_MARKER_RE);
+    } else {
+      expect(result.diff.text).toBe(trimToLastCompleteHunk(result.diff.text));
+    }
+
+    const { envelope } = buildEnvelope({
+      version: "0.0.0-test",
+      command: "probe",
+      status: "survived",
+      durationMs: 1,
+      cwd: root,
+      warnings: [],
+      logs: [],
+      extra: {
+        mutant: {
+          file: relPath,
+          line: result.line,
+          before: result.before,
+          after: result.after,
+          form: "patch",
+          diff: result.diff,
+        },
+        mutation_probe: {
+          mutant: formatMutantSummary(
+            relPath,
+            result.line,
+            result.before,
+            result.after,
+            result.diff,
+          ),
+          verified_applied_via: formatVerifiedAppliedVia(
+            relPath,
+            result.line,
+            result.before,
+            result.after,
+            result.diff,
+          ),
+        },
+      },
+      logDir: makeTmpDir(),
+    });
+    reconcileEnvelopeDiffTruncation(envelope);
+
+    const mutant = envelope.mutant as { diff?: MutantDiffField } | undefined;
+    // The excerpt's own text is well under the default envelope budget
+    // regardless of which way `truncated` fell above, so nothing here
+    // should have cut it further.
+    expect(mutant?.diff?.text).toBe(result.diff.text);
+    expect(mutant?.diff?.truncated).toBe(result.diff.truncated);
+    expect(mutant?.diff?.hunkCount).toBe(15);
+    expect(String(mutant?.diff?.text)).not.toMatch(ENVELOPE_MARKER_RE);
+  });
+
+  it("20 hunks of 400-char lines: the excerpt's own bound truncates at a hunk boundary, and the envelope delivers that unmodified at the default budget", async () => {
+    const changedLines = Array.from({ length: 20 }, (_, i) => (i + 1) * 4);
+    const { root, relPath, result } = await computeFixedLengthMultiHunkDiff(
+      120,
+      400,
+      changedLines,
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    if (result.diff === undefined) return;
+    expect(result.diff.hunkCount).toBe(20);
+    // 20 hunks of 400-char removed/added lines each is far past the
+    // excerpt's own 3,000-character bound: this is the case that bound
+    // exists for.
+    expect(result.diff.truncated).toBe(true);
+    expect(result.diff.text.length).toBeLessThanOrEqual(DIFF_EXCERPT_MAX_CHARS);
+    // Never mid-hunk, even from the excerpt's OWN truncation.
+    expect(result.diff.text).toBe(trimToLastCompleteHunk(result.diff.text));
+
+    const { envelope } = buildEnvelope({
+      version: "0.0.0-test",
+      command: "probe",
+      status: "survived",
+      durationMs: 1,
+      cwd: root,
+      warnings: [],
+      logs: [],
+      extra: {
+        mutant: {
+          file: relPath,
+          line: result.line,
+          before: result.before,
+          after: result.after,
+          form: "patch",
+          diff: result.diff,
+        },
+        mutation_probe: {
+          mutant: formatMutantSummary(
+            relPath,
+            result.line,
+            result.before,
+            result.after,
+            result.diff,
+          ),
+          verified_applied_via: formatVerifiedAppliedVia(
+            relPath,
+            result.line,
+            result.before,
+            result.after,
+            result.diff,
+          ),
+        },
+      },
+      logDir: makeTmpDir(),
+    });
+    reconcileEnvelopeDiffTruncation(envelope);
+
+    const mutant = envelope.mutant as { diff?: MutantDiffField } | undefined;
+    // The excerpt's own bound already produced a hunk-boundary-safe cut
+    // well under the envelope's default budget: nothing further to do.
+    expect(mutant?.diff?.text).toBe(result.diff.text);
+    expect(mutant?.diff?.truncated).toBe(true);
+    expect(mutant?.diff?.hunkCount).toBe(20);
+  });
+});
+
 describe("computeMutant: patch form multi-hunk diff excerpt", () => {
   it("reports all three hunks in `diff`, never just the first changed line -- the defect this excerpt fixes", async () => {
     const { root, relPath, absFile, content } = initRepoWithLines(10);
@@ -490,6 +710,11 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
     expect(result.diff?.text).toContain("function fn10() { return 10; }");
     expect(result.diff?.text).toContain("function fn10() { return 1000; }");
 
+    // Every hunk here is a one-for-one line replace, so removed === added
+    // (3 === 3): the pair form survives.
+    expect(result.diff?.removed).toBe(3);
+    expect(result.diff?.added).toBe(3);
+
     const summary = formatMutantSummary(
       "fixture.js",
       result.line,
@@ -499,7 +724,7 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
     );
     expect(summary).toContain("first of 6 changed lines across 3 hunks");
     // The one-line summary still never quotes the second/third hunk --
-    // that is `verified_applied_via`'s job, not this one's.
+    // that is `mutant.diff`'s job, not this one's.
     expect(summary).not.toContain("fn6");
 
     const verifiedVia = formatVerifiedAppliedVia(
@@ -509,9 +734,16 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
       result.after,
       result.diff,
     );
+    // `verified_applied_via` is a short descriptor pointing at
+    // `mutant.diff`, never a second copy of the excerpt: it names the
+    // counts, not the hunks' own content.
     expect(verifiedVia).toContain("3 hunks");
-    expect(verifiedVia).toContain("function fn6() { return 600; }");
-    expect(verifiedVia).toContain("function fn10() { return 1000; }");
+    expect(verifiedVia).toContain("6 changed lines");
+    expect(verifiedVia).toContain("3 removed, 3 added");
+    expect(verifiedVia).toContain("see mutant.diff");
+    expect(verifiedVia).not.toContain("fn2");
+    expect(verifiedVia).not.toContain("function fn6() { return 600; }");
+    expect(verifiedVia).not.toContain("function fn10() { return 1000; }");
   });
 
   it("attaches `diff` for a single hunk spanning more than one changed line too, not only for several hunks", async () => {
@@ -864,35 +1096,179 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
     }
   });
 
-  it("the excerpt's own bound leaves room in the envelope's default budget: `verified_applied_via` survives `buildEnvelope` unmodified at the default max-chars", async () => {
-    const lineCount = 700;
-    const { root, relPath, absFile, content } = initRepoWithLines(lineCount);
-    const changedLines = Array.from(
-      { length: 100 },
-      (_, i) => (i + 1) * 4,
-    ).filter((n) => n <= lineCount);
-    const patchPath = path.join(root, "many-hunks-envelope.patch");
-    writeSparsePatch(patchPath, relPath, changedLines, lineCount);
+  it("pins ambient git config for the applied-diff excerpt's own `git diff --no-index` (a `core.attributesFile`-assigned `textconv` cannot fabricate hunks either)", async () => {
+    const { root, relPath, absFile, content } = initRepoWithLines(10);
+    const patchPath = path.join(root, "hostile-textconv.patch");
+    writeSparsePatch(patchPath, relPath, [2, 6], 10);
 
-    const result = await computeMutant(
-      { form: "patch", file: absFile, patchPath },
-      { root, logDir: makeTmpDir(), originalContent: content },
-    );
-    expect(result.applicable).toBe(true);
-    if (!result.applicable) return;
-    // This fixture's own excerpt is already cut by `DIFF_EXCERPT_MAX_LINES`/
-    // `DIFF_EXCERPT_MAX_CHARS`, the worst case a single `mutation_probe`
-    // entry's diff excerpt can be.
-    expect(result.diff?.truncated).toBe(true);
+    // A `core.attributesFile` mapping every path to a driver, plus a
+    // `diff.<driver>.textconv` that ignores its actual input and always
+    // emits a fixed marker: without `--no-textconv`, this converts
+    // `before/`/`after/`'s content before the comparison, and the
+    // excerpt would report the CONVERTED (fabricated) content rather
+    // than what `git apply` actually wrote -- silently, since `git
+    // diff` still exits 1 ("differences found") either way.
+    const attributesFile = path.join(makeTmpDir(), "attributes");
+    fs.writeFileSync(attributesFile, "* diff=customdriver\n");
 
-    const verifiedAppliedVia = formatVerifiedAppliedVia(
-      relPath,
-      result.line,
-      result.before,
-      result.after,
-      result.diff,
-    );
+    const prevConfigCount = process.env.GIT_CONFIG_COUNT;
+    const prevConfigKey0 = process.env.GIT_CONFIG_KEY_0;
+    const prevConfigValue0 = process.env.GIT_CONFIG_VALUE_0;
+    const prevConfigKey1 = process.env.GIT_CONFIG_KEY_1;
+    const prevConfigValue1 = process.env.GIT_CONFIG_VALUE_1;
+    process.env.GIT_CONFIG_COUNT = "2";
+    process.env.GIT_CONFIG_KEY_0 = "core.attributesFile";
+    process.env.GIT_CONFIG_VALUE_0 = attributesFile;
+    process.env.GIT_CONFIG_KEY_1 = "diff.customdriver.textconv";
+    process.env.GIT_CONFIG_VALUE_1 = "/bin/echo FABRICATED";
+    try {
+      const result = await computeMutant(
+        { form: "patch", file: absFile, patchPath },
+        { root, logDir: makeTmpDir(), originalContent: content },
+      );
 
+      expect(result.applicable).toBe(true);
+      if (!result.applicable) return;
+      expect(result.diff).toBeDefined();
+      expect(result.diff?.text).toContain("function fn2()");
+      expect(result.diff?.text).not.toContain("FABRICATED");
+      expect(result.diffWarning).toBeUndefined();
+    } finally {
+      if (prevConfigCount === undefined) delete process.env.GIT_CONFIG_COUNT;
+      else process.env.GIT_CONFIG_COUNT = prevConfigCount;
+      if (prevConfigKey0 === undefined) delete process.env.GIT_CONFIG_KEY_0;
+      else process.env.GIT_CONFIG_KEY_0 = prevConfigKey0;
+      if (prevConfigValue0 === undefined) delete process.env.GIT_CONFIG_VALUE_0;
+      else process.env.GIT_CONFIG_VALUE_0 = prevConfigValue0;
+      if (prevConfigKey1 === undefined) delete process.env.GIT_CONFIG_KEY_1;
+      else process.env.GIT_CONFIG_KEY_1 = prevConfigKey1;
+      if (prevConfigValue1 === undefined) delete process.env.GIT_CONFIG_VALUE_1;
+      else process.env.GIT_CONFIG_VALUE_1 = prevConfigValue1;
+    }
+  });
+
+  it("surfaces a `diffWarning` (and no `diff`) when the applied-diff excerpt's own `git diff --no-index` fails, and `step.ts` folds it into `warnings`", async () => {
+    const { root, relPath, absFile, content } = initRepoWithLines(10);
+    const patchPath = path.join(root, "warning-path.patch");
+    writeSparsePatch(patchPath, relPath, [2, 6], 10);
+
+    // Every OTHER `git` call this dry run makes (`--numstat`, the real
+    // `apply`) must still run for real; only the excerpt's own `diff
+    // --no-index` call is made to fail, by rejecting the specific argv
+    // shape `computeAppliedDiffExcerpt` builds.
+    const mockedRunArgv = vi.mocked(runArgv);
+    const realRunArgv = (
+      await vi.importActual<typeof import("../src/probe/run.js")>(
+        "../src/probe/run.js",
+      )
+    ).runArgv;
+    mockedRunArgv.mockImplementation(async (cmd, args, opts) => {
+      if (
+        cmd === "git" &&
+        args.includes("diff") &&
+        args.includes("--no-index")
+      ) {
+        return {
+          exitCode: 128,
+          durationMs: 0,
+          stdout: "",
+          stderr: "fatal: forced failure for the diffWarning test",
+          logPath: path.join(opts.logDir, "forced-failure.log"),
+          timedOut: false,
+          aborted: false,
+          outputTruncated: false,
+          logWriteFailed: false,
+          stdioClosed: true,
+        };
+      }
+      return realRunArgv(cmd, args, opts);
+    });
+
+    try {
+      const result = await computeMutant(
+        { form: "patch", file: absFile, patchPath },
+        { root, logDir: makeTmpDir(), originalContent: content },
+      );
+      expect(result.applicable).toBe(true);
+      if (!result.applicable) return;
+      // The defect this test kills: without a test forcing this path,
+      // deleting `step.ts`'s `warnings.push(computed.diffWarning)`
+      // survives the whole suite. `diff` must be absent (never both
+      // `diff` and `diffWarning` at once) and `diffWarning` must name
+      // the failure.
+      expect(result.diff).toBeUndefined();
+      expect(result.diffWarning).toBeDefined();
+      expect(result.diffWarning).toContain("exited 128 unexpectedly");
+
+      // Exercise `step.ts`'s own wiring end to end: `prepareMutant` is
+      // what folds `computed.diffWarning` into the caller's `warnings`.
+      const abortController = new AbortController();
+      const rt: Parameters<typeof prepareMutant>[0] = {
+        root,
+        logDir: makeTmpDir(),
+        applyRoot: root,
+        execEnv: {
+          cwd: root,
+          logDir: makeTmpDir(),
+          signal: abortController.signal,
+        },
+        gitApplyTimeoutMs: DEFAULT_GIT_APPLY_TIMEOUT_MS,
+        effectiveIsolation: "inplace",
+        testCommand: "true",
+        signal: abortController.signal,
+        track: async (started) => started,
+        crashHandlers: {
+          remove: () => undefined,
+          isHandling: () => false,
+          handled: Promise.resolve(null),
+        },
+        exitOnSignal: false,
+        setRestoreState: () => undefined,
+      };
+      const target: Parameters<typeof prepareMutant>[1] = {
+        displayFile: absFile,
+        absFile,
+        mutationFilePath: absFile,
+        preHash: "",
+        originalContent: content,
+        session: {} as Parameters<typeof prepareMutant>[1]["session"],
+        restoreOnce: async () => ({ ok: true, verified: true }),
+        discardBackup: () => undefined,
+      };
+      const warnings: string[] = [];
+      const prepared = await prepareMutant(
+        rt,
+        target,
+        { form: "patch", patchPath, expect: "fail" },
+        warnings,
+      );
+      expect(prepared.ok).toBe(true);
+      if (!prepared.ok) return;
+      expect(prepared.mutant.diff).toBeUndefined();
+      expect(warnings.some((w) => w.includes("exited 128 unexpectedly"))).toBe(
+        true,
+      );
+    } finally {
+      mockedRunArgv.mockImplementation(realRunArgv);
+    }
+  });
+
+  /** Builds the `probe --plan` envelope shape `cli.ts`'s own
+   * `runProbePlanCommand` builds, for one already-computed mutant, and
+   * runs it through `buildEnvelope` plus `reconcileEnvelopeDiffTruncation`
+   * exactly the way the CLI does -- so these tests exercise the real
+   * mechanism, not a hand-rolled approximation of it. */
+  function buildPlanEnvelope(
+    relPath: string,
+    root: string,
+    result: {
+      line: number;
+      before: string;
+      after: string;
+      diff?: MutantDiffField;
+    },
+    maxChars: number | undefined,
+  ): Record<string, unknown> {
     const { envelope } = buildEnvelope({
       version: "0.0.0-test",
       command: "probe",
@@ -925,7 +1301,13 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
                   result.after,
                   result.diff,
                 ),
-                verified_applied_via: verifiedAppliedVia,
+                verified_applied_via: formatVerifiedAppliedVia(
+                  relPath,
+                  result.line,
+                  result.before,
+                  result.after,
+                  result.diff,
+                ),
               },
               warnings: [],
               logs: [],
@@ -941,26 +1323,210 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
         },
       },
       keepWhole: ["plan.summary"],
-      // `maxChars` omitted deliberately: this exercises the real
-      // default (8,000), the shape every `probe`/`probe --plan`
-      // invocation gets unless the caller passes `-m`/`--max-chars`.
+      maxChars,
       logDir: makeTmpDir(),
     });
+    reconcileEnvelopeDiffTruncation(envelope);
+    return envelope;
+  }
 
-    const deliveredResults = (
-      envelope as { plan?: { results?: Array<Record<string, unknown>> } }
-    ).plan?.results;
-    expect(deliveredResults).toBeDefined();
-    const deliveredEntry = deliveredResults?.[0] as
-      { mutation_probe?: { verified_applied_via?: unknown } } | undefined;
-    const delivered = deliveredEntry?.mutation_probe?.verified_applied_via;
-    // The excerpt's own `truncated: true` must be the ONLY truncation a
-    // reader ever sees: if the envelope's own generic string reduction
-    // cut this further, `delivered` would end in the envelope's own
-    // "...(N more characters omitted)" marker instead of matching the
-    // fully formatted string byte for byte -- silently disagreeing with
-    // `diff.truncated`.
-    expect(delivered).toBe(verifiedAppliedVia);
+  function planDiff(
+    envelope: Record<string, unknown>,
+  ): { text?: unknown; truncated?: unknown; hunkCount?: unknown } | undefined {
+    const plan = envelope.plan as
+      { results?: Array<Record<string, unknown>> } | undefined;
+    const mutant = plan?.results?.[0]?.mutant as
+      | { diff?: { text?: unknown; truncated?: unknown; hunkCount?: unknown } }
+      | undefined;
+    return mutant?.diff;
+  }
+
+  function planVerifiedAppliedVia(envelope: Record<string, unknown>): unknown {
+    const plan = envelope.plan as
+      { results?: Array<Record<string, unknown>> } | undefined;
+    const probeField = plan?.results?.[0]?.mutation_probe as
+      { verified_applied_via?: unknown } | undefined;
+    return probeField?.verified_applied_via;
+  }
+
+  it("the diff excerpt is carried exactly once: `verified_applied_via` never repeats it, at the envelope's default budget", async () => {
+    const lineCount = 700;
+    const { root, relPath, absFile, content } = initRepoWithLines(lineCount);
+    const changedLines = Array.from(
+      { length: 100 },
+      (_, i) => (i + 1) * 4,
+    ).filter((n) => n <= lineCount);
+    const patchPath = path.join(root, "many-hunks-envelope.patch");
+    writeSparsePatch(patchPath, relPath, changedLines, lineCount);
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    // This fixture's own excerpt is already cut by `DIFF_EXCERPT_MAX_LINES`/
+    // `DIFF_EXCERPT_MAX_CHARS`, the worst case a single `mutation_probe`
+    // entry's diff excerpt can be.
+    expect(result.diff?.truncated).toBe(true);
+    if (result.diff === undefined) return;
+
+    // `maxChars` omitted deliberately: this exercises the real default
+    // (8,000), the shape every `probe --plan` invocation gets unless the
+    // caller passes `-m`/`--max-chars`.
+    const envelope = buildPlanEnvelope(relPath, root, result, undefined);
+
+    const deliveredDiff = planDiff(envelope);
+    // No further cut happened at this size: the delivered text matches
+    // the excerpt's own (already-truncated-to-its-own-bound) text byte
+    // for byte, and `truncated` still names only that pre-existing cut.
+    expect(deliveredDiff?.text).toBe(result.diff.text);
+    expect(deliveredDiff?.truncated).toBe(true);
+    expect(deliveredDiff?.hunkCount).toBe(result.diff.hunkCount);
+
+    const deliveredVerifiedAppliedVia = planVerifiedAppliedVia(envelope);
+    // The short descriptor, not a second copy of the excerpt.
+    expect(deliveredVerifiedAppliedVia).toBe(
+      formatVerifiedAppliedVia(
+        relPath,
+        result.line,
+        result.before,
+        result.after,
+        result.diff,
+      ),
+    );
+    expect(String(deliveredVerifiedAppliedVia)).not.toContain("function fn");
+  }, 30000);
+
+  it("--plan batch of three multi-hunk mutants: every excerpt's `truncated` stays honest at the default budget", async () => {
+    const mutants = await Promise.all(
+      [0, 1, 2].map(async (n) => {
+        const lineCount = 200;
+        const { root, relPath, absFile, content } =
+          initRepoWithLines(lineCount);
+        const changedLines = Array.from(
+          { length: 10 },
+          (_, i) => (i + 1) * 4 + n,
+        ).filter((line) => line >= 1 && line <= lineCount);
+        const patchPath = path.join(root, `plan-mutant-${String(n)}.patch`);
+        writeSparsePatch(patchPath, relPath, changedLines, lineCount);
+        const result = await computeMutant(
+          { form: "patch", file: absFile, patchPath },
+          { root, logDir: makeTmpDir(), originalContent: content },
+        );
+        if (!result.applicable)
+          throw new Error("expected an applicable mutant");
+        return { root, relPath, result };
+      }),
+    );
+
+    const { envelope } = buildEnvelope({
+      version: "0.0.0-test",
+      command: "probe",
+      status: "survived",
+      durationMs: 1,
+      cwd: mutants[0].root,
+      warnings: [],
+      logs: [],
+      extra: {
+        plan: {
+          results: mutants.map(({ relPath, result }, index) => ({
+            index,
+            file: relPath,
+            expect: "fail",
+            status: "survived",
+            mutant: {
+              file: relPath,
+              line: result.line,
+              before: result.before,
+              after: result.after,
+              form: "patch",
+              diff: result.diff,
+            },
+            mutation_probe: {
+              mutant: formatMutantSummary(
+                relPath,
+                result.line,
+                result.before,
+                result.after,
+                result.diff,
+              ),
+              verified_applied_via: formatVerifiedAppliedVia(
+                relPath,
+                result.line,
+                result.before,
+                result.after,
+                result.diff,
+              ),
+            },
+            warnings: [],
+            logs: [],
+          })),
+          summary: {
+            total: 3,
+            killed: 0,
+            survived: 3,
+            not_run: 0,
+            inconclusive: 0,
+          },
+        },
+      },
+      keepWhole: ["plan.summary"],
+      logDir: makeTmpDir(),
+    });
+    reconcileEnvelopeDiffTruncation(envelope);
+
+    const plan = envelope.plan as { results?: Array<Record<string, unknown>> };
+    expect(plan.results).toHaveLength(3);
+    for (const [index, entry] of (plan.results ?? []).entries()) {
+      const mutant = entry.mutant as { diff?: MutantDiffField } | undefined;
+      const diff = mutant?.diff;
+      expect(diff).toBeDefined();
+      if (diff === undefined) continue;
+      const markerFree = !ENVELOPE_MARKER_RE.test(diff.text);
+      // The invariant: `truncated: false` never sits beside text the
+      // envelope itself cut (a trailing omission marker); when
+      // `truncated` is true, the text ends at a hunk boundary.
+      if (!diff.truncated) {
+        expect(markerFree).toBe(true);
+      } else {
+        expect(diff.text).toBe(trimToLastCompleteHunk(diff.text));
+      }
+      expect(diff.hunkCount).toBe(mutants[index].result.diff?.hunkCount);
+    }
+  }, 30000);
+
+  it("at `-m 2000`, a truncated `diff.text` never carries the envelope's own omission marker and ends at a hunk boundary", async () => {
+    const lineCount = 700;
+    const { root, relPath, absFile, content } = initRepoWithLines(lineCount);
+    const changedLines = Array.from(
+      { length: 100 },
+      (_, i) => (i + 1) * 4,
+    ).filter((n) => n <= lineCount);
+    const patchPath = path.join(root, "many-hunks-tight.patch");
+    writeSparsePatch(patchPath, relPath, changedLines, lineCount);
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    if (result.diff === undefined) return;
+
+    const envelope = buildPlanEnvelope(relPath, root, result, 2000);
+    const diff = planDiff(envelope);
+    expect(diff).toBeDefined();
+    if (diff === undefined) return;
+    const text = String(diff.text ?? "");
+    expect(ENVELOPE_MARKER_RE.test(text)).toBe(false);
+    if (diff.truncated) {
+      // Ends at a hunk boundary: re-running the boundary trim on the
+      // delivered text reproduces it byte for byte -- nothing partial
+      // was left in.
+      expect(text).toBe(trimToLastCompleteHunk(text));
+    }
+    expect(diff.hunkCount).toBe(result.diff.hunkCount);
   }, 30000);
 });
 

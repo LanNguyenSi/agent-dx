@@ -321,25 +321,63 @@ comparison finds its first disagreement on a line the patch never
 touched at all. `mutant.diff` covers the rest, attached whenever the
 applied change is anything other than exactly one hunk with exactly one
 removed and one added line (the only shape `before`/`after` truly
-cover, a like-for-like line replacement): `{ text, hunkCount,
-changedLineCount, truncated }`, a `git diff --no-index --unified=0` body
-(every hunk's header and its added/removed lines, no surrounding
-context) bounded to 100 lines / 3,000 characters -- small enough to
-survive `verify`/`probe`'s own default 8,000-character envelope budget
-alongside the rest of one result -- so the result stays one bounded
-JSON object; a bigger change is cut to its earliest hunks with
-`truncated: true`, while `hunkCount` and `changedLineCount` always
-report the true totals. `mutation_probe.mutant` names both totals too
-(`"... (first of 4 changed lines across 1 hunk; see
-verified_applied_via for the full diff)"`) and
-`mutation_probe.verified_applied_via` becomes the excerpt itself rather
-than the three-line before/after snippet. Absent for `-r`/`-M`/`-w`
-(which only ever change the one line they are given) and for an
-ordinary single-hunk, single-line-replacement patch, so every such
-result is unchanged by this field's existence. When the excerpt itself
-could not be computed (an unreadable `git diff`, or its own output too
-large to read back in full), `diff` is absent but a warning names why,
-rather than the gap staying silent.
+cover, a like-for-like line replacement): `{ text, hunkCount, removed,
+added, changedLineCount, truncated }`, a `git diff --no-index
+--unified=0` body (every hunk's header and its added/removed lines, no
+surrounding context) bounded to whole hunks -- never mid-hunk -- at 100
+lines / 3,000 characters, so the result stays one bounded JSON object; a
+bigger change is cut to its earliest whole hunks with `truncated: true`,
+while `hunkCount`, `removed`, `added` and `changedLineCount` always
+report the true totals, uncut.
+
+`mutant.diff.text` is the SINGLE carrier of the excerpt: nothing else in
+the result repeats it. `mutation_probe.mutant` names the totals
+(`"... (first of 4 changed lines across 1 hunk; see mutant.diff,
+truncated)"`) and, when `removed !== added` (a pure deletion, a pure
+insertion, or a mixed edit), drops the `before -> after` pair rather than
+present a false one -- unequal counts mean the two do not correspond to
+each other one for one (see `MutantComputed.diff`'s own docblock on why
+`before`/`after` can name an untouched neighbour in these shapes).
+`mutation_probe.verified_applied_via` is a short, bounded descriptor
+pointing at `mutant.diff`, never a second copy of the excerpt: `"git
+diff --no-index of the before/after scratch copies: 3 hunks, 6 changed
+lines (3 removed, 3 added); see mutant.diff"`. Both are absent for
+`-r`/`-M`/`-w` (which only ever change the one line they are given) and
+for an ordinary single-hunk, single-line-replacement patch, so every
+such result -- and the identity fixture built from one -- stays
+byte-identical. When the excerpt itself could not be computed (an
+unreadable `git diff`, or its own output too large to read back in
+full), `diff` is absent but a warning names why, rather than the gap
+staying silent.
+
+Carrying the excerpt once, rather than in both `mutant.diff.text` and
+`verified_applied_via`, is what keeps a multi-hunk result from having to
+fit inside `verify`/`probe`'s own default 8,000-character envelope
+budget TWICE over. It is not, on its own, a guarantee that the excerpt
+survives that budget unmodified: a `--plan` batch of several such
+excerpts, or a caller-supplied `-m`/`--max-chars` below the default, can
+still make the envelope's own generic string reduction cut `diff.text`
+further than `computeAppliedDiffExcerpt`'s own bound already did (that
+reduction has no notion of a hunk, and would otherwise cut mid-hunk with
+no marker to say so, while `truncated` still read the pre-envelope
+`false`). Both `probe` and `probe --plan` correct that after the fact:
+once `buildEnvelope` has built the envelope, the CLI walks it (`mutant`
+for a single probe, every `plan.results[].mutant` for a plan -- an
+array, which the envelope's own `keepWhole` cannot protect a nested
+value inside) and, wherever a `diff.text` still carries the envelope's
+own omission-marker suffix, trims it back to the last hunk it can prove
+-- from the hunk header's own declared `-a,b +c,d` counts, never from
+character or line counting -- is fully present, and sets
+`truncated: true`. `hunkCount`/`removed`/`added`/`changedLineCount`
+never change: they were fixed, to the true totals, before either bound
+ran. The result: `diff.truncated: false` never sits beside text either
+bound cut, at the default budget or a tighter `-m`. At a budget tight
+enough that the whole `diff` object cannot fit at all (alongside
+everything else in the result), the generic reduction may still drop it
+entirely (a dropped key, or a depth-pruned placeholder) the same way it
+would any other oversized field; that is a different, pre-existing
+outcome the reduction already names as such, not a false `truncated`
+claim.
 
 The probe pins its own content-writing git commands with `-c
 core.autocrlf=false` and `-c apply.whitespace=nowarn`: the patch dry
@@ -348,8 +386,9 @@ apply. A machine's global `core.autocrlf` or `apply.whitespace` setting
 therefore cannot rewrite content while the probe is checking, applying,
 or syncing a mutation. The `mutant.diff` excerpt's own `git diff
 --no-index` read is pinned the same way (`-c core.autocrlf=false -c
-diff.noprefix=false --no-ext-diff`), so a global `diff.external`
-cannot silently swallow it either.
+diff.noprefix=false --no-ext-diff --no-textconv`), so neither a global
+`diff.external` nor a `core.attributesFile`-assigned
+`diff.<driver>.textconv` can silently swallow or fabricate it.
 
 A patch touching two or more paths without an explicit `--file` is
 `status: "usage_error"`, `reason: "patch_file_ambiguous"`, exit `2`,
