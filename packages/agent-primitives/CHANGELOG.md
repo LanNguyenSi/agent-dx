@@ -181,6 +181,14 @@ SKILL.md`) and the README gained an "Invocation templates" section
 
 ### Changed
 
+- `test/probe-worktree.test.ts` now pins `session.ts`'s stale-worktree
+  marker removal after a successful recovery (`if (staleWt)
+  removeMarkerFor(realRoot)`) with a test that mocks `beginWorktree` to
+  fail before it reaches its own `onWorktreeAttempt` write: the run's
+  own new-worktree attempt always rewrites the same marker on success,
+  which would otherwise mask an inverted condition there entirely. A
+  negative control confirms a normal run with no marker to recover
+  still writes none.
 - `test/doctor.test.ts`'s "hints: is empty when no required tool is
   missing" case now runs `doctor()` against a fresh `cwd` and `lockDir`
   fixture, the same isolation every other case in the file already

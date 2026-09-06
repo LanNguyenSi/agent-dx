@@ -14,6 +14,7 @@ import {
 } from "../src/lock.js";
 import { resolveDeepestExisting } from "../src/probe/containment.js";
 import {
+  beginWorktree,
   isScratchWorktreePath,
   parseWorktreeListZ,
   readScratchOwner,
@@ -42,6 +43,19 @@ vi.mock("node:crypto", async (importOriginal) => {
 vi.mock("../src/probe/run.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/probe/run.js")>();
   return { ...actual, runArgv: vi.fn(actual.runArgv) };
+});
+
+// Call-through mock, same shape as the two above: lets one test force
+// `beginWorktree` to fail before it ever calls `onWorktreeAttempt` (the
+// real function only does that once its own `writeScratchOwner` write
+// has succeeded), so that test can observe `session.ts`'s stale-marker
+// removal (`if (staleWt) removeMarkerFor(realRoot)`) in isolation from
+// the run's own new in-flight marker, which `onWorktreeAttempt` would
+// otherwise always write right back over it.
+vi.mock("../src/probe/isolation.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/probe/isolation.js")>();
+  return { ...actual, beginWorktree: vi.fn(actual.beginWorktree) };
 });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -661,6 +675,81 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
         .split("\n\n")
         .filter((b) => b.trim().length > 0),
     ).toHaveLength(1);
+  });
+
+  it("removes the stale-worktree marker once recovery succeeds, even when this run's own new worktree attempt then fails before it writes its own marker: the inverted condition (`if (!staleWt)`) would leave the already-recovered marker behind instead", async () => {
+    // `session.ts`'s `prepareWorktreeSession` recovers a leftover from a
+    // previous run, then always starts a fresh worktree for THIS run;
+    // that fresh attempt's own `onWorktreeAttempt` immediately writes a
+    // new marker, which would mask a broken removal of the OLD one by
+    // simply overwriting it. Forcing `beginWorktree` to fail before it
+    // ever reaches `onWorktreeAttempt` (mirroring its real
+    // `writeScratchOwner`-throws early-failure path) removes that mask:
+    // whether the old marker is still there afterward depends only on
+    // whether the recovery's own removal ran.
+    useLockDir();
+    const { repo } = initRepo();
+
+    const staleLogDir = makeTmpDir();
+    const stalePath = path.join(staleLogDir, `wt-${randomUUID()}`, "wt");
+    fs.mkdirSync(path.dirname(stalePath), { recursive: true });
+    const staleAdd = spawnSync(
+      "git",
+      ["worktree", "add", "--detach", "--", stalePath, "HEAD"],
+      { cwd: repo },
+    );
+    expect(staleAdd.status).toBe(0);
+
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    if (!deadPid) throw new Error("failed to obtain a dead pid for the test");
+    const realRoot = resolveDeepestExisting(repo);
+    writeMarker(realRoot, {
+      targetPath: stalePath,
+      backupPath: realRoot,
+      preHash: "",
+      mutatedHash: "",
+      pid: deadPid,
+      timestamp: new Date().toISOString(),
+      scratchRoot: staleLogDir,
+    });
+
+    // `mockImplementationOnce` overrides exactly the one call this run
+    // makes; every later call (a later test in this file, this same
+    // test's own cleanup) falls back to the module's own call-through
+    // default (`vi.fn(actual.beginWorktree)`, set once in the `vi.mock`
+    // factory above), so nothing here needs to be restored afterward.
+    vi.mocked(beginWorktree).mockImplementationOnce(async () => ({
+      ok: false,
+      reason: "worktree_sync_failed",
+      detail: "stub: forced failure before onWorktreeAttempt",
+      logPaths: [],
+    }));
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    // The old leftover was already recovered (removed) before this
+    // run's own new-worktree attempt ever ran, let alone failed.
+    expect(fs.existsSync(stalePath)).toBe(false);
+    // The correct code removed the recovered marker at recovery time;
+    // this run's own stub failure never wrote a new one over it. The
+    // inverted-condition mutant skips that removal, so the marker
+    // recovery already made obsolete (still naming the now-deleted
+    // `stalePath`) would still be sitting on disk here.
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+  });
+
+  it("writes no worktree marker at all for a normal run that had none to recover (negative control)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realRoot = resolveDeepestExisting(repo);
+
+    expect(readMarkerFor(realRoot)).toBeUndefined();
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("killed");
+    expect(readMarkerFor(realRoot)).toBeUndefined();
   });
 
   it("a leftover worktree marker is recovered whatever its pid says, even an alive one, once the lock has already ruled out a live probe of its own for this repository", async () => {
