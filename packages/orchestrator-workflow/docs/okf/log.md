@@ -1,5 +1,16 @@
 # Bundle log
 
+- 2026-09-06T05:26:00Z (same task, follow-up re-stamp): the yaml-fence pin
+  above needed a follow-up fix (a whole-file "exactly one yaml fence"
+  check, so a decoy fence anywhere in `reviewer.md` fails loudly, not
+  only one added between the heading and the real contract), which
+  touched `test/docs-consistency.test.ts` again after the prior entry's
+  re-stamp, re-staling `model-preselection.md`,
+  `review-gate-and-waivers.md`, and `run-state-lifecycle-and-markers.md`
+  a second time on the same source file. Re-stamped all three again; no
+  further prose change, since their own citations remain unaffected (see
+  the prior entry).
+
 - 2026-09-06T05:21:00Z (reviewer checklist mirrored pairs + two more test
   pins): added three assertions to `test/docs-consistency.test.ts` (the
   reviewer output-contract yaml-block negative pin now slices from the
