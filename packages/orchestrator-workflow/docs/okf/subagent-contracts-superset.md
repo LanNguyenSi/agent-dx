@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-05T22:41:37Z
+timestamp: 2026-09-06T04:35:50Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -360,7 +360,7 @@ implementer's log — and record method, sample size, and result against the
 implementer's claim. The trigger is deliberately narrow: a single
 deterministic check (one test run, `tsc`, lint) does not qualify. The GitHub
 Actions run-step shell replay named in both installed prompts (see CHANGELOG's
-`[Unreleased]` entry) is a second, explicitly non-probabilistic trigger for the
+`[0.30.0]` entry) is a second, explicitly non-probabilistic trigger for the
 same field: `sample_size: not_applicable` is allowed when the replay itself has
 no meaningful sample size
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:277#"GitHub Actions shell replay named in step 6 is a second, explicitly"`;
@@ -493,7 +493,7 @@ Motivation: `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
 mechanical replay of every earlier round's mutation probes, run before
 the next reviewer spawn, would have caught without spending a reviewer
 round on it; see `packages/orchestrator-workflow/CHANGELOG.md`'s
-Unreleased entry for the pointer.
+`[0.30.0]` entry for the pointer.
 
 ## Recurrence field
 

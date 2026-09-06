@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-06
+
 ### Added
 
 - Decision records now use stable IDs and retain trigger/evidence, decision,

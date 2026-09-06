@@ -1489,7 +1489,7 @@ describe("no installed asset cites the CHANGELOG's [Unreleased] heading by name"
  * where the escalation choice is recorded, and both SKILL.md and
  * agents-md-section.md name that exact marker (checked above). Wiring a
  * machine reader to this marker is a follow-up, not part of this change
- * (see the CHANGELOG's `[Unreleased]` entry); this test only pins the
+ * (see the CHANGELOG's `[0.30.0]` entry); this test only pins the
  * template's own named place existing.
  */
 describe("03-decisions.md template carries the review-round-escalation marker", () => {
@@ -4362,7 +4362,7 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
  * reviewed working tree (keeping its read-only Bash rule intact), that only
  * the reviewer prompt's copy points to the `reproduction` field, SKILL.md's
  * one-sentence reference to the installed implementer prompt, and the
- * CHANGELOG citation the rule's `[Unreleased]` bullet carries.
+ * CHANGELOG citation the rule's `[0.30.0]` entry carries.
  */
 describe("GitHub Actions run-step shell replay ships in the implementer prompt, the reviewer prompt, and SKILL.md", () => {
   const implementerMd = unwrap(readAsset("agents/implementer.md"));
@@ -4449,8 +4449,8 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
     );
   });
 
-  it("the CHANGELOG's Unreleased section carries the ow-kit-effort-analysis.md section 7(vi) citation", () => {
-    const start = changelogMd.indexOf("## [Unreleased]");
+  it("the CHANGELOG's 0.30.0 section carries the ow-kit-effort-analysis.md section 7(vi) citation", () => {
+    const start = changelogMd.indexOf("## [0.30.0]");
     const next = changelogMd.indexOf("\n## [", start + 1);
     expect(start).toBeGreaterThan(-1);
     const section = changelogMd.slice(start, next === -1 ? undefined : next);
@@ -4462,7 +4462,7 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
       "docs/okf/subagent-contracts-superset.md",
     ).replace(/\s+/g, " ");
     expect(subagentContractsMd).toContain(
-      "The GitHub Actions run-step shell replay named in both installed prompts (see CHANGELOG's `[Unreleased]` entry) is a second, explicitly non-probabilistic trigger for the same field: `sample_size: not_applicable` is allowed when the replay itself has no meaningful sample size",
+      "The GitHub Actions run-step shell replay named in both installed prompts (see CHANGELOG's `[0.30.0]` entry) is a second, explicitly non-probabilistic trigger for the same field: `sample_size: not_applicable` is allowed when the replay itself has no meaningful sample size",
     );
   });
 });
@@ -4532,8 +4532,8 @@ describe("identifier drift ships as a reviewer checklist item", () => {
 
   it("the CHANGELOG's identifier-drift bullet carries the ow-kit-effort-analysis.md section 7(iv) citation and names the agent-primitives drift guard (a mutant re-citing 7(v) must fail this)", () => {
     // Anchored on the bullet's own opening and closing text rather than the
-    // `## [Unreleased]`-to-next-heading span, so this still holds once the
-    // bullet is released and moves under a version heading.
+    // release-section span, so this still holds if the bullet moves under a
+    // later version heading.
     const section = unwrap(
       phraseBoundedSlice(
         changelogMd,
