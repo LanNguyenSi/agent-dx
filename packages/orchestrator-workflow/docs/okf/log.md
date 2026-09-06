@@ -17,8 +17,8 @@
   4317/4344/4347 — the last two also carry the `docs-consistency.test.ts`
   growth from the yaml-fence-pin edit itself, not only the earlier
   +1-line shift shared by the first four) and in the running re-point
-  account for `CHANGELOG.md:#"the keyed placeholder line's exact text,"`
-  (221 to 236, +15). Re-stamped `model-preselection.md`,
+  account below for the keyed-placeholder-line citation into
+  `CHANGELOG.md` (221 to 236, +15). Re-stamped `model-preselection.md`,
   `review-gate-and-waivers.md`, and `run-state-lifecycle-and-markers.md`
   (all three list `test/docs-consistency.test.ts` and/or `CHANGELOG.md`
   as sources and went stale on the source-file commit timestamp; their
