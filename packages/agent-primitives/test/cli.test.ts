@@ -19,6 +19,7 @@ import {
   type StdoutSink,
 } from "../src/cli.js";
 import { UsageError } from "../src/envelope.js";
+import { trimToLastCompleteHunk } from "../src/probe/mutant.js";
 import type { VerifyResult, CheckResult } from "../src/verify/index.js";
 import {
   assertArgvWithinLimit,
@@ -58,6 +59,73 @@ function absentNames(count: number): string {
 
 function shQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/** A 61-character original line and a 61-character mutated one, so 15
+ * hunks of them is far past `-m 6000`: the envelope's own generic
+ * reduction MUST cut `mutant.diff.text` further than this module's own
+ * bound already did, which is exactly the shape that pins the CLI's own
+ * `reconcileEnvelopeDiffTruncation` call rather than the function in
+ * isolation (a unit test on the exported function cannot tell whether
+ * `cli.ts` actually calls it). Shared by the single-probe and `--plan`
+ * wiring regression tests below. */
+function buildWideLine(n: number): string {
+  return `line ${String(n).padStart(4, "0")} ${"x".repeat(51)}`;
+}
+function buildMutatedLine(n: number): string {
+  const label = `M${String(n).padStart(3, "0")}`;
+  return `  ${label} ${"y".repeat(54)}`;
+}
+/** A unified diff of 15 single-line hunks against a `lineCount`-line
+ * file, mutating every fifth line starting at line 0 (0-indexed). */
+function buildWidePatch(file: string, lineCount: number): string {
+  const lines = Array.from({ length: lineCount }, (_, i) => buildWideLine(i));
+  const mutationIndices = Array.from({ length: 15 }, (_, i) => i * 5);
+  const hunks = mutationIndices.map((idx, i) => {
+    if (idx === 0) {
+      return [
+        "@@ -1,2 +1,2 @@",
+        `-${lines[0]}`,
+        `+${buildMutatedLine(i)}`,
+        ` ${lines[1]}`,
+      ].join("\n");
+    }
+    return [
+      `@@ -${String(idx)},3 +${String(idx)},3 @@`,
+      ` ${lines[idx - 1]}`,
+      `-${lines[idx]}`,
+      `+${buildMutatedLine(i)}`,
+      ` ${lines[idx + 1]}`,
+    ].join("\n");
+  });
+  return (
+    [
+      `diff --git a/${file} b/${file}`,
+      "index 0000000..0000000 100644",
+      `--- a/${file}`,
+      `+++ b/${file}`,
+      ...hunks,
+    ].join("\n") + "\n"
+  );
+}
+
+/** `envelope.ts`'s own generic string-cap suffix, the same pattern
+ * `reconcileEnvelopeDiffTruncation` looks for on `diff.text`. */
+const ENVELOPE_OMISSION_MARKER_RE = /\.\.\.\(\d+ more characters? omitted\)$/;
+
+/** Asserts a descriptor states the diff's own delivered clause, UNLESS
+ * the envelope's own generic string cap cut the descriptor string
+ * itself down before it ever reached that clause -- a legitimate,
+ * separately-tested outcome of the string cap alone, not a sign the
+ * wiring this test targets ever stopped running. */
+function expectDescriptorStatesClauseUnlessCut(
+  descriptor: unknown,
+  clause: string,
+): void {
+  expect(typeof descriptor).toBe("string");
+  if (typeof descriptor !== "string") return;
+  if (ENVELOPE_OMISSION_MARKER_RE.test(descriptor)) return;
+  expect(descriptor).toContain(clause);
 }
 
 afterEach(() => {
@@ -1720,6 +1788,68 @@ describe("cli: probe", () => {
     expect(JSON.parse(runText.stdout).mutant.diff.hunkCount).toBe(3);
   });
 
+  it("wiring regression (single probe): deleting the CLI's own reconcileEnvelopeDiffTruncation call regresses a tight `-m` to a mid-hunk/mid-line cut reported as truncated: false", async () => {
+    const repo = initRepo();
+    const lineCount = 80;
+    fs.writeFileSync(
+      path.join(repo, "wide.txt"),
+      Array.from({ length: lineCount }, (_, i) => buildWideLine(i)).join("\n") +
+        "\n",
+    );
+    commitAll(repo);
+    const patchPath = path.join(repo, "wide.patch");
+    fs.writeFileSync(patchPath, buildWidePatch("wide.txt", lineCount));
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      "6000",
+      "probe",
+      "--file",
+      "wide.txt",
+      "-p",
+      patchPath,
+      "-t",
+      "true",
+      "--expect",
+      "pass",
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(6000);
+    const parsed = JSON.parse(run.stdout);
+    // `-t 'true'` always leaves the test passing, and `--expect pass`
+    // reads that as the mutant behaving as expected: `killed`.
+    expect(parsed.status).toBe("killed");
+    const diff = parsed.mutant.diff;
+    expect(diff.hunkCount).toBe(15);
+    // The envelope's own reduction had to cut this further than this
+    // module's own bound (the whole 15-hunk excerpt is far past 6000
+    // characters on its own): `truncated` must be true, by construction
+    // against the DELIVERED result, never a stale pre-envelope `false`.
+    expect(diff.truncated).toBe(true);
+    // Never the envelope's own omission-marker suffix landing inside the
+    // excerpt itself (that would mean the correction never ran at all).
+    expect(diff.text).not.toMatch(ENVELOPE_OMISSION_MARKER_RE);
+    // Ends at a hunk boundary (every kept hunk provably whole), or is
+    // explicitly marked as cut inside one -- never a silent partial hunk.
+    // The descriptors state whichever clause applies, unless the
+    // envelope's own string cap cut the descriptor itself down first.
+    const clause =
+      diff.hunkTruncated === true
+        ? "see mutant.diff (cut mid-hunk)"
+        : "see mutant.diff (truncated)";
+    if (diff.hunkTruncated !== true) {
+      expect(trimToLastCompleteHunk(diff.text)).toBe(diff.text);
+    }
+    expectDescriptorStatesClauseUnlessCut(parsed.mutation_probe.mutant, clause);
+    expectDescriptorStatesClauseUnlessCut(
+      parsed.mutation_probe.verified_applied_via,
+      clause,
+    );
+  }, 30000);
+
   it("a -p patch touching two paths, no --file: usage_error/patch_file_ambiguous, exit 2, through the built CLI", async () => {
     const repo = initRepo();
     fs.writeFileSync(
@@ -2981,6 +3111,76 @@ describe("cli: probe --plan", () => {
       inconclusive: 0,
       not_run: 0,
     });
+  }, 60000);
+
+  it("wiring regression (--plan): deleting the CLI's own reconcileEnvelopeDiffTruncation call regresses a 3-mutant plan at the DEFAULT budget to a mid-hunk/mid-line cut reported as truncated: false, even with a long -l log directory competing for the same budget", async () => {
+    const lineCount = 80;
+    const repo = fs.mkdtempSync(path.join("/tmp", "ap-cli-test-repo-"));
+    tmpDirs.push(repo);
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(
+      path.join(repo, "wide.txt"),
+      Array.from({ length: lineCount }, (_, i) => buildWideLine(i)).join("\n") +
+        "\n",
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const patchPath = path.join(repo, "wide.patch");
+    fs.writeFileSync(patchPath, buildWidePatch("wide.txt", lineCount));
+    const planPath = writePlan(repo, {
+      test: "true",
+      mutants: [
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+      ],
+    });
+    // A long `-l` directory (roughly 120 characters), so its own path
+    // (repeated per mutant on `plan.results[i].test.logPath`/`.logs`)
+    // competes for the same budget the excerpt does -- the shape that
+    // measurably forced the correction to cut the plan's own default
+    // budget in the reviewed sweep.
+    const logDir = path.join(
+      "/tmp",
+      "ap-cli-test-logdir-wiring-plan-" + "x".repeat(80),
+    );
+    tmpDirs.push(logDir);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logDir,
+      "probe",
+      "--plan",
+      planPath,
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(parsed.plan.results.length).toBeGreaterThan(0);
+    const entry = parsed.plan.results[0];
+    const diff = entry.mutant.diff;
+    expect(diff.hunkCount).toBe(15);
+    expect(diff.truncated).toBe(true);
+    expect(diff.text).not.toMatch(ENVELOPE_OMISSION_MARKER_RE);
+    const clause =
+      diff.hunkTruncated === true
+        ? "see mutant.diff (cut mid-hunk)"
+        : "see mutant.diff (truncated)";
+    if (diff.hunkTruncated !== true) {
+      expect(trimToLastCompleteHunk(diff.text)).toBe(diff.text);
+    }
+    expectDescriptorStatesClauseUnlessCut(entry.mutation_probe.mutant, clause);
+    expectDescriptorStatesClauseUnlessCut(
+      entry.mutation_probe.verified_applied_via,
+      clause,
+    );
   }, 60000);
 
   it("on SIGINT during mutant 2 of 3: restores the in-flight mutant, never applies the third, exits 130 with no output", async () => {

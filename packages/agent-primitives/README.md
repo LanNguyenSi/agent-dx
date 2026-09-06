@@ -423,8 +423,13 @@ still drop it entirely (a dropped key, or a depth-pruned placeholder)
 the same way it would any other oversized field. Nothing is put back
 there either, but the descriptors stop pointing at a field that is not
 in the result: they say the excerpt was omitted from this envelope and
-point at `logs`, which is never cut and carries the full result's own
-path whenever anything was.
+point at `logs` instead -- the top-level `logs`, specifically: a
+protected field the reduction never cuts, which carries the full,
+unreduced result's own path whenever anything was cut at all. In
+`probe --plan`, a plan entry's OWN `plan.results[i].logs` is a
+different field and is capped like any other value on that entry; the
+route to the full diff there is the top-level `result-full-<run-id>.json`
+the top-level `logs` names instead.
 
 Library callers composing their own envelope get the same correction:
 `reconcileEnvelopeDiffTruncation(envelope, { mutant })` for a single

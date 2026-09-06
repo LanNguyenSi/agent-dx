@@ -281,13 +281,19 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   reduction, oblivious to hunks, can still cut it further for a large
   enough `--plan` batch or a tight enough `-m`), so `probe` and
   `probe --plan` now call a new `reconcileEnvelopeDiffTruncation` on the
-  built envelope: wherever a delivered `diff.text` still carries the
-  envelope's own omission-marker suffix, it is trimmed back to the last
-  hunk provably complete (from the hunk header's own declared counts,
-  never from character/line counting) and `truncated` is set `true`;
-  `hunkCount`/`removed`/`added`/`changedLineCount` are never touched,
-  since they already name the true totals fixed before either bound ran.
-  This runs after `buildEnvelope` rather than protecting `diff.text` with
+  built envelope, WITH the pre-envelope result beside it: a delivered
+  `diff.text` that DIFFERS from what the probe actually produced is
+  rebuilt from that original under the same bound rule, inside the
+  character budget the delivered text already occupied, and `truncated`
+  is set `true` by construction against the delivered result rather than
+  left at its pre-envelope value; `hunkCount`/`removed`/`added`/
+  `changedLineCount` are never touched, since they already name the true
+  totals fixed before either bound ran. Deciding on this comparison
+  rather than on the envelope's own omission-marker suffix matters: a
+  legitimate excerpt can end in that literal on its own (a mutant adding
+  `...(12 more characters omitted)`), and a suffix-only check would empty
+  it and set a false `truncated` on text nothing had actually cut. This
+  runs after `buildEnvelope` rather than protecting `diff.text` with
   `keepWhole` (the mechanism already used for `plan.summary`) because
   `keepWhole` cannot reach into an array (`plan.results[]` always is),
   and because holding an excerpt bigger than a tight `-m` uncapped would
@@ -295,14 +301,15 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
 
   `mutation_probe.mutant`'s one-line summary names the hunk/changed-line
   totals and points at `mutant.diff` for the full excerpt (`"... (first
-  of 4 changed lines across 1 hunk; see mutant.diff, truncated)"`), and,
+  of 4 changed lines across 1 hunk; see mutant.diff (truncated); full
+  diff at mutant.diff.path)"`), and,
   when `removed !== added` (a pure deletion, a pure insertion, or a
   mixed edit), no longer presents a `before -> after` pair at all: an
   unequal count means the two do not correspond to each other one for
   one (the same untouched-neighbour risk `before`/`after` already carry
   for those shapes), so the summary instead names only the side actually
   removed or added (`"target.txt:5: line05 removed (1 changed line
-  across 1 hunk; see mutant.diff)"`). The pair form survives only when
+  across 1 hunk; see mutant.diff (whole))"`). The pair form survives only when
   `removed === added` (the `=== 1` case is the one `diff` is never
   attached for at all). Both descriptor strings, and every existing test
   asserting the old duplicated `verified_applied_via` content, are
@@ -336,28 +343,24 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   itself, which is unbounded and would be the same "excerpt paid for
   twice" defect in another dress.
 
-  `reconcileEnvelopeDiffTruncation` now decides on EVIDENCE rather than
-  on a suffix: `cli.ts` hands it the pre-envelope result beside the
-  envelope, and only a `diff.text` that differs from the one the probe
-  produced is corrected. Recognising the envelope's omission marker
-  instead emptied a legitimate excerpt whose own last line ended in that
-  literal (a mutant adding `...(12 more characters omitted)`), setting a
-  false `truncated` on a text nothing had cut. A text that did change is
-  rebuilt from the ORIGINAL under the same bound rule, inside the
-  character budget the delivered text already occupied, rather than
-  repaired in place -- so the delivered excerpt is always a line-prefix
-  of what the probe produced, ending at a hunk boundary or, when even
-  the first hunk did not fit, at a line boundary inside it. Both
-  descriptor strings are rebuilt from the corrected field, so
-  `mutation_probe.mutant`/`verified_applied_via` can no longer state a
-  truncation state the field contradicts (they were formatted before the
-  envelope ran and never revisited: at `-m 4000` the descriptor read
-  "15 hunks, 30 changed lines ...; see mutant.diff" beside a delivered
-  `diff` of `text: ""`, `truncated: true`). A descriptor the reduction
-  had already cut is re-capped instead of restored, so the correction
-  never adds back characters the envelope removed to meet its bound; and
-  when the reduction dropped the `diff` object entirely, the descriptors
-  stop pointing at it and name `logs`, which is never cut.
+  Measured before this evidence-based decision replaced an earlier,
+  suffix-matching draft: at `-m 4000` a descriptor read "15 hunks, 30
+  changed lines ...; see mutant.diff" beside a delivered `diff` of
+  `text: ""`, `truncated: true` -- the two had been formatted before the
+  envelope ran and never revisited. Both descriptor strings are rebuilt
+  from the corrected field instead, so `mutation_probe.mutant`/
+  `verified_applied_via` can no longer state a truncation state the field
+  contradicts. A descriptor the reduction had already cut is re-capped
+  instead of restored, so the correction never adds back characters the
+  envelope removed to meet its bound; and when the reduction dropped the
+  `diff` object entirely, the descriptors stop pointing at it and name
+  `logs` instead -- the top-level `logs` specifically, a PROTECTED_KEYS
+  field the reduction never cuts and which carries the full, unreduced
+  result's own path whenever anything was cut at all. In `probe --plan`,
+  a plan entry's OWN `plan.results[i].logs` is a different field, capped
+  like any other array/object value the same as everything else on that
+  entry; the route to the full diff there is the top-level
+  `result-full-<run-id>.json` the top-level `logs` names instead.
   `reconcileEnvelopeDiffTruncation`, `trimToLastCompleteHunk` and the
   `MutantDiffField` type are exported from the package root for library
   callers composing their own envelope.

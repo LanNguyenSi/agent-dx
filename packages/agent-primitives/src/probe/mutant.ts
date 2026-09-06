@@ -920,11 +920,31 @@ export function buildBoundedHunkExcerpt(
   maxChars: number,
 ): BoundedExcerpt {
   if (hunks.length === 0) {
+    // No hunk to bound at all (a `preamble`-only diff -- not produced by
+    // this module's own callers today, but a caller composing `preamble`
+    // directly hits this). Bounded the same way a hunk's own body is:
+    // whole lines kept while both `maxLines` and `maxChars` still allow
+    // one more, never a mid-line cut, so this exported surface never
+    // ships an unconditionally whole (and unbounded) preamble the way
+    // every other branch of this function is bounded.
+    let kept = 0;
+    let lineTotal = 0;
+    let charTotal = 0;
+    for (const line of preamble) {
+      const nextLineTotal = lineTotal + 1;
+      const nextCharTotal = charTotal + (kept > 0 ? 1 : 0) + line.length;
+      if (nextLineTotal > maxLines || nextCharTotal > maxChars) break;
+      lineTotal = nextLineTotal;
+      charTotal = nextCharTotal;
+      kept++;
+    }
+    const text = preamble.slice(0, kept).join("\n");
+    const truncated = kept < preamble.length;
     return {
-      text: preamble.join("\n"),
-      truncated: false,
+      text,
+      truncated,
       hunkTruncated: false,
-      bodyOmitted: false,
+      bodyOmitted: truncated && text === "",
       keptHunks: 0,
     };
   }
@@ -1795,6 +1815,132 @@ const CORRECTABLE_DIFF_KEYS = [
   "bodyOmitted",
 ] as const;
 
+/** `envelope.ts`'s own `"..."` key, added to a `diff` object whose keys
+ * `capObject`'s `maxKeys` cap had to drop some of. Duplicated narrowly
+ * here (rather than importing a private constant across module
+ * boundaries) for the one thing this module has to do with it: keeping
+ * that key's own count honest when `writeCorrectableDiffKeys` writes a
+ * key back that the cap had dropped (see there). */
+const DIFF_OMITTED_KEYS_MARKER = "...";
+
+/** Parses the count out of `envelope.ts`'s own `objectMarker` text ("N
+ * more key(s) omitted"), the only shape this module ever reads that
+ * marker for. `undefined` for anything else -- including a `diff` object
+ * that happens to carry a literal `"..."` key of its own, which this
+ * must not mistake for a reduction marker it can rewrite -- read the
+ * same as "no count here to correct". */
+function parseOmittedKeysCount(marker: unknown): number | undefined {
+  if (typeof marker !== "string") return undefined;
+  const match = /^(\d+) more keys? omitted$/.exec(marker);
+  return match ? Number(match[1]) : undefined;
+}
+
+/** `envelope.ts`'s own `objectMarker`, rebuilt here for the same reason
+ * `envelopeStringMarker` is: restating a count in the reduction's own
+ * words rather than inventing a different one. */
+function diffObjectOmittedMarker(omitted: number): string {
+  return `${String(omitted)} more key${omitted === 1 ? "" : "s"} omitted`;
+}
+
+/**
+ * Writes `CORRECTABLE_DIFF_KEYS` from `corrected` into the delivered
+ * `deliveredDiff` object in place, against `originalDiff` -- the diff
+ * exactly as `computePatch` produced it, before `buildEnvelope` ever
+ * touched it -- as the record of which keys genuinely existed prior to
+ * any capping at all.
+ *
+ * `deliveredDiff` can carry its own `"..."` marker when `buildEnvelope`'s
+ * object-key cap (`capObject`'s `maxKeys`) dropped some of its keys
+ * before this ever ran -- `text` survived (case 2 only reaches here when
+ * it did), but `truncated`/`hunkTruncated`/`bodyOmitted` may not have.
+ * Writing one of those keys back here un-drops it ONLY when
+ * `originalDiff` itself already carried it (`truncated` always does; an
+ * optional flag does only when the PRISTINE excerpt was already in that
+ * state, e.g. already `hunkTruncated` before any envelope ran at all):
+ * the object then has one more key than the cap counted as kept, so the
+ * marker's own count must decrement to match, or it overstates how much
+ * of the object is still missing. A key this correction introduces that
+ * `originalDiff` never had at all (this module's OWN tighter rebuild
+ * turning up `hunkTruncated: true` where the pristine excerpt was whole)
+ * is not "un-dropping" anything the cap ever took away -- decrementing
+ * for it would UNDERstate what the cap actually dropped, the opposite
+ * mistake. A key this writes back that `deliveredDiff` already carried
+ * is a plain overwrite and touches no count at all. An object with no
+ * marker at all was never key-capped, so these flags are simply new,
+ * ordinary fields on it -- nothing to correct there.
+ */
+function writeCorrectableDiffKeys(
+  deliveredDiff: Record<string, unknown>,
+  corrected: MutantDiffField,
+  originalDiff: MutantDiffField,
+): void {
+  let omitted = parseOmittedKeysCount(deliveredDiff[DIFF_OMITTED_KEYS_MARKER]);
+  for (const key of CORRECTABLE_DIFF_KEYS) {
+    const value = (corrected as unknown as Record<string, unknown>)[key];
+    const hadKey = Object.prototype.hasOwnProperty.call(deliveredDiff, key);
+    if (value === undefined) {
+      if (hadKey) delete deliveredDiff[key];
+      continue;
+    }
+    if (!hadKey && omitted !== undefined) {
+      const wasInOriginal = Object.prototype.hasOwnProperty.call(
+        originalDiff,
+        key,
+      );
+      if (wasInOriginal) omitted = Math.max(0, omitted - 1);
+    }
+    deliveredDiff[key] = value;
+  }
+  if (omitted !== undefined) {
+    if (omitted > 0) {
+      deliveredDiff[DIFF_OMITTED_KEYS_MARKER] =
+        diffObjectOmittedMarker(omitted);
+    } else {
+      delete deliveredDiff[DIFF_OMITTED_KEYS_MARKER];
+    }
+  }
+}
+
+/**
+ * The `diff` the two descriptors are formatted from: `corrected` itself,
+ * unless the delivered `path` (untouched by this correction --
+ * `CORRECTABLE_DIFF_KEYS` never includes it) no longer matches the
+ * original's. A delivered `path` can differ from the original in two
+ * ways, both meaning the same thing for a descriptor: the envelope's
+ * own generic string cap capped the path VALUE itself (a nonexistent
+ * path ending in that cap's own omission marker), or the reduction
+ * dropped the `path` key entirely. Either way, a clause naming
+ * `mutant.diff.path` would point the reader at a path that is not the
+ * one the full diff actually lives at (or not present at all), so the
+ * descriptor is built from a copy with `path` cleared instead -- the
+ * reader falls back to `logs`, exactly as `describeExcerptPointer`
+ * already does whenever `diff.path` is undefined.
+ */
+function descriptorDiffFor(
+  deliveredDiff: unknown,
+  corrected: MutantDiffField,
+): MutantDiffField {
+  const deliveredPath = isPlainRecord(deliveredDiff)
+    ? deliveredDiff.path
+    : undefined;
+  return deliveredPath === corrected.path
+    ? corrected
+    : { ...corrected, path: undefined };
+}
+
+/** One target this module corrected a `diff.text` for (case 2 of
+ * `reconcileOneMutant`): the live, in-envelope `diff` object (mutated in
+ * place, so re-applying a smaller budget to it is visible to the
+ * envelope `enforceEnvelopeBudget` re-measures), the `mutation_probe`
+ * object beside it, and the pre-envelope evidence the excerpt is
+ * rebuilt from. Case 1 (untouched) and case 3 (dropped) need no further
+ * shrinking, so neither is ever pushed here. */
+interface CorrectionTarget {
+  diff: Record<string, unknown>;
+  probeField: unknown;
+  original: MutantOriginal;
+}
+
 /**
  * Corrects ONE delivered mutant (`mutantField`) and the descriptor
  * strings beside it (`probeField`) against what the probe actually
@@ -1812,6 +1958,9 @@ const CORRECTABLE_DIFF_KEYS = [
  *    character budget (never longer than what was there), and both
  *    descriptors are restated from the corrected field, so a `truncated`
  *    or `hunkTruncated` the correction introduces is stated by all three.
+ *    Pushed onto `targets`, so `enforceEnvelopeBudget` can shrink it
+ *    further if the correction itself pushed the whole envelope over
+ *    its bound.
  * 3. The delivered `diff` is gone (a dropped key, a depth-pruned
  *    placeholder, or a `mutant` field replaced wholesale): nothing is
  *    put back -- the reduction dropped it because it did not fit -- but
@@ -1828,12 +1977,15 @@ const CORRECTABLE_DIFF_KEYS = [
  * characters is case 3 for a mutant whose full diff could not be written
  * at all (no `path`, so the omission clause is the longer one) -- at
  * most a few dozen characters, against a `diff` object the reduction had
- * just dropped whole.
+ * just dropped whole. That reserve does not, on its own, account for
+ * every way this correction can grow the envelope (see
+ * `enforceEnvelopeBudget`, which re-measures and corrects for the rest).
  */
 function reconcileOneMutant(
   mutantField: unknown,
   probeField: unknown,
   original: MutantOriginal | undefined,
+  targets: CorrectionTarget[],
 ): void {
   const originalDiff = original?.diff;
   // No excerpt was ever produced for this mutant (`replace`/`match`, or
@@ -1870,13 +2022,17 @@ function reconcileOneMutant(
     rebuildDeliveredExcerpt(originalDiff, budget),
   );
   if (isPlainRecord(deliveredDiff)) {
-    for (const key of CORRECTABLE_DIFF_KEYS) {
-      const value = (corrected as unknown as Record<string, unknown>)[key];
-      if (value === undefined) delete deliveredDiff[key];
-      else deliveredDiff[key] = value;
-    }
+    writeCorrectableDiffKeys(deliveredDiff, corrected, originalDiff);
+    rewriteProbeDescriptors(
+      probeField,
+      original,
+      descriptorDiffFor(deliveredDiff, corrected),
+      false,
+    );
+    targets.push({ diff: deliveredDiff, probeField, original });
+  } else {
+    rewriteProbeDescriptors(probeField, original, corrected, false);
   }
-  rewriteProbeDescriptors(probeField, original, corrected, false);
 }
 
 /** How many characters to hold back from the corrected excerpt's budget
@@ -1921,6 +2077,172 @@ function reservedForDescriptorGrowth(
   return (summaryIntact ? slack : 0) + (viaIntact ? slack : 0);
 }
 
+/** `JSON.stringify(value).length`, never throwing: by the time this
+ * runs, `envelope` already survived `buildEnvelope`'s own serialization
+ * (a cycle or a BigInt would have been caught there), so this is a
+ * defensive fallback rather than an expected path -- an unserializable
+ * value contributes nothing to an enclosing object's own serialized
+ * length either, which is what makes `0` the right answer here too. */
+function jsonLength(value: unknown): number {
+  try {
+    const json = JSON.stringify(value);
+    return typeof json === "string" ? json.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** The current excerpt length of `target`, as it sits in the envelope
+ * right now (read fresh every time, since `enforceEnvelopeBudget` mutates
+ * it in place between calls). */
+function currentExcerptLength(target: CorrectionTarget): number {
+  const text = target.diff.text;
+  return typeof text === "string" ? text.length : 0;
+}
+
+/** Rebuilds `target`'s excerpt from its own pre-envelope original under
+ * `budget` characters, writes it back the same way `reconcileOneMutant`'s
+ * case 2 does, and restates both descriptors -- the one step
+ * `enforceEnvelopeBudget`'s search repeats at a shrinking budget. A
+ * `target` is only ever pushed by case 2, so `original.diff` is always
+ * defined here. */
+function applyExcerptBudget(target: CorrectionTarget, budget: number): void {
+  const originalDiff = target.original.diff;
+  if (originalDiff === undefined) return;
+  const corrected = withoutUndefined(
+    rebuildDeliveredExcerpt(originalDiff, budget),
+  );
+  writeCorrectableDiffKeys(target.diff, corrected, originalDiff);
+  rewriteProbeDescriptors(
+    target.probeField,
+    target.original,
+    descriptorDiffFor(target.diff, corrected),
+    false,
+  );
+}
+
+/**
+ * Re-measures the envelope once every mutant's excerpt has already been
+ * corrected (`reconcileOneMutant`'s case 2), and shrinks the largest
+ * excerpts further when the correction itself pushed the WHOLE envelope
+ * past `bound`.
+ *
+ * Two things the per-mutant correction's own budget does not account
+ * for can grow the envelope even though no excerpt grew past the length
+ * it was delivered at: writing `CORRECTABLE_DIFF_KEYS` back can un-drop
+ * a key `buildEnvelope`'s own object-key cap had counted as omitted
+ * (`writeCorrectableDiffKeys` corrects that key's own count, but the
+ * re-added key's bytes are still new bytes), and a descriptor rewrite
+ * can spend the full reserved pointer-clause slack
+ * (`reservedForDescriptorGrowth`) even when the excerpt itself did not
+ * shrink to make room for it. Neither is bounded against the WHOLE
+ * envelope, only against one mutant's own prior field -- which is
+ * exactly how a single-mutant `probe` result (`envelope.mutant` alone,
+ * with nothing else to blame the growth on) can come back longer than
+ * the `-m` it was built with.
+ *
+ * `bound` is `max(maxChars, preCorrectionLength)`: `buildEnvelope`
+ * already guarantees its own return is at most `max(maxChars,
+ * skeletonFloor)`, and `preCorrectionLength` -- the envelope's
+ * serialized length before this function touched anything -- can never
+ * be smaller than that true `skeletonFloor` (it IS that floor exactly
+ * when the reduction fell all the way back to the skeleton). Using it in
+ * place of computing `skeletonFloor` directly needs no knowledge of
+ * which envelope fields are fixed and which are payload -- knowledge
+ * this module, unlike `envelope.ts`, has no reason to have.
+ *
+ * Targets are visited largest-excerpt-first, each shrunk by binary
+ * search on its own budget to the largest that still fits the WHOLE
+ * envelope, before the next target's excerpt is touched at all: a
+ * single oversized mutant is shrunk on its own rather than spreading a
+ * uniform cut across every mutant in a plan that did not need one.
+ *
+ * When every target has been shrunk to nothing and the envelope still
+ * exceeds `maxChars` (the fixed fields, or fields this never touches,
+ * are what is over budget), the dropped keys stay dropped -- there is
+ * nothing left here to shrink -- and a warning names the true final
+ * length, in the same words `buildEnvelope`'s own overrun warning uses,
+ * so a caller can tell "bounded as requested" from "bounded, but bigger
+ * than asked for, honestly reported" here too.
+ */
+function enforceEnvelopeBudget(
+  envelope: Record<string, unknown>,
+  targets: readonly CorrectionTarget[],
+  maxChars: number,
+  preCorrectionLength: number,
+): void {
+  if (targets.length === 0) return;
+  const bound = Math.max(maxChars, preCorrectionLength);
+  let length = jsonLength(envelope);
+  if (length <= bound) return;
+
+  const order = [...targets].sort(
+    (a, b) => currentExcerptLength(b) - currentExcerptLength(a),
+  );
+  for (const target of order) {
+    if (length <= bound) break;
+    let hi = currentExcerptLength(target);
+    if (hi === 0) continue;
+    let lo = 0;
+    let best = -1;
+    // Binary search on the target's own excerpt budget: `fitsWithLimits`
+    // in `envelope.ts` searches a single scale the same way, over the
+    // same kind of monotone (never strictly, marker text aside)
+    // "shorter budget never grows the result" relationship. An
+    // unfitting `mid` is simply not kept, so a rare non-monotone blip
+    // costs utilization, never correctness: `best` only ever holds a
+    // budget this loop measured the WHOLE envelope at and found to fit.
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      applyExcerptBudget(target, mid);
+      if (jsonLength(envelope) <= bound) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    applyExcerptBudget(target, Math.max(0, best));
+    length = jsonLength(envelope);
+  }
+
+  if (length > maxChars) pushBudgetOverrunWarning(envelope, maxChars);
+}
+
+/** `envelope.ts`'s own overrun-warning wording and its digit-count
+ * arithmetic, duplicated here for the one thing this module has to do
+ * with it: the warning's own text is part of the length it states, and
+ * appending it here (after `enforceEnvelopeBudget`'s shrinking already
+ * ran) grows the envelope by exactly that text -- so a naive `length`
+ * captured before appending would understate the true final size by the
+ * warning's own byte count. Scanning digit counts (rather than a
+ * fixed-iteration re-measure loop) finds the exact `n` satisfying
+ * `n === base + digitCount(n)`, so the number this states is always the
+ * envelope's real, final, serialized length, warning included. */
+function pushBudgetOverrunWarning(
+  envelope: Record<string, unknown>,
+  maxChars: number,
+): void {
+  const baseWarnings = Array.isArray(envelope.warnings)
+    ? (envelope.warnings as unknown[])
+    : [];
+  const wording = (n: number): string =>
+    `envelope is ${String(n)} characters; requested max-chars ${String(maxChars)} could not be met`;
+  const probe = wording(0);
+  const base =
+    jsonLength({ ...envelope, warnings: [...baseWarnings, probe] }) -
+    "0".length;
+  let finalLength = base + 1;
+  for (let digits = 1; digits <= 20; digits++) {
+    const candidate = base + digits;
+    if (String(candidate).length === digits) {
+      finalLength = candidate;
+      break;
+    }
+  }
+  envelope.warnings = [...baseWarnings, wording(finalLength)];
+}
+
 /**
  * Called by `cli.ts` on the envelope `buildEnvelope` already returned,
  * with the pre-envelope result beside it, for both `probe` (a single
@@ -1943,17 +2265,30 @@ function reservedForDescriptorGrowth(
  * they name the true totals, fixed before any bound ran -- and neither
  * is `path`, which names the whole diff on disk regardless.
  *
+ * `maxChars`, when given, is the same bound `buildEnvelope` built this
+ * envelope with (`cli.ts` passes its own resolved `-m`/`--max-chars`):
+ * once every mutant's excerpt is corrected, `enforceEnvelopeBudget`
+ * re-measures the WHOLE envelope and shrinks the largest corrected
+ * excerpts further if the correction itself pushed it back over that
+ * bound. Omitted (a library caller composing its own envelope with no
+ * fixed budget in mind), this step is skipped entirely -- the per-mutant
+ * correction still runs, exactly as it always has.
+ *
  * A no-op when `envelope.mutant`/`envelope.plan.results` are absent or a
  * shape this cannot walk, and for any mutant that never had an excerpt.
  */
 export function reconcileEnvelopeDiffTruncation(
   envelope: Record<string, unknown>,
   originals: EnvelopeDiffOriginals,
+  maxChars?: number,
 ): void {
+  const preCorrectionLength = maxChars !== undefined ? jsonLength(envelope) : 0;
+  const targets: CorrectionTarget[] = [];
   reconcileOneMutant(
     envelope.mutant,
     envelope.mutation_probe,
     originals.mutant,
+    targets,
   );
   const plan = envelope.plan;
   if (isPlainRecord(plan) && Array.isArray(plan.results)) {
@@ -1963,7 +2298,11 @@ export function reconcileEnvelopeDiffTruncation(
         entry.mutant,
         entry.mutation_probe,
         originals.planResults?.[index]?.mutant,
+        targets,
       );
     });
+  }
+  if (maxChars !== undefined) {
+    enforceEnvelopeBudget(envelope, targets, maxChars, preCorrectionLength);
   }
 }

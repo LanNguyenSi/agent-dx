@@ -2341,6 +2341,31 @@ describe("buildBoundedHunkExcerpt", () => {
     expect(out.text).toBe("--- a/x\n+++ b/x");
     expect(out).toMatchObject({ truncated: false, keptHunks: 0 });
   });
+
+  it("bounds the preamble like any other content for a zero-hunk input, rather than shipping it whole regardless of either bound", () => {
+    // A character bound that fits the first preamble line but not both:
+    // never a mid-line cut, so the second line is dropped whole.
+    const oneLine = buildBoundedHunkExcerpt(PREAMBLE, [], 100, 10);
+    expect(oneLine.text).toBe("--- a/x");
+    expect(oneLine).toMatchObject({ truncated: true, keptHunks: 0 });
+
+    // A line bound of 1 behaves the same way, from the other bound.
+    const lineBounded = buildBoundedHunkExcerpt(PREAMBLE, [], 1, 1000);
+    expect(lineBounded.text).toBe("--- a/x");
+    expect(lineBounded).toMatchObject({ truncated: true, keptHunks: 0 });
+
+    // Not even the first line fits: an empty string, with `bodyOmitted`
+    // saying so -- never a silent empty excerpt behind a "whole" or
+    // "truncated: false" claim.
+    const nothing = buildBoundedHunkExcerpt(PREAMBLE, [], 100, 3);
+    expect(nothing.text).toBe("");
+    expect(nothing).toMatchObject({
+      truncated: true,
+      hunkTruncated: false,
+      bodyOmitted: true,
+      keptHunks: 0,
+    });
+  });
 });
 
 describe("reconcileEnvelopeDiffTruncation", () => {
@@ -2701,6 +2726,358 @@ describe("reconcileEnvelopeDiffTruncation", () => {
     expect((second.diff as Record<string, unknown>).truncated).toBe(true);
     expect(results[2]).toBe("...(3 more items omitted)");
   });
+
+  it("drops the `; full diff at mutant.diff.path` clause when the delivered `path` value itself was capped by the envelope's own string cap", () => {
+    const cutText =
+      ORIGINAL_TEXT.slice(0, 45) + "...(14 more characters omitted)";
+    // What the envelope's own generic string cap does to a long `-l`
+    // path: a prefix plus its own omission marker, no longer the real
+    // path at all.
+    const cutPath = DIFF_PATH.slice(0, 6) + "...(40 more characters omitted)";
+    const envelope = envelopeWith(
+      {
+        text: cutText,
+        path: cutPath,
+        hunkCount: 2,
+        removed: 2,
+        added: 2,
+        changedLineCount: 4,
+        truncated: false,
+      },
+      { mutant: WHOLE_SUMMARY, verified_applied_via: WHOLE_VIA },
+    );
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(originalDiff()),
+    });
+
+    const probeField = envelope.mutation_probe as Record<string, unknown>;
+    expect(probeField.mutant).not.toContain("mutant.diff.path");
+    expect(probeField.mutant).toContain("see mutant.diff (truncated)");
+    expect(probeField.verified_applied_via).not.toContain("mutant.diff.path");
+    expect(probeField.verified_applied_via).toContain(
+      "see mutant.diff (truncated)",
+    );
+    // The delivered `path` field itself is left exactly as the envelope
+    // capped it: `path` is not in `CORRECTABLE_DIFF_KEYS`, so this
+    // correction never touches it either way.
+    const diff = (envelope.mutant as Record<string, unknown>).diff as Record<
+      string,
+      unknown
+    >;
+    expect(diff.path).toBe(cutPath);
+  });
+
+  it("drops the pointer's path half when the reduction dropped the `path` key entirely (only `text` survived)", () => {
+    const cutText =
+      ORIGINAL_TEXT.slice(0, 45) + "...(14 more characters omitted)";
+    const envelope = envelopeWith(
+      {
+        text: cutText,
+        // No `path` at all: the object's own key cap dropped it while
+        // `text` (needed for case 2 to run at all) survived.
+        hunkCount: 2,
+        removed: 2,
+        added: 2,
+        changedLineCount: 4,
+        truncated: false,
+      },
+      { mutant: WHOLE_SUMMARY, verified_applied_via: WHOLE_VIA },
+    );
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(originalDiff()),
+    });
+
+    const probeField = envelope.mutation_probe as Record<string, unknown>;
+    expect(probeField.mutant).not.toContain("mutant.diff.path");
+    expect(probeField.verified_applied_via).not.toContain("mutant.diff.path");
+    expect(probeField.mutant).toContain("see mutant.diff (truncated)");
+  });
+
+  it("keeps the pointer's path half when the delivered `path` still matches the original's", () => {
+    const cutText =
+      ORIGINAL_TEXT.slice(0, 45) + "...(14 more characters omitted)";
+    const envelope = envelopeWith(
+      {
+        text: cutText,
+        path: DIFF_PATH,
+        hunkCount: 2,
+        removed: 2,
+        added: 2,
+        changedLineCount: 4,
+        truncated: false,
+      },
+      { mutant: WHOLE_SUMMARY, verified_applied_via: WHOLE_VIA },
+    );
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(originalDiff()),
+    });
+
+    const probeField = envelope.mutation_probe as Record<string, unknown>;
+    expect(probeField.mutant).toContain("full diff at mutant.diff.path");
+    expect(probeField.verified_applied_via).toContain(
+      "full diff at mutant.diff.path",
+    );
+  });
+
+  it("decrements a diff object's own omitted-key marker only for a key that genuinely existed before any capping ran", () => {
+    // The pristine excerpt was already hunk-truncated (unrelated to the
+    // envelope: the module's own bound had already cut its one hunk
+    // before `buildEnvelope` ever ran), so `hunkTruncated` is a real key
+    // of the TRUE original -- one the object's own key cap can genuinely
+    // drop and this correction can genuinely un-drop.
+    const alreadyHunkTruncated: MutantDiffField = {
+      text: "@@ -1,4 +1,4 @@\n-aaa\n-bbb\n-ccc\n-ddd",
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 4,
+      added: 4,
+      changedLineCount: 8,
+      truncated: true,
+      hunkTruncated: true,
+    };
+    const deliveredDiff: Record<string, unknown> = {
+      // Cut further still by the envelope's own string cap; differs
+      // from the original so case 2 runs.
+      text: "@@ -1,4 +1,4 @@\n-aaa",
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 4,
+      added: 4,
+      truncated: true,
+      // `hunkTruncated` and `changedLineCount` both dropped by the
+      // object's own key cap.
+      "...": "2 more keys omitted",
+    };
+    const envelope = envelopeWith(deliveredDiff, {
+      mutant: "unused",
+      verified_applied_via: "unused",
+    });
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(alreadyHunkTruncated),
+    });
+
+    const diff = (envelope.mutant as Record<string, unknown>).diff as Record<
+      string,
+      unknown
+    >;
+    // `hunkTruncated` is un-dropped (the cut still lands inside the same
+    // hunk), so the marker's own count decrements by exactly the one key
+    // this wrote back -- `changedLineCount` is still genuinely missing.
+    expect(diff.hunkTruncated).toBe(true);
+    expect(diff["..."]).toBe("1 more key omitted");
+  });
+
+  it("does not decrement the marker for a flag this correction introduces fresh, never present in the pristine excerpt before any capping", () => {
+    // The pristine excerpt was whole (no `hunkTruncated`/`bodyOmitted` at
+    // all): a tiny delivered budget forces a NEW mid-hunk (or
+    // header-only) cut this correction introduces on its own, which
+    // never existed for the object's own key cap to have dropped.
+    const deliveredDiff: Record<string, unknown> = {
+      text: ORIGINAL_TEXT.slice(0, 10),
+      path: DIFF_PATH,
+      hunkCount: 2,
+      removed: 2,
+      added: 2,
+      truncated: false,
+      // `changedLineCount` dropped by the cap -- unrelated to anything
+      // this correction ever writes back.
+      "...": "1 more key omitted",
+    };
+    const envelope = envelopeWith(deliveredDiff, {
+      mutant: WHOLE_SUMMARY,
+      verified_applied_via: WHOLE_VIA,
+    });
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(originalDiff()),
+    });
+
+    const diff = (envelope.mutant as Record<string, unknown>).diff as Record<
+      string,
+      unknown
+    >;
+    // Whichever of `hunkTruncated`/`bodyOmitted` this introduced, the
+    // marker's count is untouched: it never named either of them.
+    expect(diff["..."]).toBe("1 more key omitted");
+  });
+
+  it("re-measures and shrinks the corrected excerpt further when writing its flags back pushed a REAL buildEnvelope-built envelope past `maxChars` (the measured -m 4200 defect: a 1-hunk/1000-changed-line patch)", () => {
+    // Built through the actual `buildEnvelope`, exactly as `cli.ts` does,
+    // so the pre-correction envelope handed to `reconcileEnvelopeDiffTruncation`
+    // genuinely satisfies the invariant this correction's own budget
+    // arithmetic relies on (`serializedLength <= max(maxChars,
+    // skeletonFloor)`) rather than an invariant this test merely asserts.
+    const bigHunkLines = Array.from(
+      { length: 1000 },
+      (_, i) => `-old wide line ${String(i)} ${"x".repeat(40)}`,
+    );
+    const bigOriginal: MutantDiffField = {
+      text: [
+        "--- a/wide.txt",
+        "+++ b/wide.txt",
+        "@@ -1,1000 +1,1000 @@",
+        ...bigHunkLines,
+      ].join("\n"),
+      path: "/tmp/probe-logs/mutant-diff-wide/mutant-diff.patch",
+      hunkCount: 1,
+      removed: 1000,
+      added: 0,
+      changedLineCount: 1000,
+      truncated: false,
+    };
+    const originalMutantField = {
+      file: "wide.txt",
+      line: 1,
+      before: "old wide line 0",
+      after: "",
+      diff: bigOriginal,
+    };
+    const summary = formatMutantSummary(
+      "wide.txt",
+      1,
+      "old wide line 0",
+      "",
+      bigOriginal,
+    );
+    const via = formatVerifiedAppliedVia(
+      "wide.txt",
+      1,
+      "old wide line 0",
+      "",
+      bigOriginal,
+    );
+    const maxChars = 4200;
+
+    const { envelope } = buildEnvelope({
+      version: "test",
+      command: "probe",
+      status: "survived",
+      durationMs: 1,
+      cwd: "/tmp",
+      warnings: [],
+      logs: [],
+      extra: {
+        mutant: {
+          file: "wide.txt",
+          line: 1,
+          before: "old wide line 0",
+          after: "",
+          form: "patch",
+          diff: bigOriginal,
+        },
+        mutation_probe: {
+          mutant: summary,
+          verified_applied_via: via,
+          result: "survived",
+          restored_verified: true,
+        },
+      },
+      maxChars,
+    });
+    // `buildEnvelope`'s own guarantee, restated as a premise check: if
+    // this ever failed, the rest of the test would be exercising an
+    // envelope shape `buildEnvelope` itself would never actually produce.
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      { mutant: originalMutantField },
+      maxChars,
+    );
+
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+  });
+});
+
+describe("reconcileEnvelopeDiffTruncation: stays within maxChars across a sweep of budgets (REAL buildEnvelope-built envelopes)", () => {
+  // 15 two-line hunks of a fixed, generous width -- the same shape a
+  // reviewer's own sweep across a range of `-m` values exercised through
+  // the built CLI; this pins the same invariant as a fast, in-process
+  // unit test over the exported function directly.
+  const hunk = (n: number): string =>
+    `@@ -${String(n)} +${String(n)} @@\n-old line ${String(n)} ${"x".repeat(20)}\n+new line ${String(n)} ${"y".repeat(20)}`;
+  const FULL_TEXT = [
+    "--- before/t.txt",
+    "+++ after/t.txt",
+    ...Array.from({ length: 15 }, (_, i) => hunk(i + 1)),
+  ].join("\n");
+  const ORIGINAL_WIDE: MutantDiffField = {
+    text: FULL_TEXT,
+    path: "/tmp/probe-logs/mutant-diff-wide/mutant-diff.patch",
+    hunkCount: 15,
+    removed: 15,
+    added: 15,
+    changedLineCount: 30,
+    truncated: false,
+  };
+  const originalMutantField = {
+    file: "t.txt",
+    line: 1,
+    before: "old line 1",
+    after: "new line 1",
+    diff: ORIGINAL_WIDE,
+  };
+  const summary = formatMutantSummary(
+    "t.txt",
+    1,
+    "old line 1",
+    "new line 1",
+    ORIGINAL_WIDE,
+  );
+  const via = formatVerifiedAppliedVia(
+    "t.txt",
+    1,
+    "old line 1",
+    "new line 1",
+    ORIGINAL_WIDE,
+  );
+
+  it.each([300, 400, 500, 600, 700, 800, 1000, 1500, 2000])(
+    "at maxChars=%i: a REAL buildEnvelope-built envelope stays within it after correction",
+    (maxChars) => {
+      const { envelope } = buildEnvelope({
+        version: "test",
+        command: "probe",
+        status: "killed",
+        durationMs: 1,
+        cwd: "/tmp",
+        warnings: [],
+        logs: [],
+        extra: {
+          mutant: {
+            file: "t.txt",
+            line: 1,
+            before: "old line 1",
+            after: "new line 1",
+            form: "patch",
+            diff: ORIGINAL_WIDE,
+          },
+          mutation_probe: {
+            mutant: summary,
+            verified_applied_via: via,
+            result: "killed",
+            restored_verified: true,
+          },
+        },
+        maxChars,
+      });
+      // Premise check: this is what `buildEnvelope` itself guarantees,
+      // before this correction ever touches the result.
+      expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+
+      reconcileEnvelopeDiffTruncation(
+        envelope,
+        { mutant: originalMutantField },
+        maxChars,
+      );
+
+      expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    },
+  );
 });
 
 describe("mutant.diff.path: the whole applied diff on disk", () => {
