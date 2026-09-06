@@ -1,5 +1,33 @@
 # Bundle log
 
+- 2026-09-06T05:21:00Z (reviewer checklist mirrored pairs + two more test
+  pins): added three assertions to `test/docs-consistency.test.ts` (the
+  reviewer output-contract yaml-block negative pin now slices from the
+  output-contract heading and requires exactly one yaml fence after it,
+  rather than matching the first yaml fence in the file; the CHANGELOG's
+  own prose copy of the fix-round mutation-probe replay rule is now
+  pinned, anchored on the bullet's own opening text; a table of
+  (reviewer.md phrase, SKILL.md phrase) pairs asserts every mirrored
+  reviewer checklist item still carries its SKILL.md counterpart). Added
+  one `[Unreleased]` CHANGELOG bullet (tests only) describing the three
+  pins, inserted above the `[0.30.0]` heading; this shifted every
+  line-anchored citation into `CHANGELOG.md` below it by +15, re-derived
+  in `subagent-contracts-superset.md`'s six line citations at
+  4247/4256/4262/4256/4310/4316/4325/4328 (now 4248/4257/4263/4257/4311/
+  4317/4344/4347 — the last two also carry the `docs-consistency.test.ts`
+  growth from the yaml-fence-pin edit itself, not only the earlier
+  +1-line shift shared by the first four) and in the running re-point
+  account for `CHANGELOG.md:#"the keyed placeholder line's exact text,"`
+  (221 to 236, +15). Re-stamped `model-preselection.md`,
+  `review-gate-and-waivers.md`, and `run-state-lifecycle-and-markers.md`
+  (all three list `test/docs-consistency.test.ts` and/or `CHANGELOG.md`
+  as sources and went stale on the source-file commit timestamp; their
+  own line-anchored citations sit well below this round's edits and were
+  re-verified as unaffected, so only the timestamp moved).
+  `okf-kit check --json docs/okf --require-anchors` reports the same
+  zero anchor-family findings on this commit as on the pre-change
+  baseline.
+
 - 2026-09-05T22:41:37Z (decision authority): re-verified the decision,
   reviewer, and review-gate surfaces after `03-decisions.md` gained its
   seven-column record. The new authority rule separates reviewer
@@ -2665,8 +2693,10 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:221#"the keyed placeholder line's exact text,"`,
-re-pointed by 38 lines since this account was first written, by T-002's own
+(`CHANGELOG.md:236#"the keyed placeholder line's exact text,"`,
+re-pointed by 53 lines since this account was first written (+15 more,
+from the batch-38 `[Unreleased]` bullet added above `[0.30.0]` by the
+reviewer-checklist mirrored-pairs task), by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
 it, the +2-line shift from the 0.28.0 release commit inserting
