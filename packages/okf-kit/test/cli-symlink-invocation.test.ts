@@ -50,7 +50,9 @@ describe("CLI invoked through a symlink (the npx / npm -g shape)", () => {
     fs.symlinkSync(cliPath, link);
     const target = path.join(dir, "bundle");
 
-    execFileSync(process.execPath, [link, "init", target], { encoding: "utf8" });
+    execFileSync(process.execPath, [link, "init", target], {
+      encoding: "utf8",
+    });
 
     expect(fs.existsSync(path.join(target, "index.md"))).toBe(true);
   });
