@@ -23,6 +23,14 @@ export interface TmpGitRepo {
     files: Array<{ relPath: string; content: string }>,
     isoDate: string,
   ): void;
+  /**
+   * Runs an arbitrary git command with BOTH author and committer date pinned
+   * to `isoDate`, the same way `commitFile`/`commitFiles` do. Needed for the
+   * history shapes those two cannot build -- `git mv` + `commit` (rename),
+   * `git checkout -b` + `git merge` (merge commits) -- whose commit times
+   * must stay as deterministic as every other fixture commit's.
+   */
+  gitAt(args: string[], isoDate: string): string;
   cleanup(): void;
 }
 
@@ -69,6 +77,17 @@ export function createTmpGitRepo(): TmpGitRepo {
           GIT_COMMITTER_DATE: isoDate,
         },
       });
+    },
+    gitAt(args, isoDate) {
+      return execFileSync("git", args, {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_DATE: isoDate,
+          GIT_COMMITTER_DATE: isoDate,
+        },
+      }).trim();
     },
     cleanup() {
       fs.rmSync(dir, { recursive: true, force: true });

@@ -83,3 +83,41 @@ export function getRawTimestampString(parsed: unknown): string | undefined {
 export function hasUtcDesignator(raw: string): boolean {
   return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw.trim());
 }
+
+/**
+ * A canonical identity string for the frontmatter `timestamp` VALUE, or
+ * undefined when the key is absent, blank, or not a scalar this tool
+ * understands. Two docs (or two revisions of one doc) are "stamped the same"
+ * iff this returns the same value for both.
+ *
+ * Used by `sources-fresh` to decide whether a commit actually re-stamped a
+ * doc, by comparing the doc's frontmatter at that commit against its
+ * frontmatter in the commit's first parent. Comparing VALUES, not diff text,
+ * is what makes the test immune to the three shapes a diff-text scan gets
+ * wrong: a `timestamp:` line inside a fenced YAML example in the doc BODY (it
+ * is not the frontmatter key, so it never reaches this function at all), a
+ * rename (the two revisions are read by path, not from a diff header), and a
+ * merge commit (whose combined-diff output is empty while its trees are
+ * perfectly readable).
+ *
+ * The `date:`/`string:` prefixes keep the two YAML shapes distinguishable: a
+ * `!!timestamp`-tagged scalar resolving to a native `Date` and a plain string
+ * are different frontmatter, so rewriting one into the other counts as a
+ * re-stamp rather than silently comparing equal. Deliberately NOT normalized
+ * to an epoch: this is an identity test ("did the value change"), not a
+ * chronological one, so re-writing `2026-01-01T00:00:00Z` as
+ * `2026-01-01T00:00:00+00:00` counts as a re-stamp -- the author touched the
+ * stamp. Whether the new value is CORRECT is a separate question this
+ * function deliberately does not answer (see the README's known limitations).
+ */
+export function getTimestampIdentity(parsed: unknown): string | undefined {
+  if (!isRecord(parsed)) return undefined;
+  const timestamp = parsed.timestamp;
+  if (timestamp instanceof Date) {
+    const ms = timestamp.getTime();
+    return Number.isNaN(ms) ? undefined : `date:${ms}`;
+  }
+  if (typeof timestamp !== "string" || timestamp.trim() === "")
+    return undefined;
+  return `string:${timestamp.trim()}`;
+}

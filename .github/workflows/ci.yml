@@ -376,13 +376,29 @@ jobs:
         # one sources-fresh-future notice, then runs the SAME filter the
         # step below uses and asserts it keeps exactly the warning and the
         # error (2) while dropping the notice -- mirrors the neighbouring
-        # Anchor-citation guard self-test's shape. If this ever returns
-        # anything other than 2, the filter itself is broken (a typo, a
-        # severity the tool stopped emitting) and this step fails red
-        # before the real check below can pass green for the wrong reason.
+        # Anchor-citation guard self-test's shape, assert_numeric guard
+        # included, so a jq pipeline that produces no usable output fails
+        # here rather than falling through an `if` condition `set -e` does
+        # not catch. If this ever returns anything other than 2, the filter
+        # itself is broken (a typo, a severity the tool stopped emitting)
+        # and this step fails red before the real check below can pass
+        # green for the wrong reason.
         shell: bash
         run: |
           set -e
+          # Same helper, same reason as the Anchor-citation guard self-test
+          # above: an empty/non-numeric count inside a `[ "${x}" -ne 2 ]`
+          # test is a shell usage error, and `set -e` exempts condition
+          # commands, so without this the step would report "Self-test OK"
+          # on a broken pipeline.
+          assert_numeric() {
+            case "$2" in
+              ''|*[!0-9]*)
+                echo "::error title=OKF freshness guard self-test failed::${1} is not a numeric finding count (got \"${2}\"); the jq pipeline produced no usable output"
+                exit 1
+                ;;
+            esac
+          }
           syntheticReport=$(jq -n '{
             findings: [
               {ruleId: "sources-fresh", severity: "warning", file: "a.md", message: "STALE: x"},
@@ -397,6 +413,7 @@ jobs:
             | select(.severity != "notice")
           ] | length')
 
+          assert_numeric matched "${matched}"
           if [ "${matched}" -ne 2 ]; then
             echo "::error title=OKF freshness guard self-test failed::expected 2 findings to survive the filter (the warning and the error), got ${matched}"
             exit 1
@@ -416,15 +433,26 @@ jobs:
         # okf-staleness.yml watch. Filters by rule id, not a fixed message
         # pattern or a hardcoded release note: matches sources-fresh and
         # sources-fresh-future by rule id, whichever the installed okf-kit
-        # emits, so a future pin bump needs no edit here. `if: always()`:
-        # the Anchor-citation guard step above writes okf-anchor-report.json
-        # before it can itself exit 1 on an anchor finding, so this step's
-        # findings should surface in the same CI round rather than being
-        # skipped after an anchor failure; it already fails closed on a
-        # missing or malformed report file below.
-        if: always()
+        # emits, so a future pin bump needs no edit here.
+        # `if: success() || failure()`: the Anchor-citation guard step above
+        # writes okf-anchor-report.json before it can itself exit 1 on an
+        # anchor finding, so this step's findings should surface in the same
+        # CI round rather than being skipped after an anchor failure. NOT
+        # `always()`, which would also run after a cancellation and after an
+        # earlier setup step failed (no okf-kit installed, no report written)
+        # and stack a jq file-open error on top of the real failure; the
+        # explicit report-missing guard below is what turns a genuinely
+        # absent report into one readable annotation.
+        if: success() || failure()
         shell: bash
         run: |
+          if [ ! -f okf-anchor-report.json ]; then
+            echo "::error title=OKF freshness guard::the anchor guard step did not produce a report"
+            exit 1
+          fi
+
+          jq -e . okf-anchor-report.json > /dev/null
+
           freshnessFindings=$(jq '[
             .findings[]
             | select(.ruleId == "sources-fresh" or .ruleId == "sources-fresh-future")

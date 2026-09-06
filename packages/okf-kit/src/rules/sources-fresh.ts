@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { parseFrontmatter } from "../bundle.js";
 import { runGit as defaultRunGit } from "../git.js";
 import {
   getRawTimestampString,
   getTimestampEpoch,
+  getTimestampIdentity,
   getValidSources,
   hasUtcDesignator,
 } from "../util.js";
@@ -30,7 +32,7 @@ export const DEFAULT_FUTURE_SKEW_SECONDS = 600;
 export const sourcesFreshRule: Rule = {
   id: RULE_ID,
   description:
-    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`, unless the doc's own last commit lands at/after the source's and that same commit actually re-stamped the doc (added/changed its frontmatter `timestamp:` line, or created the doc).",
+    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`, unless the doc's own last commit lands at/after the source's and that same commit actually re-stamped the doc: the doc's parsed frontmatter `timestamp` VALUE at that commit differs from its value in the commit's first parent (rename-aware; creating the doc counts as re-stamping it). When git cannot answer that question, the doc gets a `not assessable` notice instead of either a STALE warning or a silent pass.",
   run(ctx) {
     const findings: Finding[] = [];
 
@@ -82,23 +84,37 @@ export const sourcesFreshRule: Rule = {
       // A doc whose own last commit is at or after the source's last commit
       // (typically: both landed in one squash-merge), AND that same commit
       // actually re-stamped the doc, is not stale, even if its frontmatter
-      // timestamp predates the merge -- see docStampTouchedFor below for
-      // what "re-stamped" means and why the plain commit-ordering check
-      // alone is not enough. Both lookups are lazy + memoized: each costs a
-      // git process per doc but is only ever consulted on the stale path,
-      // and the epoch lookup is shared with sources-fresh-future via
-      // getDocCommitEpochShared so the two rules don't each spawn their own
-      // `git log` for the same doc in one `check` run.
+      // timestamp predates the merge -- see restampedByOwnLastCommit below
+      // for what "re-stamped" means and why the plain commit-ordering check
+      // alone is not enough. Both lookups are lazy + memoized: they are only
+      // ever consulted on the stale path, and the epoch lookup is shared
+      // with sources-fresh-future via getDocCommitEpochShared so the two
+      // rules don't each spawn their own `git log` for the same doc in one
+      // `check` run.
+      //
+      // GIT PROCESS BUDGET, per doc, per `check` run: 1 (the shared
+      // `git log -1 --format=%ct` epoch lookup, always) + at most 4 more on
+      // the re-stamp path (`git log -1 --format=%H%n%P`, then `git diff-tree`,
+      // then two `git show`s), i.e. AT MOST 5 -- regardless of how many
+      // sources the doc declares, since both lookups are memoized per doc.
+      // A doc created by its last commit (or by the repo's root commit)
+      // stops after 2 (or 1). Plus one `git log` per UNIQUE source path
+      // across the whole bundle (commitEpochCache above). Pinned by
+      // "spends at most five git processes per doc" in
+      // test/sources-fresh.test.ts.
       const repoRelDocPath = toRepoRelDocPath(repoRoot, ctx.bundleDir, doc);
       const docCommitEpochFor = (): number | null =>
         getDocCommitEpochShared(ctx, git, repoRoot, repoRelDocPath);
-      let docStampTouchedMemo: boolean | undefined;
-      const docStampTouchedFor = (): boolean =>
-        (docStampTouchedMemo ??= lastCommitTouchedTimestamp(
+      let restampMemo: RestampVerdict | undefined;
+      const restampFor = (): RestampVerdict =>
+        (restampMemo ??= restampedByOwnLastCommit(
           git,
           repoRoot,
           repoRelDocPath,
         ));
+      // At most one "not assessable" notice per doc, however many of its
+      // sources hit the unanswerable re-stamp question.
+      let notAssessableReported = false;
 
       for (const source of sources) {
         // A missing path on disk is sources-shape's job to report; avoid a
@@ -121,15 +137,29 @@ export const sourcesFreshRule: Rule = {
         // Doc committed at/after the source, AND that commit actually
         // re-stamped it: not stale (see comment above). A doc without git
         // history (null epoch, e.g. uncommitted) keeps the frontmatter-only
-        // comparison.
+        // comparison. When git cannot answer the re-stamp question at all,
+        // the doc is reported as not assessable rather than being guessed
+        // either way: calling it STALE would turn a git hiccup into a red
+        // build, and calling it fresh would be a silent pass.
         if (isStale) {
           const docCommitEpoch = docCommitEpochFor();
-          if (
-            docCommitEpoch !== null &&
-            docCommitEpoch >= commitEpoch &&
-            docStampTouchedFor()
-          ) {
-            isStale = false;
+          if (docCommitEpoch !== null && docCommitEpoch >= commitEpoch) {
+            const verdict = restampFor();
+            if (verdict === "restamped") {
+              isStale = false;
+            } else if (verdict === "unknown") {
+              if (!notAssessableReported) {
+                notAssessableReported = true;
+                findings.push({
+                  ruleId: RULE_ID,
+                  severity: "notice",
+                  file: doc.relPath,
+                  message:
+                    "staleness not assessable: git could not read the doc's own last commit to decide whether it re-stamped the doc",
+                });
+              }
+              continue;
+            }
           }
         }
 
@@ -329,30 +359,168 @@ function getDocCommitEpochShared(
 }
 
 /**
- * Whether `doc`'s own last commit actually re-stamped it: added or changed
- * a frontmatter `timestamp:` line. A doc CREATED in that commit counts too,
- * without any special case -- a new file's entire diff (including its
- * `timestamp:` line) shows as added, so the same `+timestamp:` check covers
- * it. This is what narrows `sources-fresh`'s co-commit staleness exception:
- * a commit that merely happens to also touch the doc file (a typo fix, a
- * repo-wide formatter run, a rename) without re-stamping it carries no
- * verification claim and must NOT suppress staleness, only a commit that
+ * Verdict for "did the doc's OWN last commit re-stamp it?" -- the question
+ * that narrows `sources-fresh`'s co-commit staleness exception.
+ *
+ * `unknown` is a first-class answer, not an error: git can legitimately fail
+ * to produce one of the inputs (a corrupt object, a missing binary, an
+ * unreadable blob), and neither of the other two answers may be invented in
+ * that case. `sources-fresh` turns it into a `not assessable` notice.
+ */
+type RestampVerdict = "restamped" | "not-restamped" | "unknown";
+
+/**
+ * Whether `doc`'s own last commit actually re-stamped it, decided by
+ * comparing the doc's PARSED FRONTMATTER `timestamp` VALUE at that commit
+ * against its value in the commit's FIRST PARENT. A doc created by that
+ * commit (or by the repo's root commit) counts as re-stamped: its stamp
+ * arrived with it.
+ *
+ * This is what narrows `sources-fresh`'s co-commit staleness exception: a
+ * commit that merely happens to also touch the doc file (a typo fix, a
+ * repo-wide formatter run, a rename) without changing the stamp carries no
+ * verification claim and must NOT suppress staleness; only a commit that
  * actually rewrote the stamp (or created the doc) does.
  *
- * Deliberately scoped to a single-file `git log -p` diff rather than a
- * frontmatter-only parse: the frontmatter block's own keys are never
- * indented, so a top-level `+timestamp:` line in this diff can only come
- * from the frontmatter, not from prose in the doc body.
+ * WHY VALUES AND NOT DIFF TEXT. An earlier version of this check scanned
+ * `git log -1 -p -- <doc>` for a `^\+timestamp:` line. Scanning diff TEXT is
+ * wrong in three distinct, independently reachable ways, each of which this
+ * value comparison closes structurally rather than by another special case:
+ *
+ *  1. A fenced YAML EXAMPLE in the doc's BODY can contain an unindented
+ *     `timestamp:` line. Added in a commit that also changed a source, that
+ *     body line reads as a re-stamp and silently suppresses staleness --
+ *     exactly the review class this rule exists to close. Parsing
+ *     frontmatter cannot see a body line at all.
+ *  2. A RENAME (`git mv`) shows as `new file mode` under a single-path
+ *     `git log -p`, firing the "created counts as stamped" branch even
+ *     though the stamp never moved. The rename-aware lookup below reads the
+ *     doc's real previous path instead.
+ *  3. A MERGE commit prints NO patch at all under `git log -p` (git's
+ *     default combined-diff suppression), so a genuine re-stamp landing on
+ *     a `refs/pull/N/merge` ref -- the ref CI actually checks out -- became
+ *     an invisible false-positive STALE. Both trees are perfectly readable
+ *     via `git show`, merge or not.
+ *
+ * Its limits, stated rather than hidden: this answers "did the value
+ * change", never "is the new value right". A hand-typed or backdated stamp
+ * still counts as a re-stamp (`sources-fresh-future` is the rule that
+ * catches an implausible value), and comparing against only the FIRST parent
+ * means a merge that takes its doc content wholesale from the second parent
+ * is judged against the first-parent baseline, which is the same baseline
+ * the PR under review is measured against.
+ *
+ * Spends at most 4 git processes and returns early before most of them: 1
+ * for the commit + parents, 1 for the rename-aware name-status lookup
+ * (skipped for a root commit), and 2 blob reads (skipped when the doc was
+ * created there). See the GIT PROCESS BUDGET comment in the rule above.
  */
-function lastCommitTouchedTimestamp(
+function restampedByOwnLastCommit(
   git: RunGit,
   repoRoot: string,
   repoRelDocPath: string,
-): boolean {
-  const diff = git(
-    ["log", "-1", "-p", "--format=", "--", repoRelDocPath],
+): RestampVerdict {
+  // %H then %P on its own line: the doc's last commit and its parent list in
+  // ONE process. Default history simplification is exactly what this needs
+  // for a single path: a merge whose result for that path differs from every
+  // parent (a conflict resolution, or a clean auto-merge of two sides that
+  // both touched the doc) IS returned here, while a merge that is TREESAME
+  // to a parent resolves to the real content-changing commit on that side.
+  const head = git(
+    ["log", "-1", "--format=%H%n%P", "--", repoRelDocPath],
     repoRoot,
   );
-  if (!diff) return false;
-  return /^\+timestamp:/m.test(diff);
+  if (head === null) return "unknown";
+  const [sha, parentLine] = head.split("\n");
+  if (!sha) return "unknown";
+  const parents = (parentLine ?? "").split(" ").filter((p) => p !== "");
+  // Root commit: the doc arrived with the repo's first commit, stamp and all.
+  if (parents.length === 0) return "restamped";
+  const firstParent = parents[0];
+
+  const previous = previousPathIn(
+    git,
+    repoRoot,
+    firstParent,
+    sha,
+    repoRelDocPath,
+  );
+  if (previous.kind === "unknown") return "unknown";
+  if (previous.kind === "created") return "restamped";
+
+  const current = git(["show", `${sha}:${repoRelDocPath}`], repoRoot);
+  if (current === null) return "unknown";
+  const before = git(["show", `${firstParent}:${previous.path}`], repoRoot);
+  if (before === null) return "unknown";
+
+  const currentStamp = getTimestampIdentity(
+    parseFrontmatter(current).frontmatter.parsed,
+  );
+  const beforeStamp = getTimestampIdentity(
+    parseFrontmatter(before).frontmatter.parsed,
+  );
+  // Both undefined (no parseable stamp on either side) compares equal, i.e.
+  // "not re-stamped" -- nothing was rewritten, so nothing is claimed.
+  return currentStamp !== beforeStamp ? "restamped" : "not-restamped";
+}
+
+/**
+ * Where the doc lived in `parentSha`, so its previous revision can be read
+ * by that path: the same path (`same`), a different one it was renamed from
+ * (`renamed`), or nowhere at all because that commit created it (`created`).
+ *
+ * Runs `git diff-tree` WITHOUT a pathspec on purpose. A pathspec is applied
+ * BEFORE rename detection, so `git diff-tree -M --name-status <parent> <sha>
+ * -- <doc>` reports a renamed doc as `A` (verified against a real `git mv`
+ * fixture) -- which is precisely the false "created" verdict that made a
+ * rename suppress staleness. The unfiltered output is still bounded and
+ * small: `--name-status -r` prints one line per changed path, not any file
+ * content, and the raised RunGit output cap (see src/git.ts) covers even a
+ * repo-wide formatting commit.
+ *
+ * A doc that does not appear in the diff at all resolves to `same`: the two
+ * revisions are then byte-identical by construction, and the value
+ * comparison above resolves that to "not re-stamped" without a second code
+ * path deciding it.
+ */
+function previousPathIn(
+  git: RunGit,
+  repoRoot: string,
+  parentSha: string,
+  sha: string,
+  repoRelDocPath: string,
+):
+  | { kind: "same" | "renamed"; path: string }
+  | { kind: "created" }
+  | { kind: "unknown" } {
+  const nameStatus = git(
+    [
+      "diff-tree",
+      "-r",
+      "-M",
+      "--name-status",
+      "--no-commit-id",
+      parentSha,
+      sha,
+    ],
+    repoRoot,
+  );
+  if (nameStatus === null) return { kind: "unknown" };
+
+  for (const line of nameStatus.split("\n")) {
+    const fields = line.split("\t");
+    if (fields.length < 2) continue;
+    const status = fields[0];
+    // Rename/copy rows carry BOTH paths: `R<score>\t<old>\t<new>`.
+    if (status.startsWith("R") || status.startsWith("C")) {
+      if (fields.length >= 3 && fields[2] === repoRelDocPath) {
+        return { kind: "renamed", path: fields[1] };
+      }
+      continue;
+    }
+    if (fields[1] !== repoRelDocPath) continue;
+    if (status.startsWith("A")) return { kind: "created" };
+    return { kind: "same", path: repoRelDocPath };
+  }
+  return { kind: "same", path: repoRelDocPath };
 }

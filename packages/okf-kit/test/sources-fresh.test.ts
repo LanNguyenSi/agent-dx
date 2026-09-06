@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadBundle } from "../src/bundle.js";
+import { runGit } from "../src/git.js";
 import { sourcesFreshRule } from "../src/rules/sources-fresh.js";
 import type { RunGit } from "../src/types.js";
 import {
@@ -468,6 +469,458 @@ describe("sources-fresh", () => {
       const findings = sourcesFreshRule.run(ctx);
       expect(findings).toHaveLength(1);
       expect(findings[0].message).toContain("STALE");
+    });
+  });
+  describe("re-stamp detection compares frontmatter timestamp VALUES, not diff text", () => {
+    // Every fixture below is a shape a `git log -p` TEXT scan gets wrong.
+    // The frontmatter blocks are byte-identical except where a fixture
+    // deliberately changes the stamp, so "the stamp value changed" is the
+    // only signal separating a pass from a STALE.
+    const fm = (stamp: string): string =>
+      `---\ntype: concept\ntimestamp: ${stamp}\nsources:\n  - source.ts\n---\n`;
+    const STAMP = "2026-01-01T00:00:00Z";
+
+    it("a body-level `timestamp:` line in a fenced YAML example is not a re-stamp -> STALE", () => {
+      // The doc's BODY gains a fenced YAML example whose `timestamp:` line
+      // is unindented, co-committed with a source change, while the
+      // frontmatter stamp is untouched. Under the previous `^\+timestamp:`
+      // diff scan that body line read as a re-stamp and silently suppressed
+      // staleness -- the exact review class this rule exists to close.
+      repo.commitFiles(
+        [
+          { relPath: "bundle/doc.md", content: `${fm(STAMP)}\n# Doc\n` },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T10:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm(STAMP)}\n# Doc\n\nExample frontmatter:\n\n\`\`\`yaml\ntype: concept\ntimestamp: 2026-08-20T12:00:00Z\n\`\`\`\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-08-20T12:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("warning");
+      expect(findings[0].message).toContain("STALE");
+      expect(findings[0].message).toContain("source.ts");
+    });
+
+    it("a rename with an unchanged stamp is not a re-stamp -> STALE", () => {
+      // `git mv` makes a single-path `git log -p` print `new file mode`,
+      // which fired the "created counts as stamped" branch and suppressed
+      // staleness. The rename-aware name-status lookup reads the doc's real
+      // previous path instead, so the stamp comparison is against the
+      // doc's own earlier revision.
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/old.md",
+            content: `${fm(STAMP)}\n# Doc\n\nBody line one.\nBody line two.\nBody line three.\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "source.ts",
+        "export const a = 2;\n",
+        "2026-02-01T00:00:00Z",
+      );
+      repo.gitAt(
+        ["mv", "bundle/old.md", "bundle/doc.md"],
+        "2026-03-01T00:00:00Z",
+      );
+      repo.gitAt(
+        ["commit", "--quiet", "-m", "rename doc"],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("warning");
+      expect(findings[0].message).toContain("STALE");
+    });
+
+    it("negative control: a rename that also rewrites the stamp IS a re-stamp -> passes", () => {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/old.md",
+            content: `${fm(STAMP)}\n# Doc\n\nBody line one.\nBody line two.\nBody line three.\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "source.ts",
+        "export const a = 2;\n",
+        "2026-02-01T00:00:00Z",
+      );
+      repo.gitAt(
+        ["mv", "bundle/old.md", "bundle/doc.md"],
+        "2026-03-01T00:00:00Z",
+      );
+      fs.writeFileSync(
+        path.join(repo.dir, "bundle/doc.md"),
+        `${fm("2026-02-20T00:00:00Z")}\n# Doc\n\nBody line one.\nBody line two.\nBody line three.\n`,
+      );
+      repo.gitAt(["add", "bundle/doc.md"], "2026-03-01T00:00:00Z");
+      repo.gitAt(
+        ["commit", "--quiet", "-m", "rename + re-stamp"],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
+    // A merge commit prints NO patch under `git log -p` (git's default
+    // combined-diff suppression), so the previous detector saw an empty
+    // diff and called a genuine re-stamp "not re-stamped" -- a
+    // false-positive STALE on exactly the `refs/pull/N/merge` ref CI checks
+    // out. Reading both trees with `git show` works merge or not.
+    const HUNK_DOC = (stamp: string, a: string, b: string): string =>
+      `${fm(stamp)}\n# Doc\n\n${a}\n\nmiddle filler\n\n${b}\n`;
+
+    it("(merge i) clean auto-merge whose merged-in side carries the re-stamp -> passes", () => {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: HUNK_DOC(STAMP, "HUNK-A base", "HUNK-B base"),
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.gitAt(["branch", "feature"], "2026-01-01T00:00:00Z");
+      // main side: prose only, no re-stamp.
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: HUNK_DOC(STAMP, "HUNK-A main edit", "HUNK-B base"),
+          },
+        ],
+        "2026-02-01T00:00:00Z",
+      );
+      repo.gitAt(["checkout", "--quiet", "feature"], "2026-01-01T00:00:00Z");
+      // feature side: a real re-stamp (to an instant BEFORE the commit that
+      // carries it, the ordinary "verified, then committed" gap) plus the
+      // source change that makes the doc a staleness candidate at all.
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: HUNK_DOC(
+              "2026-02-15T00:00:00Z",
+              "HUNK-A base",
+              "HUNK-B feature edit",
+            ),
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+      repo.gitAt(["checkout", "--quiet", "main"], "2026-01-01T00:00:00Z");
+      repo.gitAt(
+        ["merge", "--quiet", "--no-edit", "feature"],
+        "2026-04-01T00:00:00Z",
+      );
+
+      // Both sides touched the doc, so the merge result is TREESAME to
+      // neither parent and IS the doc's last commit.
+      expect(
+        repo.git(["log", "-1", "--format=%H", "--", "bundle/doc.md"]),
+      ).toBe(repo.git(["rev-parse", "HEAD"]));
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
+    it("(merge ii) conflict-resolution merge that re-stamps -> passes", () => {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: HUNK_DOC(STAMP, "HUNK-A base", "HUNK-B base"),
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.gitAt(["branch", "feature"], "2026-01-01T00:00:00Z");
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: HUNK_DOC(STAMP, "HUNK-A main version", "HUNK-B base"),
+          },
+        ],
+        "2026-02-01T00:00:00Z",
+      );
+      repo.gitAt(["checkout", "--quiet", "feature"], "2026-01-01T00:00:00Z");
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: HUNK_DOC(STAMP, "HUNK-A feature version", "HUNK-B base"),
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+      repo.gitAt(["checkout", "--quiet", "main"], "2026-01-01T00:00:00Z");
+      // Both sides rewrote the same line: git cannot auto-merge, so the
+      // merge stops with a conflict and the resolution below is a real
+      // human-shaped commit.
+      expect(() =>
+        repo.gitAt(
+          ["merge", "--quiet", "--no-edit", "feature"],
+          "2026-04-01T00:00:00Z",
+        ),
+      ).toThrow();
+      fs.writeFileSync(
+        path.join(repo.dir, "bundle/doc.md"),
+        HUNK_DOC("2026-02-20T00:00:00Z", "HUNK-A merged", "HUNK-B base"),
+      );
+      repo.gitAt(["add", "bundle/doc.md"], "2026-04-01T00:00:00Z");
+      repo.gitAt(["commit", "--quiet", "--no-edit"], "2026-04-01T00:00:00Z");
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
+    it("(merge iii) merge that does NOT re-stamp while a source changed on a side -> STALE", () => {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: HUNK_DOC(STAMP, "HUNK-A base", "HUNK-B base"),
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.gitAt(["branch", "feature"], "2026-01-01T00:00:00Z");
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: HUNK_DOC(STAMP, "HUNK-A main edit", "HUNK-B base"),
+          },
+        ],
+        "2026-02-01T00:00:00Z",
+      );
+      repo.gitAt(["checkout", "--quiet", "feature"], "2026-01-01T00:00:00Z");
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: HUNK_DOC(STAMP, "HUNK-A base", "HUNK-B feature edit"),
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+      repo.gitAt(["checkout", "--quiet", "main"], "2026-01-01T00:00:00Z");
+      repo.gitAt(
+        ["merge", "--quiet", "--no-edit", "feature"],
+        "2026-04-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("warning");
+      expect(findings[0].message).toContain("STALE");
+    });
+
+    it("a last commit that REMOVED the timestamp line reports the no-valid-timestamp notice", () => {
+      repo.commitFiles(
+        [
+          { relPath: "bundle/doc.md", content: `${fm(STAMP)}\n# Doc\n` },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content:
+              "---\ntype: concept\nsources:\n  - source.ts\n---\n\n# Doc\n",
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "notice",
+        file: "doc.md",
+      });
+      expect(findings[0].message).toContain("no valid timestamp");
+    });
+
+    it("a git failure on the re-stamp path is a not-assessable notice, never STALE and never a silent pass", () => {
+      repo.commitFiles(
+        [
+          { relPath: "bundle/doc.md", content: `${fm(STAMP)}\n# Doc\n` },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm(STAMP)}\n# Doc\n\nmore\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+
+      // Real git for everything except the blob read, which fails the way a
+      // corrupt object or an oversized output does.
+      const failingShow: RunGit = (args, cwd) =>
+        args[0] === "show" ? null : runGit(args, cwd);
+
+      const ctx = loadBundle(
+        path.join(repo.dir, "bundle"),
+        repo.dir,
+        failingShow,
+      );
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "notice",
+        file: "doc.md",
+      });
+      expect(findings[0].message).toContain("not assessable");
+      expect(findings[0].message).not.toContain("STALE");
+    });
+
+    it("reads a doc larger than node's default 1 MiB child-process output cap", () => {
+      // `git show <sha>:<doc>` streams the whole blob. Without an explicit
+      // maxBuffer (see src/git.ts) node kills the call at 1 MiB and RunGit
+      // reports it as a git failure, which would turn a perfectly healthy
+      // large doc into a permanent "not assessable" notice.
+      const body =
+        "lorem ipsum filler line for a deliberately large doc\n".repeat(30000);
+      expect(body.length).toBeGreaterThan(1024 * 1024);
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm(STAMP)}\n# Doc\n\n${body}`,
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm("2026-02-20T00:00:00Z")}\n# Doc\n\n${body}`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
+    it("spends at most five git processes per doc per run, however many sources it declares", () => {
+      // Pins the GIT PROCESS BUDGET comment in src/rules/sources-fresh.ts:
+      // one shared epoch lookup plus at most four on the re-stamp path,
+      // memoized per doc -- a doc's git cost must not scale with its
+      // `sources` list. The counting runner delegates to real git so the
+      // count is of real invocations, not of a fake's expectations.
+      const calls: string[][] = [];
+      const countingGit: RunGit = (args, cwd) => {
+        calls.push(args);
+        return runGit(args, cwd);
+      };
+      const sources = ["a.ts", "b.ts", "c.ts"];
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `---\ntype: concept\ntimestamp: ${STAMP}\nsources:\n${sources.map((s) => `  - ${s}`).join("\n")}\n---\n\n# Doc\n`,
+          },
+          ...sources.map((relPath) => ({
+            relPath,
+            content: "export const v = 1;\n",
+          })),
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        sources.map((relPath) => ({
+          relPath,
+          content: "export const v = 2;\n",
+        })),
+        "2026-02-01T00:00:00Z",
+      );
+      // Doc touched last, WITHOUT a re-stamp: the longest path through the
+      // re-stamp lookup (no early return for "created" or a root commit).
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `---\ntype: concept\ntimestamp: ${STAMP}\nsources:\n${sources.map((s) => `  - ${s}`).join("\n")}\n---\n\n# Doc\n\nprose\n`,
+          },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(
+        path.join(repo.dir, "bundle"),
+        repo.dir,
+        countingGit,
+      );
+      const findings = sourcesFreshRule.run(ctx);
+      expect(findings).toHaveLength(3);
+
+      const perSourceCalls = calls.filter((args) =>
+        sources.some((s) => args[args.length - 1] === s),
+      );
+      const perDocCalls = calls.filter(
+        (args) => !perSourceCalls.includes(args),
+      );
+      expect(perSourceCalls).toHaveLength(sources.length);
+      expect(perDocCalls).toHaveLength(5);
+      expect(perDocCalls.map((args) => args[0])).toEqual([
+        "log",
+        "log",
+        "diff-tree",
+        "show",
+        "show",
+      ]);
+      expect(calls).toHaveLength(sources.length + 5);
     });
   });
 });

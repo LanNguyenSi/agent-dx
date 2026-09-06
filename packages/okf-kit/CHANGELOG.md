@@ -62,24 +62,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `sources-fresh`'s co-commit staleness exception (a source committed
   at/before the doc file's own last commit is treated as fresh) is
-  narrowed to a commit that actually re-stamped the doc: added or
-  changed its frontmatter `timestamp:` line, or created the doc. A
-  commit that co-commits a source change with the doc (a prose edit, a
-  typo fix) WITHOUT touching the stamp no longer suppresses staleness --
+  narrowed to a commit that actually re-stamped the doc. A commit that
+  co-commits a source change with the doc (a prose edit, a typo fix)
+  WITHOUT touching the stamp no longer suppresses staleness --
   previously this unconditional exception let exactly that case (a
   source and the doc's prose committed together with the timestamp left
   stale) pass silently, which was the review class this rule pair
-  exists to close. See the README's "Staleness (sources-fresh)" section
-  for the full narrowed contract and its remaining known limitations.
+  exists to close. "Re-stamped" is decided by VALUE: the doc's parsed
+  frontmatter `timestamp` at that commit is compared against its value
+  in the commit's FIRST PARENT, and they must differ (a doc created
+  there, having no parent revision at all, counts as re-stamped). The
+  lookup follows a rename, so a `git mv` is not read as a creation, and
+  it reads trees rather than a patch, so a merge commit -- including the
+  `refs/pull/N/merge` ref CI checks out -- is assessed like any other
+  commit. Consequently a `timestamp:` line inside a fenced YAML example
+  in the doc's BODY is not mistaken for a re-stamp. The check answers
+  "did the value change", never "is the new value right": a hand-typed
+  or backdated stamp still counts (`sources-fresh-future` is the rule
+  that catches an implausible value), and a doc-only prose edit with
+  unchanged sources remains outside both rules' reach. When git cannot
+  answer the question at all, the doc gets one `staleness not
+  assessable` notice rather than a STALE warning or a silent pass. See
+  the README's "Staleness (sources-fresh)" section for the full contract
+  and its remaining known limitations.
 - `--future-skew-minutes ''` (empty or whitespace-only) is now rejected
   as the same usage error (exit 2) a negative value already gets,
   instead of silently accepting it as `0`.
+- The internal git runner now sets an explicit 16 MiB output cap.
+  Node's default for a synchronous child process is 1 MiB, and
+  `sources-fresh` reads whole doc blobs to compare frontmatter
+  timestamps, so a doc larger than 1 MiB previously resolved to "git
+  failed" -- and therefore to a permanent not-assessable notice -- on a
+  perfectly healthy repository.
 - CI: the `okf-anchor-guard` job's freshness step (`.github/workflows/ci.yml`)
   now rejects any `error`-severity freshness finding too (was: only
   `warning`), gained a self-test mirroring the neighbouring
-  Anchor-citation guard's shape, and now runs with `if: always()` so its
-  findings surface in the same CI round as the Anchor-citation guard's
-  rather than being skipped after an anchor failure.
+  Anchor-citation guard's shape (its `assert_numeric` guard included),
+  guards explicitly against a missing or malformed report before its
+  first `jq`, and runs with `if: success() || failure()` so its findings
+  surface in the same CI round as the Anchor-citation guard's rather
+  than being skipped after an anchor failure -- while, unlike
+  `always()`, staying out of the way of a cancelled run or an earlier
+  setup failure that never produced a report.
 
 ### Changed
 
