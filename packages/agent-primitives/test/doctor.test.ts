@@ -329,18 +329,20 @@ describe("doctor: hints", () => {
     // Unlike every other case in this file, this assertion is exact
     // (`toBe(0)`, not `toBeGreaterThan(0)`), so it is the one case a
     // stray extra hint from unrelated ambient state would actually
-    // break. `doctor`'s `stale-worktree` check produces a hint for a
-    // registered scratch worktree it finds live-owned (see
-    // `describe("doctor: stale-worktree check")` above): without an
-    // isolated `cwd`/`lockDir`, this call resolves both from real
-    // defaults (`process.cwd()`, the uid-scoped tmp dir every
-    // `agent-primitives` invocation on this machine shares), so a
-    // concurrent real probe run against this same checkout, or a
-    // leftover marker/registered worktree from an earlier one, could
-    // surface as a hint here and fail an assertion this test has
-    // nothing to do with. Pinning both to fresh, empty fixtures (as
-    // every sibling test in this file already does) removes that
-    // dependency regardless of whether it has ever actually fired.
+    // break, and it is a reproduced failure, not a hypothetical one:
+    // with a concurrent real `agent-primitives probe -i worktree` run
+    // against this same checkout, a pre-fix call that left `cwd` and
+    // `lockDir` at their real defaults returned `hints.length === 1` in
+    // every poll, because `doctor`'s `stale-worktree` check reads `git
+    // worktree list` for `containmentRoot(cwd)` (`process.cwd()` here)
+    // and finds that live scratch worktree registered, regardless of
+    // `lockDir` (see `describe("doctor: stale-worktree check")` above
+    // for the check itself). The shared lock directory (the uid-scoped
+    // tmp dir every `agent-primitives` invocation on this machine
+    // shares) is a second, weaker channel through the same check's
+    // worktree-marker lookup. Pinning both `cwd` and `lockDir` to
+    // fresh, empty fixtures (as every sibling test in this file already
+    // does) removes both channels.
     const lockDir = makeTmpDir();
     const cwd = makeTmpDir();
     const result = await doctor({
