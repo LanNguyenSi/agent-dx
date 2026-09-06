@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-06
+
 ### Added
 
 - A new rule, `sources-fresh-future`, complements `sources-fresh`: it flags
@@ -48,15 +50,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gained a strict freshness step that fails the build on any
   `sources-fresh`/`sources-fresh-future` warning for
   `packages/orchestrator-workflow/docs/okf`. **Release dependency:**
-  `sources-fresh-future` does not exist in the okf-kit version this job
-  currently installs (a pinned release from npm, kept in sync with
-  `package.json`'s own version by
+  `sources-fresh-future` did not exist in the okf-kit version this job
+  installed before this release (a pinned release from npm, kept in sync
+  with `package.json`'s own version by
   `orchestrator-workflow/test/docs-consistency.test.ts`), so the step's
-  filter matches only `sources-fresh` findings until the next okf-kit
-  release ships this rule and the job's pin is bumped to it (in the same
-  commit as every other `okf-kit@<version>` pin, per this file's
-  "Changed" entry above); no other change to the step is needed at that
-  point, since it already filters by rule id rather than a fixed list.
+  filter matched only `sources-fresh` findings until this release; the
+  job's pin moves to 0.10.0 in the same commit as every other
+  `okf-kit@<version>` pin (per this file's "Changed" entry below), so it
+  now matches both rule ids and no other change to the step is needed,
+  since it already filters by rule id rather than a fixed list.
 
 ### Fixed
 
