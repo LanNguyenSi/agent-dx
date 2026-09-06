@@ -245,8 +245,12 @@ directory and the subagents.
    engine. Only the orchestrator can explicitly revise a baseline, recording
    old/new revisions, affected IDs, authority and reason, invalidated evidence,
    and verified rationale for carrying unchanged evidence forward.
-7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
-   briefing the base and head revision the diff was generated from. When tier
+7. **Delegate review.** Never run mutation probes in place against a
+   worktree a reviewer subagent is concurrently reviewing; isolate the probe
+   in a separate worktree or wait until the reviewer has returned before
+   probing that tree again. Send the diff to the reviewer subagent, naming
+   in the briefing the base and head revision the diff was generated from.
+   When tier
    variants are installed, pick the reviewer tier (the installed
    `reviewer-<tier>` subagents, if any) by the task's complexity and risk, at
    your own judgment, defaulting to the unsuffixed subagent when unsure; record

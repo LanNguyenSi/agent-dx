@@ -38,7 +38,12 @@ Check, at minimum:
 - Edge cases: empty inputs, error paths, concurrency, encoding, limits.
 - Security: injection, path traversal, secrets, permissions, unsafe defaults.
 - Test adequacy: are the new or changed behaviors covered, and would the new
-  tests actually fail if the change were reverted? Flag inert tests.
+  tests actually fail if the change were reverted? Flag inert tests. A test
+  that spawns a CLI and asserts its output against a byte-count ceiling
+  calibrated to sit inside the output's own run-to-run noise (timing digits,
+  temporary-directory names) is not a regression test; the fix is to pin
+  the argument under test in-process, or assert the actual contract (a
+  bound, or the presence of a warning), never a byte ceiling.
 - Maintainability: naming, dead code, needless abstraction, doc drift.
 - Placement: does the change add org-, machine-, or point-in-time-bound
   evidence (dates, sample sizes, task ids, home paths, incident tallies) to a

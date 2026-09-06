@@ -1,5 +1,48 @@
 # Bundle log
 
+- 2026-09-06T20:33:16Z (task 0e17fb63, three process-class prompt
+  additions): added one sentence each to `implementer.md` (never
+  background a long test/build/mutation-probe run; run it in the
+  foreground and wait), `reviewer.md` plus `implementer.md` (a
+  spawned-CLI test calibrated to a byte-count ceiling inside the
+  output's own run-to-run noise is not a regression test; pin the
+  argument in-process or assert the bound/warning contract instead),
+  and `SKILL.md` step 7 (never mutation-probe a worktree a reviewer
+  subagent is concurrently reviewing; isolate or wait). Added a
+  CHANGELOG Unreleased bullet naming all three with their motivating
+  incidents; the prompts themselves stay free of task ids, dates, or
+  counts per the placement rule. Three new `describe` blocks in
+  `test/docs-consistency.test.ts` pin the added sentences (one per
+  rule), each verified red-then-green through a mutation probe
+  (delete the sentence, confirm the pin fails, restore, confirm
+  green). The insertions shifted every line-numbered citation into
+  `SKILL.md`, `implementer.md`, `reviewer.md`, and
+  `test/docs-consistency.test.ts` that sits below the insertion
+  points; re-derived and corrected all of them in
+  `review-gate-and-waivers.md`, `subagent-contracts-superset.md`, and
+  `run-state-lifecycle-and-markers.md` against the edited tree (each
+  citation's anchor text now sits on the last content line of its own
+  corrected range; re-checked by hand for the multi-candidate cases
+  where the anchor text recurs elsewhere in the same file, e.g.
+  SKILL.md's `risk: low | medium | high` and `commits:` lines, and
+  `docs-consistency.test.ts`'s `expectPointerMention(section)` and
+  `replayed: false | true` lines). `model-preselection.md` also lists
+  `test/docs-consistency.test.ts` as a source; its own citations sit
+  well above this round's insertion point and are unaffected, but its
+  timestamp is re-stamped too since it was re-verified against the
+  final tree. Confirmed `composeClaudeAgentVariant` in `src/init.ts`
+  (and the default-tier `composeClaudeAgent` beside it) both call
+  `readAgentAsset(role)` to derive a tier variant's body from
+  `assets/agents/<role>.md` at install time, so no hand-edited tier
+  file needs a matching edit; the pandora install itself is refreshed
+  at the next kit release, named as such in the CHANGELOG entry rather
+  than performed here. `npx vitest run` is green across the suite
+  (`test/docs-consistency.test.ts` included); `tsc --noEmit` and
+  `tsc --noEmit -p tsconfig.test.json` are both clean; `prettier --check`
+  is red on `test/decision-authority.test.ts` and
+  `test/template-markers.test.ts`, pre-existing on master and untouched
+  by this round.
+
 - 2026-09-06T05:42:00Z (review fix round, six low findings): fixed the
   CHANGELOG replay-rule pin's tautological assertion, flagged because its
   anchor text (`"On any round after a task's first, the orchestrator's
@@ -2747,7 +2790,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:236#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:256#"the keyed placeholder line's exact text,"`,
 re-pointed by 53 lines since this account was first written (+15 more,
 from the batch-38 `[Unreleased]` bullet added above `[0.30.0]` by the
 reviewer-checklist mirrored-pairs task), by T-002's own
@@ -7247,7 +7290,7 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   pre-existing `install-fence-mechanics.md` staleness warning, plus two
   new `citations-resolve` warnings against citations in this `log.md`
   file itself (a `test/docs-consistency.test.ts` (then lines 920–933) citation and a
-  `CHANGELOG.md:186` citation, both line-shifted by this pass's edits).
+  `CHANGELOG.md:256` citation, both line-shifted by this pass's edits).
   Correction (found in review): this bundle's convention, per this same
   pass's own H1 fix above and the sibling T-002 pass, is to re-point a
   `log.md` citation shifted by the current change rather than leave it
@@ -7255,7 +7298,7 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   resolve): re-pointed both to the same content at head, both bounds
   checked: `test/docs-consistency.test.ts` (then lines 920–933) (the reproduction-field
   byte-for-byte equality `it` block, "expect(skillBlock).toBe
-  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:186` (the
+  (reviewerBlock);") moved to `931-944`, and `CHANGELOG.md:256` (the
   probe-replay `[Unreleased]` bullet's own citation of `test/template-
   markers.test.ts`'s "the keyed placeholder line's exact text,") moved to
   `175`, the further +7-line shift coming from this bundle's own
@@ -7298,7 +7341,7 @@ this class recurred on (line 295, `,274-275` for "Repos without a bundle
 are unaffected", which at this round's head sits at
 `packages/orchestrator-workflow/assets/skill/SKILL.md:295`,
 re-anchored to its own
-`packages/orchestrator-workflow/assets/skill/SKILL.md:334#"without a bundle are unaffected"`).
+`packages/orchestrator-workflow/assets/skill/SKILL.md:338#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
 in this bundle's non-reserved docs now has its own anchor via a full
 citation (`index.md` and `log.md` are append-only journals and keep their
