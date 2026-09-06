@@ -32,7 +32,7 @@ export const DEFAULT_FUTURE_SKEW_SECONDS = 600;
 export const sourcesFreshRule: Rule = {
   id: RULE_ID,
   description:
-    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`, unless the doc's own last commit lands at/after the source's and that same commit actually re-stamped the doc: the doc's parsed frontmatter `timestamp` VALUE at that commit differs from its value in the commit's first parent (rename-aware; creating the doc counts as re-stamping it). When git cannot answer that question, the doc gets a `not assessable` notice instead of either a STALE warning or a silent pass.",
+    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`, unless the doc's own last commit lands at/after the source's and that same commit actually re-stamped the doc: the doc's parsed frontmatter `timestamp` VALUE at that commit differs from its value in the commit's first parent (rename-aware; creating the doc counts as re-stamping it). Creation is trusted only in a genuinely unshallow repository: in a shallow clone, a commit with no parents can simply be where history was cut off, not a real root commit, so it gets the same `not assessable` notice instead of being assumed created. When git cannot answer the question at all, the doc gets a `not assessable` notice instead of either a STALE warning or a silent pass.",
   run(ctx) {
     const findings: Finding[] = [];
 
@@ -101,7 +101,10 @@ export const sourcesFreshRule: Rule = {
       // stops after 2 (or 1). Plus one `git log` per UNIQUE source path
       // across the whole bundle (commitEpochCache above). Pinned by
       // "spends at most five git processes per doc" in
-      // test/sources-fresh.test.ts.
+      // test/sources-fresh.test.ts. PLUS: at most 1 `git rev-parse
+      // --is-shallow-repository` for the ENTIRE run, not per doc (see
+      // isShallowRepoShared below) -- only spent at all when some doc's
+      // re-stamp lookup actually reaches a root commit.
       const repoRelDocPath = toRepoRelDocPath(repoRoot, ctx.bundleDir, doc);
       const docCommitEpochFor = (): number | null =>
         getDocCommitEpochShared(ctx, git, repoRoot, repoRelDocPath);
@@ -111,6 +114,7 @@ export const sourcesFreshRule: Rule = {
           git,
           repoRoot,
           repoRelDocPath,
+          () => isShallowRepoShared(ctx, git, repoRoot),
         ));
       // At most one "not assessable" notice per doc, however many of its
       // sources hit the unanswerable re-stamp question.
@@ -147,7 +151,10 @@ export const sourcesFreshRule: Rule = {
             const verdict = restampFor();
             if (verdict === "restamped") {
               isStale = false;
-            } else if (verdict === "unknown") {
+            } else if (
+              verdict === "unknown" ||
+              verdict === "unknown-shallow-root"
+            ) {
               if (!notAssessableReported) {
                 notAssessableReported = true;
                 findings.push({
@@ -155,7 +162,9 @@ export const sourcesFreshRule: Rule = {
                   severity: "notice",
                   file: doc.relPath,
                   message:
-                    "staleness not assessable: git could not read the doc's own last commit to decide whether it re-stamped the doc",
+                    verdict === "unknown-shallow-root"
+                      ? "staleness not assessable: this is a shallow clone (`git clone --depth`), so git cannot tell whether the doc's earliest available commit really created it or is just where history was cut off -- use `fetch-depth: 0` (or an unshallow checkout) to assess it"
+                      : "staleness not assessable: git could not read the doc's own last commit to decide whether it re-stamped the doc",
                 });
               }
               continue;
@@ -359,22 +368,61 @@ function getDocCommitEpochShared(
 }
 
 /**
+ * Per-run cache (keyed by `BundleContext`, same pattern as
+ * `docCommitEpochCache` above) of whether `repoRoot` is a shallow clone
+ * (`git clone --depth <n>`), so `restampedByOwnLastCommit`'s root-commit
+ * shortcut spends at most ONE `git rev-parse --is-shallow-repository` for
+ * the whole `check` run, not one per doc. A failed git call (repoRoot
+ * somehow not a real git work tree after all) is treated as shallow: this
+ * function's only consumer only ever asks it to decide whether a commit
+ * with an empty parent list is trustworthy as a genuine root commit, and
+ * the file's standing rule is to answer "unknown" rather than invent
+ * either verdict when git itself cannot be asked -- so a failure here must
+ * NOT fall back to the previous "always trust it" behavior.
+ */
+const shallowRepoCache = new WeakMap<BundleContext, boolean>();
+
+function isShallowRepoShared(
+  ctx: BundleContext,
+  git: RunGit,
+  repoRoot: string,
+): boolean {
+  const cached = shallowRepoCache.get(ctx);
+  if (cached !== undefined) return cached;
+  const out = git(["rev-parse", "--is-shallow-repository"], repoRoot);
+  const isShallow = out === null ? true : out.trim() === "true";
+  shallowRepoCache.set(ctx, isShallow);
+  return isShallow;
+}
+
+/**
  * Verdict for "did the doc's OWN last commit re-stamp it?" -- the question
  * that narrows `sources-fresh`'s co-commit staleness exception.
  *
- * `unknown` is a first-class answer, not an error: git can legitimately fail
- * to produce one of the inputs (a corrupt object, a missing binary, an
- * unreadable blob), and neither of the other two answers may be invented in
- * that case. `sources-fresh` turns it into a `not assessable` notice.
+ * `unknown` and `unknown-shallow-root` are both first-class answers, not an
+ * error: git can legitimately fail to produce one of the inputs (a corrupt
+ * object, a missing binary, an unreadable blob) -- `unknown` -- or the
+ * repository can be a shallow clone where an empty parent list does not
+ * mean what it normally means -- `unknown-shallow-root`, see
+ * `restampedByOwnLastCommit`'s root-commit branch below -- and neither of
+ * the other two answers may be invented in either case. `sources-fresh`
+ * turns both into a `not assessable` notice (with different wording).
  */
-type RestampVerdict = "restamped" | "not-restamped" | "unknown";
+type RestampVerdict =
+  "restamped" | "not-restamped" | "unknown" | "unknown-shallow-root";
 
 /**
  * Whether `doc`'s own last commit actually re-stamped it, decided by
  * comparing the doc's PARSED FRONTMATTER `timestamp` VALUE at that commit
  * against its value in the commit's FIRST PARENT. A doc created by that
- * commit (or by the repo's root commit) counts as re-stamped: its stamp
- * arrived with it.
+ * commit (or by a genuine root commit of an unshallow repository) counts as
+ * re-stamped: its stamp arrived with it. In a SHALLOW clone (`git clone
+ * --depth`), the doc's last commit can have an EMPTY parent list purely
+ * because that is where history was grafted off, not because it is really
+ * the repo's first commit -- `isShallowRepo` (checked lazily, only when a
+ * commit with no parents is actually seen) distinguishes the two, so a
+ * shallow checkout gets `unknown-shallow-root` there instead of an assumed
+ * `restamped`.
  *
  * This is what narrows `sources-fresh`'s co-commit staleness exception: a
  * commit that merely happens to also touch the doc file (a typo fix, a
@@ -419,6 +467,7 @@ function restampedByOwnLastCommit(
   git: RunGit,
   repoRoot: string,
   repoRelDocPath: string,
+  isShallowRepo: () => boolean,
 ): RestampVerdict {
   // %H then %P on its own line: the doc's last commit and its parent list in
   // ONE process. Default history simplification is exactly what this needs
@@ -434,8 +483,18 @@ function restampedByOwnLastCommit(
   const [sha, parentLine] = head.split("\n");
   if (!sha) return "unknown";
   const parents = (parentLine ?? "").split(" ").filter((p) => p !== "");
-  // Root commit: the doc arrived with the repo's first commit, stamp and all.
-  if (parents.length === 0) return "restamped";
+  // An empty parent list means "the doc arrived with the repo's first
+  // commit, stamp and all" ONLY in a genuinely unshallow repository. In a
+  // shallow clone (`git clone --depth`), the boundary commit git grafted
+  // the history onto also reports an empty parent list for every path
+  // touched at or before it -- indistinguishable from a real root commit
+  // by this lookup alone -- so trusting it there would let the shallow-clone
+  // shortcut fire unconditionally and silently suppress every doc's
+  // staleness. isShallowRepo() is checked here, not unconditionally at the
+  // top of this function, so an unshallow repo never pays for it.
+  if (parents.length === 0) {
+    return isShallowRepo() ? "unknown-shallow-root" : "restamped";
+  }
   const firstParent = parents[0];
 
   const previous = previousPathIn(
@@ -482,6 +541,21 @@ function restampedByOwnLastCommit(
  * revisions are then byte-identical by construction, and the value
  * comparison above resolves that to "not re-stamped" without a second code
  * path deciding it.
+ *
+ * Runs with `-z` (NUL-delimited output) rather than the default newline/tab
+ * form, and for one reason that is NOT about newlines: git's default
+ * `--name-status` output C-QUOTES any path containing a non-ASCII byte
+ * (`core.quotePath` defaults to true) as a double-quoted string with octal
+ * escapes (e.g. `"bundle/\303\266lt.md"` for `bundle/ölt.md`), so a plain
+ * `repoRelDocPath` never string-equals that quoted form and a non-ASCII doc
+ * falls through every branch below to the `same` fallback -- which then
+ * feeds the WRONG (quoted, unreadable) path into the `git show` blob reads
+ * in the caller, making them fail and turning a normal rename or creation
+ * into a false `not assessable` notice. `-z` prints every path verbatim,
+ * unquoted, regardless of `core.quotePath`, closing that structurally
+ * rather than by passing `-c core.quotePath=false` (which is a config
+ * override this rule would otherwise have to remember on every git
+ * invocation touching a path, not just this one).
  */
 function previousPathIn(
   git: RunGit,
@@ -498,6 +572,7 @@ function previousPathIn(
       "diff-tree",
       "-r",
       "-M",
+      "-z",
       "--name-status",
       "--no-commit-id",
       parentSha,
@@ -507,18 +582,31 @@ function previousPathIn(
   );
   if (nameStatus === null) return { kind: "unknown" };
 
-  for (const line of nameStatus.split("\n")) {
-    const fields = line.split("\t");
-    if (fields.length < 2) continue;
-    const status = fields[0];
-    // Rename/copy rows carry BOTH paths: `R<score>\t<old>\t<new>`.
+  // `-z` NUL-terminates every field (status, then path(s)) instead of the
+  // default "status TAB path NEWLINE" (or, for a rename/copy row, "status
+  // TAB old-path TAB new-path NEWLINE") -- including a trailing NUL after
+  // the very last field, which RunGit's `.trim()` does not strip (NUL is
+  // not whitespace), so the split below always drops one empty trailing
+  // token. A rename/copy row is 3 NUL-terminated tokens (status, old path,
+  // new path); every other row is 2 (status, path) -- read positionally,
+  // not by re-joining on a separator, since a path can itself legitimately
+  // contain a tab or newline once quoting is off.
+  const tokens = nameStatus.split("\0").filter((t) => t !== "");
+  let i = 0;
+  while (i < tokens.length) {
+    const status = tokens[i];
     if (status.startsWith("R") || status.startsWith("C")) {
-      if (fields.length >= 3 && fields[2] === repoRelDocPath) {
-        return { kind: "renamed", path: fields[1] };
+      const oldPath = tokens[i + 1];
+      const newPath = tokens[i + 2];
+      i += 3;
+      if (newPath === repoRelDocPath) {
+        return { kind: "renamed", path: oldPath };
       }
       continue;
     }
-    if (fields[1] !== repoRelDocPath) continue;
+    const p = tokens[i + 1];
+    i += 2;
+    if (p !== repoRelDocPath) continue;
     if (status.startsWith("A")) return { kind: "created" };
     return { kind: "same", path: repoRelDocPath };
   }

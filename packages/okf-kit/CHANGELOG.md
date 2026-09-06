@@ -85,6 +85,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assessable` notice rather than a STALE warning or a silent pass. See
   the README's "Staleness (sources-fresh)" section for the full contract
   and its remaining known limitations.
+- `sources-fresh`'s re-stamp lookup no longer misjudges two more shapes
+  the value comparison above did not yet cover. (1) In a SHALLOW clone
+  (`git clone --depth`, including `actions/checkout`'s default), the
+  grafted history boundary commit reports an EMPTY parent list for every
+  path touched at or before it -- indistinguishable from a real root
+  commit by the parent-list check alone, which previously trusted it and
+  assumed "created" (re-stamped) unconditionally. The lookup now checks
+  `git rev-parse --is-shallow-repository` (once per `check` run, not per
+  doc: only spent at all when some doc's re-stamp lookup actually
+  reaches a commit with no parents) and, when the repository is shallow,
+  answers `not assessable` there instead -- see the README's "CI usage"
+  section for the `fetch-depth: 0` remedy. (2) A NON-ASCII doc path was
+  C-quoted by `git diff-tree`'s default `--name-status` output
+  (`core.quotePath` defaults to true, e.g. `"bundle/\303\266lt.md"` for
+  `bundle/ölt.md`), so the rename/created lookup's plain string match
+  against the doc's real (unquoted) path never matched, silently fell
+  through to the wrong path, and turned a normal rename or creation into
+  a `not assessable` notice instead of the real verdict. The lookup now
+  runs with `-z` (NUL-delimited, never quoted regardless of
+  `core.quotePath`) instead of the default form. New fixtures also pin:
+  an octopus merge (three parents) as a doc's last commit without a
+  re-stamp still reports STALE (only the FIRST parent is ever consulted,
+  however many there are); and a cosmetic rewrite of the stamp to the
+  same instant in another string representation (`...00Z` to
+  `...00.000Z`) still counts as a re-stamp, since the comparison is by
+  raw parsed VALUE, not by resolved instant -- while adding or removing
+  quotes around an otherwise-unchanged value does NOT count, since YAML
+  parsing already normalizes those away before the comparison ever sees
+  them.
 - `--future-skew-minutes ''` (empty or whitespace-only) is now rejected
   as the same usage error (exit 2) a negative value already gets,
   instead of silently accepting it as `0`.
@@ -103,7 +132,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surface in the same CI round as the Anchor-citation guard's rather
   than being skipped after an anchor failure -- while, unlike
   `always()`, staying out of the way of a cancelled run or an earlier
-  setup failure that never produced a report.
+  setup failure that never produced a report. The self-test step now
+  carries the same `if: success() || failure()` (it previously ran
+  unconditionally), and both it and the real step now read the SAME
+  `FRESHNESS_FILTER` jq expression from the job's `env:` rather than the
+  self-test guarding its own hand-kept copy: an edit to the real filter
+  is now exercised by the self-test, not silently bypassed by it.
 
 ### Changed
 

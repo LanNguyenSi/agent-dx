@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -585,6 +586,75 @@ describe("sources-fresh", () => {
       expect(sourcesFreshRule.run(ctx)).toEqual([]);
     });
 
+    it("a rename with a NON-ASCII doc name and an unchanged stamp is not a re-stamp -> STALE", () => {
+      // git's default `--name-status` C-quotes a non-ASCII path
+      // (`core.quotePath` defaults to true), so `previousPathIn`'s plain
+      // string match against `repoRelDocPath` never matched a quoted
+      // `"bundle/\303\266lt.md"` row -- the doc fell through to the `same`
+      // fallback, and the ensuing `git show <parent>:<doc>` blob read (for
+      // the WRONG, still-quoted path under the old code) failed, turning
+      // this into a `not assessable` notice rather than the STALE it
+      // should have been. `-z` prints the path verbatim; this fixture pins
+      // that a non-ASCII rename is still read correctly end to end.
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/ölt.md",
+            content: `${fm(STAMP)}\n# Doc\n\nBody line one.\nBody line two.\nBody line three.\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "source.ts",
+        "export const a = 2;\n",
+        "2026-02-01T00:00:00Z",
+      );
+      repo.gitAt(
+        ["mv", "bundle/ölt.md", "bundle/nöu.md"],
+        "2026-03-01T00:00:00Z",
+      );
+      repo.gitAt(
+        ["commit", "--quiet", "-m", "rename doc (non-ascii)"],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("warning");
+      expect(findings[0].message).toContain("STALE");
+    });
+
+    it("a NON-ASCII doc name created (not renamed) by a non-root commit -> passes", () => {
+      // Same C-quoting hazard, the `created` branch of previousPathIn: an
+      // "A" (added) row for a non-ASCII path is quoted the same way a
+      // rename row's paths are. A prior unrelated commit keeps the doc's
+      // own last commit from being the repo's ROOT commit, so this
+      // exercises previousPathIn's real "A" row parsing, not the
+      // root-commit shortcut in restampedByOwnLastCommit.
+      repo.commitFile("unrelated.txt", "x\n", "2026-01-01T00:00:00Z");
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/nöu.md",
+            content: docContent({
+              type: "concept",
+              timestamp: "2020-01-01T00:00:00Z",
+              sources: ["source.ts"],
+            }),
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-05-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
     // A merge commit prints NO patch under `git log -p` (git's default
     // combined-diff suppression), so the previous detector saw an empty
     // diff and called a genuine re-stamp "not re-stamped" -- a
@@ -745,6 +815,143 @@ describe("sources-fresh", () => {
       expect(findings).toHaveLength(1);
       expect(findings[0].severity).toBe("warning");
       expect(findings[0].message).toContain("STALE");
+    });
+
+    it("(merge iv) octopus merge (three parents) as the doc's last commit, without a re-stamp -> STALE", () => {
+      // An octopus merge (`git merge b1 b2 b3` from a single starting
+      // point) commits with THREE parents in one commit, not two -- a
+      // shape `firstParent = parents[0]` must still handle correctly (it
+      // does: it only ever looks at parents[0], regardless of how many
+      // there are). Three independent hunks so the three branches merge
+      // cleanly with no conflict.
+      const OCTO_DOC = (
+        stamp: string,
+        a: string,
+        b: string,
+        c: string,
+      ): string =>
+        `${fm(stamp)}\n# Doc\n\n${a}\n\nfiller-ab\n\n${b}\n\nfiller-bc\n\n${c}\n`;
+
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: OCTO_DOC(
+              STAMP,
+              "HUNK-A base",
+              "HUNK-B base",
+              "HUNK-C base",
+            ),
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.gitAt(["branch", "b1"], "2026-01-01T00:00:00Z");
+      repo.gitAt(["branch", "b2"], "2026-01-01T00:00:00Z");
+      repo.gitAt(["branch", "b3"], "2026-01-01T00:00:00Z");
+
+      repo.gitAt(["checkout", "--quiet", "b1"], "2026-01-01T00:00:00Z");
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: OCTO_DOC(
+              STAMP,
+              "HUNK-A one",
+              "HUNK-B base",
+              "HUNK-C base",
+            ),
+          },
+        ],
+        "2026-02-01T00:00:00Z",
+      );
+
+      repo.gitAt(["checkout", "--quiet", "b2"], "2026-01-01T00:00:00Z");
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: OCTO_DOC(
+              STAMP,
+              "HUNK-A base",
+              "HUNK-B two",
+              "HUNK-C base",
+            ),
+          },
+        ],
+        "2026-02-02T00:00:00Z",
+      );
+
+      repo.gitAt(["checkout", "--quiet", "b3"], "2026-01-01T00:00:00Z");
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: OCTO_DOC(
+              STAMP,
+              "HUNK-A base",
+              "HUNK-B base",
+              "HUNK-C three",
+            ),
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+
+      repo.gitAt(["checkout", "--quiet", "main"], "2026-01-01T00:00:00Z");
+      repo.gitAt(
+        ["merge", "--quiet", "--no-edit", "b1", "b2", "b3"],
+        "2026-04-01T00:00:00Z",
+      );
+
+      const parents = repo.git(["log", "-1", "--format=%P"]).split(" ");
+      expect(parents).toHaveLength(3);
+      expect(
+        repo.git(["log", "-1", "--format=%H", "--", "bundle/doc.md"]),
+      ).toBe(repo.git(["rev-parse", "HEAD"]));
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("warning");
+      expect(findings[0].message).toContain("STALE");
+    });
+
+    it("a cosmetic timestamp rewrite (same instant, different representation) still counts as a re-stamp -> passes", () => {
+      // Pins the documented identity contract: this rule answers "did the
+      // stamp VALUE change", never "does the new value mean a different
+      // instant" -- a rewrite from `...00Z` to `...00.000Z` names the same
+      // instant but is a different raw string, and getTimestampIdentity
+      // (util.ts) compares raw strings, not resolved epochs, so it counts
+      // as a re-stamp exactly like a genuine backdated/hand-typed change
+      // would (see the rule's own "answers 'did the value change', never
+      // 'is the new value right'" doc comment).
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm(STAMP)}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm("2026-01-01T00:00:00.000Z")}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
     });
 
     it("a last commit that REMOVED the timestamp line reports the no-valid-timestamp notice", () => {
@@ -921,6 +1128,87 @@ describe("sources-fresh", () => {
         "show",
       ]);
       expect(calls).toHaveLength(sources.length + 5);
+    });
+  });
+
+  describe("shallow clone: a grafted boundary commit must not be trusted as a real root commit", () => {
+    it("a shallow clone (--depth 1) reports 'not assessable', never a silent pass; a full clone of the same repo still reports STALE", () => {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: docContent({
+              type: "concept",
+              timestamp: "2026-01-01T00:00:00Z",
+              sources: ["source.ts"],
+            }),
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "source.ts",
+        "export const a = 2;\n",
+        "2026-02-01T00:00:00Z",
+      );
+
+      // Full (non-shallow) clone of the same history: STALE, exactly as
+      // every other fixture in this file.
+      const fullCtx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const fullFindings = sourcesFreshRule.run(fullCtx);
+      expect(fullFindings).toHaveLength(1);
+      expect(fullFindings[0].severity).toBe("warning");
+      expect(fullFindings[0].message).toContain("STALE");
+
+      // Shallow clone: `--depth` is silently ignored for a plain local
+      // path clone, so this goes through a `file://` URL to get a real
+      // grafted boundary commit. That boundary commit (== the "change
+      // source only" commit above) reports an EMPTY parent list for
+      // bundle/doc.md too, indistinguishable from a real root commit by
+      // `git log -1 --format=%H%n%P` alone -- even though the doc
+      // manifestly existed before, just outside the depth-1 window.
+      const shallowDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "okf-kit-shallow-"),
+      );
+      try {
+        execFileSync(
+          "git",
+          [
+            "clone",
+            "--quiet",
+            "--depth",
+            "1",
+            `file://${repo.dir}`,
+            shallowDir,
+          ],
+          { encoding: "utf8" },
+        );
+        const isShallow = execFileSync(
+          "git",
+          ["rev-parse", "--is-shallow-repository"],
+          { cwd: shallowDir, encoding: "utf8" },
+        ).trim();
+        expect(isShallow).toBe("true");
+
+        const shallowCtx = loadBundle(
+          path.join(shallowDir, "bundle"),
+          shallowDir,
+        );
+        const shallowFindings = sourcesFreshRule.run(shallowCtx);
+
+        expect(shallowFindings).toHaveLength(1);
+        expect(shallowFindings[0]).toMatchObject({
+          ruleId: "sources-fresh",
+          severity: "notice",
+          file: "doc.md",
+        });
+        expect(shallowFindings[0].message).toContain("not assessable");
+        expect(shallowFindings[0].message).toContain("shallow");
+        expect(shallowFindings[0].message).not.toContain("STALE");
+      } finally {
+        fs.rmSync(shallowDir, { recursive: true, force: true });
+      }
     });
   });
 });

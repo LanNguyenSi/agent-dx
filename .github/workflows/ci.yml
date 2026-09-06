@@ -63,6 +63,12 @@ jobs:
     timeout-minutes: 5
     env:
       BUNDLE_PATH: packages/orchestrator-workflow/docs/okf
+      # Read by BOTH the "Self-test the freshness-finding filter" step and
+      # the real "Freshness guard" step below, so an edit to the filter is
+      # exercised by the self-test instead of the self-test guarding a
+      # separately hand-kept copy of it (reviewer-reproduced miss: editing
+      # only the real step's filter left the self-test green).
+      FRESHNESS_FILTER: 'select(.ruleId == "sources-fresh" or .ruleId == "sources-fresh-future") | select(.severity != "notice")'
     steps:
       - uses: actions/checkout@v5
         with:
@@ -373,16 +379,24 @@ jobs:
         # the bundle: builds a throwaway inline report (not a real okf-kit
         # invocation, since the filter only cares about JSON shape) with
         # one sources-fresh warning, one sources-fresh-future error, and
-        # one sources-fresh-future notice, then runs the SAME filter the
-        # step below uses and asserts it keeps exactly the warning and the
-        # error (2) while dropping the notice -- mirrors the neighbouring
-        # Anchor-citation guard self-test's shape, assert_numeric guard
-        # included, so a jq pipeline that produces no usable output fails
-        # here rather than falling through an `if` condition `set -e` does
-        # not catch. If this ever returns anything other than 2, the filter
-        # itself is broken (a typo, a severity the tool stopped emitting)
-        # and this step fails red before the real check below can pass
-        # green for the wrong reason.
+        # one sources-fresh-future notice, then runs the job-level
+        # `FRESHNESS_FILTER` env var -- the IDENTICAL expression text the
+        # step below reads, not a separately hand-kept copy of it, so an
+        # edit to the real filter is exercised here too instead of silently
+        # bypassing this self-test -- and asserts it keeps exactly the
+        # warning and the error (2) while dropping the notice -- mirrors
+        # the neighbouring Anchor-citation guard self-test's shape,
+        # assert_numeric guard included, so a jq pipeline that produces no
+        # usable output fails here rather than falling through an `if`
+        # condition `set -e` does not catch. If this ever returns anything
+        # other than 2, the filter itself is broken (a typo, a severity the
+        # tool stopped emitting) and this step fails red before the real
+        # check below can pass green for the wrong reason.
+        # `if: success() || failure()`, same reasoning as the real step
+        # below: this is a pure self-test with no bundle dependency, so it
+        # should still run (and still be able to fail red) after an earlier
+        # Anchor-citation guard finding, just not after a cancellation.
+        if: success() || failure()
         shell: bash
         run: |
           set -e
@@ -407,11 +421,7 @@ jobs:
             ]
           }')
 
-          matched=$(echo "${syntheticReport}" | jq '[
-            .findings[]
-            | select(.ruleId == "sources-fresh" or .ruleId == "sources-fresh-future")
-            | select(.severity != "notice")
-          ] | length')
+          matched=$(echo "${syntheticReport}" | jq "[.findings[] | ${FRESHNESS_FILTER}] | length")
 
           assert_numeric matched "${matched}"
           if [ "${matched}" -ne 2 ]; then
@@ -453,11 +463,7 @@ jobs:
 
           jq -e . okf-anchor-report.json > /dev/null
 
-          freshnessFindings=$(jq '[
-            .findings[]
-            | select(.ruleId == "sources-fresh" or .ruleId == "sources-fresh-future")
-            | select(.severity != "notice")
-          ]' okf-anchor-report.json)
+          freshnessFindings=$(jq "[.findings[] | ${FRESHNESS_FILTER}]" okf-anchor-report.json)
           count=$(echo "${freshnessFindings}" | jq 'length')
 
           {
