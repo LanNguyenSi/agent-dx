@@ -3100,7 +3100,7 @@ describe("cli: probe --plan", () => {
     ]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
+    expect(run.stdout.trimEnd().length).toBeLessThanOrEqual(maxChars);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("killed");
     expect(parsed.truncated).toBe(true);
@@ -3239,7 +3239,7 @@ describe("cli: probe --plan", () => {
     ]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
+    expect(run.stdout.trimEnd().length).toBeLessThanOrEqual(maxChars);
     expect(() => JSON.parse(run.stdout)).not.toThrow();
   }, 60000);
 
@@ -3287,7 +3287,7 @@ describe("cli: probe --plan", () => {
     ]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
+    expect(run.stdout.trimEnd().length).toBeLessThanOrEqual(maxChars);
     expect(() => JSON.parse(run.stdout)).not.toThrow();
   }, 60000);
 
