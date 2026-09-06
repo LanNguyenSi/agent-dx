@@ -2665,7 +2665,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:219#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:221#"the keyed placeholder line's exact text,"`,
 re-pointed by 38 lines since this account was first written, by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
