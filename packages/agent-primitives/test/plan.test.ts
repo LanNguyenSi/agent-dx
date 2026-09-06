@@ -3,7 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { probe, probePlan, type ProbePlanOptions } from "../src/probe/index.js";
+import {
+  probe,
+  probePlan,
+  type ExpectVerdict,
+  type ProbePlanOptions,
+} from "../src/probe/index.js";
 import {
   parsePlanFile,
   validatePlan,
@@ -1180,4 +1185,141 @@ describe("probePlan(): a target that was never synced into the worktree", () => 
       gitOutput(repo, ["worktree", "list"]).trim().split("\n"),
     ).toHaveLength(1);
   }, 60000);
+});
+
+/**
+ * Reproduces (and pins the absence of) a discrepancy a reviewer reported
+ * (task a42fae2a): inside a `probe --plan` batch, a mutant declared
+ * `expect: "pass"` came back `killed`, while the identical single-mutant
+ * `-p`/`-r` invocation came back `survived` for the same mutant --
+ * standalone runs were treated as authoritative. `runMutantAttempt`'s
+ * classify step (`step.ts`) is shared verbatim between `probe()` and
+ * `probePlan()` (see `probePlan`'s own docblock, invariant I6), so this
+ * suite's job is to prove that sharing actually holds for every
+ * `killed`/`survived` combination `expect` can produce, not just the one
+ * this file's other tests already exercise.
+ *
+ * Every case below ran green on this branch: single and plan agree in
+ * all four. The attempted reproduction is recorded in this task's
+ * implementation summary rather than a fix, since nothing here
+ * reproduces the reported flip.
+ */
+describe("probe() and probePlan(): the same mutant and expectation produce the same verdict (parity)", () => {
+  const CAUGHT_LINE = 2;
+  const CAUGHT_REPLACEMENT = "  return false;";
+  // The suite asserts nothing about the `extra` key this adds, so the
+  // mutant leaves every assertion in FIXTURE_TEST_JS passing -- the
+  // same "leaves tests green" mutant `probePlan()`'s own
+  // "honours a per-mutant expect" test above already relies on.
+  const UNCAUGHT_LINE = 7;
+  const UNCAUGHT_REPLACEMENT =
+    "module.exports = { isPositive, isNegative, extra: 1 };";
+
+  async function runSingle(
+    repo: string,
+    line: number,
+    replaceText: string,
+    expectVerdict: ExpectVerdict,
+  ) {
+    return probe({
+      file: "fixture.js",
+      line,
+      form: "replace",
+      replaceText,
+      testCommand: "node fixture.test.js",
+      isolation: "inplace",
+      expect: expectVerdict,
+      cwd: repo,
+      logDir: makeTmpDir(),
+    });
+  }
+
+  async function runPlan(
+    repo: string,
+    line: number,
+    replaceText: string,
+    expectVerdict: ExpectVerdict,
+  ) {
+    return probePlan(
+      planOptions(repo, [replaceMutant(line, replaceText)], {
+        expect: expectVerdict,
+      }),
+    );
+  }
+
+  it("expect: fail, mutant the suite catches -- killed in both", async () => {
+    useLockDir();
+    const single = await runSingle(
+      initRepo().repo,
+      CAUGHT_LINE,
+      CAUGHT_REPLACEMENT,
+      "fail",
+    );
+    const plan = await runPlan(
+      initRepo().repo,
+      CAUGHT_LINE,
+      CAUGHT_REPLACEMENT,
+      "fail",
+    );
+    expect(single.status).toBe("killed");
+    expect(plan.results[0].status).toBe("killed");
+    expect(plan.results[0].status).toBe(single.status);
+  }, 30000);
+
+  it("expect: fail, mutant the suite does not catch -- survived in both", async () => {
+    useLockDir();
+    const single = await runSingle(
+      initRepo().repo,
+      UNCAUGHT_LINE,
+      UNCAUGHT_REPLACEMENT,
+      "fail",
+    );
+    const plan = await runPlan(
+      initRepo().repo,
+      UNCAUGHT_LINE,
+      UNCAUGHT_REPLACEMENT,
+      "fail",
+    );
+    expect(single.status).toBe("survived");
+    expect(plan.results[0].status).toBe("survived");
+    expect(plan.results[0].status).toBe(single.status);
+  }, 30000);
+
+  it("expect: pass, mutant the suite does not catch (matches the expectation) -- killed in both -- the exact shape the reviewer reported disagreeing", async () => {
+    useLockDir();
+    const single = await runSingle(
+      initRepo().repo,
+      UNCAUGHT_LINE,
+      UNCAUGHT_REPLACEMENT,
+      "pass",
+    );
+    const plan = await runPlan(
+      initRepo().repo,
+      UNCAUGHT_LINE,
+      UNCAUGHT_REPLACEMENT,
+      "pass",
+    );
+    expect(single.status).toBe("killed");
+    expect(plan.results[0].status).toBe("killed");
+    expect(plan.results[0].status).toBe(single.status);
+  }, 30000);
+
+  it("expect: pass, mutant the suite catches (breaks the expectation) -- survived in both", async () => {
+    useLockDir();
+    const single = await runSingle(
+      initRepo().repo,
+      CAUGHT_LINE,
+      CAUGHT_REPLACEMENT,
+      "pass",
+    );
+    const plan = await runPlan(
+      initRepo().repo,
+      CAUGHT_LINE,
+      CAUGHT_REPLACEMENT,
+      "pass",
+    );
+    expect(single.status).toBe("survived");
+    expect(plan.results[0].status).toBe("survived");
+    expect(plan.results[0].status).toBe(single.status);
+  }, 30000);
 });

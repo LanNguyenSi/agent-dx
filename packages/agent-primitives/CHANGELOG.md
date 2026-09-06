@@ -233,6 +233,34 @@ changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
 
 ### Fixed
 
+- `probe -p/--patch`'s result now carries the whole applied change for a
+  multi-line patch, not just its first changed line: `mutant.diff` (and
+  the `mutation_probe.mutant`/`verified_applied_via` strings built from
+  it) reports every hunk the applied `git diff --no-index` found,
+  bounded to 200 lines / 20,000 characters with a `truncated` flag and
+  the true `hunkCount` when the applied change is bigger than that.
+  Before this, `mutant.before`/`mutant.after` and `verified_applied_via`
+  echoed only the first line a multi-hunk (or multi-line-single-hunk)
+  patch changed, which read as the mutant's whole effect; a reviewer
+  briefing concluded from that echo that a heartbeat-removal mutant had
+  only changed a comment and was therefore impossible to kill, until the
+  patch file itself was read by hand. `mutant.line`/`before`/`after`
+  still name only the first changed line (unchanged, and still what a
+  single-hunk, single-line patch reports on its own, so every existing
+  result -- including the identity fixture -- is unaffected); `diff` is
+  the new field that shows the rest. Investigated alongside this: a
+  reviewer also reported one `expect: "pass"` mutant that came back
+  `killed` inside a `probe --plan` batch while the identical single-
+  mutant invocation came back `survived`. It does not reproduce: `probe()`
+  and `probePlan()` share the same classify step (`step.ts`'s
+  `runMutantAttempt`, unchanged by this fix), and a new parity suite
+  (`test/plan.test.ts`) runs the same mutant through both entry points
+  for all four `killed`/`survived` x `expect: "fail"`/`"pass"`
+  combinations, including the exact "leaves the suite green under
+  `expect: pass`" shape the reviewer described; all four agree in both
+  modes. The README now states explicitly what `killed`/`survived` mean
+  under each `expect` value, since the ambiguity that report described
+  is otherwise easy to read as a code defect.
 - `probe -p/--patch` now also pins its real `git apply`, the `-i
   worktree` checkout, and the tracked-diff sync apply with `-c
   core.autocrlf=false` and `-c apply.whitespace=nowarn`. A global

@@ -270,6 +270,24 @@ because a probe whose test was never shown to pass unmutated is not a
 probe), run the test against the mutant, restore the file, and classify
 the result.
 
+`--expect` names what the mutant SHOULD do to the test, and `killed`
+always means "the mutated test's outcome matched `--expect`", `survived`
+always means it did not, whichever direction `--expect` names -- neither
+word means "the test passed" or "the test failed" on its own, only
+relative to what was expected. Under the default `--expect fail` (a real
+mutation-testing probe: the mutant should break a suite that actually
+covers the mutated code) `killed` means the mutated run's test exited
+non-zero and `survived` means it still exited `0`, the usual mutation-
+testing sense. Under `--expect pass` (a negative-control probe: this
+mutant must NOT break the suite, because it targets dead code, an
+equivalent rewrite, or anything else the suite is not supposed to react
+to) the two flip: `killed` means the mutated run's test still exited `0`
+(the suite tolerated the mutant, as expected) and `survived` means it
+exited non-zero (the suite reacted to something it was not supposed to
+react to). A `--plan` mutant's own `expect` (or the plan's, or
+`--expect` on the command line; see below) decides which of the two
+readings its `killed`/`survived` uses, mutant by mutant.
+
 ```bash
 agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
   -t 'npm test'
@@ -291,6 +309,26 @@ removed `---`, an added `++`, a pure deletion, several hunks). Passing
 `-n` alongside `-p` neither moves the mutation nor changes what is
 reported; when it names a different line than the patch changes, both
 numbers appear in a warning.
+
+`mutant.line`/`before`/`after` (and the one-line
+`mutation_probe.mutant` string built from them) only ever name that
+FIRST changed line, even when the patch changes several: reading them
+alone as the whole mutant is exactly the mistake to avoid. `mutant.diff`
+covers the rest, present whenever the applied change is not fully shown
+by that one line already -- more than one hunk, or one hunk spanning
+more than one changed line: `{ text, hunkCount, truncated }`, a
+`git diff --no-index --unified=0` body (every hunk's header and its
+added/removed lines, no surrounding context) bounded to 200 lines /
+20,000 characters so the result stays one bounded JSON object; a bigger
+change is cut to its earliest hunks with `truncated: true`, while
+`hunkCount` always reports the true total. `mutation_probe.mutant`
+names that total too (`"... (first of 3 hunks; see
+verified_applied_via for the full diff)"`) and
+`mutation_probe.verified_applied_via` becomes the excerpt itself rather
+than the three-line before/after snippet. Absent for `-r`/`-M`/`-w`
+(which only ever change the one line they are given) and for an
+ordinary single-hunk, single-line patch, so every such result is
+unchanged by this field's existence.
 
 The probe pins its own content-writing git commands with `-c
 core.autocrlf=false` and `-c apply.whitespace=nowarn`: the patch dry
@@ -749,7 +787,9 @@ whether `--file` was given explicitly or is derived from the patch.
 
 Output beside the envelope: `status` (`killed`, `survived`, or
 `inconclusive`), `reason` (when inconclusive), `mutant: { file, line,
-before, after, form }`, `mutation_probe: { mutant, verified_applied_via,
+before, after, form }` (plus `diff`, for a `-p/--patch` mutant whose
+change is not fully shown by `before`/`after` alone; see above),
+`mutation_probe: { mutant, verified_applied_via,
 result, restored_verified }` (paste straight into an implementer's
 `mutation_probes` output field), `baseline: { exitCode, durationMs,
 logPath, timedOut }`, `test: { command, exitCode, durationMs, timedOut,

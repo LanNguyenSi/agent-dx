@@ -1620,6 +1620,98 @@ describe("cli: probe", () => {
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
+  it("a three-hunk -p patch reports every hunk in `mutant.diff`, in both -f json and -f text (never just the first changed line)", async () => {
+    const repo = initRepo();
+    const lines = Array.from(
+      { length: 10 },
+      (_, i) => `function fn${String(i)}() { return ${String(i)}; }`,
+    );
+    fs.writeFileSync(path.join(repo, "fixture.js"), lines.join("\n") + "\n");
+    fs.writeFileSync(path.join(repo, "fixture.test.js"), "x\n");
+    commitAll(repo);
+    const patchPath = path.join(repo, "three-hunk.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        "diff --git a/fixture.js b/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/fixture.js",
+        "+++ b/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        " function fn0() { return 0; }",
+        "-function fn1() { return 1; }",
+        "+function fn1() { return 100; }",
+        " function fn2() { return 2; }",
+        "@@ -5,3 +5,3 @@",
+        " function fn4() { return 4; }",
+        "-function fn5() { return 5; }",
+        "+function fn5() { return 500; }",
+        " function fn6() { return 6; }",
+        "@@ -9,2 +9,2 @@",
+        " function fn8() { return 8; }",
+        "-function fn9() { return 9; }",
+        "+function fn9() { return 900; }",
+      ].join("\n") + "\n",
+    );
+
+    const runJson = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "-p",
+      patchPath,
+      "-t",
+      "true",
+      "-i",
+      "inplace",
+    ]);
+    expect(runJson.code).toBe(1);
+    const parsedJson = JSON.parse(runJson.stdout);
+    expect(parsedJson.mutant.line).toBe(2);
+    expect(parsedJson.mutant.before).toBe("function fn1() { return 1; }");
+    expect(parsedJson.mutant.diff.hunkCount).toBe(3);
+    expect(parsedJson.mutant.diff.truncated).toBe(false);
+    expect(parsedJson.mutant.diff.text).toContain(
+      "function fn1() { return 1; }",
+    );
+    expect(parsedJson.mutant.diff.text).toContain(
+      "function fn5() { return 500; }",
+    );
+    expect(parsedJson.mutant.diff.text).toContain(
+      "function fn9() { return 900; }",
+    );
+    expect(parsedJson.mutation_probe.mutant).toContain("first of 3 hunks");
+    expect(parsedJson.mutation_probe.verified_applied_via).toContain(
+      "function fn5() { return 500; }",
+    );
+    expect(parsedJson.mutation_probe.verified_applied_via).toContain(
+      "function fn9() { return 900; }",
+    );
+
+    // `-f text` has no dedicated probe renderer, so it is the same
+    // envelope pretty-printed (see the "bounded pretty-JSON fallback"
+    // test above): the multi-hunk diff has to survive that round trip
+    // too, not just the compact `-f json` one.
+    const runText = await spawnCli([
+      "-C",
+      repo,
+      "-f",
+      "text",
+      "probe",
+      "-p",
+      patchPath,
+      "-t",
+      "true",
+      "-i",
+      "inplace",
+    ]);
+    expect(runText.code).toBe(1);
+    expect(runText.stdout).toContain('"hunkCount": 3');
+    expect(runText.stdout).toContain("function fn5() { return 500; }");
+    expect(runText.stdout).toContain("function fn9() { return 900; }");
+    expect(JSON.parse(runText.stdout).mutant.diff.hunkCount).toBe(3);
+  });
+
   it("a -p patch touching two paths, no --file: usage_error/patch_file_ambiguous, exit 2, through the built CLI", async () => {
     const repo = initRepo();
     fs.writeFileSync(

@@ -43,7 +43,55 @@ export interface MutantComputed {
    * `replace`/`match`, which do no exec calls; the dry-run `git apply`
    * and, for `patch`, the `--numstat` check for `patch`). */
   logPaths: string[];
+  /** The applied change's full, bounded diff excerpt, present only for
+   * a `patch` mutant whose change `line`/`before`/`after` alone would
+   * not already show in full: more than one hunk, or one hunk spanning
+   * more than one changed line. Absent for `replace`/`match` (which
+   * only ever change the one line `before`/`after` already quote) and
+   * for a single-hunk, single-line `patch` mutant (the same case),
+   * so every existing single-line result -- and the identity fixture
+   * built from one -- stays byte-identical. See `computeAppliedDiffExcerpt`. */
+  diff?: MutantDiffField;
 }
+
+/** `MutantComputed.diff`: what `mutation_probe.mutant` and
+ * `verified_applied_via` show instead of (never in place of the
+ * evidence in) `before`/`after` alone, for a multi-line patch mutant --
+ * see `MutantComputed.diff`'s own docblock for when this is present. */
+export interface MutantDiffField {
+  /** A `git diff --no-index --unified=0` body: the `--- `/`+++ ` file
+   * lines and every `@@ ... @@` hunk with its added/removed lines; no
+   * context lines (the point is which lines changed, not the lines
+   * around them) and no leading `diff --git `/`index ` lines (they would
+   * only name this comparison's own throwaway scratch paths and a blob
+   * hash from a repository that does not exist). Bounded to
+   * `DIFF_EXCERPT_MAX_LINES`/`DIFF_EXCERPT_MAX_CHARS`; cut to its head
+   * (the earliest hunks) when the applied change is bigger than that,
+   * with `truncated` set. */
+  text: string;
+  /** Every hunk the applied change produced, counted before any
+   * truncation, so it stays accurate even when `text` had to be cut. */
+  hunkCount: number;
+  truncated: boolean;
+}
+
+/**
+ * The bound on `MutantDiffField.text`: the result stays one bounded JSON
+ * object, so a patch that changes hundreds of lines gets a clearly
+ * truncated excerpt (the earliest hunks, `truncated: true`, `hunkCount`
+ * still the true total) rather than an unbounded dump. Sized well past
+ * what an actual multi-hunk mutation-probe patch needs to prove its
+ * hunks are not just the first one (the fixture this bound is tested
+ * against uses three, each two lines), while still being far below
+ * `PATCH_MAX_BYTES`. Deliberately its own constants rather than
+ * `exec.ts`'s `TAIL_CHARS`/`TAIL_LINES`: those keep a subprocess
+ * output's TAIL (the most recent lines), while a diff excerpt keeps its
+ * HEAD (the earliest hunks) -- the two bounds happen to hold the same
+ * shape of value (a capped text blob) for unrelated reasons and are not
+ * meant to move together.
+ */
+export const DIFF_EXCERPT_MAX_LINES = 200;
+export const DIFF_EXCERPT_MAX_CHARS = 20_000;
 
 export interface MutantNotApplicable {
   applicable: false;
@@ -404,6 +452,111 @@ export async function listPatchTouchedPaths(
  * `after` from one comparison is what keeps the reported number and the
  * quoted content from ever naming different lines.
  */
+/**
+ * Computes `MutantComputed.diff` for a `patch` mutant: a
+ * `git diff --no-index --unified=0` between two scratch copies of
+ * `originalContent` and `newContent` -- never the patch file's own
+ * bytes, the same invariant `patchUnusableReason`'s docblock documents
+ * (this process never reads a `-p/--patch` path's content; `git apply`,
+ * a child process, is what does). The two copies both use `relPath`'s
+ * basename, one under a `before/` and one under an `after/` scratch
+ * subdirectory, so the diff's own `--- `/`+++ ` header lines read as
+ * "before/<name>" and "after/<name>" rather than two arbitrary temp
+ * paths.
+ *
+ * `--unified=0` (no context lines) is deliberate: this excerpt exists to
+ * show which lines changed, not the lines around them, and every context
+ * line would spend the same bound the changed lines do.
+ *
+ * Returns `undefined` on anything that keeps this from computing (a
+ * `git` too old for `--no-index`, or any other non-0/1 exit): the
+ * caller already knows the two contents differ from its own comparison,
+ * so a failure here only means the extra excerpt is unavailable, never
+ * that the mutant itself is inconclusive.
+ */
+async function computeAppliedDiffExcerpt(
+  originalContent: string,
+  newContent: string,
+  relPath: string,
+  logDir: string,
+  runOptions: { logDir: string; timeoutMs: number; signal?: AbortSignal },
+): Promise<
+  | {
+      text: string;
+      hunkCount: number;
+      changedLineCount: number;
+      truncated: boolean;
+      logPath: string;
+    }
+  | undefined
+> {
+  let diffDir: string;
+  try {
+    diffDir = fs.mkdtempSync(path.join(logDir, "mutant-diff-"));
+  } catch {
+    return undefined;
+  }
+  const base = path.basename(relPath) || "file";
+  const beforeDir = path.join(diffDir, "before");
+  const afterDir = path.join(diffDir, "after");
+  fs.mkdirSync(beforeDir, { recursive: true });
+  fs.mkdirSync(afterDir, { recursive: true });
+  fs.writeFileSync(path.join(beforeDir, base), originalContent);
+  fs.writeFileSync(path.join(afterDir, base), newContent);
+  const diffResult = await runArgv(
+    "git",
+    [
+      "diff",
+      "--no-index",
+      "--unified=0",
+      "--",
+      `before/${base}`,
+      `after/${base}`,
+    ],
+    { ...runOptions, cwd: diffDir, logDir: diffDir },
+  );
+  // `git diff --no-index` exits 0 for "no difference" (unreachable here:
+  // the caller only calls this once its own comparison already found
+  // one), 1 for "differences found" (the expected case), and anything
+  // else for a failure this excerpt cannot recover from.
+  if (diffResult.exitCode !== 0 && diffResult.exitCode !== 1) {
+    return undefined;
+  }
+  const bodyLines = diffResult.stdout
+    .split("\n")
+    .filter(
+      (line) => !line.startsWith("diff --git ") && !line.startsWith("index "),
+    );
+  while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1] === "") {
+    bodyLines.pop();
+  }
+  const hunkCount = bodyLines.filter((line) => line.startsWith("@@ ")).length;
+  if (hunkCount === 0) return undefined;
+  const changedLineCount = bodyLines.filter(
+    (line) =>
+      (line.startsWith("+") && !line.startsWith("+++ ")) ||
+      (line.startsWith("-") && !line.startsWith("--- ")),
+  ).length;
+  let lines = bodyLines;
+  let truncated = false;
+  if (lines.length > DIFF_EXCERPT_MAX_LINES) {
+    lines = lines.slice(0, DIFF_EXCERPT_MAX_LINES);
+    truncated = true;
+  }
+  let text = lines.join("\n");
+  if (text.length > DIFF_EXCERPT_MAX_CHARS) {
+    text = text.slice(0, DIFF_EXCERPT_MAX_CHARS);
+    truncated = true;
+  }
+  return {
+    text,
+    hunkCount,
+    changedLineCount,
+    truncated,
+    logPath: diffResult.logPath,
+  };
+}
+
 async function computePatch(
   originalContent: string,
   absFile: string,
@@ -509,6 +662,37 @@ async function computePatch(
       reason: "patch applied cleanly but produced no content change",
       logPaths,
     };
+  // The multi-hunk excerpt (and the extra `git diff --no-index` call
+  // that computes it) is skipped outright when `originalContent` and
+  // `newContent` are already known to be a single-line change: same
+  // line count, exactly one differing index. That is the common case
+  // (and every existing patch-mutant test fixture, including the
+  // identity fixture), so it keeps its exact previous log/argv
+  // footprint -- no extra subprocess call, no `diff` field -- rather
+  // than paying for an excerpt that would only ever be discarded.
+  const singleLineChange = isSingleLineChange(originalContent, newContent);
+  const excerpt = singleLineChange
+    ? undefined
+    : await computeAppliedDiffExcerpt(
+        originalContent,
+        newContent,
+        relPath,
+        logDir,
+        runOptions,
+      );
+  // Attached only when `before`/`after` (this mutant's first changed
+  // line alone) would not already show the whole story: more than one
+  // hunk, or one hunk spanning more than one changed line (more than
+  // the one removed and one added line a single-line change produces).
+  const diffField: MutantDiffField | undefined =
+    excerpt !== undefined &&
+    (excerpt.hunkCount > 1 || excerpt.changedLineCount > 2)
+      ? {
+          text: excerpt.text,
+          hunkCount: excerpt.hunkCount,
+          truncated: excerpt.truncated,
+        }
+      : undefined;
   return {
     applicable: true,
     line: diff.line,
@@ -516,8 +700,33 @@ async function computePatch(
     after: diff.after,
     newContent,
     mutatedHash: hashString(newContent),
-    logPaths,
+    logPaths: excerpt !== undefined ? [...logPaths, excerpt.logPath] : logPaths,
+    ...(diffField !== undefined ? { diff: diffField } : {}),
   };
+}
+
+/** Cheap pre-check, no `git` call: true when `a` and `b` have the same
+ * number of lines and differ at exactly one index. Every single-line
+ * `replace`/`match` mutant is this by construction, and so is a `patch`
+ * mutant whose hunk replaces one line with another -- the case
+ * `before`/`after` already covers completely, which is what lets
+ * `computePatch` skip `computeAppliedDiffExcerpt`'s `git diff` call for
+ * it rather than computing an excerpt only to discard it. An insertion
+ * or deletion (a line-count change) is never this, even when it is the
+ * only line touched, since there is no single index for both to differ
+ * at only once. */
+function isSingleLineChange(a: string, b: string): boolean {
+  const aLines = a.split("\n");
+  const bLines = b.split("\n");
+  if (aLines.length !== bLines.length) return false;
+  let differences = 0;
+  for (let i = 0; i < aLines.length; i++) {
+    if (aLines[i] !== bLines[i]) {
+      differences++;
+      if (differences > 1) return false;
+    }
+  }
+  return differences === 1;
 }
 
 export interface ComputeMutantOptions extends GitApplyOptions {
@@ -599,24 +808,49 @@ export function applyPatchForReal(
 }
 
 /** Formats the `mutant: "<file>:<line>: <before> -> <after>"` string
- * used verbatim as `mutation_probe.mutant`. */
+ * used verbatim as `mutation_probe.mutant`. When `diff` is given (a
+ * patch mutant whose change spans more than the one line `before`/
+ * `after` already quote) a trailing note names the true hunk count and,
+ * when the excerpt itself had to be cut, that it was truncated -- so
+ * this one line can never be read as the whole mutant on its own; see
+ * `verified_applied_via` (`formatVerifiedAppliedVia`) for the full
+ * excerpt. */
 export function formatMutantSummary(
   file: string,
   line: number,
   before: string,
   after: string,
+  diff?: MutantDiffField,
 ): string {
-  return `${file}:${line}: ${before} -> ${after}`;
+  const head = `${file}:${line}: ${before} -> ${after}`;
+  if (diff === undefined) return head;
+  return (
+    `${head} (first of ${String(diff.hunkCount)} hunks; see ` +
+    `verified_applied_via for the full diff` +
+    `${diff.truncated ? ", truncated" : ""})`
+  );
 }
 
 /** A short, fixed-shape (three lines) snippet proving the mutant was
  * really applied: the file:line header, the original line, and the
- * mutated line. */
+ * mutated line. When `diff` is given, this is instead the bounded
+ * multi-hunk excerpt (`MutantComputed.diff`'s own docblock covers when
+ * that happens): a header naming the file, the true hunk count, and
+ * whether the excerpt was truncated, followed by the excerpt's own
+ * `git diff --no-index` body -- so a multi-hunk patch mutant is never
+ * represented by a single line here either. */
 export function formatVerifiedAppliedVia(
   file: string,
   line: number,
   before: string,
   after: string,
+  diff?: MutantDiffField,
 ): string {
-  return [`${file}:${line}`, `- ${before}`, `+ ${after}`].join("\n");
+  if (diff === undefined) {
+    return [`${file}:${line}`, `- ${before}`, `+ ${after}`].join("\n");
+  }
+  const header =
+    `${file}: ${String(diff.hunkCount)} hunks` +
+    (diff.truncated ? " (excerpt truncated)" : "");
+  return [header, diff.text].join("\n");
 }

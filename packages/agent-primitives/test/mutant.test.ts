@@ -391,6 +391,198 @@ describe("computeMutant: the reported line", () => {
   });
 });
 
+/** A repo whose file has `lineCount` distinct, numbered lines -- enough
+ * room for several hunks spaced far enough apart that `git diff`'s
+ * default context never bridges them. */
+function initRepoWithLines(lineCount: number): {
+  root: string;
+  relPath: string;
+  absFile: string;
+  content: string;
+} {
+  const root = makeTmpDir();
+  git(root, ["init", "-q"]);
+  git(root, ["config", "user.email", "test@example.com"]);
+  git(root, ["config", "user.name", "test"]);
+  const relPath = "fixture.js";
+  const absFile = path.join(root, relPath);
+  const content =
+    Array.from(
+      { length: lineCount },
+      (_, i) => `function fn${String(i + 1)}() { return ${String(i + 1)}; }`,
+    ).join("\n") + "\n";
+  fs.writeFileSync(absFile, content);
+  git(root, ["add", "-A"]);
+  git(root, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+  return { root, relPath, absFile, content };
+}
+
+/** A unified diff (built by hand, `--unified=0` shape) that replaces
+ * `changedLines` (1-indexed) each with `<original> -> CHANGED`, one hunk
+ * per line, so the number of hunks the patch carries is exactly
+ * `changedLines.length`. */
+/** `git apply` refuses a context-free hunk outright (`--unidiff-zero` is
+ * required for one, and `computePatch`/`applyPatchForReal` never pass
+ * it, the same as a real `-p` patch made by `git diff`'s own default):
+ * every hunk here carries one line of context on each side it has one,
+ * exactly as `git diff` would produce. `changedLines` must be spaced at
+ * least 4 apart so no two hunks' one-line context windows ever touch,
+ * which would merge them into one hunk instead of the `changedLines.length`
+ * this test counts on. */
+function writeSparsePatch(
+  patchPath: string,
+  relPath: string,
+  changedLines: number[],
+  lineCount: number,
+): void {
+  const fnLine = (n: number): string =>
+    `function fn${String(n)}() { return ${String(n)}; }`;
+  const body: string[] = [
+    `diff --git a/${relPath} b/${relPath}`,
+    "index 0000000..0000000 100644",
+    `--- a/${relPath}`,
+    `+++ b/${relPath}`,
+  ];
+  for (const n of changedLines) {
+    const hasBefore = n > 1;
+    const hasAfter = n < lineCount;
+    const oldCount = 1 + (hasBefore ? 1 : 0) + (hasAfter ? 1 : 0);
+    const start = hasBefore ? n - 1 : n;
+    body.push(
+      `@@ -${String(start)},${String(oldCount)} +${String(start)},${String(oldCount)} @@`,
+    );
+    if (hasBefore) body.push(` ${fnLine(n - 1)}`);
+    body.push(`-${fnLine(n)}`);
+    body.push(`+function fn${String(n)}() { return ${String(n * 100)}; }`);
+    if (hasAfter) body.push(` ${fnLine(n + 1)}`);
+  }
+  fs.writeFileSync(patchPath, body.join("\n") + "\n");
+}
+
+describe("computeMutant: patch form multi-hunk diff excerpt", () => {
+  it("reports all three hunks in `diff`, never just the first changed line -- the defect this excerpt fixes", async () => {
+    const { root, relPath, absFile, content } = initRepoWithLines(10);
+    const patchPath = path.join(root, "three-hunk.patch");
+    writeSparsePatch(patchPath, relPath, [2, 6, 10], 10);
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    // `line`/`before`/`after` still name only the FIRST changed line --
+    // that alone is not the defect; the defect was `diff` not existing
+    // at all, leaving the reader with no way to see the other two hunks.
+    expect(result.line).toBe(2);
+    expect(result.before).toBe("function fn2() { return 2; }");
+    expect(result.after).toBe("function fn2() { return 200; }");
+    expect(result.diff).toBeDefined();
+    expect(result.diff?.hunkCount).toBe(3);
+    expect(result.diff?.truncated).toBe(false);
+    expect(result.diff?.text).toContain("function fn2() { return 2; }");
+    expect(result.diff?.text).toContain("function fn6() { return 6; }");
+    expect(result.diff?.text).toContain("function fn6() { return 600; }");
+    expect(result.diff?.text).toContain("function fn10() { return 10; }");
+    expect(result.diff?.text).toContain("function fn10() { return 1000; }");
+
+    const summary = formatMutantSummary(
+      "fixture.js",
+      result.line,
+      result.before,
+      result.after,
+      result.diff,
+    );
+    expect(summary).toContain("first of 3 hunks");
+    // The one-line summary still never quotes the second/third hunk --
+    // that is `verified_applied_via`'s job, not this one's.
+    expect(summary).not.toContain("fn6");
+
+    const verifiedVia = formatVerifiedAppliedVia(
+      "fixture.js",
+      result.line,
+      result.before,
+      result.after,
+      result.diff,
+    );
+    expect(verifiedVia).toContain("3 hunks");
+    expect(verifiedVia).toContain("function fn6() { return 600; }");
+    expect(verifiedVia).toContain("function fn10() { return 1000; }");
+  });
+
+  it("attaches `diff` for a single hunk spanning more than one changed line too, not only for several hunks", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "multi-line-single-hunk.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        `+++ b/${relPath}`,
+        "@@ -1,3 +1,3 @@",
+        "-function isPositive(n) {",
+        "+function isPositive(n) {  // mutated",
+        "-  return n > 0;",
+        "+  return false;",
+        " }",
+      ].join("\n") + "\n",
+    );
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    expect(result.diff?.hunkCount).toBe(1);
+    expect(result.diff?.text).toContain("return false;");
+    expect(result.diff?.text).toContain("mutated");
+  });
+
+  it("does NOT attach `diff` for an ordinary single-hunk, single-line patch (every existing fixture stays byte-identical)", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "single-line.patch");
+    writeValidPatch(patchPath, relPath);
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeUndefined();
+  });
+
+  it("truncates a diff excerpt bigger than the bound, but keeps reporting the true total hunk count", async () => {
+    const lineCount = 700;
+    const { root, relPath, absFile, content } = initRepoWithLines(lineCount);
+    const changedLines = Array.from(
+      { length: 100 },
+      (_, i) => (i + 1) * 4,
+    ).filter((n) => n <= lineCount);
+    const patchPath = path.join(root, "many-hunks.patch");
+    writeSparsePatch(patchPath, relPath, changedLines, lineCount);
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.diff).toBeDefined();
+    expect(result.diff?.hunkCount).toBe(changedLines.length);
+    expect(result.diff?.truncated).toBe(true);
+    expect(result.diff?.text.length).toBeLessThanOrEqual(20_000);
+    expect(result.diff?.text.split("\n").length).toBeLessThanOrEqual(200);
+  }, 30000);
+});
+
 describe("computeMutant: CRLF terminator preservation", () => {
   const CRLF_ORIGINAL = "function isPositive(n) {\r\n  return n > 0;\r\n}\r\n";
 

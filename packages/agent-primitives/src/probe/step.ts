@@ -140,18 +140,21 @@ export async function prepareMutant(
       before: computed.before,
       after: computed.after,
       form: spec.form,
+      ...(computed.diff !== undefined ? { diff: computed.diff } : {}),
     },
     mutantSummary: formatMutantSummary(
       target.displayFile,
       computed.line,
       computed.before,
       computed.after,
+      computed.diff,
     ),
     verifiedAppliedVia: formatVerifiedAppliedVia(
       target.displayFile,
       computed.line,
       computed.before,
       computed.after,
+      computed.diff,
     ),
     logPaths: computed.logPaths,
   };

@@ -24,7 +24,7 @@ import {
   type InplaceSession,
   type WorktreeSyncSuccess,
 } from "./isolation.js";
-import type { MutantForm } from "./mutant.js";
+import type { MutantDiffField, MutantForm } from "./mutant.js";
 
 /**
  * The run-controller layer of the probe pipeline: the SIGINT/SIGTERM
@@ -54,6 +54,10 @@ export interface MutantField {
   before: string;
   after: string;
   form: MutantForm;
+  /** Present only for a `patch` mutant whose applied change is not
+   * fully shown by `before`/`after` alone; see
+   * `MutantComputed.diff`'s docblock in `mutant.ts` for exactly when. */
+  diff?: MutantDiffField;
 }
 
 export interface MutationProbeField {
