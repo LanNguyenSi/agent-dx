@@ -4241,6 +4241,7 @@ describe("docs-only closing deltas stay narrowly bounded", () => {
 describe("fix-round mutation probe replay ships in step 6, step 7, and both implementer contracts", () => {
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
   const implementerMd = unwrap(readAsset("agents/implementer.md"));
+  const changelogMd = readDoc("CHANGELOG.md");
 
   it("step 6 instructs replaying every mutation probe named in an earlier round of this task", () => {
     expect(skillMd).toContain(
@@ -4319,9 +4320,41 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
 
   it("the reviewer prompt's output-contract yaml block gains no `replayed` field", () => {
     const reviewerMd = readAsset("agents/reviewer.md");
-    const match = reviewerMd.match(/```yaml\n([\s\S]*?)```/);
-    expect(match, "reviewer output-contract yaml block not found").toBeTruthy();
-    const outputContractBlock = (match as RegExpMatchArray)[1];
+    // Slice from the output-contract heading itself (the way
+    // template-markers.test.ts slices from "### Mutation Probes") rather
+    // than matching the first yaml fence in the file, so a fence added
+    // earlier in the prompt (an example, a decoy) cannot be mistaken for the
+    // output contract. Also require exactly one yaml fence in the whole
+    // file (not only after the heading), so a fence added anywhere -
+    // including above the output contract, where it would silently become
+    // the "first fence" the old regex matched - fails this test loudly
+    // instead of passing by accident. The whole-file count is the primary
+    // guard: it fails for an added fence anywhere in the file. The heading
+    // slice below is a second, narrower guard that additionally covers the
+    // one case the whole-file count alone would not distinguish: the
+    // file's single fence sitting above the heading instead of after it.
+    const allFences = [...reviewerMd.matchAll(/```yaml\n([\s\S]*?)```/g)];
+    expect(
+      allFences.length,
+      "expected exactly one yaml fence in reviewer.md",
+    ).toBe(1);
+    const heading =
+      "Return exactly this structure as your final output, nothing else:";
+    const headingIndex = reviewerMd.indexOf(heading);
+    expect(
+      headingIndex,
+      "reviewer output-contract heading not found",
+    ).toBeGreaterThanOrEqual(0);
+    const afterHeading = reviewerMd.slice(headingIndex);
+    const fences = [...afterHeading.matchAll(/```yaml\n([\s\S]*?)```/g)];
+    expect(
+      fences.length,
+      "expected exactly one yaml fence after the output-contract heading",
+    ).toBe(1);
+    const outputContractBlock = fences[0][1];
+    // The file's one fence (asserted above) must be this one: ties the
+    // whole-file guard and the heading-slice guard to the same block.
+    expect(outputContractBlock).toBe(allFences[0][1]);
     expect(outputContractBlock).not.toContain("replayed");
   });
 
@@ -4342,6 +4375,48 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     ];
     expect(subFieldNames(skillBlock)).toEqual(expectedOrder);
     expect(subFieldNames(implementerBlock)).toEqual(expectedOrder);
+  });
+
+  // The CHANGELOG's own prose description of the replay rule is a fourth
+  // copy (after SKILL.md step 6, SKILL.md's output-contract paragraph, and
+  // implementer.md) and was previously unpinned. Anchor on a phrase inside
+  // the bullet rather than the "[Unreleased]" heading above it, since a
+  // release moves the bullet under a version heading (it now sits under
+  // `[0.30.0]`, released the same day this pin was added) while the
+  // bullet's own wording survives the move unchanged. The anchor phrase
+  // itself deliberately stops short of the trigger clause ("after a
+  // task's first") and the two evidence phrases checked below, so those
+  // checks are real: none of them is already guaranteed true merely
+  // because the anchor was found, the way a check against the anchor's
+  // own text would be.
+  it("the CHANGELOG's own prose copy of the replay rule names the trigger and the `replayed` field", () => {
+    const bulletAnchor = "the orchestrator's briefing names";
+    const anchorIndex = changelogMd.indexOf(bulletAnchor);
+    expect(
+      anchorIndex,
+      "CHANGELOG replay-rule bullet anchor phrase not found",
+    ).toBeGreaterThanOrEqual(0);
+    const bulletStart = changelogMd.lastIndexOf("\n- ", anchorIndex) + 1;
+    expect(
+      bulletStart,
+      "start of CHANGELOG replay-rule bullet not found",
+    ).toBeGreaterThan(0);
+    // The bullet ends at the next bullet, or (if this is the list's last
+    // bullet) the next heading, or (if nothing follows) the file's end.
+    let bulletEnd = changelogMd.indexOf("\n- ", anchorIndex + 1);
+    if (bulletEnd < 0) {
+      bulletEnd = changelogMd.indexOf("\n#", anchorIndex + 1);
+    }
+    if (bulletEnd < 0) {
+      bulletEnd = changelogMd.length;
+    }
+    const bullet = changelogMd.slice(bulletStart, bulletEnd);
+    // Names the trigger: a fix round after the task's first round. Real
+    // check: the anchor above stops before this clause.
+    expect(bullet).toContain("On any round after a task's first");
+    expect(bullet).toContain("every mutation probe named in an earlier round");
+    // Names the `replayed` field the evidence is carried in.
+    expect(bullet).toContain("`replayed` sub-field");
   });
 });
 
@@ -4566,5 +4641,76 @@ describe("identifier drift is also covered for the orchestrator's own trivial-re
     expect(skillMd).toContain(
       "by the reviewer or by the orchestrator itself when it reviews a trivial rename per Scaling delegation, using a connected drift check when one exists",
     );
+  });
+});
+
+/**
+ * The reviewer checklist items above are individually pinned in
+ * `reviewer.md`, and several are separately pinned again wherever SKILL.md
+ * carries a mirrored sentence for the orchestrator (Placement at step 9,
+ * the GitHub Actions shell replay at steps 6/7, identifier drift at step
+ * 7). Those pins live in independent `describe` blocks, so removing one
+ * side of a mirrored pair only fails the block that pins that side: a
+ * reviewer.md edit that silently drops its SKILL.md counterpart (or vice
+ * versa) is not caught by any single existing test. This block asserts
+ * every mirrored pair together from one table, so either half missing
+ * fails the same test.
+ *
+ * Convention for adding a new pair (when a new reviewer checklist item
+ * gains a SKILL.md mirror): add one entry to `MIRRORED_CHECKLIST_PAIRS`
+ * with a short `item` label, the exact `reviewerPhrase` substring (after
+ * `unwrap`, so line-wrapping in the source file does not matter), and the
+ * exact `skillPhrase` substring its SKILL.md counterpart carries. Do not
+ * add a pair for a checklist item that has no SKILL.md mirror (identifier
+ * drift's own reviewer-only wording, e.g. the "no product or binary name
+ * is hardcoded" guard above, stays out of this table on purpose). Not
+ * every mirrored item lives in this table: Recurrence, the empirical
+ * reproduction rule, and the mandatory `acceptance_recommendation` field
+ * are also mirrored between reviewer.md and SKILL.md, but each is already
+ * pinned as a pair in its own dedicated `describe` block elsewhere in this
+ * file, so they are deliberately not duplicated here.
+ */
+describe("the reviewer checklist items mirrored in this table still carry their SKILL.md counterpart", () => {
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  const MIRRORED_CHECKLIST_PAIRS: Array<{
+    item: string;
+    reviewerPhrase: string;
+    skillPhrase: string;
+  }> = [
+    {
+      item: "Placement",
+      reviewerPhrase:
+        "Placement: does the change add org-, machine-, or point-in-time-bound evidence",
+      skillPhrase:
+        "check that no org-, machine-, or point-in-time-bound evidence was added to a reusable instruction file",
+    },
+    {
+      item: "GitHub Actions shell replay",
+      reviewerPhrase:
+        "GitHub Actions shell replay: for any diff that adds or changes a GitHub Actions `run:` step, replay it yourself under the shell the step actually runs",
+      skillPhrase:
+        "The GitHub Actions shell replay named in step 6 is a second, explicitly non-probabilistic trigger for the same field",
+    },
+    {
+      item: "identifier drift",
+      reviewerPhrase:
+        "Identifier drift: after a change deletes or renames an exported identifier, type, config key or file",
+      skillPhrase:
+        "A change that deletes or renames an exported identifier, type, config key, or file is also checked for identifier drift",
+    },
+  ];
+
+  it.each(MIRRORED_CHECKLIST_PAIRS)(
+    "$item: reviewer.md and SKILL.md both carry their half of the pair",
+    ({ reviewerPhrase, skillPhrase }) => {
+      expect(reviewerMd).toContain(reviewerPhrase);
+      expect(skillMd).toContain(skillPhrase);
+    },
+  );
+
+  it("found at least three mirrored pairs to check (sanity: not vacuously true)", () => {
+    expect(MIRRORED_CHECKLIST_PAIRS.length).toBeGreaterThanOrEqual(3);
   });
 });
