@@ -1,5 +1,45 @@
 # Bundle log
 
+- 2026-09-06T05:42:00Z (review fix round, six low findings): fixed the
+  CHANGELOG replay-rule pin's tautological assertion, flagged because its
+  anchor text (`"On any round after a task's first, the orchestrator's
+  briefing names"`) already contained the substring the follow-up
+  `expect(bullet).toContain("after a task's first")` re-checked, so that
+  assertion could not fail independently of the anchor lookup above it.
+  Shrank the anchor to a bullet-internal phrase that excludes the trigger
+  clause and the two evidence phrases already checked, so the trigger
+  assertion is now real; also swapped the brittle "next bullet must
+  exist" end-of-bullet detection (a hard failure if this ever becomes the
+  changelog's last bullet) for a fallback chain: next bullet, else next
+  heading, else end of file. Added one sentence to the yaml-fence pin's
+  docblock stating the whole-file fence count is the primary guard and
+  the heading slice is a narrower second guard for the one case the
+  count alone would not distinguish (the file's single fence sitting
+  above the heading), plus an assertion tying the heading-sliced fence
+  to the whole-file match. Retitled the mirrored-checklist-pairs
+  `describe` block to state its actual invariant (the three pairs in its
+  table, not every mirrored item) and named the three mirrors pinned
+  elsewhere (Recurrence, the reproduction rule, the mandatory
+  `acceptance_recommendation` field) that are deliberately not
+  duplicated into this table. Corrected this log's own miscount in the
+  prior entry: `subagent-contracts-superset.md`'s re-derived citations
+  are eight line citations, seven distinct lines, since the
+  regression-signal citation appears twice, not six as previously
+  written; also dropped a stray em dash from that entry's prose per the
+  no-em-dash convention. The fence-pin and CHANGELOG-pin edits above
+  shifted the two output-contract citations following them in
+  `subagent-contracts-superset.md` from 4351/4354 to 4358/4361;
+  re-derived and corrected both. Re-verified the rest of
+  `subagent-contracts-superset.md` against the final tree (every other
+  citation into `docs-consistency.test.ts` sits above this round's edits
+  and is unaffected) and re-stamped it. `model-preselection.md`,
+  `review-gate-and-waivers.md`, and `run-state-lifecycle-and-markers.md`
+  also list `docs-consistency.test.ts` as a source; re-verified each
+  against the final tree (their own citations sit well below this
+  round's edits, unaffected) and re-stamped all three. `npx vitest run`
+  is green across the suite; typecheck, typecheck:test, and build all
+  succeed.
+
 - 2026-09-06T05:26:00Z (same task, follow-up re-stamp): the yaml-fence pin
   above needed a follow-up fix (a whole-file "exactly one yaml fence"
   check, so a decoy fence anywhere in `reviewer.md` fails loudly, not
@@ -23,9 +63,10 @@
   one `[Unreleased]` CHANGELOG bullet (tests only) describing the three
   pins, inserted above the `[0.30.0]` heading; this shifted every
   line-anchored citation into `CHANGELOG.md` below it by +15, re-derived
-  in `subagent-contracts-superset.md`'s six line citations at
+  in `subagent-contracts-superset.md`'s eight line citations, seven
+  distinct lines (the regression-signal citation appears twice), at
   4247/4256/4262/4256/4310/4316/4325/4328 (now 4248/4257/4263/4257/4311/
-  4317/4351/4354 — the last two also carry the `docs-consistency.test.ts`
+  4317/4351/4354, the last two also carrying the `docs-consistency.test.ts`
   growth from the yaml-fence-pin edit itself, including its own follow-up
   fix adding a whole-file fence count so the named mutant (a decoy fence
   above the output contract) fails loudly, not only the earlier +1-line
