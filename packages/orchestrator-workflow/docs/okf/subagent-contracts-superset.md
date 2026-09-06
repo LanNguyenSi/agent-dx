@@ -473,20 +473,22 @@ output contract itself
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:291#"the replayed probes the implementer reports as killed"`);
 `assets/agents/reviewer.md` itself is untouched by this change.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:4247#"On any round after the task's first, the briefing also names"` pins step 6's
-instruction, `test/docs-consistency.test.ts:4256#"A replayed probe whose mutant now survives or can no longer be applied is a regression signal"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:4248#"On any round after the task's first, the briefing also names"` pins step 6's
+instruction, `test/docs-consistency.test.ts:4257#"A replayed probe whose mutant now survives or can no longer be applied is a regression signal"`
 pins the regression-signal consequence, and the implementer prompt's
 matching rules
-(`test/docs-consistency.test.ts:4262#"On any round after the task's first, the assignment also names"`,
-`test/docs-consistency.test.ts:4256#"A replayed probe whose mutant now survives or can no longer be applied is a regression signal"`). A byte-for-byte
+(`test/docs-consistency.test.ts:4263#"On any round after the task's first, the assignment also names"`,
+`test/docs-consistency.test.ts:4257#"A replayed probe whose mutant now survives or can no longer be applied is a regression signal"`). A byte-for-byte
 cross-copy equality check on the `mutation_probes` block including the new
-sub-field (`test/docs-consistency.test.ts:4310#"replayed: false | true"`), the step 7 reviewer-briefing
-sentence (`test/docs-consistency.test.ts:4316#"the orchestrator's reviewer briefing names the replayed probes"`), and a
+sub-field (`test/docs-consistency.test.ts:4311#"replayed: false | true"`), the step 7 reviewer-briefing
+sentence (`test/docs-consistency.test.ts:4317#"the orchestrator's reviewer briefing names the replayed probes"`), and a
 negative pin scoped to `reviewer.md`'s output-contract yaml block, that it
-gains no `replayed` field
-(`test/docs-consistency.test.ts:4325#"outputContractBlock).not.toContain"`). A further pin locks the five
+gains no `replayed` field, sliced from the output-contract heading rather
+than the first yaml fence in the file so an earlier decoy fence cannot be
+mistaken for it
+(`test/docs-consistency.test.ts:4344#"outputContractBlock).not.toContain"`). A further pin locks the five
 `mutation_probes` sub-fields to their fixed order in both copies
-(`test/docs-consistency.test.ts:4328#"both copies' mutation_probes block has exactly the five sub-fields in a fixed order"`).
+(`test/docs-consistency.test.ts:4347#"both copies' mutation_probes block has exactly the five sub-fields in a fixed order"`).
 
 Motivation: `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
 7(ii) found fix-round regressions from a prior round's own fix that a
