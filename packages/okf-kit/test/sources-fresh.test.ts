@@ -591,11 +591,14 @@ describe("sources-fresh", () => {
       // (`core.quotePath` defaults to true), so `previousPathIn`'s plain
       // string match against `repoRelDocPath` never matched a quoted
       // `"bundle/\303\266lt.md"` row -- the doc fell through to the `same`
-      // fallback, and the ensuing `git show <parent>:<doc>` blob read (for
-      // the WRONG, still-quoted path under the old code) failed, turning
-      // this into a `not assessable` notice rather than the STALE it
-      // should have been. `-z` prints the path verbatim; this fixture pins
-      // that a non-ASCII rename is still read correctly end to end.
+      // fallback, which returns the doc's real (unquoted) current path
+      // unchanged. But this commit was a rename, so the doc was NOT at
+      // that path in the first parent (it lived under the old name
+      // there), and the ensuing `git show <parent>:<doc>` blob read
+      // failed, turning this into a `not assessable` notice rather than
+      // the STALE it should have been. `-z` prints the path verbatim;
+      // this fixture pins that a non-ASCII rename is still read
+      // correctly end to end.
       repo.commitFiles(
         [
           {
@@ -1129,6 +1132,93 @@ describe("sources-fresh", () => {
       ]);
       expect(calls).toHaveLength(sources.length + 5);
     });
+
+    it("a failed rev-parse on a parentless doc commit -> not assessable, never a silent pass", () => {
+      // Pins the "a failed git call ... is treated as shallow" branch in
+      // isShallowRepoShared (`out === null ? true : ...`): stubs ONLY the
+      // shared `rev-parse --is-shallow-repository` call to fail (as a real
+      // process failure would -- corrupt object, missing binary), while
+      // every other call goes to real git. The doc's last commit here is
+      // the repo's genuine root commit (empty parent list), so without the
+      // "failure counts as shallow" branch, a failed rev-parse would fall
+      // through to "not shallow", trust the root commit as a real one, and
+      // silently pass a source this run could never actually verify.
+      const stubGit: RunGit = (args, cwd) => {
+        if (
+          args[0] === "rev-parse" &&
+          args.includes("--is-shallow-repository")
+        ) {
+          return null;
+        }
+        return runGit(args, cwd);
+      };
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: docContent({
+              type: "concept",
+              timestamp: "2025-12-01T00:00:00Z",
+              sources: ["source.ts"],
+            }),
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir, stubGit);
+      const findings = sourcesFreshRule.run(ctx);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("notice");
+      expect(findings[0].message).toContain("not assessable");
+      expect(findings[0].message).not.toContain("STALE");
+    });
+
+    it("caches the shared is-shallow-repository lookup across docs: at most one rev-parse call per run", () => {
+      // Pins the WeakMap cache in isShallowRepoShared: three docs, each
+      // with a parentless last commit (a genuine root commit), each reach
+      // the root-commit branch that consults isShallowRepo(). Without the
+      // cache (a lookup that never hits, e.g. always returning `undefined`),
+      // this would spend one `rev-parse --is-shallow-repository` PER doc
+      // instead of one for the whole run.
+      const calls: string[][] = [];
+      const countingGit: RunGit = (args, cwd) => {
+        calls.push(args);
+        return runGit(args, cwd);
+      };
+      const docs = ["doc1", "doc2", "doc3"];
+      repo.commitFiles(
+        [
+          ...docs.map((name) => ({
+            relPath: `bundle/${name}.md`,
+            content: docContent({
+              type: "concept",
+              timestamp: "2025-12-01T00:00:00Z",
+              sources: [`${name}-source.ts`],
+            }),
+          })),
+          ...docs.map((name) => ({
+            relPath: `${name}-source.ts`,
+            content: "export const a = 1;\n",
+          })),
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(
+        path.join(repo.dir, "bundle"),
+        repo.dir,
+        countingGit,
+      );
+      sourcesFreshRule.run(ctx);
+
+      const revParseCalls = calls.filter(
+        (args) =>
+          args[0] === "rev-parse" && args.includes("--is-shallow-repository"),
+      );
+      expect(revParseCalls).toHaveLength(1);
+    });
   });
 
   describe("shallow clone: a grafted boundary commit must not be trusted as a real root commit", () => {
@@ -1206,6 +1296,85 @@ describe("sources-fresh", () => {
         expect(shallowFindings[0].message).toContain("not assessable");
         expect(shallowFindings[0].message).toContain("shallow");
         expect(shallowFindings[0].message).not.toContain("STALE");
+      } finally {
+        fs.rmSync(shallowDir, { recursive: true, force: true });
+      }
+    });
+
+    it("a shallow clone whose doc last commit has an in-window parent is still assessed normally, not gated as unassessable", () => {
+      // A shallow clone is not automatically "not assessable" for every
+      // doc: the root-commit shortcut (and its shallow guard) only fires
+      // when the doc's OWN last commit reports an empty parent list. Here
+      // that commit's parent is still inside the depth-2 window, so
+      // `restampedByOwnLastCommit` takes the ordinary (non-root) path and
+      // this must resolve to a ordinary STALE, exactly like a full clone
+      // -- pinning that the shallow gate does not over-trigger.
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: docContent({
+              type: "concept",
+              timestamp: "2026-01-01T00:00:00Z",
+              sources: ["source.ts"],
+            }),
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "source.ts",
+        "export const a = 2;\n",
+        "2026-02-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/doc.md",
+        docContent({
+          type: "concept",
+          timestamp: "2026-01-01T00:00:00Z",
+          sources: ["source.ts"],
+        }) + "\nbody edit, no re-stamp\n",
+        "2026-03-01T00:00:00Z",
+      );
+
+      const shallowDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "okf-kit-shallow-inwindow-"),
+      );
+      try {
+        execFileSync(
+          "git",
+          [
+            "clone",
+            "--quiet",
+            "--depth",
+            "2",
+            `file://${repo.dir}`,
+            shallowDir,
+          ],
+          { encoding: "utf8" },
+        );
+        const isShallow = execFileSync(
+          "git",
+          ["rev-parse", "--is-shallow-repository"],
+          { cwd: shallowDir, encoding: "utf8" },
+        ).trim();
+        expect(isShallow).toBe("true");
+
+        const shallowCtx = loadBundle(
+          path.join(shallowDir, "bundle"),
+          shallowDir,
+        );
+        const shallowFindings = sourcesFreshRule.run(shallowCtx);
+
+        expect(shallowFindings).toHaveLength(1);
+        expect(shallowFindings[0]).toMatchObject({
+          ruleId: "sources-fresh",
+          severity: "warning",
+          file: "doc.md",
+        });
+        expect(shallowFindings[0].message).toContain("STALE");
+        expect(shallowFindings[0].message).not.toContain("not assessable");
       } finally {
         fs.rmSync(shallowDir, { recursive: true, force: true });
       }

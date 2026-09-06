@@ -548,10 +548,13 @@ function restampedByOwnLastCommit(
  * (`core.quotePath` defaults to true) as a double-quoted string with octal
  * escapes (e.g. `"bundle/\303\266lt.md"` for `bundle/ölt.md`), so a plain
  * `repoRelDocPath` never string-equals that quoted form and a non-ASCII doc
- * falls through every branch below to the `same` fallback -- which then
- * feeds the WRONG (quoted, unreadable) path into the `git show` blob reads
- * in the caller, making them fail and turning a normal rename or creation
- * into a false `not assessable` notice. `-z` prints every path verbatim,
+ * falls through every branch below to the `same` fallback, which returns
+ * the doc's real (unquoted) CURRENT path unchanged. When that commit was
+ * actually a rename or creation, the doc was NOT at that path in the first
+ * parent -- it lived under a different name there, or did not exist yet --
+ * so the caller's `git show <firstParent>:<that path>` blob read fails,
+ * turning a normal rename or creation into a false `not assessable`
+ * notice. `-z` prints every path verbatim,
  * unquoted, regardless of `core.quotePath`, closing that structurally
  * rather than by passing `-c core.quotePath=false` (which is a config
  * override this rule would otherwise have to remember on every git

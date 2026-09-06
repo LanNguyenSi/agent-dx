@@ -66,9 +66,12 @@ jobs:
       # Read by BOTH the "Self-test the freshness-finding filter" step and
       # the real "Freshness guard" step below, so an edit to the filter is
       # exercised by the self-test instead of the self-test guarding a
-      # separately hand-kept copy of it (reviewer-reproduced miss: editing
-      # only the real step's filter left the self-test green).
-      FRESHNESS_FILTER: 'select(.ruleId == "sources-fresh" or .ruleId == "sources-fresh-future") | select(.severity != "notice")'
+      # separately hand-kept copy of it. The full `[.findings[] | ...]`
+      # array expression lives here too (not just the inner
+      # select-expression), so each consuming step only appends `| length`
+      # (or reads the array directly) rather than hand-keeping the
+      # `.findings[]` wrapper in more than one place.
+      FRESHNESS_FILTER: '[.findings[] | select(.ruleId == "sources-fresh" or .ruleId == "sources-fresh-future") | select(.severity != "notice")]'
     steps:
       - uses: actions/checkout@v5
         with:
@@ -421,7 +424,7 @@ jobs:
             ]
           }')
 
-          matched=$(echo "${syntheticReport}" | jq "[.findings[] | ${FRESHNESS_FILTER}] | length")
+          matched=$(echo "${syntheticReport}" | jq "${FRESHNESS_FILTER} | length")
 
           assert_numeric matched "${matched}"
           if [ "${matched}" -ne 2 ]; then
@@ -463,7 +466,7 @@ jobs:
 
           jq -e . okf-anchor-report.json > /dev/null
 
-          freshnessFindings=$(jq "[.findings[] | ${FRESHNESS_FILTER}]" okf-anchor-report.json)
+          freshnessFindings=$(jq "${FRESHNESS_FILTER}" okf-anchor-report.json)
           count=$(echo "${freshnessFindings}" | jq 'length')
 
           {
