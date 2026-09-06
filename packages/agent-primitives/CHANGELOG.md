@@ -181,6 +181,20 @@ SKILL.md`) and the README gained an "Invocation templates" section
 
 ### Changed
 
+- `test/import-boundaries.test.ts`: a new guard, parsing each of
+  `src/probe/session.ts`, `step.ts`, `setup.ts` and `index.ts`'s own
+  import specifiers by regex, that fails if `session.ts` imports
+  `step.ts`, `setup.ts` or `index.ts`, if `step.ts` imports `setup.ts`
+  or `index.ts`, or if `setup.ts` imports `step.ts` or `index.ts` --
+  pinning the one-way layering `index.ts`'s own docblock already
+  describes (`session.ts <- step.ts <- setup.ts <- index.ts`), so far
+  kept only by convention. A `type`-only import counts as forbidden
+  the same as a value import: it is still a structural dependency, and
+  nothing stops it becoming a value import later. The one documented
+  exception is the type-only `index.ts` <-> `plan.ts` cycle
+  (`PlanMutantSpec` one way, `ExpectVerdict`/`IsolationMode` the
+  other); the guard asserts that cycle explicitly rather than silently
+  never looking at `plan.ts`.
 - README's `--plan` example mutant now names a neutral placeholder
   (`src/example.ts` line 42) instead of a real source line
   (`src/probe/index.ts` line 812), which was already inaccurate and
