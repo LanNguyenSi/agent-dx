@@ -45,6 +45,13 @@ export interface CheckOptions {
    * set.
    */
   proseLineReferencesStrict?: boolean;
+  /**
+   * `sources-fresh-future`'s clock-skew allowance, in minutes (default 10
+   * when omitted; see `DEFAULT_FUTURE_SKEW_SECONDS` in
+   * `src/rules/sources-fresh.ts`). Converted to seconds and stored on
+   * `ctx.freshnessFutureSkewSeconds`.
+   */
+  futureSkewMinutes?: number;
   /** Test-only override for git access; production code shells out to the real `git` binary. */
   runGit?: RunGit;
 }
@@ -79,6 +86,9 @@ export function runCheck(
     ctx.proseLineReferences = {
       strict: Boolean(options.proseLineReferencesStrict),
     };
+  }
+  if (options.futureSkewMinutes !== undefined) {
+    ctx.freshnessFutureSkewSeconds = Math.round(options.futureSkewMinutes * 60);
   }
 
   const findings = allRules.flatMap((rule) => rule.run(ctx));
@@ -135,6 +145,11 @@ program
     "prose-line-references: also flag every prose line reference, not only a drifted one, with " +
       "the remedy to lift it into a backtick citation or a symbol name (ignored unless --prose-line-references is also passed)",
   )
+  .option(
+    "--future-skew-minutes <n>",
+    "sources-fresh-future: clock-skew allowance in minutes before a doc `timestamp` later than " +
+      "the doc's own last commit is flagged as future-dated (default 10)",
+  )
   .exitOverride()
   .action(
     (
@@ -147,9 +162,20 @@ program
         requireAnchorsAllow?: string[];
         proseLineReferences?: boolean;
         proseLineReferencesStrict?: boolean;
+        futureSkewMinutes?: string;
       },
     ) => {
       try {
+        let futureSkewMinutes: number | undefined;
+        if (opts.futureSkewMinutes !== undefined) {
+          const n = Number(opts.futureSkewMinutes);
+          if (!Number.isFinite(n) || n < 0) {
+            throw new UsageError(
+              `--future-skew-minutes must be a non-negative number, got \`${opts.futureSkewMinutes}\``,
+            );
+          }
+          futureSkewMinutes = n;
+        }
         const result = runCheck(bundleDir, {
           repoRoot: opts.repoRoot,
           strict: opts.strict,
@@ -157,6 +183,7 @@ program
           requireAnchorsAllow: opts.requireAnchorsAllow,
           proseLineReferences: opts.proseLineReferences,
           proseLineReferencesStrict: opts.proseLineReferencesStrict,
+          futureSkewMinutes,
         });
         const output = opts.json
           ? renderJson(result.bundleDir, result.findings)

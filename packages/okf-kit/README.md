@@ -29,8 +29,11 @@ okf-kit check path/to/bundle --repo-root /path/to/repo
 # JSON output for tooling
 okf-kit check path/to/bundle --json
 
-# fail on warnings too, not just errors (STALE findings are warnings)
+# fail on warnings too, not just errors (STALE and FUTURE-DATED findings are warnings)
 okf-kit check path/to/bundle --strict
+
+# narrow sources-fresh-future's default 10-minute clock-skew allowance
+okf-kit check path/to/bundle --future-skew-minutes 2
 ```
 
 ## Scaffold a bundle (`init`)
@@ -55,7 +58,7 @@ Every template doc except `benchmark-template.md` ships with `sources: [path/to/
 
 ### Authoring guidance
 
-- **`timestamp` means "last verified against sources," not "created on."** Bump it, and add a line to `log.md`, every time you re-verify a doc against its sources. Always use the real instant of verification (`new Date().toISOString()` or equivalent); never hand-write an artificial midnight datetime, `sources-fresh` staleness comparisons depend on it being real.
+- **`timestamp` means "last verified against sources," not "created on."** Bump it, and add a line to `log.md`, every time you re-verify a doc against its sources. Always use the real instant of verification (`new Date().toISOString()` or equivalent); never hand-write an artificial midnight datetime, or a local wall-clock time with a `Z` suffix it doesn't actually have -- `sources-fresh` and `sources-fresh-future` staleness comparisons both depend on it being real. See "Future-dated timestamps (`sources-fresh-future`)" below for the measure-after-commit discipline this enforces.
 - **Never list the bundle's own directory in `sources`.** A bundle directory changes on every doc edit inside it, so a self-referential `sources` entry goes permanently stale. This happened to the OKF pilot's own `BENCHMARK.md` (`agent-tasks` `docs/okf/BENCHMARK.md`, `sources: [docs/okf/]`); `benchmark-template.md` here omits `sources` entirely for the same reason, since a benchmark record measures the bundle rather than describing a piece of the codebase.
 - **Keep all links same-directory relative.** Use `name.md`, not `/name.md`; see `no-absolute-links` above for why a leading slash breaks once the bundle is viewed outside its own repository.
 - **Write a sibling short-form citation as a connective-led `:N-M`, not `(N-M)`.** When a paragraph cites several sub-ranges of a source already named by a full `path:N-M` citation earlier in the same paragraph, write each later one as a `:N-M` led by one of the serial connectives the gate accepts -- `,`, `;`, `(`, or a trailing `and`/`or` -- right after the phrase it points at (e.g. `review finding L1 (:1170-1227, ...)`). `citations-resolve` only recognises the colon form; a parenthesized `(N-M)` is never checked, so it can drift silently. This convention is not demonstrated by any scaffolded template; it is a `citations-resolve` authoring rule. See "Citation resolution (citations-resolve)" below.
@@ -70,6 +73,7 @@ Every template doc except `benchmark-template.md` ships with `sources: [path/to/
 | `no-absolute-links` | warning | Link targets should not start with `/`. GitHub resolves a leading slash against the repository root, not the bundle root, so an absolute link 404s once the bundle is viewed outside its own repository. Use a same-directory relative link instead. |
 | `sources-shape` | error | Frontmatter `sources`, when present, must be a non-empty array of non-empty strings. With a repo root (explicit or auto-detected), each listed path (file or directory) must also exist under it. |
 | `sources-fresh` | warning / notice | For docs with a `sources` list and a repo root, flags a source path whose last git commit is newer than both the doc's `timestamp` and the doc file's own last commit. See "Staleness (sources-fresh)" below. |
+| `sources-fresh-future` | warning | For the same docs as `sources-fresh`, flags a `timestamp` later than the doc file's own last commit by more than a clock-skew allowance (default 10 minutes, `--future-skew-minutes`). Catches a local wall-clock time mistakenly written with a `Z`/UTC suffix. See "Staleness (sources-fresh)" below. |
 | `citations-resolve` | warning / notice | For docs with a repo root, flags a `` `path:N`/`path:N-M` `` citation (and its `` `:N` ``/`` -`M` ``/`` (`N`) `` continuations, and bare paragraph-bound short forms `:N-M`/`(N-M)`) whose target file is missing, whose range is inverted or exceeds the file, or whose start line is blank or (for a non-markdown target) only a closing brace. A full citation may also carry an optional `#anchor` (e.g. `` `CHANGELOG.md:50-144#0.24.0` ``), checked against the target's own structure/content instead of just its line numbers. A backtick-delimited `` `path:#heading` `` citation (`.md` targets only) resolves to a whole Markdown section instead of a line range, immune to every line-number shift above it; see "Heading-section citations" below. A short-form citation's range into a test file is also checked for a describe/it block boundary. `--require-anchors` opts into five additional checks; see "Anchor strictness (opt-in, `--require-anchors`)" below. See "Citation resolution (citations-resolve)" below. |
 | `prose-line-references` | (opt-in, `--prose-line-references`) warning / notice | Off by default. Flags a prose-embedded line reference outside `citations-resolve`'s own backtick grammar (`line N`, `lines N-M`, `lines N to M`) that is drifted, unresolvable, or ambiguous once bound to the nearest named file. `--prose-line-references-strict` additionally flags every such reference as a formatting policy violation. See "Prose line references (opt-in, `--prose-line-references`)" below. |
 
@@ -101,6 +105,22 @@ Known limitation: a `git log` call that fails for a reason other than "no histor
 Known limitation: the doc-commit comparison suppresses staleness for every source older than the doc file's last commit, not only for sources from the same commit. For a multi-source doc that means any commit touching the doc (a typo fix, a repo-wide formatter run, a rename, which resets the doc's last-commit time because `git log` runs without `--follow`) silences drift on all sources changed before it, even ones nobody re-verified. The frontmatter `timestamp` still governs sources changed after the doc's last commit.
 
 **Authoring guidance:** when you re-verify a doc against its sources, bump its frontmatter `timestamp` (and add a line to the bundle's `log.md`) so `sources-fresh` reflects that the doc is current again.
+
+### Future-dated timestamps (`sources-fresh-future`)
+
+`sources-fresh` catches a `timestamp` that is too OLD relative to a source's last commit. `sources-fresh-future` catches the opposite mistake: a `timestamp` that is too NEW relative to the doc file's OWN last commit -- in practice, almost always a local wall-clock time hand-written with a trailing `Z` (or another UTC marker) it does not actually have, rather than a genuine future date. It never looks at `sources` commit times at all, only at the doc file's own git history, so it has nothing to say about whether any source is stale; the two rules are complementary, not overlapping, and are assessed over the same population of docs (a validly-shaped `sources` list and a repo root available, exactly like `sources-fresh` above).
+
+| Situation | Severity | Message |
+|-----------|----------|---------|
+| The doc's `timestamp` is later than the doc file's own last commit by more than the skew allowance | warning | `FUTURE-DATED: doc timestamp <iso> is after the doc's own last commit <iso> (skew allowance <n>s)` |
+| The doc's `timestamp` is at or within the skew allowance of the doc file's own last commit | (nothing) | fresh: an ordinary write-then-commit gap, not a mistake |
+| The doc has no git history yet (uncommitted) | (nothing) | unknown, not flagged: there is no real commit time to compare against |
+| The doc's `timestamp` is missing or not a parseable date | (nothing) | left to `sources-fresh`'s own notice, not duplicated here |
+| No repo root available (see auto-detection above) | (nothing) | left to `sources-fresh`'s single bundle-level notice, not duplicated here |
+
+The skew allowance defaults to 10 minutes (600 seconds), absorbing the ordinary gap between writing a timestamp and the commit that carries it landing; override it with `--future-skew-minutes <n>`. Like `STALE` findings, `FUTURE-DATED` findings are warnings, advisory by default; run with `--strict` to fail the build on either.
+
+**The measure-after-commit discipline both rules enforce:** re-verify the doc against its sources, THEN bump `timestamp` to the real instant of that verification (`new Date().toISOString()` or equivalent, never a hand-written value), THEN commit. Stamping before committing, or hand-writing a local time with a `Z` suffix it doesn't have, is exactly what `sources-fresh-future` exists to catch; stamping and forgetting to commit, or committing without re-stamping, is what `sources-fresh` exists to catch.
 
 ## Citation resolution (citations-resolve)
 

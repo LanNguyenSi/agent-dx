@@ -368,6 +368,51 @@ jobs:
           echo "Clean, 0 anchor findings."
           exit 0
 
+      - name: "Freshness guard (strict): sources-fresh + sources-fresh-future"
+        # Reuses okf-anchor-report.json from the Anchor-citation guard step
+        # above (one `okf-kit check` invocation already ran every rule
+        # against BUNDLE_PATH, --require-anchors only adds MORE
+        # citations-resolve checks to that same run, it never removes any
+        # other rule's findings). This is the strict half of the review
+        # class named in okf-kit's CHANGELOG.md [Unreleased] "sources-fresh-
+        # future" entry: a bundle doc edited (or its declared source
+        # changed) without a correct re-stamp, previously only caught by the
+        # warn-only okf-staleness.yml watch. Filters by rule id, not a fixed
+        # message pattern, on purpose: this pinned okf-kit release does not
+        # ship sources-fresh-future yet (see the CHANGELOG entry above), so
+        # today this only ever matches sources-fresh findings; once the
+        # okf-kit install pin further up this job is bumped to a release
+        # that ships sources-fresh-future, this same filter starts matching
+        # its findings too with no further edit needed here.
+        shell: bash
+        run: |
+          freshnessFindings=$(jq '[
+            .findings[]
+            | select(.ruleId == "sources-fresh" or .ruleId == "sources-fresh-future")
+            | select(.severity == "warning")
+          ]' okf-anchor-report.json)
+          count=$(echo "${freshnessFindings}" | jq 'length')
+
+          {
+            echo "## OKF bundle freshness guard (\`${BUNDLE_PATH}\`), strict"
+            echo ""
+            echo "freshness findings: ${count}"
+            if [ "${count}" -gt 0 ]; then
+              echo ""
+              echo '```'
+              echo "${freshnessFindings}" | jq -r '.[] | "\(.ruleId) \(.file): \(.message)"'
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${count}" -gt 0 ]; then
+            echo "${freshnessFindings}" | jq -r '.[] | "::error title=OKF freshness drift::\(.ruleId) \(.file): \(.message)"'
+            exit 1
+          fi
+
+          echo "Clean, 0 freshness findings (strict)."
+          exit 0
+
   lint-cli-flag-order:
     runs-on: ubuntu-latest
     timeout-minutes: 2

@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A new rule, `sources-fresh-future`, complements `sources-fresh`: it flags
+  a doc's frontmatter `timestamp` that is later than the doc file's own
+  last commit by more than a clock-skew allowance (default 10 minutes,
+  `--future-skew-minutes <n>`), catching a local wall-clock time
+  mistakenly written with a `Z`/UTC suffix it doesn't actually have.
+  Unlike `sources-fresh`, it never looks at `sources` commit times, only
+  at the doc file's own git history, and it is assessed over the same doc
+  population (a validly-shaped `sources` list and a repo root available).
+  An uncommitted doc (no own commit yet) is "unknown, not flagged", the
+  same posture `sources-fresh` already takes for an untracked source path.
+  `FUTURE-DATED` findings are `warning` severity, same as `STALE`; run
+  with the existing `--strict` flag to fail the build on either, rather
+  than a second, rule-specific strictness switch. Extends
+  `src/rules/sources-fresh.ts` (shares its `getLastCommitEpoch` git
+  helper and its doc-population filter) instead of adding a parallel
+  mechanism; see the README's "Staleness (sources-fresh)" section,
+  "Future-dated timestamps (`sources-fresh-future`)" subsection, for the
+  full rule contract and how the two rules relate. Closes the review
+  class where a bundle doc was edited, or its declared source changed,
+  but the doc's `timestamp` was not re-stamped after the last commit (or
+  was stamped with a local time written as UTC).
+- CI: the agent-dx `okf-anchor-guard` job (`.github/workflows/ci.yml`)
+  gained a strict freshness step that fails the build on any
+  `sources-fresh`/`sources-fresh-future` warning for
+  `packages/orchestrator-workflow/docs/okf`. **Release dependency:**
+  `sources-fresh-future` does not exist in the okf-kit version this job
+  currently installs (a pinned release from npm, kept in sync with
+  `package.json`'s own version by
+  `orchestrator-workflow/test/docs-consistency.test.ts`), so the step's
+  filter matches only `sources-fresh` findings until the next okf-kit
+  release ships this rule and the job's pin is bumped to it (in the same
+  commit as every other `okf-kit@<version>` pin, per this file's
+  "Changed" entry above); no other change to the step is needed at that
+  point, since it already filters by rule id rather than a fixed list.
+
 ### Changed
 
 - The release procedure now bumps orchestrator-workflow's okf-kit pins
