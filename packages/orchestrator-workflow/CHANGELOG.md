@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mutating under it from a concurrent probe; the fix is worktree
   isolation or waiting until the reviewer has returned. Consumers refresh
   their installs at the next release to pick up all three prompt changes.
+  Motivated by agent-tasks task 0e17fb63; see `docs/okf/log.md` for the
+  incident detail behind each of the three rules.
 
 ## [0.30.0] - 2026-09-06
 

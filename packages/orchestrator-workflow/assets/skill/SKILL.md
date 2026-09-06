@@ -245,12 +245,8 @@ directory and the subagents.
    engine. Only the orchestrator can explicitly revise a baseline, recording
    old/new revisions, affected IDs, authority and reason, invalidated evidence,
    and verified rationale for carrying unchanged evidence forward.
-7. **Delegate review.** Never run mutation probes in place against a
-   worktree a reviewer subagent is concurrently reviewing; isolate the probe
-   in a separate worktree or wait until the reviewer has returned before
-   probing that tree again. Send the diff to the reviewer subagent, naming
-   in the briefing the base and head revision the diff was generated from.
-   When tier
+7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
+   briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed
    `reviewer-<tier>` subagents, if any) by the task's complexity and risk, at
    your own judgment, defaulting to the unsuffixed subagent when unsure; record
@@ -277,8 +273,8 @@ directory and the subagents.
    implementer's log — and record the method, sample size, and result against
    the implementer's claim in the reviewer output contract's `reproduction`
    field. This does not apply to deterministic checks (a single test run,
-   `tsc`, lint): only claims that could vary run to run trigger it. The
-   GitHub Actions shell replay named in step 6 is a second, explicitly
+   `tsc`, lint): only claims that could vary run to run trigger it. The GitHub
+   Actions shell replay named in step 6 is a second, explicitly
    non-probabilistic trigger for the same field, with `sample_size:
    not_applicable` allowed when the replay itself has no meaningful sample
    size. A change that deletes or renames an exported identifier, type, config
@@ -286,18 +282,21 @@ directory and the subagents.
    describing the old name as current), by the reviewer or by the orchestrator
    itself when it reviews a trivial rename per Scaling delegation, using a
    connected drift check when one exists. When this is not the task's first
-   review round, name the round
-   number in the briefing; the reviewer marks each finding's `recurrence` as
-   `new` or `repeated` against the earlier rounds it was told about, which is
-   what lets the orchestrator detect the Review-round escalation budget's
-   trigger (see below) without re-deriving it by hand. When the implementer's
-   report replays a prior round's mutation probe, the orchestrator's reviewer
-   briefing names the replayed probes the implementer reports as killed
-   together with their `mutant` and `verified_applied_via` values; the reviewer
-   may then skip re-running those. The reviewer output contract itself is
-   unchanged. For an explicitly adopted v1 run, ask the reviewer to compare the frozen delegated criteria with
-   the referenced evidence and judge semantic adequacy, including whether a
-   manual check is actually concrete and reasoned.
+   review round, name the round number in the briefing; the reviewer marks each
+   finding's `recurrence` as `new` or `repeated` against the earlier rounds it
+   was told about, which is what lets the orchestrator detect the Review-round
+   escalation budget's trigger (see below) without re-deriving it by hand. When
+   the implementer's report replays a prior round's mutation probe, the
+   orchestrator's reviewer briefing names the replayed probes the implementer
+   reports as killed together with their `mutant` and `verified_applied_via`
+   values; the reviewer may then skip re-running those. The reviewer output
+   contract itself is unchanged. Never run mutation probes in place against a
+   worktree a reviewer subagent is concurrently reviewing; isolate the probe in
+   a separate worktree or wait until the reviewer has returned before probing
+   that tree again. For an explicitly adopted v1 run, ask the reviewer to
+   compare the frozen delegated criteria with the referenced evidence and judge
+   semantic adequacy, including whether a manual check is actually concrete and
+   reasoned.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high

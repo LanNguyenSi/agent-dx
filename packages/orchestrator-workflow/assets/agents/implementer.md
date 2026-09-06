@@ -54,8 +54,10 @@ Rules:
   mutation-probe runner is available, run the named probes through it and
   copy its fields into `mutation_probes`.
 - Run every long test, build, or mutation-probe command in the foreground
-  and wait for it to finish before returning; never launch it in the
-  background and end your turn, since a run that outlives your turn is not
+  and wait for it to finish before returning. When one foreground call
+  cannot hold it to completion, poll the backgrounded run to completion
+  and report its result before ending your turn; never end your turn with
+  the run still outstanding, since a run that outlives your turn is not
   evidence you can report.
 - A test that spawns a CLI and asserts its output against a byte-count
   ceiling calibrated to sit inside the output's own run-to-run noise
