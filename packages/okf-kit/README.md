@@ -87,12 +87,13 @@ Pass `--repo-root` explicitly to pin a specific root (useful in CI when the bund
 
 ## Staleness (sources-fresh)
 
-`sources-fresh` compares each frontmatter `sources` entry's last git commit time against the doc's `timestamp`, and additionally against the doc file's own last commit time: a source committed at or before the doc file's last commit is treated as fresh even when the frontmatter `timestamp` is older. That keeps squash-merge PRs honest: when a doc re-stamp lands in the same commit as its changed sources, the merge gives every source a commit time later than any pre-merge `timestamp`, which used to make such docs stale-on-arrival. The rule never blocks a doc that has no `sources`, and it never invents an error where git can't give a real answer:
+`sources-fresh` compares each frontmatter `sources` entry's last git commit time against the doc's `timestamp`, and additionally against the doc file's own last commit time: a source committed at or before the doc file's last commit is treated as fresh even when the frontmatter `timestamp` is older, PROVIDED that same commit actually re-stamped the doc (added or changed its frontmatter `timestamp:` line -- creating the doc counts as re-stamping it too, since a new file's whole content, timestamp line included, is "added"). That keeps squash-merge PRs honest: when a doc re-stamp lands in the same commit as its changed sources, the merge gives every source a commit time later than any pre-merge `timestamp`, which used to make such docs stale-on-arrival. It does NOT extend to a commit that merely happens to also touch the doc file -- a typo fix, a co-committed prose edit, a repo-wide formatter run -- without rewriting the stamp: that commit carries no verification claim, so staleness stands. The rule never blocks a doc that has no `sources`, and it never invents an error where git can't give a real answer:
 
 | Situation | Severity | Message |
 |-----------|----------|---------|
 | A source path's last commit is newer than the doc's `timestamp` and the doc file's last commit | warning | `STALE: <path> changed <iso> after doc timestamp <iso>` |
-| A source path's last commit is newer than the doc's `timestamp` but at/before the doc file's last commit | (nothing) | fresh: doc and source landed together (or the doc was committed later) |
+| A source path's last commit is newer than the doc's `timestamp`, at/before the doc file's last commit, AND that commit re-stamped the doc | (nothing) | fresh: doc and source landed together with a real re-stamp (or the doc was committed later, or created there) |
+| A source path's last commit is newer than the doc's `timestamp`, at/before the doc file's last commit, but that commit did NOT re-stamp the doc | warning | `STALE: <path> changed <iso> after doc timestamp <iso>` (co-commit with no re-stamp is not an exception) |
 | A source path exists but has no git history (untracked) | notice | `untracked by git, staleness unknown: <path>` |
 | The doc's `timestamp` is missing or not a parseable date, while `sources` is present | notice | `staleness not assessable: no valid timestamp` |
 | No repo root available (see auto-detection above) | notice | `staleness skipped: not inside a git work tree` |
@@ -102,7 +103,7 @@ STALE findings are warnings, so they are advisory by default; run with `--strict
 
 Known limitation: a `git log` call that fails for a reason other than "no history for this path" (for example a corrupt object or a transient git error) is reported the same way as a genuinely untracked path, the `untracked by git, staleness unknown` notice; okf-kit does not currently distinguish a real git failure from "no commits touch this path".
 
-Known limitation: the doc-commit comparison suppresses staleness for every source older than the doc file's last commit, not only for sources from the same commit. For a multi-source doc that means any commit touching the doc (a typo fix, a repo-wide formatter run, a rename, which resets the doc's last-commit time because `git log` runs without `--follow`) silences drift on all sources changed before it, even ones nobody re-verified. The frontmatter `timestamp` still governs sources changed after the doc's last commit.
+Known limitation: the doc-commit comparison suppresses staleness for every source older than the doc file's last re-stamping commit, not only for sources from the same commit -- provided that commit is the one that rewrote the stamp. For a multi-source doc that means a re-stamp silences drift on every source changed before it, even ones that specific re-stamp did not itself verify. The frontmatter `timestamp` still governs sources changed after the doc's last commit. Also note: the check only looks at WHETHER the `timestamp:` line changed, never at whether its new value is itself correct (old, wrong, or hand-typed) -- an inaccurate but touched stamp still counts as a re-stamp.
 
 **Authoring guidance:** when you re-verify a doc against its sources, bump its frontmatter `timestamp` (and add a line to the bundle's `log.md`) so `sources-fresh` reflects that the doc is current again.
 
@@ -114,13 +115,16 @@ Known limitation: the doc-commit comparison suppresses staleness for every sourc
 |-----------|----------|---------|
 | The doc's `timestamp` is later than the doc file's own last commit by more than the skew allowance | warning | `FUTURE-DATED: doc timestamp <iso> is after the doc's own last commit <iso> (skew allowance <n>s)` |
 | The doc's `timestamp` is at or within the skew allowance of the doc file's own last commit | (nothing) | fresh: an ordinary write-then-commit gap, not a mistake |
+| The doc's `timestamp` string has no `Z`/UTC designator or numeric offset (e.g. `2026-01-01T00:00:00`, no offset) | notice | future-dated check skipped: timestamp has no UTC designator (`Z`) or numeric offset, can't be compared reliably across timezones |
 | The doc has no git history yet (uncommitted) | (nothing) | unknown, not flagged: there is no real commit time to compare against |
 | The doc's `timestamp` is missing or not a parseable date | (nothing) | left to `sources-fresh`'s own notice, not duplicated here |
 | No repo root available (see auto-detection above) | (nothing) | left to `sources-fresh`'s single bundle-level notice, not duplicated here |
 
 The skew allowance defaults to 10 minutes (600 seconds), absorbing the ordinary gap between writing a timestamp and the commit that carries it landing; override it with `--future-skew-minutes <n>`. Like `STALE` findings, `FUTURE-DATED` findings are warnings, advisory by default; run with `--strict` to fail the build on either.
 
-**The measure-after-commit discipline both rules enforce:** re-verify the doc against its sources, THEN bump `timestamp` to the real instant of that verification (`new Date().toISOString()` or equivalent, never a hand-written value), THEN commit. Stamping before committing, or hand-writing a local time with a `Z` suffix it doesn't have, is exactly what `sources-fresh-future` exists to catch; stamping and forgetting to commit, or committing without re-stamping, is what `sources-fresh` exists to catch.
+**Why the UTC-designator gate exists:** a bare local datetime string (no `Z`, no numeric offset) parses under `Date.parse` in the machine's OWN timezone, so the same frontmatter value would compare differently on a UTC+2 laptop than on a UTC CI runner -- unusable against a default allowance measured in minutes. A numeric offset (`+02:00`, `-0500`) is unambiguous and IS assessed normally (`Date.parse` already normalizes it to a real UTC instant); only a fully bare datetime is skipped. `sources-fresh`'s own thresholds are days wide, so this ambiguity doesn't practically matter there and the gate applies only to `sources-fresh-future`.
+
+**What these two rules catch, precisely, and what they don't:** a source path committed after the doc's `timestamp` (`sources-fresh`'s base case); a source and the doc co-committed together where that commit did NOT re-stamp the doc (`sources-fresh`'s narrowed co-commit exception, see "Staleness (sources-fresh)" above); and a local wall-clock time hand-written with a `Z`/UTC suffix it doesn't actually have (`sources-fresh-future`). What they do NOT catch: a doc-only prose edit that leaves `sources` untouched and the `timestamp` stale -- neither rule has a source-side signal to compare against in that case, so it is not mechanically assessable and stays a reviewer judgment call, the same as before this pair of rules existed.
 
 ## Citation resolution (citations-resolve)
 

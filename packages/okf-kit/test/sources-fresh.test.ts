@@ -358,4 +358,116 @@ describe("sources-fresh", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  describe("co-commit exception is narrowed to a commit that actually re-stamps the doc", () => {
+    // Frontmatter blocks kept byte-identical except for the timestamp line,
+    // so a real `git log -p` diff between the two commits below contains
+    // (fixture a) no `+timestamp:` line at all, or (fixture b) exactly one.
+    const stampV1 =
+      "---\ntype: concept\ntimestamp: 2026-01-01T00:00:00Z\nsources:\n  - source.ts\n---\n\n";
+    const stampV2Rewritten =
+      "---\ntype: concept\ntimestamp: 2026-01-01T00:00:01Z\nsources:\n  - source.ts\n---\n\n";
+
+    it("(a) source + doc prose co-committed, stamp line untouched -> STALE", () => {
+      repo.commitFiles(
+        [
+          { relPath: "bundle/doc.md", content: `${stampV1}# Doc\n` },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T10:00:00Z",
+      );
+
+      // Second commit changes the doc's PROSE and co-commits a source
+      // change, but the frontmatter `timestamp:` line is byte-identical to
+      // the prior commit -- exactly the review class this rule exists to
+      // close: a co-commit that carries no verification claim must not
+      // silently suppress staleness.
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${stampV1}# Doc\n\nExtra prose, unrelated to the source.\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-08-20T12:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain("STALE");
+      expect(findings[0].message).toContain("source.ts");
+    });
+
+    it("(b) negative control: source + doc co-committed WITH the stamp rewritten in that commit -> passes", () => {
+      repo.commitFiles(
+        [
+          { relPath: "bundle/doc.md", content: `${stampV1}# Doc\n` },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T10:00:00Z",
+      );
+
+      // Same shape as fixture (a), except this commit's frontmatter
+      // `timestamp:` line differs from the prior commit's, so the diff
+      // carries a `+timestamp:` line: a real (if imperfect) re-stamp.
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${stampV2Rewritten}# Doc\n\nExtra prose, unrelated to the source.\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-08-20T12:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
+    it("(c) doc CREATED in the same commit as its source -> passes (new file counts as stamped)", () => {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: docContent({
+              type: "concept",
+              timestamp: "2020-01-01T00:00:00Z",
+              sources: ["source.ts"],
+            }),
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-05-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
+    it("(d) source-only change after the stamp, no co-commit at all -> STALE (existing behaviour)", () => {
+      repo.commitFile(
+        "bundle/doc.md",
+        docContent({
+          type: "concept",
+          timestamp: "2026-01-01T00:00:00Z",
+          sources: ["source.ts"],
+        }),
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "source.ts",
+        "export const a = 2;\n",
+        "2026-02-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain("STALE");
+    });
+  });
 });

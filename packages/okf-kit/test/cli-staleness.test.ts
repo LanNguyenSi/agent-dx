@@ -171,6 +171,56 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
     expect(result.stderr).toContain("--future-skew-minutes");
   });
 
+  it("rejects an empty (or whitespace-only) --future-skew-minutes as a usage error (exit 2), not 0", () => {
+    const result = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--future-skew-minutes",
+      "",
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("--future-skew-minutes");
+
+    const whitespaceResult = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--future-skew-minutes",
+      "   ",
+    ]);
+    expect(whitespaceResult.status).toBe(2);
+    expect(whitespaceResult.stderr).toContain("--future-skew-minutes");
+  });
+
+  it("accepts 0 as a valid --future-skew-minutes (the tightest allowance)", () => {
+    repo.commitFile(
+      "bundle/doc.md",
+      // Exactly at the doc's own commit instant: still fresh even under a
+      // 0-second (no) skew allowance.
+      "---\ntype: concept\ntimestamp: 2026-01-01T00:00:00.000Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+      "2026-01-01T00:00:00Z",
+    );
+    fs.writeFileSync(path.join(repo.dir, "source.ts"), "export const a = 1;\n");
+
+    const result = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--future-skew-minutes",
+      "0",
+      "--json",
+    ]);
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout) as JsonReport;
+    expect(
+      parsed.findings.some((f) => f.ruleId === "sources-fresh-future"),
+    ).toBe(false);
+  });
+
   it("skips staleness with a notice when the bundle is not inside a git work tree", () => {
     const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-plain-"));
     try {

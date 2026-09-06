@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { runGit as defaultRunGit } from "../git.js";
-import { getTimestampEpoch, getValidSources } from "../util.js";
+import {
+  getRawTimestampString,
+  getTimestampEpoch,
+  getValidSources,
+  hasUtcDesignator,
+} from "../util.js";
 import type {
   BundleContext,
   BundleDoc,
@@ -25,7 +30,7 @@ export const DEFAULT_FUTURE_SKEW_SECONDS = 600;
 export const sourcesFreshRule: Rule = {
   id: RULE_ID,
   description:
-    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp` and the doc file's own last commit.",
+    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`, unless the doc's own last commit lands at/after the source's and that same commit actually re-stamped the doc (added/changed its frontmatter `timestamp:` line, or created the doc).",
   run(ctx) {
     const findings: Finding[] = [];
 
@@ -75,13 +80,21 @@ export const sourcesFreshRule: Rule = {
       }
 
       // A doc whose own last commit is at or after the source's last commit
-      // (typically: both landed in one squash-merge) is not stale, even if
-      // its frontmatter timestamp is old. Lazy + memoized: the lookup costs a
-      // git process per doc but is only ever consulted on the stale path.
+      // (typically: both landed in one squash-merge), AND that same commit
+      // actually re-stamped the doc, is not stale, even if its frontmatter
+      // timestamp predates the merge -- see docStampTouchedFor below for
+      // what "re-stamped" means and why the plain commit-ordering check
+      // alone is not enough. Both lookups are lazy + memoized: each costs a
+      // git process per doc but is only ever consulted on the stale path,
+      // and the epoch lookup is shared with sources-fresh-future via
+      // getDocCommitEpochShared so the two rules don't each spawn their own
+      // `git log` for the same doc in one `check` run.
       const repoRelDocPath = toRepoRelDocPath(repoRoot, ctx.bundleDir, doc);
-      let docCommitEpochMemo: number | null | undefined;
       const docCommitEpochFor = (): number | null =>
-        (docCommitEpochMemo ??= getLastCommitEpoch(
+        getDocCommitEpochShared(ctx, git, repoRoot, repoRelDocPath);
+      let docStampTouchedMemo: boolean | undefined;
+      const docStampTouchedFor = (): boolean =>
+        (docStampTouchedMemo ??= lastCommitTouchedTimestamp(
           git,
           repoRoot,
           repoRelDocPath,
@@ -105,12 +118,17 @@ export const sourcesFreshRule: Rule = {
 
         let isStale = commitEpoch > timestampEpoch;
 
-        // Doc committed at/after the source: not stale (see comment above).
-        // A doc without git history (null epoch, e.g. uncommitted) keeps the
-        // frontmatter-only comparison.
+        // Doc committed at/after the source, AND that commit actually
+        // re-stamped it: not stale (see comment above). A doc without git
+        // history (null epoch, e.g. uncommitted) keeps the frontmatter-only
+        // comparison.
         if (isStale) {
           const docCommitEpoch = docCommitEpochFor();
-          if (docCommitEpoch !== null && docCommitEpoch >= commitEpoch) {
+          if (
+            docCommitEpoch !== null &&
+            docCommitEpoch >= commitEpoch &&
+            docStampTouchedFor()
+          ) {
             isStale = false;
           }
         }
@@ -159,7 +177,7 @@ export const sourcesFreshRule: Rule = {
 export const sourcesFreshFutureRule: Rule = {
   id: FUTURE_RULE_ID,
   description:
-    "A doc's frontmatter `timestamp` must not be later than the doc file's own last commit time by more than a clock-skew allowance (default 10 minutes, `--future-skew-minutes`); catches a local time mistakenly written with a `Z`/UTC suffix. Assessed for the same docs as `sources-fresh` (a `sources` list and a repo root); see the README's \"Staleness (sources-fresh)\" section for how the two rules relate.",
+    "A doc's frontmatter `timestamp` must not be later than the doc file's own last commit time by more than a clock-skew allowance (default 10 minutes, `--future-skew-minutes`); catches a local time mistakenly written with a `Z`/UTC suffix. Skipped (notice) for a timestamp with no explicit UTC designator (`Z`) or numeric offset, since that parses in the local timezone and cannot be compared reliably against a minutes-wide allowance. Assessed for the same docs as `sources-fresh` (a `sources` list and a repo root); see the README's \"Staleness (sources-fresh)\" section for how the two rules relate.",
   run(ctx) {
     const findings: Finding[] = [];
 
@@ -176,8 +194,34 @@ export const sourcesFreshFutureRule: Rule = {
       const timestampEpoch = getTimestampEpoch(doc.frontmatter.parsed);
       if (timestampEpoch === undefined) continue;
 
+      // A string timestamp with no `Z`/numeric-offset suffix parses in the
+      // machine's local timezone (`Date.parse`), which would make this
+      // check's verdict swing by hours between machines against a
+      // minutes-wide allowance -- not usable. A native `Date` frontmatter
+      // value (see getTimestampEpoch's doc comment) carries no such
+      // ambiguity and always passes this gate. sources-fresh's own
+      // thresholds are in days, wide enough that this ambiguity doesn't
+      // practically matter there, so this gate is deliberately NOT applied
+      // to that rule.
+      const rawTimestamp = getRawTimestampString(doc.frontmatter.parsed);
+      if (rawTimestamp !== undefined && !hasUtcDesignator(rawTimestamp)) {
+        findings.push({
+          ruleId: FUTURE_RULE_ID,
+          severity: "notice",
+          file: doc.relPath,
+          message:
+            "future-dated check skipped: timestamp has no UTC designator (`Z`) or numeric offset, can't be compared reliably across timezones",
+        });
+        continue;
+      }
+
       const repoRelDocPath = toRepoRelDocPath(repoRoot, ctx.bundleDir, doc);
-      const docCommitEpoch = getLastCommitEpoch(git, repoRoot, repoRelDocPath);
+      const docCommitEpoch = getDocCommitEpochShared(
+        ctx,
+        git,
+        repoRoot,
+        repoRelDocPath,
+      );
       if (docCommitEpoch === null) continue;
 
       if (timestampEpoch > docCommitEpoch + skewSeconds) {
@@ -248,4 +292,67 @@ function getLastCommitEpoch(
 
 function epochToIso(epochSeconds: number): string {
   return new Date(epochSeconds * 1000).toISOString();
+}
+
+/**
+ * Per-run cache of a doc's own last-commit epoch, keyed by the
+ * `BundleContext` instance so `sources-fresh`'s doc-commit comparison and
+ * `sources-fresh-future`'s timestamp comparison -- both need the IDENTICAL
+ * (repoRoot, doc path) `getLastCommitEpoch` lookup for every doc in one
+ * `check` invocation -- share one `git log` process per doc instead of each
+ * rule spawning its own. Safe to key on the context object itself: a fresh
+ * `BundleContext` is built per `runCheck`/`loadBundle` call, so nothing
+ * reuses a stale cache entry across invocations, and the WeakMap lets the
+ * cache be garbage-collected with the context once a run is done.
+ */
+const docCommitEpochCache = new WeakMap<
+  BundleContext,
+  Map<string, number | null>
+>();
+
+function getDocCommitEpochShared(
+  ctx: BundleContext,
+  git: RunGit,
+  repoRoot: string,
+  repoRelDocPath: string,
+): number | null {
+  let cache = docCommitEpochCache.get(ctx);
+  if (!cache) {
+    cache = new Map();
+    docCommitEpochCache.set(ctx, cache);
+  }
+  const cached = cache.get(repoRelDocPath);
+  if (cached !== undefined) return cached;
+  const epoch = getLastCommitEpoch(git, repoRoot, repoRelDocPath);
+  cache.set(repoRelDocPath, epoch);
+  return epoch;
+}
+
+/**
+ * Whether `doc`'s own last commit actually re-stamped it: added or changed
+ * a frontmatter `timestamp:` line. A doc CREATED in that commit counts too,
+ * without any special case -- a new file's entire diff (including its
+ * `timestamp:` line) shows as added, so the same `+timestamp:` check covers
+ * it. This is what narrows `sources-fresh`'s co-commit staleness exception:
+ * a commit that merely happens to also touch the doc file (a typo fix, a
+ * repo-wide formatter run, a rename) without re-stamping it carries no
+ * verification claim and must NOT suppress staleness, only a commit that
+ * actually rewrote the stamp (or created the doc) does.
+ *
+ * Deliberately scoped to a single-file `git log -p` diff rather than a
+ * frontmatter-only parse: the frontmatter block's own keys are never
+ * indented, so a top-level `+timestamp:` line in this diff can only come
+ * from the frontmatter, not from prose in the doc body.
+ */
+function lastCommitTouchedTimestamp(
+  git: RunGit,
+  repoRoot: string,
+  repoRelDocPath: string,
+): boolean {
+  const diff = git(
+    ["log", "-1", "-p", "--format=", "--", repoRelDocPath],
+    repoRoot,
+  );
+  if (!diff) return false;
+  return /^\+timestamp:/m.test(diff);
 }

@@ -168,7 +168,11 @@ program
       try {
         let futureSkewMinutes: number | undefined;
         if (opts.futureSkewMinutes !== undefined) {
-          const n = Number(opts.futureSkewMinutes);
+          const trimmed = opts.futureSkewMinutes.trim();
+          // `Number("")` and `Number("  ")` both resolve to 0, which would
+          // otherwise silently accept an empty/whitespace-only value as
+          // "0 minutes" instead of rejecting it as the usage error it is.
+          const n = trimmed === "" ? Number.NaN : Number(trimmed);
           if (!Number.isFinite(n) || n < 0) {
             throw new UsageError(
               `--future-skew-minutes must be a non-negative number, got \`${opts.futureSkewMinutes}\``,

@@ -209,6 +209,53 @@ describe("sources-fresh-future", () => {
     }
   });
 
+  it("skips (notice) a timestamp with no UTC designator or numeric offset, regardless of gap size", () => {
+    repo.commitFile(
+      "bundle/doc.md",
+      docContent({
+        type: "concept",
+        // No `Z`, no numeric offset: parses in the local timezone under
+        // Date.parse, so it is not reliably comparable against a
+        // minutes-wide skew allowance and must be skipped, not assessed.
+        timestamp: "2026-01-02T00:00:00",
+        sources: ["source.ts"],
+      }),
+      "2026-01-01T00:00:00Z",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshFutureRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "sources-fresh-future",
+      severity: "notice",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("no UTC designator");
+  });
+
+  it("assesses a timestamp with a numeric UTC offset instead of Z", () => {
+    repo.commitFile(
+      "bundle/doc.md",
+      docContent({
+        type: "concept",
+        // +00:00 is equivalent to Z; still a real offset, so it must be
+        // assessed (not skipped) and flags exactly like the Z-suffixed
+        // equivalent tested above.
+        timestamp: "2026-01-02T00:00:00+00:00",
+        sources: ["source.ts"],
+      }),
+      "2026-01-01T00:00:00Z",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshFutureRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain("FUTURE-DATED");
+  });
+
   it("applies the doc-commit comparison to docs in bundle subdirectories", () => {
     repo.commitFile(
       "bundle/sub/doc.md",

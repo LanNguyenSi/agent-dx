@@ -26,10 +26,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   helper and its doc-population filter) instead of adding a parallel
   mechanism; see the README's "Staleness (sources-fresh)" section,
   "Future-dated timestamps (`sources-fresh-future`)" subsection, for the
-  full rule contract and how the two rules relate. Closes the review
-  class where a bundle doc was edited, or its declared source changed,
-  but the doc's `timestamp` was not re-stamped after the last commit (or
-  was stamped with a local time written as UTC).
+  full rule contract and how the two rules relate. Together with the
+  `sources-fresh` narrowing below, catches: a source path committed
+  after the doc's `timestamp`; a source and the doc co-committed
+  together where that commit did not re-stamp the doc; and a local
+  wall-clock time hand-written with a `Z`/UTC suffix it doesn't
+  actually have. Does NOT catch a doc-only prose edit that leaves
+  `sources` untouched and the `timestamp` stale -- neither rule has a
+  source-side signal to compare against in that case, so it stays a
+  reviewer judgment call.
+- `sources-fresh-future` skips (severity `notice`) a `timestamp` string
+  with no `Z`/UTC designator or numeric offset (e.g.
+  `2026-01-01T00:00:00`): such a string parses in the machine's own
+  local timezone under `Date.parse`, which would swing the check's
+  verdict by hours between a UTC+2 laptop and a UTC CI runner against a
+  default 10-minute allowance. A numeric offset (`+02:00`, `-0500`) is
+  unambiguous and is still assessed normally. `sources-fresh`'s own
+  thresholds are days wide, so this ambiguity does not practically
+  matter there; the gate applies only to `sources-fresh-future`.
 - CI: the agent-dx `okf-anchor-guard` job (`.github/workflows/ci.yml`)
   gained a strict freshness step that fails the build on any
   `sources-fresh`/`sources-fresh-future` warning for
@@ -43,6 +57,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit as every other `okf-kit@<version>` pin, per this file's
   "Changed" entry above); no other change to the step is needed at that
   point, since it already filters by rule id rather than a fixed list.
+
+### Fixed
+
+- `sources-fresh`'s co-commit staleness exception (a source committed
+  at/before the doc file's own last commit is treated as fresh) is
+  narrowed to a commit that actually re-stamped the doc: added or
+  changed its frontmatter `timestamp:` line, or created the doc. A
+  commit that co-commits a source change with the doc (a prose edit, a
+  typo fix) WITHOUT touching the stamp no longer suppresses staleness --
+  previously this unconditional exception let exactly that case (a
+  source and the doc's prose committed together with the timestamp left
+  stale) pass silently, which was the review class this rule pair
+  exists to close. See the README's "Staleness (sources-fresh)" section
+  for the full narrowed contract and its remaining known limitations.
+- `--future-skew-minutes ''` (empty or whitespace-only) is now rejected
+  as the same usage error (exit 2) a negative value already gets,
+  instead of silently accepting it as `0`.
+- CI: the `okf-anchor-guard` job's freshness step (`.github/workflows/ci.yml`)
+  now rejects any `error`-severity freshness finding too (was: only
+  `warning`), gained a self-test mirroring the neighbouring
+  Anchor-citation guard's shape, and now runs with `if: always()` so its
+  findings surface in the same CI round as the Anchor-citation guard's
+  rather than being skipped after an anchor failure.
 
 ### Changed
 

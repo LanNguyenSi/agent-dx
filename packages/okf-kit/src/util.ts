@@ -48,3 +48,38 @@ export function getTimestampEpoch(parsed: unknown): number | undefined {
   if (Number.isNaN(ms)) return undefined;
   return Math.floor(ms / 1000);
 }
+
+/**
+ * The frontmatter `timestamp`'s raw string form, or undefined when it is
+ * absent, blank, or not a string -- notably, a native `Date` instance (see
+ * `getTimestampEpoch`'s doc comment) returns undefined here too, since a
+ * `Date`'s `getTime()` is always UTC-unambiguous and carries none of the
+ * local-timezone risk `hasUtcDesignator` exists to catch. Used only by
+ * `sources-fresh-future`'s UTC-designator gate; `sources-fresh` itself has
+ * no need for the raw string, only the resolved epoch.
+ */
+export function getRawTimestampString(parsed: unknown): string | undefined {
+  if (!isRecord(parsed)) return undefined;
+  const timestamp = parsed.timestamp;
+  if (typeof timestamp !== "string" || timestamp.trim() === "")
+    return undefined;
+  return timestamp;
+}
+
+/**
+ * Whether an ISO-ish timestamp string carries an explicit UTC designator
+ * (`Z`) or a numeric UTC offset (`+02:00`, `-0500`) at its end. A timestamp
+ * with neither ("2026-01-01T00:00:00", "2026-01-01 00:00:00") parses in
+ * the machine's LOCAL timezone under `Date.parse`, which would make
+ * `sources-fresh-future`'s clock-skew comparison swing by hours depending
+ * on which machine runs the check -- not usable for a check whose default
+ * allowance is only 10 minutes. A numeric offset, unlike a bare local
+ * time, is unambiguous: `Date.parse`/`Date#getTime()` already normalizes
+ * it to a real UTC instant, so no extra conversion is needed here beyond
+ * recognizing it as present. `sources-fresh`'s own thresholds are in
+ * days, wide enough that this ambiguity doesn't practically matter there,
+ * so this helper is deliberately NOT applied to that rule's comparison.
+ */
+export function hasUtcDesignator(raw: string): boolean {
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw.trim());
+}
