@@ -181,6 +181,16 @@ SKILL.md`) and the README gained an "Invocation templates" section
 
 ### Changed
 
+- `test/drift.test.ts`'s "'++ ' as content" case now uses a real rename
+  (`src/old-thing.yaml` -> `src/new-thing.ts`, `---`/`+++` naming
+  different paths) instead of a same-path edit: a same-path edit cannot
+  observe a compound mutant that disables the whole `!sawHunk &&
+  raw.startsWith("+++ ")` header branch, since `newPath ?? oldPath`
+  then falls back to the SAME file either way; a same-extension rename
+  is equally unobservable, since `extractIdentifier` classifies purely
+  by extension bucket. Renaming across buckets (a YAML config key
+  becoming a TS declaration) is what makes the fallback path
+  disagree with the real one.
 - `test/import-boundaries.test.ts`: a new guard, parsing each of
   `src/probe/session.ts`, `step.ts`, `setup.ts` and `index.ts`'s own
   import specifiers by regex, that fails if `session.ts` imports
