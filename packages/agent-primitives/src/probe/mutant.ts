@@ -2223,14 +2223,33 @@ function pushBudgetOverrunWarning(
   envelope: Record<string, unknown>,
   maxChars: number,
 ): void {
+  // A `warnings` this correction cannot append to safely (anything but
+  // an array, e.g. a caller-composed envelope that never ran this
+  // module's own reduction) is left exactly as it was, rather than
+  // silently replaced with a fresh one-element array.
+  if (envelope.warnings !== undefined && !Array.isArray(envelope.warnings)) {
+    return;
+  }
   const baseWarnings = Array.isArray(envelope.warnings)
     ? (envelope.warnings as unknown[])
     : [];
+  // `buildEnvelope`'s own reduction may already have appended this exact
+  // wording (the envelope did not fit `maxChars` even before this
+  // module's correction ran): replacing it here, rather than appending
+  // a second one, keeps the array carrying at most one "could not be
+  // met" warning, stating the true final length rather than the stale
+  // one measured before this correction's own shrinking.
+  const isOverrunWarning = (value: unknown): boolean =>
+    typeof value === "string" &&
+    /^envelope is \d+ characters; requested max-chars \d+ could not be met$/.test(
+      value,
+    );
+  const priorWarnings = baseWarnings.filter((w) => !isOverrunWarning(w));
   const wording = (n: number): string =>
     `envelope is ${String(n)} characters; requested max-chars ${String(maxChars)} could not be met`;
   const probe = wording(0);
   const base =
-    jsonLength({ ...envelope, warnings: [...baseWarnings, probe] }) -
+    jsonLength({ ...envelope, warnings: [...priorWarnings, probe] }) -
     "0".length;
   let finalLength = base + 1;
   for (let digits = 1; digits <= 20; digits++) {
@@ -2240,7 +2259,7 @@ function pushBudgetOverrunWarning(
       break;
     }
   }
-  envelope.warnings = [...baseWarnings, wording(finalLength)];
+  envelope.warnings = [...priorWarnings, wording(finalLength)];
 }
 
 /**

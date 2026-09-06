@@ -2664,6 +2664,65 @@ describe("reconcileEnvelopeDiffTruncation", () => {
     expect(midHunkOriginal.text.startsWith(String(diff.text))).toBe(true);
   });
 
+  it("stops the corrected excerpt at the last complete hunk, never re-including a malformed trailing hunk fragment past it, even when the original is itself flagged hunkTruncated", () => {
+    // `EnvelopeDiffOriginals`/`MutantOriginal` are structurally typed on
+    // purpose (see their own docblocks): nothing stops a library caller
+    // composing its own envelope from handing this a `hunkTruncated:
+    // true` original whose text nonetheless carries one complete hunk
+    // followed by a second, malformed one (a header whose declared
+    // count does not match what actually follows it) -- a shape this
+    // module's own producer (`buildBoundedHunkExcerpt`) never emits
+    // itself (`hunkTruncated` there only ever describes a lone, partial
+    // FIRST hunk, never a later one behind an already-complete prefix),
+    // but the type does not forbid it. `rebuildDeliveredExcerpt`'s
+    // `completePrefix` rule has to stop the rebuilt excerpt at the last
+    // hunk `trimToLastCompleteHunk` can actually vouch for, rather than
+    // reusing the whole original text regardless of what its own
+    // `hunkTruncated` flag says.
+    const completeHunk = "@@ -1,1 +1,1 @@\n-x\n+y";
+    const malformedTrailingHunk = "@@ -3,5 +3,5 @@\n-p";
+    const original: MutantDiffField = {
+      text: `${completeHunk}\n${malformedTrailingHunk}`,
+      path: DIFF_PATH,
+      hunkCount: 2,
+      removed: 6,
+      added: 6,
+      changedLineCount: 12,
+      truncated: true,
+      hunkTruncated: true,
+    };
+    // Premise check: the last hunk genuinely is not one
+    // `trimToLastCompleteHunk` can vouch for (its header declares 10
+    // body lines; only one follows), so the complete prefix really does
+    // stop before it.
+    expect(trimToLastCompleteHunk(original.text)).toBe(completeHunk);
+
+    // Long and different from `original.text`, so case 2 runs with a
+    // generous budget -- comfortably large enough to fit BOTH hunks,
+    // which is what makes this discriminate: a correction that used
+    // `original.text` outright (ignoring `completePrefix`) would have
+    // room to re-include the malformed trailing hunk whole.
+    const deliveredDiff: Record<string, unknown> = {
+      ...original,
+      text: "y".repeat(300),
+    };
+    const envelope = envelopeWith(deliveredDiff, {
+      mutant: "unused",
+      verified_applied_via: "unused",
+    });
+
+    reconcileEnvelopeDiffTruncation(envelope, {
+      mutant: originalMutant(original),
+    });
+
+    const diff = (envelope.mutant as Record<string, unknown>).diff as Record<
+      string,
+      unknown
+    >;
+    expect(diff.text).toBe(completeHunk);
+    expect(String(diff.text)).not.toContain("-p");
+  });
+
   it("matches a plan's delivered entries to the originals by index, leaving the array marker alone", () => {
     const cutText =
       ORIGINAL_TEXT.slice(0, 45) + "...(14 more characters omitted)";
@@ -2990,6 +3049,103 @@ describe("reconcileEnvelopeDiffTruncation", () => {
     );
 
     expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+  });
+
+  it("does not duplicate the overrun warning when the whole envelope is still over `maxChars` after every target has been shrunk to nothing", () => {
+    // An unrelated fixed field this correction never touches, sized so
+    // the envelope stays past `maxChars` no matter how far the one
+    // target's excerpt is shrunk -- the shape that reaches
+    // `pushBudgetOverrunWarning` a SECOND time (`buildEnvelope`'s own
+    // reduction already appended one, simulated here directly rather
+    // than through a real `buildEnvelope` call, since only the dedup
+    // behaviour of the second append is under test).
+    const padding = "z".repeat(5000);
+    const alreadyHunkTruncated: MutantDiffField = {
+      text: "@@ -1,4 +1,4 @@\n-aaa\n-bbb\n-ccc\n-ddd",
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 4,
+      added: 4,
+      changedLineCount: 8,
+      truncated: true,
+      hunkTruncated: true,
+    };
+    // Delivered short with dropped keys, so restoring them (`writeCorrectableDiffKeys`)
+    // and restating the descriptors (`unused` -> the real formatted
+    // summary/via strings) both grow the envelope past its
+    // pre-correction length, entering `enforceEnvelopeBudget`'s shrink
+    // search.
+    const deliveredDiff: Record<string, unknown> = {
+      text: "@@ -1,4 +1,4 @@\n-aaa",
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 4,
+      added: 4,
+      truncated: true,
+      "...": "2 more keys omitted",
+    };
+    const envelope = envelopeWith(deliveredDiff, {
+      mutant: "unused",
+      verified_applied_via: "unused",
+    });
+    envelope.warnings = [
+      "envelope is 12345 characters; requested max-chars 10 could not be met",
+    ];
+    envelope.padding = padding;
+
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      { mutant: originalMutant(alreadyHunkTruncated) },
+      10,
+    );
+
+    const overrunWarnings = (envelope.warnings as string[]).filter((w) =>
+      /could not be met/.test(w),
+    );
+    expect(overrunWarnings.length).toBe(1);
+    // The one warning that survives states the TRUE final length, not
+    // the stale one the pre-existing warning named.
+    expect(overrunWarnings[0]).not.toBe(
+      "envelope is 12345 characters; requested max-chars 10 could not be met",
+    );
+  });
+
+  it("leaves a non-array `warnings` field untouched, rather than overwriting it, when the envelope is still over `maxChars` after correction", () => {
+    const padding = "z".repeat(5000);
+    const alreadyHunkTruncated: MutantDiffField = {
+      text: "@@ -1,4 +1,4 @@\n-aaa\n-bbb\n-ccc\n-ddd",
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 4,
+      added: 4,
+      changedLineCount: 8,
+      truncated: true,
+      hunkTruncated: true,
+    };
+    const deliveredDiff: Record<string, unknown> = {
+      text: "@@ -1,4 +1,4 @@\n-aaa",
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 4,
+      added: 4,
+      truncated: true,
+      "...": "2 more keys omitted",
+    };
+    const envelope = envelopeWith(deliveredDiff, {
+      mutant: "unused",
+      verified_applied_via: "unused",
+    });
+    const nonArrayWarnings = "not an array; left alone rather than clobbered";
+    envelope.warnings = nonArrayWarnings;
+    envelope.padding = padding;
+
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      { mutant: originalMutant(alreadyHunkTruncated) },
+      10,
+    );
+
+    expect(envelope.warnings).toBe(nonArrayWarnings);
   });
 });
 

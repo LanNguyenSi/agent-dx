@@ -3183,6 +3183,114 @@ describe("cli: probe --plan", () => {
     );
   }, 60000);
 
+  it("bound regression (--plan): dropping the CLI's third `reconcileEnvelopeDiffTruncation` argument (global.maxChars) lets a 2-mutant plan (15 hunks of 61-char lines) exceed a tight `-m`, even with a SHORT -l log directory under which the diff.path pointer clause survives the envelope's own string cap", async () => {
+    // Unlike the wiring-regression test above (a long `-l`, the DEFAULT
+    // `-m`, asserting only that the per-mutant hunk correction ran at
+    // all), this pins the CLI's OWN pass of `global.maxChars` into the
+    // call: with it, `enforceEnvelopeBudget` re-measures the whole
+    // envelope once the per-mutant correction restores bytes the
+    // reduction had dropped, and shrinks the largest excerpt further if
+    // that restoration pushed the envelope back over `-m`. Deleting
+    // just the third argument (not the whole call) leaves the per-mutant
+    // correction running -- so the wiring-regression test above still
+    // passes -- but skips that re-measure, so the envelope silently
+    // ships a few bytes over the bound it was asked for.
+    const lineCount = 80;
+    const repo = fs.mkdtempSync(path.join("/tmp", "ap6-plan-repo-"));
+    tmpDirs.push(repo);
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(
+      path.join(repo, "wide.txt"),
+      Array.from({ length: lineCount }, (_, i) => buildWideLine(i)).join("\n") +
+        "\n",
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const patchPath = path.join(repo, "wide.patch");
+    fs.writeFileSync(patchPath, buildWidePatch("wide.txt", lineCount));
+    const planPath = writePlan(repo, {
+      test: "true",
+      mutants: [
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+        { file: "wide.txt", patch: patchPath, expect: "pass" },
+      ],
+    });
+    // Short (a handful of random characters under `/tmp`), so the
+    // per-mutant excerpt correction's own `diff.path` pointer clause
+    // survives the envelope's generic string cap -- the same growth
+    // `enforceEnvelopeBudget` has to absorb.
+    const logDir = fs.mkdtempSync(path.join("/tmp", "ap6L-"));
+    tmpDirs.push(logDir);
+    const maxChars = 3650;
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      String(maxChars),
+      "-l",
+      logDir,
+      "probe",
+      "--plan",
+      planPath,
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
+    expect(() => JSON.parse(run.stdout)).not.toThrow();
+  }, 60000);
+
+  it("bound regression (single probe): dropping the CLI's third `reconcileEnvelopeDiffTruncation` argument (global.maxChars) lets a single probe (15 hunks of 61-char lines) exceed a tight `-m`, even with a SHORT -l log directory under which the diff.path pointer clause survives the envelope's own string cap", async () => {
+    // The single-probe mirror of the `--plan` test above: the same
+    // dropped third argument, at the OTHER call site in `cli.ts`
+    // (`envelope.mutant`/`envelope.mutation_probe` at the top level
+    // rather than one entry per `plan.results[]`).
+    const lineCount = 80;
+    const repo = fs.mkdtempSync(path.join("/tmp", "ap6-single-repo-"));
+    tmpDirs.push(repo);
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(
+      path.join(repo, "wide.txt"),
+      Array.from({ length: lineCount }, (_, i) => buildWideLine(i)).join("\n") +
+        "\n",
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const patchPath = path.join(repo, "wide.patch");
+    fs.writeFileSync(patchPath, buildWidePatch("wide.txt", lineCount));
+    const logDir = fs.mkdtempSync(path.join("/tmp", "ap6L2-"));
+    tmpDirs.push(logDir);
+    const maxChars = 2200;
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-m",
+      String(maxChars),
+      "-l",
+      logDir,
+      "probe",
+      "--file",
+      "wide.txt",
+      "-p",
+      patchPath,
+      "-t",
+      "true",
+      "--expect",
+      "pass",
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(maxChars);
+    expect(() => JSON.parse(run.stdout)).not.toThrow();
+  }, 60000);
+
   it("on SIGINT during mutant 2 of 3: restores the in-flight mutant, never applies the third, exits 130 with no output", async () => {
     const { repo, before } = initPlanRepo();
     const lockDir = makeTmpDir();
