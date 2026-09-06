@@ -780,7 +780,7 @@ agent-primitives probe --plan mutants.json
   "expect": "fail",
   "timeout": 900,
   "mutants": [
-    { "file": "src/probe/index.ts", "line": 812, "replace": "  return true;" },
+    { "file": "src/example.ts", "line": 42, "replace": "  return true;" },
     { "file": "src/lock.ts", "line": 44, "match": "n > 0", "with": "n >= 0" },
     {
       "file": "src/exec.ts",

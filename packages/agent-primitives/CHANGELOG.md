@@ -181,6 +181,11 @@ SKILL.md`) and the README gained an "Invocation templates" section
 
 ### Changed
 
+- README's `--plan` example mutant now names a neutral placeholder
+  (`src/example.ts` line 42) instead of a real source line
+  (`src/probe/index.ts` line 812), which was already inaccurate and
+  drifts with every edit to that file. The example illustrates the plan
+  file's shape only; it was never meant to be run as-is.
 - `test/probe-worktree.test.ts` now pins `session.ts`'s stale-worktree
   marker removal after a successful recovery (`if (staleWt)
   removeMarkerFor(realRoot)`) with a test that mocks `beginWorktree` to
