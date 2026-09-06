@@ -63,6 +63,15 @@ jobs:
     timeout-minutes: 5
     env:
       BUNDLE_PATH: packages/orchestrator-workflow/docs/okf
+      # Read by BOTH the "Self-test the freshness-finding filter" step and
+      # the real "Freshness guard" step below, so an edit to the filter is
+      # exercised by the self-test instead of the self-test guarding a
+      # separately hand-kept copy of it. The full `[.findings[] | ...]`
+      # array expression lives here too (not just the inner
+      # select-expression), so each consuming step only appends `| length`
+      # (or reads the array directly) rather than hand-keeping the
+      # `.findings[]` wrapper in more than one place.
+      FRESHNESS_FILTER: '[.findings[] | select(.ruleId == "sources-fresh" or .ruleId == "sources-fresh-future") | select(.severity != "notice")]'
     steps:
       - uses: actions/checkout@v5
         with:
@@ -366,6 +375,118 @@ jobs:
           fi
 
           echo "Clean, 0 anchor findings."
+          exit 0
+
+      - name: Self-test the freshness-finding filter against a synthetic report
+        # Guards the jq pipeline in the "Freshness guard" step below, not
+        # the bundle: builds a throwaway inline report (not a real okf-kit
+        # invocation, since the filter only cares about JSON shape) with
+        # one sources-fresh warning, one sources-fresh-future error, and
+        # one sources-fresh-future notice, then runs the job-level
+        # `FRESHNESS_FILTER` env var -- the IDENTICAL expression text the
+        # step below reads, not a separately hand-kept copy of it, so an
+        # edit to the real filter is exercised here too instead of silently
+        # bypassing this self-test -- and asserts it keeps exactly the
+        # warning and the error (2) while dropping the notice -- mirrors
+        # the neighbouring Anchor-citation guard self-test's shape,
+        # assert_numeric guard included, so a jq pipeline that produces no
+        # usable output fails here rather than falling through an `if`
+        # condition `set -e` does not catch. If this ever returns anything
+        # other than 2, the filter itself is broken (a typo, a severity the
+        # tool stopped emitting) and this step fails red before the real
+        # check below can pass green for the wrong reason.
+        # `if: success() || failure()`, same reasoning as the real step
+        # below: this is a pure self-test with no bundle dependency, so it
+        # should still run (and still be able to fail red) after an earlier
+        # Anchor-citation guard finding, just not after a cancellation.
+        if: success() || failure()
+        shell: bash
+        run: |
+          set -e
+          # Same helper, same reason as the Anchor-citation guard self-test
+          # above: an empty/non-numeric count inside a `[ "${x}" -ne 2 ]`
+          # test is a shell usage error, and `set -e` exempts condition
+          # commands, so without this the step would report "Self-test OK"
+          # on a broken pipeline.
+          assert_numeric() {
+            case "$2" in
+              ''|*[!0-9]*)
+                echo "::error title=OKF freshness guard self-test failed::${1} is not a numeric finding count (got \"${2}\"); the jq pipeline produced no usable output"
+                exit 1
+                ;;
+            esac
+          }
+          syntheticReport=$(jq -n '{
+            findings: [
+              {ruleId: "sources-fresh", severity: "warning", file: "a.md", message: "STALE: x"},
+              {ruleId: "sources-fresh-future", severity: "error", file: "b.md", message: "FUTURE-DATED: y"},
+              {ruleId: "sources-fresh-future", severity: "notice", file: "c.md", message: "future-dated check skipped"}
+            ]
+          }')
+
+          matched=$(echo "${syntheticReport}" | jq "${FRESHNESS_FILTER} | length")
+
+          assert_numeric matched "${matched}"
+          if [ "${matched}" -ne 2 ]; then
+            echo "::error title=OKF freshness guard self-test failed::expected 2 findings to survive the filter (the warning and the error), got ${matched}"
+            exit 1
+          fi
+
+          echo "Self-test OK: freshness filter kept 2/3 synthetic findings (dropped the notice)."
+
+      - name: "Freshness guard (strict): sources-fresh + sources-fresh-future"
+        # Reuses okf-anchor-report.json from the Anchor-citation guard step
+        # above (one `okf-kit check` invocation already ran every rule
+        # against BUNDLE_PATH, --require-anchors only adds MORE
+        # citations-resolve checks to that same run, it never removes any
+        # other rule's findings). This is the strict half of the review
+        # class named in okf-kit's CHANGELOG.md "Fixed"/"Added" entries: a
+        # bundle doc edited (or its declared source changed) without a
+        # correct re-stamp, previously only caught by the warn-only
+        # okf-staleness.yml watch. Filters by rule id, not a fixed message
+        # pattern or a hardcoded release note: matches sources-fresh and
+        # sources-fresh-future by rule id, whichever the installed okf-kit
+        # emits, so a future pin bump needs no edit here.
+        # `if: success() || failure()`: the Anchor-citation guard step above
+        # writes okf-anchor-report.json before it can itself exit 1 on an
+        # anchor finding, so this step's findings should surface in the same
+        # CI round rather than being skipped after an anchor failure. NOT
+        # `always()`, which would also run after a cancellation and after an
+        # earlier setup step failed (no okf-kit installed, no report written)
+        # and stack a jq file-open error on top of the real failure; the
+        # explicit report-missing guard below is what turns a genuinely
+        # absent report into one readable annotation.
+        if: success() || failure()
+        shell: bash
+        run: |
+          if [ ! -f okf-anchor-report.json ]; then
+            echo "::error title=OKF freshness guard::the anchor guard step did not produce a report"
+            exit 1
+          fi
+
+          jq -e . okf-anchor-report.json > /dev/null
+
+          freshnessFindings=$(jq "${FRESHNESS_FILTER}" okf-anchor-report.json)
+          count=$(echo "${freshnessFindings}" | jq 'length')
+
+          {
+            echo "## OKF bundle freshness guard (\`${BUNDLE_PATH}\`), strict"
+            echo ""
+            echo "freshness findings: ${count}"
+            if [ "${count}" -gt 0 ]; then
+              echo ""
+              echo '```'
+              echo "${freshnessFindings}" | jq -r '.[] | "\(.ruleId) \(.file): \(.message)"'
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${count}" -gt 0 ]; then
+            echo "${freshnessFindings}" | jq -r '.[] | "::error title=OKF freshness drift::\(.ruleId) \(.file): \(.message)"'
+            exit 1
+          fi
+
+          echo "Clean, 0 freshness findings (strict)."
           exit 0
 
   lint-cli-flag-order:

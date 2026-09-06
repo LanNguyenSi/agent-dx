@@ -52,8 +52,15 @@ function walkMarkdownFiles(dir: string): string[] {
  * line that is exactly `---`. Anything else (no opening delimiter, or an
  * opening delimiter with no matching close) counts as no frontmatter block
  * at all, per the OKF v0.1 shape rule.
+ *
+ * Exported so `sources-fresh` can apply the IDENTICAL parse to a historical
+ * blob (`git show <sha>:<path>`) that `loadBundle` applies to the working-tree
+ * file: the rule's re-stamp test compares the parsed frontmatter `timestamp`
+ * VALUE across a commit boundary, and a second, subtly different parser there
+ * would decide freshness by a different notion of "frontmatter" than the rest
+ * of the tool.
  */
-function parseFrontmatter(raw: string): {
+export function parseFrontmatter(raw: string): {
   frontmatter: FrontmatterInfo;
   body: string;
 } {

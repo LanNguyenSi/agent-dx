@@ -86,6 +86,141 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
     expect(strictRun.status).toBe(1);
   });
 
+  it("includes sources-fresh-future findings in --json, and --strict turns a FUTURE-DATED-only bundle into exit 1 while default exits 0", () => {
+    repo.commitFile(
+      "bundle/doc.md",
+      "---\ntype: concept\ntimestamp: 2026-01-02T00:00:00.000Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+      "2026-01-01T00:00:00Z",
+    );
+    fs.writeFileSync(path.join(repo.dir, "source.ts"), "export const a = 1;\n");
+
+    const defaultRun = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--json",
+    ]);
+    expect(defaultRun.status).toBe(0);
+    const parsed = JSON.parse(defaultRun.stdout) as JsonReport;
+    expect(
+      parsed.findings.some(
+        (f) => f.ruleId === "sources-fresh-future" && f.severity === "warning",
+      ),
+    ).toBe(true);
+    expect(parsed.summary.warnings).toBeGreaterThan(0);
+    expect(parsed.summary.errors).toBe(0);
+
+    const strictRun = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--strict",
+    ]);
+    expect(strictRun.status).toBe(1);
+  });
+
+  it("--future-skew-minutes narrows the allowance so a timestamp that passed under the default now fails", () => {
+    repo.commitFile(
+      "bundle/doc.md",
+      // 5 minutes after the doc's own commit: fresh under the default
+      // 10-minute skew.
+      "---\ntype: concept\ntimestamp: 2026-01-01T00:05:00.000Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+      "2026-01-01T00:00:00Z",
+    );
+    fs.writeFileSync(path.join(repo.dir, "source.ts"), "export const a = 1;\n");
+
+    const defaultRun = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--json",
+    ]);
+    const defaultParsed = JSON.parse(defaultRun.stdout) as JsonReport;
+    expect(
+      defaultParsed.findings.some((f) => f.ruleId === "sources-fresh-future"),
+    ).toBe(false);
+
+    const narrowRun = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--future-skew-minutes",
+      "1",
+      "--json",
+    ]);
+    const narrowParsed = JSON.parse(narrowRun.stdout) as JsonReport;
+    expect(
+      narrowParsed.findings.some((f) => f.ruleId === "sources-fresh-future"),
+    ).toBe(true);
+  });
+
+  it("rejects a negative --future-skew-minutes as a usage error (exit 2)", () => {
+    const result = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--future-skew-minutes",
+      "-5",
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("--future-skew-minutes");
+  });
+
+  it("rejects an empty (or whitespace-only) --future-skew-minutes as a usage error (exit 2), not 0", () => {
+    const result = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--future-skew-minutes",
+      "",
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("--future-skew-minutes");
+
+    const whitespaceResult = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--future-skew-minutes",
+      "   ",
+    ]);
+    expect(whitespaceResult.status).toBe(2);
+    expect(whitespaceResult.stderr).toContain("--future-skew-minutes");
+  });
+
+  it("accepts 0 as a valid --future-skew-minutes (the tightest allowance)", () => {
+    repo.commitFile(
+      "bundle/doc.md",
+      // Exactly at the doc's own commit instant: still fresh even under a
+      // 0-second (no) skew allowance.
+      "---\ntype: concept\ntimestamp: 2026-01-01T00:00:00.000Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+      "2026-01-01T00:00:00Z",
+    );
+    fs.writeFileSync(path.join(repo.dir, "source.ts"), "export const a = 1;\n");
+
+    const result = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--future-skew-minutes",
+      "0",
+      "--json",
+    ]);
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout) as JsonReport;
+    expect(
+      parsed.findings.some((f) => f.ruleId === "sources-fresh-future"),
+    ).toBe(false);
+  });
+
   it("skips staleness with a notice when the bundle is not inside a git work tree", () => {
     const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-plain-"));
     try {

@@ -7,6 +7,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A new rule, `sources-fresh-future`, complements `sources-fresh`: it flags
+  a doc's frontmatter `timestamp` that is later than the doc file's own
+  last commit by more than a clock-skew allowance (default 10 minutes,
+  `--future-skew-minutes <n>`), catching a local wall-clock time
+  mistakenly written with a `Z`/UTC suffix it doesn't actually have.
+  Unlike `sources-fresh`, it never looks at `sources` commit times, only
+  at the doc file's own git history, and it is assessed over the same doc
+  population (a validly-shaped `sources` list and a repo root available).
+  An uncommitted doc (no own commit yet) is "unknown, not flagged", the
+  same posture `sources-fresh` already takes for an untracked source path.
+  `FUTURE-DATED` findings are `warning` severity, same as `STALE`; run
+  with the existing `--strict` flag to fail the build on either, rather
+  than a second, rule-specific strictness switch. Extends
+  `src/rules/sources-fresh.ts` (shares its `getLastCommitEpoch` git
+  helper and its doc-population filter) instead of adding a parallel
+  mechanism; see the README's "Staleness (sources-fresh)" section,
+  "Future-dated timestamps (`sources-fresh-future`)" subsection, for the
+  full rule contract and how the two rules relate. Together with the
+  `sources-fresh` narrowing below, catches: a source path committed
+  after the doc's `timestamp`; a source and the doc co-committed
+  together where that commit did not re-stamp the doc; and a local
+  wall-clock time hand-written with a `Z`/UTC suffix it doesn't
+  actually have. Does NOT catch a doc-only prose edit that leaves
+  `sources` untouched and the `timestamp` stale -- neither rule has a
+  source-side signal to compare against in that case, so it stays a
+  reviewer judgment call.
+- `sources-fresh-future` skips (severity `notice`) a `timestamp` string
+  with no `Z`/UTC designator or numeric offset (e.g.
+  `2026-01-01T00:00:00`): such a string parses in the machine's own
+  local timezone under `Date.parse`, which would swing the check's
+  verdict by hours between a UTC+2 laptop and a UTC CI runner against a
+  default 10-minute allowance. A numeric offset (`+02:00`, `-0500`) is
+  unambiguous and is still assessed normally. `sources-fresh`'s own
+  thresholds are days wide, so this ambiguity does not practically
+  matter there; the gate applies only to `sources-fresh-future`.
+- CI: the agent-dx `okf-anchor-guard` job (`.github/workflows/ci.yml`)
+  gained a strict freshness step that fails the build on any
+  `sources-fresh`/`sources-fresh-future` warning for
+  `packages/orchestrator-workflow/docs/okf`. **Release dependency:**
+  `sources-fresh-future` does not exist in the okf-kit version this job
+  currently installs (a pinned release from npm, kept in sync with
+  `package.json`'s own version by
+  `orchestrator-workflow/test/docs-consistency.test.ts`), so the step's
+  filter matches only `sources-fresh` findings until the next okf-kit
+  release ships this rule and the job's pin is bumped to it (in the same
+  commit as every other `okf-kit@<version>` pin, per this file's
+  "Changed" entry above); no other change to the step is needed at that
+  point, since it already filters by rule id rather than a fixed list.
+
+### Fixed
+
+- `sources-fresh`'s co-commit staleness exception (a source committed
+  at/before the doc file's own last commit is treated as fresh) is
+  narrowed to a commit that actually re-stamped the doc. A commit that
+  co-commits a source change with the doc (a prose edit, a typo fix)
+  WITHOUT touching the stamp no longer suppresses staleness --
+  previously this unconditional exception let exactly that case (a
+  source and the doc's prose committed together with the timestamp left
+  stale) pass silently, which was the review class this rule pair
+  exists to close. "Re-stamped" is decided by VALUE: the doc's parsed
+  frontmatter `timestamp` at that commit is compared against its value
+  in the commit's FIRST PARENT, and they must differ (a doc created
+  there, having no parent revision at all, counts as re-stamped). The
+  lookup follows a rename, so a `git mv` is not read as a creation, and
+  it reads trees rather than a patch, so a merge commit -- including the
+  `refs/pull/N/merge` ref CI checks out -- is assessed like any other
+  commit. Consequently a `timestamp:` line inside a fenced YAML example
+  in the doc's BODY is not mistaken for a re-stamp. The check answers
+  "did the value change", never "is the new value right": a hand-typed
+  or backdated stamp still counts (`sources-fresh-future` is the rule
+  that catches an implausible value), and a doc-only prose edit with
+  unchanged sources remains outside both rules' reach. When git cannot
+  answer the question at all, the doc gets one `staleness not
+  assessable` notice rather than a STALE warning or a silent pass. See
+  the README's "Staleness (sources-fresh)" section for the full contract
+  and its remaining known limitations.
+- `sources-fresh`'s re-stamp lookup no longer misjudges two more shapes
+  the value comparison above did not yet cover. (1) In a SHALLOW clone
+  (`git clone --depth`, including `actions/checkout`'s default), the
+  grafted history boundary commit reports an EMPTY parent list for every
+  path touched at or before it -- indistinguishable from a real root
+  commit by the parent-list check alone, which previously trusted it and
+  assumed "created" (re-stamped) unconditionally. The lookup now checks
+  `git rev-parse --is-shallow-repository` (once per `check` run, not per
+  doc: only spent at all when some doc's re-stamp lookup actually
+  reaches a commit with no parents) and, when the repository is shallow,
+  answers `not assessable` there instead -- see the README's "CI usage"
+  section for the `fetch-depth: 0` remedy. (2) A NON-ASCII doc path was
+  C-quoted by `git diff-tree`'s default `--name-status` output
+  (`core.quotePath` defaults to true, e.g. `"bundle/\303\266lt.md"` for
+  `bundle/ölt.md`), so the rename/created lookup's plain string match
+  against the doc's real (unquoted) path never matched, silently fell
+  through to the wrong path, and turned a normal rename or creation into
+  a `not assessable` notice instead of the real verdict. The lookup now
+  runs with `-z` (NUL-delimited, never quoted regardless of
+  `core.quotePath`) instead of the default form. New fixtures also pin:
+  an octopus merge (three parents) as a doc's last commit without a
+  re-stamp still reports STALE (only the FIRST parent is ever consulted,
+  however many there are); and a cosmetic rewrite of the stamp to the
+  same instant in another string representation (`...00Z` to
+  `...00.000Z`) still counts as a re-stamp, since the comparison is by
+  raw parsed VALUE, not by resolved instant -- while adding or removing
+  quotes around an otherwise-unchanged value does NOT count, since YAML
+  parsing already normalizes those away before the comparison ever sees
+  them.
+- `--future-skew-minutes ''` (empty or whitespace-only) is now rejected
+  as the same usage error (exit 2) a negative value already gets,
+  instead of silently accepting it as `0`.
+- The internal git runner now sets an explicit 16 MiB output cap.
+  Node's default for a synchronous child process is 1 MiB, and
+  `sources-fresh` reads whole doc blobs to compare frontmatter
+  timestamps, so a doc larger than 1 MiB previously resolved to "git
+  failed" -- and therefore to a permanent not-assessable notice -- on a
+  perfectly healthy repository.
+- CI: the `okf-anchor-guard` job's freshness step (`.github/workflows/ci.yml`)
+  now rejects any `error`-severity freshness finding too (was: only
+  `warning`), gained a self-test mirroring the neighbouring
+  Anchor-citation guard's shape (its `assert_numeric` guard included),
+  guards explicitly against a missing or malformed report before its
+  first `jq`, and runs with `if: success() || failure()` so its findings
+  surface in the same CI round as the Anchor-citation guard's rather
+  than being skipped after an anchor failure -- while, unlike
+  `always()`, staying out of the way of a cancelled run or an earlier
+  setup failure that never produced a report. The self-test step now
+  carries the same `if: success() || failure()` (it previously ran
+  unconditionally), and both it and the real step now read the SAME
+  `FRESHNESS_FILTER` jq expression from the job's `env:` rather than the
+  self-test guarding its own hand-kept copy: an edit to the real filter
+  is now exercised by the self-test, not silently bypassed by it.
+
 ### Changed
 
 - The release procedure now bumps orchestrator-workflow's okf-kit pins
