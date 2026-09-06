@@ -4068,6 +4068,123 @@ describe("roles prefer connected structural search, verify, and mutation-probe r
   });
 });
 
+/**
+ * Recurring process class from a batch review: an implementer left a long
+ * probe or test run backgrounded and ended its turn, so the result was
+ * only recovered by resuming the subagent later. The prompt now requires
+ * running such a command in the foreground and waiting for it to finish.
+ */
+describe("the implementer never backgrounds a long verification run (a mutant deleting this sentence must fail this)", () => {
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+  const implementerRules = phraseBoundedSlice(
+    implementerMd,
+    "Rules:",
+    "For v1, return the delegated baseline identity",
+  );
+
+  it("implementer prompt requires foreground verification runs, never a backgrounded run left to outlive the turn", () => {
+    expect(implementerRules).toContain(
+      "Run every long test, build, or mutation-probe command in the foreground",
+    );
+    expect(implementerRules).toContain(
+      "never end your turn with the run still outstanding",
+    );
+  });
+});
+
+/**
+ * Recurring process class from a batch review: a spawned-CLI test was
+ * calibrated to a byte-count ceiling that sat inside the output's own
+ * run-to-run noise (timing digits, temp-dir names), so it passed locally
+ * and failed on the next run with no code change. reviewer.md and
+ * implementer.md both now carry the same caution and the same two fixes.
+ * This pair is pinned in its own dedicated block rather than added to
+ * `MIRRORED_CHECKLIST_PAIRS` above, since that table pairs a reviewer
+ * checklist item with its SKILL.md mirror, not with implementer.md.
+ */
+describe("a spawned-CLI test's assertion is calibrated in-process or against its contract, never a byte ceiling inside run-to-run noise", () => {
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+  const reviewerTestAdequacy = phraseBoundedSlice(
+    reviewerMd,
+    "Test adequacy:",
+    "- Maintainability:",
+  );
+  const implementerRules = phraseBoundedSlice(
+    implementerMd,
+    "Rules:",
+    "For v1, return the delegated baseline identity",
+  );
+
+  const PHRASE =
+    "A test that spawns a CLI and asserts its output against a byte-count ceiling calibrated to sit inside the output's own run-to-run noise";
+
+  it("reviewer.md and implementer.md both carry the byte-ceiling caution, worded identically", () => {
+    expect(reviewerTestAdequacy).toContain(PHRASE);
+    expect(implementerRules).toContain(PHRASE);
+  });
+
+  it("both prompts steer to the same two fixes: pin in-process, or assert the bound/warning contract", () => {
+    for (const doc of [reviewerTestAdequacy, implementerRules]) {
+      expect(doc).toContain("pin the argument under test in-process");
+      expect(doc).toContain(
+        "assert the actual contract (a bound, or the presence of a warning), never a byte ceiling",
+      );
+    }
+  });
+});
+
+/**
+ * Recurring process class from a batch review: the orchestrator ran
+ * mutation probes in place on a worktree a reviewer subagent was
+ * concurrently reviewing, so the reviewer verified findings against a
+ * tree that was mutating under it. SKILL.md step 7 now names the fix.
+ */
+describe("the orchestrator never probes a worktree a reviewer subagent is concurrently using (SKILL.md step 7)", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const step7 = phraseBoundedSlice(
+    skillMd,
+    "7. **Delegate review.**",
+    "8. **Decide acceptance.**",
+  );
+
+  it("step 7 requires worktree isolation or waiting before probing a tree the reviewer is using (a mutant deleting this sentence must fail this)", () => {
+    expect(step7).toContain(
+      "Never run mutation probes in place against a worktree a reviewer subagent is concurrently reviewing",
+    );
+    expect(step7).toContain(
+      "isolate the probe in a separate worktree or wait until the reviewer has returned",
+    );
+  });
+});
+
+/**
+ * The CHANGELOG's own `[Unreleased]` bullet narrates all three rules above
+ * (foreground verification, the byte-ceiling caution, and the worktree
+ * isolation rule) with their motivating incidents; nothing pinned that
+ * prose, so a future edit could silently drop or water down the bullet
+ * while the three prompt rules it describes stay intact.
+ */
+describe("the CHANGELOG [Unreleased] bullet names all three process rules from this round", () => {
+  const changelogMd = readDoc("CHANGELOG.md");
+  const start = changelogMd.indexOf("## [Unreleased]");
+  const next = changelogMd.indexOf("\n## [", start + 1);
+  const section = unwrap(
+    changelogMd.slice(start, next === -1 ? undefined : next),
+  );
+
+  it("names the foreground-run rule, the byte-ceiling caution, and the worktree-isolation rule inside [Unreleased]", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(section).toContain(
+      "running every long test, build, or mutation-probe command in the foreground",
+    );
+    expect(section).toContain("byte-count ceiling");
+    expect(section).toContain(
+      "prohibits running mutation probes in place against a worktree a reviewer subagent is concurrently reviewing",
+    );
+  });
+});
+
 describe("Codex routing and agent-led installation stay documented", () => {
   const installAgentMd = unwrap(readDoc("INSTALL-AGENT.md"));
   const readmeMd = unwrap(readDoc("README.md"));
@@ -4668,7 +4785,11 @@ describe("identifier drift is also covered for the orchestrator's own trivial-re
  * reproduction rule, and the mandatory `acceptance_recommendation` field
  * are also mirrored between reviewer.md and SKILL.md, but each is already
  * pinned as a pair in its own dedicated `describe` block elsewhere in this
- * file, so they are deliberately not duplicated here.
+ * file, so they are deliberately not duplicated here. The byte-ceiling
+ * caution is mirrored too, but between reviewer.md and implementer.md, not
+ * between reviewer.md and SKILL.md; it does not belong in this table (which
+ * pairs a reviewer checklist item with its SKILL.md mirror only) and stays
+ * pinned in its own dedicated block above instead.
  */
 describe("the reviewer checklist items mirrored in this table still carry their SKILL.md counterpart", () => {
   const reviewerMd = unwrap(readAsset("agents/reviewer.md"));

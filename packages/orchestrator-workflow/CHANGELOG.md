@@ -22,6 +22,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SKILL.md counterpart sentence, from one table of paired phrases, so
   either half going missing fails the same test.
 
+- The implementer prompt now requires running every long test, build, or
+  mutation-probe command in the foreground and waiting for it to finish
+  before returning, never backgrounding it and ending the turn: a batch
+  review found a probe run left running in the background whose result
+  was only recovered by resuming the subagent later, which is not
+  evidence the orchestrator can trust unattended. The reviewer and
+  implementer prompts now both caution against a spawned-CLI test
+  calibrated to a byte-count ceiling that sits inside the tool's own
+  run-to-run noise (timing digits, temp-directory names): a batch review
+  found exactly such a test pass locally and fail on the next run one
+  byte off, with no code change, and the fix is to pin the argument
+  under test in-process or assert the actual contract (a bound, or the
+  presence of a warning), never a byte ceiling. SKILL.md's Delegate
+  review step now prohibits running mutation probes in place against a
+  worktree a reviewer subagent is concurrently reviewing, after a batch
+  review found a reviewer verifying findings against a tree that was
+  mutating under it from a concurrent probe; the fix is worktree
+  isolation or waiting until the reviewer has returned. Consumers refresh
+  their installs at the next release to pick up all three prompt changes.
+  Motivated by agent-tasks task 0e17fb63; see `docs/okf/log.md` for the
+  incident detail behind each of the three rules.
+
 ## [0.30.0] - 2026-09-06
 
 ### Added

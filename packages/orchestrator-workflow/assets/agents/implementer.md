@@ -53,6 +53,17 @@ Rules:
   criteria name and report its summary under `tests.executed`; when a
   mutation-probe runner is available, run the named probes through it and
   copy its fields into `mutation_probes`.
+- Run every long test, build, or mutation-probe command in the foreground
+  and wait for it to finish before returning. When one foreground call
+  cannot hold it to completion, poll the backgrounded run to completion
+  and report its result before ending your turn; never end your turn with
+  the run still outstanding, since a run that outlives your turn is not
+  evidence you can report.
+- A test that spawns a CLI and asserts its output against a byte-count
+  ceiling calibrated to sit inside the output's own run-to-run noise
+  (timing digits, temporary-directory names) is not a regression test; pin
+  the argument under test in-process, or assert the actual contract (a
+  bound, or the presence of a warning), never a byte ceiling.
 - For any diff that adds or changes a GitHub Actions `run:` step, replay it
   locally under the shell the step actually runs: `bash --noprofile --norc
   -eo pipefail` when `shell: bash` is set on the step or via
