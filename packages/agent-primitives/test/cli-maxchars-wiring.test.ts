@@ -103,6 +103,12 @@ async function runInProcess(argv: string[]): Promise<{
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as typeof process.exit);
+  // `emit` also installs the CLI's EPIPE guard, a real `'error'` listener
+  // on `process.stdout`; its once-only flag lives in the module instance
+  // the reset above just discarded, so every run would add another one
+  // for the rest of the worker's life. Snapshot and remove what the run
+  // added.
+  const errorListenersBefore = new Set(process.stdout.listeners("error"));
   try {
     await program.parseAsync(["node", "agent-primitives", ...argv]);
     // `writeAndExit` resolves the exit through the stdout write callback,
@@ -112,6 +118,14 @@ async function runInProcess(argv: string[]): Promise<{
   } finally {
     exit.mockRestore();
     write.mockRestore();
+    for (const listener of process.stdout.listeners("error")) {
+      if (!errorListenersBefore.has(listener)) {
+        process.stdout.removeListener(
+          "error",
+          listener as (...args: unknown[]) => void,
+        );
+      }
+    }
   }
 }
 
@@ -125,10 +139,17 @@ function lastCall(
 }
 
 describe("cli: reconcileEnvelopeDiffTruncation is called with the CLI's own --max-chars", () => {
+  const stdoutErrorListenersAtStart = process.stdout.listenerCount("error");
+
   afterEach(() => {
     for (const dir of tmpDirs.splice(0)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+    // The in-process run must not leave the CLI's EPIPE guard behind on
+    // the worker's real stdout (see `runInProcess`).
+    expect(process.stdout.listenerCount("error")).toBe(
+      stdoutErrorListenersAtStart,
+    );
   });
 
   it("single probe: the third argument is the parsed -m value (not undefined), against the pre-envelope mutant", async () => {
