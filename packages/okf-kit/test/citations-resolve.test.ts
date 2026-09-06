@@ -2547,8 +2547,8 @@ describe("citations-resolve: anchor-required-continuation's own exemptions", () 
     // The missing-file citation itself is still reported (unrelated to
     // this rule) -- confirms the fixture actually exercises the
     // missing-file path rather than accidentally resolving.
-    expect(
-      findings.some((f) => f.message.includes("[missing-file]")),
-    ).toBe(true);
+    expect(findings.some((f) => f.message.includes("[missing-file]"))).toBe(
+      true,
+    );
   });
 });
