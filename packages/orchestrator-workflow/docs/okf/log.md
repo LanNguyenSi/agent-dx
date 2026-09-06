@@ -14,9 +14,11 @@
   line-anchored citation into `CHANGELOG.md` below it by +15, re-derived
   in `subagent-contracts-superset.md`'s six line citations at
   4247/4256/4262/4256/4310/4316/4325/4328 (now 4248/4257/4263/4257/4311/
-  4317/4344/4347 — the last two also carry the `docs-consistency.test.ts`
-  growth from the yaml-fence-pin edit itself, not only the earlier
-  +1-line shift shared by the first four) and in the running re-point
+  4317/4351/4354 — the last two also carry the `docs-consistency.test.ts`
+  growth from the yaml-fence-pin edit itself, including its own follow-up
+  fix adding a whole-file fence count so the named mutant (a decoy fence
+  above the output contract) fails loudly, not only the earlier +1-line
+  shift shared by the first four) and in the running re-point
   account below for the keyed-placeholder-line citation into
   `CHANGELOG.md` (221 to 236, +15). Re-stamped `model-preselection.md`,
   `review-gate-and-waivers.md`, and `run-state-lifecycle-and-markers.md`

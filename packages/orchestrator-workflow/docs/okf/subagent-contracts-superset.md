@@ -486,9 +486,9 @@ negative pin scoped to `reviewer.md`'s output-contract yaml block, that it
 gains no `replayed` field, sliced from the output-contract heading rather
 than the first yaml fence in the file so an earlier decoy fence cannot be
 mistaken for it
-(`test/docs-consistency.test.ts:4344#"outputContractBlock).not.toContain"`). A further pin locks the five
+(`test/docs-consistency.test.ts:4351#"outputContractBlock).not.toContain"`). A further pin locks the five
 `mutation_probes` sub-fields to their fixed order in both copies
-(`test/docs-consistency.test.ts:4347#"both copies' mutation_probes block has exactly the five sub-fields in a fixed order"`).
+(`test/docs-consistency.test.ts:4354#"both copies' mutation_probes block has exactly the five sub-fields in a fixed order"`).
 
 Motivation: `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
 7(ii) found fix-round regressions from a prior round's own fix that a

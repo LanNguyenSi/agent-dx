@@ -4324,9 +4324,16 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     // template-markers.test.ts slices from "### Mutation Probes") rather
     // than matching the first yaml fence in the file, so a fence added
     // earlier in the prompt (an example, a decoy) cannot be mistaken for the
-    // output contract. Also require exactly one yaml fence after that
-    // heading, so a fence added between the heading and the real contract
-    // fails loudly instead of silently shifting which block gets checked.
+    // output contract. Also require exactly one yaml fence in the whole
+    // file (not only after the heading), so a fence added anywhere -
+    // including above the output contract, where it would silently become
+    // the "first fence" the old regex matched - fails this test loudly
+    // instead of passing by accident.
+    const allFences = [...reviewerMd.matchAll(/```yaml\n([\s\S]*?)```/g)];
+    expect(
+      allFences.length,
+      "expected exactly one yaml fence in reviewer.md",
+    ).toBe(1);
     const heading =
       "Return exactly this structure as your final output, nothing else:";
     const headingIndex = reviewerMd.indexOf(heading);
