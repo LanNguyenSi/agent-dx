@@ -1,5 +1,62 @@
 # Bundle log
 
+- 2026-09-06T21:33:40Z (task 0e17fb63, review round 2 fix round, two
+  medium findings plus three low): both mediums were the same repeated
+  class, a citation that resolves but points at the wrong bullet.
+  `run-state-lifecycle-and-markers.md`'s three per-harness "pointer rule
+  applies unchanged" citations named `SKILL.md:644` twice and never cited
+  the OpenAI Codex bullet at `SKILL.md:659`; corrected the third citation
+  to `SKILL.md:659#"pointer rule from Run state applies unchanged."`.
+  `subagent-contracts-superset.md` cited `test/docs-consistency.test.ts`,
+  then at line 4364 ("...is a regression signal", the SKILL.md step 6
+  copy, comma-worded) for both the step 6 instruction and the
+  implementer-prompt copy; the implementer copy is a separate,
+  colon-worded assertion, then at line 4379, re-pointed to
+  `test/docs-consistency.test.ts:4389#"signal: report it as such"`, a
+  substring unique to that copy. Scoped the two whole-file `implementerMd`
+  `toContain` checks (the foreground-run pin and the byte-ceiling pin) to
+  a new `implementerRules` slice bounded "Rules:" through "For v1, return
+  the delegated baseline identity", the same `phraseBoundedSlice` pattern
+  already applied to `reviewer.md` and `SKILL.md` in the round-1 fix
+  round; verified by a probe that relocates the foreground-run sentence
+  out of the Rules list into the intro prose instead of deleting it: the
+  scoped pin fails where the prior whole-file check would not have.
+  Restored a round-1-fix historical `log.md` sentence (the
+  `citations-resolve` warning account for `okf-kit check docs/okf`'s
+  initial run) to prose at both its mentions, dropping the live
+  `CHANGELOG.md:258` citation the entry carried inside an otherwise
+  historical, append-only account ("a `CHANGELOG.md` citation, then at
+  line 186" in place of "then line 186, now `CHANGELOG.md:258`"), so the
+  historical account carries no re-point obligation going forward.
+  Replaced the round-2 entry's own suite totals ("passed all 281 tests",
+  "passed all 763 tests") with delta verdicts ("green, including the
+  four new pins", "green") per this doc's own Maintenance convention;
+  older entries are untouched.
+  This round's own two-line insertion into `test/docs-consistency.test.ts`
+  (the new `implementerRules` slice, declared twice) shifted every
+  downstream citation into that file by ten lines; re-derived all nine
+  affected citations across `review-gate-and-waivers.md` and
+  `subagent-contracts-superset.md` against the edited tree, each verified
+  by locating the anchor's exact quoted text at its new line rather than
+  by uniform arithmetic, plus one further `log.md` self-citation (the
+  round-2 entry's own pin of the foreground-run sentence's new invariant
+  text) shifted by five lines to `test/docs-consistency.test.ts:4090`.
+  `npx vitest run test/docs-consistency.test.ts` is green (281/281,
+  including the relocation probe's scoped pin); `npm test` is green
+  (763/763); `npm run typecheck` and `npm run typecheck:test` were both
+  clean; `npm run format:check` is red only on the two pre-existing files
+  (`test/decision-authority.test.ts`, `test/template-markers.test.ts`),
+  untouched by this round. Replayed one round-1 mutation probe (deleting
+  `implementer.md`'s foreground-run sentence from the new
+  `implementerRules` slice): killed, restored and verified. Ran one new
+  probe (relocating the same sentence out of the Rules list into the
+  intro prose rather than deleting it): the scoped `implementerRules` pin
+  failed as expected where the retired whole-file check would not have;
+  restored and verified. `okf-kit check --json --require-anchors
+  packages/orchestrator-workflow/docs/okf` measured after this round's
+  commit reported 0 errors, 0 warnings, 23 notices, matching the
+  round-1-fix baseline exactly.
+
 - 2026-09-06T21:10:29Z (task 0e17fb63, review round 1 fix round, six
   findings): the HIGH finding was the round-1 entry's own
   `run-state-lifecycle-and-markers.md` re-point, which repeated
@@ -18,7 +75,7 @@
   outstanding, since the harness itself caps a single foreground call
   (`assets/agents/implementer.md:56-60`); updated the sentence's pin to
   the new invariant text
-  (`test/docs-consistency.test.ts:4085#"never end your turn with the run still outstanding"`).
+  (`test/docs-consistency.test.ts:4090#"never end your turn with the run still outstanding"`).
   Reflowed `SKILL.md` step 7, moving the
   Delegate-review opening back to the diff-and-tier instruction and
   relocating the mutation-probe worktree-isolation sentence beside the
@@ -72,8 +129,8 @@
   for the CHANGELOG pin and the docblock update landed unformatted)
   shifted the file's own line numbers a second time; re-ran the same
   citation re-derivation pass afterward and reconfirmed 0 errors, 0
-  warnings, 23 notices. `npx vitest run test/docs-consistency.test.ts`
-  passed all 281 tests; `npm test` passed all 763 tests; `npm run
+  warnings, 23 notices. `npx vitest run test/docs-consistency.test.ts` is
+  green, including the four new pins; `npm test` is green; `npm run
   typecheck` and `npm run typecheck:test` were both clean; `npm run
   format:check` is red only on the two pre-existing files
   (`test/decision-authority.test.ts`, `test/template-markers.test.ts`),
@@ -7382,17 +7439,18 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
   check docs/okf` initially reported 0 errors, 3 warnings, 23 notices: the
   pre-existing `install-fence-mechanics.md` staleness warning, plus two
   new `citations-resolve` warnings against citations in this `log.md`
-  file itself (a `test/docs-consistency.test.ts` (then lines 920–933) citation and a
-  `CHANGELOG.md` citation (then line 186, now `CHANGELOG.md:258`), both line-shifted by this pass's edits).
+  file itself (a `test/docs-consistency.test.ts` citation, then at lines
+  920–933, and a `CHANGELOG.md` citation, then at line 186, both
+  line-shifted by this pass's edits).
   Correction (found in review): this bundle's convention, per this same
   pass's own H1 fix above and the sibling T-002 pass, is to re-point a
   `log.md` citation shifted by the current change rather than leave it
   (the log records how a class recurred; its anchors are expected to
   resolve): re-pointed both to the same content at head, both bounds
-  checked: `test/docs-consistency.test.ts` (then lines 920–933) (the reproduction-field
+  checked: `test/docs-consistency.test.ts`, then at lines 920–933 (the reproduction-field
   byte-for-byte equality `it` block, "expect(skillBlock).toBe
-  (reviewerBlock);") moved to `931-944`, and a `CHANGELOG.md` citation
-  (then line 186, now `CHANGELOG.md:258`) (the
+  (reviewerBlock);") moved to `931-944`, and a `CHANGELOG.md` citation,
+  then at line 186 (the
   probe-replay `[Unreleased]` bullet's own citation of `test/template-
   markers.test.ts`'s "the keyed placeholder line's exact text,") moved to
   `175`, the further +7-line shift coming from this bundle's own

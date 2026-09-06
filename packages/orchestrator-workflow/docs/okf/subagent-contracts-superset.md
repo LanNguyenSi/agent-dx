@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-06T21:09:43Z
+timestamp: 2026-09-06T21:32:46Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -218,7 +218,7 @@ site outside the edit set. It uses the existing `relevant_files` and
 `packages/orchestrator-workflow/assets/agents/task-slicer.md:50#"will not edit."`).
 The focused regression pin checks each canonical asset for the changed-value
 categories, both existing fields, every reference site, and the annotation
-requirement (`packages/orchestrator-workflow/test/docs-consistency.test.ts:4255#"requires reference sites to be annotated in the existing task fields"`).
+requirement (`packages/orchestrator-workflow/test/docs-consistency.test.ts:4265#"requires reference sites to be annotated in the existing task fields"`).
 
 The scope-boundary wording is pinned independently
 (`packages/orchestrator-workflow/test/docs-consistency.test.ts:917#"not implementation instructions"`).
@@ -473,22 +473,22 @@ output contract itself
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:291#"reports as killed together with their"`);
 `assets/agents/reviewer.md` itself is untouched by this change.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:4355#"On any round after the task's first, the briefing also names"` pins step 6's
-instruction, `test/docs-consistency.test.ts:4364#"A replayed probe whose mutant now survives or can no longer be applied is a regression signal"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:4365#"On any round after the task's first, the briefing also names"` pins step 6's
+instruction, `test/docs-consistency.test.ts:4374#"A replayed probe whose mutant now survives or can no longer be applied is a regression signal"`
 pins the regression-signal consequence, and the implementer prompt's
 matching rules
-(`test/docs-consistency.test.ts:4370#"On any round after the task's first, the assignment also names"`,
-`test/docs-consistency.test.ts:4364#"A replayed probe whose mutant now survives or can no longer be applied is a regression signal"`). A byte-for-byte
+(`test/docs-consistency.test.ts:4380#"On any round after the task's first, the assignment also names"`,
+`test/docs-consistency.test.ts:4389#"signal: report it as such"`). A byte-for-byte
 cross-copy equality check on the `mutation_probes` block including the new
-sub-field (`test/docs-consistency.test.ts:4418#"replayed: false | true"`), the step 7 reviewer-briefing
-sentence (`test/docs-consistency.test.ts:4424#"the orchestrator's reviewer briefing names the replayed probes"`), and a
+sub-field (`test/docs-consistency.test.ts:4428#"replayed: false | true"`), the step 7 reviewer-briefing
+sentence (`test/docs-consistency.test.ts:4434#"the orchestrator's reviewer briefing names the replayed probes"`), and a
 negative pin scoped to `reviewer.md`'s output-contract yaml block, that it
 gains no `replayed` field, sliced from the output-contract heading rather
 than the first yaml fence in the file so an earlier decoy fence cannot be
 mistaken for it
-(`test/docs-consistency.test.ts:4465#"outputContractBlock).not.toContain"`). A further pin locks the five
+(`test/docs-consistency.test.ts:4475#"outputContractBlock).not.toContain"`). A further pin locks the five
 `mutation_probes` sub-fields to their fixed order in both copies
-(`test/docs-consistency.test.ts:4468#"both copies' mutation_probes block has exactly the five sub-fields in a fixed order"`).
+(`test/docs-consistency.test.ts:4478#"both copies' mutation_probes block has exactly the five sub-fields in a fixed order"`).
 
 Motivation: `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
 7(ii) found fix-round regressions from a prior round's own fix that a

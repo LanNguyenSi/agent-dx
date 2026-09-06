@@ -4076,12 +4076,17 @@ describe("roles prefer connected structural search, verify, and mutation-probe r
  */
 describe("the implementer never backgrounds a long verification run (a mutant deleting this sentence must fail this)", () => {
   const implementerMd = unwrap(readAsset("agents/implementer.md"));
+  const implementerRules = phraseBoundedSlice(
+    implementerMd,
+    "Rules:",
+    "For v1, return the delegated baseline identity",
+  );
 
   it("implementer prompt requires foreground verification runs, never a backgrounded run left to outlive the turn", () => {
-    expect(implementerMd).toContain(
+    expect(implementerRules).toContain(
       "Run every long test, build, or mutation-probe command in the foreground",
     );
-    expect(implementerMd).toContain(
+    expect(implementerRules).toContain(
       "never end your turn with the run still outstanding",
     );
   });
@@ -4105,17 +4110,22 @@ describe("a spawned-CLI test's assertion is calibrated in-process or against its
     "Test adequacy:",
     "- Maintainability:",
   );
+  const implementerRules = phraseBoundedSlice(
+    implementerMd,
+    "Rules:",
+    "For v1, return the delegated baseline identity",
+  );
 
   const PHRASE =
     "A test that spawns a CLI and asserts its output against a byte-count ceiling calibrated to sit inside the output's own run-to-run noise";
 
   it("reviewer.md and implementer.md both carry the byte-ceiling caution, worded identically", () => {
     expect(reviewerTestAdequacy).toContain(PHRASE);
-    expect(implementerMd).toContain(PHRASE);
+    expect(implementerRules).toContain(PHRASE);
   });
 
   it("both prompts steer to the same two fixes: pin in-process, or assert the bound/warning contract", () => {
-    for (const doc of [reviewerTestAdequacy, implementerMd]) {
+    for (const doc of [reviewerTestAdequacy, implementerRules]) {
       expect(doc).toContain("pin the argument under test in-process");
       expect(doc).toContain(
         "assert the actual contract (a bound, or the presence of a warning), never a byte ceiling",
