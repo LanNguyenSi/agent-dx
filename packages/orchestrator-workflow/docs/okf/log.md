@@ -4,9 +4,10 @@
   medium findings plus three low): both mediums were the same repeated
   class, a citation that resolves but points at the wrong bullet.
   `run-state-lifecycle-and-markers.md`'s three per-harness "pointer rule
-  applies unchanged" citations named `SKILL.md:644` twice and never cited
-  the OpenAI Codex bullet at `SKILL.md:659`; corrected the third citation
-  to `SKILL.md:659#"pointer rule from Run state applies unchanged."`.
+  applies unchanged" citations named the opencode bullet (then at line
+  644 of `SKILL.md`) twice and never cited the OpenAI Codex bullet;
+  corrected the third citation to
+  `assets/skill/SKILL.md:659#"pointer rule from Run state applies unchanged."`.
   `subagent-contracts-superset.md` cited `test/docs-consistency.test.ts`,
   then at line 4364 ("...is a regression signal", the SKILL.md step 6
   copy, comma-worded) for both the step 6 instruction and the
@@ -41,9 +42,9 @@
   by uniform arithmetic, plus one further `log.md` self-citation (the
   round-2 entry's own pin of the foreground-run sentence's new invariant
   text) shifted by five lines to `test/docs-consistency.test.ts:4090`.
-  `npx vitest run test/docs-consistency.test.ts` is green (281/281,
-  including the relocation probe's scoped pin); `npm test` is green
-  (763/763); `npm run typecheck` and `npm run typecheck:test` were both
+  `npx vitest run test/docs-consistency.test.ts` is green, including the
+  relocation probe's scoped pin; `npm test` is green; `npm run typecheck`
+  and `npm run typecheck:test` were both
   clean; `npm run format:check` is red only on the two pre-existing files
   (`test/decision-authority.test.ts`, `test/template-markers.test.ts`),
   untouched by this round. Replayed one round-1 mutation probe (deleting
