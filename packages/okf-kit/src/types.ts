@@ -79,6 +79,13 @@ export interface BundleContext {
   requireAnchors?: RequireAnchorsOptions;
   /** See `ProseLineReferencesOptions`. Undefined when `--prose-line-references` was not passed. */
   proseLineReferences?: ProseLineReferencesOptions;
+  /**
+   * Clock-skew allowance (seconds) for `sources-fresh-future` (see
+   * `--future-skew-minutes` in `src/cli.ts` and `DEFAULT_FUTURE_SKEW_SECONDS`
+   * in `src/rules/sources-fresh.ts`). Undefined when `--future-skew-minutes`
+   * was not passed, in which case the rule applies its own default.
+   */
+  freshnessFutureSkewSeconds?: number;
 }
 
 export interface Rule {

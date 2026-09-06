@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Tests only, no asset wording change. The reviewer prompt's output-contract
+  yaml-block negative pin now slices from the output-contract heading (and
+  requires exactly one yaml fence after it) instead of matching the first
+  yaml fence in the file, so an unrelated fence earlier in the prompt cannot
+  be mistaken for the output contract. The CHANGELOG's own prose copy of the
+  fix-round mutation-probe replay rule is now pinned, anchored on the
+  bullet's own opening text rather than the release heading above it, so
+  the pin survives the bullet moving under a version heading. A new guard
+  asserts every reviewer checklist item mirrored in SKILL.md (Placement,
+  the GitHub Actions run-step replay, identifier drift) still carries its
+  SKILL.md counterpart sentence, from one table of paired phrases, so
+  either half going missing fails the same test.
+
 ## [0.30.0] - 2026-09-06
 
 ### Added
