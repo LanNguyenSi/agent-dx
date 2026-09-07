@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget` (task
+  `e82f341a`): the `targets.length === 0` early return skipped the whole
+  bound re-check whenever every correction was a case 3 (the whole `diff`
+  object dropped by the reduction, descriptors intact, no `diff.path`).
+  Case 3 never pushes a shrink target, but its own descriptor rewrite (the
+  longer "mutant.diff omitted from this envelope; see logs" clause) can
+  still grow the envelope, and with no target the growth was never
+  re-measured and `pushBudgetOverrunWarning` never ran: a single-probe
+  envelope in that shape, built through the real `buildEnvelope` plus
+  `reconcileEnvelopeDiffTruncation`, measured growing from 573 to 623
+  characters against a 620-character budget with `warnings: []` -- over
+  budget with no warning at all. The early return is gone; the re-measure
+  and overrun warning now run whenever `maxChars` is supplied, even with
+  an empty `targets` (the shrink loop itself stays a no-op in that case,
+  since there is nothing left to shrink). Covered by a new test in
+  `test/mutant.test.ts` built through real `buildEnvelope` and
+  `reconcileEnvelopeDiffTruncation` at a budget a few characters under the
+  corrected length, which fails on the pre-fix code.
+
 - `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget`: when
   restating a plan's descriptors and excerpts pushes the whole envelope
   back over `-m`/`--max-chars`, which mutant's excerpt gets shrunk

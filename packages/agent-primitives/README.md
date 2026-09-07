@@ -453,6 +453,17 @@ excerpt has been shrunk to nothing and the envelope still exceeds
 `-m` does a warning name the true final length, the same wording
 `buildEnvelope`'s own overrun warning uses.
 
+This re-measure runs even for a mutant whose `diff` was dropped entirely
+(no excerpt left to shrink, so nothing is pushed into the shrink search
+above): a dropped `diff` with no `path` rewrites its descriptors to the
+longer "omitted from this envelope" clause, and that rewrite alone can
+push the envelope back over `-m` with no target to shrink it back down.
+The re-measure and overrun warning still run in that shape too, rather
+than being skipped because there was nothing to shrink (see
+`test/mutant.test.ts`, "re-measures and warns after a case-3 correction
+grows a REAL buildEnvelope-built envelope past `maxChars`, even though no
+target was ever pushed to shrink").
+
 The probe pins its own content-writing git commands with `-c
 core.autocrlf=false` and `-c apply.whitespace=nowarn`: the patch dry
 run, the real patch apply, the worktree checkout, and the tracked-diff
