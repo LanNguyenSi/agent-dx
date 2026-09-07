@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only inside its own cited range. Two rules, applied per paragraph: (a) the
   same `file:range#anchor` cited twice in one paragraph, unless allowlisted
   with a reason; (b) a string anchor's text also occurring, uncited, at
-  another line of the same target within a 10-line window while the
-  paragraph cites a sibling range of that file, unless allowlisted. Fixtures
+  another line of the same target within a 20-line window (widened from 10
+  in review round 2, see below) while the paragraph cites a sibling range
+  of that file, unless allowlisted. Fixtures
   reproduce three review findings that shared this shape and were the
   motivation for the guard: three sibling `it`-block citations collapsing
   onto one range twice, the third never cited; three per-harness bullet
@@ -35,6 +36,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   suite already runs on every PR while an okf-kit rule needs a release and
   a fleet pin bump first; an opt-in okf-kit rule for the same class is a
   named follow-up candidate once this guard has proven itself.
+- Review round 2 of the citation-sibling-drift guard above (task agent-dx
+  9f72ae6d): the round-1 review found 7 of the round's 18 raw hits were not
+  coincidental at all -- real mis-pointed citations that got allowlisted
+  instead of fixed, because the round-1 pass classified every hit by range
+  and reason without re-deriving each cited claim's real evidence line by
+  line. All seven re-pointed to their real evidence, citation-only, no
+  content changes: a duplicate `docs-consistency.test.ts` self-citation
+  whose second claim's real test sat 26 lines below the first
+  (`subagent-contracts-superset.md`); an `init.test.ts` range that stopped
+  6 lines short of the `model: opus` assertion it named
+  (`model-preselection.md`); a `SKILL.md` duplicate whose first claim's
+  real text sat just above the cited line (`run-state-lifecycle-and-
+  markers.md`); an `init.ts` comment cited in place of the real
+  `installKitFile` call it restates (`install-fence-mechanics.md`); an
+  `init.ts` range crossing from one branch of `installKitFile` into
+  another branch's own record line (`install-fence-mechanics.md`); an
+  `init.ts` range naming the wrong call for an `opencodeEffortLine(...)`
+  claim (`model-preselection.md`, cited from two spellings of the same
+  path); and a milder range that stopped 1 line short of the parameter its
+  own sentence's second half named (`install-fence-mechanics.md`). Widened
+  `SIBLING_GUARD_WINDOW` from 10 to 20 once a real case fell just outside
+  it (two genuinely distinct `init.ts` notes sharing one message, 18 lines
+  apart, both legitimate and now allowlisted per doc); re-triaged every
+  additional hit the wider window surfaced against the bundle, fixing or
+  allowlisting each with a reason stating what the cited line actually
+  says (see `docs/okf/log.md` for the full re-triage and the re-measured
+  counts). Added `anchorKey` (first 8 hex chars of a sha256 over the
+  finding's own anchor text, computed at test time, never stored literally
+  in the array) to every allowlist entry and to the match, plus a test
+  asserting every entry matched at least one finding on the current
+  bundle, closing a gap where a range-only match would silently exempt any
+  future, differently-anchored finding on the same range. Added a fixture
+  at the real batch-39 S3 geometry (a literal duplicate citation, its real
+  sibling 15 lines away, not the original fixture's 10-line near-miss
+  range) asserting both rules' behaviour, and a negative fixture pinning
+  that the duplicate-citation rule fires regardless of window, since it is
+  a pairing comparison, not a windowed one. Two coverage gaps noted in the
+  guard's own comment and here rather than closed this round: a path-less
+  continuation citation (`:N-M#"..."`, whose path is implied by the
+  preceding citation) never matches the citation regex, so this guard
+  cannot see one -- extending the regex to resolve a continuation's
+  implied path is a named follow-up; and a citation-shaped string inside a
+  fenced ` ``` ` code block is now skipped rather than matched (closing the
+  reverse risk of misreading a code sample as a citation), a cheap
+  addition alongside the rest of this round's work.
 
 ## [0.31.0] - 2026-09-07
 

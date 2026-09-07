@@ -1,5 +1,86 @@
 # Bundle log
 
+- 2026-09-07T11:49:38Z (citation-sibling-drift guard, review round 2, task
+  agent-dx 9f72ae6d): round 1's own review classified all 18 raw hits by
+  range and stated reason without re-deriving each cited claim's real
+  evidence line by line; 7 of them were real mis-pointed citations
+  allowlisted instead of fixed. Re-derived each against its target file and
+  re-pointed, citation-only, no content changes: `subagent-contracts-
+  superset.md`'s duplicate `docs-consistency.test.ts:848` self-citation
+  (its second claim's real test sits at `:857-874`, `cursor = idx;`, 26
+  lines below the first, still-correct citation); `model-preselection.md`'s
+  `init.test.ts:102-108` citation for the `model: sonnet`/`model: opus`
+  pair (split into `:104-109#"model: sonnet"` and
+  `:110-115#"{{MODEL}}"`, the second range covering the `model: opus`
+  assertion plus the following placeholder-not-left check 6 lines past the
+  old range's end); `run-state-lifecycle-and-markers.md`'s duplicate
+  `SKILL.md:83` self-citation (its first claim's real text sits at
+  `:81-82`, just above the cited line); `install-fence-mechanics.md`'s
+  `init.ts:776` citation for the `.gitkeep` install (a comment restating
+  the literal; the real `installKitFile(...)` call is at `:769`); its
+  `init.ts:755-760` citation for the exists-and-unedited overwrite branch
+  (crossed from the conflicted branch into the path-does-not-exist
+  branch's own record line; the real evidence is `:747-752`); its
+  `init.ts:900-902` citation for the effort-line-then-pass-in claim (ended
+  1 line before the `effortLine,` parameter its own sentence's second half
+  named; widened to `:893-903#"effortLine,"` to cover both halves, with no
+  further coincidental hit at this range); and `model-preselection.md`'s
+  two `init.ts:869` citations (from two path spellings) for the
+  `opencodeEffortLine(...)` claim (that line is the sibling
+  `composeOpencodeAgent(...)` call; the real evidence is `:862-866`).
+  D-010: widened `SIBLING_GUARD_WINDOW` from 10 to 20 once a real case
+  (two genuinely distinct `init.ts` notes sharing one message, 18 lines
+  apart -- the dropped-role file note at `:606-617` and its tier-variant
+  sibling note at `:635`) fell just outside 10; re-ran the guard with an
+  emptied allowlist at window 20 over the corrected bundle and read every
+  raw hit against its target: rule (a) reports 5 real hits (down from 7;
+  the two fixed above were genuine drift, not this doc-wide "topic
+  sentence, then repeat as the closing list item" convention); rule (b)
+  reports 12 real hits at window 20 (three carried over from window 10 at
+  their original ranges: `install-fence-mechanics.md`'s `init.test.ts:190-
+  201` and `uninstall.ts:138-147`, `model-preselection.md`'s `init.test.ts
+  :1497-1513` and `:1793-1826`, `operator-install-and-registry.md`'s
+  `doctor.ts:113-121`; five newly visible at window 20, each read and
+  allowlisted with the reason found: `install-fence-mechanics.md`'s
+  `init.ts:766-766` (`readAsset(join(` prefix also reaches an unrelated
+  SKILL.md asset read 20 lines below), `init.ts:606-617` and
+  `model-preselection.md`'s own citation of the same range (the
+  dropped-role-note pair above), `install-fence-mechanics.md`'s
+  `init.test.ts:129-142` (a common report-shape assertion idiom repeated
+  in an earlier, unrelated `it` block), and the two re-pointed ranges
+  above (`init.ts:747-752` and `init.ts:862-866`) each still carrying
+  their own pre-existing coincidental sibling). Allowlisted as 16 entries
+  (5 duplicate-citation, 11 wrong-sibling-anchor; one wrong-sibling entry
+  matches two raw hits that differ only in the citation's own path
+  spelling, `src/init.ts` vs `init.ts`). Every entry now carries an
+  `anchorKey` (first 8 hex chars of a sha256 over the finding's own anchor
+  text, computed at test time via `node:crypto`, never stored literally in
+  the array) in addition to (doc, kind, real target, range); a new test
+  asserts every entry matched at least one finding on the current bundle,
+  so a future citation edit that changes the anchor but keeps the range
+  fails the match instead of staying silently exempt. Added a fixture at
+  the real batch-39 S3 geometry this guard's original fixture only
+  approximated: a literal duplicate citation (not a near-miss pair of
+  ranges), its real sibling 15 lines away (not 10); the drifted form is
+  flagged by rule (a) only, not rule (b) (an identical range is not a
+  sibling range), and a negative-control fixture pins that rule (a) fires
+  identically at window 0, 1, and 1000, since `findDuplicateCitations`
+  never takes a window argument. Two coverage gaps noted rather than
+  closed: a path-less continuation citation (`:N-M#"..."`) never matches
+  `ANCHOR_CITATION_RE`, so this guard cannot see one (`model-preselection
+  .md` alone carries several); a citation-shaped string inside a fenced
+  ` ``` ` block is now skipped during extraction (closes the reverse risk
+  of misreading a code sample as a citation; the bundle currently has no
+  fenced blocks, so this is a no-op today). `npm test` (776 tests),
+  `npm run typecheck`, and `npm run typecheck:test` are all green;
+  `npm run format:check` is clean on `test/docs-consistency.test.ts`
+  itself (the two pre-existing red files, `decision-authority.test.ts` and
+  `template-markers.test.ts`, are unchanged and untouched by this round).
+  `npx okf-kit@0.10.0 check --json --require-anchors docs/okf`, measured
+  against the pre-round tree (git-stashed this round's edits, ran, then
+  restored) and again after this round's commit, reports 0 errors, 0
+  warnings, 24 notices both times, an identical notice set.
+
 - 2026-09-07T11:10:41Z (citation-sibling-drift guard): added a
   paragraph-scoped guard next to the existing anchor-load-bearing checks in
   `test/docs-consistency.test.ts` -- rule (a): the same `file:range#anchor`
