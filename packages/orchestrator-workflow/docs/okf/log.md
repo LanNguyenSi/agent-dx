@@ -79,8 +79,19 @@
   `template-markers.test.ts`, are unchanged and untouched by this round).
   `npx okf-kit@0.10.0 check --json --require-anchors docs/okf`, measured
   against the pre-round tree (git-stashed this round's edits, ran, then
-  restored) and again after this round's commit, reports 0 errors, 0
-  warnings, 24 notices both times, an identical notice set.
+  restored), reports 0 errors, 0 warnings, 24 notices. Measured again
+  after this round's commits: a first pass found a broken
+  citation chain (two citations in this entry's own text had been
+  line-wrapped across a markdown line break inside their backtick spans,
+  making them invisible to the parser, so a bare continuation right after
+  them resolved against the wrong preceding citation) and a staleness lag
+  (the doc timestamps had been stamped before the CHANGELOG.md/test-file
+  edits they cover actually landed); fixed in a follow-up commit and
+  re-measured: 0 errors, 0 warnings, 38 notices. The 14 new notices are
+  this doc's own `unresolved-ambiguous` notices on the bare basenames
+  (`init.ts`, `init.test.ts`, `SKILL.md`) this entry's own citation list
+  introduces, the same notice class this doc already carried before the
+  round, not a new one.
 
 - 2026-09-07T11:10:41Z (citation-sibling-drift guard): added a
   paragraph-scoped guard next to the existing anchor-load-bearing checks in
