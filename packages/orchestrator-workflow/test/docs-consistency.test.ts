@@ -5968,10 +5968,20 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       ),
     ).toBe(true);
 
+    // Round 3: the differing finding keeps the entry's recorded geometry
+    // (`unclaimedLines: [20]`) and differs in the anchor text ALONE, so
+    // this stays a proof about `anchorKey` specifically. Round 3's added
+    // geometry comparison would otherwise reject a variant that also moved
+    // the uncited line, and a mutant that drops the anchorKey check
+    // entirely would survive this fixture on the geometry check's back --
+    // measured, not hypothetical: the round-2 anchorKey probe came back
+    // `survived` on the first replay of this round for exactly that
+    // reason. A same-anchorless-range finding with an anchor edited to
+    // something that happens to recur on the SAME uncited line is a real
+    // shape (a citation re-anchored in place), and nobody has reviewed it.
     const differentAnchorFinding: WrongSiblingAnchorFinding = {
       ...sameAnchorFinding,
       anchorText: "a completely different anchor text",
-      unclaimedLines: [30],
     };
     expect(
       siblingGuardFindingMatchesAllowlist(
