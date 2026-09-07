@@ -3429,17 +3429,14 @@ describe("reconcileEnvelopeDiffTruncation: stays within maxChars across a sweep 
 
 describe("probe --plan envelope: never over maxChars without a warning naming the true length (sweep of budgets, REAL buildEnvelope-built envelopes)", () => {
   // A two-mutant `--plan` result, each carrying 15 single-line hunks of a
-  // fixed 61-character width -- the same shape a reviewer's own sweep
-  // across a range of `-m` values exercised through the built CLI after
-  // an unrelated incident left a lingering doubt about whether the
-  // envelope could ever ship over its own `-m` with no warning at all.
-  // That sweep (3000-4300 inclusive, plus a coarse 500-20000 pass)
-  // found no such case; this pins the same invariant the sweep checked,
-  // as a fast in-process test that runs on every CI build rather than a
-  // one-off manual check. Two mutants, not one, so `plan.results[]` is
-  // exercised as an array (the shape `keepWhole` cannot reach into) and
-  // the combined payload is large enough to need real reduction across
-  // the swept range.
+  // fixed 61-character width. The invariant: across a sweep of `-m`
+  // budgets the envelope is either within the bound (and then carries no
+  // could-not-be-met warning) or over it with a warning naming its exact
+  // final length; never silently over. Two mutants, not one, so
+  // `plan.results[]` is exercised as an array (the shape `keepWhole`
+  // cannot reach into) and the combined payload needs real reduction
+  // across the swept range. The CLI sweep that motivated this pin is
+  // recorded in the CHANGELOG.
   const buildWideLine = (n: number): string =>
     `line ${String(n).padStart(4, "0")} ${"x".repeat(51)}`;
   const buildMutatedLine = (n: number): string =>
@@ -3557,25 +3554,64 @@ describe("probe --plan envelope: never over maxChars without a warning naming th
     maxChars: number,
   ): void {
     const finalLength = JSON.stringify(envelope).length;
-    if (finalLength <= maxChars) return;
     const warnings = Array.isArray(envelope.warnings)
       ? (envelope.warnings as unknown[])
       : [];
     const expected = `envelope is ${String(finalLength)} characters; requested max-chars ${String(maxChars)} could not be met`;
+    if (finalLength <= maxChars) {
+      // In bound: the reduction did its job and must not ALSO claim it
+      // could not meet the request. Asserting this half keeps a budget
+      // that fits from passing vacuously (a reduction that is abandoned
+      // entirely ships the whole payload over the bound and fails the
+      // branch below; a reduction that meets the bound must say nothing).
+      expect(
+        warnings.some(
+          (w) => typeof w === "string" && w.includes("could not be met"),
+        ),
+        `envelope is ${String(finalLength)} chars, within maxChars=${String(maxChars)}, but carries a could-not-be-met warning: ${JSON.stringify(warnings)}`,
+      ).toBe(false);
+      return;
+    }
     expect(
       warnings,
       `envelope is ${String(finalLength)} chars, over maxChars=${String(maxChars)}, but warnings do not name the true length: ${JSON.stringify(warnings)}`,
     ).toContain(expected);
   }
 
+  // `mustFit` marks the budgets the real reduction is known to meet for
+  // this fixture (measured: every budget from 300 up fits; 50 to 250 sit
+  // below the fixed skeleton's floor and are honestly reported as over).
+  // A budget marked `mustFit` is asserted in bound outright, so a
+  // reduction that gives up and ships the whole payload with an honest
+  // warning still fails here: the contract has two halves, "never
+  // silently over" and "reduced to fit whenever the payload allows it".
   it.each([
-    50, 100, 150, 200, 250, 300, 400, 500, 700, 1000, 1500, 2000, 3000, 3650,
-    4300,
-  ])(
-    "at maxChars=%i: never over the bound without a warning naming the true length",
-    (maxChars) => {
+    [50, false],
+    [100, false],
+    [150, false],
+    [200, false],
+    [250, false],
+    [300, true],
+    [400, true],
+    [500, true],
+    [700, true],
+    [1000, true],
+    [1500, true],
+    [2000, true],
+    [3000, true],
+    [3650, true],
+    [4300, true],
+  ] as const)(
+    "at maxChars=%i (mustFit=%s): never over the bound without a warning naming the true length, and in bound whenever the reduction can get there",
+    (maxChars, mustFit) => {
       const envelope = buildPlanEnvelope(maxChars);
       assertNeverOverWithoutHonestWarning(envelope, maxChars);
+      if (mustFit) {
+        expect(
+          JSON.stringify(envelope).length,
+          `the reduction is known to fit this fixture at maxChars=${String(maxChars)}, but the envelope shipped over the bound`,
+        ).toBeLessThanOrEqual(maxChars);
+      }
     },
   );
 });

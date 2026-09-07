@@ -38,7 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `buildEnvelope`/`reconcileEnvelopeDiffTruncation`, plus a manual CLI sweep
   across 3,000-4,300 and a coarse 500-20,000 pass) found no case of the
   envelope exceeding its requested bound with no warning naming the true
-  length; a regression test now pins that contract on every build. Two
+  length; a regression test now pins that contract for the swept plan shape
+  on every build (in bound with no could-not-be-met warning, or over the
+  bound with a warning naming the exact final length). Two
   existing spawned-CLI regression tests that asserted a raw
   `stdout.length` ceiling near the reduction's edge lost that byte check in
   favor of the actual contract they already asserted next to it

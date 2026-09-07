@@ -2996,7 +2996,7 @@ describe("cli: probe --plan", () => {
     expect(parsed.status).toBe("killed");
     // The envelope does not fit the default bound and says so...
     expect(parsed.truncated).toBe(true);
-    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    expect(run.stdout.trimEnd().length).toBeLessThanOrEqual(8000);
     // ...and what it cut is `plan.results`: fewer entries than mutants,
     // the rest behind an honest marker.
     expect(parsed.plan.results.length).toBeLessThan(count);
@@ -3038,7 +3038,7 @@ describe("cli: probe --plan", () => {
     const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    expect(run.stdout.trimEnd().length).toBeLessThanOrEqual(8000);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("killed");
     expect(parsed.truncated).toBe(true);
