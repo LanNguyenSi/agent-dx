@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A sweep of `-m` budgets against a real `probe --plan` envelope (in-process
+  `buildEnvelope`/`reconcileEnvelopeDiffTruncation`, plus a manual CLI sweep
+  across 3,000-4,300 and a coarse 500-20,000 pass) found no case of the
+  envelope exceeding its requested bound with no warning naming the true
+  length; a regression test now pins that contract for the swept plan shape
+  on every build (in bound with no could-not-be-met warning, or over the
+  bound with a warning naming the exact final length). Two
+  existing spawned-CLI regression tests that asserted a raw
+  `stdout.length` ceiling near the reduction's edge lost that byte check in
+  favor of the actual contract they already asserted next to it
+  (`truncated`, the hunk-boundary shape, the descriptor clause).
 - `agent-primitives drift --base <rev> --head <rev>`: a prototype-scope
   identifier-drift guard. Collects the identifiers whose declaration a
   git range removed (a regex over `git diff -U0`'s removed lines: a

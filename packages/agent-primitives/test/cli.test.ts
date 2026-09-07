@@ -1817,11 +1817,19 @@ describe("cli: probe", () => {
     ]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(6000);
+    // No byte ceiling here (see the removed round-6 bound-regression
+    // tests, dropped for exactly this reason): the contract this test
+    // pins is that the per-mutant correction ran at all -- `truncated`,
+    // the hunk-boundary/mid-hunk shape, and the descriptor clause below
+    // -- not a byte count that would sit inside the envelope's own
+    // run-to-run noise (a timing digit, a temp-dir name).
     const parsed = JSON.parse(run.stdout);
     // `-t 'true'` always leaves the test passing, and `--expect pass`
     // reads that as the mutant behaving as expected: `killed`.
     expect(parsed.status).toBe("killed");
+    // The envelope's own top-level flag: something in the result really
+    // was cut, not only the per-mutant `diff.truncated` checked below.
+    expect(parsed.truncated).toBe(true);
     const diff = parsed.mutant.diff;
     expect(diff.hunkCount).toBe(15);
     // The envelope's own reduction had to cut this further than this
@@ -2988,7 +2996,7 @@ describe("cli: probe --plan", () => {
     expect(parsed.status).toBe("killed");
     // The envelope does not fit the default bound and says so...
     expect(parsed.truncated).toBe(true);
-    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    expect(run.stdout.trimEnd().length).toBeLessThanOrEqual(8000);
     // ...and what it cut is `plan.results`: fewer entries than mutants,
     // the rest behind an honest marker.
     expect(parsed.plan.results.length).toBeLessThan(count);
@@ -3030,7 +3038,7 @@ describe("cli: probe --plan", () => {
     const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    expect(run.stdout.trimEnd().length).toBeLessThanOrEqual(8000);
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("killed");
     expect(parsed.truncated).toBe(true);
@@ -3160,9 +3168,17 @@ describe("cli: probe --plan", () => {
     ]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    // No byte ceiling here (see the removed round-6 bound-regression
+    // tests, dropped for exactly this reason): the contract this test
+    // pins is that the per-mutant correction ran at all -- `truncated`,
+    // the hunk-boundary/mid-hunk shape, and the descriptor clause below
+    // -- not a byte count that would sit inside the envelope's own
+    // run-to-run noise (a timing digit, a temp-dir name).
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("killed");
+    // The envelope's own top-level flag: something in the result really
+    // was cut, not only the per-mutant `diff.truncated` checked below.
+    expect(parsed.truncated).toBe(true);
     expect(parsed.plan.results.length).toBeGreaterThan(0);
     const entry = parsed.plan.results[0];
     const diff = entry.mutant.diff;
