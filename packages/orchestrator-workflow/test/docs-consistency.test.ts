@@ -4159,22 +4159,32 @@ describe("the orchestrator never probes a worktree a reviewer subagent is concur
 });
 
 /**
- * The CHANGELOG's own `[Unreleased]` bullet narrates all three rules above
- * (foreground verification, the byte-ceiling caution, and the worktree
- * isolation rule) with their motivating incidents; nothing pinned that
- * prose, so a future edit could silently drop or water down the bullet
- * while the three prompt rules it describes stay intact.
+ * The CHANGELOG's own bullet narrates all three rules above (foreground
+ * verification, the byte-ceiling caution, and the worktree isolation rule)
+ * with their motivating incidents; nothing pinned that prose, so a future
+ * edit could silently drop or water down the bullet while the three prompt
+ * rules it describes stay intact. Anchor on the bullet's own opening text
+ * rather than the release heading above it, since a release moves the
+ * bullet under a version heading while the bullet's own wording survives
+ * the move unchanged.
  */
-describe("the CHANGELOG [Unreleased] bullet names all three process rules from this round", () => {
+describe("the CHANGELOG's release bullet names all three process rules from this round", () => {
   const changelogMd = readDoc("CHANGELOG.md");
-  const start = changelogMd.indexOf("## [Unreleased]");
+  const bulletAnchor =
+    "The implementer prompt now requires running every long test, build, or";
+  const anchorIndex = changelogMd.indexOf(bulletAnchor);
+  const start = changelogMd.lastIndexOf("\n- ", anchorIndex) + 1;
   const next = changelogMd.indexOf("\n## [", start + 1);
   const section = unwrap(
     changelogMd.slice(start, next === -1 ? undefined : next),
   );
 
-  it("names the foreground-run rule, the byte-ceiling caution, and the worktree-isolation rule inside [Unreleased]", () => {
-    expect(start).toBeGreaterThan(-1);
+  it("names the foreground-run rule, the byte-ceiling caution, and the worktree-isolation rule", () => {
+    expect(
+      anchorIndex,
+      "CHANGELOG bullet anchor phrase not found",
+    ).toBeGreaterThan(-1);
+    expect(start).toBeGreaterThan(0);
     expect(section).toContain(
       "running every long test, build, or mutation-probe command in the foreground",
     );

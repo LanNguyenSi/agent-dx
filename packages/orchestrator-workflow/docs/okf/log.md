@@ -1,5 +1,67 @@
 # Bundle log
 
+- 2026-09-07T04:29:31Z (release 0.31.0): moved the two `[Unreleased]`
+  bullets (the docs-consistency pin hardening from PR #199, the three
+  verification-process rules from PR #206) under a new `## [0.31.0] -
+  2026-09-07` heading, keeping an empty `[Unreleased]` heading above it,
+  and bumped package and lockfile versions. The cut's net effect on
+  CHANGELOG.md is +2 lines (the new heading plus its trailing blank
+  line), shifting every line at or below it. Re-anchored
+  `test/docs-consistency.test.ts`'s "the CHANGELOG [Unreleased] bullet
+  names all three process rules from this round" describe block on the
+  moved bullet's own opening text (`"The implementer prompt now requires
+  running every long test, build, or"`) rather than the `[Unreleased]`
+  heading above it, so the pin survives the move; the block itself grew
+  by 10 lines after a `prettier --write` reflow of the new multi-line
+  `expect` call, shifting every citation into
+  `test/docs-consistency.test.ts` below it by +10 (not +7, the block's
+  own line delta before reformatting). Re-pointed all ten affected
+  citations in `subagent-contracts-superset.md`, each anchor text
+  unchanged and only the line number moved by +10: "requires reference
+  sites to be annotated in the existing task fields" from line 4265 to
+  4275; "On any round after the task's first, the briefing also names"
+  from 4365 to 4375; "A replayed probe whose mutant now survives or can
+  no longer be applied is a regression signal" from 4374 to 4384; "On
+  any round after the task's first, the assignment also names" from
+  4380 to 4390; "signal: report it as such" from 4389 to 4399;
+  "replayed: false | true" from 4428 to 4438; "the orchestrator's
+  reviewer briefing names the replayed probes" from 4434 to 4444;
+  "outputContractBlock).not.toContain" from 4475 to 4485; "both copies'
+  mutation_probes block has exactly the five sub-fields in a fixed
+  order" from 4478 to 4488. One more in `review-gate-and-waivers.md`:
+  "docs-only closing deltas stay narrowly bounded" from line 4290 to
+  4300. `docs/okf/log.md`'s own copy of the "signal: report it as such"
+  citation moved with it, from line 4389 to 4399.
+  None of the bundle's `CHANGELOG.md` citations needed re-pointing: all
+  are heading-anchored, for example `CHANGELOG.md:#[0.9.0]`, optionally
+  with a quoted-text anchor, which resolve by heading name, not line number,
+  and every pre-existing heading in the file (`[0.30.0]` down to
+  `[0.7.0]`) is unchanged, just shifted. `docs/okf/log.md`'s own
+  historical citation to the "the keyed placeholder line's exact text,"
+  anchor (a maintained, evolving pointer this journal has re-pointed at
+  every prior release and fix round, unlike the rest of the journal's
+  frozen historical coordinates) moved from line 258 to line 260 of
+  `CHANGELOG.md`, the same +2-line shift.
+  Re-stamped `review-gate-and-waivers.md`, `run-state-lifecycle-and-
+  markers.md`, and `subagent-contracts-superset.md` (all three list both
+  `CHANGELOG.md` and `test/docs-consistency.test.ts` under `sources:`) in
+  the first pass, and `model-preselection.md` in a second pass a few
+  minutes later, after the post-edit freshness check reported it STALE:
+  its `sources:` list names `test/docs-consistency.test.ts`, whose lines
+  moved with the reflow, while none of its own citations fell inside the
+  shifted range (re-verified, timestamp-only re-stamp). Verdicts:
+  `npx vitest run test/docs-consistency.test.ts` green, including the
+  re-anchored bullet pin; `npm test` green; `npm run typecheck` and
+  `npm run typecheck:test` clean; `npm run format:check` red only on the
+  same two pre-existing files (`test/decision-authority.test.ts`,
+  `test/template-markers.test.ts`), untouched by this cut. Measured on
+  the committed tree: `npx okf-kit@0.10.0 check --json
+  packages/orchestrator-workflow/docs/okf` reports 0 errors and 0
+  warnings, with the same notice set as the base run; the ci.yml
+  `okf-anchor-guard` job's anchor-citation step (`--require-anchors` with
+  its allowlist) and its strict freshness step, replayed under
+  `bash --noprofile --norc -eo pipefail`, both report 0 findings.
+
 - 2026-09-06T21:33:40Z (task 0e17fb63, review round 2 fix round, two
   medium findings plus three low): both mediums were the same repeated
   class, a citation that resolves but points at the wrong bullet.
@@ -13,7 +75,7 @@
   copy, comma-worded) for both the step 6 instruction and the
   implementer-prompt copy; the implementer copy is a separate,
   colon-worded assertion, then at line 4379, re-pointed to
-  `test/docs-consistency.test.ts:4389#"signal: report it as such"`, a
+  `test/docs-consistency.test.ts:4399#"signal: report it as such"`, a
   substring unique to that copy. Scoped the two whole-file `implementerMd`
   `toContain` checks (the foreground-run pin and the byte-ceiling pin) to
   a new `implementerRules` slice bounded "Rules:" through "For v1, return
@@ -2941,7 +3003,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:258#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:260#"the keyed placeholder line's exact text,"`,
 re-pointed by 53 lines since this account was first written (+15 more,
 from the batch-38 `[Unreleased]` bullet added above `[0.30.0]` by the
 reviewer-checklist mirrored-pairs task), by T-002's own

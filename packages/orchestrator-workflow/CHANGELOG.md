@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-07
+
 ### Changed
 
 - Tests only, no asset wording change. The reviewer prompt's output-contract
