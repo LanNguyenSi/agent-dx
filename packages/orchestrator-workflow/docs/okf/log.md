@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-09-07T12:52:31Z (citation-sibling-drift guard, review round 3, task
+- 2026-09-07T12:57:17Z (citation-sibling-drift guard, review round 3, task
   agent-dx 9f72ae6d, orchestrator decision D-017): round 2's review found
   one more allowlisted pair that was real wrong-sibling drift, the second
   round in a row to find that class inside the allowlist, so this round
@@ -110,6 +110,21 @@
   own `unresolved-ambiguous` notices on bare basenames (`init.ts`,
   `SKILL.md`, `cli.ts`) inside older entries, the same class this doc
   carried before the round.
+  Mutation probes, all run through the probe runner in an isolated
+  worktree, all killed with the restore verified: rule (a) and rule (b)
+  each stubbed out of the finding list; the window set to 0; the
+  `anchorKey` comparison dropped from the match; the fenced-line skip
+  removed; the recorded-geometry comparison dropped from the match; the
+  geometry re-check's own condition disabled; and the fence-balance throw
+  disabled. Worth recording because it is the shape this round exists to
+  catch: replaying round 2's `anchorKey` probe on this round's first tree
+  came back `survived`. The regression was this round's own -- the
+  anchorKey fixture's differing finding also moved its uncited line, so
+  the newly added geometry comparison rejected it and the fixture stopped
+  discriminating the anchorKey check at all. The fixture now varies the
+  anchor text alone, which is also a real shape (a citation re-anchored in
+  place onto text that recurs at the same uncited line); re-probed, the
+  mutant is killed again.
 
 - 2026-09-07T11:57:20Z (citation-sibling-drift guard, review round 2, task
   agent-dx 9f72ae6d): round 1's own review classified all 18 raw hits by
