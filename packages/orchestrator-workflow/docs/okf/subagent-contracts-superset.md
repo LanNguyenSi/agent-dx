@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-07T11:10:41Z
+timestamp: 2026-09-07T11:49:38Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -237,7 +237,7 @@ fails instead. Supporting checks in the same suite: both slicer-output copies
 the newer fields (`test/docs-consistency.test.ts:848#"cursor = idx;"`); `02-tasks.md`'s
 sections retain the existing scope fields, with a v1 contract block and a
 non-normative criterion-ID checklist
-(`test/docs-consistency.test.ts:848#"cursor = idx;"`); and `task-slicer.md` must frame
+(`test/docs-consistency.test.ts:857-874#"cursor = idx;"`); and `task-slicer.md` must frame
 `allowed_changes`/`forbidden_changes` as scope boundaries for the
 implementer, not implementation instructions
 (`test/docs-consistency.test.ts:914#"not implementation instructions"`, prompt text at

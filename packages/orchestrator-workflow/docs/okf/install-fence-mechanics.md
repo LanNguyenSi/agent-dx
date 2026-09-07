@@ -3,7 +3,7 @@ type: module
 title: Install fence mechanics
 description: How orchestrator-workflow's installer writes, fences, updates, and removes its surface in a target repo.
 tags: [installer, marker-fence, manifest, agents-md, harness-adapters, uninstall]
-timestamp: 2026-09-05T22:41:37Z
+timestamp: 2026-09-07T11:49:38Z
 sources:
   - packages/orchestrator-workflow/src/init.ts
   - packages/orchestrator-workflow/src/codex.ts
@@ -34,7 +34,7 @@ sources:
 
 ## What `init` writes
 
-- `.ai/workflow/templates/00-goal.md` through `06-handoff.md`, one per name from `listTemplateNames()` (init.ts:766#"readAsset(join("), plus an empty `.ai/runs/.gitkeep` (init.ts:776#".gitkeep"). See [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md) for how these templates become run directories.
+- `.ai/workflow/templates/00-goal.md` through `06-handoff.md`, one per name from `listTemplateNames()` (init.ts:766#"readAsset(join("), plus an empty `.ai/runs/.gitkeep` (init.ts:769#".gitkeep"). See [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md) for how these templates become run directories.
 - The marker-fenced `## Agentic Coding Workflow` section in `AGENTS.md`, installed whenever at least one harness is selected, regardless of which one (init.ts:771-778#"if (options.harnesses.length > 0) {"): Codex and opencode read `AGENTS.md` natively, Claude Code gets it via an import, so the section is written for any of the three. Since agent-tasks 613316c9 (`--harness none`, templates-only mode), an empty `options.harnesses` skips this write entirely: only `.ai/workflow/**` and `.ai/runs/.gitkeep` (the bullet above) are installed, and AGENTS.md is left untouched, never created from scratch either. See "`--harness none` (templates-only mode)" below.
 - Per selected harness (`options.harnesses`), and per role `rolesForProfile(profile)` selects for that harness (0.15.0: `full` installs `{explorer,task-slicer,implementer,reviewer}`, `minimal` installs only `{implementer,reviewer}`; since 0.21.0 `full` also installs `advisor` (`{explorer,task-slicer,implementer,reviewer,advisor}`), the fifth role added purely by extending `ROLES`/`MINIMAL_PROFILE_ROLES` in `src/models.ts`, `rolesForProfile` itself unchanged, `minimal` still filters against the same two-role `MINIMAL_PROFILE_ROLES` set, so advisor is dropped from `minimal` for free, the same way explorer/task-slicer already are; see [model-preselection.md](model-preselection.md) and the manifest's `profile` field below):
   - **claude**: `.claude/skills/orchestrator-workflow/SKILL.md` and `.claude/agents/{role}.md` for each installed role (init.ts:791-795#"options.models[role],"), plus the `CLAUDE.md` import (init.ts:813#"ensureClaudeImport(report, join(targetDir,").
@@ -72,7 +72,7 @@ in 0.22.0 since the function now also serves the default file, `init.ts:435-455#
 always returns `undefined` when its own `modelValue` argument is `undefined` (it
 short-circuits on that first), so the second clause never added any
 filtering the first did not already provide, an equivalence the reviewer
-proved rather than assumed. `init.ts:900-902#"variantModelValue,"` now computes the effort line only
+proved rather than assumed. `init.ts:893-903#"effortLine,"` now computes the effort line only
 *after* the resolved-model check passes, and passes it into
 `composeOpencodeAgentVariant` (`init.ts:471-487#"frontmatter.push(effortLine);"`) as a fourth parameter
 instead of that function recomputing it internally, not because the
@@ -331,7 +331,7 @@ folded into drift rather than aborting the whole target check.
 `installKitFile` (init.ts:739-759#"installFile(report, path, content, { force });") drives every kit-owned file (templates, skills, per-role agent files, and, since 0.19.0, per-role-per-tier variant files, since the tier-rendering loops call the exact same closure):
 
 - Path doesn't exist: write, record hash.
-- Path exists and its current sha256 matches the hash recorded in the previous manifest ("unedited"): overwritten with the newly shipped content even without `--force` (init.ts:755-760#"installedFiles[relativePath] = sha256(content);"), this is how a kit version bump propagates (init.test.ts:255-275#"expect(readFileSync(templatePath,").
+- Path exists and its current sha256 matches the hash recorded in the previous manifest ("unedited"): overwritten with the newly shipped content even without `--force` (init.ts:747-752#"installedFiles[relativePath] = sha256(content);"), this is how a kit version bump propagates (init.test.ts:255-275#"expect(readFileSync(templatePath,").
 - Path exists and differs from shipped, with either a hash mismatch or no recorded hash: kept as-is and reported `conflicted` unless `--force`; the previous hash record is preserved rather than dropped (init.ts:753-755#"installedFiles[relativePath] = recorded;"), so a later upgrade still recognizes the file as edited (init.test.ts:322-337#"createHash(").
 - A plain second run with no drift is a byte-for-byte no-op across every file, including the manifest, which is only rewritten when the computed `desired` object differs from `previous` (init.ts:915-950#"${JSON.stringify(manifest, null, 2)}\n", init.test.ts:129-142#"expect(report.updated).toEqual([]);"); since 0.19.0 this no-op also covers a `tiers: true` re-run, `test/init.test.ts:1999-2010#"expect([...after.keys()].sort()).toEqual([...before.keys()].sort());"` pins a second `tiers: true` run changing no file.
 - 0.15.0: a `full` -> `minimal` downgrade is the one case where a plain re-run is *not* silent, see the manifest.json section above for the leftover-files note it prints. Since fix-round-1, `tiers: true` -> `tiers: false` is the same kind of not-silent case, via its own dedicated note block rather than by accreting onto the profile-downgrade one; before the fix it was a structurally identical leftover-files case that printed nothing at all (review finding M2, see "What `init` writes" above).
