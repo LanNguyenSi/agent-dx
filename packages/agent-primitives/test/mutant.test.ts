@@ -1851,6 +1851,23 @@ describe("formatMutantSummary / formatVerifiedAppliedVia", () => {
       "src/probe/mutant.ts:1: x -> y",
     );
   });
+
+  it("caps exactly at the 200-character bound: a 200-character path passes through byte-identical, a 201-character path gets the marker naming one omitted character", () => {
+    const atBound = "p".repeat(200);
+    const overBound = "p".repeat(201);
+    expect(formatMutantSummary(atBound, 1, "x", "y")).toBe(
+      `${atBound}:1: x -> y`,
+    );
+    expect(formatMutantSummary(overBound, 1, "x", "y")).toBe(
+      `${atBound}...(1 more character omitted):1: x -> y`,
+    );
+    expect(formatVerifiedAppliedVia(atBound, 1, "x", "y").split("\n")[0]).toBe(
+      `${atBound}:1`,
+    );
+    expect(
+      formatVerifiedAppliedVia(overBound, 1, "x", "y").split("\n")[0],
+    ).toBe(`${atBound}...(1 more character omitted):1`);
+  });
 });
 
 describe("computeMutant: a --numstat listing that did not fit", () => {
