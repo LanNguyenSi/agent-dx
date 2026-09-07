@@ -3192,6 +3192,282 @@ describe("reconcileEnvelopeDiffTruncation", () => {
 
     expect(envelope.warnings).toBe(nonArrayWarnings);
   });
+
+  it("re-measures and warns after a case-3 correction grows a REAL buildEnvelope-built envelope past `maxChars`, even though no target was ever pushed to shrink (task e82f341a)", () => {
+    // The pre-envelope evidence: a real diff with NO `path` (the probe
+    // could not write the full diff to disk), which is exactly what makes
+    // case 3's rewritten descriptors longer than the ones they replace
+    // (`describeExcerptPointer`'s omission clause has no `; full diff at
+    // mutant.diff.path` to offset against).
+    const noPathDiff: MutantDiffField = {
+      text: "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-aaa\n-bbb\n-ccc\n+ddd\n+eee\n+fff",
+      hunkCount: 1,
+      removed: 3,
+      added: 3,
+      changedLineCount: 6,
+      truncated: false,
+    };
+    const summary = formatMutantSummary(
+      "fixture.js",
+      2,
+      "old line",
+      "new line",
+      noPathDiff,
+    );
+    const via = formatVerifiedAppliedVia(
+      "fixture.js",
+      2,
+      "old line",
+      "new line",
+      noPathDiff,
+    );
+    const originalMutantField = {
+      file: "fixture.js",
+      line: 2,
+      before: "old line",
+      after: "new line",
+      diff: noPathDiff,
+    };
+
+    // A REAL `buildEnvelope` call (a generous `maxChars` so it is a pure
+    // pass-through here, not a fabricated shape): the case-3 precondition
+    // -- `diff` already gone from `mutant`, both descriptors still the
+    // pristine strings the probe produced -- is exactly what a caller
+    // composing this envelope from a prior, harsher reduction pass would
+    // hand in, and is the one shape `reconcileOneMutant`'s case 3 exists
+    // to correct.
+    const buildCase3Envelope = () =>
+      buildEnvelope({
+        version: "test",
+        command: "probe",
+        status: "survived",
+        durationMs: 1,
+        cwd: "/tmp",
+        warnings: [],
+        logs: [],
+        extra: {
+          mutant: {
+            file: "fixture.js",
+            line: 2,
+            before: "old line",
+            after: "new line",
+            form: "patch",
+            // `diff` omitted: what a prior reduction pass left behind.
+          },
+          mutation_probe: {
+            mutant: summary,
+            verified_applied_via: via,
+            result: "survived",
+            restored_verified: true,
+          },
+        },
+      });
+
+    const { envelope: uncut } = buildCase3Envelope();
+    const preLen = JSON.stringify(uncut).length;
+
+    // Learn the correction's own natural, unshrunk length: a huge budget
+    // that can never itself trigger `pushBudgetOverrunWarning`, so the
+    // only thing this measures is how long the case-3 rewrite makes the
+    // envelope on its own.
+    const { envelope: reference } = buildCase3Envelope();
+    reconcileEnvelopeDiffTruncation(
+      reference,
+      { mutant: originalMutantField },
+      preLen * 10,
+    );
+    const correctedLength = JSON.stringify(reference).length;
+    // Premise check: the correction actually grew the envelope past its
+    // pre-correction length, which is what makes this fixture a real
+    // exercise of case 3's own growth rather than a no-op.
+    expect(correctedLength).toBeGreaterThan(preLen);
+
+    // The budget under test: a few characters BELOW the corrected
+    // length, so the envelope is genuinely over budget once the
+    // descriptors are rewritten and `enforceEnvelopeBudget` has nothing
+    // to shrink (case 3 never pushes a target).
+    const budget = correctedLength - 3;
+
+    const { envelope } = buildCase3Envelope();
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(budget);
+
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      { mutant: originalMutantField },
+      budget,
+    );
+
+    const finalLength = JSON.stringify(envelope).length;
+    // The bound contract: either the envelope came back within `budget`,
+    // or it is over and a warning names the TRUE final length -- never
+    // silently over budget with no warning at all, which is what the
+    // `targets.length === 0` early return in `enforceEnvelopeBudget`
+    // used to allow for a case-3-only correction.
+    const warnings = Array.isArray(envelope.warnings)
+      ? (envelope.warnings as unknown[])
+      : [];
+    // Pin which arm this fixture actually takes: `budget` is set 3
+    // characters below the case-3 correction's own natural length, and
+    // case 3 never pushes a target for `enforceEnvelopeBudget` to
+    // shrink, so this fixture must land over budget with a warning --
+    // never silently within it. Asserting that here, before the
+    // disjunction below, keeps a change that moved this fixture onto
+    // the other arm from passing on the disjunction's tautological else
+    // (`finalLength <= budget` proving itself).
+    expect(finalLength).toBeGreaterThan(budget);
+    const overrunBefore = warnings.find(
+      (w) => typeof w === "string" && /could not be met/.test(w),
+    );
+    expect(overrunBefore).toBeDefined();
+    if (finalLength > budget) {
+      const overrun = warnings.find(
+        (w) => typeof w === "string" && /could not be met/.test(w),
+      );
+      expect(overrun).toBeDefined();
+      expect(overrun).toContain(`${String(finalLength)} characters`);
+    } else {
+      expect(finalLength).toBeLessThanOrEqual(budget);
+    }
+  });
+
+  it("replaces a prior-pass overrun warning already on the envelope with one naming the case-3-grown final length, rather than appending a second one (task e82f341a)", () => {
+    // The pre-envelope evidence: same no-path diff shape as the sibling
+    // fixture above -- case 3's own precondition (`diff` already gone
+    // from `mutant`, both descriptors still pristine) needs no `targets`
+    // pushed to exercise the newly reachable empty-targets branch.
+    //
+    // A sweep of `buildEnvelope`'s OWN reduction at this fixture's size
+    // (see the round-2 review's F1) never lands both preconditions this
+    // fixture needs at once: below the size where its own cap search can
+    // no longer keep the descriptors byte-identical to the pristine
+    // format (`rewriteProbeDescriptors`'s `wasIntact` check), the search
+    // does not shrink gracefully to an over-budget-but-populated shape --
+    // it drops the WHOLE payload in one step once no candidate structure
+    // fits, so `mutation_probe` is gone by the time an overrun warning
+    // would appear, and there is nothing left for case 3 to grow. What
+    // this fixture builds instead -- a real `buildEnvelope` call that is
+    // a pure pass-through (`maxChars` generous enough that nothing is
+    // cut) whose caller supplies a `warnings` entry already shaped like
+    // an overrun warning -- is `buildEnvelope`'s own documented, real
+    // behavior (caller-supplied `warnings` entries are carried through
+    // unchanged, see `EnvelopeInput.warnings`), and stands in for the
+    // "prior harsher reduction pass" the round-1 fixture's own docblock
+    // already names as case 3's real precondition: that prior pass's own
+    // output is exactly an envelope carrying its own stale overrun
+    // warning alongside pristine, not-yet-corrected descriptors.
+    const noPathDiff: MutantDiffField = {
+      text: "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-aaa\n-bbb\n-ccc\n+ddd\n+eee\n+fff",
+      hunkCount: 1,
+      removed: 3,
+      added: 3,
+      changedLineCount: 6,
+      truncated: false,
+    };
+    const originalMutantField = {
+      file: "fixture.js",
+      line: 2,
+      before: "old line",
+      after: "new line",
+      diff: noPathDiff,
+    };
+    const summary = formatMutantSummary(
+      "fixture.js",
+      2,
+      "old line",
+      "new line",
+      noPathDiff,
+    );
+    const via = formatVerifiedAppliedVia(
+      "fixture.js",
+      2,
+      "old line",
+      "new line",
+      noPathDiff,
+    );
+    const staleOverrunWarning =
+      "envelope is 1 characters; requested max-chars 1 could not be met";
+
+    const buildCase3Envelope = (warnings: string[]) =>
+      buildEnvelope({
+        version: "test",
+        command: "probe",
+        status: "survived",
+        durationMs: 1,
+        cwd: "/tmp",
+        warnings,
+        logs: [],
+        extra: {
+          mutant: {
+            file: "fixture.js",
+            line: 2,
+            before: "old line",
+            after: "new line",
+            form: "patch",
+            // `diff` omitted: what a prior reduction pass left behind.
+          },
+          mutation_probe: {
+            mutant: summary,
+            verified_applied_via: via,
+            result: "survived",
+            restored_verified: true,
+          },
+        },
+      }).envelope;
+
+    // Learn the case-3 correction's own natural, unshrunk length (no
+    // stale warning in play here, so the reference measurement is not
+    // itself contaminated by the fixture's premise).
+    const reference = buildCase3Envelope([]);
+    const refPreLen = JSON.stringify(reference).length;
+    reconcileEnvelopeDiffTruncation(
+      reference,
+      { mutant: originalMutantField },
+      refPreLen * 10,
+    );
+    const correctedLength = JSON.stringify(reference).length;
+    expect(correctedLength).toBeGreaterThan(refPreLen);
+
+    const budget = correctedLength - 3;
+
+    const envelope = buildCase3Envelope([staleOverrunWarning]);
+    // Premise check: the envelope already carries a "could not be met"
+    // warning before `reconcileEnvelopeDiffTruncation` ever runs, and its
+    // pre-correction size already exceeds `budget` (the stale warning's
+    // own bytes are why): `preCorrectionLength > maxChars` is exactly the
+    // precondition the round-1 review asked this fixture to cover.
+    const preWarnings = envelope.warnings as unknown[];
+    expect(
+      preWarnings.some(
+        (w) => typeof w === "string" && /could not be met/.test(w),
+      ),
+    ).toBe(true);
+    const preLen = JSON.stringify(envelope).length;
+    expect(preLen).toBeGreaterThan(budget);
+
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      { mutant: originalMutantField },
+      budget,
+    );
+
+    const finalLength = JSON.stringify(envelope).length;
+    // Premise check: the case-3 rewrite grew the envelope further, past
+    // the length the stale warning already named and past `budget`.
+    expect(finalLength).toBeGreaterThan(preLen);
+    expect(finalLength).toBeGreaterThan(budget);
+
+    const finalWarnings = envelope.warnings as unknown[];
+    const overrunWarnings = finalWarnings.filter(
+      (w) => typeof w === "string" && /could not be met/.test(w),
+    );
+    // The pin: exactly one "could not be met" warning survives, and it
+    // names the NEW, larger final length -- `pushBudgetOverrunWarning`
+    // replaces the stale warning rather than appending a second one
+    // alongside it.
+    expect(overrunWarnings).toHaveLength(1);
+    expect(overrunWarnings[0]).toContain(`${String(finalLength)} characters`);
+    expect(overrunWarnings[0]).not.toBe(staleOverrunWarning);
+  });
 });
 
 describe("reconcileEnvelopeDiffTruncation: stays within maxChars across a sweep of budgets (REAL buildEnvelope-built envelopes)", () => {

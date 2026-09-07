@@ -448,10 +448,26 @@ them in whatever order `plan.results` happens to list them; two
 excerpts of equal current length keep their `plan.results` order (the
 sort is stable). A mutant
 whose excerpt already fits is left alone for as long as the ones ahead
-of it in size can absorb the deficit on their own; only once every
-excerpt has been shrunk to nothing and the envelope still exceeds
-`-m` does a warning name the true final length, the same wording
-`buildEnvelope`'s own overrun warning uses.
+of it in size can absorb the deficit on their own; once there is
+nothing left here to shrink and the envelope still exceeds `-m`, a
+warning names the true final length, the same wording `buildEnvelope`'s
+own overrun warning uses.
+
+This re-measure runs even for a mutant whose `diff` was dropped entirely
+(no excerpt left to shrink, so nothing is pushed into the shrink search
+above): a dropped `diff` with no `path` rewrites its descriptors to the
+longer "omitted from this envelope" clause, and that rewrite alone can
+push the envelope back over `-m` with no target to shrink it back down.
+The re-measure and overrun warning still run in that shape too, rather
+than being skipped because there was nothing to shrink. This is
+reachable for an envelope a library caller composes itself, or one
+handed in from a prior, harsher reduction pass whose `mutant.diff` is
+already gone while both descriptors are still pristine (`src/probe/mutant.ts`,
+`rewriteProbeDescriptors`, its `wasIntact` check); a sweep of `probe`'s
+own single-pass reduction across a range of `-m` values did not produce
+this shape (see `test/mutant.test.ts`, the `reconcileEnvelopeDiffTruncation`
+describe block's case-3 fixtures) -- do not read this paragraph as a
+claim about `probe`/`probe --plan` CLI output.
 
 The probe pins its own content-writing git commands with `-c
 core.autocrlf=false` and `-c apply.whitespace=nowarn`: the patch dry

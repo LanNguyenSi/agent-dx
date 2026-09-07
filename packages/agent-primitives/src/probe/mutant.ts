@@ -1982,8 +1982,11 @@ function descriptorDiffFor(
  * place, so re-applying a smaller budget to it is visible to the
  * envelope `enforceEnvelopeBudget` re-measures), the `mutation_probe`
  * object beside it, and the pre-envelope evidence the excerpt is
- * rebuilt from. Case 1 (untouched) and case 3 (dropped) need no further
- * shrinking, so neither is ever pushed here. */
+ * rebuilt from. Case 1 (untouched) and case 3 (dropped) have no excerpt
+ * left to shrink further, so neither is ever pushed here -- but case 3's
+ * own descriptor rewrite can still grow the envelope (see
+ * `enforceEnvelopeBudget`'s docblock), which is why that function's
+ * re-measure runs even when `targets` ends up empty. */
 interface CorrectionTarget {
   diff: Record<string, unknown>;
   probeField: unknown;
@@ -2206,13 +2209,20 @@ function applyExcerptBudget(target: CorrectionTarget, budget: number): void {
  * single oversized mutant is shrunk on its own rather than spreading a
  * uniform cut across every mutant in a plan that did not need one.
  *
- * When every target has been shrunk to nothing and the envelope still
- * exceeds `maxChars` (the fixed fields, or fields this never touches,
- * are what is over budget), the dropped keys stay dropped -- there is
- * nothing left here to shrink -- and a warning names the true final
+ * Once there is nothing left here to shrink (every target has been
+ * shrunk to nothing, or there was never a target to begin with) and the
+ * envelope still exceeds `maxChars`, a warning names the true final
  * length, in the same words `buildEnvelope`'s own overrun warning uses,
  * so a caller can tell "bounded as requested" from "bounded, but bigger
  * than asked for, honestly reported" here too.
+ *
+ * An EMPTY `targets` does not skip this re-measure: `reconcileOneMutant`'s
+ * case 3 rewrites a descriptor without ever pushing a target (see its own
+ * docblock), and that rewrite alone can push the whole envelope past
+ * `bound` with nothing here left to shrink. The shrink loop below is
+ * simply a no-op over an empty `order` in that shape -- the re-measure and
+ * `pushBudgetOverrunWarning` still have to run so that growth is reported
+ * rather than silently shipped over budget.
  */
 function enforceEnvelopeBudget(
   envelope: Record<string, unknown>,
@@ -2220,7 +2230,6 @@ function enforceEnvelopeBudget(
   maxChars: number,
   preCorrectionLength: number,
 ): void {
-  if (targets.length === 0) return;
   const bound = Math.max(maxChars, preCorrectionLength);
   let length = jsonLength(envelope);
   if (length <= bound) return;
