@@ -61,3 +61,12 @@ and goes stale on the next rebase or added test; log.md records how
 that class recurred on one change. Prefer string-anchored
 citations over bare line ranges for the same reason: only anchored
 citations are covered by the in-repo docs-consistency guard.
+
+A citation-sibling-drift guard (also in `test/docs-consistency.test.ts`)
+checks a class the anchor guard above cannot: a citation that resolves and
+anchors correctly on its own but names the wrong sibling among near-identical
+citations. It flags (a) the same `file:range#anchor` cited twice in one
+paragraph, and (b) a string anchor's text also occurring, uncited, at
+another nearby line of the same target while the paragraph cites a sibling
+range of that file; either can be allowlisted in the guard's own test with a
+reason.

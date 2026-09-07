@@ -1,5 +1,42 @@
 # Bundle log
 
+- 2026-09-07T11:10:41Z (citation-sibling-drift guard): added a
+  paragraph-scoped guard next to the existing anchor-load-bearing checks in
+  `test/docs-consistency.test.ts` -- rule (a): the same `file:range#anchor`
+  cited twice in one paragraph; rule (b): a string anchor's text also
+  occurring, uncited, at another line of the same target within a 10-line
+  window while the paragraph cites a sibling range of that file -- with
+  in-memory fixtures for three review findings that shared this shape.
+  Appended at the end of the file, past every existing citation into it, so
+  none shifted. `npm test`, `npm run typecheck`, `npm run typecheck:test`,
+  and `npm run format:check` are all green (format needed one
+  `prettier --write` pass over the new block). Run over the current bundle,
+  rule (a) reports 7 real hits and rule (b) reports 11, each read against
+  its real target file and the citing paragraph and allowlisted in the
+  guard's own test with the specific reason found: a doc-wide "topic
+  sentence, then repeat as the closing list item" convention for rule (a)
+  (`subagent-contracts-superset.md`, `run-state-lifecycle-and-markers.md`,
+  `operator-install-and-registry.md`); a short/common token (a bare
+  keyword, a field mirrored across two interfaces, a comment restating a
+  literal the code two lines away already installs, a test-assertion idiom
+  repeated on an adjacent line, a local variable name reused a few lines
+  later) recurring near a real citation by coincidence for rule (b)
+  (`install-fence-mechanics.md`, `model-preselection.md`,
+  `operator-install-and-registry.md`). The guard itself reports 0
+  unallowlisted findings against the bundle. `docs/okf/index.md`'s
+  Maintenance section and `CHANGELOG.md`'s `[Unreleased]` section both name
+  the guard. Re-verified and re-stamped `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`, and
+  `subagent-contracts-superset.md` (the four docs whose `sources:` list
+  `test/docs-consistency.test.ts` and/or `CHANGELOG.md`): neither source's
+  change needed a citation re-point, since the new test code sits past
+  every existing citation into the file and every bundle `CHANGELOG.md`
+  citation is heading-anchored, not line-numbered.
+  `okf-kit check --json --require-anchors
+  packages/orchestrator-workflow/docs/okf`, measured after this round's
+  commit, reported 0 errors, 0 warnings, 24 notices, matching the
+  pre-round baseline exactly.
+
 - 2026-09-07T04:29:31Z (release 0.31.0): moved the two `[Unreleased]`
   bullets (the docs-consistency pin hardening from PR #199, the three
   verification-process rules from PR #206) under a new `## [0.31.0] -
@@ -3003,9 +3040,11 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:260#"the keyed placeholder line's exact text,"`,
-re-pointed by 53 lines since this account was first written (+15 more,
-from the batch-38 `[Unreleased]` bullet added above `[0.30.0]` by the
+(`CHANGELOG.md:289#"the keyed placeholder line's exact text,"`,
+re-pointed by 82 lines since this account was first written (+29 more,
+from this round's own citation-sibling-drift-guard `[Unreleased]` bullet
+added above `[0.31.0]`; +15 before that, from the batch-38 `[Unreleased]`
+bullet added above `[0.30.0]` by the
 reviewer-checklist mirrored-pairs task), by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
