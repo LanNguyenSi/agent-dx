@@ -4890,25 +4890,29 @@ describe("the reviewer checklist items mirrored in this table still carry their 
 //       for a section-level anchor); rule (a) still covers a
 //       heading-anchored duplicate.
 //
-// SIBLING_GUARD_WINDOW is 10, tuned against the current bundle (594
-// in-scope citations across the six checked docs): rule (b) reports 11 real
-// hits at this window, each read against its real target file and
-// allowlisted below with the specific reason found -- every one a
-// short/common token (a bare keyword, a mirrored field declared twice
-// across two interfaces, a comment restating a literal the code two lines
-// away already installs, a common test-assertion idiom repeated on an
-// adjacent line, a local variable name reused a few lines later in the
-// same function) recurring near a real, correct citation by coincidence,
-// not a hidden wrong-sibling bug. Rule (a) reports 7 real hits, unrelated
-// to the window: each is a paragraph that names one citation as its
-// opening topic sentence and repeats the identical citation as the closing
-// item of an enumerated sub-citation list a few lines later, a deliberate,
-// doc-wide convention in subagent-contracts-superset.md and
-// run-state-lifecycle-and-markers.md, not a collapsed sibling. Widening the
-// window catches more of the bundle's own recurring short tokens without
-// surfacing any further genuine drift (checked at 20/40/60/80), so 10 is
-// kept as the smallest window that still reproduces the S3 fixture shape
-// below without an unreviewable allowlist.
+// SIBLING_GUARD_WINDOW is 20, widened from the round-1 value of 10 (round 2
+// D-010) once a real bundle case was measured to fall outside it: two
+// genuinely distinct sibling notes sharing identical text 20 lines apart
+// (see docs/okf/log.md for the measured hit counts at each window and the
+// re-triage of every additional hit the wider window surfaces). Every hit
+// this window reports against the current bundle is read against its real
+// target file and the citing paragraph, then either fixed (a real
+// mis-pointed citation) or allowlisted below with the specific reason
+// found -- see docs/okf/log.md for the current measured counts, kept out
+// of this comment per this file's own D31 convention of leaving numbers to
+// the log rather than hand-writing them at two sites that can drift apart.
+//
+// Two known coverage gaps, not yet closed: (1) a path-less continuation
+// citation (`:N-M#"..."`, whose path is implied by the preceding citation
+// in the same sentence) never matches ANCHOR_CITATION_RE, so this guard
+// cannot see one -- model-preselection.md alone carries several; extending
+// the regex to resolve a continuation's implied path is a follow-up (see
+// CHANGELOG.md), not done this round. (2) a citation-shaped string sitting
+// inside a fenced ``` code block is skipped below rather than matched --
+// cheap to add and closes the reverse risk (a code sample being
+// misread as a real citation), but means a genuine citation someone
+// mistakenly wrote inside a fence would also go unseen; fenced citations
+// are not a pattern this bundle currently uses.
 function extractSiblingGuardCitations(
   docText: string,
   resolveRealPath: (citedPath: string) => string | undefined,
@@ -4928,8 +4932,21 @@ function extractSiblingGuardCitations(
       prevBlank = false;
     }
   }
+  // Coverage gap (2) above: skip lines inside fenced ``` code blocks so a
+  // citation-shaped string in a code sample is never matched as a real
+  // citation. The fence delimiter line itself is treated as fenced too
+  // (it is never citation-shaped in this bundle).
+  let inFence = false;
+  const fencedLine: boolean[] = lines.map((line) => {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      return true;
+    }
+    return inFence;
+  });
   const citations: SiblingGuardCitation[] = [];
   lines.forEach((line, idx) => {
+    if (fencedLine[idx]) return;
     const paragraph = paragraphOfLine[idx];
     if (paragraph === -1) return;
     for (const m of line.matchAll(ANCHOR_CITATION_RE)) {
@@ -4992,7 +5009,7 @@ interface WrongSiblingAnchorFinding {
 
 type SiblingGuardFinding = DuplicateCitationFinding | WrongSiblingAnchorFinding;
 
-const SIBLING_GUARD_WINDOW = 10;
+const SIBLING_GUARD_WINDOW = 20;
 
 function groupSiblingGuardCitationsByParagraph(
   citations: SiblingGuardCitation[],
@@ -5274,7 +5291,102 @@ describe("citation-sibling-drift guard: fixtures reproduce the three review-batc
       formatSiblingGuardFindings(correctedFindings),
     ).toEqual([]);
   });
+
+  // Round 2 (F4): the shape 3 fixture above is a deliberate near-miss (two
+  // citations to slightly different ranges sharing one anchor text), not
+  // the real batch-39 geometry. The real case (docs/okf/log.md's
+  // 2026-09-06T21:33:40Z entry) was one citation reused verbatim for two
+  // claims -- a literal duplicate -- whose real, uncited sibling sat 15
+  // lines below it, not the fixture's 10. This fixture reproduces that
+  // real distance and shape, and checks both rules' behaviour on it: the
+  // drifted form is a literal duplicate, so rule (a) must fire and rule
+  // (b) must not (no sibling RANGE exists yet to compare against, only a
+  // repeated one); the corrected form re-points the second citation to
+  // the real 15-line-distant sibling and is clean under both rules.
+  it("shape 3, real geometry (a literal duplicate, correct sibling 15 lines away, per docs/okf/log.md): drifted form is flagged by the duplicate rule and not the wrong-sibling rule, corrected form re-points to the real sibling and is clean under both rules", () => {
+    const target = buildSiblingGuardFixtureFile(35, {
+      10: '      "...is a regression signal, reported as such (...) and resolved before the next reviewer spawn.",',
+      25: '      "...is a regression signal, reported as such (...) and resolved before the next reviewer spawn.",',
+    });
+    const readTarget = (): string => target;
+
+    const drifted =
+      "the step 6 copy and the implementer-prompt copy both state the\n" +
+      "regression-signal consequence\n" +
+      '(fixture-real-s3.test.ts:8-10#"is a regression signal",\n' +
+      'fixture-real-s3.test.ts:8-10#"is a regression signal").\n';
+    const driftedFindings = findCitationSiblingDrift(
+      drifted,
+      identity,
+      readTarget,
+      SIBLING_GUARD_WINDOW,
+    );
+    expect(
+      driftedFindings.some((f) => f.kind === "duplicate-citation"),
+      "the real S3 shape is a literal duplicate, so rule (a) must fire: " +
+        formatSiblingGuardFindings(driftedFindings),
+    ).toBe(true);
+    expect(
+      driftedFindings.some((f) => f.kind === "wrong-sibling-anchor"),
+      "a repeated IDENTICAL range is not a sibling range, so rule (b) must " +
+        "not also fire on the drifted form: " +
+        formatSiblingGuardFindings(driftedFindings),
+    ).toBe(false);
+
+    const corrected =
+      "the step 6 copy and the implementer-prompt copy both state the\n" +
+      "regression-signal consequence\n" +
+      '(fixture-real-s3.test.ts:8-10#"is a regression signal",\n' +
+      'fixture-real-s3.test.ts:23-25#"is a regression signal").\n';
+    const correctedFindings = findCitationSiblingDrift(
+      corrected,
+      identity,
+      readTarget,
+      SIBLING_GUARD_WINDOW,
+    );
+    expect(
+      correctedFindings,
+      formatSiblingGuardFindings(correctedFindings),
+    ).toEqual([]);
+  });
+
+  // Round 2 (F4) negative control: `findDuplicateCitations` never receives
+  // a `window` argument (see its signature above) -- a literal duplicate
+  // is a PAIRING comparison, not a windowed one, so rule (a) must report
+  // it identically no matter how small or large SIBLING_GUARD_WINDOW is.
+  // Pins that against regression (e.g. someone later folding rule (a)
+  // into the same windowed comparison rule (b) uses).
+  it("shape 3 real geometry, negative control: rule (a) (duplicate-citation) fires identically regardless of the window argument", () => {
+    const target = buildSiblingGuardFixtureFile(35, {
+      10: '      "...is a regression signal, reported as such (...) and resolved before the next reviewer spawn.",',
+      25: '      "...is a regression signal, reported as such (...) and resolved before the next reviewer spawn.",',
+    });
+    const readTarget = (): string => target;
+    const drifted =
+      "the step 6 copy and the implementer-prompt copy both state the\n" +
+      "regression-signal consequence\n" +
+      '(fixture-real-s3.test.ts:8-10#"is a regression signal",\n' +
+      'fixture-real-s3.test.ts:8-10#"is a regression signal").\n';
+
+    for (const window of [0, 1, 1000]) {
+      const findings = findCitationSiblingDrift(
+        drifted,
+        identity,
+        readTarget,
+        window,
+      );
+      expect(
+        findings.some((f) => f.kind === "duplicate-citation"),
+        `window=${window}: ` + formatSiblingGuardFindings(findings),
+      ).toBe(true);
+    }
+  });
 });
+
+// Imported here, not moved to the top-of-file import block, for the same
+// reason `import ts from "typescript"` sits at its own point-of-use above:
+// adding it there would shift every existing citation into this file.
+import { createHash } from "node:crypto";
 
 interface SiblingGuardAllowlistEntry {
   doc: string;
@@ -5282,7 +5394,27 @@ interface SiblingGuardAllowlistEntry {
   real: string;
   start: number;
   end: number;
+  // First 8 hex chars of sha256 over the finding's own anchor text
+  // (`anchorText` for wrong-sibling-anchor, `anchorRaw` -- including its
+  // own quote characters -- for duplicate-citation). Round 2 (F5): an
+  // entry matched by (doc, kind, real, range) alone silently exempts ANY
+  // future finding on that same range regardless of what its anchor
+  // actually says, so a later citation edit that changes the anchor but
+  // keeps the range would stay silently exempt instead of getting a fresh
+  // review. `anchorKey` closes that: a changed anchor changes the key, so
+  // the match (and the "every entry matched" test below) fails until the
+  // entry is re-reviewed. Never the literal anchor text itself -- see the
+  // note below on why this array must not quote one.
+  anchorKey: string;
   reason: string;
+}
+
+function siblingGuardAnchorKey(finding: SiblingGuardFinding): string {
+  const text =
+    finding.kind === "duplicate-citation"
+      ? (finding.anchorRaw ?? "")
+      : finding.anchorText;
+  return createHash("sha256").update(text).digest("hex").slice(0, 8);
 }
 
 // Read against the real target file and the citing paragraph for each hit
@@ -5290,13 +5422,14 @@ interface SiblingGuardAllowlistEntry {
 // verified coincidental recurrence of a short/common token or a deliberate
 // doc-wide "topic sentence, then repeat as the closing list item"
 // convention, not a collapsed sibling. Matched by (doc, kind, real target,
-// range) only -- not by paragraph, not by the citation's own spelling of
-// the path, and deliberately not by the anchor's own literal text either:
-// four of these entries target this very file
+// range, anchorKey) -- not by paragraph, not by the citation's own spelling
+// of the path, and deliberately not by the anchor's own literal text
+// either: four of these entries target this very file
 // (`test/docs-consistency.test.ts`), so quoting an anchor's exact text in
 // this array would itself add another occurrence of that text to the file
 // the "at most 3 times file-wide" check (above) counts against -- the
-// `reason` below paraphrases each one instead of quoting it verbatim. One
+// `reason` below paraphrases each one instead of quoting it verbatim, and
+// `anchorKey` carries a hash instead of the text for the same reason. One
 // entry also covers the same real hit cited a second time elsewhere in the
 // same doc under a different path spelling.
 const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
@@ -5306,17 +5439,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     real: "packages/orchestrator-workflow/src/cli.ts",
     start: 1484,
     end: 1495,
+    anchorKey: "3378a4b9",
     reason:
       'the `adopt` section cites this write-call evidence twice in one paragraph: once for the "touching nothing in the repository" claim, again for the "bootstraps from recorded settings" claim.',
-  },
-  {
-    doc: "run-state-lifecycle-and-markers.md",
-    kind: "duplicate-citation",
-    real: "packages/orchestrator-workflow/assets/skill/SKILL.md",
-    start: 83,
-    end: 83,
-    reason:
-      'cited twice in one paragraph: once for "see the pointer section below", again for "must not be edited"; same evidence, two claims.',
   },
   {
     doc: "run-state-lifecycle-and-markers.md",
@@ -5324,6 +5449,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     real: "packages/orchestrator-workflow/test/template-markers.test.ts",
     start: 39,
     end: 41,
+    anchorKey: "f3227b28",
     reason:
       "cited twice inside one long (22-line, blank-line-free) paragraph: once for the byte-exact claim, again for the literal-line/default claim.",
   },
@@ -5331,17 +5457,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 848,
-    end: 848,
-    reason:
-      "cited twice in one paragraph for two adjacent claims (original field order survives; the v1-contract/checklist claim); the doc-wide topic-sentence-then-closing-list-item convention (see the other subagent-contracts-superset.md entries below).",
-  },
-  {
-    doc: "subagent-contracts-superset.md",
-    kind: "duplicate-citation",
-    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
     start: 534,
     end: 534,
+    anchorKey: "47aedb12",
     reason:
       "the paragraph's opening topic sentence names this citation, then repeats it verbatim as the closing item of its own enumerated sub-citation list a few lines later.",
   },
@@ -5351,6 +5469,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
     start: 1055,
     end: 1055,
+    anchorKey: "03317257",
     reason:
       "same topic-sentence/closing-list-item convention as the 534 entry above, four lines apart in its own paragraph.",
   },
@@ -5360,6 +5479,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
     start: 1169,
     end: 1169,
+    anchorKey: "b19680bb",
     reason:
       "same topic-sentence/closing-list-item convention as the 534 and 1055 entries above.",
   },
@@ -5367,19 +5487,41 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 776,
-    end: 776,
+    start: 766,
+    end: 766,
+    anchorKey: "3a4a026f",
     reason:
-      "line 776 is a comment restating the literal `.gitkeep` path that line 769 (a separate, correctly cited call) actually installs; both are genuine occurrences of the same literal, not a wrong-sibling.",
+      "round 2 (F3b fixed the actual .gitkeep mis-citation this range used to carry; this range's own text is the template-asset read, correctly cited). At window 20 its `readAsset(join(` prefix also reaches the unrelated SKILL.md asset read a few lines below; a common call-prefix coincidence, not a wrong-sibling.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 900,
-    end: 902,
+    start: 606,
+    end: 617,
+    anchorKey: "bb96ff2f",
     reason:
-      "the same parameter name is passed a few lines earlier at the call this cited call's own argument was declared for; a normal local-variable reuse, not drift.",
+      "the identical note text is pushed twice by design: once here for a dropped role's own now-untracked file, again a few lines later (within window 20, not 10) for that same role's now-untracked tier-variant files; two genuinely distinct, correctly-real note sites sharing one message, not a wrong-sibling.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 129,
+    end: 142,
+    anchorKey: "6b912d8f",
+    reason:
+      "a common `expect(report.updated).toEqual([]);` report-shape assertion idiom, also asserted (within window 20) in an earlier, unrelated `it` block's own report checks; not a wrong-sibling.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 747,
+    end: 752,
+    anchorKey: "33e8e25a",
+    reason:
+      "round 2 (F3c) re-point: this range is the exists-and-unedited overwrite branch's own record. The identical `installedFiles[relativePath] = sha256(content);` assignment also appears a few lines below, in the sibling path-does-not-exist branch's own record; both are real code for two different branches, not drift.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5387,17 +5529,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     real: "packages/orchestrator-workflow/test/init.test.ts",
     start: 190,
     end: 201,
+    anchorKey: "14824022",
     reason:
       "the common `expect(after).toContain(...)` assertion idiom repeats on the very next line for a second, sibling assertion in the same `it` block.",
-  },
-  {
-    doc: "install-fence-mechanics.md",
-    kind: "wrong-sibling-anchor",
-    real: "packages/orchestrator-workflow/src/init.ts",
-    start: 755,
-    end: 760,
-    reason:
-      "the identical assignment also appears a few lines above in the function's unconditional branch; both are real code for two different branches, not drift.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5405,26 +5539,29 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     real: "packages/orchestrator-workflow/src/uninstall.ts",
     start: 138,
     end: 147,
+    anchorKey: "0bf37874",
     reason:
       "`continue;` is a bare loop keyword reused at every early-exit branch of the same loop; not diagnostic of a wrong-sibling on its own.",
   },
   {
     doc: "model-preselection.md",
     kind: "wrong-sibling-anchor",
-    real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 102,
-    end: 108,
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 862,
+    end: 866,
+    anchorKey: "8cd81eb8",
     reason:
-      "the same assertion idiom repeats on the very next line for a sibling `expect(slicer).toContain(...)` check in the same `it` block.",
+      "round 2 (F3d) re-point: this range is the actual `opencodeEffortLine(...)` call this doc names. The same `modelValue,` argument is also passed a few lines later, into the sibling `composeOpencodeAgent(...)` call this range's own result feeds; a normal local-variable reuse, not drift.",
   },
   {
     doc: "model-preselection.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 869,
-    end: 869,
+    start: 606,
+    end: 617,
+    anchorKey: "bb96ff2f",
     reason:
-      "cited twice in this doc (once spelled `src/init.ts`, once `init.ts`, both resolving here); the same variable name is also used a few lines earlier in the same function, a coincidental recurrence, not a wrong-sibling.",
+      "same genuinely-distinct-sibling-notes pair as the install-fence-mechanics.md entry above (this doc cites the same range independently).",
   },
   {
     doc: "model-preselection.md",
@@ -5432,6 +5569,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     real: "packages/orchestrator-workflow/test/init.test.ts",
     start: 1497,
     end: 1513,
+    anchorKey: "5ea9652d",
     reason:
       "a comment a few lines above the cited pinned array also mentions the literal `effort: medium` in backticks, explaining why the array below pins that value; both are genuine, not drift.",
   },
@@ -5441,6 +5579,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     real: "packages/orchestrator-workflow/test/init.test.ts",
     start: 1793,
     end: 1826,
+    anchorKey: "d90f95bc",
     reason:
       "the immediately following assertion line in the same `it` block repeats the same idiom for a second `not.toContain(...)` check.",
   },
@@ -5450,6 +5589,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     real: "packages/orchestrator-workflow/src/doctor.ts",
     start: 113,
     end: 121,
+    anchorKey: "9ff75269",
     reason:
       "the identical field is declared twice by design, once on `TargetReport` and again a few lines later on its own JSON-contract mirror `TargetReportJson`; not a wrong-sibling.",
   },
@@ -5462,7 +5602,8 @@ function siblingGuardFindingMatchesAllowlist(
 ): boolean {
   if (entry.doc !== doc || entry.kind !== finding.kind) return false;
   if (entry.real !== finding.real) return false;
-  return entry.start === finding.start && entry.end === finding.end;
+  if (entry.start !== finding.start || entry.end !== finding.end) return false;
+  return entry.anchorKey === siblingGuardAnchorKey(finding);
 }
 
 describe("the citation-sibling-drift guard reports zero (unallowlisted) findings on the current bundle", () => {
@@ -5477,6 +5618,40 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
     for (const entry of SIBLING_GUARD_BUNDLE_ALLOWLIST) {
       expect(entry.reason.length, JSON.stringify(entry)).toBeGreaterThan(10);
     }
+  });
+
+  // Round 2 (F5): the range-only match above does not by itself prove an
+  // entry is still live -- a stale entry (its citation later re-pointed or
+  // deleted, or the source line it named edited away) would sit in the
+  // array forever, matching nothing, without ever failing a test. This
+  // collects every finding across the whole bundle once and asserts each
+  // allowlist entry matched at least one of them, so a dead exemption
+  // fails here instead of silently accreting.
+  it("every allowlist entry matched at least one finding on the current bundle (sanity: no dead exemption)", () => {
+    const allFindings: Array<{ doc: string; finding: SiblingGuardFinding }> =
+      [];
+    for (const doc of ANCHOR_OKF_DOCS) {
+      const docText = readRepoFile(
+        `packages/orchestrator-workflow/docs/okf/${doc}`,
+      );
+      for (const finding of findCitationSiblingDrift(
+        docText,
+        resolveRealPath,
+        readRepoFile,
+      )) {
+        allFindings.push({ doc, finding });
+      }
+    }
+    const unmatched = SIBLING_GUARD_BUNDLE_ALLOWLIST.filter(
+      (entry) =>
+        !allFindings.some(({ doc, finding }) =>
+          siblingGuardFindingMatchesAllowlist(doc, finding, entry),
+        ),
+    );
+    expect(
+      unmatched,
+      `dead allowlist entries (matched no finding on the current bundle): ${JSON.stringify(unmatched, null, 2)}`,
+    ).toEqual([]);
   });
 
   for (const doc of ANCHOR_OKF_DOCS) {
