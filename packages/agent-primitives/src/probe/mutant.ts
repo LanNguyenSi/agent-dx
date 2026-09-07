@@ -2294,15 +2294,24 @@ function enforceEnvelopeBudget(
 /** Matches exactly the wording `pushBudgetOverrunWarning` (here) and
  * `pushOverrunWarning` (`envelope.ts`) both produce, so either origin's
  * prior warning is recognised the same way: a `warnings` entry naming a
- * length this correction may since have made stale. Shared by
- * `pushBudgetOverrunWarning` (replace) and `reconcileBudgetOverrunWarning`
- * (detect, to decide whether a removal is even in play). */
-function isBudgetOverrunWarning(value: unknown): boolean {
+ * length this correction may since have made stale -- but ONLY a prior
+ * warning about THIS `maxChars`. A warning stating a length that failed
+ * to fit a DIFFERENT, harsher bound from a prior reduction pass (the
+ * very shape the README's "prior, harsher reduction pass" clause
+ * blesses) remains true regardless of what this call's own `maxChars`
+ * is, so it is deliberately left unmatched here: neither
+ * `pushBudgetOverrunWarning`'s replace filter nor
+ * `reconcileBudgetOverrunWarning`'s removal branch may touch it. Shared
+ * by `pushBudgetOverrunWarning` (replace) and
+ * `reconcileBudgetOverrunWarning` (detect, to decide whether a removal
+ * is even in play). */
+function isBudgetOverrunWarning(value: unknown, maxChars: number): boolean {
   return (
     typeof value === "string" &&
     /^envelope is \d+ characters; requested max-chars \d+ could not be met$/.test(
       value,
-    )
+    ) &&
+    value.endsWith(`requested max-chars ${String(maxChars)} could not be met`)
   );
 }
 
@@ -2331,12 +2340,17 @@ function pushBudgetOverrunWarning(
     ? (envelope.warnings as unknown[])
     : [];
   // `buildEnvelope`'s own reduction may already have appended this exact
-  // wording (the envelope did not fit `maxChars` even before this
-  // module's correction ran): replacing it here, rather than appending
-  // a second one, keeps the array carrying at most one "could not be
-  // met" warning, stating the true final length rather than the stale
-  // one measured before this correction's own shrinking.
-  const priorWarnings = baseWarnings.filter((w) => !isBudgetOverrunWarning(w));
+  // wording for THIS SAME `maxChars` (the envelope did not fit even
+  // before this module's correction ran): replacing it here, rather
+  // than appending a second one, keeps the array carrying at most one
+  // "could not be met" warning per bound, stating the true final length
+  // rather than the stale one measured before this correction's own
+  // shrinking. A warning about a DIFFERENT bound (a prior, harsher
+  // reduction pass) is left in place -- it remains true regardless of
+  // what this call's own `maxChars` is.
+  const priorWarnings = baseWarnings.filter(
+    (w) => !isBudgetOverrunWarning(w, maxChars),
+  );
   const wording = (n: number): string =>
     `envelope is ${String(n)} characters; requested max-chars ${String(maxChars)} could not be met`;
   const probe = wording(0);
@@ -2365,11 +2379,15 @@ function pushBudgetOverrunWarning(
  * shrink loop. `length > maxChars` still needs a warning naming the
  * true final length (`pushBudgetOverrunWarning` already replaces rather
  * than duplicates); `length <= maxChars` means the envelope is back in
- * bound, so a warning is no longer true and is dropped rather than left
- * stating a size the envelope no longer has. A `warnings` array that
- * never carried a "could not be met" entry, or a non-array `warnings`
- * (left untouched, same as `pushBudgetOverrunWarning`'s own guard),
- * costs nothing extra here. */
+ * bound, so a warning about THIS bound that is no longer true is
+ * dropped rather than left stating a size the envelope no longer has --
+ * a warning about a DIFFERENT, harsher bound from a prior reduction
+ * pass is left untouched either way, since it names a length that
+ * still failed to fit that other bound regardless of what this call's
+ * own `maxChars` is. A `warnings` array that never carried a "could not
+ * be met" entry for THIS bound, or a non-array `warnings` (left
+ * untouched, same as `pushBudgetOverrunWarning`'s own guard), costs
+ * nothing extra here. */
 function reconcileBudgetOverrunWarning(
   envelope: Record<string, unknown>,
   maxChars: number,
@@ -2381,8 +2399,10 @@ function reconcileBudgetOverrunWarning(
   }
   if (!Array.isArray(envelope.warnings)) return;
   const warnings = envelope.warnings as unknown[];
-  if (!warnings.some(isBudgetOverrunWarning)) return;
-  envelope.warnings = warnings.filter((w) => !isBudgetOverrunWarning(w));
+  if (!warnings.some((w) => isBudgetOverrunWarning(w, maxChars))) return;
+  envelope.warnings = warnings.filter(
+    (w) => !isBudgetOverrunWarning(w, maxChars),
+  );
 }
 
 /**
