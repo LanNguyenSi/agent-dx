@@ -4845,3 +4845,659 @@ describe("the reviewer checklist items mirrored in this table still carry their 
     expect(MIRRORED_CHECKLIST_PAIRS.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Citation-sibling-drift guard.
+//
+// A citation that resolves and anchors correctly by every check above can
+// still name the WRONG sibling among a run of near-identical citations --
+// three review findings shared one shape: the same `file:range#anchor`
+// cited twice in one paragraph while a genuinely different, equally-real
+// sibling range went uncited (a repeated-`it`-block citation collapsing
+// three sibling ranges onto one, twice; three per-harness bullet citations
+// doing the same), or a string anchor's own text also occurring, verbatim,
+// at another uncited line of the same target within a short window while
+// the paragraph cites a sibling range of that file (two logically distinct
+// assertions collapsing onto one shared range and anchor text). Neither
+// okf-kit's `citations-resolve` rule nor the local anchor guards above can
+// see this class: every individual citation involved passes "on the last
+// content line", "unique within its own range", and "<=3 file-wide"
+// unchanged, because the defect is a PAIRING problem across citations in
+// the same paragraph, not a property of any one citation read in
+// isolation.
+//
+// Two mechanical rules, applied per paragraph (a paragraph is a maximal run
+// of non-blank doc lines; a citation never spans a line break, so every
+// match is attributed to exactly one paragraph):
+//
+//   (a) duplicate-citation: the same resolved `file:range#anchor` (heading
+//       or string form) appears two or more times within one paragraph.
+//       This is the shape a paragraph takes when prose meant to walk on to
+//       the next sibling and instead re-typed the previous citation.
+//
+//   (b) wrong-sibling-anchor: a STRING anchor's own text also occurs,
+//       verbatim, on another line of the same target file, within
+//       SIBLING_GUARD_WINDOW lines of the citation's own range, that (i)
+//       lies outside the citation's own range AND (ii) is not itself
+//       covered by any other citation to that file already present in the
+//       same paragraph, while the paragraph cites at least one sibling
+//       range of that file. An "unclaimed" nearby occurrence like this is
+//       exactly what a wrong-sibling re-point leaves behind: the real,
+//       correct line for the reference the citation was meant to make
+//       sits right there, uncited, while the citation instead repeats (or
+//       sits right next to) a sibling's own range. Heading-form anchors
+//       are out of scope for this rule (no "occurs on a line" semantics
+//       for a section-level anchor); rule (a) still covers a
+//       heading-anchored duplicate.
+//
+// SIBLING_GUARD_WINDOW is 10, tuned against the current bundle (594
+// in-scope citations across the six checked docs): rule (b) reports 11 real
+// hits at this window, each read against its real target file and
+// allowlisted below with the specific reason found -- every one a
+// short/common token (a bare keyword, a mirrored field declared twice
+// across two interfaces, a comment restating a literal the code two lines
+// away already installs, a common test-assertion idiom repeated on an
+// adjacent line, a local variable name reused a few lines later in the
+// same function) recurring near a real, correct citation by coincidence,
+// not a hidden wrong-sibling bug. Rule (a) reports 7 real hits, unrelated
+// to the window: each is a paragraph that names one citation as its
+// opening topic sentence and repeats the identical citation as the closing
+// item of an enumerated sub-citation list a few lines later, a deliberate,
+// doc-wide convention in subagent-contracts-superset.md and
+// run-state-lifecycle-and-markers.md, not a collapsed sibling. Widening the
+// window catches more of the bundle's own recurring short tokens without
+// surfacing any further genuine drift (checked at 20/40/60/80), so 10 is
+// kept as the smallest window that still reproduces the S3 fixture shape
+// below without an unreviewable allowlist.
+function extractSiblingGuardCitations(
+  docText: string,
+  resolveRealPath: (citedPath: string) => string | undefined,
+): SiblingGuardCitation[] {
+  const lines = docText.split("\n");
+  const paragraphOfLine: number[] = [];
+  let paragraphId = 0;
+  let prevBlank = true;
+  for (const line of lines) {
+    const isBlank = line.trim() === "";
+    if (isBlank) {
+      paragraphOfLine.push(-1);
+      prevBlank = true;
+    } else {
+      if (prevBlank) paragraphId += 1;
+      paragraphOfLine.push(paragraphId);
+      prevBlank = false;
+    }
+  }
+  const citations: SiblingGuardCitation[] = [];
+  lines.forEach((line, idx) => {
+    const paragraph = paragraphOfLine[idx];
+    if (paragraph === -1) return;
+    for (const m of line.matchAll(ANCHOR_CITATION_RE)) {
+      const citedPath = m[1];
+      const real = resolveRealPath(citedPath);
+      if (!real) continue;
+      const start = Number(m[2]);
+      const end = m[3] ? Number(m[3]) : start;
+      const anchorRaw = m[4];
+      const isStringAnchor = !!anchorRaw && anchorRaw.startsWith('"');
+      citations.push({
+        citedPath,
+        real,
+        start,
+        end,
+        anchorRaw,
+        isStringAnchor,
+        anchorText: isStringAnchor ? anchorRaw!.slice(1, -1) : undefined,
+        line: idx + 1,
+        paragraphId: paragraph,
+      });
+    }
+  });
+  return citations;
+}
+
+interface SiblingGuardCitation {
+  citedPath: string;
+  real: string;
+  start: number;
+  end: number;
+  anchorRaw: string | undefined;
+  isStringAnchor: boolean;
+  anchorText: string | undefined;
+  line: number;
+  paragraphId: number;
+}
+
+interface DuplicateCitationFinding {
+  kind: "duplicate-citation";
+  paragraphId: number;
+  citedPath: string;
+  real: string;
+  start: number;
+  end: number;
+  anchorRaw: string | undefined;
+  count: number;
+}
+
+interface WrongSiblingAnchorFinding {
+  kind: "wrong-sibling-anchor";
+  paragraphId: number;
+  citedPath: string;
+  real: string;
+  start: number;
+  end: number;
+  anchorText: string;
+  unclaimedLines: number[];
+}
+
+type SiblingGuardFinding = DuplicateCitationFinding | WrongSiblingAnchorFinding;
+
+const SIBLING_GUARD_WINDOW = 10;
+
+function groupSiblingGuardCitationsByParagraph(
+  citations: SiblingGuardCitation[],
+): Map<number, SiblingGuardCitation[]> {
+  const byParagraph = new Map<number, SiblingGuardCitation[]>();
+  for (const c of citations) {
+    const list = byParagraph.get(c.paragraphId);
+    if (list) {
+      list.push(c);
+    } else {
+      byParagraph.set(c.paragraphId, [c]);
+    }
+  }
+  return byParagraph;
+}
+
+// Rule (a).
+function findDuplicateCitations(
+  citations: SiblingGuardCitation[],
+): DuplicateCitationFinding[] {
+  const findings: DuplicateCitationFinding[] = [];
+  for (const [paragraphId, list] of groupSiblingGuardCitationsByParagraph(
+    citations,
+  )) {
+    const groups = new Map<string, SiblingGuardCitation[]>();
+    for (const c of list) {
+      const key = `${c.real}:${c.start}-${c.end}#${c.anchorRaw ?? ""}`;
+      const group = groups.get(key);
+      if (group) {
+        group.push(c);
+      } else {
+        groups.set(key, [c]);
+      }
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const [first] = group;
+      findings.push({
+        kind: "duplicate-citation",
+        paragraphId,
+        citedPath: first.citedPath,
+        real: first.real,
+        start: first.start,
+        end: first.end,
+        anchorRaw: first.anchorRaw,
+        count: group.length,
+      });
+    }
+  }
+  return findings;
+}
+
+// Rule (b).
+function findWrongSiblingAnchors(
+  citations: SiblingGuardCitation[],
+  readTargetFile: (realPath: string) => string,
+  window: number,
+): WrongSiblingAnchorFinding[] {
+  const findings: WrongSiblingAnchorFinding[] = [];
+  const fileLinesCache = new Map<string, string[]>();
+  const fileLines = (real: string): string[] => {
+    let lines = fileLinesCache.get(real);
+    if (!lines) {
+      lines = readTargetFile(real).split("\n");
+      fileLinesCache.set(real, lines);
+    }
+    return lines;
+  };
+  for (const [paragraphId, list] of groupSiblingGuardCitationsByParagraph(
+    citations,
+  )) {
+    for (const c of list) {
+      if (!c.isStringAnchor || c.anchorText === undefined) continue;
+      const sameFile = list.filter((o) => o.real === c.real);
+      const hasSibling = sameFile.some(
+        (o) => o !== c && (o.start !== c.start || o.end !== c.end),
+      );
+      if (!hasSibling) continue;
+      const anchorText = c.anchorText;
+      const lines = fileLines(c.real);
+      const claimedRanges: Array<[number, number]> = sameFile.map((o) => [
+        o.start,
+        o.end,
+      ]);
+      const isClaimed = (ln: number): boolean =>
+        claimedRanges.some(([s, e]) => ln >= s && ln <= e);
+      const unclaimedLines: number[] = [];
+      const lo = Math.max(1, c.start - window);
+      const hi = Math.min(lines.length, c.end + window);
+      for (let ln = lo; ln <= hi; ln++) {
+        if (ln >= c.start && ln <= c.end) continue;
+        if (isClaimed(ln)) continue;
+        if ((lines[ln - 1] ?? "").includes(anchorText)) {
+          unclaimedLines.push(ln);
+        }
+      }
+      if (unclaimedLines.length > 0) {
+        findings.push({
+          kind: "wrong-sibling-anchor",
+          paragraphId,
+          citedPath: c.citedPath,
+          real: c.real,
+          start: c.start,
+          end: c.end,
+          anchorText,
+          unclaimedLines,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
+function findCitationSiblingDrift(
+  docText: string,
+  resolveRealPath: (citedPath: string) => string | undefined,
+  readTargetFile: (realPath: string) => string,
+  window: number = SIBLING_GUARD_WINDOW,
+): SiblingGuardFinding[] {
+  const citations = extractSiblingGuardCitations(docText, resolveRealPath);
+  return [
+    ...findDuplicateCitations(citations),
+    ...findWrongSiblingAnchors(citations, readTargetFile, window),
+  ];
+}
+
+function formatSiblingGuardFinding(f: SiblingGuardFinding): string {
+  if (f.kind === "duplicate-citation") {
+    return (
+      `duplicate-citation: \`${f.citedPath}:${f.start}-${f.end}#${f.anchorRaw ?? ""}\` ` +
+      `cited ${f.count} times in one paragraph`
+    );
+  }
+  return (
+    `wrong-sibling-anchor: \`${f.citedPath}:${f.start}-${f.end}#"${f.anchorText}"\` -- ` +
+    `anchor text also occurs, uncited, at line(s) ${f.unclaimedLines.join(", ")} of ${f.real}`
+  );
+}
+
+function formatSiblingGuardFindings(findings: SiblingGuardFinding[]): string {
+  return findings.map(formatSiblingGuardFinding).join("\n");
+}
+
+/**
+ * Builds an in-memory fixture "file" with 1-indexed lines: every line not
+ * explicitly given content gets an inert filler line, so a fixture only has
+ * to spell out the lines its own scenario actually cares about.
+ */
+function buildSiblingGuardFixtureFile(
+  totalLines: number,
+  contentByLine: Record<number, string>,
+): string {
+  const lines: string[] = [];
+  for (let ln = 1; ln <= totalLines; ln++) {
+    lines.push(contentByLine[ln] ?? `  // filler line ${ln}`);
+  }
+  return lines.join("\n");
+}
+
+describe("citation-sibling-drift guard: fixtures reproduce the three review-batch shapes", () => {
+  const identity = (citedPath: string): string => citedPath;
+
+  it("shape 1 (a run of near-identical sibling ranges collapsing onto one, twice, the third never cited): drifted form is flagged by the duplicate rule, corrected form is clean", () => {
+    const target = buildSiblingGuardFixtureFile(34, {
+      10: "    checkPointerFixture(section);",
+      20: "    checkPointerFixture(section);",
+      30: "    checkPointerFixture(section);",
+    });
+    const readTarget = (): string => target;
+
+    const drifted =
+      "the README and both write-surface listings mention the pointer via\n" +
+      "the helper, in both places\n" +
+      '(fixture-pointer.test.ts:8-10#"checkPointerFixture(section)";\n' +
+      'fixture-pointer.test.ts:8-10#"checkPointerFixture(section)").\n';
+    const driftedFindings = findCitationSiblingDrift(
+      drifted,
+      identity,
+      readTarget,
+    );
+    expect(
+      driftedFindings.some((f) => f.kind === "duplicate-citation"),
+      formatSiblingGuardFindings(driftedFindings),
+    ).toBe(true);
+
+    const corrected =
+      "the README and both write-surface listings mention the pointer via\n" +
+      "the helper, in all three places\n" +
+      '(fixture-pointer.test.ts:8-10#"checkPointerFixture(section)";\n' +
+      'fixture-pointer.test.ts:18-20#"checkPointerFixture(section)";\n' +
+      'fixture-pointer.test.ts:28-30#"checkPointerFixture(section)").\n';
+    const correctedFindings = findCitationSiblingDrift(
+      corrected,
+      identity,
+      readTarget,
+    );
+    expect(
+      correctedFindings,
+      formatSiblingGuardFindings(correctedFindings),
+    ).toEqual([]);
+  });
+
+  it("shape 2 (three per-harness bullets collapsing onto one cited line, the third never cited): drifted form is flagged by the duplicate rule, corrected form is clean", () => {
+    const target = buildSiblingGuardFixtureFile(24, {
+      9: "  pointer rule from Run state applies unchanged.",
+      14: "  pointer rule from Run state applies unchanged.",
+    });
+    const readTarget = (): string => target;
+
+    const drifted =
+      "every harness bullet says the pointer rule applies unchanged\n" +
+      '(fixture-harness.md:7-9#"pointer rule from Run state applies unchanged.";\n' +
+      'fixture-harness.md:7-9#"pointer rule from Run state applies unchanged.").\n';
+    const driftedFindings = findCitationSiblingDrift(
+      drifted,
+      identity,
+      readTarget,
+    );
+    expect(
+      driftedFindings.some((f) => f.kind === "duplicate-citation"),
+      formatSiblingGuardFindings(driftedFindings),
+    ).toBe(true);
+
+    const corrected =
+      "every harness bullet says the pointer rule applies unchanged\n" +
+      '(fixture-harness.md:7-9#"pointer rule from Run state applies unchanged.";\n' +
+      'fixture-harness.md:12-14#"pointer rule from Run state applies unchanged.").\n';
+    const correctedFindings = findCitationSiblingDrift(
+      corrected,
+      identity,
+      readTarget,
+    );
+    expect(
+      correctedFindings,
+      formatSiblingGuardFindings(correctedFindings),
+    ).toEqual([]);
+  });
+
+  it("shape 3 (two distinct assertions collapsing onto one shared range and anchor text, the second's own line never cited): drifted form is flagged only by the wrong-sibling rule (it is not a literal duplicate), corrected form re-points to a more specific anchor and is clean", () => {
+    const target = buildSiblingGuardFixtureFile(30, {
+      10: '      "...is a regression signal, reported as such (...) and resolved before the next reviewer spawn.",',
+      20: '      "...is a regression signal: report it as such (...) and resolve it before the next reviewer spawn.",',
+    });
+    const readTarget = (): string => target;
+
+    const drifted =
+      "the step 6 copy and the implementer-prompt copy both state the\n" +
+      "regression-signal consequence\n" +
+      '(fixture-contracts.test.ts:10#"is a regression signal",\n' +
+      'fixture-contracts.test.ts:8-10#"is a regression signal").\n';
+    const driftedFindings = findCitationSiblingDrift(
+      drifted,
+      identity,
+      readTarget,
+    );
+    expect(
+      driftedFindings.some((f) => f.kind === "duplicate-citation"),
+      "shape 3's drifted form must not be a literal duplicate (it exercises " +
+        "the wrong-sibling rule, not the duplicate rule): " +
+        formatSiblingGuardFindings(driftedFindings),
+    ).toBe(false);
+    expect(
+      driftedFindings.some((f) => f.kind === "wrong-sibling-anchor"),
+      formatSiblingGuardFindings(driftedFindings),
+    ).toBe(true);
+
+    const corrected =
+      "the step 6 copy and the implementer-prompt copy both state the\n" +
+      "regression-signal consequence\n" +
+      '(fixture-contracts.test.ts:10#"is a regression signal",\n' +
+      'fixture-contracts.test.ts:18-20#"signal: report it as such").\n';
+    const correctedFindings = findCitationSiblingDrift(
+      corrected,
+      identity,
+      readTarget,
+    );
+    expect(
+      correctedFindings,
+      formatSiblingGuardFindings(correctedFindings),
+    ).toEqual([]);
+  });
+});
+
+interface SiblingGuardAllowlistEntry {
+  doc: string;
+  kind: SiblingGuardFinding["kind"];
+  real: string;
+  start: number;
+  end: number;
+  reason: string;
+}
+
+// Read against the real target file and the citing paragraph for each hit
+// (see the doc comment above `SIBLING_GUARD_WINDOW`); every entry here is a
+// verified coincidental recurrence of a short/common token or a deliberate
+// doc-wide "topic sentence, then repeat as the closing list item"
+// convention, not a collapsed sibling. Matched by (doc, kind, real target,
+// range) only -- not by paragraph, not by the citation's own spelling of
+// the path, and deliberately not by the anchor's own literal text either:
+// four of these entries target this very file
+// (`test/docs-consistency.test.ts`), so quoting an anchor's exact text in
+// this array would itself add another occurrence of that text to the file
+// the "at most 3 times file-wide" check (above) counts against -- the
+// `reason` below paraphrases each one instead of quoting it verbatim. One
+// entry also covers the same real hit cited a second time elsewhere in the
+// same doc under a different path spelling.
+const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
+  {
+    doc: "operator-install-and-registry.md",
+    kind: "duplicate-citation",
+    real: "packages/orchestrator-workflow/src/cli.ts",
+    start: 1484,
+    end: 1495,
+    reason:
+      'the `adopt` section cites this write-call evidence twice in one paragraph: once for the "touching nothing in the repository" claim, again for the "bootstraps from recorded settings" claim.',
+  },
+  {
+    doc: "run-state-lifecycle-and-markers.md",
+    kind: "duplicate-citation",
+    real: "packages/orchestrator-workflow/assets/skill/SKILL.md",
+    start: 83,
+    end: 83,
+    reason:
+      'cited twice in one paragraph: once for "see the pointer section below", again for "must not be edited"; same evidence, two claims.',
+  },
+  {
+    doc: "run-state-lifecycle-and-markers.md",
+    kind: "duplicate-citation",
+    real: "packages/orchestrator-workflow/test/template-markers.test.ts",
+    start: 39,
+    end: 41,
+    reason:
+      "cited twice inside one long (22-line, blank-line-free) paragraph: once for the byte-exact claim, again for the literal-line/default claim.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "duplicate-citation",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 848,
+    end: 848,
+    reason:
+      "cited twice in one paragraph for two adjacent claims (original field order survives; the v1-contract/checklist claim); the doc-wide topic-sentence-then-closing-list-item convention (see the other subagent-contracts-superset.md entries below).",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "duplicate-citation",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 534,
+    end: 534,
+    reason:
+      "the paragraph's opening topic sentence names this citation, then repeats it verbatim as the closing item of its own enumerated sub-citation list a few lines later.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "duplicate-citation",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1055,
+    end: 1055,
+    reason:
+      "same topic-sentence/closing-list-item convention as the 534 entry above, four lines apart in its own paragraph.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "duplicate-citation",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1169,
+    end: 1169,
+    reason:
+      "same topic-sentence/closing-list-item convention as the 534 and 1055 entries above.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 776,
+    end: 776,
+    reason:
+      "line 776 is a comment restating the literal `.gitkeep` path that line 769 (a separate, correctly cited call) actually installs; both are genuine occurrences of the same literal, not a wrong-sibling.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 900,
+    end: 902,
+    reason:
+      "the same parameter name is passed a few lines earlier at the call this cited call's own argument was declared for; a normal local-variable reuse, not drift.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 190,
+    end: 201,
+    reason:
+      "the common `expect(after).toContain(...)` assertion idiom repeats on the very next line for a second, sibling assertion in the same `it` block.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 755,
+    end: 760,
+    reason:
+      "the identical assignment also appears a few lines above in the function's unconditional branch; both are real code for two different branches, not drift.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/src/uninstall.ts",
+    start: 138,
+    end: 147,
+    reason:
+      "`continue;` is a bare loop keyword reused at every early-exit branch of the same loop; not diagnostic of a wrong-sibling on its own.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 102,
+    end: 108,
+    reason:
+      "the same assertion idiom repeats on the very next line for a sibling `expect(slicer).toContain(...)` check in the same `it` block.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 869,
+    end: 869,
+    reason:
+      "cited twice in this doc (once spelled `src/init.ts`, once `init.ts`, both resolving here); the same variable name is also used a few lines earlier in the same function, a coincidental recurrence, not a wrong-sibling.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1497,
+    end: 1513,
+    reason:
+      "a comment a few lines above the cited pinned array also mentions the literal `effort: medium` in backticks, explaining why the array below pins that value; both are genuine, not drift.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1793,
+    end: 1826,
+    reason:
+      "the immediately following assertion line in the same `it` block repeats the same idiom for a second `not.toContain(...)` check.",
+  },
+  {
+    doc: "operator-install-and-registry.md",
+    kind: "wrong-sibling-anchor",
+    real: "packages/orchestrator-workflow/src/doctor.ts",
+    start: 113,
+    end: 121,
+    reason:
+      "the identical field is declared twice by design, once on `TargetReport` and again a few lines later on its own JSON-contract mirror `TargetReportJson`; not a wrong-sibling.",
+  },
+];
+
+function siblingGuardFindingMatchesAllowlist(
+  doc: string,
+  finding: SiblingGuardFinding,
+  entry: SiblingGuardAllowlistEntry,
+): boolean {
+  if (entry.doc !== doc || entry.kind !== finding.kind) return false;
+  if (entry.real !== finding.real) return false;
+  return entry.start === finding.start && entry.end === finding.end;
+}
+
+describe("the citation-sibling-drift guard reports zero (unallowlisted) findings on the current bundle", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+  const RESOLVE = anchorScopeResolve();
+  const resolveRealPath = (citedPath: string): string | undefined =>
+    RESOLVE[citedPath];
+
+  it("every allowlist entry names a reason (sanity: no bare exemption)", () => {
+    for (const entry of SIBLING_GUARD_BUNDLE_ALLOWLIST) {
+      expect(entry.reason.length, JSON.stringify(entry)).toBeGreaterThan(10);
+    }
+  });
+
+  for (const doc of ANCHOR_OKF_DOCS) {
+    it(`${doc}: zero unallowlisted citation-sibling-drift findings`, () => {
+      const docText = readRepoFile(
+        `packages/orchestrator-workflow/docs/okf/${doc}`,
+      );
+      const findings = findCitationSiblingDrift(
+        docText,
+        resolveRealPath,
+        readRepoFile,
+      );
+      const unallowlisted = findings.filter(
+        (f) =>
+          !SIBLING_GUARD_BUNDLE_ALLOWLIST.some((entry) =>
+            siblingGuardFindingMatchesAllowlist(doc, f, entry),
+          ),
+      );
+      expect(unallowlisted, formatSiblingGuardFindings(unallowlisted)).toEqual(
+        [],
+      );
+    });
+  }
+});

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A citation-sibling-drift guard (`test/docs-consistency.test.ts`, next to
+  the existing anchor-load-bearing checks) catches a citation that resolves
+  and anchors correctly on its own but names the wrong sibling among a run
+  of near-identical citations, a class neither okf-kit's `citations-resolve`
+  rule nor the local anchor guards can see, because both check an anchor
+  only inside its own cited range. Two rules, applied per paragraph: (a) the
+  same `file:range#anchor` cited twice in one paragraph, unless allowlisted
+  with a reason; (b) a string anchor's text also occurring, uncited, at
+  another line of the same target within a 10-line window while the
+  paragraph cites a sibling range of that file, unless allowlisted. Fixtures
+  reproduce three review findings that shared this shape and were the
+  motivation for the guard: three sibling `it`-block citations collapsing
+  onto one range twice, the third never cited; three per-harness bullet
+  citations doing the same; two logically distinct assertions collapsing
+  onto one shared range and anchor text, the second's own line never cited.
+  Run over the current bundle, the guard's rule (a) reports 7 real hits and
+  rule (b) reports 11, every one read against its target and allowlisted
+  with the specific reason found (a doc-wide "topic sentence, then repeat
+  as the closing list item" convention for rule (a); a short/common token
+  -- a keyword, a mirrored field on twin interfaces, a comment restating a
+  literal, a test-assertion idiom on an adjacent line, a reused local
+  variable name -- recurring near a real citation by coincidence, for rule
+  (b)). Lives in this file rather than as an okf-kit rule because this
+  suite already runs on every PR while an okf-kit rule needs a release and
+  a fleet pin bump first; an opt-in okf-kit rule for the same class is a
+  named follow-up candidate once this guard has proven itself.
+
 ## [0.31.0] - 2026-09-07
 
 ### Changed
