@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-09-07T11:49:38Z (citation-sibling-drift guard, review round 2, task
+- 2026-09-07T11:57:20Z (citation-sibling-drift guard, review round 2, task
   agent-dx 9f72ae6d): round 1's own review classified all 18 raw hits by
   range and stated reason without re-deriving each cited claim's real
   evidence line by line; 7 of them were real mis-pointed citations
@@ -37,10 +37,11 @@
   the two fixed above were genuine drift, not this doc-wide "topic
   sentence, then repeat as the closing list item" convention); rule (b)
   reports 12 real hits at window 20 (three carried over from window 10 at
-  their original ranges: `install-fence-mechanics.md`'s `init.test.ts:190-
-  201` and `uninstall.ts:138-147`, `model-preselection.md`'s `init.test.ts
-  :1497-1513` and `:1793-1826`, `operator-install-and-registry.md`'s
-  `doctor.ts:113-121`; five newly visible at window 20, each read and
+  their original ranges: `install-fence-mechanics.md`'s
+  `test/init.test.ts:190-201` and `src/uninstall.ts:138-147`,
+  `model-preselection.md`'s `test/init.test.ts:1497-1513` and
+  `test/init.test.ts:1793-1826`, `operator-install-and-registry.md`'s
+  `src/doctor.ts:113-121`; five newly visible at window 20, each read and
   allowlisted with the reason found: `install-fence-mechanics.md`'s
   `init.ts:766-766` (`readAsset(join(` prefix also reaches an unrelated
   SKILL.md asset read 20 lines below), `init.ts:606-617` and
@@ -3121,9 +3122,11 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:289#"the keyed placeholder line's exact text,"`,
-re-pointed by 82 lines since this account was first written (+29 more,
-from this round's own citation-sibling-drift-guard `[Unreleased]` bullet
+(`CHANGELOG.md:335#"the keyed placeholder line's exact text,"`,
+re-pointed by 128 lines since this account was first written (+46 more,
+from task agent-dx 9f72ae6d's own review-round-2 `[Unreleased]` bullet
+added above it, sibling-drift-guard task; +29 before that, from this
+same task's round-1 `[Unreleased]` bullet
 added above `[0.31.0]`; +15 before that, from the batch-38 `[Unreleased]`
 bullet added above `[0.30.0]` by the
 reviewer-checklist mirrored-pairs task), by T-002's own
