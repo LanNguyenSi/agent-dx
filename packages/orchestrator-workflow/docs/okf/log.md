@@ -46,7 +46,11 @@
   Strengthened to also require the claim to include at least one of
   `start`/`end`/`paragraphLine`/`secondCitationLine`/`uncitedLines`; the
   three claims were edited to name their own recorded lines (534/341,
-  1055/425, 1169/555) without changing what they assert.
+  1055/425, 1169/555) without changing what they assert. Extracted to a
+  named `siblingGuardClaimIsFalsifiable` function and given its own
+  bundle-independent fixture (a 41-character claim naming none of its
+  own entry's recorded lines), since the real array never contains a bad
+  entry for a weakened-back-to-length-only mutant to fail against.
   (L3) is the geometry-check half of M1 above, not a separate change.
   (M2) The `model-preselection.md` entry for
   `packages/orchestrator-workflow/test/init.test.ts:1793-1826` claimed the

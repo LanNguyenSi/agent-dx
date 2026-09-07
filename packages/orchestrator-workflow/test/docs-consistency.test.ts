@@ -5943,6 +5943,37 @@ function siblingGuardEntryGeometryViolation(
   return undefined;
 }
 
+// Round 4 (L1): every doc line number an entry itself records, across both
+// kinds -- `start`/`end` (both kinds), `paragraphLine` (both kinds),
+// `secondCitationLine` (duplicate-citation only), `uncitedLines`
+// (wrong-sibling-anchor only, zero or more). A `claim` is falsifiable only
+// if it names at least one of these; extracted to its own function so a
+// dedicated, bundle-independent fixture can probe it directly rather than
+// only through the real array (which never contains a bad entry to catch
+// a weakened check with).
+function siblingGuardEntryOwnLines(
+  entry: SiblingGuardAllowlistEntry,
+): number[] {
+  return [
+    entry.start,
+    entry.end,
+    entry.paragraphLine,
+    ...(entry.secondCitationLine !== undefined
+      ? [entry.secondCitationLine]
+      : []),
+    ...(entry.uncitedLines ?? []),
+  ];
+}
+
+function siblingGuardClaimIsFalsifiable(
+  entry: SiblingGuardAllowlistEntry,
+): boolean {
+  if (entry.claim.length <= 40) return false;
+  return siblingGuardEntryOwnLines(entry).some((n) =>
+    entry.claim.includes(String(n)),
+  );
+}
+
 describe("the citation-sibling-drift guard reports zero (unallowlisted) findings on the current bundle", () => {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const readRepoFile = (relPath: string): string =>
@@ -5963,24 +5994,51 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
   it("every allowlist entry's claim is long enough AND names one of its own recorded lines (sanity: a falsifiable claim, not just a long string)", () => {
     for (const entry of SIBLING_GUARD_BUNDLE_ALLOWLIST) {
       expect(entry.claim.length, JSON.stringify(entry)).toBeGreaterThan(40);
-      const ownLines = [
-        entry.start,
-        entry.end,
-        entry.paragraphLine,
-        ...(entry.secondCitationLine !== undefined
-          ? [entry.secondCitationLine]
-          : []),
-        ...(entry.uncitedLines ?? []),
-      ];
-      const mentionsOwnLine = ownLines.some((n) =>
-        entry.claim.includes(String(n)),
-      );
       expect(
-        mentionsOwnLine,
+        siblingGuardClaimIsFalsifiable(entry),
         `${entry.doc} (${entry.real}:${entry.start}-${entry.end}) claim names ` +
-          `none of its own recorded lines (${ownLines.join(", ")}): ${entry.claim}`,
+          `none of its own recorded lines (${siblingGuardEntryOwnLines(entry).join(", ")}): ${entry.claim}`,
       ).toBe(true);
     }
+  });
+
+  // Round 4 (L1), bundle-independent: a dedicated fixture for
+  // `siblingGuardClaimIsFalsifiable`, since the real array above never
+  // contains a bad entry -- a mutant that weakens the check back to
+  // length-only would survive the "every allowlist entry" test forever,
+  // because no CURRENT entry exercises the rejection path. This
+  // constructs a 41-character stub claim (long enough to pass the old
+  // check) that names none of its own recorded lines, and asserts the
+  // helper still rejects it.
+  it("a 41-character claim that names none of its own entry's recorded lines is not falsifiable (the length check alone is not enough)", () => {
+    const longEnoughButUnrelated: SiblingGuardAllowlistEntry = {
+      doc: "fixture-doc.md",
+      kind: "wrong-sibling-anchor",
+      real: "fixture-target.ts",
+      start: 10,
+      end: 12,
+      anchorKey: "deadbeef",
+      paragraphLine: 5,
+      uncitedLines: [20],
+      claim: "a common idiom explains this coincidence.", // 41 chars, no digits
+    };
+    expect(longEnoughButUnrelated.claim.length).toBeGreaterThan(40);
+    expect(
+      siblingGuardClaimIsFalsifiable(longEnoughButUnrelated),
+      "a claim long enough to pass the old length-only check, but naming " +
+        "none of the entry's own recorded lines (5, 10, 12, 20), must " +
+        "still be rejected as unfalsifiable",
+    ).toBe(false);
+
+    const namesItsOwnLine: SiblingGuardAllowlistEntry = {
+      ...longEnoughButUnrelated,
+      claim: "line 20 is a different, unrelated coincidence entirely.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(namesItsOwnLine),
+      "the same length, now naming one of its own recorded lines (20), " +
+        "must pass",
+    ).toBe(true);
   });
 
   // Round 3 (R1): the entries' recorded geometry is re-derived from the
