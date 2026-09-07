@@ -110,7 +110,7 @@ tier's `<role>-<tier>.md` path that is actually present in
 `previous.files`, naming it and how to remove it. The profile-downgrade
 note loop itself also gained a fix-round-1 extension (review finding M3): a
 dropped role's variant files get notes too, not just its base file
-(`init.ts:606-617#"now untracked after the full -> ${profile} profile downgrade; run"`, the sub-loop inside the existing per-dropped-role
+(`init.ts:626-635#"variantPath}: now untracked after the full"`, the sub-loop inside the existing per-dropped-role
 loop); before the fix, dropping a role while tiers were on silently
 orphaned that role's variant files with no note at all, since the original
 downgrade-note loop only knew about `<role>.md`.
@@ -288,7 +288,7 @@ Markers: `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:en
 - No `AGENTS.md`: created as `# Agent instructions` plus the section (writers.ts:58#"export const AGENTS_MD_HEADING =", 72-76).
 - File exists, no markers found: the section is appended after existing content, trimmed (writers.ts:85-87#"${base}\n\n${block}\n").
 - Exactly one well-ordered begin/end pair: everything between the markers is replaced with the current shipped content; everything before `begin` and after `end` is untouched (writers.ts:100-109#"write(path, replaced);"). This is a full replace, not a merge: init.test.ts:160-174#"restored).not.toContain(" shows a user-mangled heading inside the fence is silently restored on the next `init` run, while content outside the fence survives. Since 0.21.0 the shipped fenced content itself carries the advisor escalation paragraph in Scaling delegation (see [subagent-contracts-superset.md](subagent-contracts-superset.md)); the merge mechanics this section documents are unaffected, since the fence is still replaced as one opaque block regardless of what changed inside it.
-- Zero-or-more-than-one pair, or an end before its begin: reported as `conflicted`, file left alone (writers.ts:91-97#"report.conflicted.push(path);"). A marker only counts when it is the entire trimmed line (writers.ts:81-83#"if (line.trim() === SECTION_END) endLines.push(index);"), so prose merely mentioning the marker string inline never shifts or breaks the fence (init.test.ts:190-201#"after).toContain(").
+- Zero-or-more-than-one pair, or an end before its begin: reported as `conflicted`, file left alone (writers.ts:91-97#"report.conflicted.push(path);"). A marker only counts when it is the entire trimmed line (writers.ts:81-83#"if (line.trim() === SECTION_END) endLines.push(index);"), so prose merely mentioning the marker string inline never shifts or breaks the fence (init.test.ts:197-204#"The fence starts at <!-- orchestrator-workflow:begin --> below.").
 
 Net contract: content between the markers is kit-owned and overwritten on every install/upgrade; content outside is user-owned and touched only by one whole-line append when the fence doesn't exist yet.
 

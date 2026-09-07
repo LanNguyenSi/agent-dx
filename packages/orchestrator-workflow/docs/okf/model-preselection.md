@@ -488,7 +488,7 @@ M2; before the fix this transition was silent, see
 [install-fence-mechanics.md](install-fence-mechanics.md)), and a
 `full -> minimal` downgrade that also had `tiers: true` now notes the
 dropped roles' tier-variant files too, not just their base files
-(`init.ts:606-617#"now untracked after the full -> ${profile} profile downgrade; run"`, review finding M3;
+(`init.ts:626-635#"variantPath}: now untracked after the full"`, review finding M3;
 `test/init.test.ts:894-931#"The variant files themselves are untouched, only untracked, same as"` pins the note count, since 0.21.0 asserting 8
 notes rather than 6 for the base-plus-tiers case — advisor became a third
 dropped role, contributing 1 base-file note plus 1 non-default-tier note of

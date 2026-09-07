@@ -24,7 +24,7 @@ sources:
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:76#"  05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(SKILL.md:81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:160#"one directory per unit of work, newest = active";
+(SKILL.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:160#"one directory per unit of work, newest = active";
 packages/orchestrator-workflow/INSTALL-AGENT.md:64-65#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:173-178#"instead: it sources its defaults from the operator"). The newest run
 directory is the active one unless a `.ai/run` pointer names one
 (SKILL.md:81-82#"pointer names one (see below);", see the pointer section below); older
