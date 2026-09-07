@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-07T12:57:17Z
+timestamp: 2026-09-07T13:36:36Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -420,7 +420,9 @@ role's own intended weight). 0.22.0 closes that gap by having
 `` `effort: ${TIER_DEFS[DEFAULT_TIER[role]].effort}` `` (Claude Code,
 `init.ts:329-332#"selection?.effort ?? TIER_DEFS[DEFAULT_TIER[role]].effort"`) or the equivalent opencode effort line (via
 `opencodeEffortLine(DEFAULT_TIER[role], modelValue)`, computed once per role
-at the call site, `init.ts:862-866#"modelValue,"`, and passed in as a parameter the same
+at the call site described above under "Per-harness frontmatter behavior",
+and passed in as a parameter at the call right after,
+`init.ts:867-869#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`, the same
 way `composeOpencodeAgentVariant` already took its own effort line since
 fix-round-2) unconditionally, for every install regardless of `--tiers`.
 Since `TIER_DEFS[DEFAULT_TIER[role]].effort` is `"medium"` for

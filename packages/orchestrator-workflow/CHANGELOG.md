@@ -122,6 +122,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inside an unclosed fence now failing loudly instead of silently dropping
   every citation after the stray delimiter, paired with an assertion that
   every bundle doc yields at least one citation.
+- Review round 4 of the citation-sibling-drift guard above (task agent-dx
+  9f72ae6d): a third consecutive review classified every allowlist entry
+  by re-reading the two lines each `claim` names, rather than trusting the
+  prior round's verdicts; none certified real drift, but two claims were
+  inaccurate and one more citation was mis-paired in a shape the guard
+  itself cannot see. Rule (a)'s match compared only the finding's second
+  citation line, which a `return true;` mutant of that comparison
+  survives, and which also could not tell a two-citation entry's cleared
+  repeat from a THIRD, unreviewed repeat sharing the same second line;
+  fixed with a dedicated fixture and a repeat-count check. The allowlist
+  entry's match and its independent geometry re-check both gained
+  `paragraphLine`, the doc line of the finding's own first citation: an
+  entry was previously keyed by (doc, kind, real target, range, anchorKey,
+  recorded geometry) alone, so the same coincidence recurring in a SECOND,
+  unreviewed paragraph of a doc would silently inherit the first
+  paragraph's verdict -- exactly the shape one entry was carrying (the
+  same `init.ts` range cited, and separately drifting, from two paragraphs
+  of `model-preselection.md`); the second paragraph's citation is now
+  re-pointed to its own, different evidence instead, so the entry covers
+  one paragraph only. The geometry re-check's duplicate-citation branch
+  dropped a near-tautological "some citation exists at the recorded line"
+  check (true of any citation the extractor produces, by construction) for
+  one that reads the group's own citations, sorts them into document
+  order, and checks the recorded lines by POSITION -- closing a mutant
+  (`if (false)` on the old guard) no existing fixture caught. The bare
+  `claim.length > 40` sanity check now also rejects a claim that never
+  names one of its own entry's recorded lines, closing the gap that let
+  three `subagent-contracts-superset.md` entries carry a long claim that
+  never actually pointed at its own geometry. One inaccurate claim
+  (`model-preselection.md`) said an uncited line named a "codex-only
+  effort field"; it is opencode's own field for a non-Claude-family,
+  non-Ollama provider, not a codex field at all, and no anchor exists that
+  can widen the citation to cover it under this file's own occurrence-cap
+  rule, so the claim was corrected instead. One real mis-pairing:
+  `install-fence-mechanics.md` cited the OUTER per-dropped-role loop's
+  gate/note for a sentence about the tier-variant SUB-loop, and the
+  sub-loop's own gate/note for a sentence about the base-file note --
+  swapped, citation-only, no content change. Known limit, unclosed this
+  round: neither rule catches a citation that resolves and anchors cleanly
+  but simply names the WRONG target -- no duplication, no anchor text
+  recurring nearby -- which is exactly the shape this round's real
+  mis-pairing was; both citations passed every existing check (including
+  this guard) because nothing about either one, read alone or against its
+  paragraph's siblings, looks wrong.
 
 ## [0.31.0] - 2026-09-07
 

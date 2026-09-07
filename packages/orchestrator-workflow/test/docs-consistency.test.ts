@@ -5028,6 +5028,13 @@ interface WrongSiblingAnchorFinding {
   end: number;
   anchorText: string;
   unclaimedLines: number[];
+  // Round 4 (L2): the DOC line the citation itself sits on (as opposed to
+  // `start`/`end`, the cited RANGE in the target file). A wrong-sibling-
+  // anchor finding is built from exactly one citation, so this is just
+  // that citation's own `line`; carried onto the finding so the allowlist
+  // match can pin an entry to the paragraph it was actually reviewed in
+  // (see `SiblingGuardAllowlistEntry.paragraphLine`).
+  citationLine: number;
 }
 
 type SiblingGuardFinding = DuplicateCitationFinding | WrongSiblingAnchorFinding;
@@ -5140,6 +5147,7 @@ function findWrongSiblingAnchors(
           end: c.end,
           anchorText,
           unclaimedLines,
+          citationLine: c.line,
         });
       }
     }
@@ -5530,6 +5538,17 @@ interface SiblingGuardAllowlistEntry {
   // entry is re-reviewed. Never the literal anchor text itself -- see the
   // note below on why this array must not quote one.
   anchorKey: string;
+  // Round 4 (L2): the doc line of the finding's first citation in its
+  // group -- the citing line itself for a wrong-sibling-anchor entry (each
+  // wrong-sibling-anchor finding is built from exactly one citation), the
+  // EARLIEST of the repeated citations' lines for a duplicate-citation
+  // entry. Before this field, the match keyed on (doc, kind, real, range,
+  // anchorKey, geometry) alone, so one entry could clear the same
+  // coincidence in every paragraph of a doc that happened to reproduce it,
+  // never reviewed per paragraph. A doc that makes the same citing mistake
+  // in two different paragraphs now needs two entries and two claims, not
+  // one covering both silently.
+  paragraphLine: number;
   // Round 3 (R1), wrong-sibling-anchor entries only: the target-file
   // line(s) carrying the uncited, identical anchor text this entry was
   // actually cleared against, in the order the rule reports them. Both
@@ -5586,23 +5605,27 @@ function siblingGuardCitationAnchorKey(
 // consecutive review rounds found entries here that certified real
 // wrong-sibling drift, and both got in the same way -- the implementer
 // classified its own guard's hits and wrote a free-prose reason no test
-// could check. The classification is recorded in docs/okf/log.md; the two
-// machine-checked halves are `uncitedLines`/`secondCitationLine` (the
-// geometry the verdict was reached against, re-checked below) and
-// `claim` (a falsifiable one-sentence statement a reviewer can check by
-// reading exactly two lines).
+// could check. The classification is recorded in docs/okf/log.md; the
+// three machine-checked halves are `uncitedLines`/`secondCitationLine` and
+// `paragraphLine` (the geometry the verdict was reached against, re-checked
+// below) and `claim` (a falsifiable one-sentence statement a reviewer can
+// check by reading exactly two lines).
 //
 // Matched by (doc, kind, real target, range, anchorKey, recorded
-// geometry) -- not by paragraph, not by the citation's own spelling of
-// the path, and deliberately not by the anchor's own literal text either:
-// four of these entries target this very file
-// (`test/docs-consistency.test.ts`), so quoting an anchor's exact text in
-// this array would itself add another occurrence of that text to the file
-// the "at most 3 times file-wide" check (above) counts against -- the
-// `claim` below paraphrases each one instead of quoting it verbatim, and
-// `anchorKey` carries a hash instead of the text for the same reason. One
-// entry also covers the same real hit cited a second time elsewhere in
-// the same doc under a different path spelling.
+// geometry, `paragraphLine`) -- not by the citation's own spelling of the
+// path, and deliberately not by the anchor's own literal text either: four
+// of these entries target this very file (`test/docs-consistency.test.ts`),
+// so quoting an anchor's exact text in this array would itself add another
+// occurrence of that text to the file the "at most 3 times file-wide"
+// check (above) counts against -- the `claim` below paraphrases each one
+// instead of quoting it verbatim, and `anchorKey` carries a hash instead of
+// the text for the same reason. Round 4 (L2): `paragraphLine` pins an
+// entry to the one citation (or repeat-group) it was actually reviewed
+// against, so a doc that repeats the same coincidence in two different
+// paragraphs needs two entries -- this closed a real case (round 4's M3
+// finding): one entry silently cleared the identical range cited from two
+// separate paragraphs of `model-preselection.md`, until the second
+// paragraph's citation was re-pointed to its own, different evidence.
 const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
   {
     doc: "operator-install-and-registry.md",
@@ -5611,6 +5634,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1484,
     end: 1495,
     anchorKey: "3378a4b9",
+    paragraphLine: 326,
     secondCitationLine: 334,
     claim:
       "the `adopt` paragraph makes two different claims about the same single write call -- first that the action writes nothing but the operator manifest, then at line 334 that the same call bootstraps a missing operator manifest from the target's own recorded settings; `adopt` has no second write call the repeat could have walked on to.",
@@ -5622,6 +5646,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 39,
     end: 41,
     anchorKey: "f3227b28",
+    paragraphLine: 67,
     secondCitationLine: 89,
     claim:
       "the first citation attaches the byte-exact pin to the shipped marker literal; line 89 repeats it as the last item of the paragraph's closing enumeration of all three run-base pins in that file (:19, :33, :39-41), which leaves no fourth sibling test for the repeat to have named.",
@@ -5633,9 +5658,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 534,
     end: 534,
     anchorKey: "47aedb12",
+    paragraphLine: 336,
     secondCitationLine: 341,
     claim:
-      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes with an enumeration of that same test's clause-level pins (:504, :511, :517, :524, :529) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the repeat is the doc's closing-list convention, not a skipped sibling.",
+      "the paragraph opens at :534 by naming the test that pins the 0.11.0 misfire rule, then closes at line 341 with an enumeration of that same test's clause-level pins (:504, :511, :517, :524, :529) whose last item is the review-gate consequence clause the :534 opening citation already named; the enumeration is complete, so the line-341 repeat is the doc's closing-list convention, not a skipped sibling.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -5644,9 +5670,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1055,
     end: 1055,
     anchorKey: "03317257",
+    paragraphLine: 421,
     secondCitationLine: 425,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the 534 entry: the closing list walks :1030, :1038, :1043 and ends on the cross-copy equality check the opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the 534 entry, here at :1055/line 425: the closing list walks :1030, :1038, :1043 and ends on the cross-copy equality check the :1055 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -5655,9 +5682,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1169,
     end: 1169,
     anchorKey: "b19680bb",
+    paragraphLine: 549,
     secondCitationLine: 555,
     claim:
-      "same convention again: the closing list walks :1135, :1141, :1148, :1163 and ends on the not-applicable-clause pin the opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1169/line 555: the closing list walks :1135, :1141, :1148, :1163 and ends on the not-applicable-clause pin the :1169 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -5666,6 +5694,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 766,
     end: 766,
     anchorKey: "3a4a026f",
+    paragraphLine: 37,
     uncitedLines: [786],
     claim:
       "the sentence describes the per-template asset read driven by `listTemplateNames()`; line 766 is the read of a templates-directory asset, while uncited 786 reads the skill asset for a different install step the sentence never mentions.",
@@ -5677,6 +5706,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 197,
     end: 204,
     anchorKey: "67834189",
+    paragraphLine: 291,
     uncitedLines: [195],
     claim:
       "the sentence claims an inline marker mention survives a re-run; line 203 is the assertion that it did survive, while uncited 195 is the test's own input string, which writes the mention before the run and asserts nothing.",
@@ -5688,6 +5718,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 747,
     end: 752,
     anchorKey: "33e8e25a",
+    paragraphLine: 334,
     uncitedLines: [760],
     claim:
       "the sentence is explicitly about the path-exists-and-unedited branch; line 752 records the hash inside that branch's own `if`, while uncited 760 is the path-does-not-exist branch's record, which the sentence's own wording excludes.",
@@ -5699,6 +5730,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 129,
     end: 142,
     anchorKey: "6b912d8f",
+    paragraphLine: 336,
     uncitedLines: [118],
     claim:
       "the sentence claims a plain SECOND run is a byte-for-byte no-op; line 142 is the idempotence block's second-run assertion, while uncited 118 is the same assertion inside an earlier first-install test, which says nothing about a second run.",
@@ -5710,6 +5742,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 138,
     end: 147,
     anchorKey: "0bf37874",
+    paragraphLine: 343,
     uncitedLines: [152, 157],
     claim:
       "the sentence names the containment re-check made before the unlink; line 147 is that guard's own loop exit, while uncited 152 and 157 exit the same loop for a missing file and a non-regular file, two guards this sentence does not describe (the anchor is a bare loop keyword, so it is the cited RANGE, not the anchor, that identifies the branch here).",
@@ -5721,9 +5754,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 862,
     end: 866,
     anchorKey: "8cd81eb8",
+    paragraphLine: 156,
     uncitedLines: [869],
     claim:
-      "both citing sentences (this doc cites the range twice, under two path spellings) name the effort-line call and the model argument it is computed from; line 865 is that argument, while uncited 869 passes the same local into the agent-composition call the sentences mention only as the consumer of this call's result.",
+      "the :156 sentence names the effort-line computation call and the model argument it is computed from; line 865 is that argument, while uncited 869 passes the computed local into the agent-composition call that only the (now separately cited, at init.ts:867-869) :423 sentence describes.",
   },
   {
     doc: "model-preselection.md",
@@ -5732,6 +5766,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1497,
     end: 1513,
     anchorKey: "5ea9652d",
+    paragraphLine: 376,
     uncitedLines: [1493],
     claim:
       "the sentence names the content assertion pinning the five-line default frontmatter; line 1513 is the asserted array element, while uncited 1493 is a comment above the test restating the same literal in prose.",
@@ -5743,9 +5778,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1793,
     end: 1826,
     anchorKey: "d90f95bc",
+    paragraphLine: 392,
     uncitedLines: [1827],
     claim:
-      "the sentence names the Claude-family variant-suffix outcomes; line 1826 asserts the low tier gets no variant line, while uncited 1827 asserts the absence of the codex-only effort field, which this sentence does not name (the Ollama-side outcome it does name is cited separately, at a different range).",
+      "the sentence names only the Claude-family variant-suffix outcomes; line 1826 asserts the low tier gets no `variant:` line, which is what the sentence needs, while uncited 1827 asserts the absence of `reasoningEffort`, opencode's own field for a non-Claude-family, non-Ollama provider (`src/init.ts:461`), not a codex field (codex's own equivalent is `model_reasoning_effort`, `src/codex.ts:50`) -- not part of what this sentence claims (the Ollama-side outcome it does name is cited separately, at a different range).",
   },
   {
     doc: "operator-install-and-registry.md",
@@ -5754,6 +5790,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 113,
     end: 121,
     anchorKey: "9ff75269",
+    paragraphLine: 276,
     uncitedLines: [107],
     claim:
       "the sentence names the `--json` subset interface by name; line 121 is that interface's own field declaration, while uncited 107 is the identical field on the superset interface the very same sentence contrasts it against.",
@@ -5769,6 +5806,18 @@ function siblingGuardFindingMatchesAllowlist(
   if (entry.real !== finding.real) return false;
   if (entry.start !== finding.start || entry.end !== finding.end) return false;
   if (entry.anchorKey !== siblingGuardAnchorKey(finding)) return false;
+  // Round 4 (L2): pins an entry to the ONE paragraph it was reviewed
+  // against -- the citing line itself for a wrong-sibling-anchor finding
+  // (built from exactly one citation), the earliest of the repeated
+  // citations' lines for a duplicate-citation finding. Without this, a
+  // same (doc, kind, real, range, anchorKey, geometry) finding recurring
+  // in a SECOND paragraph -- an unreviewed, independent coincidence --
+  // would silently inherit the first paragraph's verdict.
+  const findingParagraphLine =
+    finding.kind === "duplicate-citation"
+      ? finding.citationLines[0]
+      : finding.citationLine;
+  if (entry.paragraphLine !== findingParagraphLine) return false;
   // Round 3 (R1): the recorded geometry is part of the key, so an entry
   // exempts only the hit it was actually cleared against. A hit that grew
   // a new uncited occurrence, or a repeat that moved to another doc line,
@@ -5781,7 +5830,16 @@ function siblingGuardFindingMatchesAllowlist(
       recorded.every((line, idx) => line === finding.unclaimedLines[idx])
     );
   }
-  return entry.secondCitationLine === finding.citationLines[1];
+  // Round 4 (M1): also require the repeat COUNT to match. The pre-round-4
+  // match compared only `citationLines[1]`, so a finding with a THIRD
+  // repeat (`citationLines.length` 3, e.g. [a, b, c]) would still match an
+  // entry cleared for a two-citation group whenever its second element
+  // happened to equal the recorded line -- silently exempting the third,
+  // unreviewed occurrence on the back of a verdict reached for only two.
+  return (
+    finding.citationLines.length === 2 &&
+    entry.secondCitationLine === finding.citationLines[1]
+  );
 }
 
 /**
@@ -5819,7 +5877,15 @@ function siblingGuardEntryGeometryViolation(
     return `${where} -- the doc no longer carries a citation of that range with the recorded anchorKey ${entry.anchorKey}`;
   }
   if (entry.kind === "wrong-sibling-anchor") {
-    const anchorText = citations[0].anchorText;
+    // Round 4 (L2): picks the SPECIFIC citation the entry was reviewed
+    // against, by its recorded `paragraphLine`, rather than `citations[0]`
+    // (which, before this round, could silently be a same-range,
+    // same-anchor citation sitting in a different, unreviewed paragraph).
+    const citation = citations.find((c) => c.line === entry.paragraphLine);
+    if (citation === undefined) {
+      return `${where} -- the doc no longer carries this citation at its recorded paragraph line ${entry.paragraphLine}`;
+    }
+    const anchorText = citation.anchorText;
     if (anchorText === undefined) {
       return `${where} -- recorded as a wrong-sibling-anchor exemption, but the doc's citation carries no string anchor`;
     }
@@ -5836,17 +5902,43 @@ function siblingGuardEntryGeometryViolation(
     }
     return undefined;
   }
-  const recordedLine = entry.secondCitationLine;
-  if (recordedLine === undefined) {
+  const recordedSecond = entry.secondCitationLine;
+  if (recordedSecond === undefined) {
     return `${where} -- a duplicate-citation entry must record the doc line its repeat sits on`;
   }
-  const repeat = citations.find((c) => c.line === recordedLine);
-  const docLine = docText.split("\n")[recordedLine - 1];
-  if (repeat === undefined || docLine === undefined) {
-    return `${where} -- doc line ${recordedLine} no longer carries the recorded repeat of that citation`;
+  // Round 4 (L3): replaces the near-tautological "a citation exists at the
+  // recorded line, and that line's own text contains that same citation's
+  // own path/start" check (true of ANY citation the extractor produced,
+  // by construction -- it carries no information about whether the
+  // recorded line is actually the SECOND member of the group). This reads
+  // the group's own citations, sorts them into document order, and checks
+  // the recorded lines by POSITION: `paragraphLine` must be the first,
+  // `secondCitationLine` the second. Scoped to the SAME PARAGRAPH as the
+  // recorded `paragraphLine` (not every same-range/anchorKey citation
+  // doc-wide): `findDuplicateCitations` itself groups per paragraph, and
+  // the same test/doc pair is legitimately cited again, unrelated, in a
+  // different paragraph elsewhere in several bundle docs.
+  const paragraphCitation = citations.find(
+    (c) => c.line === entry.paragraphLine,
+  );
+  if (paragraphCitation === undefined) {
+    return `${where} -- the doc no longer carries this citation at its recorded paragraph line ${entry.paragraphLine}`;
   }
-  if (!docLine.includes(`${repeat.citedPath}:${repeat.start}`)) {
-    return `${where} -- doc line ${recordedLine} no longer spells the recorded citation`;
+  const groupLines = citations
+    .filter((c) => c.paragraphId === paragraphCitation.paragraphId)
+    .map((c) => c.line)
+    .sort((a, b) => a - b);
+  if (groupLines[0] !== entry.paragraphLine) {
+    return (
+      `${where} -- doc line ${entry.paragraphLine} is no longer the FIRST citation of ` +
+      `this group in document order (group lines: ${groupLines.join(", ")})`
+    );
+  }
+  if (groupLines.length < 2 || groupLines[1] !== recordedSecond) {
+    return (
+      `${where} -- doc line ${recordedSecond} is no longer the SECOND citation of ` +
+      `this group in document order (group lines: ${groupLines.join(", ")})`
+    );
   }
   return undefined;
 }
@@ -5861,9 +5953,33 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
   const resolveRealPath = (citedPath: string): string | undefined =>
     RESOLVE[citedPath];
 
-  it("every allowlist entry states a falsifiable claim (sanity: no bare exemption)", () => {
+  // Round 4 (L1): renamed from "states a falsifiable claim", which the
+  // body only checked by length -- a 41-character string with no relation
+  // to the entry it sits on would have passed. Now also requires the claim
+  // to name at least one of the entry's own recorded lines (`start`,
+  // `end`, `paragraphLine`, `secondCitationLine`, `uncitedLines`), so a
+  // claim that talks ABOUT the right shape but never actually points at
+  // the geometry it is supposed to falsify fails here.
+  it("every allowlist entry's claim is long enough AND names one of its own recorded lines (sanity: a falsifiable claim, not just a long string)", () => {
     for (const entry of SIBLING_GUARD_BUNDLE_ALLOWLIST) {
       expect(entry.claim.length, JSON.stringify(entry)).toBeGreaterThan(40);
+      const ownLines = [
+        entry.start,
+        entry.end,
+        entry.paragraphLine,
+        ...(entry.secondCitationLine !== undefined
+          ? [entry.secondCitationLine]
+          : []),
+        ...(entry.uncitedLines ?? []),
+      ];
+      const mentionsOwnLine = ownLines.some((n) =>
+        entry.claim.includes(String(n)),
+      );
+      expect(
+        mentionsOwnLine,
+        `${entry.doc} (${entry.real}:${entry.start}-${entry.end}) claim names ` +
+          `none of its own recorded lines (${ownLines.join(", ")}): ${entry.claim}`,
+      ).toBe(true);
     }
   });
 
@@ -5948,6 +6064,7 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       end: 12,
       anchorText: "the allowlisted coincidence",
       unclaimedLines: [20],
+      citationLine: 5,
     };
     const entry: SiblingGuardAllowlistEntry = {
       doc: "fixture-doc.md",
@@ -5956,6 +6073,7 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       start: 10,
       end: 12,
       anchorKey: siblingGuardAnchorKey(sameAnchorFinding),
+      paragraphLine: 5,
       uncitedLines: [20],
       claim:
         "fixture: the citing sentence names the cited range's own subject, and the uncited line at 20 belongs to a different one.",
@@ -6009,6 +6127,7 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       end: 12,
       anchorText: "the allowlisted coincidence",
       unclaimedLines: [20],
+      citationLine: 5,
     };
     const entry: SiblingGuardAllowlistEntry = {
       doc: "fixture-doc.md",
@@ -6017,6 +6136,7 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       start: 10,
       end: 12,
       anchorKey: siblingGuardAnchorKey(clearedFinding),
+      paragraphLine: 5,
       uncitedLines: [20],
       claim:
         "fixture: the citing sentence names the cited range's own subject, and the uncited line at 20 belongs to a different one.",
@@ -6058,6 +6178,190 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
     ).toBe(false);
   });
 
+  // Round 4 (L2), bundle-independent: `paragraphLine` gates the match too.
+  // Same doc, kind, real target, range, anchorKey AND recorded geometry
+  // (`uncitedLines`) as the cleared hit -- the pre-round-4 match would
+  // exempt this -- but the finding's own citing line says it comes from a
+  // DIFFERENT paragraph. A second paragraph reproducing the exact same
+  // coincidence is independent, unreviewed drift, not a repeat of the
+  // first paragraph's already-classified hit.
+  it("an allowlist entry does not match a same-geometry finding from a different paragraph (paragraphLine gates the match)", () => {
+    const clearedFinding: WrongSiblingAnchorFinding = {
+      kind: "wrong-sibling-anchor",
+      paragraphId: 0,
+      citedPath: "fixture-target.ts",
+      real: "fixture-target.ts",
+      start: 10,
+      end: 12,
+      anchorText: "the allowlisted coincidence",
+      unclaimedLines: [20],
+      citationLine: 5,
+    };
+    const entry: SiblingGuardAllowlistEntry = {
+      doc: "fixture-doc.md",
+      kind: "wrong-sibling-anchor",
+      real: "fixture-target.ts",
+      start: 10,
+      end: 12,
+      anchorKey: siblingGuardAnchorKey(clearedFinding),
+      paragraphLine: 5,
+      uncitedLines: [20],
+      claim:
+        "fixture: the citing sentence names the cited range's own subject, and the uncited line at 20 belongs to a different one.",
+    };
+    expect(
+      siblingGuardFindingMatchesAllowlist(
+        "fixture-doc.md",
+        clearedFinding,
+        entry,
+      ),
+    ).toBe(true);
+
+    const anotherParagraphFinding: WrongSiblingAnchorFinding = {
+      ...clearedFinding,
+      paragraphId: 4,
+      citationLine: 40,
+    };
+    expect(
+      siblingGuardFindingMatchesAllowlist(
+        "fixture-doc.md",
+        anotherParagraphFinding,
+        entry,
+      ),
+      "the identical range/anchor/geometry coincidence reproduced in a " +
+        "different paragraph is independent, unreviewed drift and must " +
+        "not inherit the first paragraph's exemption",
+    ).toBe(false);
+  });
+
+  // Round 4 (M1): a duplicate-citation counterpart to the round-3
+  // anchorKey/geometry fixtures above -- the pre-round-4 match compared
+  // only `finding.citationLines[1]` against `entry.secondCitationLine`,
+  // which a literal `return true;` mutant of that comparison survives
+  // undetected (no fixture built a duplicate-citation finding whose
+  // second citation line actually DIFFERS from the entry it is compared
+  // against). Also covers the three-repeat blind spot named in the
+  // review: a finding with a THIRD citation (`citationLines` [a, b, c])
+  // whose second element happens to equal the recorded line, compared
+  // against an entry that was only ever reviewed for a two-citation
+  // repeat.
+  it("an allowlist entry does not match a duplicate-citation finding whose second citation line differs, or whose group grew a third repeat", () => {
+    const twoRepeatFinding: DuplicateCitationFinding = {
+      kind: "duplicate-citation",
+      paragraphId: 0,
+      citedPath: "fixture-target.ts",
+      real: "fixture-target.ts",
+      start: 10,
+      end: 12,
+      anchorRaw: '"the allowlisted coincidence"',
+      count: 2,
+      citationLines: [5, 30],
+    };
+    const entry: SiblingGuardAllowlistEntry = {
+      doc: "fixture-doc.md",
+      kind: "duplicate-citation",
+      real: "fixture-target.ts",
+      start: 10,
+      end: 12,
+      anchorKey: siblingGuardAnchorKey(twoRepeatFinding),
+      paragraphLine: 5,
+      secondCitationLine: 30,
+      claim:
+        "fixture: the opening citation at line 5 and the repeat at line 30 both name the same subject, and no third citation exists for the repeat to have walked on to.",
+    };
+    expect(
+      siblingGuardFindingMatchesAllowlist(
+        "fixture-doc.md",
+        twoRepeatFinding,
+        entry,
+      ),
+    ).toBe(true);
+
+    const movedRepeat: DuplicateCitationFinding = {
+      ...twoRepeatFinding,
+      citationLines: [5, 33],
+    };
+    expect(
+      siblingGuardFindingMatchesAllowlist("fixture-doc.md", movedRepeat, entry),
+      "a repeat that moved to a different doc line is a different " +
+        "situation and must not inherit the cleared verdict",
+    ).toBe(false);
+
+    const threeRepeatFinding: DuplicateCitationFinding = {
+      ...twoRepeatFinding,
+      count: 3,
+      citationLines: [5, 30, 55],
+    };
+    expect(
+      siblingGuardFindingMatchesAllowlist(
+        "fixture-doc.md",
+        threeRepeatFinding,
+        entry,
+      ),
+      "a finding whose group grew a THIRD, unreviewed repeat must not " +
+        "match an entry that was only ever cleared for a two-citation group, " +
+        "even though its second element (30) still equals the recorded line",
+    ).toBe(false);
+  });
+
+  // Round 4 (M1), the `siblingGuardEntryGeometryViolation` counterpart:
+  // before round 4 (L3), the duplicate-citation branch only checked that
+  // SOME citation existed at the recorded line and that its own text
+  // contained its own path/start -- true of any citation the extractor
+  // produced, by construction. A mutant replacing that whole guard with
+  // `if (false)` survived, because no fixture exercised the branch where
+  // the recorded line is NOT actually the group's second citation in
+  // document order. This fixture does: same recorded geometry, but the
+  // doc's citations moved so the recorded `secondCitationLine` is no
+  // longer where the repeat actually sits.
+  it("a duplicate-citation entry whose recorded doc lines are no longer the group's first/second citations in order is reported as a geometry violation", () => {
+    const identity = (citedPath: string): string => citedPath;
+    const entry: SiblingGuardAllowlistEntry = {
+      doc: "fixture-dup-geometry.md",
+      kind: "duplicate-citation",
+      real: "fixture-dup-geometry.test.ts",
+      start: 10,
+      end: 12,
+      anchorKey: siblingGuardAnchorKeyFor('"shared anchor"'),
+      paragraphLine: 2,
+      secondCitationLine: 6,
+      claim:
+        "fixture: the opening citation at line 2 and the repeat at line 6 both name the same subject, with no third sibling for the repeat to have walked on to.",
+    };
+
+    const intactDoc =
+      "opening filler line\n" +
+      'fixture-dup-geometry.test.ts:10-12#"shared anchor" opens the point,\n' +
+      "some unrelated prose in between\n" +
+      "more unrelated prose\n" +
+      "still more unrelated prose\n" +
+      'fixture-dup-geometry.test.ts:10-12#"shared anchor" repeats it here.\n';
+    expect(
+      siblingGuardEntryGeometryViolation(entry, intactDoc, identity, () => ""),
+      "the citations sit on lines 2 and 6, exactly the recorded " +
+        "paragraphLine/secondCitationLine pair, and must pass",
+    ).toBeUndefined();
+
+    // A new, EARLIER citation of the same range appears in the same
+    // paragraph (no blank line separates it from the recorded line-2
+    // citation, which is still there): the group's real first citation is
+    // now line 1, not the recorded 2, even though line 2 itself is
+    // untouched -- exactly the shape the pre-round-4 tautological check
+    // could not see, since a citation still exists at the recorded line.
+    const driftedDoc =
+      'fixture-dup-geometry.test.ts:10-12#"shared anchor" appears extra early here,\n' +
+      'fixture-dup-geometry.test.ts:10-12#"shared anchor" opens the point,\n' +
+      "more unrelated prose\n" +
+      "still more unrelated prose\n" +
+      'fixture-dup-geometry.test.ts:10-12#"shared anchor" repeats it here.\n';
+    expect(
+      siblingGuardEntryGeometryViolation(entry, driftedDoc, identity, () => ""),
+      "a new citation of the same range appeared at line 1, so the " +
+        "recorded paragraphLine (2) is no longer the group's FIRST " +
+        "citation and this must be reported",
+    ).toMatch(/no longer the FIRST citation/);
+  });
+
   // Round 3 (R1), bundle-independent: the geometry re-check itself. An
   // entry whose recorded uncited line no longer carries the citation's
   // anchor text was cleared against a situation that no longer exists,
@@ -6076,6 +6380,7 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       start: 10,
       end: 12,
       anchorKey: siblingGuardAnchorKeyFor(anchor),
+      paragraphLine: 2,
       uncitedLines: [20],
       claim:
         "fixture: the citing sentence names the cited range's own subject, and the uncited line at 20 belongs to a different one.",

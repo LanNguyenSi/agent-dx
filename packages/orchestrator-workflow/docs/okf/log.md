@@ -1,5 +1,97 @@
 # Bundle log
 
+- 2026-09-07T13:36:36Z (citation-sibling-drift guard, review round 4, task
+  agent-dx 9f72ae6d): a third consecutive independent review re-read every
+  allowlist entry against the two lines its own `claim` names, rather than
+  trusting the prior round's verdicts. None of the 14 entries certified
+  real drift, but the pass found two inaccurate claims and one further
+  citation mis-pairing invisible to the guard itself.
+  (M1) Rule (a)'s match compared only `finding.citationLines[1]` against
+  `entry.secondCitationLine`; a `return true;` mutant of that one line
+  survives, and a two-citation entry's cleared repeat was indistinguishable
+  from a finding whose group grew a THIRD, unreviewed repeat sharing the
+  same second line. The match now also requires
+  `finding.citationLines.length === 2`
+  (`packages/orchestrator-workflow/test/docs-consistency.test.ts`, the
+  `siblingGuardFindingMatchesAllowlist` function), pinned by a new
+  bundle-independent fixture covering both the differing-second-line and
+  the three-repeat cases. The geometry re-check's duplicate-citation
+  branch had the same blind spot from the other side: it only asked
+  whether SOME citation exists at the recorded line, true of any citation
+  the extractor produces by construction. Replaced with a check that sorts
+  the group's own citations into document order and requires the recorded
+  `paragraphLine`/`secondCitationLine` to sit at positions 0 and 1; a
+  mutant reducing the old guard to `if (false)` survived until this
+  fixture existed.
+  (L2) The match and the geometry re-check both gained `paragraphLine`,
+  the doc line of the finding's own first citation. Before this, an entry
+  was keyed by (doc, kind, real target, range, anchorKey, recorded
+  geometry) alone, so the identical coincidence recurring in a SECOND,
+  unreviewed paragraph would silently inherit the first paragraph's
+  verdict. Not hypothetical: the `model-preselection.md` entry for
+  `src/init.ts:862-866` matched hits from both its `:156` paragraph and
+  its `:423` paragraph -- the array's own header comment named this
+  explicitly ("one entry also covers the same real hit cited a second
+  time elsewhere in the same doc under a different path spelling"). The
+  `:423` paragraph's citation of that range is re-pointed to its own,
+  different evidence
+  (`packages/orchestrator-workflow/src/init.ts:867-869#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`,
+  the effort-line pass-in the sentence actually describes), so the entry
+  now covers `:156` only.
+  (L1) The "states a falsifiable claim" sanity check tested only
+  `claim.length > 40`; three `subagent-contracts-superset.md` entries
+  (for `test/docs-consistency.test.ts:534`, `:1055`, `:1169`) passed it
+  with a claim that never named either of its own recorded lines.
+  Strengthened to also require the claim to include at least one of
+  `start`/`end`/`paragraphLine`/`secondCitationLine`/`uncitedLines`; the
+  three claims were edited to name their own recorded lines (534/341,
+  1055/425, 1169/555) without changing what they assert.
+  (L3) is the geometry-check half of M1 above, not a separate change.
+  (M2) The `model-preselection.md` entry for `test/init.test.ts:1793-1826`
+  claimed the uncited line 1827 "asserts the absence of the codex-only
+  effort field". It does not: `reasoningEffort` (asserted absent at 1827)
+  is opencode's own field for a non-Claude-family, non-Ollama provider
+  (`packages/orchestrator-workflow/src/init.ts:461#"return \`reasoningEffort: ${TIER_DEFS[tier].effort}\`;"`);
+  codex's own equivalent field is `model_reasoning_effort`
+  (`packages/orchestrator-workflow/src/codex.ts:50#"model_reasoning_effort = ${tomlString(selection.effort)}"`).
+  No compliant anchor exists to widen the citation to cover 1827: the
+  only non-quote-crossing substring distinguishing it from its sibling
+  line 1826 is the bare word `reasoningEffort`, which recurs 15 times in
+  `init.test.ts`, over this file's own 3-occurrence-file-wide cap; the
+  claim was corrected instead of the citation.
+  (M4) `install-fence-mechanics.md`'s "Since fix-round-2 (review finding
+  R2-M2)" sentence had its two citations swapped: the sentence about the
+  tier-variant SUB-loop cited the OUTER per-dropped-role loop's own
+  gate/note (`init.ts:606-617`, gate at 615, note at 617), and the
+  sentence about the base-file note cited the sub-loop's own gate/note
+  (`init.ts:630-635`). Re-pointed, citation-only: the sub-loop sentence
+  now cites
+  `packages/orchestrator-workflow/src/init.ts:626-635#"variantPath}: now untracked after the full"`
+  (already used for the same sub-loop elsewhere in this doc and in
+  `model-preselection.md`); the base-file-note sentence now cites
+  `packages/orchestrator-workflow/src/init.ts:615-618#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run"`.
+  Known limit, unclosed this round (also recorded in the CHANGELOG
+  `[Unreleased]` entry): neither rule catches a citation that resolves
+  and anchors cleanly but simply names the WRONG target -- no duplication
+  in the paragraph, no anchor text recurring nearby. M4's mis-pairing was
+  exactly this shape: both citations passed every existing check,
+  including this guard, because nothing about either one, read alone or
+  against its paragraph's siblings, looked wrong; only re-reading the
+  target file against the sentence's own claim surfaced it.
+  Verification. `npm test`, `npm run typecheck` and `npm run
+  typecheck:test` are green, including this round's new fixtures; `npm
+  run format:check` is clean on `test/docs-consistency.test.ts` (the two
+  pre-existing red files, `decision-authority.test.ts` and
+  `template-markers.test.ts`, are untouched by this round). `npx
+  okf-kit@0.10.0 check --json --require-anchors docs/okf` measured before
+  this round's edits: 0 errors, 0 warnings, 17 notices; measured again
+  after this round's commit (once the re-stamped `timestamp:` fields are
+  no longer future-dated against their own last commit): 0 errors, 0
+  warnings, 17 notices, unchanged.
+  Mutation probes recorded in this same entry once run, through the probe
+  runner in an isolated worktree, after this round's implementation
+  commit (per this bundle's own commit-before-probing convention).
+
 - 2026-09-07T12:57:17Z (citation-sibling-drift guard, review round 3, task
   agent-dx 9f72ae6d, orchestrator decision D-017): round 2's review found
   one more allowlisted pair that was real wrong-sibling drift, the second
