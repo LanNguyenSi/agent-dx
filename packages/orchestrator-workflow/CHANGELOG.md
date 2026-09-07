@@ -25,14 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   onto one range twice, the third never cited; three per-harness bullet
   citations doing the same; two logically distinct assertions collapsing
   onto one shared range and anchor text, the second's own line never cited.
-  Run over the current bundle, the guard's rule (a) reports 7 real hits and
-  rule (b) reports 11, every one read against its target and allowlisted
-  with the specific reason found (a doc-wide "topic sentence, then repeat
-  as the closing list item" convention for rule (a); a short/common token
-  -- a keyword, a mirrored field on twin interfaces, a comment restating a
-  literal, a test-assertion idiom on an adjacent line, a reused local
-  variable name -- recurring near a real citation by coincidence, for rule
-  (b)). Lives in this file rather than as an okf-kit rule because this
+  Run over the current bundle, every hit either rule reports is read
+  against its own target file and the citing paragraph, then fixed or
+  allowlisted; the measured per-rule hit counts live in `docs/okf/log.md`
+  with the classification that produced them, not here, so the two sites
+  cannot drift apart. The recurring coincidence shapes are a doc-wide
+  "topic sentence, then repeat as the closing list item" convention for
+  rule (a), and a short or common token -- a keyword, a mirrored field on
+  twin interfaces, a comment restating a literal, a test-assertion idiom on
+  an adjacent line, a reused local variable name -- recurring near a real
+  citation for rule (b). Lives in this file rather than as an okf-kit rule
+  because this
   suite already runs on every PR while an okf-kit rule needs a release and
   a fleet pin bump first; an opt-in okf-kit rule for the same class is a
   named follow-up candidate once this guard has proven itself.
@@ -81,6 +84,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fenced ` ``` ` code block is now skipped rather than matched (closing the
   reverse risk of misreading a code sample as a citation), a cheap
   addition alongside the rest of this round's work.
+- Review round 3 of the citation-sibling-drift guard above (task agent-dx
+  9f72ae6d): a second consecutive review round found allowlist entries that
+  certified real wrong-sibling drift, so this round changes the mechanism
+  rather than only the entries. An allowlist entry now records the
+  GEOMETRY it was cleared against -- the target-file line(s) carrying the
+  uncited identical anchor text for a rule-(b) entry, the doc line the
+  repeat sits on for a rule-(a) one -- and that geometry is part of the
+  match, so an entry exempts only the hit it was actually reviewed for: a
+  new uncited occurrence next to an already-cleared one, or a repeat that
+  moved to another doc line, fails instead of inheriting the old verdict. A
+  test re-reads those recorded lines against the current files
+  independently of the guard's own output (the anchor text is re-derived
+  from the doc's own citation, since the array deliberately stores a hash
+  rather than the literal text), so an entry whose situation no longer
+  exists goes red instead of silently exempting a different one. The
+  free-form `reason` field is replaced by `claim`: one sentence naming what
+  the citing sentence describes and why the cited line, rather than the
+  uncited sibling, is its evidence, written so a reviewer can falsify it by
+  reading exactly the two lines the entry names. Process, recorded in
+  `docs/okf/log.md` with each round's classification: an allowlist entry is
+  accepted only on an INDEPENDENT review classification of the hit, never
+  on the reading of whoever implemented or re-pointed the citation, which
+  is how both earlier rounds' wrong verdicts reached a green suite.
+  Re-pointed the pair this round's review found (a sentence about the
+  dropped-role tier-variant SUB-loop citing the enclosing loop's own note
+  range, in two docs) to the sub-loop's own note, dropped their entries,
+  and re-triaged every remaining hit at the current window against its
+  target file. Also citation-only: a fence-contract citation that stopped
+  short of the assertion its sentence names, a run-state citation one line
+  short of the sentence it supports, and a slicer-superset citation whose
+  sentence's second half is now cited from the test that actually pins it.
+  Two more fixtures: rule (b) firing at the guard's window and staying
+  silent at the round-1 value of 10 for an uncited occurrence 15 lines
+  outside the cited range (the window was previously pinned only
+  indirectly, through the no-dead-exemption test), and a doc that ends
+  inside an unclosed fence now failing loudly instead of silently dropping
+  every citation after the stray delimiter, paired with an assertion that
+  every bundle doc yields at least one citation.
 
 ## [0.31.0] - 2026-09-07
 

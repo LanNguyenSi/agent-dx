@@ -68,5 +68,12 @@ anchors correctly on its own but names the wrong sibling among near-identical
 citations. It flags (a) the same `file:range#anchor` cited twice in one
 paragraph, and (b) a string anchor's text also occurring, uncited, at
 another nearby line of the same target while the paragraph cites a sibling
-range of that file; either can be allowlisted in the guard's own test with a
-reason.
+range of that file; either can be allowlisted in the guard's own test. An
+allowlist entry is accepted only on an independent review classification of
+the hit, never on the reading of whoever wrote or re-pointed the citation,
+and it records both the geometry it was cleared against (the uncited line,
+or the doc line the repeat sits on) and a one-sentence claim a reviewer can
+falsify by reading exactly those two lines; a test re-checks that recorded
+geometry against the current files, so an exemption whose situation changed
+fails instead of quietly covering a different one. The classification
+itself belongs in [log.md](log.md), with the round that produced it.
