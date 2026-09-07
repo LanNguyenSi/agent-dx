@@ -29,7 +29,8 @@
   geometry) alone, so the identical coincidence recurring in a SECOND,
   unreviewed paragraph would silently inherit the first paragraph's
   verdict. Not hypothetical: the `model-preselection.md` entry for
-  `src/init.ts:862-866` matched hits from both its `:156` paragraph and
+  `packages/orchestrator-workflow/src/init.ts:862-866` matched hits from
+  both its `:156` paragraph and
   its `:423` paragraph -- the array's own header comment named this
   explicitly ("one entry also covers the same real hit cited a second
   time elsewhere in the same doc under a different path spelling"). The
@@ -47,11 +48,12 @@
   three claims were edited to name their own recorded lines (534/341,
   1055/425, 1169/555) without changing what they assert.
   (L3) is the geometry-check half of M1 above, not a separate change.
-  (M2) The `model-preselection.md` entry for `test/init.test.ts:1793-1826`
-  claimed the uncited line 1827 "asserts the absence of the codex-only
+  (M2) The `model-preselection.md` entry for
+  `packages/orchestrator-workflow/test/init.test.ts:1793-1826` claimed the
+  uncited line 1827 "asserts the absence of the codex-only
   effort field". It does not: `reasoningEffort` (asserted absent at 1827)
   is opencode's own field for a non-Claude-family, non-Ollama provider
-  (`packages/orchestrator-workflow/src/init.ts:461#"return \`reasoningEffort: ${TIER_DEFS[tier].effort}\`;"`);
+  (`packages/orchestrator-workflow/src/init.ts:461#"reasoningEffort: ${TIER_DEFS[tier].effort}"`);
   codex's own equivalent field is `model_reasoning_effort`
   (`packages/orchestrator-workflow/src/codex.ts:50#"model_reasoning_effort = ${tomlString(selection.effort)}"`).
   No compliant anchor exists to widen the citation to cover 1827: the
@@ -3372,10 +3374,12 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:376#"the keyed placeholder line's exact text,"`,
-re-pointed by 169 lines since this account was first written (+41 more,
-from task agent-dx 9f72ae6d's own review-round-3 `[Unreleased]` bullet
-added above it, same sibling-drift-guard task; +46 before that, from that
+(`CHANGELOG.md:420#"the keyed placeholder line's exact text,"`,
+re-pointed by 213 lines since this account was first written (+44 more,
+from task agent-dx 9f72ae6d's own review-round-4 `[Unreleased]` bullet
+added above it, same sibling-drift-guard task; +41 before that,
+from that same task's own review-round-3 `[Unreleased]` bullet
+added above it; +46 before that, from that
 task's review-round-2 bullet; +29 before that, from this
 same task's round-1 `[Unreleased]` bullet
 added above `[0.31.0]`; +15 before that, from the batch-38 `[Unreleased]`
