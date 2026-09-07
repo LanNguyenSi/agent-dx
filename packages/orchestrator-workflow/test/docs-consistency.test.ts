@@ -5654,6 +5654,56 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
     ).toEqual([]);
   });
 
+  // Round 2 (F5): a dedicated, bundle-independent proof that `anchorKey`
+  // actually gates the match rather than being a decorative extra field.
+  // Builds one allowlist entry and two hand-made findings that share the
+  // entry's (doc, kind, real, range) exactly but differ in anchor text: a
+  // match on range alone (the pre-round-2 behaviour) would wrongly exempt
+  // the second one too.
+  it("an allowlist entry does not match a same-range finding whose anchor text differs (anchorKey gates the match, not just the range)", () => {
+    const sameAnchorFinding: WrongSiblingAnchorFinding = {
+      kind: "wrong-sibling-anchor",
+      paragraphId: 0,
+      citedPath: "fixture-target.ts",
+      real: "fixture-target.ts",
+      start: 10,
+      end: 12,
+      anchorText: "the allowlisted coincidence",
+      unclaimedLines: [20],
+    };
+    const entry: SiblingGuardAllowlistEntry = {
+      doc: "fixture-doc.md",
+      kind: "wrong-sibling-anchor",
+      real: "fixture-target.ts",
+      start: 10,
+      end: 12,
+      anchorKey: siblingGuardAnchorKey(sameAnchorFinding),
+      reason: "fixture: a verified, correctly-anchored coincidence.",
+    };
+    expect(
+      siblingGuardFindingMatchesAllowlist(
+        "fixture-doc.md",
+        sameAnchorFinding,
+        entry,
+      ),
+    ).toBe(true);
+
+    const differentAnchorFinding: WrongSiblingAnchorFinding = {
+      ...sameAnchorFinding,
+      anchorText: "a completely different anchor text",
+      unclaimedLines: [30],
+    };
+    expect(
+      siblingGuardFindingMatchesAllowlist(
+        "fixture-doc.md",
+        differentAnchorFinding,
+        entry,
+      ),
+      "a same-range finding with a different anchor must NOT silently " +
+        "match an entry verified for a different anchor's coincidence",
+    ).toBe(false);
+  });
+
   for (const doc of ANCHOR_OKF_DOCS) {
     it(`${doc}: zero unallowlisted citation-sibling-drift findings`, () => {
       const docText = readRepoFile(
