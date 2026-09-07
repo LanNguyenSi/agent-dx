@@ -1828,6 +1828,46 @@ describe("formatMutantSummary / formatVerifiedAppliedVia", () => {
     const snippet = formatVerifiedAppliedVia("/a/b.js", 3, "x", "y");
     expect(snippet.split("\n")).toEqual(["/a/b.js:3", "- x", "+ y"]);
   });
+
+  it("caps a very long file path (e.g. a long -l/-C path) with the envelope's own truncation-marker wording, naming the true omitted-character count, instead of pasting it whole into mutant/verified_applied_via", () => {
+    const longFile = `/tmp/${"x".repeat(300)}/fixture.js`;
+
+    const summary = formatMutantSummary(longFile, 3, "x", "y");
+    const [filePart] = summary.split(":3: ");
+    expect(filePart.length).toBeLessThan(240);
+    expect(filePart.endsWith("...(116 more characters omitted)")).toBe(true);
+    expect(filePart.startsWith(longFile.slice(0, 200))).toBe(true);
+    expect(summary.endsWith(": x -> y")).toBe(true);
+
+    const via = formatVerifiedAppliedVia(longFile, 3, "x", "y");
+    const [viaFilePart] = via.split("\n")[0].split(":3");
+    expect(viaFilePart.length).toBeLessThan(240);
+    expect(viaFilePart.endsWith("...(116 more characters omitted)")).toBe(true);
+    expect(via.split("\n").slice(1)).toEqual(["- x", "+ y"]);
+  });
+
+  it("leaves a short file path byte-identical (no marker) so every existing fixture is unaffected", () => {
+    expect(formatMutantSummary("src/probe/mutant.ts", 1, "x", "y")).toBe(
+      "src/probe/mutant.ts:1: x -> y",
+    );
+  });
+
+  it("caps exactly at the 200-character bound: a 200-character path passes through byte-identical, a 201-character path gets the marker naming one omitted character", () => {
+    const atBound = "p".repeat(200);
+    const overBound = "p".repeat(201);
+    expect(formatMutantSummary(atBound, 1, "x", "y")).toBe(
+      `${atBound}:1: x -> y`,
+    );
+    expect(formatMutantSummary(overBound, 1, "x", "y")).toBe(
+      `${atBound}...(1 more character omitted):1: x -> y`,
+    );
+    expect(formatVerifiedAppliedVia(atBound, 1, "x", "y").split("\n")[0]).toBe(
+      `${atBound}:1`,
+    );
+    expect(
+      formatVerifiedAppliedVia(overBound, 1, "x", "y").split("\n")[0],
+    ).toBe(`${atBound}...(1 more character omitted):1`);
+  });
 });
 
 describe("computeMutant: a --numstat listing that did not fit", () => {
@@ -2365,6 +2405,11 @@ describe("buildBoundedHunkExcerpt", () => {
       bodyOmitted: true,
       keptHunks: 0,
     });
+  });
+
+  it("returns a value rather than throwing for a zero-hunk input, which is what the dedicated hunks.length === 0 branch exists to guarantee (see the function's own docblock: folding it into boundHunksUnder's shared fallback would index hunks[0] of an empty array and throw instead)", () => {
+    expect(() => buildBoundedHunkExcerpt(PREAMBLE, [], 100, 100)).not.toThrow();
+    expect(() => buildBoundedHunkExcerpt([], [], 100, 100)).not.toThrow();
   });
 });
 
@@ -3234,6 +3279,152 @@ describe("reconcileEnvelopeDiffTruncation: stays within maxChars across a sweep 
       expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
     },
   );
+
+  it("shrinks the excerpt with the larger CURRENT length first, at exact, measured byte counts that pin the order (largest-excerpt-first), rather than the array order `plan.results` happens to list them in", () => {
+    // Two single-hunk `--plan` mutants of very different TRUE size (400
+    // wide lines vs. 80 narrow ones), the smaller one listed FIRST in
+    // `plan.results` -- the opposite of size order, so a rule that
+    // processed entries in array/index order rather than by excerpt
+    // size could not produce the numbers asserted below by accident.
+    // `buildEnvelope`'s own uniform string-length reduction caps both
+    // excerpts down to a similar SMALL size regardless of their true
+    // size (a shared scale search, not one aware of which original was
+    // bigger), which is what makes the post-`buildEnvelope` "current"
+    // excerpt lengths close enough for order to matter, while the two
+    // different line widths (60 vs. 2 characters) keep their hunk-
+    // boundary rounding from coinciding, so the two are never tied.
+    // The exact byte counts below were measured against this build:
+    // reversing `enforceEnvelopeBudget`'s sort comparator (so the
+    // SMALLER excerpt is shrunk first instead) changes them to
+    // `postSmall: 111, postBig: 19` -- a different, and wrong, division
+    // of the budget between the two mutants that still fits `maxChars`,
+    // which is exactly the "the reduction's incidental order decides,
+    // not a documented rule" failure mode this pins against.
+    const bigLines = 400;
+    const bigWidth = 60;
+    const smallLines = 80;
+    const smallWidth = 2;
+    const wideDiff = (
+      lines: number,
+      width: number,
+      name: string,
+    ): MutantDiffField => ({
+      text: [
+        `--- a/${name}`,
+        `+++ b/${name}`,
+        `@@ -1,${String(lines)} +1,${String(lines)} @@`,
+        ...Array.from(
+          { length: lines },
+          (_, i) => `-l${String(i)} ${"x".repeat(width)}`,
+        ),
+      ].join("\n"),
+      path: `/tmp/probe-logs/mutant-diff-${name}/mutant-diff.patch`,
+      hunkCount: 1,
+      removed: lines,
+      added: 0,
+      changedLineCount: lines,
+      truncated: false,
+    });
+    const bigOriginal = wideDiff(bigLines, bigWidth, "big.txt");
+    const smallOriginal = wideDiff(smallLines, smallWidth, "small.txt");
+    const bigSummary = formatMutantSummary(
+      "big.txt",
+      1,
+      "old",
+      "",
+      bigOriginal,
+    );
+    const bigVia = formatVerifiedAppliedVia(
+      "big.txt",
+      1,
+      "old",
+      "",
+      bigOriginal,
+    );
+    const smallSummary = formatMutantSummary(
+      "small.txt",
+      1,
+      "old",
+      "",
+      smallOriginal,
+    );
+    const smallVia = formatVerifiedAppliedVia(
+      "small.txt",
+      1,
+      "old",
+      "",
+      smallOriginal,
+    );
+    const bigEntry = {
+      status: "survived",
+      mutant: {
+        file: "big.txt",
+        line: 1,
+        before: "old",
+        after: "",
+        form: "patch",
+        diff: bigOriginal,
+      },
+      mutation_probe: {
+        mutant: bigSummary,
+        verified_applied_via: bigVia,
+        result: "survived",
+        restored_verified: true,
+      },
+    };
+    const smallEntry = {
+      status: "survived",
+      mutant: {
+        file: "small.txt",
+        line: 1,
+        before: "old",
+        after: "",
+        form: "patch",
+        diff: smallOriginal,
+      },
+      mutation_probe: {
+        mutant: smallSummary,
+        verified_applied_via: smallVia,
+        result: "survived",
+        restored_verified: true,
+      },
+    };
+
+    const maxChars = 1600;
+    const { envelope } = buildEnvelope({
+      version: "test",
+      command: "probe",
+      status: "survived",
+      durationMs: 1,
+      cwd: "/tmp",
+      warnings: [],
+      logs: [],
+      extra: { plan: { results: [smallEntry, bigEntry], summary: {} } },
+      maxChars,
+    });
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      {
+        planResults: [
+          { mutant: smallEntry.mutant },
+          { mutant: bigEntry.mutant },
+        ],
+      },
+      maxChars,
+    );
+
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    const results = (envelope.plan as Record<string, unknown>)
+      .results as Record<string, unknown>[];
+    const smallDiff = (results[0].mutant as Record<string, unknown>)
+      .diff as Record<string, unknown>;
+    const bigDiff = (results[1].mutant as Record<string, unknown>)
+      .diff as Record<string, unknown>;
+    expect((smallDiff.text as string).length).toBe(95);
+    expect((bigDiff.text as string).length).toBe(84);
+  });
 });
 
 describe("mutant.diff.path: the whole applied diff on disk", () => {

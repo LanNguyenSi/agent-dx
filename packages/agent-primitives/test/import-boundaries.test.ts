@@ -50,16 +50,24 @@ function importSpecifiers(source: string, fileName: string): string[] {
   return specifiers;
 }
 
-/** The last path segment of a relative `./x.js` or `../x.js` specifier,
- * without its extension; `undefined` for anything else (a bare package
- * specifier, `node:*`). An extensionless relative specifier (`./index`)
- * matches the same module its `.js`-suffixed form (`./index.js`) would:
- * both are the same file at build time, and the guard must not miss one
- * just because a source file omitted the extension. */
+/** The last path segment of a relative `./x.js`, `./x.ts` or `../x.js`/
+ * `../x.ts` specifier, without its extension; `undefined` for anything
+ * else (a bare package specifier, `node:*`). An extensionless relative
+ * specifier (`./index`) matches the same module its `.js`-suffixed form
+ * (`./index.js`) would: both are the same file at build time, and the
+ * guard must not miss one just because a source file omitted the
+ * extension. A `.ts`-suffixed specifier (`./index.ts`) is normalised the
+ * same way: TypeScript source never imports its own sibling by that
+ * spelling in practice, but a forbidden import spelled that way must
+ * still be caught rather than silently passing as a module named
+ * "index.ts", which cannot match "index" and so would never be flagged
+ * as the forbidden import it is. */
 function relativeModuleName(specifier: string): string | undefined {
   if (!specifier.startsWith(".")) return undefined;
   const base = path.basename(specifier);
-  return base.endsWith(".js") ? base.slice(0, -".js".length) : base;
+  if (base.endsWith(".js")) return base.slice(0, -".js".length);
+  if (base.endsWith(".ts")) return base.slice(0, -".ts".length);
+  return base;
 }
 
 /** True if every import/export declaration in `source` whose module
@@ -213,5 +221,44 @@ describe("probe module import boundaries", () => {
     expect(
       [...plan].filter((m) => ["session", "step", "setup"].includes(m)),
     ).toEqual([]);
+  });
+});
+
+describe("relativeModuleName", () => {
+  it("normalises a .ts relative specifier the same as .js and extensionless, so a forbidden import spelled ./index.ts is not missed", () => {
+    expect(relativeModuleName("./index.ts")).toBe("index");
+    expect(relativeModuleName("./index.js")).toBe("index");
+    expect(relativeModuleName("./index")).toBe("index");
+    expect(relativeModuleName("../index.ts")).toBe("index");
+  });
+
+  it("leaves a bare package specifier and a node: specifier unmatched, .ts suffix or not", () => {
+    expect(relativeModuleName("some-package.ts")).toBeUndefined();
+    expect(relativeModuleName("node:fs")).toBeUndefined();
+  });
+
+  it("end-to-end: a synthetic source importing a forbidden layer with a .ts specifier is caught the same as the .js and extensionless forms", () => {
+    // Mirrors what `importedProbeModules` does against a real file, but
+    // against an in-memory source so the fixture is test-only and never
+    // touches `src/probe`'s real layering. Before the fix, a `.ts`
+    // specifier's `relativeModuleName` was the un-stripped "index.ts",
+    // which never matches "index" in the forbidden-module filter the
+    // real describe block above uses -- so this forbidden import would
+    // have silently passed the guard.
+    const forbiddenSource = [
+      'import { begin } from "./index.ts";',
+      'import { helper } from "./index.js";',
+      'import { other } from "./index";',
+    ].join("\n");
+    const fileName = path.join(PROBE_DIR, "session.ts");
+    const modules = new Set<string>();
+    for (const specifier of importSpecifiers(forbiddenSource, fileName)) {
+      const name = relativeModuleName(specifier);
+      if (name !== undefined) modules.add(name);
+    }
+    expect([...modules]).toEqual(["index"]);
+    expect(
+      [...modules].filter((m) => ["step", "setup", "index"].includes(m)),
+    ).toEqual(["index"]);
   });
 });
