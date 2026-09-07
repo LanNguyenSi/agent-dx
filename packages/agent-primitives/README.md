@@ -436,6 +436,21 @@ Library callers composing their own envelope get the same correction:
 probe result, or `{ planResults }` for a plan's `results` array, both
 exported from the package root alongside the `MutantDiffField` type.
 
+When restating a plan's descriptors and excerpts pushes the WHOLE
+envelope back over `-m`/`--max-chars` (the correction restores content
+`buildEnvelope`'s own generic reduction had cut, which can grow the
+result even though no excerpt is longer than it was delivered at), the
+excerpts are shrunk again, one mutant at a time, LARGEST CURRENT EXCERPT
+FIRST: each is binary-searched down to the largest size that still fits
+the whole envelope before the next one is touched at all, rather than
+spreading a uniform cut across every mutant in the plan or shrinking
+them in whatever order `plan.results` happens to list them. A mutant
+whose excerpt already fits is left alone for as long as the ones ahead
+of it in size can absorb the deficit on their own; only once every
+excerpt has been shrunk to nothing and the envelope still exceeds
+`-m` does a warning name the true final length, the same wording
+`buildEnvelope`'s own overrun warning uses.
+
 The probe pins its own content-writing git commands with `-c
 core.autocrlf=false` and `-c apply.whitespace=nowarn`: the patch dry
 run, the real patch apply, the worktree checkout, and the tracked-diff

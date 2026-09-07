@@ -3239,6 +3239,152 @@ describe("reconcileEnvelopeDiffTruncation: stays within maxChars across a sweep 
       expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
     },
   );
+
+  it("shrinks the excerpt with the larger CURRENT length first, at exact, measured byte counts that pin the order (largest-excerpt-first), rather than the array order `plan.results` happens to list them in", () => {
+    // Two single-hunk `--plan` mutants of very different TRUE size (400
+    // wide lines vs. 80 narrow ones), the smaller one listed FIRST in
+    // `plan.results` -- the opposite of size order, so a rule that
+    // processed entries in array/index order rather than by excerpt
+    // size could not produce the numbers asserted below by accident.
+    // `buildEnvelope`'s own uniform string-length reduction caps both
+    // excerpts down to a similar SMALL size regardless of their true
+    // size (a shared scale search, not one aware of which original was
+    // bigger), which is what makes the post-`buildEnvelope` "current"
+    // excerpt lengths close enough for order to matter, while the two
+    // different line widths (60 vs. 2 characters) keep their hunk-
+    // boundary rounding from coinciding, so the two are never tied.
+    // The exact byte counts below were measured against this build:
+    // reversing `enforceEnvelopeBudget`'s sort comparator (so the
+    // SMALLER excerpt is shrunk first instead) changes them to
+    // `postSmall: 111, postBig: 19` -- a different, and wrong, division
+    // of the budget between the two mutants that still fits `maxChars`,
+    // which is exactly the "the reduction's incidental order decides,
+    // not a documented rule" failure mode this pins against.
+    const bigLines = 400;
+    const bigWidth = 60;
+    const smallLines = 80;
+    const smallWidth = 2;
+    const wideDiff = (
+      lines: number,
+      width: number,
+      name: string,
+    ): MutantDiffField => ({
+      text: [
+        `--- a/${name}`,
+        `+++ b/${name}`,
+        `@@ -1,${String(lines)} +1,${String(lines)} @@`,
+        ...Array.from(
+          { length: lines },
+          (_, i) => `-l${String(i)} ${"x".repeat(width)}`,
+        ),
+      ].join("\n"),
+      path: `/tmp/probe-logs/mutant-diff-${name}/mutant-diff.patch`,
+      hunkCount: 1,
+      removed: lines,
+      added: 0,
+      changedLineCount: lines,
+      truncated: false,
+    });
+    const bigOriginal = wideDiff(bigLines, bigWidth, "big.txt");
+    const smallOriginal = wideDiff(smallLines, smallWidth, "small.txt");
+    const bigSummary = formatMutantSummary(
+      "big.txt",
+      1,
+      "old",
+      "",
+      bigOriginal,
+    );
+    const bigVia = formatVerifiedAppliedVia(
+      "big.txt",
+      1,
+      "old",
+      "",
+      bigOriginal,
+    );
+    const smallSummary = formatMutantSummary(
+      "small.txt",
+      1,
+      "old",
+      "",
+      smallOriginal,
+    );
+    const smallVia = formatVerifiedAppliedVia(
+      "small.txt",
+      1,
+      "old",
+      "",
+      smallOriginal,
+    );
+    const bigEntry = {
+      status: "survived",
+      mutant: {
+        file: "big.txt",
+        line: 1,
+        before: "old",
+        after: "",
+        form: "patch",
+        diff: bigOriginal,
+      },
+      mutation_probe: {
+        mutant: bigSummary,
+        verified_applied_via: bigVia,
+        result: "survived",
+        restored_verified: true,
+      },
+    };
+    const smallEntry = {
+      status: "survived",
+      mutant: {
+        file: "small.txt",
+        line: 1,
+        before: "old",
+        after: "",
+        form: "patch",
+        diff: smallOriginal,
+      },
+      mutation_probe: {
+        mutant: smallSummary,
+        verified_applied_via: smallVia,
+        result: "survived",
+        restored_verified: true,
+      },
+    };
+
+    const maxChars = 1600;
+    const { envelope } = buildEnvelope({
+      version: "test",
+      command: "probe",
+      status: "survived",
+      durationMs: 1,
+      cwd: "/tmp",
+      warnings: [],
+      logs: [],
+      extra: { plan: { results: [smallEntry, bigEntry], summary: {} } },
+      maxChars,
+    });
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      {
+        planResults: [
+          { mutant: smallEntry.mutant },
+          { mutant: bigEntry.mutant },
+        ],
+      },
+      maxChars,
+    );
+
+    expect(JSON.stringify(envelope).length).toBeLessThanOrEqual(maxChars);
+    const results = (envelope.plan as Record<string, unknown>)
+      .results as Record<string, unknown>[];
+    const smallDiff = (results[0].mutant as Record<string, unknown>)
+      .diff as Record<string, unknown>;
+    const bigDiff = (results[1].mutant as Record<string, unknown>)
+      .diff as Record<string, unknown>;
+    expect((smallDiff.text as string).length).toBe(95);
+    expect((bigDiff.text as string).length).toBe(84);
+  });
 });
 
 describe("mutant.diff.path: the whole applied diff on disk", () => {

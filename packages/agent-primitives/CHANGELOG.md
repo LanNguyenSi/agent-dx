@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget`: when
+  restating a plan's descriptors and excerpts pushes the whole envelope
+  back over `-m`/`--max-chars`, which mutant's excerpt gets shrunk
+  further to close the gap is now a documented, pinned rule (largest
+  CURRENT excerpt first, each shrunk to the largest size that still
+  fits the whole envelope before the next is touched) rather than
+  whatever order the correction happened to visit `plan.results` in.
+  This was already the implementation's behavior; it is now covered by
+  a discriminating test (two differently-sized single-hunk mutants,
+  asserted at exact post-correction byte counts that a smallest-first
+  or array-order rule would not produce) and documented in the README.
+
 ### Added
 
 - `agent-primitives drift --base <rev> --head <rev>`: a prototype-scope
