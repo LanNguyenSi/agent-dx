@@ -7,6 +7,166 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A citation-sibling-drift guard (`test/docs-consistency.test.ts`, next to
+  the existing anchor-load-bearing checks) catches a citation that resolves
+  and anchors correctly on its own but names the wrong sibling among a run
+  of near-identical citations, a class neither okf-kit's `citations-resolve`
+  rule nor the local anchor guards can see, because both check an anchor
+  only inside its own cited range. Two rules, applied per paragraph: (a) the
+  same `file:range#anchor` cited twice in one paragraph, unless allowlisted
+  with a reason; (b) a string anchor's text also occurring, uncited, at
+  another line of the same target within a 20-line window (widened from 10
+  in review round 2, see below) while the paragraph cites a sibling range
+  of that file, unless allowlisted. Fixtures
+  reproduce three review findings that shared this shape and were the
+  motivation for the guard: three sibling `it`-block citations collapsing
+  onto one range twice, the third never cited; three per-harness bullet
+  citations doing the same; two logically distinct assertions collapsing
+  onto one shared range and anchor text, the second's own line never cited.
+  Run over the current bundle, every hit either rule reports is read
+  against its own target file and the citing paragraph, then fixed or
+  allowlisted; the measured per-rule hit counts live in `docs/okf/log.md`
+  with the classification that produced them, not here, so the two sites
+  cannot drift apart. The recurring coincidence shapes are a doc-wide
+  "topic sentence, then repeat as the closing list item" convention for
+  rule (a), and a short or common token -- a keyword, a mirrored field on
+  twin interfaces, a comment restating a literal, a test-assertion idiom on
+  an adjacent line, a reused local variable name -- recurring near a real
+  citation for rule (b). Lives in this file rather than as an okf-kit rule
+  because this
+  suite already runs on every PR while an okf-kit rule needs a release and
+  a fleet pin bump first; an opt-in okf-kit rule for the same class is a
+  named follow-up candidate once this guard has proven itself.
+- Review round 2 of the citation-sibling-drift guard above (task agent-dx
+  9f72ae6d): the round-1 review found 7 of the round's 18 raw hits were not
+  coincidental at all -- real mis-pointed citations that got allowlisted
+  instead of fixed, because the round-1 pass classified every hit by range
+  and reason without re-deriving each cited claim's real evidence line by
+  line. All seven re-pointed to their real evidence, citation-only, no
+  content changes: a duplicate `docs-consistency.test.ts` self-citation
+  whose second claim's real test sat 26 lines below the first
+  (`subagent-contracts-superset.md`); an `init.test.ts` range that stopped
+  6 lines short of the `model: opus` assertion it named
+  (`model-preselection.md`); a `SKILL.md` duplicate whose first claim's
+  real text sat just above the cited line (`run-state-lifecycle-and-
+  markers.md`); an `init.ts` comment cited in place of the real
+  `installKitFile` call it restates (`install-fence-mechanics.md`); an
+  `init.ts` range crossing from one branch of `installKitFile` into
+  another branch's own record line (`install-fence-mechanics.md`); an
+  `init.ts` range naming the wrong call for an `opencodeEffortLine(...)`
+  claim (`model-preselection.md`, cited from two spellings of the same
+  path); and a milder range that stopped 1 line short of the parameter its
+  own sentence's second half named (`install-fence-mechanics.md`). Widened
+  `SIBLING_GUARD_WINDOW` from 10 to 20 once a real case fell just outside
+  it (two genuinely distinct `init.ts` notes sharing one message, 18 lines
+  apart, both legitimate and now allowlisted per doc); re-triaged every
+  additional hit the wider window surfaced against the bundle, fixing or
+  allowlisting each with a reason stating what the cited line actually
+  says (see `docs/okf/log.md` for the full re-triage and the re-measured
+  counts). Added `anchorKey` (first 8 hex chars of a sha256 over the
+  finding's own anchor text, computed at test time, never stored literally
+  in the array) to every allowlist entry and to the match, plus a test
+  asserting every entry matched at least one finding on the current
+  bundle, closing a gap where a range-only match would silently exempt any
+  future, differently-anchored finding on the same range. Added a fixture
+  at the real batch-39 S3 geometry (a literal duplicate citation, its real
+  sibling 15 lines away, not the original fixture's 10-line near-miss
+  range) asserting both rules' behaviour, and a negative fixture pinning
+  that the duplicate-citation rule fires regardless of window, since it is
+  a pairing comparison, not a windowed one. Two coverage gaps noted in the
+  guard's own comment and here rather than closed this round: a path-less
+  continuation citation (`:N-M#"..."`, whose path is implied by the
+  preceding citation) never matches the citation regex, so this guard
+  cannot see one -- extending the regex to resolve a continuation's
+  implied path is a named follow-up; and a citation-shaped string inside a
+  fenced ` ``` ` code block is now skipped rather than matched (closing the
+  reverse risk of misreading a code sample as a citation), a cheap
+  addition alongside the rest of this round's work.
+- Review round 3 of the citation-sibling-drift guard above (task agent-dx
+  9f72ae6d): a second consecutive review round found allowlist entries that
+  certified real wrong-sibling drift, so this round changes the mechanism
+  rather than only the entries. An allowlist entry now records the
+  GEOMETRY it was cleared against -- the target-file line(s) carrying the
+  uncited identical anchor text for a rule-(b) entry, the doc line the
+  repeat sits on for a rule-(a) one -- and that geometry is part of the
+  match, so an entry exempts only the hit it was actually reviewed for: a
+  new uncited occurrence next to an already-cleared one, or a repeat that
+  moved to another doc line, fails instead of inheriting the old verdict. A
+  test re-reads those recorded lines against the current files
+  independently of the guard's own output (the anchor text is re-derived
+  from the doc's own citation, since the array deliberately stores a hash
+  rather than the literal text), so an entry whose situation no longer
+  exists goes red instead of silently exempting a different one. The
+  free-form `reason` field is replaced by `claim`: one sentence naming what
+  the citing sentence describes and why the cited line, rather than the
+  uncited sibling, is its evidence, written so a reviewer can falsify it by
+  reading exactly the two lines the entry names. Process, recorded in
+  `docs/okf/log.md` with each round's classification: an allowlist entry is
+  accepted only on an INDEPENDENT review classification of the hit, never
+  on the reading of whoever implemented or re-pointed the citation, which
+  is how both earlier rounds' wrong verdicts reached a green suite.
+  Re-pointed the pair this round's review found (a sentence about the
+  dropped-role tier-variant SUB-loop citing the enclosing loop's own note
+  range, in two docs) to the sub-loop's own note, dropped their entries,
+  and re-triaged every remaining hit at the current window against its
+  target file. Also citation-only: a fence-contract citation that stopped
+  short of the assertion its sentence names, a run-state citation one line
+  short of the sentence it supports, and a slicer-superset citation whose
+  sentence's second half is now cited from the test that actually pins it.
+  Two more fixtures: rule (b) firing at the guard's window and staying
+  silent at the round-1 value of 10 for an uncited occurrence 15 lines
+  outside the cited range (the window was previously pinned only
+  indirectly, through the no-dead-exemption test), and a doc that ends
+  inside an unclosed fence now failing loudly instead of silently dropping
+  every citation after the stray delimiter, paired with an assertion that
+  every bundle doc yields at least one citation.
+- Review round 4 of the citation-sibling-drift guard above (task agent-dx
+  9f72ae6d): a third consecutive review classified every allowlist entry
+  by re-reading the two lines each `claim` names, rather than trusting the
+  prior round's verdicts; none certified real drift, but two claims were
+  inaccurate and one more citation was mis-paired in a shape the guard
+  itself cannot see. Rule (a)'s match compared only the finding's second
+  citation line, which a `return true;` mutant of that comparison
+  survives, and which also could not tell a two-citation entry's cleared
+  repeat from a THIRD, unreviewed repeat sharing the same second line;
+  fixed with a dedicated fixture and a repeat-count check. The allowlist
+  entry's match and its independent geometry re-check both gained
+  `paragraphLine`, the doc line of the finding's own first citation: an
+  entry was previously keyed by (doc, kind, real target, range, anchorKey,
+  recorded geometry) alone, so the same coincidence recurring in a SECOND,
+  unreviewed paragraph of a doc would silently inherit the first
+  paragraph's verdict -- exactly the shape one entry was carrying (the
+  same `init.ts` range cited, and separately drifting, from two paragraphs
+  of `model-preselection.md`); the second paragraph's citation is now
+  re-pointed to its own, different evidence instead, so the entry covers
+  one paragraph only. The geometry re-check's duplicate-citation branch
+  dropped a near-tautological "some citation exists at the recorded line"
+  check (true of any citation the extractor produces, by construction) for
+  one that reads the group's own citations, sorts them into document
+  order, and checks the recorded lines by POSITION -- closing a mutant
+  (`if (false)` on the old guard) no existing fixture caught. The bare
+  `claim.length > 40` sanity check now also rejects a claim that never
+  names one of its own entry's recorded lines, closing the gap that let
+  three `subagent-contracts-superset.md` entries carry a long claim that
+  never actually pointed at its own geometry. One inaccurate claim
+  (`model-preselection.md`) said an uncited line named a "codex-only
+  effort field"; it is opencode's own field for a non-Claude-family,
+  non-Ollama provider, not a codex field at all, and no anchor exists that
+  can widen the citation to cover it under this file's own occurrence-cap
+  rule, so the claim was corrected instead. One real mis-pairing:
+  `install-fence-mechanics.md` cited the OUTER per-dropped-role loop's
+  gate/note for a sentence about the tier-variant SUB-loop, and the
+  sub-loop's own gate/note for a sentence about the base-file note --
+  swapped, citation-only, no content change. Known limit, unclosed this
+  round: neither rule catches a citation that resolves and anchors cleanly
+  but simply names the WRONG target -- no duplication, no anchor text
+  recurring nearby -- which is exactly the shape this round's real
+  mis-pairing was; both citations passed every existing check (including
+  this guard) because nothing about either one, read alone or against its
+  paragraph's siblings, looks wrong.
+
 ## [0.31.0] - 2026-09-07
 
 ### Changed

@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-07T04:34:44Z
+timestamp: 2026-09-07T13:49:22Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -130,7 +130,9 @@ below.
   `src/models.ts:22#"export const READ_ONLY_ROLES: ReadonlySet<Role> = new"`) additionally get
   `disallowedTools: Edit, Write, NotebookEdit` right after `effort:`
   (`src/init.ts:335-336#"disallowedTools: Edit, Write, NotebookEdit"`). Test coverage:
-  `test/init.test.ts:102-108#"expect(slicer).toContain("` (`model: sonnet` / `model: opus` present) and
+  `test/init.test.ts:104-109#"model: sonnet"` (`model: sonnet` present) and
+  `test/init.test.ts:110-115#"{{MODEL}}"` (`model: opus` present, and the
+  `{{MODEL}}` placeholder is not left unsubstituted) and
   `test/init.test.ts:510-554#"expect(claudeSlicer).toContain("` (per-role alias mix installs correctly for Claude while
   opencode differs, see below).
 - **opencode.** opencode needs a fully-qualified `provider/model-id`.
@@ -151,7 +153,7 @@ below.
   omitted entirely so the subagent inherits the session/default model
   (`src/init.ts:350-370#"permission:"`, comment at `:268-269#"// Omitting it lets the subagent inherit the session/default model."`). Since 0.22.0 it also takes
   an `effortLine` parameter, computed once by the caller via
-  `opencodeEffortLine(DEFAULT_TIER[role], modelValue)` (`src/init.ts:869#"modelValue,"`)
+  `opencodeEffortLine(DEFAULT_TIER[role], modelValue)` (`src/init.ts:862-866#"modelValue,"`)
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
@@ -418,7 +420,9 @@ role's own intended weight). 0.22.0 closes that gap by having
 `` `effort: ${TIER_DEFS[DEFAULT_TIER[role]].effort}` `` (Claude Code,
 `init.ts:329-332#"selection?.effort ?? TIER_DEFS[DEFAULT_TIER[role]].effort"`) or the equivalent opencode effort line (via
 `opencodeEffortLine(DEFAULT_TIER[role], modelValue)`, computed once per role
-at the call site, `init.ts:869#"modelValue,"`, and passed in as a parameter the same
+at the call site described above under "Per-harness frontmatter behavior",
+and passed in as a parameter at the call right after,
+`init.ts:867-869#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`, the same
 way `composeOpencodeAgentVariant` already took its own effort line since
 fix-round-2) unconditionally, for every install regardless of `--tiers`.
 Since `TIER_DEFS[DEFAULT_TIER[role]].effort` is `"medium"` for
@@ -486,7 +490,7 @@ M2; before the fix this transition was silent, see
 [install-fence-mechanics.md](install-fence-mechanics.md)), and a
 `full -> minimal` downgrade that also had `tiers: true` now notes the
 dropped roles' tier-variant files too, not just their base files
-(`init.ts:606-617#"now untracked after the full -> ${profile} profile downgrade; run"`, review finding M3;
+(`init.ts:626-635#"variantPath}: now untracked after the full"`, review finding M3;
 `test/init.test.ts:894-931#"The variant files themselves are untouched, only untracked, same as"` pins the note count, since 0.21.0 asserting 8
 notes rather than 6 for the base-plus-tiers case — advisor became a third
 dropped role, contributing 1 base-file note plus 1 non-default-tier note of

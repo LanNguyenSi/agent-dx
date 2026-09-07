@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-07T04:29:31Z
+timestamp: 2026-09-07T13:49:22Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -24,10 +24,10 @@ sources:
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/SKILL.md:76#"  05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(SKILL.md:81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:160#"one directory per unit of work, newest = active";
+(SKILL.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:160#"one directory per unit of work, newest = active";
 packages/orchestrator-workflow/INSTALL-AGENT.md:64-65#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:173-178#"instead: it sources its defaults from the operator"). The newest run
 directory is the active one unless a `.ai/run` pointer names one
-(SKILL.md:83#"older directories are the auditable history. Do not", see the pointer section below); older
+(SKILL.md:81-82#"pointer names one (see below);", see the pointer section below); older
 directories are the auditable history and
 must not be edited (SKILL.md:83#"older directories are the auditable history. Do not", "Do not edit past runs"). Three of the
 seven files carry a `<!-- solution-acceptance: <key> = <value> -->`

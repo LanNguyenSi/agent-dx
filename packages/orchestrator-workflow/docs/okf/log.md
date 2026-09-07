@@ -1,5 +1,384 @@
 # Bundle log
 
+- 2026-09-07T13:36:36Z (citation-sibling-drift guard, review round 4, task
+  agent-dx 9f72ae6d): a third consecutive independent review re-read every
+  allowlist entry against the two lines its own `claim` names, rather than
+  trusting the prior round's verdicts. None of the 14 entries certified
+  real drift, but the pass found two inaccurate claims and one further
+  citation mis-pairing invisible to the guard itself.
+  (M1) Rule (a)'s match compared only `finding.citationLines[1]` against
+  `entry.secondCitationLine`; a `return true;` mutant of that one line
+  survives, and a two-citation entry's cleared repeat was indistinguishable
+  from a finding whose group grew a THIRD, unreviewed repeat sharing the
+  same second line. The match now also requires
+  `finding.citationLines.length === 2`
+  (`packages/orchestrator-workflow/test/docs-consistency.test.ts`, the
+  `siblingGuardFindingMatchesAllowlist` function), pinned by a new
+  bundle-independent fixture covering both the differing-second-line and
+  the three-repeat cases. The geometry re-check's duplicate-citation
+  branch had the same blind spot from the other side: it only asked
+  whether SOME citation exists at the recorded line, true of any citation
+  the extractor produces by construction. Replaced with a check that sorts
+  the group's own citations into document order and requires the recorded
+  `paragraphLine`/`secondCitationLine` to sit at positions 0 and 1; a
+  mutant reducing the old guard to `if (false)` survived until this
+  fixture existed.
+  (L2) The match and the geometry re-check both gained `paragraphLine`,
+  the doc line of the finding's own first citation. Before this, an entry
+  was keyed by (doc, kind, real target, range, anchorKey, recorded
+  geometry) alone, so the identical coincidence recurring in a SECOND,
+  unreviewed paragraph would silently inherit the first paragraph's
+  verdict. Not hypothetical: the `model-preselection.md` entry for
+  `packages/orchestrator-workflow/src/init.ts:862-866` matched hits from
+  both its `:156` paragraph and
+  its `:423` paragraph -- the array's own header comment named this
+  explicitly ("one entry also covers the same real hit cited a second
+  time elsewhere in the same doc under a different path spelling"). The
+  `:423` paragraph's citation of that range is re-pointed to its own,
+  different evidence
+  (`packages/orchestrator-workflow/src/init.ts:867-869#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`,
+  the effort-line pass-in the sentence actually describes), so the entry
+  now covers `:156` only.
+  (L1) The "states a falsifiable claim" sanity check tested only
+  `claim.length > 40`; three `subagent-contracts-superset.md` entries
+  (for `test/docs-consistency.test.ts:534`, `:1055`, `:1169`) passed it
+  with a claim that never named either of its own recorded lines.
+  Strengthened to also require the claim to include at least one of
+  `start`/`end`/`paragraphLine`/`secondCitationLine`/`uncitedLines`; the
+  three claims were edited to name their own recorded lines (534/341,
+  1055/425, 1169/555) without changing what they assert. Extracted to a
+  named `siblingGuardClaimIsFalsifiable` function and given its own
+  bundle-independent fixture (a 41-character claim naming none of its
+  own entry's recorded lines), since the real array never contains a bad
+  entry for a weakened-back-to-length-only mutant to fail against.
+  (L3) is the geometry-check half of M1 above, not a separate change.
+  (M2) The `model-preselection.md` entry for
+  `packages/orchestrator-workflow/test/init.test.ts:1793-1826` claimed the
+  uncited line 1827 "asserts the absence of the codex-only
+  effort field". It does not: `reasoningEffort` (asserted absent at 1827)
+  is opencode's own field for a non-Claude-family, non-Ollama provider
+  (`packages/orchestrator-workflow/src/init.ts:461#"reasoningEffort: ${TIER_DEFS[tier].effort}"`);
+  codex's own equivalent field is `model_reasoning_effort`
+  (`packages/orchestrator-workflow/src/codex.ts:50#"model_reasoning_effort = ${tomlString(selection.effort)}"`).
+  No compliant anchor exists to widen the citation to cover 1827: the
+  only non-quote-crossing substring distinguishing it from its sibling
+  line 1826 is the bare word `reasoningEffort`, which recurs 15 times in
+  `init.test.ts`, over this file's own 3-occurrence-file-wide cap; the
+  claim was corrected instead of the citation.
+  (M4) `install-fence-mechanics.md`'s "Since fix-round-2 (review finding
+  R2-M2)" sentence had its two citations swapped: the sentence about the
+  tier-variant SUB-loop cited the OUTER per-dropped-role loop's own
+  gate/note (`init.ts:606-617`, gate at 615, note at 617), and the
+  sentence about the base-file note cited the sub-loop's own gate/note
+  (`init.ts:630-635`). Re-pointed, citation-only: the sub-loop sentence
+  now cites
+  `packages/orchestrator-workflow/src/init.ts:626-635#"variantPath}: now untracked after the full"`
+  (already used for the same sub-loop elsewhere in this doc and in
+  `model-preselection.md`); the base-file-note sentence now cites
+  `packages/orchestrator-workflow/src/init.ts:615-618#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run"`.
+  Known limit, unclosed this round (also recorded in the CHANGELOG
+  `[Unreleased]` entry): neither rule catches a citation that resolves
+  and anchors cleanly but simply names the WRONG target -- no duplication
+  in the paragraph, no anchor text recurring nearby. M4's mis-pairing was
+  exactly this shape: both citations passed every existing check,
+  including this guard, because nothing about either one, read alone or
+  against its paragraph's siblings, looked wrong; only re-reading the
+  target file against the sentence's own claim surfaced it.
+  Verification. `npm test`, `npm run typecheck` and `npm run
+  typecheck:test` are green, including this round's new fixtures; `npm
+  run format:check` is clean on `test/docs-consistency.test.ts` (the two
+  pre-existing red files, `decision-authority.test.ts` and
+  `template-markers.test.ts`, are untouched by this round). `npx
+  okf-kit@0.10.0 check --json --require-anchors docs/okf` measured before
+  this round's edits: 0 errors, 0 warnings, 17 notices; measured again
+  after this round's commit (once the re-stamped `timestamp:` fields are
+  no longer future-dated against their own last commit): 0 errors, 0
+  warnings, 17 notices, unchanged.
+  Mutation probes, all run through `agent-primitives probe` in an
+  isolated worktree after this round's implementation commit, all killed
+  with the restore verified. Replayed from earlier rounds: rule (a)
+  stubbed out of the finding list (`findCitationSiblingDrift`'s
+  `...findDuplicateCitations(citations),` spread removed); the
+  `anchorKey` comparison dropped from the match; the geometry re-check
+  short-circuited to `return undefined;` unconditionally. New this
+  round: the rule-(a) match's tail collapsed to `return true;` (the
+  `citationLines.length === 2` conjunct and the `secondCitationLine`
+  comparison both dropped); the `paragraphLine` comparison dropped from
+  the match; `siblingGuardClaimIsFalsifiable`'s own-line check collapsed
+  to `return true;` after the length check (the length-only regression
+  this round's L1 fixture exists to catch). Tree byte-identical after
+  every probe.
+
+- 2026-09-07T12:57:17Z (citation-sibling-drift guard, review round 3, task
+  agent-dx 9f72ae6d, orchestrator decision D-017): round 2's review found
+  one more allowlisted pair that was real wrong-sibling drift, the second
+  round in a row to find that class inside the allowlist, so this round
+  changed the mechanism rather than only the entries. Structural cause
+  named by D-017: whoever implemented or re-pointed a citation also
+  classified its own guard's hits, and an entry's justification was free
+  prose no test could check, so a wrong "coincidence" verdict shipped with
+  the suite green. Three changes.
+  (R1) An entry now records the geometry it was cleared against and that
+  geometry is part of the match: `uncitedLines` for a rule-(b) entry (the
+  target-file line or lines carrying the uncited identical anchor text, in
+  the order the rule reports them; recorded as a list because
+  `packages/orchestrator-workflow/src/uninstall.ts:138-147#"continue;"`
+  really does report two at once) and `secondCitationLine` for a rule-(a)
+  entry (the doc line the repeat sits on). An entry therefore exempts only
+  the hit it was reviewed for: a second uncited occurrence appearing next
+  to a cleared one, or a repeat that moves to another doc line, fails the
+  per-doc check instead of inheriting the old verdict. A separate test
+  re-reads those recorded lines against the current files without going
+  through the guard at all (the anchor text is re-derived from the doc's
+  own citation, since the array stores a hash rather than the literal
+  text, for the file-wide-occurrence reason recorded in round 2), so an
+  entry whose situation no longer exists goes red even if the guard itself
+  were broken and produced no findings. Two bundle-independent fixtures
+  pin both halves.
+  (R2) `reason` is replaced by `claim`: one sentence naming what the
+  citing sentence describes and why the cited line, not the uncited
+  sibling, is that sentence's evidence, written so a reviewer can falsify
+  it by reading exactly the two lines the entry names. The process the
+  entries depend on is recorded here rather than in the entries: an
+  allowlist entry is accepted only on an independent review
+  classification, never on the reading of whoever wrote or re-pointed the
+  citation. `docs/okf/index.md`'s Maintenance section and the CHANGELOG
+  `[Unreleased]` entry both state that rule; neither carries hit counts
+  any more (round-2 finding F2 -- the CHANGELOG still named 7 and 11,
+  which had been stale since round 2 re-measured them).
+  (R3) Re-pointed the pair: `install-fence-mechanics.md` and
+  `model-preselection.md` both cited the enclosing per-dropped-role note
+  range for a sentence about the tier-variant SUB-loop, whose own note
+  sits below it
+  (`packages/orchestrator-workflow/src/init.ts:626-635#"variantPath}: now untracked after the full"`,
+  unique file-wide, anchor on the range's last content line); both entries
+  dropped. Then re-ran the guard over the corrected bundle with the
+  allowlist bypassed and read every raw hit against its target file and
+  its citing paragraph: rule (a) reports 5 hits, rule (b) reports 10 at
+  window 20 and 8 at window 10. Allowlisted as 14 entries (5
+  duplicate-citation, 9 wrong-sibling-anchor; one wrong-sibling entry
+  matches two raw hits that differ only in the citing doc's own spelling
+  of the path), down from round 2's 16.
+  Citation-only re-points from the round-2 review's smaller findings.
+  `install-fence-mechanics.md`'s fence-contract bullet cited a range that
+  stopped before the assertion its own sentence names; widened to
+  `packages/orchestrator-workflow/test/init.test.ts:197-204#"The fence starts at <!-- orchestrator-workflow:begin --> below."`.
+  The review had suggested ending that range on the no-conflict assertion
+  below it instead; that is not reachable under this bundle's own rules,
+  since that line's only content recurs 9 times in the target file and the
+  local anchor guard caps an anchor at 3 file-wide occurrences, so no
+  range ending there can carry a compliant anchor. The widened range
+  covers the marker-mention survival assertion the old one truncated; the
+  no-conflict half stays covered by the same bullet's `writers.ts`
+  citation of the mechanism. `run-state-lifecycle-and-markers.md`'s
+  copy-the-templates sentence cited one line below the sentence it
+  supports; widened to
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:80-81#"the files as the run progresses. The newest run"`.
+  `subagent-contracts-superset.md`'s slicer-superset sentence had a second
+  half (the v1 contract block and the criterion-ID checklist) that its
+  single citation did not prove; the tests that do pin it are now cited
+  alongside it,
+  `packages/orchestrator-workflow/test/acceptance-baseline.test.ts:251-258#"else assertCriteriaShape(block);"`
+  and
+  `packages/orchestrator-workflow/test/acceptance-baseline.test.ts:381-387#"original contract, keep the original checklist semantics"`.
+  Two new fixtures. The window was previously pinned only indirectly, by
+  the no-dead-exemption test, which would evaporate the day the last
+  window-dependent entry is fixed; a direct fixture now places an uncited
+  occurrence 15 lines outside the cited range with a genuine sibling range
+  also cited, and asserts rule (b) fires at the guard's window and stays
+  silent at the round-1 value of 10. The fence-skipping pass toggled on
+  any delimiter line with no balance check, so one stray fence would have
+  marked the rest of a doc as fenced, dropped every citation after it and
+  left that doc reporting a clean zero; it now throws, with a fixture, and
+  a companion assertion requires every bundle doc to yield at least one
+  citation.
+  Log hygiene. Replaced this doc's own round-2 suite total with a delta
+  verdict (round-2 finding F3; the Maintenance convention above forbids
+  totals). Rewrote the round-2 entry's 14 bare-basename citations
+  (`init.ts`, `init.test.ts`, `SKILL.md`) as repo-relative paths (F6).
+  Side effect worth recording: once a doc pins one repo-relative path, the
+  checker also resolves that doc's other multi-segment citations of the
+  same suffix, which surfaced an older entry's historical inventory of how
+  some citations read at that time -- it was being validated against
+  today's file and reported a stale start line. Rewrote that inventory as
+  prose, the same remedy and the same reason as the historical CHANGELOG
+  mention recorded in the round-2 entry above. The CHANGELOG citation this
+  doc carries was re-pointed by the round-3 `[Unreleased]` bullet's own
+  length, and two self-citations into `subagent-contracts-superset.md`
+  were re-pointed by the two lines the slicer-superset re-point added.
+  Verification. `npm test`, `npm run typecheck` and
+  `npm run typecheck:test` are green, including the round's new fixtures;
+  `npm run format:check` is clean on `test/docs-consistency.test.ts` (the
+  two pre-existing red files, `decision-authority.test.ts` and
+  `template-markers.test.ts`, are untouched by this round).
+  `npx okf-kit@0.10.0 check --json --require-anchors docs/okf` measured
+  before this round's edits: 0 errors, 0 warnings, 38 notices; measured
+  after the round's commits: 0 errors, 0 warnings, 17 notices. The drop
+  below the pre-round baseline of 24 is the F6 re-points plus the
+  resolution side effect above; all 17 remaining notices are this doc's
+  own `unresolved-ambiguous` notices on bare basenames (`init.ts`,
+  `SKILL.md`, `cli.ts`) inside older entries, the same class this doc
+  carried before the round.
+  Mutation probes, all run through the probe runner in an isolated
+  worktree, all killed with the restore verified: rule (a) and rule (b)
+  each stubbed out of the finding list; the window set to 0; the
+  `anchorKey` comparison dropped from the match; the fenced-line skip
+  removed; the recorded-geometry comparison dropped from the match; the
+  geometry re-check's own condition disabled; and the fence-balance throw
+  disabled. Worth recording because it is the shape this round exists to
+  catch: replaying round 2's `anchorKey` probe on this round's first tree
+  came back `survived`. The regression was this round's own -- the
+  anchorKey fixture's differing finding also moved its uncited line, so
+  the newly added geometry comparison rejected it and the fixture stopped
+  discriminating the anchorKey check at all. The fixture now varies the
+  anchor text alone, which is also a real shape (a citation re-anchored in
+  place onto text that recurs at the same uncited line); re-probed, the
+  mutant is killed again.
+
+- 2026-09-07T11:57:20Z (citation-sibling-drift guard, review round 2, task
+  agent-dx 9f72ae6d): round 1's own review classified all 18 raw hits by
+  range and stated reason without re-deriving each cited claim's real
+  evidence line by line; 7 of them were real mis-pointed citations
+  allowlisted instead of fixed. Re-derived each against its target file and
+  re-pointed, citation-only, no content changes: `subagent-contracts-
+  superset.md`'s duplicate `docs-consistency.test.ts:848` self-citation
+  (its second claim's real test sits at `:857-874`, `cursor = idx;`, 26
+  lines below the first, still-correct citation); `model-preselection.md`'s
+  `packages/orchestrator-workflow/test/init.test.ts:102-108` citation for
+  the `model: sonnet`/`model: opus` pair (split into
+  `:104-109#"model: sonnet"` and `:110-115#"{{MODEL}}"`, the second range
+  covering the `model: opus` assertion plus the following
+  placeholder-not-left check 6 lines past the old range's end);
+  `run-state-lifecycle-and-markers.md`'s duplicate
+  `packages/orchestrator-workflow/assets/skill/SKILL.md:83` self-citation
+  (its first claim's real text sits at `:81-82`, just above the cited
+  line); `install-fence-mechanics.md`'s
+  `packages/orchestrator-workflow/src/init.ts:776` citation for the
+  `.gitkeep` install (a comment restating the literal; the real
+  `installKitFile(...)` call is at `:769`); its
+  `packages/orchestrator-workflow/src/init.ts:755-760` citation for the
+  exists-and-unedited overwrite branch (crossed from the conflicted branch
+  into the path-does-not-exist branch's own record line; the real evidence
+  is `:747-752`); its
+  `packages/orchestrator-workflow/src/init.ts:900-902` citation for the
+  effort-line-then-pass-in claim (ended 1 line before the `effortLine,`
+  parameter its own sentence's second half named; widened to
+  `:893-903#"effortLine,"` to cover both halves, with no further
+  coincidental hit at this range); and `model-preselection.md`'s two
+  `packages/orchestrator-workflow/src/init.ts:869` citations (from two path
+  spellings) for the `opencodeEffortLine(...)` claim (that line is the
+  sibling `composeOpencodeAgent(...)` call; the real evidence is
+  `:862-866`).
+  D-010: widened `SIBLING_GUARD_WINDOW` from 10 to 20 once a real case
+  (two genuinely distinct `init.ts` notes sharing one message, 18 lines
+  apart -- the dropped-role file note at `:606-617` and its tier-variant
+  sibling note at `:635`) fell just outside 10; re-ran the guard with an
+  emptied allowlist at window 20 over the corrected bundle and read every
+  raw hit against its target: rule (a) reports 5 real hits (down from 7;
+  the two fixed above were genuine drift, not this doc-wide "topic
+  sentence, then repeat as the closing list item" convention); rule (b)
+  reports 12 real hits at window 20 (carried over from window 10 at their
+  original ranges, across three docs: `install-fence-mechanics.md`'s
+  `packages/orchestrator-workflow/test/init.test.ts:190-201` and
+  `src/uninstall.ts:138-147`, `model-preselection.md`'s
+  `packages/orchestrator-workflow/test/init.test.ts:1497-1513` and
+  `packages/orchestrator-workflow/test/init.test.ts:1793-1826`, and
+  `operator-install-and-registry.md`'s `src/doctor.ts:113-121`; five newly
+  visible at window 20, each read and allowlisted with the reason found:
+  `install-fence-mechanics.md`'s
+  `packages/orchestrator-workflow/src/init.ts:766-766` (`readAsset(join(`
+  prefix also reaches an unrelated SKILL.md asset read 20 lines below),
+  `packages/orchestrator-workflow/src/init.ts:606-617` and
+  `model-preselection.md`'s own citation of the same range (the
+  dropped-role-note pair above), `install-fence-mechanics.md`'s
+  `packages/orchestrator-workflow/test/init.test.ts:129-142` (a common
+  report-shape assertion idiom repeated in an earlier, unrelated `it`
+  block), and the two re-pointed ranges above
+  (`packages/orchestrator-workflow/src/init.ts:747-752` and
+  `packages/orchestrator-workflow/src/init.ts:862-866`) each still carrying
+  their own pre-existing coincidental sibling). Allowlisted as 16 entries
+  (5 duplicate-citation, 11 wrong-sibling-anchor; one wrong-sibling entry
+  matches two raw hits that differ only in the citation's own path
+  spelling, `src/init.ts` vs `init.ts`). Every entry now carries an
+  `anchorKey` (first 8 hex chars of a sha256 over the finding's own anchor
+  text, computed at test time via `node:crypto`, never stored literally in
+  the array) in addition to (doc, kind, real target, range); a new test
+  asserts every entry matched at least one finding on the current bundle,
+  so a future citation edit that changes the anchor but keeps the range
+  fails the match instead of staying silently exempt. Added a fixture at
+  the real batch-39 S3 geometry this guard's original fixture only
+  approximated: a literal duplicate citation (not a near-miss pair of
+  ranges), its real sibling 15 lines away (not 10); the drifted form is
+  flagged by rule (a) only, not rule (b) (an identical range is not a
+  sibling range), and a negative-control fixture pins that rule (a) fires
+  identically at window 0, 1, and 1000, since `findDuplicateCitations`
+  never takes a window argument. Two coverage gaps noted rather than
+  closed: a path-less continuation citation (`:N-M#"..."`) never matches
+  `ANCHOR_CITATION_RE`, so this guard cannot see one (`model-preselection
+  .md` alone carries several); a citation-shaped string inside a fenced
+  ` ``` ` block is now skipped during extraction (closes the reverse risk
+  of misreading a code sample as a citation; the bundle currently has no
+  fenced blocks, so this is a no-op today). `npm test` (green, including
+  this round's four new pins), `npm run typecheck`, and
+  `npm run typecheck:test` are all green;
+  `npm run format:check` is clean on `test/docs-consistency.test.ts`
+  itself (the two pre-existing red files, `decision-authority.test.ts` and
+  `template-markers.test.ts`, are unchanged and untouched by this round).
+  `npx okf-kit@0.10.0 check --json --require-anchors docs/okf`, measured
+  against the pre-round tree (git-stashed this round's edits, ran, then
+  restored), reports 0 errors, 0 warnings, 24 notices. Measured again
+  after this round's commits: a first pass found a broken
+  citation chain (two citations in this entry's own text had been
+  line-wrapped across a markdown line break inside their backtick spans,
+  making them invisible to the parser, so a bare continuation right after
+  them resolved against the wrong preceding citation) and a staleness lag
+  (the doc timestamps had been stamped before the CHANGELOG.md/test-file
+  edits they cover actually landed); fixed in a follow-up commit and
+  re-measured: 0 errors, 0 warnings, 38 notices. The 14 new notices were
+  this doc's own `unresolved-ambiguous` notices on the bare basenames
+  (`init.ts`, `init.test.ts`, `SKILL.md`) this entry's own citation list
+  introduced, the same notice class this doc already carried before the
+  round, not a new one; review round 3 re-pointed them to repo-relative
+  paths (see the round-3 entry above) and the count returned to the
+  pre-round baseline.
+
+- 2026-09-07T11:10:41Z (citation-sibling-drift guard): added a
+  paragraph-scoped guard next to the existing anchor-load-bearing checks in
+  `test/docs-consistency.test.ts` -- rule (a): the same `file:range#anchor`
+  cited twice in one paragraph; rule (b): a string anchor's text also
+  occurring, uncited, at another line of the same target within a 10-line
+  window while the paragraph cites a sibling range of that file -- with
+  in-memory fixtures for three review findings that shared this shape.
+  Appended at the end of the file, past every existing citation into it, so
+  none shifted. `npm test`, `npm run typecheck`, `npm run typecheck:test`,
+  and `npm run format:check` are all green (format needed one
+  `prettier --write` pass over the new block). Run over the current bundle,
+  rule (a) reports 7 real hits and rule (b) reports 11, each read against
+  its real target file and the citing paragraph and allowlisted in the
+  guard's own test with the specific reason found: a doc-wide "topic
+  sentence, then repeat as the closing list item" convention for rule (a)
+  (`subagent-contracts-superset.md`, `run-state-lifecycle-and-markers.md`,
+  `operator-install-and-registry.md`); a short/common token (a bare
+  keyword, a field mirrored across two interfaces, a comment restating a
+  literal the code two lines away already installs, a test-assertion idiom
+  repeated on an adjacent line, a local variable name reused a few lines
+  later) recurring near a real citation by coincidence for rule (b)
+  (`install-fence-mechanics.md`, `model-preselection.md`,
+  `operator-install-and-registry.md`). The guard itself reports 0
+  unallowlisted findings against the bundle. `docs/okf/index.md`'s
+  Maintenance section and `CHANGELOG.md`'s `[Unreleased]` section both name
+  the guard. Re-verified and re-stamped `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`, and
+  `subagent-contracts-superset.md` (the four docs whose `sources:` list
+  `test/docs-consistency.test.ts` and/or `CHANGELOG.md`): neither source's
+  change needed a citation re-point, since the new test code sits past
+  every existing citation into the file and every bundle `CHANGELOG.md`
+  citation is heading-anchored, not line-numbered.
+  `okf-kit check --json --require-anchors
+  packages/orchestrator-workflow/docs/okf`, measured after this round's
+  commit, reported 0 errors, 0 warnings, 24 notices, matching the
+  pre-round baseline exactly.
+
 - 2026-09-07T04:29:31Z (release 0.31.0): moved the two `[Unreleased]`
   bullets (the docs-consistency pin hardening from PR #199, the three
   verification-process rules from PR #206) under a new `## [0.31.0] -
@@ -181,8 +560,8 @@
   "...reports as killed together with their...") were re-anchored to a
   shorter quote sitting wholly on the anchor's own last line instead of a
   two-line span, per this bundle's own single-line-anchor convention
-  (`docs/okf/subagent-contracts-superset.md:366#"Actions shell replay named in step 6 is a second, explicitly"`,
-  `docs/okf/subagent-contracts-superset.md:473#"reports as killed together with their"`).
+  (`docs/okf/subagent-contracts-superset.md:368#"Actions shell replay named in step 6 is a second, explicitly"`,
+  `docs/okf/subagent-contracts-superset.md:475#"reports as killed together with their"`).
   `okf-kit check --json packages/orchestrator-workflow/docs/okf` went from
   0 errors/0 warnings/23 notices at round-1 HEAD, to warnings introduced
   by this round's own edits (all resolved by the re-derivation pass
@@ -921,12 +1300,19 @@
   discipline as the 2026-08-17 entry above. `test/init.test.ts` needed a
   narrower fix: the new `describe("tier variants (\`--tiers\`)")` block was
   inserted at the file's old line 941 (confirmed from the commit's own
-  diff hunk header), so every citation before that line in both docs
-  (`test/init.test.ts:100-106`, `:275-306`, `:464-509`, `:511-534`,
-  `:721-758`, `:921-941`) needed no change, while the two citations past it
-  (`:995-1007`, `:1009-1016`, the opencode-absent-binary tests) shifted by
+  diff hunk header), so every citation before that line in both docs (the
+  ranges then reading 100-106, 275-306, 464-509, 511-534, 721-758 and
+  921-941) needed no change, while the two citations past it (then reading
+  995-1007 and 1009-1016, the opencode-absent-binary tests) shifted by
   the same uniform +228 the insertion added; both kinds of claim were
   confirmed by direct read, not inferred from the insertion size alone.
+  (Review round 3 of task agent-dx 9f72ae6d rewrote these eight ranges from
+  citation syntax into prose: they are a historical inventory of how the
+  docs' citations read at that time, not live evidence pointers, and once
+  round 3's repo-relative re-points let the checker resolve this doc's
+  `test/init.test.ts` chain, they were being validated against today's file
+  instead. Same remedy, same reason as the historical `CHANGELOG.md`
+  mention two entries above.)
   `INSTALL-AGENT.md` itself changed under this same task (the `--tiers`
   question, command example, manifest-JSON `"tiers": false` field, and a
   new manual-fallback carve-out stating that path never renders
@@ -3003,9 +3389,16 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:260#"the keyed placeholder line's exact text,"`,
-re-pointed by 53 lines since this account was first written (+15 more,
-from the batch-38 `[Unreleased]` bullet added above `[0.30.0]` by the
+(`CHANGELOG.md:420#"the keyed placeholder line's exact text,"`,
+re-pointed by 213 lines since this account was first written (+44 more,
+from task agent-dx 9f72ae6d's own review-round-4 `[Unreleased]` bullet
+added above it, same sibling-drift-guard task; +41 before that,
+from that same task's own review-round-3 `[Unreleased]` bullet
+added above it; +46 before that, from that
+task's review-round-2 bullet; +29 before that, from this
+same task's round-1 `[Unreleased]` bullet
+added above `[0.31.0]`; +15 before that, from the batch-38 `[Unreleased]`
+bullet added above `[0.30.0]` by the
 reviewer-checklist mirrored-pairs task), by T-002's own
 fix-round-1 `[Unreleased]` insertion above it, the earlier +2-line shift
 from the 0.27.0 release commit inserting the `## [0.27.0]` heading above
