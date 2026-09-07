@@ -5381,6 +5381,32 @@ describe("citation-sibling-drift guard: fixtures reproduce the three review-batc
       ).toBe(true);
     }
   });
+
+  // Round 2 (F7): a citation-shaped string inside a fenced ``` code block
+  // must not be treated as a real citation. Repeats the same real citation
+  // once for real, once verbatim inside a fence in the SAME paragraph (no
+  // blank line separates them): if fence lines were still scanned, the
+  // fenced copy would collide with the real one and rule (a) would report
+  // a duplicate-citation finding that should not exist.
+  it("a citation-shaped string inside a fenced ``` code block is not matched as a real citation", () => {
+    const target = buildSiblingGuardFixtureFile(15, {
+      12: '  "real anchor",',
+    });
+    const readTarget = (): string => target;
+    const docText =
+      "prose citing a real range\n" +
+      '(fixture-fence.test.ts:10-12#"real anchor").\n' +
+      "```\n" +
+      'fixture-fence.test.ts:10-12#"real anchor"\n' +
+      "```\n";
+    const findings = findCitationSiblingDrift(
+      docText,
+      identity,
+      readTarget,
+      SIBLING_GUARD_WINDOW,
+    );
+    expect(findings, formatSiblingGuardFindings(findings)).toEqual([]);
+  });
 });
 
 // Imported here, not moved to the top-of-file import block, for the same
