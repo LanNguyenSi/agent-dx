@@ -94,9 +94,20 @@
   after this round's commit (once the re-stamped `timestamp:` fields are
   no longer future-dated against their own last commit): 0 errors, 0
   warnings, 17 notices, unchanged.
-  Mutation probes recorded in this same entry once run, through the probe
-  runner in an isolated worktree, after this round's implementation
-  commit (per this bundle's own commit-before-probing convention).
+  Mutation probes, all run through `agent-primitives probe` in an
+  isolated worktree after this round's implementation commit, all killed
+  with the restore verified. Replayed from earlier rounds: rule (a)
+  stubbed out of the finding list (`findCitationSiblingDrift`'s
+  `...findDuplicateCitations(citations),` spread removed); the
+  `anchorKey` comparison dropped from the match; the geometry re-check
+  short-circuited to `return undefined;` unconditionally. New this
+  round: the rule-(a) match's tail collapsed to `return true;` (the
+  `citationLines.length === 2` conjunct and the `secondCitationLine`
+  comparison both dropped); the `paragraphLine` comparison dropped from
+  the match; `siblingGuardClaimIsFalsifiable`'s own-line check collapsed
+  to `return true;` after the length check (the length-only regression
+  this round's L1 fixture exists to catch). Tree byte-identical after
+  every probe.
 
 - 2026-09-07T12:57:17Z (citation-sibling-drift guard, review round 3, task
   agent-dx 9f72ae6d, orchestrator decision D-017): round 2's review found
