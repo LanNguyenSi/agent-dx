@@ -3193,6 +3193,55 @@ describe("reconcileEnvelopeDiffTruncation", () => {
     expect(envelope.warnings).toBe(nonArrayWarnings);
   });
 
+  it("leaves a non-array `warnings` field untouched, rather than crashing on the removal-branch guard, when the envelope ends WITHIN `maxChars` after correction (round-2 review F3)", () => {
+    // Same shape as the sibling test above, but with a generous
+    // `maxChars` the corrected envelope actually fits within, so this
+    // exercises `reconcileBudgetOverrunWarning`'s OWN `!Array.isArray`
+    // guard on the removal branch (`length <= maxChars`), not
+    // `pushBudgetOverrunWarning`'s guard on the sync/push branch the
+    // sibling test above covers.
+    const alreadyHunkTruncated: MutantDiffField = {
+      text: "@@ -1,4 +1,4 @@\n-aaa\n-bbb\n-ccc\n-ddd",
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 4,
+      added: 4,
+      changedLineCount: 8,
+      truncated: true,
+      hunkTruncated: true,
+    };
+    const deliveredDiff: Record<string, unknown> = {
+      text: "@@ -1,4 +1,4 @@\n-aaa",
+      path: DIFF_PATH,
+      hunkCount: 1,
+      removed: 4,
+      added: 4,
+      truncated: true,
+      "...": "2 more keys omitted",
+    };
+    const envelope = envelopeWith(deliveredDiff, {
+      mutant: "unused",
+      verified_applied_via: "unused",
+    });
+    const nonArrayWarnings = "not an array; left alone rather than clobbered";
+    envelope.warnings = nonArrayWarnings;
+
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      { mutant: originalMutant(alreadyHunkTruncated) },
+      100_000,
+    );
+
+    // `envelope.warnings` comes back byte-identical: the removal
+    // branch's own guard returns before touching it, rather than
+    // throwing on a non-array `.some`/`.filter` call or otherwise
+    // clobbering it. (The excerpt itself is still rebuilt by
+    // `reconcileOneMutant` upstream of the budget guard, which is not
+    // what this guard is about -- see the sibling test above for the
+    // push/sync-branch guard this one complements.)
+    expect(envelope.warnings).toBe(nonArrayWarnings);
+  });
+
   it("re-measures and warns after a case-3 correction grows a REAL buildEnvelope-built envelope past `maxChars`, even though no target was ever pushed to shrink (task e82f341a)", () => {
     // The pre-envelope evidence: a real diff with NO `path` (the probe
     // could not write the full diff to disk), which is exactly what makes
@@ -3384,9 +3433,6 @@ describe("reconcileEnvelopeDiffTruncation", () => {
       "new line",
       noPathDiff,
     );
-    const staleOverrunWarning =
-      "envelope is 1 characters; requested max-chars 1 could not be met";
-
     const buildCase3Envelope = (warnings: string[]) =>
       buildEnvelope({
         version: "test",
@@ -3428,6 +3474,13 @@ describe("reconcileEnvelopeDiffTruncation", () => {
     expect(correctedLength).toBeGreaterThan(refPreLen);
 
     const budget = correctedLength - 3;
+    // The stale warning names the SAME bound `reconcileEnvelopeDiffTruncation`
+    // is invoked with below: the per-bound matcher (F2, round-2 review)
+    // only replaces a prior warning about THIS call's own `maxChars`, so
+    // a fixture meaning to exercise "replace, not duplicate" has to hand
+    // in a warning about that same bound rather than an arbitrary
+    // placeholder number.
+    const staleOverrunWarning = `envelope is 1 characters; requested max-chars ${String(budget)} could not be met`;
 
     const envelope = buildCase3Envelope([staleOverrunWarning]);
     // Premise check: the envelope already carries a "could not be met"
@@ -3467,6 +3520,393 @@ describe("reconcileEnvelopeDiffTruncation", () => {
     expect(overrunWarnings).toHaveLength(1);
     expect(overrunWarnings[0]).toContain(`${String(finalLength)} characters`);
     expect(overrunWarnings[0]).not.toBe(staleOverrunWarning);
+  });
+
+  describe("case 2 (a re-cut, not a rewrite): the correction SHRINKS a REAL buildEnvelope-built envelope that was already over `maxChars` before it ran (task 4af16fdf)", () => {
+    // Reachability, measured directly against this build (see the task
+    // report for the sweep across a range of `-m` values): `buildEnvelope`
+    // itself never produces the shape under test here -- an overrun
+    // warning surviving ALONGSIDE a `diff.path`-bearing excerpt. Below its
+    // skeleton floor, the reduction discards `mutant` (and `diff` with
+    // it) entirely before it ever appends that warning; at or above the
+    // floor, the reduction always fits within `maxChars` on its own, so
+    // it never appends the warning at all. The one way to get both at
+    // once -- a caller composing its own envelope with a prior "could not
+    // be met" warning already in `warnings`, the same premise the case-3
+    // fixture above uses -- is what this fixture builds, through the
+    // REAL `buildEnvelope` (not a hand-assembled envelope object), so the
+    // diff excerpt it hands to the correction is a genuine mid-hunk,
+    // mid-line cut rather than a fabricated one.
+    const hunk = (n: number): string =>
+      `@@ -${String(n)} +${String(n)} @@\n-old line ${String(n)} ${"x".repeat(20)}\n+new line ${String(n)} ${"y".repeat(20)}`;
+    const FULL_TEXT = [
+      "--- before/t.txt",
+      "+++ after/t.txt",
+      ...Array.from({ length: 15 }, (_, i) => hunk(i + 1)),
+    ].join("\n");
+    const ORIGINAL_WIDE: MutantDiffField = {
+      text: FULL_TEXT,
+      path: "/tmp/probe-logs/mutant-diff-wide/mutant-diff.patch",
+      hunkCount: 15,
+      removed: 15,
+      added: 15,
+      changedLineCount: 30,
+      truncated: false,
+    };
+    const originalMutantField = {
+      file: "t.txt",
+      line: 1,
+      before: "old line 1",
+      after: "new line 1",
+      diff: ORIGINAL_WIDE,
+    };
+    const summary = formatMutantSummary(
+      "t.txt",
+      1,
+      "old line 1",
+      "new line 1",
+      ORIGINAL_WIDE,
+    );
+    const via = formatVerifiedAppliedVia(
+      "t.txt",
+      1,
+      "old line 1",
+      "new line 1",
+      ORIGINAL_WIDE,
+    );
+    // A stale warning naming the SAME bound the `reconcileEnvelopeDiffTruncation`
+    // call below is invoked with -- the case F2 (round-2 review) asked
+    // this fixture to target: the per-bound matcher only replaces or
+    // removes a prior warning about THIS `maxChars`, so a fixture
+    // meaning to exercise that path has to name the matching bound
+    // rather than an arbitrary placeholder number.
+    const staleOverrunWarningFor = (maxChars: number): string =>
+      `envelope is 1 characters; requested max-chars ${String(maxChars)} could not be met`;
+
+    // `buildMax` is generous enough that the mid-hunk excerpt it produces
+    // still carries `diff.path` (unlike the tight budgets that drop
+    // `mutant` outright): the reduction cuts `diff.text`, not the whole
+    // field. The stale warning is handed in as an INPUT `warnings` entry
+    // (a fixed field `buildEnvelope`'s composition never drops), so it
+    // survives untouched into the built envelope exactly as a caller
+    // composing this envelope from a harsher, prior reduction pass would
+    // hand it in -- `buildEnvelope`'s own reduction here fits within
+    // `buildMax` on its own and never re-derives or re-appends it.
+    const buildOverBudgetEnvelope = (warnings: string[]) =>
+      buildEnvelope({
+        version: "test",
+        command: "probe",
+        status: "killed",
+        durationMs: 1,
+        cwd: "/tmp",
+        warnings,
+        logs: [],
+        extra: {
+          mutant: {
+            file: "t.txt",
+            line: 1,
+            before: "old line 1",
+            after: "new line 1",
+            form: "patch",
+            diff: ORIGINAL_WIDE,
+          },
+          mutation_probe: {
+            mutant: summary,
+            verified_applied_via: via,
+            result: "killed",
+            restored_verified: true,
+          },
+        },
+        // Recalibrated for the round-2 review's per-bound stale
+        // warnings (F2): a 3-digit bound number (matching the 3-digit
+        // budgets this describe block exercises) costs 2 more bytes
+        // than the placeholder single-digit number the round-1 fixture
+        // used, so `buildMax` is nudged up to keep the same shrink/
+        // stay-in-bound shape this describe's budgets were calibrated
+        // against (measured directly against this build).
+        maxChars: 805,
+      });
+
+    it("names the TRUE final length when the shrunk envelope is still over `maxChars`, rather than leaving the stale pre-correction length in place", () => {
+      // The `reconcileEnvelopeDiffTruncation` call below is invoked with
+      // 750: the stale warning has to name that SAME bound for the
+      // per-bound matcher to treat it as stale and replace it (F2,
+      // round-2 review).
+      const staleOverrunWarning = staleOverrunWarningFor(750);
+      const { envelope } = buildOverBudgetEnvelope([staleOverrunWarning]);
+      // Premise check: the stale warning survived buildEnvelope's own
+      // composition, and `diff.path` is present -- case 2's precondition,
+      // not case 3's.
+      const preWarnings = envelope.warnings as unknown[];
+      expect(preWarnings).toContain(staleOverrunWarning);
+      const mutant = envelope.mutant as Record<string, unknown>;
+      const diff = mutant.diff as Record<string, unknown>;
+      // `diff.path` is present (case 2's own precondition, not case 3's
+      // -- case 3 fires only when `diff.text` is gone entirely). Its
+      // string value may itself be cut by `buildEnvelope`'s generic
+      // string cap alongside `diff.text`, so this checks presence, not
+      // an exact match.
+      expect(typeof diff.path).toBe("string");
+      expect(diff.text).not.toBe(FULL_TEXT);
+      const preDeliveredTextLength = String(diff.text).length;
+
+      // A budget below the shrunk-but-still-over-budget length this
+      // fixture is calibrated to (measured directly against this build:
+      // the case-2 re-cut to a hunk boundary lands at 803 characters,
+      // still over 750) -- `preCorrectionLength` (805, > this budget) is
+      // what makes `bound === preCorrectionLength`, and the re-cut
+      // landing under `bound` without ever exceeding it is what sends
+      // this straight through `enforceEnvelopeBudget`'s early-return
+      // branch, with nothing here left to shrink.
+      reconcileEnvelopeDiffTruncation(
+        envelope,
+        { mutant: originalMutantField },
+        750,
+      );
+
+      const correctedDiff = (envelope.mutant as Record<string, unknown>)
+        .diff as Record<string, unknown>;
+      // Premise check: `reconcileOneMutant`'s case 2 actually re-cut the
+      // excerpt (the re-cut to a hunk boundary is shorter than
+      // `buildEnvelope`'s own generic mid-hunk cut) -- a real shrink, not
+      // a no-op.
+      expect(String(correctedDiff.text).length).toBeLessThan(
+        preDeliveredTextLength,
+      );
+
+      const finalLength = JSON.stringify(envelope).length;
+      // The shrunk envelope is still over `maxChars` (750): this is the
+      // "sync to the true final length" branch, not the removal one
+      // exercised by the next test.
+      expect(finalLength).toBeGreaterThan(750);
+
+      const finalWarnings = envelope.warnings as unknown[];
+      const overrunWarnings = finalWarnings.filter(
+        (w) => typeof w === "string" && /could not be met/.test(w),
+      );
+      // The pin: exactly one "could not be met" warning survives, and it
+      // names the NEW, smaller final length -- not the stale
+      // pre-correction one the early-return path used to leave in place.
+      expect(overrunWarnings).toHaveLength(1);
+      expect(overrunWarnings[0]).toContain(`${String(finalLength)} characters`);
+      expect(overrunWarnings[0]).not.toBe(staleOverrunWarning);
+    });
+
+    it("removes the stale warning once the shrunk envelope is back within `maxChars`", () => {
+      // The reconcile call below is invoked with 801: the stale warning
+      // has to name that SAME bound for the per-bound matcher to treat
+      // it as stale and remove it (F2, round-2 review).
+      const staleOverrunWarning = staleOverrunWarningFor(801);
+      const { envelope } = buildOverBudgetEnvelope([staleOverrunWarning]);
+      const preWarnings = envelope.warnings as unknown[];
+      expect(preWarnings).toContain(staleOverrunWarning);
+      const preLen = JSON.stringify(envelope).length;
+
+      // A budget high enough that the case-2 re-cut's own natural
+      // length (733 characters, measured directly against this build)
+      // lands back within it -- `preCorrectionLength` (805) still
+      // exceeds this budget, so `bound === preCorrectionLength` and the
+      // shrunk envelope lands under it via the same early-return branch
+      // the sync test above uses, but this time back within `maxChars`
+      // itself.
+      reconcileEnvelopeDiffTruncation(
+        envelope,
+        { mutant: originalMutantField },
+        801,
+      );
+
+      const finalLength = JSON.stringify(envelope).length;
+      // Premise check, pinned explicitly rather than left implicit
+      // (round-2 review N2): the shrink loop's OWN binary search lands
+      // EXACTLY at the 801 budget before `reconcileBudgetOverrunWarning`
+      // ever removes the stale warning -- a knife-edge fit, not merely
+      // "somewhere under" it. Reconstructed from the post-removal
+      // `finalLength` plus the exact JSON bytes the stale warning's own
+      // array entry cost (its quoting, not just its string length). A
+      // byte drift in this fixture's calibration (the hunk width, the
+      // stale-warning wording, `buildMax`) fails HERE, naming the
+      // drifted number, rather than silently surfacing as a confusing
+      // failure on the warning-count assertion below.
+      const staleWarningArrayBytes =
+        JSON.stringify([staleOverrunWarning]).length -
+        JSON.stringify([]).length;
+      expect(finalLength + staleWarningArrayBytes).toBe(801);
+      expect(finalLength).toBeLessThan(preLen);
+      expect(finalLength).toBeLessThanOrEqual(801);
+
+      const finalWarnings = envelope.warnings as unknown[];
+      const overrunWarnings = finalWarnings.filter(
+        (w) => typeof w === "string" && /could not be met/.test(w),
+      );
+      // The pin: the envelope is back in bound, so the stale warning is
+      // dropped rather than left stating a size the envelope no longer
+      // has.
+      expect(overrunWarnings).toHaveLength(0);
+    });
+
+    it("leaves a prior warning about a DIFFERENT bound intact on the sync path, alongside the new warning naming this call's own bound (task 4af16fdf, round-2 review F2)", () => {
+      // A warning from a prior, harsher reduction pass -- the exact
+      // shape the README's "prior, harsher reduction pass" clause
+      // blesses -- names a DIFFERENT `maxChars` (500) than the one this
+      // `reconcileEnvelopeDiffTruncation` call below is invoked with
+      // (750). It remains true regardless of what this call's own bound
+      // is, so the per-bound matcher must leave it alone rather than
+      // replace or drop it.
+      const otherBoundWarning = staleOverrunWarningFor(500);
+      const { envelope } = buildOverBudgetEnvelope([otherBoundWarning]);
+      const preWarnings = envelope.warnings as unknown[];
+      expect(preWarnings).toContain(otherBoundWarning);
+
+      // Same budget as the first test in this describe: the shrunk
+      // envelope is still over 750, so this lands on the "sync" branch
+      // and appends a NEW warning naming 750, without touching the
+      // pre-existing 500 one.
+      reconcileEnvelopeDiffTruncation(
+        envelope,
+        { mutant: originalMutantField },
+        750,
+      );
+
+      const finalLength = JSON.stringify(envelope).length;
+      expect(finalLength).toBeGreaterThan(750);
+
+      const finalWarnings = envelope.warnings as unknown[];
+      // The other bound's warning survives untouched.
+      expect(finalWarnings).toContain(otherBoundWarning);
+      const overrunWarnings = finalWarnings.filter(
+        (w) => typeof w === "string" && /could not be met/.test(w),
+      );
+      // Exactly two "could not be met" warnings now: the untouched
+      // other-bound one, and a fresh one naming THIS call's own bound
+      // and the true final length.
+      expect(overrunWarnings).toHaveLength(2);
+      const thisBoundWarnings = overrunWarnings.filter((w) =>
+        (w as string).includes("requested max-chars 750 could not be met"),
+      );
+      expect(thisBoundWarnings).toHaveLength(1);
+      expect(thisBoundWarnings[0]).toContain(
+        `${String(finalLength)} characters`,
+      );
+    });
+
+    it("leaves a prior warning about a DIFFERENT bound intact on the removal path, once this call's own bound is back within `maxChars`", () => {
+      // Same premise as the sibling sync-path test above, but at the
+      // 801 budget the "removes the stale warning" test above uses --
+      // the shrunk envelope lands back within `maxChars`, so this
+      // exercises the removal branch instead. The other-bound warning
+      // still must not be removed: it was never about the bound this
+      // call was invoked with, and remains true either way.
+      const otherBoundWarning = staleOverrunWarningFor(500);
+      const { envelope } = buildOverBudgetEnvelope([otherBoundWarning]);
+      const preWarnings = envelope.warnings as unknown[];
+      expect(preWarnings).toContain(otherBoundWarning);
+
+      reconcileEnvelopeDiffTruncation(
+        envelope,
+        { mutant: originalMutantField },
+        801,
+      );
+
+      const finalLength = JSON.stringify(envelope).length;
+      expect(finalLength).toBeLessThanOrEqual(801);
+
+      const finalWarnings = envelope.warnings as unknown[];
+      // The pin: the other-bound warning survives even though the
+      // envelope is now back within `maxChars` -- only a warning about
+      // THIS call's own bound (801, absent here) would have been
+      // eligible for removal.
+      expect(finalWarnings).toContain(otherBoundWarning);
+      const overrunWarnings = finalWarnings.filter(
+        (w) => typeof w === "string" && /could not be met/.test(w),
+      );
+      expect(overrunWarnings).toHaveLength(1);
+      expect(overrunWarnings[0]).toBe(otherBoundWarning);
+    });
+
+    it("appends a warning on the early-return sync path even when the envelope carried NO prior warning at all (missing case named by the round-2 review)", () => {
+      // No `warnings` input at all this time: `buildEnvelope` never
+      // appends one on its own for this fixture's generous `buildMax`
+      // (its own reduction fits within `buildMax` and never needs to).
+      // Same 750 budget as the first test in this describe -- the
+      // early-return branch (`length <= bound`, `bound ===
+      // preCorrectionLength === 805`) is what runs here, with `length`
+      // (the shrunk-but-still-over-budget re-cut) landing above 750:
+      // `reconcileBudgetOverrunWarning` still has to append a warning
+      // naming the true final length, growing the envelope past `bound`
+      // by the warning's own bytes -- the same "report growth honestly
+      // rather than silently ship over budget" contract the shrink
+      // loop's own exit already guarantees.
+      const { envelope } = buildOverBudgetEnvelope([]);
+      expect(envelope.warnings).toEqual([]);
+
+      reconcileEnvelopeDiffTruncation(
+        envelope,
+        { mutant: originalMutantField },
+        750,
+      );
+
+      const finalLength = JSON.stringify(envelope).length;
+      expect(finalLength).toBeGreaterThan(750);
+
+      const finalWarnings = envelope.warnings as unknown[];
+      const overrunWarnings = finalWarnings.filter(
+        (w) => typeof w === "string" && /could not be met/.test(w),
+      );
+      expect(overrunWarnings).toHaveLength(1);
+      expect(overrunWarnings[0]).toContain(`${String(finalLength)} characters`);
+      expect(overrunWarnings[0]).toContain(
+        "requested max-chars 750 could not be met",
+      );
+    });
+
+    it("keeps a prior warning about a DIFFERENT bound intact even when that bound's decimal string is a SUFFIX of this call's own bound (task 4af16fdf, round-2 review N3)", () => {
+      // The discriminating case for the per-bound matcher's own anchor:
+      // `isBudgetOverrunWarning` must recognise a prior warning as being
+      // about THIS call's `maxChars` only via the full ` requested
+      // max-chars <n> could not be met` clause, never via a bare
+      // trailing-digits comparison. 750 ends with the digits "50", so a
+      // prior warning naming bound 750 is exactly the fixture a matcher
+      // weakened to `value.endsWith(`${maxChars} could not be met`)`
+      // (no ` requested max-chars ` anchor) would misidentify as being
+      // about a call invoked with maxChars 50, even though it is not.
+      const otherBoundWarning = staleOverrunWarningFor(750);
+      const { envelope } = buildOverBudgetEnvelope([otherBoundWarning]);
+      const preWarnings = envelope.warnings as unknown[];
+      expect(preWarnings).toContain(otherBoundWarning);
+
+      // The built envelope (805 characters) is always over this budget,
+      // so this call always takes the replace/push branch
+      // (`pushBudgetOverrunWarning`), which is where the weakened
+      // matcher's filter would incorrectly drop the bound-750 entry.
+      reconcileEnvelopeDiffTruncation(
+        envelope,
+        { mutant: originalMutantField },
+        50,
+      );
+
+      const finalLength = JSON.stringify(envelope).length;
+      expect(finalLength).toBeGreaterThan(50);
+
+      const finalWarnings = envelope.warnings as unknown[];
+      // The pin: the bound-750 warning survives untouched -- it is NOT
+      // about bound 50, even though "750" ends with "50".
+      expect(finalWarnings).toContain(otherBoundWarning);
+      const overrunWarnings = finalWarnings.filter(
+        (w) => typeof w === "string" && /could not be met/.test(w),
+      );
+      // Exactly two: the untouched bound-750 entry, plus a fresh one
+      // naming THIS call's own bound (50) and the true final length --
+      // not a single survivor from an incorrectly "replaced" bound-750
+      // entry, which is what the weakened matcher produces.
+      expect(overrunWarnings).toHaveLength(2);
+      const thisBoundWarnings = overrunWarnings.filter((w) =>
+        (w as string).includes("requested max-chars 50 could not be met"),
+      );
+      expect(thisBoundWarnings).toHaveLength(1);
+      expect(thisBoundWarnings[0]).toContain(
+        `${String(finalLength)} characters`,
+      );
+    });
   });
 });
 

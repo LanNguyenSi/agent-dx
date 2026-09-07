@@ -2203,6 +2203,25 @@ function applyExcerptBudget(target: CorrectionTarget, budget: number): void {
  * which envelope fields are fixed and which are payload -- knowledge
  * this module, unlike `envelope.ts`, has no reason to have.
  *
+ * `length <= bound` covers both directions the correction can move the
+ * envelope relative to where it started, and both still need the
+ * overrun warning reconciled against the TRUE final length rather than
+ * left stating `preCorrectionLength`: when the correction GREW the
+ * envelope but not past `bound` (nothing here is shrunk), and when the
+ * correction SHRANK an envelope that was already past `maxChars` before
+ * this function ran (`preCorrectionLength > maxChars`, so `bound ===
+ * preCorrectionLength`) -- a re-cut to a hunk boundary in
+ * `reconcileOneMutant`'s case 2 routinely lands shorter than the
+ * generic mid-hunk cut `buildEnvelope`'s own reduction delivered, so
+ * `length` can sit anywhere from "still over `maxChars`" down to "back
+ * in bound" without ever exceeding `bound` itself, and without the
+ * shrink loop below ever running to fix the warning up as a side
+ * effect. `reconcileBudgetOverrunWarning` below is what actually
+ * updates or removes a prior "could not be met" warning in both cases;
+ * without it, a warning `buildEnvelope` (or a caller composing its own
+ * envelope) already appended keeps naming a length this correction has
+ * since made stale.
+ *
  * Targets are visited largest-excerpt-first, each shrunk by binary
  * search on its own budget to the largest that still fits the WHOLE
  * envelope, before the next target's excerpt is touched at all: a
@@ -2210,19 +2229,21 @@ function applyExcerptBudget(target: CorrectionTarget, budget: number): void {
  * uniform cut across every mutant in a plan that did not need one.
  *
  * Once there is nothing left here to shrink (every target has been
- * shrunk to nothing, or there was never a target to begin with) and the
- * envelope still exceeds `maxChars`, a warning names the true final
- * length, in the same words `buildEnvelope`'s own overrun warning uses,
- * so a caller can tell "bounded as requested" from "bounded, but bigger
- * than asked for, honestly reported" here too.
+ * shrunk to nothing, or there was never a target to begin with),
+ * `reconcileBudgetOverrunWarning` states the TRUE final length, in the
+ * same words `buildEnvelope`'s own overrun warning uses, if the
+ * envelope still exceeds `maxChars`, or removes a stale warning if the
+ * shrinking brought it back within `maxChars`, so a caller can tell
+ * "bounded as requested" from "bounded, but bigger than asked for,
+ * honestly reported" here too.
  *
  * An EMPTY `targets` does not skip this re-measure: `reconcileOneMutant`'s
  * case 3 rewrites a descriptor without ever pushing a target (see its own
  * docblock), and that rewrite alone can push the whole envelope past
  * `bound` with nothing here left to shrink. The shrink loop below is
  * simply a no-op over an empty `order` in that shape -- the re-measure and
- * `pushBudgetOverrunWarning` still have to run so that growth is reported
- * rather than silently shipped over budget.
+ * `reconcileBudgetOverrunWarning` still have to run so that growth is
+ * reported rather than silently shipped over budget.
  */
 function enforceEnvelopeBudget(
   envelope: Record<string, unknown>,
@@ -2232,7 +2253,10 @@ function enforceEnvelopeBudget(
 ): void {
   const bound = Math.max(maxChars, preCorrectionLength);
   let length = jsonLength(envelope);
-  if (length <= bound) return;
+  if (length <= bound) {
+    reconcileBudgetOverrunWarning(envelope, maxChars, length);
+    return;
+  }
 
   const order = [...targets].sort(
     (a, b) => currentExcerptLength(b) - currentExcerptLength(a),
@@ -2264,7 +2288,31 @@ function enforceEnvelopeBudget(
     length = jsonLength(envelope);
   }
 
-  if (length > maxChars) pushBudgetOverrunWarning(envelope, maxChars);
+  reconcileBudgetOverrunWarning(envelope, maxChars, length);
+}
+
+/** Matches exactly the wording `pushBudgetOverrunWarning` (here) and
+ * `pushOverrunWarning` (`envelope.ts`) both produce, so either origin's
+ * prior warning is recognised the same way: a `warnings` entry naming a
+ * length this correction may since have made stale -- but ONLY a prior
+ * warning about THIS `maxChars`. A warning stating a length that failed
+ * to fit a DIFFERENT, harsher bound from a prior reduction pass (the
+ * very shape the README's "prior, harsher reduction pass" clause
+ * blesses) remains true regardless of what this call's own `maxChars`
+ * is, so it is deliberately left unmatched here: neither
+ * `pushBudgetOverrunWarning`'s replace filter nor
+ * `reconcileBudgetOverrunWarning`'s removal branch may touch it. Shared
+ * by `pushBudgetOverrunWarning` (replace) and
+ * `reconcileBudgetOverrunWarning` (detect, to decide whether a removal
+ * is even in play). */
+function isBudgetOverrunWarning(value: unknown, maxChars: number): boolean {
+  return (
+    typeof value === "string" &&
+    /^envelope is \d+ characters; requested max-chars \d+ could not be met$/.test(
+      value,
+    ) &&
+    value.endsWith(`requested max-chars ${String(maxChars)} could not be met`)
+  );
 }
 
 /** `envelope.ts`'s own overrun-warning wording and its digit-count
@@ -2292,17 +2340,17 @@ function pushBudgetOverrunWarning(
     ? (envelope.warnings as unknown[])
     : [];
   // `buildEnvelope`'s own reduction may already have appended this exact
-  // wording (the envelope did not fit `maxChars` even before this
-  // module's correction ran): replacing it here, rather than appending
-  // a second one, keeps the array carrying at most one "could not be
-  // met" warning, stating the true final length rather than the stale
-  // one measured before this correction's own shrinking.
-  const isOverrunWarning = (value: unknown): boolean =>
-    typeof value === "string" &&
-    /^envelope is \d+ characters; requested max-chars \d+ could not be met$/.test(
-      value,
-    );
-  const priorWarnings = baseWarnings.filter((w) => !isOverrunWarning(w));
+  // wording for THIS SAME `maxChars` (the envelope did not fit even
+  // before this module's correction ran): replacing it here, rather
+  // than appending a second one, keeps the array carrying at most one
+  // "could not be met" warning per bound, stating the true final length
+  // rather than the stale one measured before this correction's own
+  // shrinking. A warning about a DIFFERENT bound (a prior, harsher
+  // reduction pass) is left in place -- it remains true regardless of
+  // what this call's own `maxChars` is.
+  const priorWarnings = baseWarnings.filter(
+    (w) => !isBudgetOverrunWarning(w, maxChars),
+  );
   const wording = (n: number): string =>
     `envelope is ${String(n)} characters; requested max-chars ${String(maxChars)} could not be met`;
   const probe = wording(0);
@@ -2318,6 +2366,43 @@ function pushBudgetOverrunWarning(
     }
   }
   envelope.warnings = [...priorWarnings, wording(finalLength)];
+}
+
+/** Keeps a prior "could not be met" warning (`buildEnvelope`'s own, or
+ * one a caller composed its own envelope with) in sync with `length`,
+ * the envelope's TRUE final serialized length once `enforceEnvelopeBudget`
+ * is done touching it -- called from BOTH of that function's exits: the
+ * `length <= bound` early return (nothing here was shrunk; covers a
+ * correction that grew the envelope without crossing `bound`, and one
+ * that shrank an envelope already over `maxChars` before this module
+ * ran without crossing back below `bound` either) and the end of the
+ * shrink loop. `length > maxChars` still needs a warning naming the
+ * true final length (`pushBudgetOverrunWarning` already replaces rather
+ * than duplicates); `length <= maxChars` means the envelope is back in
+ * bound, so a warning about THIS bound that is no longer true is
+ * dropped rather than left stating a size the envelope no longer has --
+ * a warning about a DIFFERENT, harsher bound from a prior reduction
+ * pass is left untouched either way, since it names a length that
+ * still failed to fit that other bound regardless of what this call's
+ * own `maxChars` is. A `warnings` array that never carried a "could not
+ * be met" entry for THIS bound, or a non-array `warnings` (left
+ * untouched, same as `pushBudgetOverrunWarning`'s own guard), costs
+ * nothing extra here. */
+function reconcileBudgetOverrunWarning(
+  envelope: Record<string, unknown>,
+  maxChars: number,
+  length: number,
+): void {
+  if (length > maxChars) {
+    pushBudgetOverrunWarning(envelope, maxChars);
+    return;
+  }
+  if (!Array.isArray(envelope.warnings)) return;
+  const warnings = envelope.warnings as unknown[];
+  if (!warnings.some((w) => isBudgetOverrunWarning(w, maxChars))) return;
+  envelope.warnings = warnings.filter(
+    (w) => !isBudgetOverrunWarning(w, maxChars),
+  );
 }
 
 /**

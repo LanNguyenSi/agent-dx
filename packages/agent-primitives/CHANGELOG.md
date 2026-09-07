@@ -36,6 +36,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   envelope, or one handed in from a prior, harsher reduction pass, not
   for the CLI's own reduction.
 
+- `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget` (task
+  `4af16fdf`): the adjacent, SHRINK-side gap in the same early return
+  fixed for task `e82f341a` above. When a correction (`reconcileOneMutant`'s
+  case 2, a re-cut to a hunk boundary) SHRANK an envelope that was
+  already over `maxChars` before this function ran, `bound ===
+  preCorrectionLength` and the shrunk result can land at or under it
+  without the shrink loop ever running (measured directly against a
+  15-hunk fixture: a case-2 re-cut that naturally lands at 803 or 733
+  characters, depending on the budget, both under the 805-character
+  `preCorrectionLength`) -- so the early return fired with a stale
+  "envelope is N characters; requested max-chars M could not be met"
+  warning (`buildEnvelope`'s own, or one a caller composed its own
+  envelope with) still naming the larger PRE-correction length, whether
+  the shrunk envelope was still over `maxChars` or had already landed
+  back within it. Both exits of `enforceEnvelopeBudget` now call a
+  shared `reconcileBudgetOverrunWarning`: it replaces a stale warning
+  with the TRUE final length when the envelope is still over `maxChars`,
+  and removes it outright once the envelope is back in bound -- but only
+  a warning naming THIS SAME `maxChars`: `isBudgetOverrunWarning` is
+  parameterised by the bound (round-2 review finding F2), so a prior
+  warning about a DIFFERENT, harsher bound from an earlier reduction
+  pass is left untouched by both the replace and the removal path (at
+  most one "could not be met" warning is kept per bound, not one
+  overall). Covered by tests in `test/mutant.test.ts`, built through the
+  real `buildEnvelope` plus `reconcileEnvelopeDiffTruncation` with a
+  caller-supplied stale warning and a `diff.path`-bearing excerpt (the
+  same reachable-only-via-a-caller-composed-envelope premise as task
+  `e82f341a`'s case-3 fixture -- a sweep confirmed `probe`'s own
+  single-pass reduction cannot produce a warning next to a
+  `diff.path`-bearing excerpt): one for the sync branch, one for the
+  removal branch, two more pinning that a warning about a different
+  bound survives both branches, and one pinning that the sync branch
+  still appends a warning even when the envelope carried none at all
+  before this call, all of which fail on the pre-per-bound-fix code.
+
 - `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget`: when
   restating a plan's descriptors and excerpts pushes the whole envelope
   back over `-m`/`--max-chars`, which mutant's excerpt gets shrunk
