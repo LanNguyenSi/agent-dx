@@ -925,6 +925,16 @@ absolute source-tree paths symlinked in; `syncedTrackedFiles` and
 `syncedUntrackedFiles` are counts, `0` for both on a clean tree and for
 every `inplace` run).
 
+The `file` part of `mutation_probe.mutant`/`verified_applied_via` (the
+`<file>:<line>` header both descriptors start with) is capped at 200
+characters, in the same truncation-marker wording the envelope's own
+string cap uses: a kept prefix followed by `...(N more characters
+omitted)`, `N` the true number of characters left out. A target
+resolved through a very long `-C`/`cwd` or a deep temp/log directory
+would otherwise paste its whole absolute path into both descriptors
+uncapped, unlike the excerpt beside it. An ordinary path, including
+every path in this document's examples, is unaffected.
+
 ### `--plan`: several mutants, one baseline
 
 `--plan <path>` takes a JSON file naming one test command and a list of

@@ -1828,6 +1828,29 @@ describe("formatMutantSummary / formatVerifiedAppliedVia", () => {
     const snippet = formatVerifiedAppliedVia("/a/b.js", 3, "x", "y");
     expect(snippet.split("\n")).toEqual(["/a/b.js:3", "- x", "+ y"]);
   });
+
+  it("caps a very long file path (e.g. a long -l/-C path) with the envelope's own truncation-marker wording, naming the true omitted-character count, instead of pasting it whole into mutant/verified_applied_via", () => {
+    const longFile = `/tmp/${"x".repeat(300)}/fixture.js`;
+
+    const summary = formatMutantSummary(longFile, 3, "x", "y");
+    const [filePart] = summary.split(":3: ");
+    expect(filePart.length).toBeLessThan(240);
+    expect(filePart.endsWith("...(116 more characters omitted)")).toBe(true);
+    expect(filePart.startsWith(longFile.slice(0, 200))).toBe(true);
+    expect(summary.endsWith(": x -> y")).toBe(true);
+
+    const via = formatVerifiedAppliedVia(longFile, 3, "x", "y");
+    const [viaFilePart] = via.split("\n")[0].split(":3");
+    expect(viaFilePart.length).toBeLessThan(240);
+    expect(viaFilePart.endsWith("...(116 more characters omitted)")).toBe(true);
+    expect(via.split("\n").slice(1)).toEqual(["- x", "+ y"]);
+  });
+
+  it("leaves a short file path byte-identical (no marker) so every existing fixture is unaffected", () => {
+    expect(formatMutantSummary("src/probe/mutant.ts", 1, "x", "y")).toBe(
+      "src/probe/mutant.ts:1: x -> y",
+    );
+  });
 });
 
 describe("computeMutant: a --numstat listing that did not fit", () => {

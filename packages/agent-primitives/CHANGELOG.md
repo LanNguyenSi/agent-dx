@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asserted at exact post-correction byte counts that a smallest-first
   or array-order rule would not produce) and documented in the README.
 
+- `mutation_probe.mutant`/`verified_applied_via`: the `file` part is now
+  capped at 200 characters, in the same truncation-marker wording
+  `envelope.ts`'s own string cap uses (a kept prefix followed by
+  `...(N more characters omitted)`, `N` the true number of characters
+  left out). A target file resolved through a very long `-C`/`cwd` or a
+  deep temp/log directory previously pasted its whole absolute path into
+  both descriptors uncapped, unlike the excerpt beside it, which
+  `buildEnvelope`'s own reduction and `reconcileEnvelopeDiffTruncation`
+  already bound. A short, ordinary path (every existing fixture) is
+  unaffected.
+
 ### Added
 
 - `agent-primitives drift --base <rev> --head <rev>`: a prototype-scope

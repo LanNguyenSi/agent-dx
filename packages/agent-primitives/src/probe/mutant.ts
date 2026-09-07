@@ -1359,6 +1359,36 @@ function pluralizeCount(n: number, singular: string, plural: string): string {
   return n === 1 ? singular : plural;
 }
 
+/** Longest prefix of a descriptor's own `file` part kept before the
+ * truncation marker; long enough that every existing fixture's short
+ * repository-relative path passes through unchanged, short enough that a
+ * `-l`/`-C` path of hundreds of characters (a deep `os.tmpdir()`, a
+ * `--isolation worktree` scratch root, a long ambient `TMPDIR`) cannot
+ * make `mutation_probe.mutant`/`verified_applied_via` grow without bound
+ * on the file part alone -- the one part of these two descriptors that,
+ * unlike the excerpt beside it, `buildEnvelope`'s own reduction and
+ * `reconcileEnvelopeDiffTruncation` never touch. */
+const DESCRIPTOR_PATH_MAX_CHARS = 200;
+
+/**
+ * Caps the `file` part of `formatMutantSummary`/`formatVerifiedAppliedVia`
+ * at `DESCRIPTOR_PATH_MAX_CHARS`, in the same marker convention
+ * `envelope.ts`'s own string cap uses (`stringMarker`): a kept prefix
+ * followed by `...(N more characters omitted)`, `N` the TRUE number of
+ * characters left out, never a rounded or approximate count. A `file`
+ * already at or under the bound passes through byte-identical, so every
+ * existing fixture (short repository-relative paths) is unaffected.
+ */
+function capDescriptorPath(file: string): string {
+  if (file.length <= DESCRIPTOR_PATH_MAX_CHARS) return file;
+  const omitted = file.length - DESCRIPTOR_PATH_MAX_CHARS;
+  const noun = omitted === 1 ? "character" : "characters";
+  return (
+    `${file.slice(0, DESCRIPTOR_PATH_MAX_CHARS)}` +
+    `...(${String(omitted)} more ${noun} omitted)`
+  );
+}
+
 /**
  * Formats the `mutant: "<file>:<line>: <before> -> <after>"` string
  * used verbatim as `mutation_probe.mutant`. When `diff` is given (a
@@ -1399,6 +1429,7 @@ export function formatMutantSummary(
   diff?: MutantDiffField,
   excerptOmittedFromEnvelope = false,
 ): string {
+  file = capDescriptorPath(file);
   if (diff === undefined) return `${file}:${line}: ${before} -> ${after}`;
   const lineWord = pluralizeCount(
     diff.changedLineCount,
@@ -1449,7 +1480,11 @@ export function formatVerifiedAppliedVia(
   excerptOmittedFromEnvelope = false,
 ): string {
   if (diff === undefined) {
-    return [`${file}:${line}`, `- ${before}`, `+ ${after}`].join("\n");
+    return [
+      `${capDescriptorPath(file)}:${line}`,
+      `- ${before}`,
+      `+ ${after}`,
+    ].join("\n");
   }
   const hunkWord = pluralizeCount(diff.hunkCount, "hunk", "hunks");
   const lineWord = pluralizeCount(
