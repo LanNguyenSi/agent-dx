@@ -3427,6 +3427,159 @@ describe("reconcileEnvelopeDiffTruncation: stays within maxChars across a sweep 
   });
 });
 
+describe("probe --plan envelope: never over maxChars without a warning naming the true length (sweep of budgets, REAL buildEnvelope-built envelopes)", () => {
+  // A two-mutant `--plan` result, each carrying 15 single-line hunks of a
+  // fixed 61-character width -- the same shape a reviewer's own sweep
+  // across a range of `-m` values exercised through the built CLI after
+  // an unrelated incident left a lingering doubt about whether the
+  // envelope could ever ship over its own `-m` with no warning at all.
+  // That sweep (3000-4300 inclusive, plus a coarse 500-20000 pass)
+  // found no such case; this pins the same invariant the sweep checked,
+  // as a fast in-process test that runs on every CI build rather than a
+  // one-off manual check. Two mutants, not one, so `plan.results[]` is
+  // exercised as an array (the shape `keepWhole` cannot reach into) and
+  // the combined payload is large enough to need real reduction across
+  // the swept range.
+  const buildWideLine = (n: number): string =>
+    `line ${String(n).padStart(4, "0")} ${"x".repeat(51)}`;
+  const buildMutatedLine = (n: number): string =>
+    `  M${String(n).padStart(3, "0")} ${"y".repeat(54)}`;
+  const hunk = (n: number): string =>
+    `@@ -${String(n)},1 +${String(n)},1 @@\n-${buildWideLine(n)}\n+${buildMutatedLine(n)}`;
+  const FULL_TEXT = [
+    "--- a/wide.txt",
+    "+++ b/wide.txt",
+    ...Array.from({ length: 15 }, (_, i) => hunk(i * 5)),
+  ].join("\n");
+  const WIDE_DIFF: MutantDiffField = {
+    text: FULL_TEXT,
+    path: "/tmp/probe-logs/mutant-diff-wide/mutant-diff.patch",
+    hunkCount: 15,
+    removed: 15,
+    added: 15,
+    changedLineCount: 30,
+    truncated: false,
+  };
+  const wideMutantField = {
+    file: "wide.txt",
+    line: 1,
+    before: buildWideLine(0),
+    after: buildMutatedLine(0),
+    diff: WIDE_DIFF,
+  };
+  const summary = formatMutantSummary(
+    "wide.txt",
+    1,
+    buildWideLine(0),
+    buildMutatedLine(0),
+    WIDE_DIFF,
+  );
+  const via = formatVerifiedAppliedVia(
+    "wide.txt",
+    1,
+    buildWideLine(0),
+    buildMutatedLine(0),
+    WIDE_DIFF,
+  );
+  const planResultEntry = (index: number): Record<string, unknown> => ({
+    index,
+    file: "wide.txt",
+    expect: "pass",
+    status: "killed",
+    warnings: [],
+    mutant: {
+      file: "wide.txt",
+      line: 1,
+      before: buildWideLine(0),
+      after: buildMutatedLine(0),
+      form: "patch",
+      diff: WIDE_DIFF,
+    },
+    mutation_probe: {
+      mutant: summary,
+      verified_applied_via: via,
+      result: "killed",
+      restored_verified: true,
+    },
+    logs: [],
+  });
+
+  /** Builds the plan envelope exactly as `runProbePlanCommand` does
+   * (fixed fields, `plan.{baseline is absent here, results, summary}`,
+   * `keepWhole: ["plan.summary"]`), then runs the same
+   * `reconcileEnvelopeDiffTruncation` pass `cli.ts` runs against it, at
+   * `maxChars`. */
+  function buildPlanEnvelope(maxChars: number): Record<string, unknown> {
+    const { envelope } = buildEnvelope({
+      version: "test",
+      command: "probe",
+      status: "killed",
+      durationMs: 1,
+      cwd: "/tmp",
+      warnings: [],
+      logs: [],
+      extra: {
+        plan: {
+          results: [planResultEntry(0), planResultEntry(1)],
+          summary: {
+            total: 2,
+            killed: 2,
+            survived: 0,
+            inconclusive: 0,
+            not_run: 0,
+          },
+        },
+        isolation: "worktree",
+      },
+      keepWhole: ["plan.summary"],
+      maxChars,
+    });
+    reconcileEnvelopeDiffTruncation(
+      envelope,
+      {
+        planResults: [wideMutantField, wideMutantField].map((m) => ({
+          mutant: m,
+        })),
+      },
+      maxChars,
+    );
+    return envelope;
+  }
+
+  /** The contract: `buildEnvelope`/`reconcileEnvelopeDiffTruncation`
+   * together never ship an envelope longer than `maxChars` without a
+   * warning stating that EXACT final length -- never a stale or
+   * approximate one -- so a caller can always tell "bounded as
+   * requested" from "bounded, but bigger than asked for, honestly
+   * reported" apart from a silent overrun. */
+  function assertNeverOverWithoutHonestWarning(
+    envelope: Record<string, unknown>,
+    maxChars: number,
+  ): void {
+    const finalLength = JSON.stringify(envelope).length;
+    if (finalLength <= maxChars) return;
+    const warnings = Array.isArray(envelope.warnings)
+      ? (envelope.warnings as unknown[])
+      : [];
+    const expected = `envelope is ${String(finalLength)} characters; requested max-chars ${String(maxChars)} could not be met`;
+    expect(
+      warnings,
+      `envelope is ${String(finalLength)} chars, over maxChars=${String(maxChars)}, but warnings do not name the true length: ${JSON.stringify(warnings)}`,
+    ).toContain(expected);
+  }
+
+  it.each([
+    50, 100, 150, 200, 250, 300, 400, 500, 700, 1000, 1500, 2000, 3000, 3650,
+    4300,
+  ])(
+    "at maxChars=%i: never over the bound without a warning naming the true length",
+    (maxChars) => {
+      const envelope = buildPlanEnvelope(maxChars);
+      assertNeverOverWithoutHonestWarning(envelope, maxChars);
+    },
+  );
+});
+
 describe("mutant.diff.path: the whole applied diff on disk", () => {
   it("writes the full diff beside the excerpt, names it in `diff.path` and in the mutant's log paths", async () => {
     const { root, relPath, absFile, content } = initRepoWithLines(10);

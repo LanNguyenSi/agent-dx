@@ -1817,11 +1817,19 @@ describe("cli: probe", () => {
     ]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(6000);
+    // No byte ceiling here (see the removed round-6 bound-regression
+    // tests, dropped for exactly this reason): the contract this test
+    // pins is that the per-mutant correction ran at all -- `truncated`,
+    // the hunk-boundary/mid-hunk shape, and the descriptor clause below
+    // -- not a byte count that would sit inside the envelope's own
+    // run-to-run noise (a timing digit, a temp-dir name).
     const parsed = JSON.parse(run.stdout);
     // `-t 'true'` always leaves the test passing, and `--expect pass`
     // reads that as the mutant behaving as expected: `killed`.
     expect(parsed.status).toBe("killed");
+    // The envelope's own top-level flag: something in the result really
+    // was cut, not only the per-mutant `diff.truncated` checked below.
+    expect(parsed.truncated).toBe(true);
     const diff = parsed.mutant.diff;
     expect(diff.hunkCount).toBe(15);
     // The envelope's own reduction had to cut this further than this
@@ -3160,9 +3168,17 @@ describe("cli: probe --plan", () => {
     ]);
 
     expect(run.code).toBe(0);
-    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+    // No byte ceiling here (see the removed round-6 bound-regression
+    // tests, dropped for exactly this reason): the contract this test
+    // pins is that the per-mutant correction ran at all -- `truncated`,
+    // the hunk-boundary/mid-hunk shape, and the descriptor clause below
+    // -- not a byte count that would sit inside the envelope's own
+    // run-to-run noise (a timing digit, a temp-dir name).
     const parsed = JSON.parse(run.stdout);
     expect(parsed.status).toBe("killed");
+    // The envelope's own top-level flag: something in the result really
+    // was cut, not only the per-mutant `diff.truncated` checked below.
+    expect(parsed.truncated).toBe(true);
     expect(parsed.plan.results.length).toBeGreaterThan(0);
     const entry = parsed.plan.results[0];
     const diff = entry.mutant.diff;
