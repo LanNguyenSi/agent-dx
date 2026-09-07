@@ -912,6 +912,20 @@ export interface BoundedExcerpt {
  * `reconcileEnvelopeDiffTruncation` apply -- can be pinned directly, at
  * literal small bounds, instead of only through a 3,000-character
  * end-to-end fixture whose expected output nobody can write down.
+ *
+ * Decision: the `hunks.length === 0` branch below is a REQUIRED
+ * exception, not a discretionary one, and stays a dedicated branch
+ * rather than being folded into `boundHunksUnder`. `boundHunksUnder`
+ * indexes `hunks[0]` once its whole-hunk loop keeps none (the "first
+ * hunk alone does not fit" fallback), which is unconditional once
+ * `hunks` is non-empty; called with an empty array it would iterate
+ * `for (const line of hunks[0])` over `undefined` and throw, rather than
+ * return a value this function's own callers (`computeAppliedDiffExcerpt`
+ * refuses a zero-hunk diff before ever reaching this bound, but this
+ * export has no such guard for a caller composing `preamble` directly)
+ * could use. Folding the two paths would mean teaching
+ * `boundHunksUnder` itself to special-case an empty `hunks` array first,
+ * which is exactly this branch, just moved one call frame down.
  */
 export function buildBoundedHunkExcerpt(
   preamble: string[],

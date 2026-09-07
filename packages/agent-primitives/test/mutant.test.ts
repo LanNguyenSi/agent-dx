@@ -2366,6 +2366,11 @@ describe("buildBoundedHunkExcerpt", () => {
       keptHunks: 0,
     });
   });
+
+  it("returns a value rather than throwing for a zero-hunk input, which is what the dedicated hunks.length === 0 branch exists to guarantee (see the function's own docblock: folding it into boundHunksUnder's shared fallback would index hunks[0] of an empty array and throw instead)", () => {
+    expect(() => buildBoundedHunkExcerpt(PREAMBLE, [], 100, 100)).not.toThrow();
+    expect(() => buildBoundedHunkExcerpt([], [], 100, 100)).not.toThrow();
+  });
 });
 
 describe("reconcileEnvelopeDiffTruncation", () => {
