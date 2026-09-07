@@ -26,7 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since there is nothing left to shrink). Covered by a new test in
   `test/mutant.test.ts` built through real `buildEnvelope` and
   `reconcileEnvelopeDiffTruncation` at a budget a few characters under the
-  corrected length, which fails on the pre-fix code.
+  corrected length, which fails on the pre-fix code, plus a second test
+  pinning that a stale overrun warning already on the envelope gets
+  replaced (not duplicated) once the case-3 growth pushes it further
+  over budget. The tracker task's premise that `probe`/`probe --plan`
+  CLI output itself reaches this shape is superseded by measurement: a
+  sweep of the package's own single-pass reduction did not produce the
+  shape; the growth is reachable for a library caller's own composed
+  envelope, or one handed in from a prior, harsher reduction pass, not
+  for the CLI's own reduction.
 
 - `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget`: when
   restating a plan's descriptors and excerpts pushes the whole envelope

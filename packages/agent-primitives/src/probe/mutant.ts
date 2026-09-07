@@ -2209,10 +2209,9 @@ function applyExcerptBudget(target: CorrectionTarget, budget: number): void {
  * single oversized mutant is shrunk on its own rather than spreading a
  * uniform cut across every mutant in a plan that did not need one.
  *
- * When every target has been shrunk to nothing and the envelope still
- * exceeds `maxChars` (the fixed fields, or fields this never touches,
- * are what is over budget), the dropped keys stay dropped -- there is
- * nothing left here to shrink -- and a warning names the true final
+ * Once there is nothing left here to shrink (every target has been
+ * shrunk to nothing, or there was never a target to begin with) and the
+ * envelope still exceeds `maxChars`, a warning names the true final
  * length, in the same words `buildEnvelope`'s own overrun warning uses,
  * so a caller can tell "bounded as requested" from "bounded, but bigger
  * than asked for, honestly reported" here too.
