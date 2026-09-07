@@ -469,6 +469,24 @@ this shape (see `test/mutant.test.ts`, the `reconcileEnvelopeDiffTruncation`
 describe block's case-3 fixtures) -- do not read this paragraph as a
 claim about `probe`/`probe --plan` CLI output.
 
+The same overrun warning is kept honest on the SHRINK side too, not
+only the grow side above: when a correction re-cuts an excerpt to a
+hunk boundary and that lands shorter than `buildEnvelope`'s own generic
+mid-hunk cut, an envelope that was already over `-m` before the
+correction ran can end up smaller without the shrink search above ever
+running (the shrunk result already sits at or under the envelope's
+pre-correction size). A prior "could not be met" warning is still
+reconciled against the envelope's TRUE final length in that shape: kept
+and restated if the envelope is still over `-m`, or dropped once the
+shrink brought it back within bound. Reachability is the same as the
+case-3 shape above -- a warning next to a `diff.path`-bearing excerpt is
+not something `probe`'s own single-pass reduction produces either
+(below its skeleton floor the reduction drops `mutant`, and `diff` with
+it, before ever appending a warning; at or above it, the reduction
+always fits `-m` on its own and appends none), so this too is reachable
+only for a library caller's own composed envelope, or one handed in
+from a prior, harsher reduction pass (task `4af16fdf`).
+
 The probe pins its own content-writing git commands with `-c
 core.autocrlf=false` and `-c apply.whitespace=nowarn`: the patch dry
 run, the real patch apply, the worktree checkout, and the tracked-diff
