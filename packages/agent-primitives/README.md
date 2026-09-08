@@ -874,7 +874,7 @@ relying on the exit code alone -- and carry no discriminating signal
 either way, so empty output on both sides never triggers it), when
 NEITHER side's captured tail was truncated (a byte-identical comparison
 of two truncated tails proves nothing about the untruncated output), and
-when `--require-baseline-evidence` was not given and matched (see next).
+unless a given `--require-baseline-evidence` matched the baseline (see next).
 A test command that prints nothing at all on either run is protected by
 neither mechanism -- no regex can match empty output, and there is
 nothing to compare -- so a genuinely silent suite must be made to print
@@ -893,8 +893,15 @@ side, since a pattern that matched output outside the captured tail
 would otherwise read as a plain, unexplained miss. The pattern is a bare
 JS `RegExp` source with no flags syntax (fold `i`/`m`/`s` into the
 pattern itself, e.g. `(?i)` is not supported); an unparseable one is a
-usage error before the run ever starts. Not available under `--plan`,
-the same way `--env` is not. Once given AND matched against the
+usage error before the run ever starts. Available under `--plan`: a plan
+runs every mutant against ONE shared baseline, so there is no
+two-sources conflict for this flag to referee (unlike `--env`, which
+stays refused there); like `--link` and `--allow-outside` there is no
+plan-file key for it, so it is command-line only, and it gates the
+plan's own baseline the same way it gates a single probe's -- a miss is
+the plan's own top-level `status: "inconclusive"`, `reason:
+"baseline_evidence_not_matched"`, before any mutant of the plan is
+reached. Once given AND matched against the
 baseline, it is also the escape hatch for the generic fallback above: a
 quiet, deterministic runner with real, non-empty, non-summary output on
 both runs (`node --test --test-reporter=dot`'s bare `..`, for example)
@@ -914,10 +921,9 @@ not `no_tests_executed`. Node's `--test-name-pattern` matching no test
 name is a second, reporter-independent gap: the file itself still counts
 as "a test" in node's own summary (`tests 1`), so the zero-count check
 never fires for a name-filter miss even under the default reporter.
-`--require-baseline-evidence` is the remedy for all three: recognizing
-vitest's `--reporter=json` `numTotalTests` field is possible but not
-implemented here (out of scope for this task; add it, with its own
-fixture pair, if a real case needs it).
+`--require-baseline-evidence` is the remedy for all three: vitest's
+`--reporter=json` `numTotalTests` is not recognized; use
+`--require-baseline-evidence` for a JSON-reporter run.
 
 With no `--timeout` given and a test command that looks like a whole test
 suite rather than one targeted file -- `npm test`, `npm run test`/`npm
@@ -1288,6 +1294,9 @@ since it is the only one of them that is per mutant rather than per run.
 `--link` and `--allow-outside` have no plan key at all (`plan.link` is a
 `plan_invalid` refusal naming the unknown key), so for a plan they are
 command-line only and there is nothing for them to override.
+`--require-baseline-evidence` is the same shape: no plan key, command-line
+only, and (unlike `--env`) not refused under `--plan` -- see its own
+paragraph above.
 
 Output: the envelope carries `plan: { baseline, results, summary }`
 instead of the single probe's top-level `mutant`/`mutation_probe`/`test`.

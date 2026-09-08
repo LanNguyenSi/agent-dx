@@ -714,6 +714,16 @@ export interface ProbePlanOptions {
   allowOutside?: boolean;
   cwd: string;
   logDir: string;
+  /** Opt-in `--require-baseline-evidence <regex>`, the same as
+   * `ProbeOptions.requireBaselineEvidence`: unlike `env` (which a plan
+   * has no wiring for at all), this checks the plan's own ONE shared
+   * baseline before the first mutant is applied -- there is only one
+   * baseline for the whole plan, so there is no second source for this
+   * value to conflict with. A miss reports the plan's own top-level
+   * `status: "inconclusive"`, `reason: "baseline_evidence_not_matched"`,
+   * the same unremapped pair `baseline_failed` reports for a plan (see
+   * the README's `--plan` section). */
+  requireBaselineEvidence?: RegExp;
   /** See `ProbeOptions.exitOnSignal`: `true` for the CLI, whose process
    * exists to run exactly this plan. */
   exitOnSignal?: boolean;
@@ -986,6 +996,7 @@ export async function probePlan(
       gitApplyTimeoutMs,
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
+      requireBaselineEvidence: opts.requireBaselineEvidence,
       exitOnSignal: opts.exitOnSignal ?? false,
       warnings,
       isolationField,

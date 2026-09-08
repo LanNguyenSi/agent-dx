@@ -487,18 +487,17 @@ export async function runMutantAttempt(
       testResult.stderrTail,
     );
     // The generic byte-identical fallback: scoped to a verdict whose own
-    // "killed"-ness rests on nothing but a PASSING exit code -- the
-    // exact silent exit-0 evidence this whole mechanism distrusts. Under
-    // `--expect fail` (the default) that is a `survived` verdict
-    // (`killed` is false there only because the exit code was 0); under
-    // `--expect pass` it is instead a `killed` one (`killed` is true
-    // there only because the exit code was 0). A verdict resting on a
-    // FAILING exit code already carries a real signal -- the process
-    // itself disagreed with the baseline -- that this output-only
-    // heuristic has no business second-guessing, whichever direction
-    // `--expect` points.
-    const restsOnPassingExit =
-      status === "survived" || (status === "killed" && spec.expect === "pass");
+    // exit code from the mutant's OWN run was PASSING (0) -- the exact
+    // silent exit-0 evidence this whole mechanism distrusts. Whichever
+    // direction `--expect` points, a mutant run that exited NON-ZERO
+    // already carries a real signal -- the process itself disagreed with
+    // the baseline -- that this output-only heuristic has no business
+    // second-guessing; that holds for a `survived` verdict under
+    // `--expect fail` bound to exit 0 exactly as it does for a `killed`
+    // verdict under `--expect pass` bound to exit 0, and it excludes a
+    // `survived` verdict under `--expect pass`, which is `survived`
+    // precisely because the mutant run exited NON-ZERO.
+    const restsOnPassingExit = testResult.exitCode === 0;
     // Silence on both sides is common and legitimate (many hand-rolled
     // test scripts print nothing on a pass, relying on the exit code
     // alone -- this package's own fixtures included), so it is excluded

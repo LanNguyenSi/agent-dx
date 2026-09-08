@@ -219,7 +219,6 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
     );
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("no_tests_executed");
-    expect(result.reason).not.toBe("baseline_failed");
     expect(result.mutation_probe?.result).toBe("not_run");
   });
 
@@ -486,6 +485,34 @@ describe("probe(): --expect pass, a killed verdict resting on a passing exit cod
   // See "criterion 2 fixture pair" below for the negative control (a
   // real, executed vitest summary under --expect pass is unaffected):
   // it needs the real-vitest fixture defined further down this file.
+
+  it("round-3 fix: a survived verdict under --expect pass whose mutant run exited NON-ZERO stands, even with byte-identical output on both sides", async () => {
+    // Round-2 review finding: `restsOnPassingExit` used to be
+    // `status === "survived" || (status === "killed" && expect ===
+    // "pass")`, which enters the fallback for EVERY `--expect pass`
+    // `survived` verdict regardless of the mutant run's own exit code --
+    // including this one, whose `survived`-ness rests on the mutant run
+    // exiting NON-ZERO, the opposite of the silent exit-0 evidence this
+    // mechanism exists to distrust. `restsOnPassingExit` now reads the
+    // mutant run's own exit code directly, so this case never enters the
+    // fallback at all.
+    const repo = initGitRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        expect: "pass",
+        // Prints the SAME constant line whichever content fixture.js
+        // has, but exits 0 only when it still reads the baseline's
+        // `flag: true` -- the default mutant flips it to `flag: false`,
+        // so the baseline passes (exit 0) and the mutant run fails
+        // (exit 1) while producing byte-identical output.
+        testCommand:
+          "node -e \"const { flag } = require('./fixture.js'); console.log('constant-output'); process.exit(flag ? 0 : 1);\"",
+      }),
+    );
+    expect(result.status).toBe("survived");
+    expect(result.reason).toBeUndefined();
+    expect(result.warnings).toEqual([]);
+  });
 });
 
 // --- Criterion 2's discriminating fixture pair, through a REAL vitest

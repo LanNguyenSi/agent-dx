@@ -23,64 +23,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `status: "inconclusive"`, `reason: "no_tests_executed"`,
   `mutation_probe.result: "not_run"`, exit `2` -- never a verdict a
   suite that ran nothing has no business making. For a test runner
-  neither detector recognizes, a `survived`-shaped mutant run also
-  falls back to comparing its own output against the baseline's:
-  byte-identical stdout/stderr on both sides, with no summary line
-  either detector recognizes on either side, is read the same way.
-  That fallback is deliberately narrow (`survived` only, and only when
-  there is some real, non-empty output to compare -- two empty tails
-  are common and legitimate, and carry no discriminating signal either
-  way), after an early implementation of it, checked against this
-  package's own recorded single-probe fixtures
-  (`test/probe.test.ts`'s `RECORDED.*`), flagged a genuinely `killed`
-  mutant and a genuinely `survived` one as `no_tests_executed` purely
-  because their fixture's `node fixture.test.js` test command prints
-  nothing on either a pass or a fail. An opt-in
+  neither detector recognizes, a mutant run whose own exit code is `0`
+  (a `survived` verdict under the default `--expect fail`, or a
+  `killed` one under `--expect pass`, both certified by nothing but
+  that passing exit code) also falls back to comparing its own output
+  against the baseline's: byte-identical stdout/stderr on both sides,
+  with no summary line either detector recognizes on either side, is
+  read the same way; a mutant run that exited non-zero never enters
+  this fallback, whichever direction `--expect` points, since a
+  disagreeing exit code already carries a real signal this
+  output-only heuristic has no business second-guessing. The fallback
+  is further scoped to only when there is some real, non-empty output
+  to compare (two empty tails are common and legitimate, and carry no
+  discriminating signal either way) and when neither side's captured
+  output tail (`exec.ts`'s 60-line/6000-character bound) was
+  truncated (a byte-identical comparison of two truncated tails proves
+  nothing about the untruncated output). An opt-in
   `--require-baseline-evidence <regex>` adds a caller-supplied safety
   net for a suite neither built-in detector recognizes at all: when
   given, the baseline's own stdout+stderr must match it before any
-  mutant is applied; a miss is
-  `reason: "baseline_evidence_not_matched"`, the same shape; an
-  unparseable pattern is a usage error. Both new reasons join
-  `REFUSAL_RESULT_SHAPE` (`src/probe/session.ts`) and the README's
-  "Refusal reason shape"/"Result shape" tables, provoked for real in
-  `test/probe-refusal-contract.test.ts` the same way every other
-  refusal reason already is. New detector module
+  mutant is applied; a miss is `reason: "baseline_evidence_not_matched"`,
+  the same shape, naming a truncated tail in its warning when one
+  scrolled the pattern out of view instead of reading as a plain,
+  unexplained miss; an unparseable pattern is a usage error. Once given
+  AND matched, it is also the escape hatch for the generic fallback
+  above: a genuine survivor of a quiet deterministic runner (`node
+  --test --test-reporter=dot`'s bare `..`) is reported `survived` with
+  the flag, `inconclusive`/`no_tests_executed` without it, by design.
+  Available under `--plan` (a plan runs every mutant against ONE
+  shared baseline, so unlike `--env` there is no second source for
+  this value to conflict with), threaded through `probePlan`'s own
+  setup so a plan's `results[]` and top-level `status`/`reason` carry
+  the same detector/fallback/escape-hatch shape a single probe does.
+  Both new reasons join `REFUSAL_RESULT_SHAPE` (`src/probe/session.ts`)
+  and the README's "Refusal reason shape"/"Result shape" tables,
+  provoked for real in `test/probe-refusal-contract.test.ts` the same
+  way every other refusal reason already is. New detector module
   `src/probe/zero-tests.ts`, reusing `verify`'s own `vitestDetector`
   (`src/verify/detectors/vitest.ts`) rather than re-parsing vitest's
-  summary shapes a second time.
-
-- `probe`'s zero-tests-executed detection, round 2 (task `273b3851`,
-  review round 1): the mutant-side detector (`step.ts`) and the
-  exit-code-independent ordering of the baseline-stage check
-  (`setup.ts`) had no test coverage of their own -- a probe removing
-  either survived the full suite -- now pinned by a `probe()`-level test
-  each (a runner script whose own mutant flips its output to a known
-  zero-tests shape at exit `0`; a synthetic vitest exit-`1` "No test
-  files found" baseline). The generic byte-identical fallback is now
-  skipped once a given `--require-baseline-evidence` matched the
-  baseline (the caller's own evidence is exactly what the fallback
-  otherwise stands in for), so a genuine survivor of a quiet
-  deterministic runner (`node --test --test-reporter=dot`'s bare `..`)
-  is reported `survived` with the flag, `inconclusive`/
-  `no_tests_executed` without it, by design. Both zero-tests detectors
-  and the fallback only ever see each side's CAPTURED output tail
-  (`exec.ts`'s 60-line/6000-character bound); the fallback now stays out
-  of the way entirely once either side's tail was truncated, and a
-  `--require-baseline-evidence` miss now names a truncated tail in its
-  warning instead of reading as a plain, unexplained miss. The
-  mutant-side detector and the fallback now also apply to a `killed`
-  verdict under `--expect pass` whose "killed"-ness rests on nothing but
-  a passing exit code -- the same silent exit-0 evidence, just
-  certifying the opposite verdict, previously left uncaught (a quiet
-  unknown runner with identical exit-0 output on both runs was
-  certified `killed` with empty warnings). README documents the
-  captured-tail scope, the `--require-baseline-evidence` escape hatch,
-  the default-reporter-only limitation (`--reporter=json`/`dot`, node's
-  `--test-name-pattern` matching nothing), and that a suite printing
-  nothing at all on either run is protected by neither mechanism.
-  `zero-tests.ts`'s node `--test` summary regex is no longer duplicated
-  between the zero-count detector and the generic summary check.
+  summary shapes a second time, with its node `--test` summary regex
+  shared (not duplicated) between the zero-count detector and the
+  generic summary check. README documents the captured-tail scope, the
+  escape hatch, the default-reporter-only limitation (vitest's
+  `--reporter=json` `numTotalTests` is not recognized; use
+  `--require-baseline-evidence` for a JSON-reporter run), and that a
+  suite printing nothing at all on either run is protected by neither
+  mechanism.
 
 - `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget` (task
   `e82f341a`): the `targets.length === 0` early return skipped the whole

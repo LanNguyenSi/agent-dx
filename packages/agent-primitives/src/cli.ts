@@ -1073,14 +1073,17 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
 /** The single-mutant options `--plan` refuses outright: the plan file
  * itself carries the mutants and the command they share, so accepting
  * one of these beside it would mean two sources for the same value with
- * no honest precedence between them. `--env` and
- * `--require-baseline-evidence` sit here rather than beside
- * `--link`/`--allow-outside` below: a plan run has no wiring for either
- * today, and refusing the combination outright keeps a caller from
- * silently having it ignored. The run-shaping options (`-i`, `--expect`,
- * `--timeout`, `--link`, `--allow-outside`) are NOT in this set: they
- * override the plan's own value when given (see `runProbePlanCommand`'s
- * own docblock for that precedence). */
+ * no honest precedence between them. `--env` sits here rather than
+ * beside `--link`/`--allow-outside` below: a plan run has no wiring for
+ * it today, and refusing the combination outright keeps a caller from
+ * silently having it ignored. `--require-baseline-evidence` is NOT in
+ * this set (round-3 fix): a plan runs every mutant against ONE shared
+ * baseline, so there is no second source for this value to conflict
+ * with -- it is threaded straight through to `probePlan`'s own setup,
+ * the same as `--link`/`--allow-outside` below. The run-shaping options
+ * (`-i`, `--expect`, `--timeout`, `--link`, `--allow-outside`) are NOT in
+ * this set either: they override the plan's own value when given (see
+ * `runProbePlanCommand`'s own docblock for that precedence). */
 const PLAN_EXCLUSIVE_OPTIONS: readonly {
   flag: string;
   key: keyof ProbeCliOptions;
@@ -1094,7 +1097,6 @@ const PLAN_EXCLUSIVE_OPTIONS: readonly {
   { flag: "-t/--test", key: "test" },
   { flag: "--pre", key: "pre" },
   { flag: "--env", key: "env" },
-  { flag: "--require-baseline-evidence", key: "requireBaselineEvidence" },
 ];
 
 function requirePlanExclusive(opts: ProbeCliOptions): void {
@@ -1181,6 +1183,7 @@ async function runProbePlanCommand(
       allowOutside: opts.allowOutside ?? false,
       cwd: global.cwd,
       logDir: global.logDir,
+      requireBaselineEvidence: opts.requireBaselineEvidence,
       exitOnSignal: true,
     });
   } finally {
@@ -1301,7 +1304,7 @@ program
   )
   .option(
     "--plan <path>",
-    "JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with --file, -n, -r, -M, -w, -p, -t, --pre, --env and --require-baseline-evidence",
+    "JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with --file, -n, -r, -M, -w, -p, -t, --pre and --env",
   )
   .option(
     "--link <dirs>",
