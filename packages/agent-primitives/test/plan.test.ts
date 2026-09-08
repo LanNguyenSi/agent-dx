@@ -1389,3 +1389,130 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
     expect(plan.results[0].status).toBe(single.status);
   }, 30000);
 });
+
+// --- `--require-baseline-evidence` threaded through
+// `probePlan`'s own setup (task 273b3851, review round 2). A plan runs
+// every mutant against ONE shared baseline, so unlike `--env` (still
+// refused under `--plan`, see PLAN_EXCLUSIVE_OPTIONS in cli.ts) there is
+// no second source for this value to conflict with. Mirrors
+// `test/probe-zero-tests.test.ts`'s "generic byte-identical fallback,
+// --require-baseline-evidence opt-out" describe block, for the plan
+// path. -----------------------------------------------------------------
+
+/** A throwaway `node --test` project, the plan-path twin of
+ * `probe-zero-tests.test.ts`'s `initNodeTestDotRepo()`: `calc.js`
+ * exports `add` (tested) and `unused` (never referenced by the test
+ * file at all), `calc.test.js` runs two passing tests against `add`
+ * with `--test-reporter=dot` (bare `..`, no summary line either
+ * built-in zero-tests detector recognizes). Mutating `unused` is a
+ * genuine, legitimate survivor: the suite never exercises it, so both
+ * the baseline and the mutant run print the exact same `..` and exit
+ * `0`. */
+function initNodeTestDotRepo(): string {
+  const repo = makeTmpDir();
+  git(repo, ["init", "-q"]);
+  git(repo, ["config", "user.email", "test@example.com"]);
+  git(repo, ["config", "user.name", "test"]);
+  fs.writeFileSync(
+    path.join(repo, "calc.js"),
+    [
+      "function add(a, b) {",
+      "  return a + b;",
+      "}",
+      "function unused(a, b) {",
+      "  return a + b;",
+      "}",
+      "module.exports = { add, unused };",
+      "",
+    ].join("\n"),
+  );
+  fs.writeFileSync(
+    path.join(repo, "calc.test.js"),
+    [
+      "const test = require('node:test');",
+      "const assert = require('node:assert');",
+      "const { add } = require('./calc.js');",
+      "test('add', () => { assert.strictEqual(add(1, 2), 3); });",
+      "test('add2', () => { assert.strictEqual(add(2, 2), 4); });",
+      "",
+    ].join("\n"),
+  );
+  git(repo, ["add", "-A"]);
+  git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+  return repo;
+}
+
+/** Mutates only the untested `unused` function, so the dot reporter's
+ * `..` output is unaffected either way: a genuine, legitimate survivor. */
+function dotReporterPlanOptions(
+  repo: string,
+  overrides: Partial<ProbePlanOptions> = {},
+): ProbePlanOptions {
+  return planOptions(
+    repo,
+    [
+      {
+        file: "calc.js",
+        line: 5,
+        form: "replace",
+        replaceText: "  return a - b;",
+      },
+    ],
+    {
+      testCommand: "node --test --test-reporter=dot calc.test.js",
+      ...overrides,
+    },
+  );
+}
+
+describe("probePlan(): zero-tests-executed detection through the shared baseline", () => {
+  it("without --require-baseline-evidence, a genuine dot-reporter survivor is read as inconclusive/no_tests_executed by design, per mutant", async () => {
+    useLockDir();
+    const repo = initNodeTestDotRepo();
+
+    const result = await probePlan(dotReporterPlanOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("mutant_inconclusive");
+    expect(result.results[0].status).toBe("inconclusive");
+    expect(result.results[0].reason).toBe("no_tests_executed");
+    expect(result.results[0].mutation_probe?.result).toBe("not_run");
+  }, 30000);
+
+  it("with a matching --require-baseline-evidence, the same dot-reporter survivor stays survived, not second-guessed", async () => {
+    useLockDir();
+    const repo = initNodeTestDotRepo();
+
+    const result = await probePlan(
+      dotReporterPlanOptions(repo, { requireBaselineEvidence: /\.\./ }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.results[0].status).toBe("survived");
+    expect(result.results[0].reason).toBeUndefined();
+  }, 30000);
+
+  it("a non-matching --require-baseline-evidence refuses the whole plan at the top level, before any mutant is reached", async () => {
+    // Round-2 review survivor: disabling this wiring (forcing
+    // `requireBaselineEvidenceMatched: true` regardless of what the
+    // caller passed) left a genuine survivor with no opt-out under
+    // `--plan`, and no test caught it. This is the mirror case: a
+    // regex that genuinely does not match must still refuse, at the
+    // PLAN's own top level (the unremapped `inconclusive`/
+    // `baseline_evidence_not_matched` pair, the same as `baseline_failed`
+    // is for a plan -- see the README's `--plan` section), with every
+    // mutant reported `not_run`.
+    useLockDir();
+    const repo = initNodeTestDotRepo();
+
+    const result = await probePlan(
+      dotReporterPlanOptions(repo, {
+        requireBaselineEvidence: /this text never appears/,
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_evidence_not_matched");
+    expect(result.results.map((r) => r.status)).toEqual(["not_run"]);
+  }, 30000);
+});

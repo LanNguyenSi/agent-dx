@@ -1682,6 +1682,79 @@ describe("cli: probe", () => {
     expect(JSON.parse(emptyName.stdout).status).toBe("usage_error");
   });
 
+  it("--require-baseline-evidence with an unparseable regex is a usage error, exit 2 (task 273b3851)", async () => {
+    const run = await spawnCli([
+      "probe",
+      "--require-baseline-evidence",
+      "(",
+      "-t",
+      "true",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+  });
+
+  it("--env combined with --plan is still a usage error: a plan has no wiring for it", async () => {
+    const planPath = path.join(makeTmpDir(), "plan.json");
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        test: "true",
+        mutants: [{ file: "x.js", line: 1, replace: "y" }],
+      }),
+    );
+    const run = await spawnCli(["probe", "--plan", planPath, "--env", "X=1"]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+  });
+
+  it("--require-baseline-evidence combined with --plan is allowed and threaded through to the plan's own shared baseline", async () => {
+    // Round-2 review finding: the flag used to be refused outright
+    // alongside --plan (PLAN_EXCLUSIVE_OPTIONS in cli.ts), even though a
+    // plan runs every mutant against ONE shared baseline -- there is no
+    // second source for this value to conflict with. Proven end to end
+    // here, through the built CLI, not just the library: a plan whose
+    // baseline output does NOT match the given pattern refuses at the
+    // plan's own top level (`inconclusive`/`baseline_evidence_not_matched`),
+    // never a `usage_error` -- which is exactly what a caller would see
+    // again if the flag were still in PLAN_EXCLUSIVE_OPTIONS.
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      "module.exports = { flag: true };\n",
+    );
+    commitAll(repo);
+    const planPath = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        test: "node -e \"console.log('ready')\"",
+        isolation: "inplace",
+        mutants: [
+          {
+            file: "fixture.js",
+            line: 1,
+            replace: "module.exports = { flag: false };",
+          },
+        ],
+      }),
+    );
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "--require-baseline-evidence",
+      "this text never appears",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("inconclusive");
+    expect(parsed.reason).toBe("baseline_evidence_not_matched");
+  });
+
   it("--env overrides are still visible on a baseline_failed run, at the run level, even though there is no test field", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");

@@ -95,6 +95,30 @@ export interface TestPhaseField extends ExecPhaseField {
   env?: Record<string, string>;
 }
 
+/**
+ * The baseline run's own captured tail, plus everything `step.ts`'s
+ * classify step needs about it beyond the raw text: whether either tail
+ * was itself truncated (`exec.ts`'s `TAIL_LINES`/`TAIL_CHARS` bound --
+ * both zero-tests checks and the generic byte-identical fallback only
+ * ever see this captured tail, never the command's full output), and
+ * whether `--require-baseline-evidence` was given AND matched this
+ * baseline (as opposed to not given at all -- a miss already refuses
+ * before any mutant is applied, so a caller-supplied miss never reaches
+ * here). `true` here is the caller's own opt-in evidence that this
+ * runner's output is trustworthy, which is exactly the evidence the
+ * generic fallback exists to stand in for absent that opt-in -- so the
+ * fallback is skipped entirely once this is `true` (see `step.ts`).
+ * Declared here (the bottom of the `session.ts <- step.ts <- setup.ts <-
+ * index.ts` layering) rather than in `setup.ts`, which produces it, so
+ * `step.ts` can name the type without importing `setup.ts` at all. */
+export interface BaselineOutput {
+  stdoutTail: string;
+  stderrTail: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  requireBaselineEvidenceMatched: boolean;
+}
+
 /** A `--env` override name that looks like it carries a credential:
  * `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` or `KEY`, singular or
  * plural, as its own `_`-delimited segment (case-insensitive) --
@@ -151,7 +175,17 @@ export type ProbeStatus =
  * `worktree_original_tree_modified`, `restore_failed`, `timeout`, a
  * mutant-phase `pre_failed`/`aborted`): those already always carry both
  * `mutant` and `mutation_probe` (a real mutant was applied), so they
- * need no contract entry to stay consistent. */
+ * need no contract entry to stay consistent.
+ *
+ * `"no_tests_executed"` and `"baseline_evidence_not_matched"` are both
+ * baseline-phase refusals too, reported from the same point
+ * `"baseline_failed"`/`"target_changed_during_baseline"` are (after the
+ * mutant is computed, on a baseline that otherwise exited 0): the first
+ * when the baseline's own output shows a known test runner (vitest,
+ * node's built-in `--test`) executed nothing (see `zero-tests.ts`), the
+ * second when an opt-in `--require-baseline-evidence <regex>` was given
+ * and did not match the baseline output. Both `true`, the same as the
+ * other baseline-phase reasons. */
 export type RefusalReason =
   | "worktree_allow_outside_unsupported"
   | "file_outside_root"
@@ -168,7 +202,9 @@ export type RefusalReason =
   | "aborted"
   | "pre_failed"
   | "baseline_failed"
-  | "target_changed_during_baseline";
+  | "target_changed_during_baseline"
+  | "no_tests_executed"
+  | "baseline_evidence_not_matched";
 
 /**
  * The single source of truth for which fields a single-mutant `probe()`
@@ -222,6 +258,8 @@ export const REFUSAL_RESULT_SHAPE: Record<
   pre_failed: { mutant: true, mutationProbe: true },
   baseline_failed: { mutant: true, mutationProbe: true },
   target_changed_during_baseline: { mutant: true, mutationProbe: true },
+  no_tests_executed: { mutant: true, mutationProbe: true },
+  baseline_evidence_not_matched: { mutant: true, mutationProbe: true },
 };
 
 /** Restores `session` and verifies the restore by hash. A restore whose

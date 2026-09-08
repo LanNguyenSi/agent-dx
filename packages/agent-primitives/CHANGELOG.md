@@ -9,6 +9,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
+  (or mutant run) that exited `0` with nothing actually executed was
+  read as a real pass, twice reported as `survived` in batch 43 by a
+  vitest `-t "name (with parens)"` filter that matched no test inside
+  the files vitest still loaded (`Tests N skipped (N)`, `130 skipped`
+  both baseline and mutant, exit `0` both times). Two built-in
+  detectors now run before any verdict is issued: vitest's own "No
+  test files found"/all-skipped-or-zero-summary shapes (checked
+  against the baseline's own output before a mutant is even applied,
+  and again against the mutant run's own output), and node's built-in
+  `--test` runner's zero-count summary line. Either hit is
+  `status: "inconclusive"`, `reason: "no_tests_executed"`,
+  `mutation_probe.result: "not_run"`, exit `2` -- never a verdict a
+  suite that ran nothing has no business making. For a test runner
+  neither detector recognizes, a mutant run whose own exit code is `0`
+  (a `survived` verdict under the default `--expect fail`, or a
+  `killed` one under `--expect pass`, both certified by nothing but
+  that passing exit code) also falls back to comparing its own output
+  against the baseline's: byte-identical stdout/stderr on both sides,
+  with no summary line either detector recognizes on either side, is
+  read the same way; a mutant run that exited non-zero never enters
+  this fallback, whichever direction `--expect` points, since a
+  disagreeing exit code already carries a real signal this
+  output-only heuristic has no business second-guessing. The fallback
+  is further scoped to only when there is some real, non-empty output
+  to compare (two empty tails are common and legitimate, and carry no
+  discriminating signal either way) and when neither side's captured
+  output tail (`exec.ts`'s 60-line/6000-character bound) was
+  truncated (a byte-identical comparison of two truncated tails proves
+  nothing about the untruncated output). An opt-in
+  `--require-baseline-evidence <regex>` adds a caller-supplied safety
+  net for a suite neither built-in detector recognizes at all: when
+  given, the baseline's own stdout+stderr must match it before any
+  mutant is applied; a miss is `reason: "baseline_evidence_not_matched"`,
+  the same shape, naming a truncated tail in its warning when one
+  scrolled the pattern out of view instead of reading as a plain,
+  unexplained miss; an unparseable pattern is a usage error. Once given
+  AND matched, it is also the escape hatch for the generic fallback
+  above: a genuine survivor of a quiet deterministic runner (`node
+  --test --test-reporter=dot`'s bare `..`) is reported `survived` with
+  the flag, `inconclusive`/`no_tests_executed` without it, by design.
+  Available under `--plan` (a plan runs every mutant against ONE
+  shared baseline, so unlike `--env` there is no second source for
+  this value to conflict with), threaded through `probePlan`'s own
+  setup so a plan's `results[]` and top-level `status`/`reason` carry
+  the same detector/fallback/escape-hatch shape a single probe does.
+  Both new reasons join `REFUSAL_RESULT_SHAPE` (`src/probe/session.ts`)
+  and the README's "Refusal reason shape"/"Result shape" tables,
+  provoked for real in `test/probe-refusal-contract.test.ts` the same
+  way every other refusal reason already is. New detector module
+  `src/probe/zero-tests.ts`, reusing `verify`'s own `vitestDetector`
+  (`src/verify/detectors/vitest.ts`) rather than re-parsing vitest's
+  summary shapes a second time, with its node `--test` summary regex
+  shared (not duplicated) between the zero-count detector and the
+  generic summary check. README documents the captured-tail scope, the
+  escape hatch, the default-reporter-only limitation (vitest's
+  `--reporter=json` `numTotalTests` is not recognized; use
+  `--require-baseline-evidence` for a JSON-reporter run), and that a
+  suite printing nothing at all on either run is protected by neither
+  mechanism.
+
 - `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget` (task
   `e82f341a`): the `targets.length === 0` early return skipped the whole
   bound re-check whenever every correction was a case 3 (the whole `diff`

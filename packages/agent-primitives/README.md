@@ -837,6 +837,94 @@ usage error rather than a silently dropped variable. Not available under
 `--plan`: combined with `--plan` it is refused outright as a usage
 error, the same way every other single-mutant-only option is.
 
+A baseline that exits `0` but never actually ran a test is never read as
+a real pass: both the baseline (before any mutant is even applied) and,
+past that, the mutant run itself are checked for known zero-tests
+evidence -- vitest's own "No test files found" (no matching file at all)
+or a `Tests` summary with nothing `passed` and nothing `failed` (an
+all-skipped/all-todo run, the shape a `-t`/name filter that matches no
+test inside files vitest still loaded produces), and node's built-in
+`--test` runner's own zero-count summary line. Either hit is
+`status: "inconclusive"`, `reason: "no_tests_executed"`, exit `2`,
+`mutation_probe.result: "not_run"` -- never `"killed"`/`"survived"`, a
+verdict that measured nothing. **Both detectors, and the generic
+fallback and `--require-baseline-evidence` described below, only ever
+see each side's CAPTURED output tail** (the same 60-line/6000-character
+bound every exec result reports as `stdoutTruncated`/`stderrTruncated`),
+never a command's full, untruncated output; a summary line or a
+`--require-baseline-evidence` pattern that scrolled out of the tail
+reads as a plain miss, not "not present at all" -- see the truncation
+paragraph below for how that is surfaced.
+
+For a test runner neither built-in detector recognizes, a mutant run
+whose own exit code is `0` (a `survived` verdict under the default
+`--expect fail`, or a `killed` one under `--expect pass`: the same
+silent exit-0 evidence, just certifying the opposite verdict)
+additionally falls back to comparing its own output
+against the baseline's: byte-identical stdout/stderr on both sides, with
+no summary line either detector recognizes on either side either, is
+read as "this ran the same nothing twice" rather than a real verdict. A
+`survived`/`killed` verdict resting on a FAILING exit code already
+carries a real signal (the process itself disagreed with the baseline)
+this output-only heuristic has no business second-guessing, whichever
+direction `--expect` points. The fallback is further scoped to only when
+there is some real output to compare (two empty tails are common and
+legitimate -- many hand-rolled test scripts print nothing on a pass,
+relying on the exit code alone -- and carry no discriminating signal
+either way, so empty output on both sides never triggers it), when
+NEITHER side's captured tail was truncated (a byte-identical comparison
+of two truncated tails proves nothing about the untruncated output), and
+unless a given `--require-baseline-evidence` matched the baseline (see next).
+A test command that prints nothing at all on either run is protected by
+neither mechanism -- no regex can match empty output, and there is
+nothing to compare -- so a genuinely silent suite must be made to print
+some real, discriminating evidence (even just an "N tests ran" line)
+before either one can protect it.
+
+`--require-baseline-evidence <regex>` is the opt-in safety net for a
+suite neither built-in detector recognizes at all: when given, the
+baseline's own stdout+stderr (concatenated) must match the pattern
+before this run may go on to apply a mutant, whatever the exit code and
+the zero-tests detectors said. A miss is
+`status: "inconclusive"`, `reason: "baseline_evidence_not_matched"`,
+exit `2`, `mutation_probe.result: "not_run"`; when either side of the
+baseline's own captured tail was truncated, the warning names which
+side, since a pattern that matched output outside the captured tail
+would otherwise read as a plain, unexplained miss. The pattern is a bare
+JS `RegExp` source with no flags syntax (fold `i`/`m`/`s` into the
+pattern itself, e.g. `(?i)` is not supported); an unparseable one is a
+usage error before the run ever starts. Available under `--plan`: a plan
+runs every mutant against ONE shared baseline, so there is no
+two-sources conflict for this flag to referee (unlike `--env`, which
+stays refused there); like `--link` and `--allow-outside` there is no
+plan-file key for it, so it is command-line only, and it gates the
+plan's own baseline the same way it gates a single probe's -- a miss is
+the plan's own top-level `status: "inconclusive"`, `reason:
+"baseline_evidence_not_matched"`, before any mutant of the plan is
+reached. Once given AND matched against the
+baseline, it is also the escape hatch for the generic fallback above: a
+quiet, deterministic runner with real, non-empty, non-summary output on
+both runs (`node --test --test-reporter=dot`'s bare `..`, for example)
+is exactly what this flag exists to vouch for, so a genuine `survived`
+of such a runner is reported as `survived`, not second-guessed by the
+fallback -- without the flag, the SAME command reads `inconclusive`/
+`no_tests_executed` by design (no way to tell "ran nothing" from "ran
+the same thing twice" without the caller's own evidence).
+
+Both detectors understand only each runner's DEFAULT text reporters:
+`node --test` with `--test-reporter=dot` (or any reporter besides the
+default `spec`/`tap` shapes), and vitest's own `--reporter=json` output,
+are invisible to them (neither carries the `tests <n>`/`Tests <n>
+passed` text either detector matches on) -- a `-t`/`--test-name-pattern`
+filter matching nothing under one of those reporters reads `survived`,
+not `no_tests_executed`. Node's `--test-name-pattern` matching no test
+name is a second, reporter-independent gap: the file itself still counts
+as "a test" in node's own summary (`tests 1`), so the zero-count check
+never fires for a name-filter miss even under the default reporter.
+`--require-baseline-evidence` is the remedy for all three: vitest's
+`--reporter=json` `numTotalTests` is not recognized; use
+`--require-baseline-evidence` for a JSON-reporter run.
+
 With no `--timeout` given and a test command that looks like a whole test
 suite rather than one targeted file -- `npm test`, `npm run test`/`npm
 run test:<anything>`, `yarn test`, `pnpm test` (each with nothing after
@@ -1044,8 +1132,8 @@ exactly which `reason` is which).
 | `status` | string | always | `"killed"`, `"survived"`, `"inconclusive"`, `"usage_error"`, or `"baseline_failed"`. The last is the CLI envelope's own literal status for a failing baseline (the library's `probe()` itself still returns `status: "inconclusive"`, `reason: "baseline_failed"`; the CLI remaps it so a consumer does not also have to read `reason` to tell a failing baseline apart from every other inconclusive outcome). Same exit-code class either way (`cannot-conclude`, exit `2`), so a caller gating on the exit code alone sees no difference. |
 | `reason` | string | whenever `status` is not a clean verdict | machine-readable cause, e.g. `"baseline_failed"`, `"pre_failed"`, `"restore_failed"`, `"aborted"`, `"target_changed_during_baseline"`, `"mutant_not_applicable"` |
 | `message` | string | top-level usage error only (see above) | the human-readable message commander (or this CLI's own pre-`probe()` check) produced; `reason` is still present alongside it, so a consumer can key off `reason` without also reading `message` |
-| `mutant` | `{ file, line, before, after, form, diff? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly four of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). |
-| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same four setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the four setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`), `reason` naming which. ABSENT for every other setup-phase refusal (see the table below), none of which ever computed a mutant. Paste straight into an implementer's `mutation_probes` output field. |
+| `mutant` | `{ file, line, before, after, form, diff? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly six of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"`, and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. |
+| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same six setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the six setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`), `reason` naming which, and for the mutant-phase zero-tests override described just above. ABSENT for every other setup-phase refusal (see the table below), none of which ever computed a mutant. Paste straight into an implementer's `mutation_probes` output field. |
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below) |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
@@ -1094,8 +1182,10 @@ above.
 | `pre_failed` | present | present | `--pre` exited non-zero during the baseline phase |
 | `baseline_failed` | present | present | the baseline test itself exited non-zero (or timed out) |
 | `target_changed_during_baseline` | present | present | the baseline run rewrote the target (a formatter, a codegen step) before any mutation |
+| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`) executed nothing, whatever its exit code -- see the zero-tests paragraph above |
+| `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |
 
-The four `present` rows are exactly the refusals that fire past the dry
+The six `present` rows are exactly the refusals that fire past the dry
 run: `openRunSetup` computes the one mutant this run would apply (the
 `beforeBaseline` hook) BEFORE the baseline runs, so every refusal from
 that point on already has it to report; every `absent` row above fires
@@ -1204,6 +1294,9 @@ since it is the only one of them that is per mutant rather than per run.
 `--link` and `--allow-outside` have no plan key at all (`plan.link` is a
 `plan_invalid` refusal naming the unknown key), so for a plan they are
 command-line only and there is nothing for them to override.
+`--require-baseline-evidence` is the same shape: no plan key, command-line
+only, and (unlike `--env`) not refused under `--plan` -- see its own
+paragraph above.
 
 Output: the envelope carries `plan: { baseline, results, summary }`
 instead of the single probe's top-level `mutant`/`mutation_probe`/`test`.

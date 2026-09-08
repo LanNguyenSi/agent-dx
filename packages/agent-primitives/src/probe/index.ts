@@ -110,6 +110,14 @@ export interface ProbeOptions {
    * `test.env` in the result. Omitted or empty leaves the test process's
    * environment as `process.env`. */
   env?: Record<string, string>;
+  /** Opt-in safety net for a test runner neither built-in zero-tests
+   * detector (`zero-tests.ts`) recognizes: when given, must match the
+   * baseline's own stdout+stderr before this run may apply a mutant; a
+   * miss refuses `inconclusive`/`baseline_evidence_not_matched`. `--
+   * require-baseline-evidence <regex>` on the CLI, compiled and
+   * validated there (an invalid pattern is a usage error before this
+   * ever runs). */
+  requireBaselineEvidence?: RegExp;
   cwd: string;
   logDir: string;
   /**
@@ -462,6 +470,7 @@ async function runProbePipeline(
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
       env: opts.env,
+      requireBaselineEvidence: opts.requireBaselineEvidence,
       exitOnSignal: opts.exitOnSignal ?? false,
       warnings,
       isolationField,
@@ -547,6 +556,7 @@ async function runProbePipeline(
     }
     const { rt, targets, logPaths: stepLogPaths } = setup.run;
     baseline = setup.run.baseline;
+    const baselineOutput = setup.run.baselineOutput;
     if (prepared === undefined) {
       // Unreachable: `openRunSetup` returns `ok` only past the
       // `beforeBaseline` hook above, which is where this is set. A
@@ -572,6 +582,7 @@ async function runProbePipeline(
         logPaths: stepLogPaths,
       },
       warnings,
+      baselineOutput,
     );
     return {
       status: outcome.status,
@@ -703,6 +714,16 @@ export interface ProbePlanOptions {
   allowOutside?: boolean;
   cwd: string;
   logDir: string;
+  /** Opt-in `--require-baseline-evidence <regex>`, the same as
+   * `ProbeOptions.requireBaselineEvidence`: unlike `env` (which a plan
+   * has no wiring for at all), this checks the plan's own ONE shared
+   * baseline before the first mutant is applied -- there is only one
+   * baseline for the whole plan, so there is no second source for this
+   * value to conflict with. A miss reports the plan's own top-level
+   * `status: "inconclusive"`, `reason: "baseline_evidence_not_matched"`,
+   * the same unremapped pair `baseline_failed` reports for a plan (see
+   * the README's `--plan` section). */
+  requireBaselineEvidence?: RegExp;
   /** See `ProbeOptions.exitOnSignal`: `true` for the CLI, whose process
    * exists to run exactly this plan. */
   exitOnSignal?: boolean;
@@ -975,6 +996,7 @@ export async function probePlan(
       gitApplyTimeoutMs,
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
+      requireBaselineEvidence: opts.requireBaselineEvidence,
       exitOnSignal: opts.exitOnSignal ?? false,
       warnings,
       isolationField,
@@ -1022,6 +1044,7 @@ export async function probePlan(
     }
     const { rt } = setup.run;
     baseline = setup.run.baseline;
+    const baselineOutput = setup.run.baselineOutput;
     setupLogPaths = setup.run.logPaths;
     // Keyed by the resolved path every planned mutant carries, so the
     // mutants that share a file share one backup and one restore.
@@ -1126,6 +1149,7 @@ export async function probePlan(
           logPaths: prepared.logPaths,
         },
         mutantWarnings,
+        baselineOutput,
       );
       results.push({
         index: item.index,

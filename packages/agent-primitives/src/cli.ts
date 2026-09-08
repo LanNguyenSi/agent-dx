@@ -202,6 +202,22 @@ function parseTimeoutSeconds(value: string): string {
   return value;
 }
 
+/** Compiles `--require-baseline-evidence <regex>` into a `RegExp`,
+ * rejecting an unparseable pattern as a usage error rather than letting
+ * it reach `probe()` and throw from inside the run. No flags are applied
+ * (a caller who needs `i`/`m`/`s` should fold that into the pattern
+ * itself, e.g. `(?i)` is not supported by JS `RegExp` -- there is no
+ * flags syntax on this option at all, only the bare pattern). */
+function parseRequireBaselineEvidence(value: string): RegExp {
+  try {
+    return new RegExp(value);
+  } catch (err) {
+    throw new InvalidArgumentError(
+      `--require-baseline-evidence must be a valid regular expression (got "${value}"): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 /** `--`-prefixed flags this matcher knows take a following argument, so
  * that argument is not itself mistaken for a targeted file/pattern:
  * `vitest run -t <name>` names one test by pattern, not a file, and
@@ -964,6 +980,7 @@ interface ProbeCliOptions {
   timeout?: string;
   link?: string[];
   allowOutside?: boolean;
+  requireBaselineEvidence?: RegExp;
 }
 
 function parseLine(value: string): number {
@@ -1059,10 +1076,14 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
  * no honest precedence between them. `--env` sits here rather than
  * beside `--link`/`--allow-outside` below: a plan run has no wiring for
  * it today, and refusing the combination outright keeps a caller from
- * silently having it ignored. The run-shaping options (`-i`, `--expect`,
- * `--timeout`, `--link`, `--allow-outside`) are NOT in this set: they
- * override the plan's own value when given (see `runProbePlanCommand`'s
- * own docblock for that precedence). */
+ * silently having it ignored. `--require-baseline-evidence` is NOT in
+ * this set: a plan runs every mutant against ONE shared
+ * baseline, so there is no second source for this value to conflict
+ * with -- it is threaded straight through to `probePlan`'s own setup,
+ * the same as `--link`/`--allow-outside` below. The run-shaping options
+ * (`-i`, `--expect`, `--timeout`, `--link`, `--allow-outside`) are NOT in
+ * this set either: they override the plan's own value when given (see
+ * `runProbePlanCommand`'s own docblock for that precedence). */
 const PLAN_EXCLUSIVE_OPTIONS: readonly {
   flag: string;
   key: keyof ProbeCliOptions;
@@ -1162,6 +1183,7 @@ async function runProbePlanCommand(
       allowOutside: opts.allowOutside ?? false,
       cwd: global.cwd,
       logDir: global.logDir,
+      requireBaselineEvidence: opts.requireBaselineEvidence,
       exitOnSignal: true,
     });
   } finally {
@@ -1259,6 +1281,11 @@ program
     parseEnvOption,
   )
   .option(
+    "--require-baseline-evidence <regex>",
+    "opt-in: the baseline's own output must match this regex before any verdict is issued, for a test runner neither built-in zero-tests detector recognizes",
+    parseRequireBaselineEvidence,
+  )
+  .option(
     "-i, --isolation <mode>",
     "worktree (default; mutates a detached git worktree, leaving the working tree untouched) or inplace",
     parseIsolationMode,
@@ -1332,6 +1359,7 @@ program
         testCommand,
         preCommand: opts.pre,
         env: opts.env,
+        requireBaselineEvidence: opts.requireBaselineEvidence,
         isolation: opts.isolation,
         expect: opts.expect,
         timeoutMs:
