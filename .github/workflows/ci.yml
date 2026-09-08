@@ -554,12 +554,12 @@ jobs:
 
       # Allowlisted rather than run for every matrix entry: the list names
       # every package that defines a `format:check` script (agent-dev-kit,
-      # agent-primitives, friction-log, mcp-token-audit, okf-kit,
-      # orchestrator-workflow, slop-detector). git-batch-cli and
-      # github-api-tool define no such script. Grow this list when a new
-      # package adds the script.
+      # agent-primitives, friction-log, github-api-tool, mcp-token-audit,
+      # okf-kit, orchestrator-workflow, slop-detector). git-batch-cli
+      # defines no such script. Grow this list when a new package adds
+      # the script.
       - name: Format check
-        if: contains(fromJSON('["agent-dev-kit","agent-primitives","friction-log","mcp-token-audit","okf-kit","orchestrator-workflow","slop-detector"]'), matrix.package)
+        if: contains(fromJSON('["agent-dev-kit","agent-primitives","friction-log","github-api-tool","mcp-token-audit","okf-kit","orchestrator-workflow","slop-detector"]'), matrix.package)
         run: npm run format:check
 
       - name: Test
