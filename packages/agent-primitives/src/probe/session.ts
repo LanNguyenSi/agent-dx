@@ -151,7 +151,17 @@ export type ProbeStatus =
  * `worktree_original_tree_modified`, `restore_failed`, `timeout`, a
  * mutant-phase `pre_failed`/`aborted`): those already always carry both
  * `mutant` and `mutation_probe` (a real mutant was applied), so they
- * need no contract entry to stay consistent. */
+ * need no contract entry to stay consistent.
+ *
+ * `"no_tests_executed"` and `"baseline_evidence_not_matched"` are both
+ * baseline-phase refusals too, reported from the same point
+ * `"baseline_failed"`/`"target_changed_during_baseline"` are (after the
+ * mutant is computed, on a baseline that otherwise exited 0): the first
+ * when the baseline's own output shows a known test runner (vitest,
+ * node's built-in `--test`) executed nothing (see `zero-tests.ts`), the
+ * second when an opt-in `--require-baseline-evidence <regex>` was given
+ * and did not match the baseline output. Both `true`, the same as the
+ * other baseline-phase reasons. */
 export type RefusalReason =
   | "worktree_allow_outside_unsupported"
   | "file_outside_root"
@@ -168,7 +178,9 @@ export type RefusalReason =
   | "aborted"
   | "pre_failed"
   | "baseline_failed"
-  | "target_changed_during_baseline";
+  | "target_changed_during_baseline"
+  | "no_tests_executed"
+  | "baseline_evidence_not_matched";
 
 /**
  * The single source of truth for which fields a single-mutant `probe()`
@@ -222,6 +234,8 @@ export const REFUSAL_RESULT_SHAPE: Record<
   pre_failed: { mutant: true, mutationProbe: true },
   baseline_failed: { mutant: true, mutationProbe: true },
   target_changed_during_baseline: { mutant: true, mutationProbe: true },
+  no_tests_executed: { mutant: true, mutationProbe: true },
+  baseline_evidence_not_matched: { mutant: true, mutationProbe: true },
 };
 
 /** Restores `session` and verifies the restore by hash. A restore whose

@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
+  (or mutant run) that exited `0` with nothing actually executed was
+  read as a real pass, twice reported as `survived` in batch 43 by a
+  vitest `-t "name (with parens)"` filter that matched no test inside
+  the files vitest still loaded (`Tests N skipped (N)`, `130 skipped`
+  both baseline and mutant, exit `0` both times). Two built-in
+  detectors now run before any verdict is issued: vitest's own "No
+  test files found"/all-skipped-or-zero-summary shapes (checked
+  against the baseline's own output before a mutant is even applied,
+  and again against the mutant run's own output), and node's built-in
+  `--test` runner's zero-count summary line. Either hit is
+  `status: "inconclusive"`, `reason: "no_tests_executed"`,
+  `mutation_probe.result: "not_run"`, exit `2` -- never a verdict a
+  suite that ran nothing has no business making. For a test runner
+  neither detector recognizes, a `survived`-shaped mutant run also
+  falls back to comparing its own output against the baseline's:
+  byte-identical stdout/stderr on both sides, with no summary line
+  either detector recognizes on either side, is read the same way.
+  That fallback is deliberately narrow (`survived` only, and only when
+  there is some real, non-empty output to compare -- two empty tails
+  are common and legitimate, and carry no discriminating signal either
+  way), after an early implementation of it, checked against this
+  package's own recorded single-probe fixtures
+  (`test/probe.test.ts`'s `RECORDED.*`), flagged a genuinely `killed`
+  mutant and a genuinely `survived` one as `no_tests_executed` purely
+  because their fixture's `node fixture.test.js` test command prints
+  nothing on either a pass or a fail. An opt-in
+  `--require-baseline-evidence <regex>` adds a caller-supplied safety
+  net for a suite neither built-in detector recognizes at all: when
+  given, the baseline's own stdout+stderr must match it before any
+  mutant is applied; a miss is
+  `reason: "baseline_evidence_not_matched"`, the same shape; an
+  unparseable pattern is a usage error. Both new reasons join
+  `REFUSAL_RESULT_SHAPE` (`src/probe/session.ts`) and the README's
+  "Refusal reason shape"/"Result shape" tables, provoked for real in
+  `test/probe-refusal-contract.test.ts` the same way every other
+  refusal reason already is. New detector module
+  `src/probe/zero-tests.ts`, reusing `verify`'s own `vitestDetector`
+  (`src/verify/detectors/vitest.ts`) rather than re-parsing vitest's
+  summary shapes a second time.
+
 - `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget` (task
   `e82f341a`): the `targets.length === 0` early return skipped the whole
   bound re-check whenever every correction was a case 3 (the whole `diff`

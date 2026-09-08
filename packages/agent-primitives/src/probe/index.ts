@@ -110,6 +110,14 @@ export interface ProbeOptions {
    * `test.env` in the result. Omitted or empty leaves the test process's
    * environment as `process.env`. */
   env?: Record<string, string>;
+  /** Opt-in safety net for a test runner neither built-in zero-tests
+   * detector (`zero-tests.ts`) recognizes: when given, must match the
+   * baseline's own stdout+stderr before this run may apply a mutant; a
+   * miss refuses `inconclusive`/`baseline_evidence_not_matched`. `--
+   * require-baseline-evidence <regex>` on the CLI, compiled and
+   * validated there (an invalid pattern is a usage error before this
+   * ever runs). */
+  requireBaselineEvidence?: RegExp;
   cwd: string;
   logDir: string;
   /**
@@ -462,6 +470,7 @@ async function runProbePipeline(
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
       env: opts.env,
+      requireBaselineEvidence: opts.requireBaselineEvidence,
       exitOnSignal: opts.exitOnSignal ?? false,
       warnings,
       isolationField,
@@ -547,6 +556,7 @@ async function runProbePipeline(
     }
     const { rt, targets, logPaths: stepLogPaths } = setup.run;
     baseline = setup.run.baseline;
+    const baselineOutput = setup.run.baselineOutput;
     if (prepared === undefined) {
       // Unreachable: `openRunSetup` returns `ok` only past the
       // `beforeBaseline` hook above, which is where this is set. A
@@ -572,6 +582,7 @@ async function runProbePipeline(
         logPaths: stepLogPaths,
       },
       warnings,
+      baselineOutput,
     );
     return {
       status: outcome.status,
@@ -1022,6 +1033,7 @@ export async function probePlan(
     }
     const { rt } = setup.run;
     baseline = setup.run.baseline;
+    const baselineOutput = setup.run.baselineOutput;
     setupLogPaths = setup.run.logPaths;
     // Keyed by the resolved path every planned mutant carries, so the
     // mutants that share a file share one backup and one restore.
@@ -1126,6 +1138,7 @@ export async function probePlan(
           logPaths: prepared.logPaths,
         },
         mutantWarnings,
+        baselineOutput,
       );
       results.push({
         index: item.index,

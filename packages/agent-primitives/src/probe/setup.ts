@@ -9,6 +9,7 @@ import {
 } from "../lock.js";
 import { isPathContained } from "./containment.js";
 import type { WorktreeSyncSuccess } from "./isolation.js";
+import { detectKnownZeroTestsEvidence } from "./zero-tests.js";
 import {
   createRunController,
   deferToHandlerIfActive,
@@ -191,6 +192,15 @@ export interface OpenedRun {
    * reuses one for every mutant that names the same file. */
   targets: TargetSession[];
   baseline: ExecPhaseField;
+  /** The baseline's own raw stdout/stderr tail, kept alongside (not
+   * inside) `baseline` above -- `ExecPhaseField` deliberately drops
+   * them, since they are not part of the public envelope's `baseline`
+   * field -- so `step.ts`'s classify step can compare a mutant's own
+   * output against the SAME baseline run this setup already checked for
+   * zero-tests evidence, for the generic byte-identical fallback
+   * (`zero-tests.ts`'s `hasKnownTestSummary`) a suite neither built-in
+   * detector recognizes needs. */
+  baselineOutput: { stdoutTail: string; stderrTail: string };
   /** The caller's own prior logs, the worktree sync's, and whatever
    * `beforeBaseline` produced: what a caller folds into the log paths of
    * everything it reports from here on. */
@@ -219,6 +229,14 @@ export interface RunSetupInput {
    * both run through. Omitted or empty leaves `execCommand`'s own
    * `process.env` default unchanged. */
   env?: Record<string, string>;
+  /** Opt-in `--require-baseline-evidence <regex>`: when given, must match
+   * the baseline's own stdout+stderr before this setup returns `ok` --
+   * the caller's own safety net for a test runner neither built-in
+   * zero-tests detector (`zero-tests.ts`) recognizes. Checked once the
+   * baseline has otherwise passed every other check (exit 0, a known
+   * test runner's own zero-tests evidence absent, no target rewritten
+   * mid-baseline); a miss refuses `baseline_evidence_not_matched`. */
+  requireBaselineEvidence?: RegExp;
   exitOnSignal: boolean;
   /** The run's warnings: every warning this setup produces is pushed
    * here, and a refusal carries the array as it stood when it happened. */
@@ -693,6 +711,62 @@ export async function openRunSetup(
     logPath: baselineTest.logPath,
     timedOut: baselineTest.timedOut,
   };
+  const baselineOutput = {
+    stdoutTail: baselineTest.stdoutTail,
+    stderrTail: baselineTest.stderrTail,
+  };
+
+  // A baseline that will not go on to apply a mutant (a failing one, or
+  // one whose own output shows no test actually ran) may still have
+  // rewritten a target (a formatter, a codegen step) before it got
+  // there: re-hash before deciding what to do with each backup,
+  // discarding one silently would throw away the only copy of that
+  // target's pre-baseline content, keeping one (and naming it in a
+  // warning) that the baseline itself rewrote, since there is nothing to
+  // restore and that write is not this probe's own. Always clears the
+  // in-flight restore slot: no mutation follows down either path.
+  const settleTargetsAfterNonMutatingBaseline = async (
+    rewroteLabel: string,
+  ): Promise<void> => {
+    for (const entry of opened) {
+      const postHash = await sha256File(entry.target.mutationFilePath).catch(
+        () => undefined,
+      );
+      if (postHash === entry.target.preHash) {
+        entry.target.discardBackup();
+      } else {
+        warnings.push(
+          `${rewroteLabel} also rewrote ${entry.named.subject}; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at ${entry.target.session.backupPath}`,
+        );
+      }
+    }
+    controller.setRestoreState(null);
+  };
+
+  // Zero-tests-executed detection: checked BEFORE the exit-code branch
+  // below, on both an exit-0 and a non-zero baseline (vitest exits 1 on
+  // "No test files found" but 0 on an all-skipped/`-t`-matched-nothing
+  // run; a caller cannot tell the two apart from the exit code alone).
+  // Skipped for an aborted or timed-out baseline: neither learned
+  // anything real about the suite, so neither should be reclassified by
+  // what happens to be in a truncated/killed run's own tail.
+  if (!baselineTest.aborted && !baselineTest.timedOut) {
+    const zeroTestsEvidence = detectKnownZeroTestsEvidence(
+      baselineOutput.stdoutTail,
+      baselineOutput.stderrTail,
+    );
+    if (zeroTestsEvidence.detected) {
+      await settleTargetsAfterNonMutatingBaseline("the baseline run");
+      warnings.push(
+        `the baseline run's own output shows no test was actually executed (${zeroTestsEvidence.via}); see ${baselineTest.logPath}`,
+      );
+      return refuse("inconclusive", "no_tests_executed", undefined, {
+        logPaths: stepLogPaths,
+        baseline,
+      });
+    }
+  }
+
   if (baselineTest.exitCode !== 0 || baselineTest.aborted) {
     if (baselineTest.aborted) {
       // If the handler is active it may already have restored a target
@@ -701,29 +775,7 @@ export async function openRunSetup(
       // below, so the re-hash reads settled content.
       await deferToHandlerIfActive(crashHandlers, exitOnSignal);
     }
-    // A failing baseline is still a baseline that ran commands against
-    // the working tree, and one of them may have rewritten a target (a
-    // formatter, a codegen step). Re-hash before deciding what to do
-    // with each backup: discarding one silently would throw away the
-    // only copy of that target's pre-baseline content.
-    for (const entry of opened) {
-      const postHash = await sha256File(entry.target.mutationFilePath).catch(
-        () => undefined,
-      );
-      if (postHash === entry.target.preHash) {
-        entry.target.discardBackup();
-      } else {
-        // Keep the backup file itself: nothing was mutated, so there is
-        // nothing to restore, and the target is deliberately left as the
-        // baseline wrote it.
-        warnings.push(
-          `the failing baseline run also rewrote ${entry.named.subject}; the target is left as the baseline wrote it (not restored), and its pre-baseline content is kept at ${entry.target.session.backupPath}`,
-        );
-      }
-    }
-    // Stop treating a mutation as in flight, whichever branch above each
-    // target took.
-    controller.setRestoreState(null);
+    await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
     // An aborted baseline is not a red baseline: nothing about the test
     // was learned, the run was stopped. Reported apart from a baseline
     // that genuinely failed, so a caller cannot read a cancelled run as
@@ -765,8 +817,28 @@ export async function openRunSetup(
     }
   }
 
+  // Opt-in safety net for a test runner neither built-in zero-tests
+  // detector recognizes: when given, the baseline's own output must
+  // match `--require-baseline-evidence` before this run may go on to
+  // apply a mutant, whatever the exit code said.
+  if (input.requireBaselineEvidence !== undefined) {
+    const combined = `${baselineOutput.stdoutTail}\n${baselineOutput.stderrTail}`;
+    if (!input.requireBaselineEvidence.test(combined)) {
+      discardOpened();
+      warnings.push(
+        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output; see ${baselineTest.logPath}`,
+      );
+      return refuse(
+        "inconclusive",
+        "baseline_evidence_not_matched",
+        undefined,
+        { logPaths: stepLogPaths, baseline },
+      );
+    }
+  }
+
   return {
     ok: true,
-    run: { rt, targets, baseline, logPaths: stepLogPaths },
+    run: { rt, targets, baseline, baselineOutput, logPaths: stepLogPaths },
   };
 }

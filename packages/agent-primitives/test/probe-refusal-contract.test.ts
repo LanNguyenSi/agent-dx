@@ -394,6 +394,37 @@ async function provokeTargetChangedDuringBaseline(): Promise<ProbeResult> {
   );
 }
 
+/** A baseline that exits `0` (a real pass, per the shell) but whose own
+ * output is a vitest all-skipped `Tests` summary: the exact shape a `-t`
+ * filter that matches no test inside files vitest still loaded produces
+ * (batch 43's real bug, see the CHANGELOG entry for task `273b3851`).
+ * `console.log` rather than a real vitest run: the detector is a pure
+ * text parser, so reproducing its exact input is enough to provoke it
+ * without needing vitest itself in this fixture repo. */
+async function provokeNoTestsExecuted(): Promise<ProbeResult> {
+  useLockDir();
+  const { repo } = initRepo();
+  return probe(
+    baseOptions(repo, {
+      testCommand:
+        "node -e \"console.log(' Test Files  1 skipped (1)'); console.log('      Tests  2 skipped (2)');\"",
+    }),
+  );
+}
+
+/** A baseline that passes normally (the default fixture test) but whose
+ * output never matches an opt-in `--require-baseline-evidence` the
+ * caller supplied. */
+async function provokeBaselineEvidenceNotMatched(): Promise<ProbeResult> {
+  useLockDir();
+  const { repo } = initRepo();
+  return probe(
+    baseOptions(repo, {
+      requireBaselineEvidence: /this pattern never matches/,
+    }),
+  );
+}
+
 /** Runs `probe` with the nth `execCommand` call reported as aborted
  * (the shape `exec.ts` returns once its `signal` fired: killed child, no
  * exit code of its own), every other call running for real. Same helper
@@ -456,6 +487,8 @@ const provocations: Record<RefusalReason, Provocation> = {
   pre_failed: provokePreFailed,
   baseline_failed: provokeBaselineFailed,
   target_changed_during_baseline: provokeTargetChangedDuringBaseline,
+  no_tests_executed: provokeNoTestsExecuted,
+  baseline_evidence_not_matched: provokeBaselineEvidenceNotMatched,
 };
 
 /**
@@ -493,6 +526,8 @@ const EXPECTED_SHAPE: Record<
   pre_failed: { mutant: true, mutationProbe: true },
   baseline_failed: { mutant: true, mutationProbe: true },
   target_changed_during_baseline: { mutant: true, mutationProbe: true },
+  no_tests_executed: { mutant: true, mutationProbe: true },
+  baseline_evidence_not_matched: { mutant: true, mutationProbe: true },
 };
 
 /** Asserts a provoked `ProbeResult` matches the hardcoded

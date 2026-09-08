@@ -1682,6 +1682,39 @@ describe("cli: probe", () => {
     expect(JSON.parse(emptyName.stdout).status).toBe("usage_error");
   });
 
+  it("--require-baseline-evidence with an unparseable regex is a usage error, exit 2 (task 273b3851)", async () => {
+    const run = await spawnCli([
+      "probe",
+      "--require-baseline-evidence",
+      "(",
+      "-t",
+      "true",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+  });
+
+  it("--require-baseline-evidence combined with --plan is a usage error, the same as --env", async () => {
+    const planPath = path.join(makeTmpDir(), "plan.json");
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        test: "true",
+        mutants: [{ file: "x.js", line: 1, replace: "y" }],
+      }),
+    );
+    const run = await spawnCli([
+      "probe",
+      "--plan",
+      planPath,
+      "--require-baseline-evidence",
+      "ok",
+    ]);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+  });
+
   it("--env overrides are still visible on a baseline_failed run, at the run level, even though there is no test field", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");

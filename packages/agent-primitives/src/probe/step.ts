@@ -24,6 +24,10 @@ import {
   type TargetSession,
   type TestPhaseField,
 } from "./session.js";
+import {
+  detectKnownZeroTestsEvidence,
+  hasKnownTestSummary,
+} from "./zero-tests.js";
 
 /**
  * The per-mutant step of the probe pipeline: `prepareMutant` (compute a
@@ -208,6 +212,12 @@ export async function runMutantAttempt(
     logPaths: string[];
   },
   warnings: string[],
+  /** The same baseline run `setup.ts` already checked for zero-tests
+   * evidence, carried through so the classify step below can compare a
+   * "survived"-shaped mutant run against it: the generic byte-identical
+   * fallback (`zero-tests.ts`'s `hasKnownTestSummary`) a suite neither
+   * built-in detector recognizes needs both sides to decide anything. */
+  baselineOutput: { stdoutTail: string; stderrTail: string },
 ): Promise<MutantAttemptOutcome> {
   const { computed, mutant, mutantSummary, verifiedAppliedVia } = prepared;
   const logPaths = prepared.logPaths;
@@ -438,6 +448,13 @@ export async function runMutantAttempt(
 
   let status: "killed" | "survived" | "inconclusive";
   let reason: string | undefined;
+  // The mutation-probe verdict `mutation_probe.result` reports: equal to
+  // `status` except for the zero-tests override just below, where it is
+  // forced to `"not_run"` regardless of `status` -- the commands did
+  // run, but nothing they measured backs a real verdict, so this reports
+  // the same as a baseline-stage zero-tests refusal would have (see
+  // `REFUSAL_RESULT_SHAPE.no_tests_executed` in `session.ts`).
+  let mutationProbeResult: string;
   if (testResult.aborted) {
     // The run was stopped (a SIGINT/SIGTERM this probe handled, or a
     // caller's abort) before the test could say anything about the
@@ -447,14 +464,63 @@ export async function runMutantAttempt(
     // measured.
     status = "inconclusive";
     reason = "aborted";
+    mutationProbeResult = status;
     warnings.push(`the mutant run was aborted; see ${testResult.logPath}`);
   } else if (testResult.timedOut) {
     status = "inconclusive";
     reason = "timeout";
+    mutationProbeResult = status;
   } else {
     const testPassed = testResult.exitCode === 0;
     const killed = spec.expect === "fail" ? !testPassed : testPassed;
     status = killed ? "killed" : "survived";
+    mutationProbeResult = status;
+
+    // Zero-tests-executed detection, mutant side: the mutant run's OWN
+    // output shows a known test runner executed nothing (the same
+    // detector `setup.ts` already ran against the baseline).
+    const mutantZeroTests = detectKnownZeroTestsEvidence(
+      testResult.stdoutTail,
+      testResult.stderrTail,
+    );
+    // The generic byte-identical fallback: deliberately scoped to a
+    // `survived`-shaped verdict only, and only when there is some real
+    // output to compare. A `killed` mutant already carries a real
+    // signal (the exit code disagreed with the baseline under `--expect
+    // fail`) that this output-only heuristic has no business
+    // second-guessing. Silence on both sides is common and legitimate
+    // (many hand-rolled test scripts print nothing on a pass, relying on
+    // the exit code alone -- this package's own fixtures included), so
+    // it is excluded outright rather than misread as "nothing ran": two
+    // EMPTY tails are trivially "identical" whether or not real tests
+    // executed, so empty output carries no discriminating signal either
+    // way and must never flip a real survivor to inconclusive.
+    const hasComparableOutput =
+      testResult.stdoutTail.length > 0 ||
+      testResult.stderrTail.length > 0 ||
+      baselineOutput.stdoutTail.length > 0 ||
+      baselineOutput.stderrTail.length > 0;
+    const genericFallback =
+      status === "survived" &&
+      hasComparableOutput &&
+      !mutantZeroTests.detected &&
+      !hasKnownTestSummary(testResult.stdoutTail, testResult.stderrTail) &&
+      !hasKnownTestSummary(
+        baselineOutput.stdoutTail,
+        baselineOutput.stderrTail,
+      ) &&
+      testResult.stdoutTail === baselineOutput.stdoutTail &&
+      testResult.stderrTail === baselineOutput.stderrTail;
+    if (mutantZeroTests.detected || genericFallback) {
+      status = "inconclusive";
+      reason = "no_tests_executed";
+      mutationProbeResult = "not_run";
+      warnings.push(
+        mutantZeroTests.detected
+          ? `the mutant run's own output shows no test was actually executed (${mutantZeroTests.via}); see ${testResult.logPath}`
+          : `the baseline and mutant runs produced byte-identical output with no test-summary line either built-in detector recognizes; see ${testResult.logPath}`,
+      );
+    }
   }
 
   return {
@@ -464,8 +530,9 @@ export async function runMutantAttempt(
     mutation_probe: {
       mutant: mutantSummary,
       verified_applied_via: verifiedAppliedVia,
-      result: status,
+      result: mutationProbeResult,
       restored_verified: restoredVerified,
+      ...(reason === "no_tests_executed" ? { reason } : {}),
     },
     test: testField,
     logPaths,
