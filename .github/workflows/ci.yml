@@ -552,15 +552,27 @@ jobs:
       - name: Lint
         run: npm run lint --if-present
 
-      # Allowlisted rather than run for every matrix entry: the list names
-      # every package that defines a `format:check` script (agent-dev-kit,
-      # agent-primitives, friction-log, mcp-token-audit, okf-kit,
-      # orchestrator-workflow, slop-detector). git-batch-cli and
-      # github-api-tool define no such script. Grow this list when a new
-      # package adds the script.
+      # Probed dynamically per matrix entry, like Typecheck (test files)
+      # above: a package that defines `format:check` runs it. A package
+      # that ships TypeScript sources (src/**/*.ts) but no `format:check`
+      # script fails closed instead of silently going unchecked
+      # (github-api-tool is that case today: 21 .ts files under src/, no
+      # format:check). A package with neither the script nor TS sources
+      # under src/ (git-batch-cli: plain .js) is skipped. Because the rule
+      # is fail-closed and per-package, no separate repo-level guard is
+      # needed to catch a package that adds format:check (or TS sources)
+      # later without exercising it here.
       - name: Format check
-        if: contains(fromJSON('["agent-dev-kit","agent-primitives","friction-log","mcp-token-audit","okf-kit","orchestrator-workflow","slop-detector"]'), matrix.package)
-        run: npm run format:check
+        shell: bash
+        run: |
+          if node -e "process.exit((require('./package.json').scripts || {})['format:check'] ? 0 : 1)"; then
+            npm run format:check
+          elif find src -type f -name '*.ts' 2>/dev/null | grep -q .; then
+            echo "::error::package ships TypeScript sources (src/**/*.ts) but no format:check script - files would go format-unchecked"
+            exit 1
+          else
+            echo "No format:check script and no TypeScript sources under src/, skipping format check"
+          fi
 
       - name: Test
         shell: bash
