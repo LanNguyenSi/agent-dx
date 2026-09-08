@@ -108,9 +108,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applied -- already computed by the dry run before the baseline ever
   started, so there is a real mutant to describe rather than a
   placeholder). `baseline.exitCode` was already reported and is
-  unchanged. Covered by a library-level test in `test/probe.test.ts` and
-  a CLI-level test in `test/cli.test.ts` that spawns the built CLI
-  against a failing baseline and asserts the envelope shape.
+  unchanged. The same object is now also carried by every OTHER refusal
+  `openRunSetup` returns past that same dry run -- a failing `--pre`
+  during the baseline (`reason: "pre_failed"`), an aborted baseline
+  (`reason: "aborted"`), and a baseline that itself rewrote the target
+  (`reason: "target_changed_during_baseline"`) -- each with its own
+  `reason` echoed onto `mutation_probe.reason` instead of only
+  `"baseline_failed"`: the fix above was scoped to one refusal reason
+  when every refusal past the dry run shares the same fact (the mutant
+  was already computed). Covered by a library-level test in
+  `test/probe.test.ts` and CLI-level tests in `test/cli.test.ts` that
+  spawn the built CLI against a failing baseline, a baseline-phase
+  `--pre` failure, and a baseline that rewrites its target, and assert
+  the envelope shape on each.
 
 ### Added
 
@@ -294,6 +304,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 SKILL.md`) and the README gained an "Invocation templates" section
   with a copy-pasteable line for each mutant form plus `verify` and
   `doctor`.
+- `probe --env NAME=VALUE` (repeatable, task `b00efca1`): applied to
+  both the baseline and the mutant's `--pre`/`-t` runs (they share one
+  merged environment), and echoed back under the mutant's `test.env` so
+  the isolation a caller asked for is visible in the report instead of
+  only inferable from the command string. Also echoed once at the run
+  level (a top-level `env` field, present whenever `--env` was given, on
+  every status including `baseline_failed`, where there is no `test`
+  phase for a per-test echo to live under). A value whose NAME looks
+  like a credential (`TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`
+  anywhere, case-insensitive, or a name ending `_KEY`) is redacted
+  (`"<redacted>"`) in both places; values must not otherwise be assumed
+  private, since the envelope is routinely pasted into PRs and task
+  trackers. Fixes a friction measured across 109 real `probe`
+  invocations in one batch: `agent-preflight`'s suite needs an isolated
+  `HOME`, and every one of those invocations had to smuggle
+  `HOME=<dir> npx vitest ...` into `-t` instead. No `=`, or an empty
+  name before it, is a usage error. Not wired into `--plan`: combining
+  `--env` with `--plan` is refused outright (added to
+  `PLAN_EXCLUSIVE_OPTIONS` in `src/cli.ts`) rather than silently
+  ignored.
+- `probe`: a one-line stderr notice, printed before the baseline starts,
+  when no `--timeout` was given and the test command looks like a whole
+  test suite rather than one targeted file: `npm test`, `npm run test`/
+  `npm run test:<anything>`, `yarn test`, `pnpm test` (each with nothing
+  after it but flags, a bare `--` argument separator skipped first, so
+  `npm test -- test/x.test.ts` is NOT full-suite shaped), or `vitest
+  run` (bare, through `npx` or not) with nothing after it but flags,
+  `-t <pattern>` included. A targeted command such as
+  `vitest run test/x.test.ts` prints nothing. Names that the baseline
+  and the mutant run the command serially with no bound and that
+  `--timeout` caps each run. The result also now carries
+  `totalDurationMs` (wall-clock time of the whole `probe()` call, every
+  branch), the same field name and meaning `verify`'s result already
+  carries. Motivated by the same friction as `--env` above: a probe
+  over a full-suite command runs it twice with no visible runtime hint.
 
 ### Changed
 
@@ -412,31 +457,6 @@ derive it from the patch)` / `probe: -n/--line is required for
   warns when the two differ (`-n 5 differs from the patch's first
 changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   mutate exactly the line `-n` names.
-
-- `probe --env NAME=VALUE` (repeatable, task `b00efca1`): applied to
-  both the baseline and the mutant's `--pre`/`-t` runs (they share one
-  merged environment), and echoed back under the mutant's `test.env` so
-  the isolation a caller asked for is visible in the report instead of
-  only inferable from the command string. Fixes a friction measured
-  across 109 real `probe` invocations in one batch: `agent-preflight`'s
-  suite needs an isolated `HOME`, and every one of those invocations had
-  to smuggle `HOME=<dir> npx vitest ...` into `-t` instead. No `=`, or
-  an empty name before it, is a usage error. Not wired into `--plan`:
-  combining `--env` with `--plan` is refused outright (added to
-  `PLAN_EXCLUSIVE_OPTIONS` in `src/cli.ts`) rather than silently
-  ignored.
-- `probe`: a one-line stderr notice, printed before the baseline starts,
-  when no `--timeout` was given and the test command looks like a whole
-  test suite rather than one targeted file (`npm test`, or `vitest run`
-  -- bare or through `npx` -- with nothing after it but flags); a
-  targeted command such as `vitest run test/x.test.ts` prints nothing.
-  Names that the baseline and the mutant run the command serially with
-  no bound and that `--timeout` caps each run. The result also now
-  carries `totalDurationMs` (wall-clock time of the whole `probe()`
-  call, every branch), the same field name and meaning `verify`'s
-  result already carries. Motivated by the same friction as `--env`
-  above: a probe over a full-suite command runs it twice with no
-  visible runtime hint.
 
 ### Fixed
 

@@ -87,11 +87,36 @@ export interface TestPhaseField extends ExecPhaseField {
   command: string;
   stdoutTail: string;
   stderrTail: string;
-  /** The `--env NAME=VALUE` overrides this run applied (echoed verbatim,
-   * never the whole merged environment): present only when at least one
-   * was given, so the isolation a caller asked for is visible in the
-   * report instead of only inferable from the command string. */
+  /** The `--env NAME=VALUE` overrides this run applied (redacted by
+   * `redactEnvOverrides` below, never the whole merged environment):
+   * present only when at least one was given, so the isolation a caller
+   * asked for is visible in the report instead of only inferable from
+   * the command string. */
   env?: Record<string, string>;
+}
+
+/** A `--env` override name that looks like it carries a credential:
+ * `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` anywhere in the name
+ * (case-insensitive), or a name ending in `_KEY`. */
+const SECRET_ENV_NAME_PATTERN = /TOKEN|SECRET|PASSWORD|_KEY$|CREDENTIAL/i;
+
+/**
+ * Redacts `--env` override values whose NAME matches
+ * `SECRET_ENV_NAME_PATTERN`, keeping every name visible so the shape of
+ * what was overridden is still legible, and replacing a matching value
+ * with the literal string `"<redacted>"`. `--env` overrides are echoed
+ * verbatim into the envelope (`ProbeResult.env`, `TestPhaseField.env`)
+ * and that envelope routinely gets pasted into PRs, task trackers and
+ * chat -- an unredacted secret passed via `--env` would otherwise leak
+ * into all of those. */
+export function redactEnvOverrides(
+  overrides: Record<string, string>,
+): Record<string, string> {
+  const redacted: Record<string, string> = {};
+  for (const [name, value] of Object.entries(overrides)) {
+    redacted[name] = SECRET_ENV_NAME_PATTERN.test(name) ? "<redacted>" : value;
+  }
+  return redacted;
 }
 
 export interface IsolationField {
@@ -464,6 +489,14 @@ export async function runPreThenTest(
     logDir: string;
     timeoutMs?: number;
     signal?: AbortSignal;
+    /** The `process.env` this run's `--pre`/`-t` executes against
+     * (merged with `--env` overrides when any were given): declared
+     * here, not left to fall out of a wider type structurally matching
+     * by accident, so a future rewrite of this parameter's fields (or
+     * of `MutantRuntime.execEnv`, the only caller of this signature)
+     * that drops `env` is a compiler error instead of a silent,
+     * clean-compiling loss of every `--env` override. */
+    env?: NodeJS.ProcessEnv;
   },
   /** Registers each started run (and when its stdio truly closes) as
    * the probe's one in-flight child, so the signal handler can wait for

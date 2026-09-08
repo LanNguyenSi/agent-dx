@@ -13,6 +13,7 @@ import {
 import {
   deferToHandlerIfActive,
   noteIncompleteOutput,
+  redactEnvOverrides,
   restoreAndVerify,
   runPreThenTest,
   startRunArgvTracked,
@@ -390,7 +391,7 @@ export async function runMutantAttempt(
     stdoutTail: testResult.stdoutTail,
     stderrTail: testResult.stderrTail,
     logPath: testResult.logPath,
-    ...(rt.envOverrides ? { env: rt.envOverrides } : {}),
+    ...(rt.envOverrides ? { env: redactEnvOverrides(rt.envOverrides) } : {}),
   };
 
   if (!restoreOk || !restoredVerified) {

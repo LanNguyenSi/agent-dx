@@ -202,24 +202,78 @@ function parseTimeoutSeconds(value: string): string {
   return value;
 }
 
+/** `--`-prefixed flags this matcher knows take a following argument, so
+ * that argument is not itself mistaken for a targeted file/pattern:
+ * `vitest run -t <name>` names one test by pattern, not a file, and
+ * still runs the whole suite's setup against it. Deliberately narrow
+ * (this one flag only): a flag this does not recognize is judged by
+ * whether IT starts with `-`, so an unknown flag that takes an argument
+ * still makes the command look targeted rather than full-suite -- the
+ * same "prints no hint rather than guessing" bias the rest of this
+ * matcher already applies. */
+const FLAGS_CONSUMING_NEXT_TOKEN = new Set(["-t"]);
+
+/** Whether every token in `tokens` is a flag (or a flag's own
+ * argument, consumed via `FLAGS_CONSUMING_NEXT_TOKEN`): true for
+ * `["--coverage"]` and `["-t", "some pattern"]`, false the moment a
+ * token that is neither is reached (a file or pattern argument, e.g.
+ * `test/x.test.ts`). */
+function tokensLookLikeFlagsOnly(tokens: string[]): boolean {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token.startsWith("-")) return false;
+    if (FLAGS_CONSUMING_NEXT_TOKEN.has(token)) i++;
+  }
+  return true;
+}
+
+/** Whether `rest` (everything after the recognized test-runner prefix,
+ * already trimmed) still looks like the whole suite: empty, or nothing
+ * but flags once a single bare `--` argument-separator (npm/yarn/pnpm's
+ * own divider before forwarded args) is skipped. Shared by the
+ * `npm test`, `npm run test[:*]`, `yarn test` and `pnpm test` shapes
+ * below, all of which forward extra arguments to the underlying runner
+ * the same way. */
+function restLooksLikeFullSuite(rest: string): boolean {
+  if (rest === "") return true;
+  const tokens = rest.split(/\s+/);
+  const afterSeparator = tokens[0] === "--" ? tokens.slice(1) : tokens;
+  if (afterSeparator.length === 0) return true;
+  return tokensLookLikeFlagsOnly(afterSeparator);
+}
+
 /**
  * Whether `cmd` looks like it runs a whole test suite rather than one
- * targeted file: `npm test` (any arguments after it), or `vitest run`
- * (bare, through `npx` or not) with nothing after it but flags. A
+ * targeted file: `npm test`, `npm run test`/`npm run test:<anything>`,
+ * `yarn test` or `pnpm test`, each with nothing after it but flags (a
+ * bare `--` argument separator is skipped first, so `npm test --
+ * test/x.test.ts` -- a file forwarded through it -- is NOT full-suite
+ * shaped); or `vitest run` (bare, through `npx` or not) with nothing
+ * after it but flags, `-t <name>` (a pattern, not a file) included. A
  * `probe` over a command like this runs it twice, serially (baseline,
  * then mutant), with no bound when `--timeout` was not given -- exactly
  * the shape that printed the CLI's own full-suite hint. Deliberately
- * narrow (these two shapes only): a command this does not recognize
- * prints no hint, rather than guessing.
+ * narrow (these shapes only): a command this does not recognize prints
+ * no hint, rather than guessing.
  */
 export function looksLikeFullSuiteTestCommand(cmd: string): boolean {
   const trimmed = cmd.trim();
-  if (/^npm(?:\.cmd)?\s+test\b/.test(trimmed)) return true;
+  const npmTest = /^npm(?:\.cmd)?\s+test\b(.*)$/.exec(trimmed);
+  if (npmTest !== null) return restLooksLikeFullSuite(npmTest[1].trim());
+  const npmRunTest =
+    /^npm(?:\.cmd)?\s+run\s+test(?::[\w:-]*)?(?:\s+(.*))?$/.exec(trimmed);
+  if (npmRunTest !== null) {
+    return restLooksLikeFullSuite((npmRunTest[1] ?? "").trim());
+  }
+  const yarnTest = /^yarn\s+test\b(.*)$/.exec(trimmed);
+  if (yarnTest !== null) return restLooksLikeFullSuite(yarnTest[1].trim());
+  const pnpmTest = /^pnpm\s+test\b(.*)$/.exec(trimmed);
+  if (pnpmTest !== null) return restLooksLikeFullSuite(pnpmTest[1].trim());
   const match = /(?:^|\s)(?:npx\s+)?vitest\s+run\b(.*)$/.exec(trimmed);
   if (match === null) return false;
   const rest = match[1].trim();
   if (rest === "") return true;
-  return rest.split(/\s+/).every((token) => token.startsWith("-"));
+  return tokensLookLikeFlagsOnly(rest.split(/\s+/));
 }
 
 function parseMaxFailures(value: string): string {
@@ -1321,6 +1375,7 @@ program
           ? { mutation_probe: result.mutation_probe }
           : {}),
         ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
+        ...(result.env !== undefined ? { env: result.env } : {}),
         ...(result.test !== undefined ? { test: result.test } : {}),
         isolation: result.isolation,
         totalDurationMs: result.totalDurationMs,

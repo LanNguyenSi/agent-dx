@@ -747,6 +747,14 @@ describe("probe(): the target is backed up (and checked) before any mutation, no
     expect(fs.readFileSync(target, "utf8")).toBe("REWRITTEN");
     expect(fs.readFileSync(target, "utf8")).not.toBe(before);
     expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+    // The mutant was computed before the baseline ran, so this refusal
+    // -- past that dry run, same as `baseline_failed`/`pre_failed` --
+    // reports `mutation_probe` too, not just `mutant`.
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe(
+      "target_changed_during_baseline",
+    );
+    expect(result.mutation_probe?.restored_verified).toBe(true);
   });
 });
 
@@ -1423,6 +1431,15 @@ describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
     expect(result.reason).toBe("pre_failed");
     expect(result.baseline).toBeUndefined();
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+    // Same fact `baseline_failed` already reports (the dry run computes
+    // the mutant before the baseline's own `--pre` ever runs): a
+    // `--pre` failure here is a refusal past that dry run too, so
+    // `mutation_probe` is not left out of this envelope shape either.
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("pre_failed");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(typeof result.mutation_probe?.mutant).toBe("string");
+    expect(typeof result.mutation_probe?.verified_applied_via).toBe("string");
   });
 });
 
@@ -4284,5 +4301,30 @@ describe("probe(): totalDurationMs", () => {
     );
     expect(typeof baselineFailed.totalDurationMs).toBe("number");
     expect(baselineFailed.totalDurationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  // A mutation that discards `totalDurationMs` and reports a constant
+  // (e.g. `0 * (Date.now() - start)`) satisfies "a non-negative number"
+  // above just as well as a real measurement does; this asserts a
+  // lower bound tied to the test command's own deliberately slow,
+  // synchronous busy-wait instead, so a constant (or any measurement
+  // that does not actually span both the baseline and the mutant run)
+  // fails it. Two runs of >=150ms each (the baseline, then the mutant)
+  // give a wide margin under the 200ms bound: real CI slowness pushes
+  // the total well past it, never under it, so this does not calibrate
+  // to run-to-run noise the way a byte-count ceiling would.
+  it("reflects real wall-clock time: at least the two full runs of a deliberately slow test command", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const busyWaitMs = 150;
+
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand: `node -e "const t=Date.now();while(Date.now()-t<${busyWaitMs});process.exit(0)"`,
+        expect: "pass",
+      }),
+    );
+
+    expect(result.totalDurationMs).toBeGreaterThanOrEqual(2 * busyWaitMs);
   });
 });

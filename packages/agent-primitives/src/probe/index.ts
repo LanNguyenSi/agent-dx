@@ -15,6 +15,7 @@ import {
   type ExpectVerdict,
   type IsolationField,
   type IsolationMode,
+  redactEnvOverrides,
   type MutantField,
   type MutationProbeField,
   type ProbeStatus,
@@ -131,6 +132,14 @@ export interface ProbeResult {
   warnings: string[];
   mutant?: MutantField;
   mutation_probe?: MutationProbeField;
+  /** The `--env NAME=VALUE` overrides this run was given (redacted by
+   * `redactEnvOverrides`), present whenever at least one was given --
+   * on every status, including one (`baseline_failed`,
+   * `pre_failed`, ...) that never reaches a `test` phase to carry its
+   * own `test.env` echo. Set once by `probe()` itself, from `opts.env`
+   * directly, so a caller sees the overrides it asked for even on a run
+   * whose baseline never got far enough to run the mutant at all. */
+  env?: Record<string, string>;
   baseline?: ExecPhaseField;
   test?: TestPhaseField;
   isolation: IsolationField;
@@ -496,25 +505,31 @@ async function runProbePipeline(
         ...(refusal.reportsMutant && mutantField !== undefined
           ? { mutant: mutantField }
           : {}),
-        // A failing baseline never applied any mutant, but this run's
-        // one mutant was already computed (the `beforeBaseline` dry run
-        // above, before the baseline ever started) -- so unlike every
-        // other envelope shape this hole used to leave, there is a real
-        // mutant to describe. Reported here rather than left absent, so
-        // a consumer reading `mutation_probe.result` gets a string
-        // ("not_run") instead of `undefined` for this outcome too.
-        // `restored_verified: true`: nothing was ever mutated, so the
-        // target is (trivially) still at its original content.
-        ...(refusal.reason === "baseline_failed" &&
-        mutantSummary !== undefined &&
-        verifiedAppliedVia !== undefined
+        // Every refusal `openRunSetup` can return past the
+        // `beforeBaseline` dry run above (`pre_failed`, an aborted
+        // baseline, `baseline_failed`, `target_changed_during_baseline`)
+        // shares the same fact: this run's one mutant was already
+        // computed, before the baseline (or the `--pre` ahead of it)
+        // ever ran -- so unlike every other envelope shape this hole
+        // used to leave, there is a real mutant to describe, whichever
+        // of those reasons this refusal carries. Reported here rather
+        // than left absent, so a consumer reading `mutation_probe.result`
+        // gets a string ("not_run") instead of `undefined` for any of
+        // them. Gated on `mutantSummary`/`verifiedAppliedVia` alone (not
+        // on `refusal.reason`): a refusal from BEFORE the dry run
+        // completes (`mutant_not_applicable`, a containment or lock
+        // refusal) never set either, so this still correctly omits the
+        // object there. `restored_verified: true`: nothing was ever
+        // mutated at any of these reasons, so the target is (trivially)
+        // still at its original content.
+        ...(mutantSummary !== undefined && verifiedAppliedVia !== undefined
           ? {
               mutation_probe: {
                 mutant: mutantSummary,
                 verified_applied_via: verifiedAppliedVia,
                 result: "not_run",
                 restored_verified: true,
-                reason: "baseline_failed",
+                reason: refusal.reason,
               },
             }
           : {}),
@@ -659,7 +674,13 @@ async function runProbePipeline(
 export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
   const start = Date.now();
   const result = await runProbePipeline(opts);
-  return { ...result, totalDurationMs: Date.now() - start };
+  return {
+    ...result,
+    ...(opts.env !== undefined && Object.keys(opts.env).length > 0
+      ? { env: redactEnvOverrides(opts.env) }
+      : {}),
+    totalDurationMs: Date.now() - start,
+  };
 }
 
 /** Options for one `--plan` run: the mutants, the command they share,
