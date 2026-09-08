@@ -202,6 +202,26 @@ function parseTimeoutSeconds(value: string): string {
   return value;
 }
 
+/**
+ * Whether `cmd` looks like it runs a whole test suite rather than one
+ * targeted file: `npm test` (any arguments after it), or `vitest run`
+ * (bare, through `npx` or not) with nothing after it but flags. A
+ * `probe` over a command like this runs it twice, serially (baseline,
+ * then mutant), with no bound when `--timeout` was not given -- exactly
+ * the shape that printed the CLI's own full-suite hint. Deliberately
+ * narrow (these two shapes only): a command this does not recognize
+ * prints no hint, rather than guessing.
+ */
+export function looksLikeFullSuiteTestCommand(cmd: string): boolean {
+  const trimmed = cmd.trim();
+  if (/^npm(?:\.cmd)?\s+test\b/.test(trimmed)) return true;
+  const match = /(?:^|\s)(?:npx\s+)?vitest\s+run\b(.*)$/.exec(trimmed);
+  if (match === null) return false;
+  const rest = match[1].trim();
+  if (rest === "") return true;
+  return rest.split(/\s+/).every((token) => token.startsWith("-"));
+}
+
 function parseMaxFailures(value: string): string {
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1) {
@@ -1219,6 +1239,21 @@ program
     }
     const testCommand = opts.test;
     const mutantChoice = resolveMutantForm(opts);
+    // A full-suite-shaped command with no `--timeout` runs twice, serially
+    // (the baseline, then the mutant), with no bound on either: printed
+    // to stderr before the baseline starts, so the notice reaches an
+    // operator watching the run rather than only showing up as a slow
+    // command with no explanation. Never affects the envelope itself.
+    if (
+      opts.timeout === undefined &&
+      looksLikeFullSuiteTestCommand(testCommand)
+    ) {
+      process.stderr.write(
+        `agent-primitives probe: "${testCommand}" looks like a full test ` +
+          `suite; the baseline and the mutant run it serially with no ` +
+          `time bound -- pass --timeout <seconds> to cap each run.\n`,
+      );
+    }
     // Handed to `probe` for the duration of the call: it owns SIGINT and
     // SIGTERM while it runs, because it has a mutated file to restore
     // before the process may end. Set with no `await` between it and the
@@ -1288,6 +1323,7 @@ program
         ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
         ...(result.test !== undefined ? { test: result.test } : {}),
         isolation: result.isolation,
+        totalDurationMs: result.totalDurationMs,
       },
       maxChars: global.maxChars,
       logDir: global.logDir,

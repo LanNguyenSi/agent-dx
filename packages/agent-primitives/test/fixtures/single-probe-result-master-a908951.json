@@ -37,7 +37,8 @@
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },
-    "dryRunLogPaths": []
+    "dryRunLogPaths": [],
+    "totalDurationMs": 0
   },
   "worktreePatchKilled": {
     "status": "killed",
@@ -86,7 +87,8 @@
       "<LOGS>/wt-<id>/untracked-files.log",
       "<LOGS>/mutant-dry-run-<id>/argv-<id>.log",
       "<LOGS>/mutant-dry-run-<id>/argv-<id>.log"
-    ]
+    ],
+    "totalDurationMs": 0
   },
   "inplaceReplaceSurvived": {
     "status": "survived",
@@ -126,7 +128,8 @@
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },
-    "dryRunLogPaths": []
+    "dryRunLogPaths": [],
+    "totalDurationMs": 0
   },
   "inplaceBaselineFailed": {
     "status": "inconclusive",
@@ -152,6 +155,7 @@
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },
-    "dryRunLogPaths": []
+    "dryRunLogPaths": [],
+    "totalDurationMs": 0
   }
 }

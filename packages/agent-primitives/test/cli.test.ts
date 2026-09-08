@@ -1663,6 +1663,100 @@ describe("cli: probe", () => {
     }
   });
 
+  it("a full-suite-shaped command (npm test) with no --timeout prints one stderr line naming --timeout before the baseline starts", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        name: "full-suite-fixture",
+        version: "1.0.0",
+        scripts: { test: 'node -e "process.exit(0)"' },
+      }),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "npm test",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(run.stderr).toContain("--timeout");
+  });
+
+  it("a full-suite-shaped command with --timeout given prints no hint", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        name: "full-suite-fixture",
+        version: "1.0.0",
+        scripts: { test: 'node -e "process.exit(0)"' },
+      }),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "npm test",
+      "-i",
+      "inplace",
+      "--timeout",
+      "30",
+    ]);
+
+    expect(run.stderr).not.toContain("looks like a full test suite");
+  });
+
+  it("a targeted command (vitest run test/x.test.ts) prints no full-suite hint", async () => {
+    const run = await spawnCli([
+      "probe",
+      "-t",
+      "npx vitest run test/x.test.ts",
+    ]);
+    expect(run.stderr).not.toContain("looks like a full test suite");
+  });
+
   it("exactly one mutant form is required: two given (-r and -p) is usage_error, exit 2", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");

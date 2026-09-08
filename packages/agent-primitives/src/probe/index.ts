@@ -139,6 +139,13 @@ export interface ProbeResult {
    * The caller (`cli.ts`) folds this together with `baseline`/`test`'s
    * own `logPath` into the envelope's `logs`. */
   dryRunLogPaths?: string[];
+  /** Wall-clock time of the whole `probe()` call, every branch: set once
+   * by the exported wrapper (`probeWithTotalDuration`) around the
+   * pipeline itself, so a library caller sees the same number whether
+   * the run returned normally, refused before a mutant ran, or unwound
+   * through the emergency-restore path. Distinct from `baseline`/`test`'s
+   * own `durationMs`, which cover only their own command. */
+  totalDurationMs: number;
 }
 
 function emptyIsolationField(mode: IsolationMode): IsolationField {
@@ -221,8 +228,16 @@ export function patchUnusableReason(
  * is `step.ts`'s `prepareMutant`/`runMutantAttempt`, which `probePlan`
  * runs once per mutant. See `probePlan`'s docblock for the invariants
  * that split holds to.
+ *
+ * Exported as `probe` below wrapped in a `totalDurationMs` measurement;
+ * this is the pipeline itself, kept as its own function so every one of
+ * its many return points (including the `finally` block's
+ * emergency-restore path) stays exactly as it was rather than each
+ * having to compute and attach the duration itself.
  */
-export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
+async function runProbePipeline(
+  opts: ProbeOptions,
+): Promise<Omit<ProbeResult, "totalDurationMs">> {
   const warnings: string[] = [];
   const isolationField = emptyIsolationField(opts.isolation);
 
@@ -557,7 +572,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     caughtError = err;
     throw err;
   } finally {
-    let emergencyResult: ProbeResult | undefined;
+    let emergencyResult: Omit<ProbeResult, "totalDurationMs"> | undefined;
     // No context means the setup refused (or threw) before it took a
     // lock: nothing was opened, nothing is in flight, and there is
     // nothing to tear down.
@@ -630,6 +645,21 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     }
     if (emergencyResult) return emergencyResult;
   }
+}
+
+/**
+ * Runs one mutation probe: mutate a line (or apply a patch), confirm the
+ * unmutated test passes first (the baseline), run the test against the
+ * mutant, restore the file, and classify the result. See
+ * `runProbePipeline` above for the pipeline itself; this wrapper only
+ * adds `totalDurationMs`, measured across the whole call so every branch
+ * (a normal return, a refusal before any mutant ran, or the `finally`
+ * block's emergency-restore path) reports the same wall-clock total.
+ */
+export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
+  const start = Date.now();
+  const result = await runProbePipeline(opts);
+  return { ...result, totalDurationMs: Date.now() - start };
 }
 
 /** Options for one `--plan` run: the mutants, the command they share,

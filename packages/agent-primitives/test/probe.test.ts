@@ -4172,8 +4172,9 @@ describe("probe(): the single-mutant result is what it was before the plan runne
       if (node && typeof node === "object") {
         const record = node as Record<string, unknown>;
         for (const key of Object.keys(record)) {
-          if (key === "durationMs") record[key] = 0;
-          else zeroDurations(record[key]);
+          if (key === "durationMs" || key === "totalDurationMs") {
+            record[key] = 0;
+          } else zeroDurations(record[key]);
         }
       }
     };
@@ -4266,4 +4267,22 @@ describe("probe(): the single-mutant result is what it was before the plan runne
       RECORDED.inplaceBaselineFailed,
     );
   }, 30000);
+});
+
+describe("probe(): totalDurationMs", () => {
+  it("is a non-negative number on every outcome, including a failing baseline", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    const killed = await probe(baseOptions(repo));
+    expect(typeof killed.totalDurationMs).toBe("number");
+    expect(killed.totalDurationMs).toBeGreaterThanOrEqual(0);
+
+    const { repo: repo2 } = initRepo();
+    const baselineFailed = await probe(
+      baseOptions(repo2, { testCommand: "exit 1" }),
+    );
+    expect(typeof baselineFailed.totalDurationMs).toBe("number");
+    expect(baselineFailed.totalDurationMs).toBeGreaterThanOrEqual(0);
+  });
 });
