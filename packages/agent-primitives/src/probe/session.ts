@@ -65,6 +65,11 @@ export interface MutationProbeField {
   verified_applied_via: string;
   result: string;
   restored_verified: boolean;
+  /** Present only where `result` alone does not say why (e.g.
+   * `"not_run"` for a baseline that failed before any mutant could be
+   * applied): a machine-readable cause, the same string a `ProbeResult`
+   * would otherwise carry only as its own top-level `reason`. */
+  reason?: string;
 }
 
 export interface ExecPhaseField {

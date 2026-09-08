@@ -391,6 +391,16 @@ describe("probe(): inconclusive branches, hash unchanged afterward", () => {
     expect(result.reason).toBe("baseline_failed");
     expect(result.baseline?.exitCode).toBe(1);
     expect(result.mutant).toBeUndefined();
+    // The one mutant this run would have applied was already computed
+    // (the dry run, before the baseline ever started), so unlike the
+    // absent `mutant` field above, `mutation_probe` is not left out of
+    // this envelope shape: a consumer reading `mutation_probe.result`
+    // gets a string ("not_run") for a failing baseline too.
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("baseline_failed");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(typeof result.mutation_probe?.mutant).toBe("string");
+    expect(typeof result.mutation_probe?.verified_applied_via).toBe("string");
 
     const after = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
     expect(after).toBe(before);

@@ -1219,10 +1219,22 @@ program
       // the envelope).
       probeOwnsShutdown = false;
     }
+    // A failing baseline is remapped from the library's own
+    // `status: "inconclusive"`/`reason: "baseline_failed"` pair to a
+    // literal `status: "baseline_failed"` here, in the envelope only:
+    // the exit-code class (`cannot-conclude`, exit 2) is unchanged (see
+    // `STATUS_CLASS` in envelope.ts), so a caller gating on the exit
+    // code alone sees no difference, while one reading `status` no
+    // longer has to also read `reason` to tell a failing baseline apart
+    // from every other inconclusive outcome.
+    const envelopeStatus =
+      result.status === "inconclusive" && result.reason === "baseline_failed"
+        ? "baseline_failed"
+        : result.status;
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
       command: "probe",
-      status: result.status,
+      status: envelopeStatus,
       durationMs: Date.now() - start,
       cwd: global.cwd,
       warnings: result.warnings,

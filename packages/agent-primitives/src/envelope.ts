@@ -36,6 +36,11 @@ const STATUS_CLASS: Record<string, StatusClass> = {
   usage_error: "cannot-conclude",
   inconclusive: "cannot-conclude",
   error: "cannot-conclude",
+  // `probe`'s own envelope-level remap of a failing baseline (the
+  // library's `status: "inconclusive"`/`reason: "baseline_failed"`
+  // pair): same class, same exit code, so a caller gating on the exit
+  // code sees no change from before this status existed.
+  baseline_failed: "cannot-conclude",
 };
 
 /**

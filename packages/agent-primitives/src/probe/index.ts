@@ -475,6 +475,28 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
         ...(refusal.reportsMutant && mutantField !== undefined
           ? { mutant: mutantField }
           : {}),
+        // A failing baseline never applied any mutant, but this run's
+        // one mutant was already computed (the `beforeBaseline` dry run
+        // above, before the baseline ever started) -- so unlike every
+        // other envelope shape this hole used to leave, there is a real
+        // mutant to describe. Reported here rather than left absent, so
+        // a consumer reading `mutation_probe.result` gets a string
+        // ("not_run") instead of `undefined` for this outcome too.
+        // `restored_verified: true`: nothing was ever mutated, so the
+        // target is (trivially) still at its original content.
+        ...(refusal.reason === "baseline_failed" &&
+        mutantSummary !== undefined &&
+        verifiedAppliedVia !== undefined
+          ? {
+              mutation_probe: {
+                mutant: mutantSummary,
+                verified_applied_via: verifiedAppliedVia,
+                result: "not_run",
+                restored_verified: true,
+                reason: "baseline_failed",
+              },
+            }
+          : {}),
         ...(refusal.baseline !== undefined
           ? { baseline: refusal.baseline }
           : {}),

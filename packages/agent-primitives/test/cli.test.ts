@@ -1421,6 +1421,46 @@ describe("cli: probe", () => {
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
+  it("a failing baseline reports status: baseline_failed with a mutation_probe object (result: not_run, a reason) and baseline.exitCode, exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "exit 1",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("baseline_failed");
+    expect(parsed.reason).toBe("baseline_failed");
+    expect(parsed.baseline.exitCode).toBe(1);
+    expect(parsed.mutation_probe.result).toBe("not_run");
+    expect(typeof parsed.mutation_probe.reason).toBe("string");
+    expect(typeof parsed.mutation_probe.result).toBe("string");
+  });
+
   it("a --file that does not exist is usage_error/file_not_found under command probe, with the path in a warning", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "placeholder.js"), "x\n");
