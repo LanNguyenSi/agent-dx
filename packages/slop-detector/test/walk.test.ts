@@ -19,10 +19,16 @@ afterEach(() => {
 describe("walk + ignore globs", () => {
   it("does not descend into node_modules", () => {
     fs.mkdirSync(path.join(tmp, "node_modules", "deep"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "node_modules", "deep", "evil.md"), "</result>");
+    fs.writeFileSync(
+      path.join(tmp, "node_modules", "deep", "evil.md"),
+      "</result>",
+    );
     fs.writeFileSync(path.join(tmp, "real.md"), "</result>");
 
-    const summary = checkPath(tmp, { packs: allPacks, config: defaultConfig() });
+    const summary = checkPath(tmp, {
+      packs: allPacks,
+      config: defaultConfig(),
+    });
     expect(summary.filesScanned).toBe(1);
     expect(summary.violations).toHaveLength(1);
     expect(summary.violations[0].path).toContain("real.md");
@@ -35,15 +41,24 @@ describe("walk + ignore globs", () => {
     }
     fs.writeFileSync(path.join(tmp, "real.md"), "</result>");
 
-    const summary = checkPath(tmp, { packs: allPacks, config: defaultConfig() });
+    const summary = checkPath(tmp, {
+      packs: allPacks,
+      config: defaultConfig(),
+    });
     expect(summary.filesScanned).toBe(1);
   });
 
   it("scans nested non-ignored directories", () => {
     fs.mkdirSync(path.join(tmp, "src", "deep", "nest"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "src", "deep", "nest", "x.md"), "</result>");
+    fs.writeFileSync(
+      path.join(tmp, "src", "deep", "nest", "x.md"),
+      "</result>",
+    );
 
-    const summary = checkPath(tmp, { packs: allPacks, config: defaultConfig() });
+    const summary = checkPath(tmp, {
+      packs: allPacks,
+      config: defaultConfig(),
+    });
     expect(summary.filesScanned).toBe(1);
     expect(summary.violations).toHaveLength(1);
   });

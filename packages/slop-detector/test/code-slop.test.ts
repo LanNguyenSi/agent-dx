@@ -11,7 +11,14 @@ function code(text: string, fileName = "fixture.ts"): FileTarget {
 }
 
 const config: ResolvedConfig = {
-  packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false, "placement-slop": false },
+  packs: {
+    "agent-tics": false,
+    "prose-slop": false,
+    "comment-slop": false,
+    "code-slop": true,
+    "ui-slop": false,
+    "placement-slop": false,
+  },
   ruleOverrides: {},
   ignorePaths: [],
   treatAsProse: [],
@@ -191,7 +198,10 @@ describe("code-slop/backcompat-shim-unreleased", () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "slop-backcompat-"));
-    writeFileSync(join(tmpDir, "package.json"), JSON.stringify({ name: "fixture", version: "0.3.0" }));
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "fixture", version: "0.3.0" }),
+    );
   });
 
   afterEach(() => {
@@ -205,7 +215,11 @@ describe("code-slop/backcompat-shim-unreleased", () => {
 export function legacy() { return 1; }
 `;
     writeFileSync(filePath, text);
-    const v = run("code-slop/backcompat-shim-unreleased", { path: filePath, text, kind: "code" });
+    const v = run("code-slop/backcompat-shim-unreleased", {
+      path: filePath,
+      text,
+      kind: "code",
+    });
     expect(v.length).toBeGreaterThan(0);
     expect(v[0].message).toContain("0.5.0");
   });
@@ -217,7 +231,11 @@ export function legacy() { return 1; }
 export function legacy() { return 1; }
 `;
     writeFileSync(filePath, text);
-    const v = run("code-slop/backcompat-shim-unreleased", { path: filePath, text, kind: "code" });
+    const v = run("code-slop/backcompat-shim-unreleased", {
+      path: filePath,
+      text,
+      kind: "code",
+    });
     expect(v).toHaveLength(0);
   });
 
@@ -228,7 +246,11 @@ export function legacy() { return 1; }
 export function legacy() { return 1; }
 `;
     writeFileSync(filePath, text);
-    const v = run("code-slop/backcompat-shim-unreleased", { path: filePath, text, kind: "code" });
+    const v = run("code-slop/backcompat-shim-unreleased", {
+      path: filePath,
+      text,
+      kind: "code",
+    });
     expect(v.length).toBeGreaterThan(0);
   });
 });
@@ -321,7 +343,10 @@ describe("code-slop/phantom-import", () => {
   });
 
   it("flags an undeclared `require()` call", () => {
-    const f = withPackage({ name: "fixture" }, `const x = require("phantom-cjs");\n`);
+    const f = withPackage(
+      { name: "fixture" },
+      `const x = require("phantom-cjs");\n`,
+    );
     const v = run("code-slop/phantom-import", f);
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("phantom-cjs");
@@ -340,7 +365,10 @@ describe("code-slop/phantom-import", () => {
   });
 
   it("flags an undeclared `import = require()` declaration", () => {
-    const f = withPackage({ name: "fixture" }, `import legacy = require("phantom-equals");\n`);
+    const f = withPackage(
+      { name: "fixture" },
+      `import legacy = require("phantom-equals");\n`,
+    );
     const v = run("code-slop/phantom-import", f);
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("phantom-equals");
@@ -352,7 +380,11 @@ describe("code-slop/phantom-import", () => {
     const source = `import x from "anything-at-all";\n`;
     writeFileSync(filePath, source);
     expect(
-      run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" }),
+      run("code-slop/phantom-import", {
+        path: filePath,
+        text: source,
+        kind: "code",
+      }),
     ).toHaveLength(0);
   });
 
@@ -360,21 +392,35 @@ describe("code-slop/phantom-import", () => {
     // tmpDir/ is the workspace root; packages/sib is a sibling of packages/app.
     writeFileSync(
       join(tmpDir, "package.json"),
-      JSON.stringify({ name: "root", private: true, workspaces: ["packages/*"] }),
+      JSON.stringify({
+        name: "root",
+        private: true,
+        workspaces: ["packages/*"],
+      }),
     );
     const sibDir = join(tmpDir, "packages", "sib");
     mkdirSync(sibDir, { recursive: true });
-    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/sib" }));
+    writeFileSync(
+      join(sibDir, "package.json"),
+      JSON.stringify({ name: "@ws/sib" }),
+    );
     const appDir = join(tmpDir, "packages", "app");
     mkdirSync(appDir, { recursive: true });
-    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/app" }));
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({ name: "@ws/app" }),
+    );
     const filePath = join(appDir, "x.ts");
     // The sibling is excluded, but a genuinely undeclared import from inside
     // the same workspace package must still be flagged — the workspace logic
     // must not widen `known` to "anything".
     const source = `import s from "@ws/sib";\nimport q from "actually-phantom";\n`;
     writeFileSync(filePath, source);
-    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    const v = run("code-slop/phantom-import", {
+      path: filePath,
+      text: source,
+      kind: "code",
+    });
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("actually-phantom");
   });
@@ -389,18 +435,28 @@ describe("code-slop/phantom-import", () => {
     );
     writeFileSync(
       join(tmpDir, "pnpm-workspace.yaml"),
-      "packages:\n  - \"packages/*\"\n",
+      'packages:\n  - "packages/*"\n',
     );
     const sibDir = join(tmpDir, "packages", "sib");
     mkdirSync(sibDir, { recursive: true });
-    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/sib" }));
+    writeFileSync(
+      join(sibDir, "package.json"),
+      JSON.stringify({ name: "@ws/sib" }),
+    );
     const appDir = join(tmpDir, "packages", "app");
     mkdirSync(appDir, { recursive: true });
-    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/app" }));
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({ name: "@ws/app" }),
+    );
     const filePath = join(appDir, "x.ts");
     const source = `import s from "@ws/sib";\nimport q from "actually-phantom";\n`;
     writeFileSync(filePath, source);
-    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    const v = run("code-slop/phantom-import", {
+      path: filePath,
+      text: source,
+      kind: "code",
+    });
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("actually-phantom");
   });
@@ -410,18 +466,32 @@ describe("code-slop/phantom-import", () => {
   it("resolves siblings via nested glob `packages/*/*`", () => {
     writeFileSync(
       join(tmpDir, "package.json"),
-      JSON.stringify({ name: "root", private: true, workspaces: ["packages/*/*"] }),
+      JSON.stringify({
+        name: "root",
+        private: true,
+        workspaces: ["packages/*/*"],
+      }),
     );
     const sibDir = join(tmpDir, "packages", "group", "sib");
     mkdirSync(sibDir, { recursive: true });
-    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/sib" }));
+    writeFileSync(
+      join(sibDir, "package.json"),
+      JSON.stringify({ name: "@ws/sib" }),
+    );
     const appDir = join(tmpDir, "packages", "group", "app");
     mkdirSync(appDir, { recursive: true });
-    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/app" }));
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({ name: "@ws/app" }),
+    );
     const filePath = join(appDir, "x.ts");
     const source = `import s from "@ws/sib";\nimport q from "phantom-nested";\n`;
     writeFileSync(filePath, source);
-    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    const v = run("code-slop/phantom-import", {
+      path: filePath,
+      text: source,
+      kind: "code",
+    });
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("phantom-nested");
   });
@@ -433,14 +503,24 @@ describe("code-slop/phantom-import", () => {
     );
     const sibDir = join(tmpDir, "apps", "deep", "sib");
     mkdirSync(sibDir, { recursive: true });
-    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/deep-sib" }));
+    writeFileSync(
+      join(sibDir, "package.json"),
+      JSON.stringify({ name: "@ws/deep-sib" }),
+    );
     const appDir = join(tmpDir, "apps", "consumer");
     mkdirSync(appDir, { recursive: true });
-    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/consumer" }));
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({ name: "@ws/consumer" }),
+    );
     const filePath = join(appDir, "x.ts");
     const source = `import s from "@ws/deep-sib";\nimport q from "phantom-globstar";\n`;
     writeFileSync(filePath, source);
-    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    const v = run("code-slop/phantom-import", {
+      path: filePath,
+      text: source,
+      kind: "code",
+    });
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("phantom-globstar");
   });
@@ -448,18 +528,32 @@ describe("code-slop/phantom-import", () => {
   it("resolves siblings via mid-segment star `packages/eslint-*`", () => {
     writeFileSync(
       join(tmpDir, "package.json"),
-      JSON.stringify({ name: "root", private: true, workspaces: ["packages/eslint-*"] }),
+      JSON.stringify({
+        name: "root",
+        private: true,
+        workspaces: ["packages/eslint-*"],
+      }),
     );
     const sibDir = join(tmpDir, "packages", "eslint-config-base");
     mkdirSync(sibDir, { recursive: true });
-    writeFileSync(join(sibDir, "package.json"), JSON.stringify({ name: "@ws/eslint-config-base" }));
+    writeFileSync(
+      join(sibDir, "package.json"),
+      JSON.stringify({ name: "@ws/eslint-config-base" }),
+    );
     const appDir = join(tmpDir, "packages", "app");
     mkdirSync(appDir, { recursive: true });
-    writeFileSync(join(appDir, "package.json"), JSON.stringify({ name: "@ws/app" }));
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({ name: "@ws/app" }),
+    );
     const filePath = join(appDir, "x.ts");
     const source = `import s from "@ws/eslint-config-base";\nimport q from "phantom-midseg";\n`;
     writeFileSync(filePath, source);
-    const v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+    const v = run("code-slop/phantom-import", {
+      path: filePath,
+      text: source,
+      kind: "code",
+    });
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("phantom-midseg");
   });
@@ -472,14 +566,22 @@ describe("code-slop/phantom-import", () => {
     mkdirSync(appDir, { recursive: true });
     writeFileSync(
       join(tmpDir, "package.json"),
-      JSON.stringify({ name: "root", private: true, workspaces: ["packages/?*"] }),
+      JSON.stringify({
+        name: "root",
+        private: true,
+        workspaces: ["packages/?*"],
+      }),
     );
     const filePath = join(appDir, "x.ts");
     const source = `import x from "definitely-phantom";\n`;
     writeFileSync(filePath, source);
     let v: ReturnType<typeof run>;
     expect(() => {
-      v = run("code-slop/phantom-import", { path: filePath, text: source, kind: "code" });
+      v = run("code-slop/phantom-import", {
+        path: filePath,
+        text: source,
+        kind: "code",
+      });
     }).not.toThrow();
     expect(v!).toHaveLength(1);
     expect(v![0].message).toContain("definitely-phantom");
@@ -510,7 +612,10 @@ describe("code-slop/phantom-import", () => {
   it("__resetCaches lets an in-place package.json change be re-read", () => {
     // First run caches the package context for tmpDir: lodash is undeclared,
     // so the import is flagged.
-    const f = withPackage({ name: "fixture", dependencies: {} }, `import _ from "lodash";\n`);
+    const f = withPackage(
+      { name: "fixture", dependencies: {} },
+      `import _ from "lodash";\n`,
+    );
     expect(run("code-slop/phantom-import", f)).toHaveLength(1);
 
     // Declare lodash in place. Without a reset the cached (stale) context wins,
@@ -532,7 +637,9 @@ describe("code-slop/stub-body", () => {
   it("flags a function whose body is a not-implemented throw", () => {
     const v = run(
       "code-slop/stub-body",
-      code(`function fetchUser(id: string) { throw new Error("not implemented"); }`),
+      code(
+        `function fetchUser(id: string) { throw new Error("not implemented"); }`,
+      ),
     );
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("fetchUser");
@@ -549,7 +656,9 @@ describe("code-slop/stub-body", () => {
   it("does not flag a throw with a non-placeholder message", () => {
     const v = run(
       "code-slop/stub-body",
-      code(`function parse(s: string) { throw new Error("invalid input: " + s); }`),
+      code(
+        `function parse(s: string) { throw new Error("invalid input: " + s); }`,
+      ),
     );
     expect(v).toHaveLength(0);
   });
@@ -557,7 +666,9 @@ describe("code-slop/stub-body", () => {
   it("does not flag a real implementation", () => {
     const v = run(
       "code-slop/stub-body",
-      code(`function add(a: number, b: number) { const sum = a + b; return sum; }`),
+      code(
+        `function add(a: number, b: number) { const sum = a + b; return sum; }`,
+      ),
     );
     expect(v).toHaveLength(0);
   });
@@ -665,7 +776,9 @@ function fmt(x: number | string): string { throw new Error("TODO"); }
       text: `export function helper(): void;`,
       kind: "code",
     };
-    const rule = codeSlopPack.rules.find((r) => r.id === "code-slop/stub-body")!;
+    const rule = codeSlopPack.rules.find(
+      (r) => r.id === "code-slop/stub-body",
+    )!;
     expect(rule.appliesTo(dts)).toBe(false);
   });
 });
@@ -695,7 +808,14 @@ function runCorpusRule(
     paths.push(p);
   }
   const cfg: ResolvedConfig = {
-    packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false, "placement-slop": false },
+    packs: {
+      "agent-tics": false,
+      "prose-slop": false,
+      "comment-slop": false,
+      "code-slop": true,
+      "ui-slop": false,
+      "placement-slop": false,
+    },
     ruleOverrides: { [ruleId]: { enabled: true } },
     ignorePaths: [],
     treatAsProse: [],
@@ -765,13 +885,19 @@ describe("code-slop/unused-export", () => {
       { name: "fixture", main: "./a.ts" },
     );
     // a.ts is an entrypoint — publicApi must be safe
-    expect(violations.some((v) => v.message.includes("`publicApi`"))).toBe(false);
+    expect(violations.some((v) => v.message.includes("`publicApi`"))).toBe(
+      false,
+    );
     // b.ts is NOT an entrypoint — alsoUnused should still be flagged
-    expect(violations.some((v) => v.message.includes("`alsoUnused`"))).toBe(true);
+    expect(violations.some((v) => v.message.includes("`alsoUnused`"))).toBe(
+      true,
+    );
   });
 
   it("returns empty results when corpus is absent (backward compat)", () => {
-    const rule = codeSlopPack.rules.find((r) => r.id === "code-slop/unused-export")!;
+    const rule = codeSlopPack.rules.find(
+      (r) => r.id === "code-slop/unused-export",
+    )!;
     const file: FileTarget = {
       path: "a.ts",
       text: `export function helperA() { return 1; }\n`,
@@ -790,7 +916,9 @@ describe("code-slop/unused-export", () => {
     // re-derived location/snippet instead — so a violation carrying these
     // exact fake values pins direct corpus consumption, not just "the rule
     // still works".
-    const rule = codeSlopPack.rules.find((r) => r.id === "code-slop/unused-export")!;
+    const rule = codeSlopPack.rules.find(
+      (r) => r.id === "code-slop/unused-export",
+    )!;
     const file: FileTarget = {
       path: "a.ts",
       text: `export function helperA() { return 1; }\n`,
@@ -827,7 +955,7 @@ describe("code-slop/unused-export", () => {
     expect(violations.some((v) => v.message.includes("`default`"))).toBe(true);
   });
 
-  it("does not flag a symbol re-exported by a barrel (`export { x } from \"./a.js\"`)", () => {
+  it('does not flag a symbol re-exported by a barrel (`export { x } from "./a.js"`)', () => {
     // b.ts re-exports helperA without ever importing/calling it directly.
     // Before tracking re-export specifiers as references, this made a.ts's
     // *own declaration* look unused even though the barrel makes it public.
@@ -843,7 +971,11 @@ describe("code-slop/unused-export", () => {
       tmpDir,
       { name: "fixture" },
     );
-    expect(violations.some((v) => v.path.endsWith("a.ts") && v.message.includes("`helperA`"))).toBe(false);
+    expect(
+      violations.some(
+        (v) => v.path.endsWith("a.ts") && v.message.includes("`helperA`"),
+      ),
+    ).toBe(false);
   });
 
   it("BUG REPRO: flags a src barrel's re-exports when package.json main points at a dist path with no source counterpart", () => {
@@ -874,7 +1006,7 @@ describe("code-slop/unused-export", () => {
     expect(violations.some((v) => v.message.includes("`helperA`"))).toBe(false);
   });
 
-  it("does not flag a symbol reachable only through `export * from \"./a.js\"` (star re-export)", () => {
+  it('does not flag a symbol reachable only through `export * from "./a.js"` (star re-export)', () => {
     // b.ts is a bare `export *` barrel over a.ts — nothing imports, calls,
     // or named-re-exports helperA directly. This is the exact shape used
     // in this monorepo at packages/friction-log/src/index.ts:1
@@ -888,10 +1020,14 @@ describe("code-slop/unused-export", () => {
       tmpDir,
       { name: "fixture" },
     );
-    expect(violations.some((v) => v.path.endsWith("a.ts") && v.message.includes("`helperA`"))).toBe(false);
+    expect(
+      violations.some(
+        (v) => v.path.endsWith("a.ts") && v.message.includes("`helperA`"),
+      ),
+    ).toBe(false);
   });
 
-  it("tracks `export * as ns from \"./a.js\"` as a real, trackable export of the barrel (unlike a bare `export *`)", () => {
+  it('tracks `export * as ns from "./a.js"` as a real, trackable export of the barrel (unlike a bare `export *`)', () => {
     // `ns` is a name genuinely introduced by this declaration on b.ts, not
     // just an opaque re-export passthrough — so it must show up in
     // exportsByFile and be flaggable like any other export, not silently
@@ -905,10 +1041,14 @@ describe("code-slop/unused-export", () => {
       tmpDir,
       { name: "fixture" },
     );
-    expect(violations.some((v) => v.path.endsWith("b.ts") && v.message.includes("`ns`"))).toBe(true);
+    expect(
+      violations.some(
+        (v) => v.path.endsWith("b.ts") && v.message.includes("`ns`"),
+      ),
+    ).toBe(true);
   });
 
-  it("resolves a directory specifier in `export * from \"./util\"` to util/index.ts, not the directory itself", () => {
+  it('resolves a directory specifier in `export * from "./util"` to util/index.ts, not the directory itself', () => {
     // `existsSync` is true for directories too — without a stat().isFile()
     // guard, `_resolveSourceFile` would "resolve" the bare directory path
     // and add *that* to entrypoints, which matches no scanned file, so
@@ -922,12 +1062,15 @@ describe("code-slop/unused-export", () => {
       tmpDir,
       { name: "fixture" },
     );
-    expect(violations.some((v) => v.path.endsWith("util/index.ts") && v.message.includes("`helperA`"))).toBe(
-      false,
-    );
+    expect(
+      violations.some(
+        (v) =>
+          v.path.endsWith("util/index.ts") && v.message.includes("`helperA`"),
+      ),
+    ).toBe(false);
   });
 
-  it("resolves package.json main: \"./src\" (a directory) to src/index.ts via the same directory-specifier fix", () => {
+  it('resolves package.json main: "./src" (a directory) to src/index.ts via the same directory-specifier fix', () => {
     // _resolveEntrypoints shares _resolveSourceFile with the export * fix,
     // so a directory `main` has the identical hole and the identical fix.
     const violations = runCorpusRule(
@@ -954,39 +1097,73 @@ describe("code-slop/unused-export", () => {
       tmpDir,
       { name: "fixture" },
     );
-    expect(violations.filter((v) => v.message.includes("`helperA`"))).toHaveLength(1);
+    expect(
+      violations.filter((v) => v.message.includes("`helperA`")),
+    ).toHaveLength(1);
   });
 
   it("surfaces a warning when an entrypointGlobs pattern matches no scanned files (typo protection)", () => {
-    writeFileSync(join(tmpDir, "package.json"), JSON.stringify({ name: "fixture" }));
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "fixture" }),
+    );
     const p = join(tmpDir, "a.ts");
     writeFileSync(p, `export function helperA() { return 1; }\n`);
     const cfg: ResolvedConfig = {
-      packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false, "placement-slop": false },
+      packs: {
+        "agent-tics": false,
+        "prose-slop": false,
+        "comment-slop": false,
+        "code-slop": true,
+        "ui-slop": false,
+        "placement-slop": false,
+      },
       ruleOverrides: { "code-slop/unused-export": { enabled: true } },
       ignorePaths: [],
       treatAsProse: [],
       treatAsCode: [],
       entrypointGlobs: ["src/typo-index.ts"],
     };
-    const summary = checkFiles([p], { packs: [codeSlopPack], config: cfg, corpusEnabled: true, scanRoot: tmpDir });
-    expect(summary.warnings?.some((w) => w.includes("src/typo-index.ts"))).toBe(true);
+    const summary = checkFiles([p], {
+      packs: [codeSlopPack],
+      config: cfg,
+      corpusEnabled: true,
+      scanRoot: tmpDir,
+    });
+    expect(summary.warnings?.some((w) => w.includes("src/typo-index.ts"))).toBe(
+      true,
+    );
   });
 
   it("does not warn when every entrypointGlobs pattern matches a scanned file", () => {
-    writeFileSync(join(tmpDir, "package.json"), JSON.stringify({ name: "fixture" }));
+    writeFileSync(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ name: "fixture" }),
+    );
     const p = join(tmpDir, "src", "index.ts");
     mkdirSync(join(tmpDir, "src"), { recursive: true });
     writeFileSync(p, `export function helperA() { return 1; }\n`);
     const cfg: ResolvedConfig = {
-      packs: { "agent-tics": false, "prose-slop": false, "comment-slop": false, "code-slop": true, "ui-slop": false, "placement-slop": false },
+      packs: {
+        "agent-tics": false,
+        "prose-slop": false,
+        "comment-slop": false,
+        "code-slop": true,
+        "ui-slop": false,
+        "placement-slop": false,
+      },
       ruleOverrides: { "code-slop/unused-export": { enabled: true } },
       ignorePaths: [],
       treatAsProse: [],
       treatAsCode: [],
       entrypointGlobs: ["src/index.ts"],
     };
-    const summary = checkFiles([p], { packs: [codeSlopPack], config: cfg, corpusEnabled: true, scanRoot: tmpDir });
+    const summary = checkFiles([p], {
+      packs: [codeSlopPack],
+      config: cfg,
+      corpusEnabled: true,
+      scanRoot: tmpDir,
+    });
     expect(summary.warnings).toBeUndefined();
   });
 });
@@ -1063,11 +1240,15 @@ describe("code-slop/single-callsite-helper", () => {
       tmpDir,
       { name: "fixture" },
     );
-    expect(violations.some((v) => v.message.includes("`trulyDeadInternal`"))).toBe(false);
+    expect(
+      violations.some((v) => v.message.includes("`trulyDeadInternal`")),
+    ).toBe(false);
   });
 
   it("returns empty results when corpus is absent (backward compat)", () => {
-    const rule = codeSlopPack.rules.find((r) => r.id === "code-slop/single-callsite-helper")!;
+    const rule = codeSlopPack.rules.find(
+      (r) => r.id === "code-slop/single-callsite-helper",
+    )!;
     const file: FileTarget = {
       path: "a.ts",
       text: `function helper(x: number) { return x + 1; }\n`,
@@ -1079,7 +1260,11 @@ describe("code-slop/single-callsite-helper", () => {
 
 describe("code-slop applies-to gating", () => {
   it("does not run on .md files", () => {
-    const proseFile: FileTarget = { path: "a.md", text: "try { 1 } catch {}", kind: "prose" };
+    const proseFile: FileTarget = {
+      path: "a.md",
+      text: "try { 1 } catch {}",
+      kind: "prose",
+    };
     for (const rule of codeSlopPack.rules) {
       expect(rule.appliesTo(proseFile)).toBe(false);
     }

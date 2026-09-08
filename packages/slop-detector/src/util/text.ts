@@ -19,7 +19,11 @@ export function findAllRegex(
   text: string,
   re: RegExp,
 ): Array<{ index: number; match: string; groups: RegExpExecArray }> {
-  const results: Array<{ index: number; match: string; groups: RegExpExecArray }> = [];
+  const results: Array<{
+    index: number;
+    match: string;
+    groups: RegExpExecArray;
+  }> = [];
   if (!re.global) {
     throw new Error(`findAllRegex requires a global regex; got ${re}`);
   }

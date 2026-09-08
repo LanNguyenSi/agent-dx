@@ -2,7 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { TSESTree } from "@typescript-eslint/types";
-import type { FileTarget, PackDefinition, Rule, RuleContext, Violation } from "../types.js";
+import type {
+  FileTarget,
+  PackDefinition,
+  Rule,
+  RuleContext,
+  Violation,
+} from "../types.js";
 import {
   isTypeScriptOrJavaScript,
   nodeLoc,
@@ -42,16 +48,35 @@ function makeViolation(
 // ─────────────────────────── Rule 1: try/catch around non-throwing code ───
 
 const NEVER_THROWS: ReadonlySet<string> = new Set([
-  "BooleanLiteral", "Literal", "TemplateLiteral", "Identifier", "ThisExpression",
-  "NumericLiteral", "StringLiteral", "BigIntLiteral", "NullLiteral",
-  "ArrayPattern", "ObjectPattern",
-  "VariableDeclaration", "VariableDeclarator",
-  "EmptyStatement", "BreakStatement", "ContinueStatement",
-  "BlockStatement", "ReturnStatement", "IfStatement",
-  "BinaryExpression", "LogicalExpression", "UnaryExpression",
-  "ConditionalExpression", "SpreadElement",
-  "ArrayExpression", "ObjectExpression", "Property",
-  "AssignmentExpression", "UpdateExpression",
+  "BooleanLiteral",
+  "Literal",
+  "TemplateLiteral",
+  "Identifier",
+  "ThisExpression",
+  "NumericLiteral",
+  "StringLiteral",
+  "BigIntLiteral",
+  "NullLiteral",
+  "ArrayPattern",
+  "ObjectPattern",
+  "VariableDeclaration",
+  "VariableDeclarator",
+  "EmptyStatement",
+  "BreakStatement",
+  "ContinueStatement",
+  "BlockStatement",
+  "ReturnStatement",
+  "IfStatement",
+  "BinaryExpression",
+  "LogicalExpression",
+  "UnaryExpression",
+  "ConditionalExpression",
+  "SpreadElement",
+  "ArrayExpression",
+  "ObjectExpression",
+  "Property",
+  "AssignmentExpression",
+  "UpdateExpression",
 ]);
 
 function tryBlockMayThrow(block: TSESTree.BlockStatement): boolean {
@@ -76,7 +101,10 @@ function tryBlockMayThrow(block: TSESTree.BlockStatement): boolean {
         }
         return;
       case "AssignmentExpression":
-        if (node.left.type === "MemberExpression" && node.left.object.type !== "ThisExpression") {
+        if (
+          node.left.type === "MemberExpression" &&
+          node.left.object.type !== "ThisExpression"
+        ) {
           mayThrow = true;
         }
         return;
@@ -123,7 +151,9 @@ const tryCatchCannotThrow: Rule = {
 
 // ─────────────────────────── Rule 2: default value on required-typed param ─
 
-function paramTypeIsRequired(typeAnnotation: TSESTree.TSTypeAnnotation | undefined): boolean {
+function paramTypeIsRequired(
+  typeAnnotation: TSESTree.TSTypeAnnotation | undefined,
+): boolean {
   if (!typeAnnotation) return false; // no annotation: skip (could be JS).
   const t = typeAnnotation.typeAnnotation;
   // Skip if type is a union containing `undefined` or `null`.
@@ -133,7 +163,9 @@ function paramTypeIsRequired(typeAnnotation: TSESTree.TSTypeAnnotation | undefin
         m.type === "TSUndefinedKeyword" ||
         m.type === "TSNullKeyword" ||
         m.type === "TSVoidKeyword" ||
-        (m.type === "TSLiteralType" && m.literal.type === "Literal" && m.literal.value === null),
+        (m.type === "TSLiteralType" &&
+          m.literal.type === "Literal" &&
+          m.literal.value === null),
     );
     if (hasNullable) return false;
   }
@@ -261,13 +293,18 @@ function functionBodyHasAwait(node: TSESTree.FunctionLike): boolean {
   let found = false;
   walk(body as unknown as AnyNode, (n) => {
     if (found) return;
-    if (n.type === "AwaitExpression" || n.type === "ForOfStatement" && n.await) {
+    if (
+      n.type === "AwaitExpression" ||
+      (n.type === "ForOfStatement" && n.await)
+    ) {
       found = true;
     }
     // Don't recurse into nested function bodies — they have their own scope.
     if (
       n !== body &&
-      (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression")
+      (n.type === "FunctionDeclaration" ||
+        n.type === "FunctionExpression" ||
+        n.type === "ArrowFunctionExpression")
     ) {
       // walk() will recurse anyway; we tolerate the false negative here.
     }
@@ -275,11 +312,17 @@ function functionBodyHasAwait(node: TSESTree.FunctionLike): boolean {
   return found;
 }
 
-function functionReturnTypeRequiresPromise(node: TSESTree.FunctionLike): boolean {
+function functionReturnTypeRequiresPromise(
+  node: TSESTree.FunctionLike,
+): boolean {
   const ret = (node as TSESTree.FunctionDeclaration).returnType;
   if (!ret) return false;
   const t = ret.typeAnnotation;
-  if (t.type === "TSTypeReference" && t.typeName.type === "Identifier" && t.typeName.name === "Promise") {
+  if (
+    t.type === "TSTypeReference" &&
+    t.typeName.type === "Identifier" &&
+    t.typeName.name === "Promise"
+  ) {
     return true;
   }
   return false;
@@ -326,7 +369,8 @@ const asyncWithoutAwait: Rule = {
 
 // ─────────────────────────── Rule 5: backcompat shim for unreleased API ───
 
-const KEPT_FOR_BACKCOMPAT = /kept\s+for\s+back(?:wards?[\s-]?)?compat(?:ibility)?/i;
+const KEPT_FOR_BACKCOMPAT =
+  /kept\s+for\s+back(?:wards?[\s-]?)?compat(?:ibility)?/i;
 const DEPRECATED_SINCE = /@deprecated\s+since\s+v?(\d+\.\d+\.\d+)/i;
 
 interface Origin {
@@ -351,7 +395,9 @@ function readPackageVersion(filePath: string): string | null {
       visited.push(dir);
       const pkg = path.join(dir, "package.json");
       if (fs.existsSync(pkg)) {
-        const raw = JSON.parse(fs.readFileSync(pkg, "utf8")) as { version?: string };
+        const raw = JSON.parse(fs.readFileSync(pkg, "utf8")) as {
+          version?: string;
+        };
         const version = typeof raw.version === "string" ? raw.version : null;
         for (const v of visited) packageVersionCache.set(v, version);
         return version;
@@ -388,7 +434,9 @@ const backcompatShimUnreleased: Rule = {
     const result = parseTsFile(ctx.file);
     if (!result.ok) return [];
     const ast = result.ast as ParsedTsFile;
-    const origin: Origin = { packageVersion: readPackageVersion(ctx.file.path) };
+    const origin: Origin = {
+      packageVersion: readPackageVersion(ctx.file.path),
+    };
     const violations: Violation[] = [];
 
     // (a) `@deprecated since X.Y.Z` for a version greater than the current one.
@@ -475,13 +523,48 @@ void semverGreater; // keep export-graph honest under noUnusedLocals when import
 // handled before this lookup; subpaths like `fs/promises` reduce to `fs`
 // first, so only the top-level names are listed here.
 const NODE_BUILTINS: ReadonlySet<string> = new Set([
-  "assert", "async_hooks", "buffer", "child_process", "cluster", "console",
-  "constants", "crypto", "dgram", "diagnostics_channel", "dns", "domain",
-  "events", "fs", "http", "http2", "https", "inspector", "module", "net",
-  "os", "path", "perf_hooks", "process", "punycode", "querystring",
-  "readline", "repl", "stream", "string_decoder", "sys", "timers", "tls",
-  "trace_events", "tty", "url", "util", "v8", "vm", "wasi",
-  "worker_threads", "zlib",
+  "assert",
+  "async_hooks",
+  "buffer",
+  "child_process",
+  "cluster",
+  "console",
+  "constants",
+  "crypto",
+  "dgram",
+  "diagnostics_channel",
+  "dns",
+  "domain",
+  "events",
+  "fs",
+  "http",
+  "http2",
+  "https",
+  "inspector",
+  "module",
+  "net",
+  "os",
+  "path",
+  "perf_hooks",
+  "process",
+  "punycode",
+  "querystring",
+  "readline",
+  "repl",
+  "stream",
+  "string_decoder",
+  "sys",
+  "timers",
+  "tls",
+  "trace_events",
+  "tty",
+  "url",
+  "util",
+  "v8",
+  "vm",
+  "wasi",
+  "worker_threads",
+  "zlib",
 ]);
 
 interface PackageJsonShape {
@@ -551,7 +634,8 @@ function collectDepNames(pkg: PackageJsonShape, into: Set<string>): void {
 
 function workspacePatterns(pkg: PackageJsonShape): string[] {
   const ws = pkg.workspaces;
-  if (Array.isArray(ws)) return ws.filter((p): p is string => typeof p === "string");
+  if (Array.isArray(ws))
+    return ws.filter((p): p is string => typeof p === "string");
   if (ws && typeof ws === "object" && Array.isArray(ws.packages)) {
     return ws.packages.filter((p): p is string => typeof p === "string");
   }
@@ -569,7 +653,11 @@ function workspacePatterns(pkg: PackageJsonShape): string[] {
 // are not subtracted, symlinked package dirs are skipped (readdir reports them
 // as non-directories), and only `*` is honored as a wildcard (other glob
 // metacharacters are matched literally).
-function collectWorkspaceSiblings(rootDir: string, patterns: string[], into: Set<string>): void {
+function collectWorkspaceSiblings(
+  rootDir: string,
+  patterns: string[],
+  into: Set<string>,
+): void {
   // Walk the pattern segments and return the set of concrete directory paths
   // that match. A literal segment descends into a single child; a segment with
   // `*` (other than `**`) matches directory entries against an anchored regex;
@@ -585,7 +673,11 @@ function collectWorkspaceSiblings(rootDir: string, patterns: string[], into: Set
         function collectSubdirs(d: string, depth: number): void {
           if (depth > 10) return;
           let ents: fs.Dirent[];
-          try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+          try {
+            ents = fs.readdirSync(d, { withFileTypes: true });
+          } catch {
+            return;
+          }
           for (const e of ents) {
             if (e.isDirectory()) {
               allDirs.push(path.join(d, e.name));
@@ -600,7 +692,9 @@ function collectWorkspaceSiblings(rootDir: string, patterns: string[], into: Set
         // `?` is escaped too (we only honor `*`), and the RegExp build is
         // wrapped so a pathological segment from a scanned repo's manifest can
         // never throw out of the rule — it just resolves no siblings.
-        const regexSrc = seg.replace(/[.+^${}()|[\]\\?]/g, "\\$&").replace(/\*/g, ".*");
+        const regexSrc = seg
+          .replace(/[.+^${}()|[\]\\?]/g, "\\$&")
+          .replace(/\*/g, ".*");
         let re: RegExp;
         try {
           re = new RegExp(`^${regexSrc}$`);
@@ -608,7 +702,11 @@ function collectWorkspaceSiblings(rootDir: string, patterns: string[], into: Set
           continue; // invalid glob segment — fail open
         }
         let ents: fs.Dirent[];
-        try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+        try {
+          ents = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          continue;
+        }
         for (const e of ents) {
           if (e.isDirectory() && re.test(e.name)) {
             next.push(path.join(dir, e.name));
@@ -683,9 +781,14 @@ function readPackageContext(filePath: string): PackageContext {
   // `pnpm-workspace.yaml` file at the same directory (union of both sources).
   let wsDir = ownDir;
   for (let i = 0; i < 40; i++) {
-    const pkg = wsDir === ownDir ? ownPkg : readJsonSafe(path.join(wsDir, "package.json"));
+    const pkg =
+      wsDir === ownDir
+        ? ownPkg
+        : readJsonSafe(path.join(wsDir, "package.json"));
     const pkgPatterns = pkg ? workspacePatterns(pkg) : [];
-    const pnpmPatterns = pnpmWorkspacePatterns(path.join(wsDir, "pnpm-workspace.yaml"));
+    const pnpmPatterns = pnpmWorkspacePatterns(
+      path.join(wsDir, "pnpm-workspace.yaml"),
+    );
     const patterns = Array.from(new Set([...pkgPatterns, ...pnpmPatterns]));
     if (patterns.length > 0) {
       collectWorkspaceSiblings(wsDir, patterns, known);
@@ -762,7 +865,11 @@ const phantomImport: Rule = {
         case "ExportAllDeclaration":
         case "ExportNamedDeclaration": {
           const source = node.source;
-          if (source && source.type === "Literal" && typeof source.value === "string") {
+          if (
+            source &&
+            source.type === "Literal" &&
+            typeof source.value === "string"
+          ) {
             consider(source.value, source);
           }
           return;
@@ -841,14 +948,20 @@ type StubKind = "empty" | "throw" | "return";
 const STUB_BODY_MESSAGE: Record<StubKind, string> = {
   empty: "has an empty body",
   throw: "only throws a not-implemented error",
-  return: "only returns a trivial placeholder value (null / undefined / {} / [])",
+  return:
+    "only returns a trivial placeholder value (null / undefined / {} / [])",
 };
 
 // A string literal or a no-substitution template literal, else null.
 function staticStringValue(node: TSESTree.Node | undefined): string | null {
   if (!node) return null;
-  if (node.type === "Literal" && typeof node.value === "string") return node.value;
-  if (node.type === "TemplateLiteral" && node.expressions.length === 0 && node.quasis.length === 1) {
+  if (node.type === "Literal" && typeof node.value === "string")
+    return node.value;
+  if (
+    node.type === "TemplateLiteral" &&
+    node.expressions.length === 0 &&
+    node.quasis.length === 1
+  ) {
     return node.quasis[0].value.cooked ?? node.quasis[0].value.raw;
   }
   return null;
@@ -858,7 +971,8 @@ function staticStringValue(node: TSESTree.Node | undefined): string | null {
 function isPlaceholderThrow(stmt: TSESTree.ThrowStatement): boolean {
   const arg = stmt.argument;
   if (arg.type !== "NewExpression") return false;
-  if (arg.callee.type === "Identifier" && STUB_THROW_CTOR.test(arg.callee.name)) return true;
+  if (arg.callee.type === "Identifier" && STUB_THROW_CTOR.test(arg.callee.name))
+    return true;
   const msg = staticStringValue(arg.arguments[0]);
   return msg !== null && STUB_THROW_TEXT.test(msg);
 }
@@ -871,7 +985,8 @@ function isTrivialReturn(stmt: TSESTree.ReturnStatement): boolean {
   if (arg.type === "Literal" && arg.value === null) return true;
   if (arg.type === "Identifier" && arg.name === "undefined") return true;
   if (arg.type === "UnaryExpression" && arg.operator === "void") return true;
-  if (arg.type === "ObjectExpression" && arg.properties.length === 0) return true;
+  if (arg.type === "ObjectExpression" && arg.properties.length === 0)
+    return true;
   if (arg.type === "ArrayExpression" && arg.elements.length === 0) return true;
   return false;
 }
@@ -881,7 +996,8 @@ function classifyStubBody(body: TSESTree.BlockStatement): StubKind | null {
   if (body.body.length === 0) return "empty";
   if (body.body.length !== 1) return null;
   const stmt = body.body[0];
-  if (stmt.type === "ThrowStatement" && isPlaceholderThrow(stmt)) return "throw";
+  if (stmt.type === "ThrowStatement" && isPlaceholderThrow(stmt))
+    return "throw";
   if (stmt.type === "ReturnStatement" && isTrivialReturn(stmt)) return "return";
   return null;
 }
@@ -936,7 +1052,11 @@ const stubBody: Rule = {
       if (node.type === "MethodDefinition") {
         if (node.kind !== "method") return;
         const fn = node.value;
-        if (fn.type !== "FunctionExpression" || fn.body?.type !== "BlockStatement") return;
+        if (
+          fn.type !== "FunctionExpression" ||
+          fn.body?.type !== "BlockStatement"
+        )
+          return;
         const kind = classifyStubBody(fn.body);
         if (kind) flag(node, memberName(node.key), kind);
         return;
@@ -992,7 +1112,8 @@ const unusedExport: Rule = {
       // every file's reference set for every export in the scan.
       const referencingFiles = referencingFilesByName.get(entry.symbol);
       const hasConsumer =
-        !!referencingFiles && (referencingFiles.size > 1 || !referencingFiles.has(ctx.file.path));
+        !!referencingFiles &&
+        (referencingFiles.size > 1 || !referencingFiles.has(ctx.file.path));
       if (!hasConsumer) {
         violations.push(
           makeViolation(
@@ -1057,7 +1178,8 @@ const singleCallsiteHelper: Rule = {
         const init = d.init;
         if (!init) return;
         if (
-          (init.type === "ArrowFunctionExpression" || init.type === "FunctionExpression") &&
+          (init.type === "ArrowFunctionExpression" ||
+            init.type === "FunctionExpression") &&
           init.body &&
           init.body.type === "BlockStatement"
         ) {

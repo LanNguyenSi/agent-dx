@@ -84,7 +84,9 @@ describe("ui-slop/gradient-text", () => {
 
   it("only applies to style files (skipped for prose)", () => {
     const rule = findRule("ui-slop/gradient-text");
-    expect(rule.appliesTo({ path: "README.md", text: "", kind: "prose" })).toBe(false);
+    expect(rule.appliesTo({ path: "README.md", text: "", kind: "prose" })).toBe(
+      false,
+    );
   });
 });
 
@@ -276,7 +278,13 @@ export function Page() {
 
   it("does not apply to a .ts file (no JSX)", () => {
     const rule = findRule("ui-slop/skipped-heading-levels");
-    expect(rule.appliesTo({ path: "lib.ts", text: "<h1></h1><h3></h3>", kind: "code" })).toBe(false);
+    expect(
+      rule.appliesTo({
+        path: "lib.ts",
+        text: "<h1></h1><h3></h3>",
+        kind: "code",
+      }),
+    ).toBe(false);
   });
 
   it("does NOT flag PascalCase React component tags (<H1> <H3>)", () => {
@@ -415,7 +423,9 @@ describe("ui-slop pack metadata", () => {
   });
 
   it("default-on rules are exactly the four spec rules", () => {
-    const onByDefault = uiSlopPack.rules.filter((r) => r.enabledByDefault).map((r) => r.id);
+    const onByDefault = uiSlopPack.rules
+      .filter((r) => r.enabledByDefault)
+      .map((r) => r.id);
     expect(onByDefault.sort()).toEqual(
       [
         "ui-slop/gradient-text",
