@@ -1390,7 +1390,7 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
   }, 30000);
 });
 
-// --- Round-3 fix: `--require-baseline-evidence` threaded through
+// --- `--require-baseline-evidence` threaded through
 // `probePlan`'s own setup (task 273b3851, review round 2). A plan runs
 // every mutant against ONE shared baseline, so unlike `--env` (still
 // refused under `--plan`, see PLAN_EXCLUSIVE_OPTIONS in cli.ts) there is

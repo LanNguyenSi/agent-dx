@@ -464,7 +464,7 @@ describe("probe(): generic byte-identical fallback, truncated-tail guard", () =>
 // exit code (`--expect pass`): the exact silent exit-0 evidence this
 // whole mechanism distrusts, whichever direction `--expect` points. ----
 
-describe("probe(): --expect pass, a killed verdict resting on a passing exit code", () => {
+describe("probe(): --expect pass, which verdicts rest on the mutant run's own exit code", () => {
   it("a quiet unknown runner with identical exit-0 output on both runs is refused, never certified killed", async () => {
     const repo = initGitRepo();
     const result = await probe(
@@ -486,7 +486,7 @@ describe("probe(): --expect pass, a killed verdict resting on a passing exit cod
   // real, executed vitest summary under --expect pass is unaffected):
   // it needs the real-vitest fixture defined further down this file.
 
-  it("round-3 fix: a survived verdict under --expect pass whose mutant run exited NON-ZERO stands, even with byte-identical output on both sides", async () => {
+  it("a survived verdict under --expect pass whose mutant run exited NON-ZERO stands, even with byte-identical output on both sides", async () => {
     // Round-2 review finding: `restsOnPassingExit` used to be
     // `status === "survived" || (status === "killed" && expect ===
     // "pass")`, which enters the fallback for EVERY `--expect pass`

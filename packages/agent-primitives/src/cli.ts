@@ -1077,7 +1077,7 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
  * beside `--link`/`--allow-outside` below: a plan run has no wiring for
  * it today, and refusing the combination outright keeps a caller from
  * silently having it ignored. `--require-baseline-evidence` is NOT in
- * this set (round-3 fix): a plan runs every mutant against ONE shared
+ * this set: a plan runs every mutant against ONE shared
  * baseline, so there is no second source for this value to conflict
  * with -- it is threaded straight through to `probePlan`'s own setup,
  * the same as `--link`/`--allow-outside` below. The run-shaping options

@@ -856,11 +856,11 @@ never a command's full, untruncated output; a summary line or a
 reads as a plain miss, not "not present at all" -- see the truncation
 paragraph below for how that is surfaced.
 
-For a test runner neither built-in detector recognizes, a
-`survived`-shaped mutant run -- or, symmetrically, a `killed`-shaped one
-under `--expect pass` whose "killed"-ness rests on nothing but a PASSING
-exit code (the exact same silent exit-0 evidence, just certifying the
-opposite verdict) -- additionally falls back to comparing its own output
+For a test runner neither built-in detector recognizes, a mutant run
+whose own exit code is `0` (a `survived` verdict under the default
+`--expect fail`, or a `killed` one under `--expect pass`: the same
+silent exit-0 evidence, just certifying the opposite verdict)
+additionally falls back to comparing its own output
 against the baseline's: byte-identical stdout/stderr on both sides, with
 no summary line either detector recognizes on either side either, is
 read as "this ran the same nothing twice" rather than a real verdict. A

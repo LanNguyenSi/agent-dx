@@ -1709,7 +1709,7 @@ describe("cli: probe", () => {
     expect(JSON.parse(run.stdout).status).toBe("usage_error");
   });
 
-  it("--require-baseline-evidence combined with --plan (round-3 fix): no longer refused, and actually threaded through to the plan's own shared baseline", async () => {
+  it("--require-baseline-evidence combined with --plan is allowed and threaded through to the plan's own shared baseline", async () => {
     // Round-2 review finding: the flag used to be refused outright
     // alongside --plan (PLAN_EXCLUSIVE_OPTIONS in cli.ts), even though a
     // plan runs every mutant against ONE shared baseline -- there is no
