@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documented
+
+- Decision (rule stays as-is; keep-the-rule option chosen over loosening it
+  to compare against the doc's own last commit or a postdate check): the
+  README's "Staleness (sources-fresh)" section now documents the two-branch
+  squash-merge interaction: a doc re-stamp that lands via a squash commit on
+  the trunk does not retroactively re-stamp a copy of that doc sitting on a
+  second, still-open branch, because the re-stamp check is first-parent
+  only. When that second branch's own history never touched the doc, its
+  merge of the trunk is itself a genuine value change and reads fresh; when
+  the branch carries its own older stamp that survives the merge unchanged,
+  the source reads STALE, a true statement about that branch's doc. Branch
+  authors pay with one re-verify-and-re-stamp commit after merging the
+  trunk (the recipe is now in the README); the alternative would have made
+  readers pay with false freshness. Reproduced with a fixture repo (both
+  branch variants and the trunk) before writing the decision; no rule
+  change. No fleet pin bump needed (no rule/behavior change).
+
 ## [0.10.0] - 2026-09-06
 
 ### Added
