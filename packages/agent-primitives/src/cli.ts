@@ -217,11 +217,17 @@ const FLAGS_CONSUMING_NEXT_TOKEN = new Set(["-t"]);
  * argument, consumed via `FLAGS_CONSUMING_NEXT_TOKEN`): true for
  * `["--coverage"]` and `["-t", "some pattern"]`, false the moment a
  * token that is neither is reached (a file or pattern argument, e.g.
- * `test/x.test.ts`). */
+ * `test/x.test.ts`). A literal `--` is never a flag here, even though
+ * it starts with `-`: it is npm/yarn/pnpm's own argument separator, not
+ * a flag any of them recognizes, so a caller that reaches this function
+ * with one still in `tokens` (`restLooksLikeFullSuite` below strips a
+ * single LEADING one before calling this) is treated as carrying a real
+ * argument, not a flag -- this is what makes that stripping observable
+ * rather than redundant with the `startsWith("-")` check alone. */
 function tokensLookLikeFlagsOnly(tokens: string[]): boolean {
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (!token.startsWith("-")) return false;
+    if (token === "--" || !token.startsWith("-")) return false;
     if (FLAGS_CONSUMING_NEXT_TOKEN.has(token)) i++;
   }
   return true;

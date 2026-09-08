@@ -1834,15 +1834,26 @@ describe("cli: probe", () => {
     // targeted command, not full-suite, whichever shape names it.
     ["npm test -- test/x.test.ts", false],
     ["npm test -- --coverage test/x.test.ts", false],
+    // Nothing but flags after the separator: still full-suite. This is
+    // what makes stripping the leading "--" observable at all, rather
+    // than redundant with "every token starts with -": a bare "--"
+    // itself starts with "-", so a matcher that forgot to strip it
+    // before checking would still call this full-suite by accident (the
+    // separator masquerading as a flag) -- this case only agrees with
+    // that accident when every token after it is a real flag too.
+    ["npm test -- --coverage", true],
     ["npm test", true],
     ["npm test --coverage", true],
     ["npm run test", true],
     ["npm run test:ci", true],
     ["npm run test:ci -- test/x.test.ts", false],
+    ["npm run test:ci -- --coverage", true],
     ["yarn test", true],
     ["yarn test -- test/x.test.ts", false],
+    ["yarn test -- --coverage", true],
     ["pnpm test", true],
     ["pnpm test -- test/x.test.ts", false],
+    ["pnpm test -- --coverage", true],
     ["npx vitest run --coverage", true],
     ["npx vitest run test/x.test.ts", false],
     ["vitest run", true],
