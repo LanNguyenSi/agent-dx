@@ -11,11 +11,15 @@ export default defineConfig({
       // command-handler tests (74 tests, gaps 1+2 closed). Set 1-2 pp below
       // measured values so the gate holds without immediately failing.
       // Measured: statements 79.89 / branches 60.77 / functions 86.11 / lines 82.9
+      // Lines re-pinned 2026-09-08 after the prettier reformat of the
+      // package: the same 74 tests cover one more line, but re-wrapping
+      // raised the physical line count (351 to 358), so the measured lines
+      // value moved to 81.56 with no behaviour change. Same 1-2 pp rule.
       thresholds: {
         statements: 79,
         branches: 60,
         functions: 85,
-        lines: 82,
+        lines: 80,
       },
     },
   },
