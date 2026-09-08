@@ -196,8 +196,8 @@ export type RefusalReason =
  * mechanically, one shared lookup rather than a per-call-site flag;
  * `index.ts` reads it a second time, by `mutationProbe`, to decide
  * `mutation_probe`. Checked exhaustively against `probe()`'s own
- * behavior by `test/probe.test.ts`'s "refusal result shape" suite, and
- * against the README's "Result shape" table by
+ * behavior by `test/probe-refusal-contract.test.ts`, and against the
+ * README's "Refusal reason shape" table (under "Result shape") by
  * `test/readme-conformance.test.ts`; update all three together with any
  * change here. */
 export const REFUSAL_RESULT_SHAPE: Record<
