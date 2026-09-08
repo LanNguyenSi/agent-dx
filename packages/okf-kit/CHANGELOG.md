@@ -9,32 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documented
 
-- Decision (rule stays as-is; both loosening alternatives rejected): the
-  README's "Staleness (sources-fresh)" section now documents the
-  two-branch squash-merge interaction and its underlying mechanism (git's
-  default history simplification on the doc-last-commit lookup, and which
-  outcome a merge gets depends on whether it is TREESAME to one of its
-  parents for the doc path). Two loosening alternatives were considered
-  and rejected: (b) a source counts fresh whenever the doc's last commit
+- Decision, kept option (a): the rule stays as-is; two loosening
+  alternatives were considered and rejected. The README's "Staleness
+  (sources-fresh)" section now documents the two-branch squash-merge
+  interaction as the rule's own three-step decision procedure (the
+  doc-last-commit lookup under git's default history simplification, the
+  epoch gate, and the value-level re-stamp check) instead of an
+  enumeration of merge shapes, plus the one consequence that follows for
+  any branch merging a squash-carrying trunk. The two rejected
+  alternatives: (b) a source counts fresh whenever the doc's last commit
   merely postdates it, with no re-stamp required -- readers pay, because
   any merge or unrelated doc touch would silence real drift; (c) compare
   against the doc's own last commit rather than the frontmatter stamp when
   they disagree -- readers pay, because the stamp stops being the
-  verification claim. Under the kept rule, branch authors pay instead:
-  one re-verify-and-re-stamp commit after merging the trunk (or after
-  changing a source past a trunk squash the doc's history resolved
-  through), the recipe now in the README. Reproduced with a fixture repo
-  (the trunk and five branch variants: doc untouched, doc-untouched with a
-  later source change, own-older-stamp kept wholesale, and a mixed
-  conflict resolution) before writing the decision; no rule change. No
-  fleet pin bump needed (no rule/behavior change).
+  verification claim. Under the kept option (a), branch authors pay
+  instead: one re-verify-and-re-stamp commit after merging a
+  squash-carrying trunk (or after changing a source past a trunk squash
+  the doc's history resolved through), the recipe now in the README.
+  Reproduced with a fixture repo (the trunk and eight branch variants:
+  doc untouched, B1; doc untouched with a second source changed after the
+  squash, B3; own-older-stamp kept wholesale before the squash, B2, and
+  after it, B2late, discriminating the epoch gate from the re-stamp
+  check; own-older-stamp with a mixed conflict resolution that changes
+  the stamp value, B2a, or does not, B2b; and both re-verify-and-re-stamp
+  recipe follow-ups, B2r and B3r) before writing the decision text, then
+  checked the procedure's own prediction against all eight plus the
+  trunk; no rule change. No fleet pin bump needed (no rule/behavior
+  change).
 - Concrete case that motivated this decision: in the `agent-grounding`
   repo, `docs/okf/grounding-stack-overview.md` read STALE after merging
   master (batch-42 task branch `f31ad37f`'s squash-merged re-stamp) into a
   second, longer-lived task branch (`d341afd5`), which carried its own
-  older stamp of the same doc; batch-42 decision D-015 recorded the
-  resolution as exactly the re-verify-and-re-stamp commit this README
-  section now generalizes as the recipe.
+  older stamp of the same doc; the batch-42 orchestrator run (pandora
+  workspace) recorded the resolution as decision D-015, exactly the
+  re-verify-and-re-stamp commit this README section now generalizes as
+  the recipe.
 
 ## [0.10.0] - 2026-09-06
 
