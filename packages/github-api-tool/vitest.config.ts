@@ -1,12 +1,12 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  cacheDir: '.vitest-cache',
+  cacheDir: ".vitest-cache",
   test: {
     globals: true,
-    environment: 'node',
+    environment: "node",
     coverage: {
-      provider: 'v8',
+      provider: "v8",
       // Thresholds ratcheted to actuals measured 2026-06-28 after adding
       // command-handler tests (74 tests, gaps 1+2 closed). Set 1-2 pp below
       // measured values so the gate holds without immediately failing.
