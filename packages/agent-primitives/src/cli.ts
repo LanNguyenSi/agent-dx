@@ -156,6 +156,28 @@ export function parseExecOverride(
   return { ...previous, [name]: command };
 }
 
+/** `--env NAME=VALUE`, accumulated across repeated flags into an object
+ * keyed by variable name (a later `--env` for the same name overrides an
+ * earlier one). Splits on the first `=` only, so a value containing `=`
+ * is preserved intact; no `=` at all, or an empty name before it, is a
+ * usage error rather than a silently-dropped variable. `previous` is
+ * `undefined` on the first `--env` (no default value is registered for
+ * the option, so an invocation that never passes `--env` leaves
+ * `opts.env` `undefined` rather than an always-present `{}`, which
+ * `requirePlanExclusive`'s presence check below relies on). */
+export function parseEnvOption(
+  value: string,
+  previous: Record<string, string> | undefined,
+): Record<string, string> {
+  const idx = value.indexOf("=");
+  if (idx <= 0) {
+    throw new InvalidArgumentError(`--env must be NAME=VALUE (got "${value}")`);
+  }
+  const name = value.slice(0, idx);
+  const varValue = value.slice(idx + 1);
+  return { ...previous, [name]: varValue };
+}
+
 /** Returns the validated raw string (not a number): mirrors
  * `parseMaxChars`'s style so a default value never has to pass back
  * through this parser (commander does not re-run a custom parser over an
@@ -849,6 +871,10 @@ interface ProbeCliOptions {
    * required (and checked in the action) for every single-mutant run. */
   test?: string;
   pre?: string;
+  /** Only ever present when at least one `--env` was given (no default
+   * value is registered for the option): `requirePlanExclusive`'s
+   * presence check (`opts[key] !== undefined`) depends on that. */
+  env?: Record<string, string>;
   plan?: string;
   isolation: IsolationMode;
   expect: ExpectVerdict;
@@ -947,10 +973,13 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
 /** The single-mutant options `--plan` refuses outright: the plan file
  * itself carries the mutants and the command they share, so accepting
  * one of these beside it would mean two sources for the same value with
- * no honest precedence between them. The run-shaping options (`-i`,
- * `--expect`, `--timeout`, `--link`, `--allow-outside`) are NOT in this
- * set: they override the plan's own value when given (see
- * `runProbePlanCommand`'s own docblock for that precedence). */
+ * no honest precedence between them. `--env` sits here rather than
+ * beside `--link`/`--allow-outside` below: a plan run has no wiring for
+ * it today, and refusing the combination outright keeps a caller from
+ * silently having it ignored. The run-shaping options (`-i`, `--expect`,
+ * `--timeout`, `--link`, `--allow-outside`) are NOT in this set: they
+ * override the plan's own value when given (see `runProbePlanCommand`'s
+ * own docblock for that precedence). */
 const PLAN_EXCLUSIVE_OPTIONS: readonly {
   flag: string;
   key: keyof ProbeCliOptions;
@@ -963,6 +992,7 @@ const PLAN_EXCLUSIVE_OPTIONS: readonly {
   { flag: "-p/--patch", key: "patch" },
   { flag: "-t/--test", key: "test" },
   { flag: "--pre", key: "pre" },
+  { flag: "--env", key: "env" },
 ];
 
 function requirePlanExclusive(opts: ProbeCliOptions): void {
@@ -1141,6 +1171,11 @@ program
     "shell command (e.g. a rebuild) run before each test invocation",
   )
   .option(
+    "--env <NAME=VALUE>",
+    "environment variable for --pre and -t, applied to both the baseline and the mutant run (repeatable)",
+    parseEnvOption,
+  )
+  .option(
     "-i, --isolation <mode>",
     "worktree (default; mutates a detached git worktree, leaving the working tree untouched) or inplace",
     parseIsolationMode,
@@ -1159,7 +1194,7 @@ program
   )
   .option(
     "--plan <path>",
-    "JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with --file, -n, -r, -M, -w, -p, -t and --pre",
+    "JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with --file, -n, -r, -M, -w, -p, -t, --pre and --env",
   )
   .option(
     "--link <dirs>",
@@ -1198,6 +1233,7 @@ program
         ...mutantChoice,
         testCommand,
         preCommand: opts.pre,
+        env: opts.env,
         isolation: opts.isolation,
         expect: opts.expect,
         timeoutMs:

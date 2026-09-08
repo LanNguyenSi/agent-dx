@@ -1521,6 +1521,82 @@ describe("cli: probe", () => {
     expect(parsed.message).toContain("--plan");
   });
 
+  it("--env NAME=VALUE reaches the baseline and the mutant run; without it the same command fails the baseline", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const testCommand =
+      "node -e \"process.exit(process.env.PROBE_MARKER === '1' ? 0 : 1)\"";
+
+    const withEnv = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      testCommand,
+      "-i",
+      "inplace",
+      "--env",
+      "PROBE_MARKER=1",
+    ]);
+    const parsedWithEnv = JSON.parse(withEnv.stdout);
+    // The command never reads the mutated file, only PROBE_MARKER, so a
+    // real verdict (not baseline_failed) is what proves the baseline saw
+    // the override; "survived" is the correct verdict for a mutant this
+    // command cannot react to.
+    expect(parsedWithEnv.status).toBe("survived");
+    expect(parsedWithEnv.test.env).toEqual({ PROBE_MARKER: "1" });
+
+    const withoutEnv = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      testCommand,
+      "-i",
+      "inplace",
+    ]);
+    const parsedWithoutEnv = JSON.parse(withoutEnv.stdout);
+    expect(parsedWithoutEnv.status).toBe("baseline_failed");
+  });
+
+  it("--env with no '=' or an empty name is a usage error", async () => {
+    const noEquals = await spawnCli(["probe", "--env", "FOO", "-t", "true"]);
+    expect(noEquals.code).toBe(2);
+    expect(JSON.parse(noEquals.stdout).status).toBe("usage_error");
+
+    const emptyName = await spawnCli([
+      "probe",
+      "--env",
+      "=value",
+      "-t",
+      "true",
+    ]);
+    expect(emptyName.code).toBe(2);
+    expect(JSON.parse(emptyName.stdout).status).toBe("usage_error");
+  });
+
   it("exactly one mutant form is required: none given is usage_error, exit 2", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");

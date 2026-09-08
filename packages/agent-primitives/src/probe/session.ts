@@ -87,6 +87,11 @@ export interface TestPhaseField extends ExecPhaseField {
   command: string;
   stdoutTail: string;
   stderrTail: string;
+  /** The `--env NAME=VALUE` overrides this run applied (echoed verbatim,
+   * never the whole merged environment): present only when at least one
+   * was given, so the isolation a caller asked for is visible in the
+   * report instead of only inferable from the command string. */
+  env?: Record<string, string>;
 }
 
 export interface IsolationField {
@@ -705,7 +710,16 @@ export interface MutantRuntime {
     logDir: string;
     timeoutMs?: number;
     signal: AbortSignal;
+    /** Merged (`process.env` plus every `--env` override) when at least
+     * one override was given; omitted otherwise, so `execCommand`'s own
+     * `options.env ?? process.env` default is unchanged when `--env` was
+     * never used. */
+    env?: NodeJS.ProcessEnv;
   };
+  /** The raw `--env` overrides (unmerged, never the whole environment),
+   * present only when at least one was given: what `runMutantAttempt`
+   * echoes verbatim under the mutant's `test.env`. */
+  envOverrides?: Record<string, string>;
   gitApplyTimeoutMs: number;
   effectiveIsolation: IsolationMode;
   testCommand: string;

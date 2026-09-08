@@ -390,6 +390,7 @@ export async function runMutantAttempt(
     stdoutTail: testResult.stdoutTail,
     stderrTail: testResult.stderrTail,
     logPath: testResult.logPath,
+    ...(rt.envOverrides ? { env: rt.envOverrides } : {}),
   };
 
   if (!restoreOk || !restoredVerified) {

@@ -1353,6 +1353,42 @@ describe("probe(): --pre/-t run in the invocation cwd, not the containment root"
   }, 30000);
 });
 
+describe("probe(): --env reaches the baseline and the mutant run alike", () => {
+  it("a test command reading process.env sees the --env override on both the baseline and the mutant run", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const testCommand =
+      "node -e \"process.exit(process.env.PROBE_MARKER === '1' ? 0 : 1)\"";
+
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand,
+        env: { PROBE_MARKER: "1" },
+      }),
+    );
+
+    // The test command never reads the mutated file, only PROBE_MARKER,
+    // so a real verdict (rather than an inconclusive baseline_failed)
+    // is itself proof the baseline saw the override; "survived" is the
+    // correct verdict for a mutant this command cannot react to.
+    expect(result.status).toBe("survived");
+    expect(result.test?.env).toEqual({ PROBE_MARKER: "1" });
+  });
+
+  it("without --env the same command fails the baseline (the variable it checks is unset)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const testCommand =
+      "node -e \"process.exit(process.env.PROBE_MARKER === '1' ? 0 : 1)\"";
+
+    const result = await probe(baseOptions(repo, { testCommand }));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_failed");
+    expect(result.test).toBeUndefined();
+  });
+});
+
 describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
   it("pre_failed when --pre fails specifically in the mutant phase (a rebuild refusing to build broken output)", async () => {
     useLockDir();

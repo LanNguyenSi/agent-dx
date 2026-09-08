@@ -103,6 +103,11 @@ export interface ProbeOptions {
   timeoutMs?: number;
   links?: string[];
   allowOutside?: boolean;
+  /** `--env NAME=VALUE` overrides (repeatable), applied to the baseline
+   * and the mutant's `--pre`/`-t` alike; echoed under the mutant's
+   * `test.env` in the result. Omitted or empty leaves the test process's
+   * environment as `process.env`. */
+  env?: Record<string, string>;
   cwd: string;
   logDir: string;
   /**
@@ -431,6 +436,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       gitApplyTimeoutMs,
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
+      env: opts.env,
       exitOnSignal: opts.exitOnSignal ?? false,
       warnings,
       isolationField,

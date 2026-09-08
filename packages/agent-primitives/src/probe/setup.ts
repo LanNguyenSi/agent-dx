@@ -209,6 +209,11 @@ export interface RunSetupInput {
   gitApplyTimeoutMs: number;
   testCommand: string;
   preCommand?: string;
+  /** `--env NAME=VALUE` overrides (unmerged), applied to the baseline
+   * and every mutant's `--pre`/`-t` alike via the one `rt.execEnv` they
+   * both run through. Omitted or empty leaves `execCommand`'s own
+   * `process.env` default unchanged. */
+  env?: Record<string, string>;
   exitOnSignal: boolean;
   /** The run's warnings: every warning this setup produces is pushed
    * here, and a refusal carries the array as it stood when it happened. */
@@ -515,6 +520,8 @@ export async function openRunSetup(
   // worktree; the real apply uses `applyRoot`, since a patch's paths are
   // relative to the repository (or its worktree copy), not to wherever
   // the run was invoked from.
+  const hasEnvOverrides =
+    input.env !== undefined && Object.keys(input.env).length > 0;
   const rt: MutantRuntime = {
     root,
     logDir,
@@ -524,7 +531,9 @@ export async function openRunSetup(
       logDir,
       timeoutMs: input.timeoutMs,
       signal: controller.execController.signal,
+      ...(hasEnvOverrides ? { env: { ...process.env, ...input.env } } : {}),
     },
+    ...(hasEnvOverrides ? { envOverrides: input.env } : {}),
     gitApplyTimeoutMs: input.gitApplyTimeoutMs,
     effectiveIsolation,
     testCommand: input.testCommand,
