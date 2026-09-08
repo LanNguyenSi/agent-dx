@@ -37,7 +37,8 @@
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },
-    "dryRunLogPaths": []
+    "dryRunLogPaths": [],
+    "totalDurationMs": 0
   },
   "worktreePatchKilled": {
     "status": "killed",
@@ -86,7 +87,8 @@
       "<LOGS>/wt-<id>/untracked-files.log",
       "<LOGS>/mutant-dry-run-<id>/argv-<id>.log",
       "<LOGS>/mutant-dry-run-<id>/argv-<id>.log"
-    ]
+    ],
+    "totalDurationMs": 0
   },
   "inplaceReplaceSurvived": {
     "status": "survived",
@@ -126,12 +128,27 @@
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },
-    "dryRunLogPaths": []
+    "dryRunLogPaths": [],
+    "totalDurationMs": 0
   },
   "inplaceBaselineFailed": {
     "status": "inconclusive",
     "reason": "baseline_failed",
     "warnings": [],
+    "mutant": {
+      "file": "<REPO>/fixture.js",
+      "line": 2,
+      "before": "  return n > 0;",
+      "after": "  return false;",
+      "form": "replace"
+    },
+    "mutation_probe": {
+      "mutant": "<REPO>/fixture.js:2:   return n > 0; ->   return false;",
+      "verified_applied_via": "<REPO>/fixture.js:2\n-   return n > 0;\n+   return false;",
+      "result": "not_run",
+      "restored_verified": true,
+      "reason": "baseline_failed"
+    },
     "baseline": {
       "exitCode": 1,
       "durationMs": 0,
@@ -145,6 +162,7 @@
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },
-    "dryRunLogPaths": []
+    "dryRunLogPaths": [],
+    "totalDurationMs": 0
   }
 }

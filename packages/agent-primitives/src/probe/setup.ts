@@ -15,12 +15,14 @@ import {
   noteIncompleteOutput,
   openTarget,
   prepareWorktreeSession,
+  REFUSAL_RESULT_SHAPE,
   runPreThenTest,
   type ExecPhaseField,
   type IsolationField,
   type IsolationMode,
   type MutantRuntime,
   type ProbeStatus,
+  type RefusalReason,
   type RunController,
   type TargetSession,
 } from "./session.js";
@@ -58,7 +60,7 @@ export async function recoverTargetMarker(
   displayFile: string,
   absFile: string,
   warnings: string[],
-): Promise<{ reason: string; warning: string } | undefined> {
+): Promise<{ reason: "stale_probe_marker"; warning: string } | undefined> {
   const marker = readMarkerFor(absFile);
   if (!marker) return undefined;
   const currentHash = fs.existsSync(displayFile)
@@ -157,7 +159,7 @@ export interface RunSetupContext {
  * a plan's `ProbePlanResult` with the mutants it never reached. */
 export interface RunSetupRefusal {
   status: ProbeStatus;
-  reason: string;
+  reason: RefusalReason;
   /** The warnings to report, this refusal's own message already
    * appended. */
   warnings: string[];
@@ -167,13 +169,16 @@ export interface RunSetupRefusal {
   logPaths?: string[];
   /** Present once the baseline itself has a verdict to report. */
   baseline?: ExecPhaseField;
-  /** Whether the single probe reports its own `mutant` field beside this
-   * refusal. Its dry run (`beforeBaseline`) computes that field before
-   * the baseline runs, so a `--pre` failure and the post-baseline hash
-   * check report it while the failing baseline itself never did: the
-   * flag is what keeps that envelope exactly as it was before this
-   * segment became shared. A plan carries its mutant fields per result
-   * and ignores it. */
+  /** Whether the single probe reports its own `mutant` field beside
+   * this refusal: `REFUSAL_RESULT_SHAPE[reason].mutant` (`session.ts`),
+   * read mechanically inside `refuse()` below rather than passed as a
+   * per-call flag, so a refusal can never drift from what the contract
+   * says its own `reason` carries. `index.ts` reads the same contract's
+   * `.mutationProbe` a second time, keyed on this same `reason`, to
+   * decide `mutation_probe`; both keep the single-mutant envelope's two
+   * fields tied to the one table rather than to two independent gates.
+   * A plan carries its own mutant fields per result and ignores this
+   * field entirely. */
   reportsMutant: boolean;
 }
 
@@ -209,6 +214,11 @@ export interface RunSetupInput {
   gitApplyTimeoutMs: number;
   testCommand: string;
   preCommand?: string;
+  /** `--env NAME=VALUE` overrides (unmerged), applied to the baseline
+   * and every mutant's `--pre`/`-t` alike via the one `rt.execEnv` they
+   * both run through. Omitted or empty leaves `execCommand`'s own
+   * `process.env` default unchanged. */
+  env?: Record<string, string>;
   exitOnSignal: boolean;
   /** The run's warnings: every warning this setup produces is pushed
    * here, and a refusal carries the array as it stood when it happened. */
@@ -241,7 +251,7 @@ export interface RunSetupInput {
     rt: MutantRuntime;
   }) => Promise<
     | { ok: true; logPaths: string[] }
-    | { ok: false; reason: string; logPaths: string[] }
+    | { ok: false; reason: RefusalReason; logPaths: string[] }
   >;
   /** Whether the signal handler's one restore slot stays armed (to
    * whichever target `openTarget` opened last) while the baseline runs.
@@ -301,12 +311,11 @@ export async function openRunSetup(
   const exitOnSignal = input.exitOnSignal;
   const refuse = (
     status: ProbeStatus,
-    reason: string,
+    reason: RefusalReason,
     message?: string,
     extra: {
       logPaths?: string[];
       baseline?: ExecPhaseField;
-      reportsMutant?: boolean;
     } = {},
   ): RunSetupOutcome => ({
     ok: false,
@@ -316,7 +325,12 @@ export async function openRunSetup(
       warnings: message === undefined ? [...warnings] : [...warnings, message],
       ...(extra.logPaths !== undefined ? { logPaths: extra.logPaths } : {}),
       ...(extra.baseline !== undefined ? { baseline: extra.baseline } : {}),
-      reportsMutant: extra.reportsMutant ?? false,
+      // Mechanical, not a per-call flag: every refusal's `reportsMutant`
+      // comes from the one shared contract (`REFUSAL_RESULT_SHAPE`,
+      // `session.ts`), keyed on `reason` alone, so a new refusal reason
+      // with no contract entry fails to compile here rather than
+      // silently defaulting to `false`.
+      reportsMutant: REFUSAL_RESULT_SHAPE[reason].mutant,
     },
   });
 
@@ -496,6 +510,14 @@ export async function openRunSetup(
           ...(preparedWt.logPaths !== undefined
             ? { logPaths: preparedWt.logPaths }
             : {}),
+          // Hardcoded, not looked up in `REFUSAL_RESULT_SHAPE`: this
+          // refusal fires before `beforeBaseline` ever runs, so no
+          // mutant has been computed here regardless of what the
+          // contract says for `preparedWt.reason` -- which, for
+          // `"aborted"`, is `true`, because that same string also
+          // covers the baseline phase's two abort paths, where a
+          // mutant HAS already been computed. See `RefusalReason`'s own
+          // docblock in `session.ts`.
           reportsMutant: false,
         },
       };
@@ -515,6 +537,8 @@ export async function openRunSetup(
   // worktree; the real apply uses `applyRoot`, since a patch's paths are
   // relative to the repository (or its worktree copy), not to wherever
   // the run was invoked from.
+  const hasEnvOverrides =
+    input.env !== undefined && Object.keys(input.env).length > 0;
   const rt: MutantRuntime = {
     root,
     logDir,
@@ -524,7 +548,9 @@ export async function openRunSetup(
       logDir,
       timeoutMs: input.timeoutMs,
       signal: controller.execController.signal,
+      ...(hasEnvOverrides ? { env: { ...process.env, ...input.env } } : {}),
     },
+    ...(hasEnvOverrides ? { envOverrides: input.env } : {}),
     gitApplyTimeoutMs: input.gitApplyTimeoutMs,
     effectiveIsolation,
     testCommand: input.testCommand,
@@ -656,10 +682,7 @@ export async function openRunSetup(
       preAborted
         ? `--pre was aborted during the baseline run; see ${baselineRun.pre.logPath}`
         : `--pre exited ${baselineRun.pre.exitCode} during the baseline run; see ${baselineRun.pre.logPath}`,
-      {
-        logPaths: [...stepLogPaths, baselineRun.pre.logPath],
-        reportsMutant: true,
-      },
+      { logPaths: [...stepLogPaths, baselineRun.pre.logPath] },
     );
   }
   const baselineTest = baselineRun.test;
@@ -737,7 +760,7 @@ export async function openRunSetup(
         "inconclusive",
         "target_changed_during_baseline",
         `${entry.named.subject} changed during the baseline run (before any mutation was applied); the target is left as the baseline run wrote it, not restored`,
-        { logPaths: stepLogPaths, baseline, reportsMutant: true },
+        { logPaths: stepLogPaths, baseline },
       );
     }
   }

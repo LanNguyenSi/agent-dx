@@ -156,6 +156,28 @@ export function parseExecOverride(
   return { ...previous, [name]: command };
 }
 
+/** `--env NAME=VALUE`, accumulated across repeated flags into an object
+ * keyed by variable name (a later `--env` for the same name overrides an
+ * earlier one). Splits on the first `=` only, so a value containing `=`
+ * is preserved intact; no `=` at all, or an empty name before it, is a
+ * usage error rather than a silently-dropped variable. `previous` is
+ * `undefined` on the first `--env` (no default value is registered for
+ * the option, so an invocation that never passes `--env` leaves
+ * `opts.env` `undefined` rather than an always-present `{}`, which
+ * `requirePlanExclusive`'s presence check below relies on). */
+export function parseEnvOption(
+  value: string,
+  previous: Record<string, string> | undefined,
+): Record<string, string> {
+  const idx = value.indexOf("=");
+  if (idx <= 0) {
+    throw new InvalidArgumentError(`--env must be NAME=VALUE (got "${value}")`);
+  }
+  const name = value.slice(0, idx);
+  const varValue = value.slice(idx + 1);
+  return { ...previous, [name]: varValue };
+}
+
 /** Returns the validated raw string (not a number): mirrors
  * `parseMaxChars`'s style so a default value never has to pass back
  * through this parser (commander does not re-run a custom parser over an
@@ -178,6 +200,89 @@ function parseTimeoutSeconds(value: string): string {
     );
   }
   return value;
+}
+
+/** `--`-prefixed flags this matcher knows take a following argument, so
+ * that argument is not itself mistaken for a targeted file/pattern:
+ * `vitest run -t <name>` names one test by pattern, not a file, and
+ * still runs the whole suite's setup against it. Deliberately narrow
+ * (this one flag only): a flag this does not recognize is judged by
+ * whether IT starts with `-`, so an unknown flag that takes an argument
+ * still makes the command look targeted rather than full-suite -- the
+ * same "prints no hint rather than guessing" bias the rest of this
+ * matcher already applies. */
+const FLAGS_CONSUMING_NEXT_TOKEN = new Set(["-t"]);
+
+/** Whether every token in `tokens` is a flag (or a flag's own
+ * argument, consumed via `FLAGS_CONSUMING_NEXT_TOKEN`): true for
+ * `["--coverage"]` and `["-t", "some pattern"]`, false the moment a
+ * token that is neither is reached (a file or pattern argument, e.g.
+ * `test/x.test.ts`). A bare `--` (npm/yarn/pnpm's own argument
+ * separator) is flag-shaped here, the same as any other token that
+ * starts with `-`: it never by itself disqualifies a command from
+ * looking full-suite, and whatever follows it is judged by this exact
+ * same rule, token by token -- there is no separate stripping step
+ * anywhere in this matcher. */
+function tokensLookLikeFlagsOnly(tokens: string[]): boolean {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token.startsWith("-")) return false;
+    if (FLAGS_CONSUMING_NEXT_TOKEN.has(token)) i++;
+  }
+  return true;
+}
+
+/** Whether `rest` (everything after the recognized test-runner prefix,
+ * already trimmed) still looks like the whole suite: empty, or nothing
+ * but flags per `tokensLookLikeFlagsOnly` above, a bare `--`
+ * argument-separator (npm/yarn/pnpm's own divider before forwarded
+ * args) included -- it is flag-shaped there too, so `npm test --
+ * --coverage` is still full-suite while `npm test -- test/x.test.ts`
+ * is not, with no separate handling for the separator itself. Shared by
+ * the `npm test`, `npm run test[:*]`, `yarn test` and `pnpm test`
+ * shapes below, all of which forward extra arguments to the underlying
+ * runner the same way. */
+function restLooksLikeFullSuite(rest: string): boolean {
+  if (rest === "") return true;
+  return tokensLookLikeFlagsOnly(rest.split(/\s+/));
+}
+
+/**
+ * Whether `cmd` looks like it runs a whole test suite rather than one
+ * targeted file: `npm test`, `npm run test`/`npm run test:<anything>`,
+ * `yarn test` or `pnpm test`, each with nothing after it but flags (a
+ * bare `--` argument separator is flags-only shaped in its own right,
+ * so `npm test -- --coverage` is still full-suite while `npm test --
+ * test/x.test.ts` -- a real file forwarded through it -- is not, the
+ * same rule applied to every token, the separator included, with no
+ * special-case stripping anywhere); or `vitest run` (bare, through
+ * `npx` or not) with nothing after it but flags, `-t <name>` (a
+ * pattern, not a file) and a forwarded `--` (`npx vitest run --
+ * --coverage`) included. A
+ * `probe` over a command like this runs it twice, serially (baseline,
+ * then mutant), with no bound when `--timeout` was not given -- exactly
+ * the shape that printed the CLI's own full-suite hint. Deliberately
+ * narrow (these shapes only): a command this does not recognize prints
+ * no hint, rather than guessing.
+ */
+export function looksLikeFullSuiteTestCommand(cmd: string): boolean {
+  const trimmed = cmd.trim();
+  const npmTest = /^npm(?:\.cmd)?\s+test\b(.*)$/.exec(trimmed);
+  if (npmTest !== null) return restLooksLikeFullSuite(npmTest[1].trim());
+  const npmRunTest =
+    /^npm(?:\.cmd)?\s+run\s+test(?::[\w:-]*)?(?:\s+(.*))?$/.exec(trimmed);
+  if (npmRunTest !== null) {
+    return restLooksLikeFullSuite((npmRunTest[1] ?? "").trim());
+  }
+  const yarnTest = /^yarn\s+test\b(.*)$/.exec(trimmed);
+  if (yarnTest !== null) return restLooksLikeFullSuite(yarnTest[1].trim());
+  const pnpmTest = /^pnpm\s+test\b(.*)$/.exec(trimmed);
+  if (pnpmTest !== null) return restLooksLikeFullSuite(pnpmTest[1].trim());
+  const match = /(?:^|\s)(?:npx\s+)?vitest\s+run\b(.*)$/.exec(trimmed);
+  if (match === null) return false;
+  const rest = match[1].trim();
+  if (rest === "") return true;
+  return tokensLookLikeFlagsOnly(rest.split(/\s+/));
 }
 
 function parseMaxFailures(value: string): string {
@@ -849,6 +954,10 @@ interface ProbeCliOptions {
    * required (and checked in the action) for every single-mutant run. */
   test?: string;
   pre?: string;
+  /** Only ever present when at least one `--env` was given (no default
+   * value is registered for the option): `requirePlanExclusive`'s
+   * presence check (`opts[key] !== undefined`) depends on that. */
+  env?: Record<string, string>;
   plan?: string;
   isolation: IsolationMode;
   expect: ExpectVerdict;
@@ -947,10 +1056,13 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
 /** The single-mutant options `--plan` refuses outright: the plan file
  * itself carries the mutants and the command they share, so accepting
  * one of these beside it would mean two sources for the same value with
- * no honest precedence between them. The run-shaping options (`-i`,
- * `--expect`, `--timeout`, `--link`, `--allow-outside`) are NOT in this
- * set: they override the plan's own value when given (see
- * `runProbePlanCommand`'s own docblock for that precedence). */
+ * no honest precedence between them. `--env` sits here rather than
+ * beside `--link`/`--allow-outside` below: a plan run has no wiring for
+ * it today, and refusing the combination outright keeps a caller from
+ * silently having it ignored. The run-shaping options (`-i`, `--expect`,
+ * `--timeout`, `--link`, `--allow-outside`) are NOT in this set: they
+ * override the plan's own value when given (see `runProbePlanCommand`'s
+ * own docblock for that precedence). */
 const PLAN_EXCLUSIVE_OPTIONS: readonly {
   flag: string;
   key: keyof ProbeCliOptions;
@@ -963,6 +1075,7 @@ const PLAN_EXCLUSIVE_OPTIONS: readonly {
   { flag: "-p/--patch", key: "patch" },
   { flag: "-t/--test", key: "test" },
   { flag: "--pre", key: "pre" },
+  { flag: "--env", key: "env" },
 ];
 
 function requirePlanExclusive(opts: ProbeCliOptions): void {
@@ -1141,6 +1254,11 @@ program
     "shell command (e.g. a rebuild) run before each test invocation",
   )
   .option(
+    "--env <NAME=VALUE>",
+    "environment variable for --pre and -t, applied to both the baseline and the mutant run (repeatable)",
+    parseEnvOption,
+  )
+  .option(
     "-i, --isolation <mode>",
     "worktree (default; mutates a detached git worktree, leaving the working tree untouched) or inplace",
     parseIsolationMode,
@@ -1159,7 +1277,7 @@ program
   )
   .option(
     "--plan <path>",
-    "JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with --file, -n, -r, -M, -w, -p, -t and --pre",
+    "JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with --file, -n, -r, -M, -w, -p, -t, --pre and --env",
   )
   .option(
     "--link <dirs>",
@@ -1184,6 +1302,21 @@ program
     }
     const testCommand = opts.test;
     const mutantChoice = resolveMutantForm(opts);
+    // A full-suite-shaped command with no `--timeout` runs twice, serially
+    // (the baseline, then the mutant), with no bound on either: printed
+    // to stderr before the baseline starts, so the notice reaches an
+    // operator watching the run rather than only showing up as a slow
+    // command with no explanation. Never affects the envelope itself.
+    if (
+      opts.timeout === undefined &&
+      looksLikeFullSuiteTestCommand(testCommand)
+    ) {
+      process.stderr.write(
+        `agent-primitives probe: "${testCommand}" looks like a full test ` +
+          `suite; the baseline and the mutant run it serially with no ` +
+          `time bound -- pass --timeout <seconds> to cap each run.\n`,
+      );
+    }
     // Handed to `probe` for the duration of the call: it owns SIGINT and
     // SIGTERM while it runs, because it has a mutated file to restore
     // before the process may end. Set with no `await` between it and the
@@ -1198,6 +1331,7 @@ program
         ...mutantChoice,
         testCommand,
         preCommand: opts.pre,
+        env: opts.env,
         isolation: opts.isolation,
         expect: opts.expect,
         timeoutMs:
@@ -1219,10 +1353,22 @@ program
       // the envelope).
       probeOwnsShutdown = false;
     }
+    // A failing baseline is remapped from the library's own
+    // `status: "inconclusive"`/`reason: "baseline_failed"` pair to a
+    // literal `status: "baseline_failed"` here, in the envelope only:
+    // the exit-code class (`cannot-conclude`, exit 2) is unchanged (see
+    // `STATUS_CLASS` in envelope.ts), so a caller gating on the exit
+    // code alone sees no difference, while one reading `status` no
+    // longer has to also read `reason` to tell a failing baseline apart
+    // from every other inconclusive outcome.
+    const envelopeStatus =
+      result.status === "inconclusive" && result.reason === "baseline_failed"
+        ? "baseline_failed"
+        : result.status;
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
       command: "probe",
-      status: result.status,
+      status: envelopeStatus,
       durationMs: Date.now() - start,
       cwd: global.cwd,
       warnings: result.warnings,
@@ -1238,8 +1384,10 @@ program
           ? { mutation_probe: result.mutation_probe }
           : {}),
         ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
+        ...(result.env !== undefined ? { env: result.env } : {}),
         ...(result.test !== undefined ? { test: result.test } : {}),
         isolation: result.isolation,
+        totalDurationMs: result.totalDurationMs,
       },
       maxChars: global.maxChars,
       logDir: global.logDir,

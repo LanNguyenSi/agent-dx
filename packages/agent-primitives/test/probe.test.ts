@@ -390,7 +390,18 @@ describe("probe(): inconclusive branches, hash unchanged afterward", () => {
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("baseline_failed");
     expect(result.baseline?.exitCode).toBe(1);
-    expect(result.mutant).toBeUndefined();
+    // The one mutant this run would have applied was already computed
+    // (the dry run, before the baseline ever started), so both `mutant`
+    // and `mutation_probe` are reported for a failing baseline too, the
+    // same shape `pre_failed`/`target_changed_during_baseline` already
+    // carry: a consumer reading `mutation_probe.result` gets a string
+    // ("not_run") for a failing baseline too.
+    expectLineQuotesBefore(before, result.mutant);
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("baseline_failed");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(typeof result.mutation_probe?.mutant).toBe("string");
+    expect(typeof result.mutation_probe?.verified_applied_via).toBe("string");
 
     const after = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
     expect(after).toBe(before);
@@ -737,6 +748,14 @@ describe("probe(): the target is backed up (and checked) before any mutation, no
     expect(fs.readFileSync(target, "utf8")).toBe("REWRITTEN");
     expect(fs.readFileSync(target, "utf8")).not.toBe(before);
     expect(readMarkerFor(fs.realpathSync(target))).toBeUndefined();
+    // The mutant was computed before the baseline ran, so this refusal
+    // -- past that dry run, same as `baseline_failed`/`pre_failed` --
+    // reports `mutation_probe` too, not just `mutant`.
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe(
+      "target_changed_during_baseline",
+    );
+    expect(result.mutation_probe?.restored_verified).toBe(true);
   });
 });
 
@@ -1343,6 +1362,42 @@ describe("probe(): --pre/-t run in the invocation cwd, not the containment root"
   }, 30000);
 });
 
+describe("probe(): --env reaches the baseline and the mutant run alike", () => {
+  it("a test command reading process.env sees the --env override on both the baseline and the mutant run", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const testCommand =
+      "node -e \"process.exit(process.env.PROBE_MARKER === '1' ? 0 : 1)\"";
+
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand,
+        env: { PROBE_MARKER: "1" },
+      }),
+    );
+
+    // The test command never reads the mutated file, only PROBE_MARKER,
+    // so a real verdict (rather than an inconclusive baseline_failed)
+    // is itself proof the baseline saw the override; "survived" is the
+    // correct verdict for a mutant this command cannot react to.
+    expect(result.status).toBe("survived");
+    expect(result.test?.env).toEqual({ PROBE_MARKER: "1" });
+  });
+
+  it("without --env the same command fails the baseline (the variable it checks is unset)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const testCommand =
+      "node -e \"process.exit(process.env.PROBE_MARKER === '1' ? 0 : 1)\"";
+
+    const result = await probe(baseOptions(repo, { testCommand }));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_failed");
+    expect(result.test).toBeUndefined();
+  });
+});
+
 describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
   it("pre_failed when --pre fails specifically in the mutant phase (a rebuild refusing to build broken output)", async () => {
     useLockDir();
@@ -1377,6 +1432,15 @@ describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
     expect(result.reason).toBe("pre_failed");
     expect(result.baseline).toBeUndefined();
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+    // Same fact `baseline_failed` already reports (the dry run computes
+    // the mutant before the baseline's own `--pre` ever runs): a
+    // `--pre` failure here is a refusal past that dry run too, so
+    // `mutation_probe` is not left out of this envelope shape either.
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("pre_failed");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(typeof result.mutation_probe?.mutant).toBe("string");
+    expect(typeof result.mutation_probe?.verified_applied_via).toBe("string");
   });
 });
 
@@ -4056,6 +4120,14 @@ describe("probe(): the single-mutant result is what it was before the plan runne
   // what cannot be reproduced twice is normalized away -- durations and
   // the random parts of temp/log paths -- so a real change to the
   // single-mutant path is a diff here rather than a silent drift.
+  //
+  // `inplaceBaselineFailed`'s own recorded `mutant` field is the one
+  // deliberate exception: master a908951 never reported `mutant` for
+  // `baseline_failed` (`REFUSAL_RESULT_SHAPE`'s predecessor, a per-call
+  // `reportsMutant` flag, left it unset there), which is exactly the
+  // inconsistency this task's contract fixes -- `mutant` and
+  // `mutation_probe` now agree for every baseline-phase refusal. The
+  // fixture was updated to add it rather than left to fail forever.
   const RECORDED = JSON.parse(
     fs.readFileSync(
       path.join(
@@ -4126,8 +4198,9 @@ describe("probe(): the single-mutant result is what it was before the plan runne
       if (node && typeof node === "object") {
         const record = node as Record<string, unknown>;
         for (const key of Object.keys(record)) {
-          if (key === "durationMs") record[key] = 0;
-          else zeroDurations(record[key]);
+          if (key === "durationMs" || key === "totalDurationMs") {
+            record[key] = 0;
+          } else zeroDurations(record[key]);
         }
       }
     };
@@ -4220,4 +4293,47 @@ describe("probe(): the single-mutant result is what it was before the plan runne
       RECORDED.inplaceBaselineFailed,
     );
   }, 30000);
+});
+
+describe("probe(): totalDurationMs", () => {
+  it("is a non-negative number on every outcome, including a failing baseline", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    const killed = await probe(baseOptions(repo));
+    expect(typeof killed.totalDurationMs).toBe("number");
+    expect(killed.totalDurationMs).toBeGreaterThanOrEqual(0);
+
+    const { repo: repo2 } = initRepo();
+    const baselineFailed = await probe(
+      baseOptions(repo2, { testCommand: "exit 1" }),
+    );
+    expect(typeof baselineFailed.totalDurationMs).toBe("number");
+    expect(baselineFailed.totalDurationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  // A mutation that discards `totalDurationMs` and reports a constant
+  // (e.g. `0 * (Date.now() - start)`) satisfies "a non-negative number"
+  // above just as well as a real measurement does; this asserts a
+  // lower bound tied to the test command's own deliberately slow,
+  // synchronous busy-wait instead, so a constant (or any measurement
+  // that does not actually span both the baseline and the mutant run)
+  // fails it. Two runs of >=150ms each (the baseline, then the mutant)
+  // give a wide margin under the 200ms bound: real CI slowness pushes
+  // the total well past it, never under it, so this does not calibrate
+  // to run-to-run noise the way a byte-count ceiling would.
+  it("reflects real wall-clock time: at least the two full runs of a deliberately slow test command", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const busyWaitMs = 150;
+
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand: `node -e "const t=Date.now();while(Date.now()-t<${busyWaitMs});process.exit(0)"`,
+        expect: "pass",
+      }),
+    );
+
+    expect(result.totalDurationMs).toBeGreaterThanOrEqual(2 * busyWaitMs);
+  });
 });

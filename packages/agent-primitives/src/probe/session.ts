@@ -65,6 +65,11 @@ export interface MutationProbeField {
   verified_applied_via: string;
   result: string;
   restored_verified: boolean;
+  /** Present only where `result` alone does not say why (e.g.
+   * `"not_run"` for a baseline that failed before any mutant could be
+   * applied): a machine-readable cause, the same string a `ProbeResult`
+   * would otherwise carry only as its own top-level `reason`. */
+  reason?: string;
 }
 
 export interface ExecPhaseField {
@@ -82,6 +87,44 @@ export interface TestPhaseField extends ExecPhaseField {
   command: string;
   stdoutTail: string;
   stderrTail: string;
+  /** The `--env NAME=VALUE` overrides this run applied (redacted by
+   * `redactEnvOverrides` below, never the whole merged environment):
+   * present only when at least one was given, so the isolation a caller
+   * asked for is visible in the report instead of only inferable from
+   * the command string. */
+  env?: Record<string, string>;
+}
+
+/** A `--env` override name that looks like it carries a credential:
+ * `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` or `KEY`, singular or
+ * plural, as its own `_`-delimited segment (case-insensitive) --
+ * anchored on `^`/`_` before it and `_`/`$` after it, so it matches a
+ * whole SCREAMING_SNAKE_CASE word, e.g. `GITHUB_TOKEN`,
+ * `AWS_SECRET_ACCESS_KEY`, `DATABASE_PASSWORD`, `MY_CREDENTIALS`,
+ * `MY_SECRETS`, `API_KEYS`, `AUTH_TOKENS`, `PASSWORDS`, never a
+ * substring inside a longer segment: `TOKENIZER_MODEL` and `KEYBOARD`
+ * are left alone, since neither word appears as its own segment
+ * there. */
+const SECRET_ENV_NAME_PATTERN =
+  /(^|_)(TOKEN|SECRET|PASSWORD|CREDENTIAL|KEY)S?(_|$)/i;
+
+/**
+ * Redacts `--env` override values whose NAME matches
+ * `SECRET_ENV_NAME_PATTERN`, keeping every name visible so the shape of
+ * what was overridden is still legible, and replacing a matching value
+ * with the literal string `"<redacted>"`. `--env` overrides are echoed
+ * verbatim into the envelope (`ProbeResult.env`, `TestPhaseField.env`)
+ * and that envelope routinely gets pasted into PRs, task trackers and
+ * chat -- an unredacted secret passed via `--env` would otherwise leak
+ * into all of those. */
+export function redactEnvOverrides(
+  overrides: Record<string, string>,
+): Record<string, string> {
+  const redacted: Record<string, string> = {};
+  for (const [name, value] of Object.entries(overrides)) {
+    redacted[name] = SECRET_ENV_NAME_PATTERN.test(name) ? "<redacted>" : value;
+  }
+  return redacted;
 }
 
 export interface IsolationField {
@@ -94,6 +137,92 @@ export interface IsolationField {
 
 export type ProbeStatus =
   "killed" | "survived" | "inconclusive" | "usage_error";
+
+/** Every `reason` a single-mutant `probe()` run's refusal (a status
+ * short of `killed`/`survived`, reported before or during
+ * `setup.ts`'s `openRunSetup`) can carry. Covers both how `refuse()`
+ * itself is called (`setup.ts`) and the one refusal `openRunSetup`
+ * builds by hand instead (the worktree sync failure, `"aborted"` or
+ * `"worktree_sync_failed"`), so every reason that can reach
+ * `index.ts`'s refusal-to-envelope mapping has exactly one entry in
+ * `REFUSAL_RESULT_SHAPE` below. Deliberately excludes the reasons a
+ * mutant-phase outcome (`step.ts`'s `runMutantAttempt`, past
+ * `openRunSetup`) can report (`apply_hash_mismatch`,
+ * `worktree_original_tree_modified`, `restore_failed`, `timeout`, a
+ * mutant-phase `pre_failed`/`aborted`): those already always carry both
+ * `mutant` and `mutation_probe` (a real mutant was applied), so they
+ * need no contract entry to stay consistent. */
+export type RefusalReason =
+  | "worktree_allow_outside_unsupported"
+  | "file_outside_root"
+  | "probe_in_progress"
+  | "lock_unavailable"
+  | "stale_probe_marker"
+  | "file_not_found"
+  | "stale_worktree"
+  | "worktree_sync_failed"
+  | "target_not_synced"
+  | "backup_verification_failed"
+  | "mutant_not_applicable"
+  | "git_apply_timeout"
+  | "aborted"
+  | "pre_failed"
+  | "baseline_failed"
+  | "target_changed_during_baseline";
+
+/**
+ * The single source of truth for which fields a single-mutant `probe()`
+ * refusal reports beside the common envelope: whether `mutant` (the
+ * computed-but-never-applied mutant) and `mutation_probe` (its
+ * `result: "not_run"` summary) are present. One rule decides every row:
+ * present once `openRunSetup`'s `beforeBaseline` hook has computed the
+ * run's one mutant, absent before that point -- so `pre_failed`,
+ * `baseline_failed`, `target_changed_during_baseline`, and `aborted`
+ * (both of the baseline phase's own abort paths: an aborted `--pre` and
+ * an aborted baseline test, `setup.ts`'s two `baselineRun`/
+ * `baselineTest` branches) are `true`; `mutant_not_applicable` and
+ * every earlier refusal (a containment, lock, stale-marker, or
+ * worktree-sync refusal, `git_apply_timeout` included) are `false`.
+ * `"aborted"` is also the reason two OTHER refusals report from a point
+ * BEFORE the mutant is computed (the worktree sync's own abort, and the
+ * dry run's own abort inside `beforeBaseline`): this table's `true` for
+ * `"aborted"` is still correct for those, because `index.ts` gates the
+ * actual fields on the mutant/mutant-summary values it captured itself,
+ * which stay `undefined` on both of those earlier paths regardless of
+ * what this table says -- so a `true` entry here only ever manifests
+ * once one of the two baseline-phase abort paths actually set them.
+ * `"stale_worktree"` is the third reason the worktree sync can report,
+ * a leftover worktree from a previous run that could not be removed;
+ * also always before the mutant is computed, so also `false`.
+ * `refuse()` (`setup.ts`) reads this table to fill `reportsMutant`
+ * mechanically, one shared lookup rather than a per-call-site flag;
+ * `index.ts` reads it a second time, by `mutationProbe`, to decide
+ * `mutation_probe`. Checked exhaustively against `probe()`'s own
+ * behavior by `test/probe-refusal-contract.test.ts`, and against the
+ * README's "Refusal reason shape" table (under "Result shape") by
+ * `test/readme-conformance.test.ts`; update all three together with any
+ * change here. */
+export const REFUSAL_RESULT_SHAPE: Record<
+  RefusalReason,
+  { mutant: boolean; mutationProbe: boolean }
+> = {
+  worktree_allow_outside_unsupported: { mutant: false, mutationProbe: false },
+  file_outside_root: { mutant: false, mutationProbe: false },
+  probe_in_progress: { mutant: false, mutationProbe: false },
+  lock_unavailable: { mutant: false, mutationProbe: false },
+  stale_probe_marker: { mutant: false, mutationProbe: false },
+  file_not_found: { mutant: false, mutationProbe: false },
+  stale_worktree: { mutant: false, mutationProbe: false },
+  worktree_sync_failed: { mutant: false, mutationProbe: false },
+  target_not_synced: { mutant: false, mutationProbe: false },
+  backup_verification_failed: { mutant: false, mutationProbe: false },
+  mutant_not_applicable: { mutant: false, mutationProbe: false },
+  git_apply_timeout: { mutant: false, mutationProbe: false },
+  aborted: { mutant: true, mutationProbe: true },
+  pre_failed: { mutant: true, mutationProbe: true },
+  baseline_failed: { mutant: true, mutationProbe: true },
+  target_changed_during_baseline: { mutant: true, mutationProbe: true },
+};
 
 /** Restores `session` and verifies the restore by hash. A restore whose
  * copy itself throws is treated the same as a restore that copies but
@@ -454,6 +583,14 @@ export async function runPreThenTest(
     logDir: string;
     timeoutMs?: number;
     signal?: AbortSignal;
+    /** The `process.env` this run's `--pre`/`-t` executes against
+     * (merged with `--env` overrides when any were given): declared
+     * here, not left to fall out of a wider type structurally matching
+     * by accident, so a future rewrite of this parameter's fields (or
+     * of `MutantRuntime.execEnv`, the only caller of this signature)
+     * that drops `env` is a compiler error instead of a silent,
+     * clean-compiling loss of every `--env` override. */
+    env?: NodeJS.ProcessEnv;
   },
   /** Registers each started run (and when its stdio truly closes) as
    * the probe's one in-flight child, so the signal handler can wait for
@@ -700,7 +837,16 @@ export interface MutantRuntime {
     logDir: string;
     timeoutMs?: number;
     signal: AbortSignal;
+    /** Merged (`process.env` plus every `--env` override) when at least
+     * one override was given; omitted otherwise, so `execCommand`'s own
+     * `options.env ?? process.env` default is unchanged when `--env` was
+     * never used. */
+    env?: NodeJS.ProcessEnv;
   };
+  /** The raw `--env` overrides (unmerged, never the whole environment),
+   * present only when at least one was given: what `runMutantAttempt`
+   * echoes verbatim under the mutant's `test.env`. */
+  envOverrides?: Record<string, string>;
   gitApplyTimeoutMs: number;
   effectiveIsolation: IsolationMode;
   testCommand: string;
@@ -856,7 +1002,7 @@ export async function prepareWorktreeSession(input: {
   | { ok: true; session: WorktreeSyncSuccess }
   | {
       ok: false;
-      reason: string;
+      reason: "stale_worktree" | "worktree_sync_failed" | "aborted";
       warnings: string[];
       /** Present only for a failure that produced exec logs (the sync
        * itself); a refusal before any worktree existed carries none, and

@@ -15,6 +15,8 @@ import {
   type ExpectVerdict,
   type IsolationField,
   type IsolationMode,
+  redactEnvOverrides,
+  REFUSAL_RESULT_SHAPE,
   type MutantField,
   type MutationProbeField,
   type ProbeStatus,
@@ -103,6 +105,11 @@ export interface ProbeOptions {
   timeoutMs?: number;
   links?: string[];
   allowOutside?: boolean;
+  /** `--env NAME=VALUE` overrides (repeatable), applied to the baseline
+   * and the mutant's `--pre`/`-t` alike; echoed under the mutant's
+   * `test.env` in the result. Omitted or empty leaves the test process's
+   * environment as `process.env`. */
+  env?: Record<string, string>;
   cwd: string;
   logDir: string;
   /**
@@ -126,6 +133,14 @@ export interface ProbeResult {
   warnings: string[];
   mutant?: MutantField;
   mutation_probe?: MutationProbeField;
+  /** The `--env NAME=VALUE` overrides this run was given (redacted by
+   * `redactEnvOverrides`), present whenever at least one was given --
+   * on every status, including one (`baseline_failed`,
+   * `pre_failed`, ...) that never reaches a `test` phase to carry its
+   * own `test.env` echo. Set once by `probe()` itself, from `opts.env`
+   * directly, so a caller sees the overrides it asked for even on a run
+   * whose baseline never got far enough to run the mutant at all. */
+  env?: Record<string, string>;
   baseline?: ExecPhaseField;
   test?: TestPhaseField;
   isolation: IsolationField;
@@ -134,6 +149,13 @@ export interface ProbeResult {
    * The caller (`cli.ts`) folds this together with `baseline`/`test`'s
    * own `logPath` into the envelope's `logs`. */
   dryRunLogPaths?: string[];
+  /** Wall-clock time of the whole `probe()` call, every branch: set once
+   * by the exported wrapper (`probeWithTotalDuration`) around the
+   * pipeline itself, so a library caller sees the same number whether
+   * the run returned normally, refused before a mutant ran, or unwound
+   * through the emergency-restore path. Distinct from `baseline`/`test`'s
+   * own `durationMs`, which cover only their own command. */
+  totalDurationMs: number;
 }
 
 function emptyIsolationField(mode: IsolationMode): IsolationField {
@@ -216,8 +238,16 @@ export function patchUnusableReason(
  * is `step.ts`'s `prepareMutant`/`runMutantAttempt`, which `probePlan`
  * runs once per mutant. See `probePlan`'s docblock for the invariants
  * that split holds to.
+ *
+ * Exported as `probe` below wrapped in a `totalDurationMs` measurement;
+ * this is the pipeline itself, kept as its own function so every one of
+ * its many return points (including the `finally` block's
+ * emergency-restore path) stays exactly as it was rather than each
+ * having to compute and attach the duration itself.
  */
-export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
+async function runProbePipeline(
+  opts: ProbeOptions,
+): Promise<Omit<ProbeResult, "totalDurationMs">> {
   const warnings: string[] = [];
   const isolationField = emptyIsolationField(opts.isolation);
 
@@ -431,6 +461,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
       gitApplyTimeoutMs,
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
+      env: opts.env,
       exitOnSignal: opts.exitOnSignal ?? false,
       warnings,
       isolationField,
@@ -468,12 +499,42 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     });
     if (!setup.ok) {
       const { refusal } = setup;
+      // `mutant` is gated on `refusal.reportsMutant` (`setup.ts`'s own
+      // `REFUSAL_RESULT_SHAPE[refusal.reason].mutant`, read mechanically
+      // inside `refuse()`); `mutation_probe` is gated on this same
+      // table's `.mutationProbe`, read here a second time -- one
+      // contract, keyed on `refusal.reason`, rather than two
+      // independently-drifting rules. Both agree for every reason
+      // today, but are read separately so a future reason that needs to
+      // diverge (report one field but not the other) is one table edit
+      // away, not a new per-site flag. Either still requires the mutant
+      // to have actually been computed (`mutantField`/`mutantSummary`/
+      // `verifiedAppliedVia` set): a refusal whose `reason` maps to
+      // `true` here from a point BEFORE `beforeBaseline` ever ran (the
+      // dry run's own `aborted`, or the worktree sync's, both of which
+      // hardcode `reportsMutant: false` rather than trust this table)
+      // still reports neither field, because those variables stay
+      // `undefined` on those paths regardless of what the contract says
+      // for `"aborted"` -- see `RefusalReason`'s own docblock.
       return {
         status: refusal.status,
         reason: refusal.reason,
         warnings: refusal.warnings,
         ...(refusal.reportsMutant && mutantField !== undefined
           ? { mutant: mutantField }
+          : {}),
+        ...(REFUSAL_RESULT_SHAPE[refusal.reason].mutationProbe &&
+        mutantSummary !== undefined &&
+        verifiedAppliedVia !== undefined
+          ? {
+              mutation_probe: {
+                mutant: mutantSummary,
+                verified_applied_via: verifiedAppliedVia,
+                result: "not_run",
+                restored_verified: true,
+                reason: refusal.reason,
+              },
+            }
           : {}),
         ...(refusal.baseline !== undefined
           ? { baseline: refusal.baseline }
@@ -529,7 +590,7 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     caughtError = err;
     throw err;
   } finally {
-    let emergencyResult: ProbeResult | undefined;
+    let emergencyResult: Omit<ProbeResult, "totalDurationMs"> | undefined;
     // No context means the setup refused (or threw) before it took a
     // lock: nothing was opened, nothing is in flight, and there is
     // nothing to tear down.
@@ -602,6 +663,27 @@ export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
     }
     if (emergencyResult) return emergencyResult;
   }
+}
+
+/**
+ * Runs one mutation probe: mutate a line (or apply a patch), confirm the
+ * unmutated test passes first (the baseline), run the test against the
+ * mutant, restore the file, and classify the result. See
+ * `runProbePipeline` above for the pipeline itself; this wrapper only
+ * adds `totalDurationMs`, measured across the whole call so every branch
+ * (a normal return, a refusal before any mutant ran, or the `finally`
+ * block's emergency-restore path) reports the same wall-clock total.
+ */
+export async function probe(opts: ProbeOptions): Promise<ProbeResult> {
+  const start = Date.now();
+  const result = await runProbePipeline(opts);
+  return {
+    ...result,
+    ...(opts.env !== undefined && Object.keys(opts.env).length > 0
+      ? { env: redactEnvOverrides(opts.env) }
+      : {}),
+    totalDurationMs: Date.now() - start,
+  };
 }
 
 /** Options for one `--plan` run: the mutants, the command they share,

@@ -94,6 +94,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already bound. A short, ordinary path (every existing fixture) is
   unaffected.
 
+- `probe`'s CLI envelope for a failing baseline (task `b00efca1`): a
+  failing baseline used to report `status: "inconclusive"`/`reason:
+  "baseline_failed"` with `mutation_probe` entirely absent, so a
+  consumer that read `mutation_probe.result` on every outcome without
+  shape-sniffing threw on this one. The CLI now
+  reports a literal `status: "baseline_failed"` for this case (the exit
+  code is unchanged: same `cannot-conclude` class, exit `2`, so a caller
+  gating on the exit code alone sees no difference), and the library's
+  own `ProbeResult` (`probe()` in `src/probe/index.ts`) now always
+  carries a `mutation_probe` object here too (`result: "not_run"`, a
+  `reason: "baseline_failed"`, and the mutant this run would have
+  applied -- already computed by the dry run before the baseline ever
+  started, so there is a real mutant to describe rather than a
+  placeholder). `baseline.exitCode` was already reported and is
+  unchanged. The same object is now also carried by every OTHER refusal
+  `openRunSetup` returns past that same dry run -- a failing `--pre`
+  during the baseline (`reason: "pre_failed"`), an aborted baseline
+  (`reason: "aborted"`), and a baseline that itself rewrote the target
+  (`reason: "target_changed_during_baseline"`) -- each with its own
+  `reason` echoed onto `mutation_probe.reason` instead of only
+  `"baseline_failed"`: the fix above was scoped to one refusal reason
+  when every refusal past the dry run shares the same fact (the mutant
+  was already computed). Covered by a library-level test in
+  `test/probe.test.ts` and CLI-level tests in `test/cli.test.ts` that
+  spawn the built CLI against a failing baseline, a baseline-phase
+  `--pre` failure, and a baseline that rewrites its target, and assert
+  the envelope shape on each. The `aborted` reason covers BOTH of the
+  baseline phase's own abort paths (an aborted `--pre`, an aborted
+  baseline test) with the same `mutant`/`mutation_probe` shape either
+  way, since the dry run has already computed the mutant by the time
+  either can fire.
+
+  What was four scattered site-level fixes is now one formalized
+  contract: `src/probe/session.ts`'s new `REFUSAL_RESULT_SHAPE` constant
+  (typed `Record<RefusalReason, { mutant: boolean; mutationProbe:
+  boolean }>`, so a new `RefusalReason` with no entry fails to compile)
+  is the single source of truth for every refusal `openRunSetup` can
+  return -- not just the four covered above, but all sixteen, including
+  the twelve setup-phase refusals from before the dry run (a
+  containment, lock, stale-marker, or worktree-sync refusal,
+  `worktree_allow_outside_unsupported`, and the dry run's own
+  `mutant_not_applicable`/`git_apply_timeout`), where `mutant` and
+  `mutation_probe` are both absent. `setup.ts`'s `refuse()` and
+  `index.ts`'s envelope mapping both read this same table by `reason`
+  (mechanically, not as a per-call flag), so the two locations cannot
+  drift apart on a reason either already covers. `test/
+  probe-refusal-contract.test.ts` (new) provokes every one of the
+  sixteen reasons through `probe()` for real -- a `Record<RefusalReason,
+  Provocation>` table of its own, so a reason with no provocation also
+  fails to compile -- and asserts the reported envelope matches the
+  contract exactly, in both directions. The README's Result shape
+  section gained a "Refusal reason shape" table listing all sixteen.
+
 ### Added
 
 - A sweep of `-m` budgets against a real `probe --plan` envelope (in-process
@@ -276,6 +329,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 SKILL.md`) and the README gained an "Invocation templates" section
   with a copy-pasteable line for each mutant form plus `verify` and
   `doctor`.
+- `probe --env NAME=VALUE` (repeatable, task `b00efca1`): applied to
+  both the baseline and the mutant's `--pre`/`-t` runs (they share one
+  merged environment), and echoed back under the mutant's `test.env` so
+  the isolation a caller asked for is visible in the report instead of
+  only inferable from the command string. Also echoed once at the run
+  level (a top-level `env` field, present whenever `--env` was given, on
+  every status including `baseline_failed`, where there is no `test`
+  phase for a per-test echo to live under). A value whose NAME carries
+  `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as
+  its own `_`-delimited segment (case-insensitive; anchored via
+  `SECRET_ENV_NAME_PATTERN` in `session.ts`, the segment sitting at the
+  start or end of the name, or between two underscores) is redacted
+  (`"<redacted>"`) in both places; values must not otherwise be assumed
+  private, since the envelope is routinely pasted into PRs and task
+  trackers. The anchoring is a fix in its own right, not just a rewording:
+  the earlier pattern matched the recognized word ANYWHERE in the name, so
+  `TOKENIZER_MODEL` and `KEYBOARD` were redacted despite carrying no
+  secret, false positives now gone (`TOKENIZER_MODEL`/`KEYBOARD` are
+  pinned verbatim in `test/cli.test.ts`'s redaction matrix alongside
+  genuine matches like `API_TOKEN`). This redaction covers only the two
+  echoes (`env`/`test.env`); it never touches `test.stdoutTail`/
+  `test.stderrTail` or the linked exec log, so a value the test command
+  itself prints still appears there verbatim regardless of its NAME.
+  Fixes a friction measured across 109 real `probe`
+  invocations in one batch: `agent-preflight`'s suite needs an isolated
+  `HOME`, and every one of those invocations had to smuggle
+  `HOME=<dir> npx vitest ...` into `-t` instead. No `=`, or an empty
+  name before it, is a usage error. Not wired into `--plan`: combining
+  `--env` with `--plan` is refused outright (added to
+  `PLAN_EXCLUSIVE_OPTIONS` in `src/cli.ts`) rather than silently
+  ignored.
+- `probe`: a one-line stderr notice, printed before the baseline starts,
+  when no `--timeout` was given and the test command looks like a whole
+  test suite rather than one targeted file: `npm test`, `npm run test`/
+  `npm run test:<anything>`, `yarn test`, `pnpm test` (each with nothing
+  after it but flags, a bare `--` argument separator judged by the same
+  rule as any other token -- it is flag-shaped in its own right, so it
+  never alone disqualifies a command from looking full-suite, and
+  whatever follows it is judged the same way, token by token, with no
+  separate stripping step: `npm test -- --coverage` is still full-suite
+  shaped, `npm test -- test/x.test.ts` is not), or `vitest
+  run` (bare, through `npx` or not) with nothing after it but flags,
+  `-t <pattern>` and a forwarded `--` included (task `b00efca1`, round
+  3: the npm/yarn/pnpm shapes above always stripped one leading `--`
+  before judging what followed it, but the `vitest run` shape never did
+  -- so `npx vitest run -- --coverage` was misclassified as NOT
+  full-suite, missing the timing hint for a command that genuinely runs
+  the whole suite twice; both shapes now use the one uniform token rule
+  above, with no separate stripping anywhere, so the same `--` is judged
+  the same way regardless of which prefix precedes it. Pinned in
+  `test/cli.test.ts`'s matcher table). A targeted command such as
+  `vitest run test/x.test.ts` prints nothing. Names that the baseline
+  and the mutant run the command serially with no bound and that
+  `--timeout` caps each run. The result also now carries
+  `totalDurationMs` (wall-clock time of the whole `probe()` call, every
+  branch), the same field name and meaning `verify`'s result already
+  carries. Motivated by the same friction as `--env` above: a probe
+  over a full-suite command runs it twice with no visible runtime hint.
 
 ### Changed
 

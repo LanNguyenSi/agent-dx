@@ -815,6 +815,51 @@ that bound is `status: "inconclusive"`, `reason: "git_apply_timeout"`,
 exit `2`, kept apart from `mutant_not_applicable`, which means the patch
 itself did not apply.
 
+`--env NAME=VALUE` (repeatable) sets an environment variable for both
+`--pre` and `-t`, in both the baseline and the mutant run (they share one
+merged environment, `process.env` plus every `--env` given): the
+alternative -- smuggling `HOME=<dir> npx vitest ...` into `-t` itself,
+needed whenever the suite under test requires an isolated environment
+variable the caller cannot otherwise set for a plain shell command --
+is no longer necessary. Every override actually given is echoed back at the run level (`env`) and
+under the mutant's `test.env` in the result, so the isolation a caller
+asked for is visible in the report rather than only inferable from the
+command string. `probe`'s result is routinely pasted into PRs and task
+trackers, so a value whose NAME looks like a credential (`TOKEN`,
+`SECRET`, `PASSWORD`, `CREDENTIAL` anywhere, case-insensitive, or a name
+ending `_KEY`) is redacted to `"<redacted>"` in both echoes before that
+happens; every other name's value is echoed verbatim. That name check is
+the only guard here: `--env` still passes the real value to the child
+process either way, and a credential under a name it does not recognize
+is echoed in the clear -- do not pass one through `--env` under a name
+this pattern would miss. No `=` at all, or an empty name before it, is a
+usage error rather than a silently dropped variable. Not available under
+`--plan`: combined with `--plan` it is refused outright as a usage
+error, the same way every other single-mutant-only option is.
+
+With no `--timeout` given and a test command that looks like a whole test
+suite rather than one targeted file -- `npm test`, `npm run test`/`npm
+run test:<anything>`, `yarn test`, `pnpm test` (each with nothing after
+it but flags, a bare `--` argument separator judged the same way as any
+other token: it is flag-shaped in its own right (it starts with `-`), so
+it never by itself disqualifies a command from looking full-suite, and
+whatever follows it is judged by this exact same rule, token by token --
+there is no separate stripping step anywhere in this matcher, so `npm
+test -- --coverage` is still full-suite while `npm test --
+test/x.test.ts`, a real file forwarded through it, is not), or
+`vitest run` (bare, through `npx` or not) with nothing after it but
+flags, `-t <pattern>` and a forwarded `--` included by the same rule, so
+`npx vitest run -- --coverage` also counts as full-suite -- `probe`
+prints one line to stderr
+before the baseline starts, naming that the baseline and the mutant run
+the command serially with no time bound and that `--timeout` caps each
+run: worth knowing before a probe over, say, `npx vitest run --coverage`
+sits for minutes running the whole suite twice. A targeted command such
+as `vitest run test/x.test.ts` (a file argument after `run`) or
+`npm test -- test/x.test.ts` prints nothing; passing `--timeout` also
+suppresses it, whatever the command looks like. The stderr line is
+never part of the JSON envelope.
+
 Every `--pre`/`-t` invocation runs in a process group of its own, and the
 timeout, `SIGINT`, and `SIGTERM` all signal that whole group: the timeout
 sends `SIGTERM` and escalates to `SIGKILL` after a short grace, while a
@@ -952,20 +997,135 @@ before the containment check, the lock, the in-flight marker or any
 worktree, so a refusal leaves nothing behind and applies the same
 whether `--file` was given explicitly or is derived from the patch.
 
-Output beside the envelope: `status` (`killed`, `survived`, or
-`inconclusive`), `reason` (when inconclusive), `mutant: { file, line,
-before, after, form }` (plus `diff`, for a `-p/--patch` mutant whose
-change is not fully shown by `before`/`after` alone; see above),
-`mutation_probe: { mutant, verified_applied_via,
-result, restored_verified }` (paste straight into an implementer's
-`mutation_probes` output field), `baseline: { exitCode, durationMs,
-logPath, timedOut }`, `test: { command, exitCode, durationMs, timedOut,
-stdoutTail, stderrTail, logPath }`, `isolation: { mode, path, linked,
-syncedTrackedFiles, syncedUntrackedFiles }` (`path` is the worktree
-directory for `worktree`, `null` for `inplace`; `linked` lists the
-absolute source-tree paths symlinked in; `syncedTrackedFiles` and
-`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for
-every `inplace` run).
+### Result shape
+
+The single source of truth for a consumer of `probe`'s JSON: every field
+beside the common envelope (`tool`, `version`, `command`, `status`,
+`durationMs`, `cwd`, `truncated`, `logs`, `warnings`; see
+[Output shape](#output-shape)), what type it is, and when it is present.
+Update this table in the same change as any change to the shape it
+describes.
+
+This table describes the single-mutant form (no `--plan`) after option
+parsing has succeeded. Two narrower envelopes sit outside it: a
+**top-level usage error** -- thrown by commander's own option parsing, or
+by a check this CLI runs before `probe()`/`probePlan()` is ever called
+(`-t/--test is required`, `--json` conflicting with `-f text`, a `--plan`
+file that cannot be read or parsed) -- reports `command: "unknown"` and
+carries only `reason` and `message` from the rows below: no `mutant`,
+`mutation_probe`, `baseline`, `test`, `env`, `isolation` or
+`totalDurationMs`, because none of them were ever computed. A **`--plan`**
+run replaces `mutant`/`mutation_probe`/`test`/`env`/`totalDurationMs` at
+the top level with its own `plan: { baseline, results, summary }`; see
+[`--plan`](#--plan-several-mutants-one-baseline) below for that shape and
+for where its status/reason semantics differ from the single-mutant form
+(a failing baseline, for one, is never remapped to a literal
+`status: "baseline_failed"` there).
+
+The `aborted` rows anywhere below describe `probe()`'s own result as a
+library caller sees it (`exitOnSignal: false`, `probe()`'s own default):
+a SIGINT/SIGTERM lands, the in-flight run is stopped and restored, and
+the call returns this envelope like any other refusal. Under the CLI,
+`exitOnSignal` is `true` (`src/cli.ts`, the single-mutant `probe({ ... })`
+call the CLI's own probe action makes): there, the same signal instead ends
+the process with its own conventional exit code once the restore has
+settled, and prints no envelope at all -- an `aborted` row is reachable
+from a library caller, never from the CLI's own JSON output. A consumer
+that only needs to know whether THIS run ever got as far as computing a
+mutant, without keying off which particular refusal reason fired, reads
+`result.mutation_probe?.result`: it is always the string `"not_run"`
+once this run's dry run had already computed the one mutant it would
+have applied, and `undefined` on every refusal from before that point
+(see the [refusal reason shape](#refusal-reason-shape) table below for
+exactly which `reason` is which).
+
+| Field | Type | Present | Notes |
+| --- | --- | --- | --- |
+| `status` | string | always | `"killed"`, `"survived"`, `"inconclusive"`, `"usage_error"`, or `"baseline_failed"`. The last is the CLI envelope's own literal status for a failing baseline (the library's `probe()` itself still returns `status: "inconclusive"`, `reason: "baseline_failed"`; the CLI remaps it so a consumer does not also have to read `reason` to tell a failing baseline apart from every other inconclusive outcome). Same exit-code class either way (`cannot-conclude`, exit `2`), so a caller gating on the exit code alone sees no difference. |
+| `reason` | string | whenever `status` is not a clean verdict | machine-readable cause, e.g. `"baseline_failed"`, `"pre_failed"`, `"restore_failed"`, `"aborted"`, `"target_changed_during_baseline"`, `"mutant_not_applicable"` |
+| `message` | string | top-level usage error only (see above) | the human-readable message commander (or this CLI's own pre-`probe()` check) produced; `reason` is still present alongside it, so a consumer can key off `reason` without also reading `message` |
+| `mutant` | `{ file, line, before, after, form, diff? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly four of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). |
+| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same four setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the four setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`), `reason` naming which. ABSENT for every other setup-phase refusal (see the table below), none of which ever computed a mutant. Paste straight into an implementer's `mutation_probes` output field. |
+| `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did) |
+| `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below) |
+| `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
+| `isolation` | `{ mode, path, linked, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths symlinked in; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
+| `totalDurationMs` | number | always, for this envelope (see the top-level-usage-error carve-out above, and `--plan`, whose own envelope carries no `totalDurationMs` at all) | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
+
+#### Refusal reason shape
+
+Every `reason` `openRunSetup` (`src/probe/setup.ts`) itself can return for
+a single-mutant run -- a status short of `killed`/`survived`, reported
+before or during the run's shared setup, past option parsing -- and
+whether `mutant`/`mutation_probe` are present for it. `src/probe/session.ts`'s
+`REFUSAL_RESULT_SHAPE` constant is this table's single source of truth in
+code (typed `Record<RefusalReason, ...>`, so a reason with no entry there
+fails to compile); `test/probe-refusal-contract.test.ts` provokes every
+row below through `probe()` itself and asserts the presence matches
+exactly, in both directions, so this table cannot drift from what
+`REFUSAL_RESULT_SHAPE` itself declares, and every reason below is
+provoked at the table-named site the row below describes. Five more
+`usage_error` reasons fire earlier, in `probe()`'s own option-shape
+checks (`src/probe/index.ts`), before `openRunSetup` is ever called:
+`--patch` combined with `--allow-outside` outside its supported shape
+(`patch_allow_outside_unsupported`), an unreadable `--patch` file
+(`patch_not_readable`), a `--patch` whose touched paths cannot pick a
+single `--file` for it (`patch_file_ambiguous`), a missing `--file`
+(`file_required`), and a missing `-n`/`--line` (`line_required`). They
+sit outside this table entirely, reporting neither `mutant` nor
+`mutation_probe`, the same as the top-level usage error carve-out
+above.
+
+| `reason` | `mutant` | `mutation_probe` | When it fires |
+| --- | --- | --- | --- |
+| `worktree_allow_outside_unsupported` | absent | absent | `--allow-outside` combined with `--isolation worktree`; refused before containment is even checked |
+| `file_outside_root` | absent | absent | `--file` (or a `--link`) resolves outside the containment root |
+| `probe_in_progress` | absent | absent | the repository- or file-scoped lock is already held by another run |
+| `lock_unavailable` | absent | absent | the lock directory itself could not be acquired (an unwritable lock dir, an ancestor owned by another user) |
+| `stale_probe_marker` | absent | absent | a previous run's in-flight marker was found and could not be safely recovered |
+| `file_not_found` | absent | absent | `--file` does not exist |
+| `stale_worktree` | absent | absent | a leftover worktree-mode marker names a directory this run cannot safely reclaim |
+| `worktree_sync_failed` | absent | absent | syncing the `-i worktree` copy (the tracked-diff apply, or an untracked-file copy) failed |
+| `target_not_synced` | absent | absent | `--file` is gitignored, so `-i worktree` never synced a copy of it to mutate |
+| `backup_verification_failed` | absent | absent | the pre-mutation backup does not hash-match the target right after it was taken |
+| `mutant_not_applicable` | absent | absent | the dry run (before the baseline) found the mutant does not apply -- the string is not on the line, the patch does not apply cleanly, etc. |
+| `git_apply_timeout` | absent | absent | the dry run's own `git apply` hit its bound and was killed |
+| `aborted` | present | present | a SIGINT/SIGTERM landed during the baseline phase (its `--pre`, or the baseline test itself); see the `exitOnSignal` note above for why this is a library-caller-only row |
+| `pre_failed` | present | present | `--pre` exited non-zero during the baseline phase |
+| `baseline_failed` | present | present | the baseline test itself exited non-zero (or timed out) |
+| `target_changed_during_baseline` | present | present | the baseline run rewrote the target (a formatter, a codegen step) before any mutation |
+
+The four `present` rows are exactly the refusals that fire past the dry
+run: `openRunSetup` computes the one mutant this run would apply (the
+`beforeBaseline` hook) BEFORE the baseline runs, so every refusal from
+that point on already has it to report; every `absent` row above fires
+strictly before that point, with no mutant to report yet. `mutant_not_applicable`
+and `git_apply_timeout` are two-site reasons: this table names only their
+setup-phase occurrence, the dry run above. The same two reason strings
+can also be reported later, past the baseline, when the REAL apply (not
+the dry run) fails during the mutant phase itself -- there `mutant` and
+`mutation_probe` are unconditionally present, the same as every other
+mutant-phase outcome (`apply_hash_mismatch`, `restore_failed`,
+`worktree_original_tree_modified`, `timeout`, and the mutant phase's own
+`pre_failed`/`aborted`), because a real apply was already attempted
+against the real target by then; this table's `absent` row for each of
+those two names only the earlier, setup-phase site.
+
+`aborted` is itself a three-site reason, the mirror image of
+`mutant_not_applicable`/`git_apply_timeout` above: this table's `present`
+row names only the baseline-phase pair (an aborted `--pre` or an aborted
+baseline test, both past the dry run, both with a mutant already
+computed to report). Two earlier sites report the same `"aborted"`
+string with neither field, the same as every `absent` row above, because
+both fire before `beforeBaseline` ever runs: the dry run's own abort
+(`src/probe/step.ts`, `prepareMutant`'s `computeMutant` call) and, for
+`-i worktree`, the worktree sync's own abort (`src/probe/isolation.ts`'s
+`abortedResult` helper, surfaced through `session.ts` to `setup.ts`'s
+`openRunSetup`, which hardcodes `reportsMutant: false` for this one site
+rather than trusting `REFUSAL_RESULT_SHAPE.aborted`, precisely because
+that table's `true` is right only for the baseline-phase pair). A
+consumer keying off `reason === "aborted"` alone cannot tell these three
+sites apart; `mutant`/`mutation_probe`'s presence does that instead.
 
 The `file` part of `mutation_probe.mutant`/`verified_applied_via` (the
 `<file>:<line>` header both descriptors start with) is capped at 200
@@ -1055,6 +1215,15 @@ and `logs`, and -- for a mutant that was actually applied -- `mutant`,
 `mutation_probe` (the same four fields to paste into a
 `mutation_probes` report) and `test`. `summary` counts
 `total`/`killed`/`survived`/`inconclusive`/`not_run`.
+
+A failing baseline is one difference from the single-mutant form worth
+naming explicitly: the single probe's CLI envelope remaps it to a
+literal `status: "baseline_failed"` (see the [result shape
+table](#result-shape) above), but a plan's own envelope does not --
+it stays `status: "inconclusive"`, `reason: "baseline_failed"`, the
+library's own pair, unremapped. The plan's top-level envelope also
+carries no `totalDurationMs` at all (the single-mutant form's own
+`totalDurationMs` row does not apply here).
 
 A plan of more than a handful of mutants does not fit the default
 `-m 8000`: the envelope is reduced to that bound like any other (past

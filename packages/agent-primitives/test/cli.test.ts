@@ -10,6 +10,7 @@ import { CommanderError } from "commander";
 import {
   boundText,
   classifyStdoutError,
+  looksLikeFullSuiteTestCommand,
   mapTopLevelError,
   writeAndExitTo,
   parseExecOverride,
@@ -1421,6 +1422,126 @@ describe("cli: probe", () => {
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
+  it("a failing baseline reports status: baseline_failed with a mutation_probe object (result: not_run, a reason) and baseline.exitCode, exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "exit 1",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("baseline_failed");
+    expect(parsed.reason).toBe("baseline_failed");
+    expect(parsed.baseline.exitCode).toBe(1);
+    expect(parsed.mutation_probe.result).toBe("not_run");
+    expect(typeof parsed.mutation_probe.reason).toBe("string");
+    expect(typeof parsed.mutation_probe.result).toBe("string");
+  });
+
+  it("a --pre that fails during the (still unmutated) baseline reports a mutation_probe object (result: not_run, reason: pre_failed), exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "node -e 1",
+      "--pre",
+      "exit 1",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("inconclusive");
+    expect(parsed.reason).toBe("pre_failed");
+    expect(typeof parsed.mutation_probe.result).toBe("string");
+    expect(parsed.mutation_probe.result).toBe("not_run");
+    expect(parsed.mutation_probe.reason).toBe("pre_failed");
+  });
+
+  it("a baseline that rewrites the target reports a mutation_probe object (result: not_run, reason: target_changed_during_baseline), exit 2", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "node -e \"require('fs').writeFileSync('fixture.js', 'REWRITTEN')\"",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("inconclusive");
+    expect(parsed.reason).toBe("target_changed_during_baseline");
+    expect(typeof parsed.mutation_probe.result).toBe("string");
+    expect(parsed.mutation_probe.result).toBe("not_run");
+    expect(parsed.mutation_probe.reason).toBe("target_changed_during_baseline");
+  });
+
   it("a --file that does not exist is usage_error/file_not_found under command probe, with the path in a warning", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "placeholder.js"), "x\n");
@@ -1479,6 +1600,196 @@ describe("cli: probe", () => {
     // raised past option parsing).
     expect(parsed.message).toContain("-t/--test is required");
     expect(parsed.message).toContain("--plan");
+  });
+
+  it("--env NAME=VALUE reaches the baseline and the mutant run; without it the same command fails the baseline", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const testCommand =
+      "node -e \"process.exit(process.env.PROBE_MARKER === '1' ? 0 : 1)\"";
+
+    const withEnv = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      testCommand,
+      "-i",
+      "inplace",
+      "--env",
+      "PROBE_MARKER=1",
+    ]);
+    const parsedWithEnv = JSON.parse(withEnv.stdout);
+    // The command never reads the mutated file, only PROBE_MARKER, so a
+    // real verdict (not baseline_failed) is what proves the baseline saw
+    // the override; "survived" is the correct verdict for a mutant this
+    // command cannot react to.
+    expect(parsedWithEnv.status).toBe("survived");
+    expect(parsedWithEnv.test.env).toEqual({ PROBE_MARKER: "1" });
+    // The run-level echo mirrors what was requested, independent of
+    // which phase actually ran: present here too, not only under
+    // `test.env`.
+    expect(parsedWithEnv.env).toEqual({ PROBE_MARKER: "1" });
+
+    const withoutEnv = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      testCommand,
+      "-i",
+      "inplace",
+    ]);
+    const parsedWithoutEnv = JSON.parse(withoutEnv.stdout);
+    expect(parsedWithoutEnv.status).toBe("baseline_failed");
+  });
+
+  it("--env with no '=' or an empty name is a usage error", async () => {
+    const noEquals = await spawnCli(["probe", "--env", "FOO", "-t", "true"]);
+    expect(noEquals.code).toBe(2);
+    expect(JSON.parse(noEquals.stdout).status).toBe("usage_error");
+
+    const emptyName = await spawnCli([
+      "probe",
+      "--env",
+      "=value",
+      "-t",
+      "true",
+    ]);
+    expect(emptyName.code).toBe(2);
+    expect(JSON.parse(emptyName.stdout).status).toBe("usage_error");
+  });
+
+  it("--env overrides are still visible on a baseline_failed run, at the run level, even though there is no test field", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-r",
+      "y",
+      "-t",
+      "exit 1",
+      "-i",
+      "inplace",
+      "--env",
+      "PROBE_MARKER=1",
+    ]);
+
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("baseline_failed");
+    expect(parsed.test).toBeUndefined();
+    expect(parsed.env).toEqual({ PROBE_MARKER: "1" });
+  });
+
+  it("--env values whose name looks like a credential are redacted, both at the run level and under test.env; other names are echoed verbatim", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "node -e 1",
+      "-i",
+      "inplace",
+      "--env",
+      "GITHUB_TOKEN=super-secret",
+      "--env",
+      "NPM_TOKEN=npm-secret",
+      "--env",
+      "AWS_SECRET_ACCESS_KEY=aws-secret",
+      "--env",
+      "API_KEY=abc",
+      "--env",
+      "DATABASE_PASSWORD=hunter2",
+      "--env",
+      "MY_CREDENTIALS=xyz",
+      // Plural forms of the same words: still their own `_`-delimited
+      // segment, so still redacted.
+      "--env",
+      "MY_SECRETS=xyz",
+      "--env",
+      "API_KEYS=abc",
+      "--env",
+      "AUTH_TOKENS=super-secret",
+      "--env",
+      "PASSWORDS=hunter2",
+      "--env",
+      "PROBE_MARKER=1",
+      // Negative space for the new word-boundary-anchored pattern: each
+      // contains one of the redacted words as a substring, but not as
+      // its own `_`-delimited segment, so neither is redacted.
+      "--env",
+      "TOKENIZER_MODEL=gpt-tokenizer",
+      "--env",
+      "KEYBOARD=qwerty",
+    ]);
+
+    const parsed = JSON.parse(run.stdout);
+    const expectedRedacted = {
+      GITHUB_TOKEN: "<redacted>",
+      NPM_TOKEN: "<redacted>",
+      AWS_SECRET_ACCESS_KEY: "<redacted>",
+      API_KEY: "<redacted>",
+      DATABASE_PASSWORD: "<redacted>",
+      MY_CREDENTIALS: "<redacted>",
+      MY_SECRETS: "<redacted>",
+      API_KEYS: "<redacted>",
+      AUTH_TOKENS: "<redacted>",
+      PASSWORDS: "<redacted>",
+      PROBE_MARKER: "1",
+      TOKENIZER_MODEL: "gpt-tokenizer",
+      KEYBOARD: "qwerty",
+    };
+    expect(parsed.env).toEqual(expectedRedacted);
+    expect(parsed.test.env).toEqual(expectedRedacted);
   });
 
   it("exactly one mutant form is required: none given is usage_error, exit 2", async () => {
@@ -1545,6 +1856,215 @@ describe("cli: probe", () => {
     for (const logPath of logs) {
       expect(fs.existsSync(logPath)).toBe(true);
     }
+  });
+
+  it.each([
+    // A file/pattern forwarded through npm's own "--" separator is a
+    // targeted command, not full-suite, whichever shape names it.
+    ["npm test -- test/x.test.ts", false],
+    ["npm test -- --coverage test/x.test.ts", false],
+    // Nothing but flags after the separator: still full-suite. This is
+    // what makes stripping the leading "--" observable at all, rather
+    // than redundant with "every token starts with -": a bare "--"
+    // itself starts with "-", so a matcher that forgot to strip it
+    // before checking would still call this full-suite by accident (the
+    // separator masquerading as a flag) -- this case only agrees with
+    // that accident when every token after it is a real flag too.
+    ["npm test -- --coverage", true],
+    ["npm test", true],
+    ["npm test --coverage", true],
+    ["npm run test", true],
+    ["npm run test:ci", true],
+    ["npm run test:ci -- test/x.test.ts", false],
+    ["npm run test:ci -- --coverage", true],
+    ["yarn test", true],
+    ["yarn test -- test/x.test.ts", false],
+    ["yarn test -- --coverage", true],
+    ["pnpm test", true],
+    ["pnpm test -- test/x.test.ts", false],
+    ["pnpm test -- --coverage", true],
+    ["npx vitest run --coverage", true],
+    ["npx vitest run test/x.test.ts", false],
+    // A forwarded "--" ahead of vitest's own flags is flags-shaped too,
+    // the same rule as every npm/yarn/pnpm case above: still full-suite.
+    ["npx vitest run -- --coverage", true],
+    ["vitest run", true],
+    ["vitest run -t some-pattern", true],
+    ["npm run testing", false],
+    ["node run-tests.js", false],
+  ] as const)("looksLikeFullSuiteTestCommand(%j) is %j", (cmd, expected) => {
+    expect(looksLikeFullSuiteTestCommand(cmd)).toBe(expected);
+  });
+
+  it("a full-suite-shaped command (npm test) with no --timeout prints one stderr line naming --timeout before the baseline starts", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        name: "full-suite-fixture",
+        version: "1.0.0",
+        scripts: { test: 'node -e "process.exit(0)"' },
+      }),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "npm test",
+      "-i",
+      "inplace",
+    ]);
+
+    expect(run.stderr).toContain("looks like a full test suite");
+    expect(run.stderr).toContain("--timeout");
+  });
+
+  it("a full-suite-shaped command with --timeout given prints no hint", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        name: "full-suite-fixture",
+        version: "1.0.0",
+        scripts: { test: 'node -e "process.exit(0)"' },
+      }),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "npm test",
+      "-i",
+      "inplace",
+      "--timeout",
+      "30",
+    ]);
+
+    expect(run.stderr).not.toContain("looks like a full test suite");
+  });
+
+  it("a targeted command (vitest run test/x.test.ts) prints no full-suite hint", async () => {
+    const run = await spawnCli([
+      "probe",
+      "-t",
+      "npx vitest run test/x.test.ts",
+    ]);
+    expect(run.stderr).not.toContain("looks like a full test suite");
+  });
+
+  it("prints the full-suite hint before the baseline run starts, not after", async () => {
+    // Observable ordering, not just presence: the test command writes a
+    // marker file the instant it runs, so "before the baseline starts"
+    // is asserted against a real event this run produced rather than
+    // inferred from stderr appearing at all. Streamed (not collected
+    // after close), so the hint's own arrival is observed live -- the
+    // assertion below checks, at the exact moment the hint chunk
+    // reaches this handler, whether the marker file exists yet. A
+    // cross-process wall-clock comparison (hint-seen `Date.now()` here
+    // vs. a timestamp the child wrote to the marker) would carry the
+    // scheduling and clock-resolution noise of two separate processes;
+    // this is a same-process, single-tick fact instead: the marker
+    // either exists at that instant or it does not.
+    const repo = initRepo();
+    const markerPath = path.join(makeTmpDir(), "baseline-started.marker");
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    // A script FILE, not a `-e "..."` string embedded in the shell
+    // command itself: `JSON.stringify(markerPath)` already quotes the
+    // path with double quotes, which would collide with (and truncate)
+    // an outer `node -e "..."` wrapper once npm hands the whole script
+    // to `sh -c`. Writing it to a file sidesteps that nesting entirely.
+    fs.writeFileSync(
+      path.join(repo, "write-marker.js"),
+      `require("fs").writeFileSync(${JSON.stringify(
+        markerPath,
+      )}, String(Date.now()));\n`,
+    );
+    fs.writeFileSync(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        name: "full-suite-fixture",
+        version: "1.0.0",
+        scripts: { test: "node write-marker.js" },
+      }),
+    );
+    commitAll(repo);
+
+    const child = spawnCliRaw([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "npm test",
+      "-i",
+      "inplace",
+    ]);
+    child.stderr.setEncoding("utf8");
+    let hintSeen = false;
+    let markerExistedWhenHintArrived: boolean | undefined;
+    child.stderr.on("data", (chunk: string) => {
+      if (!hintSeen && chunk.includes("looks like a full test suite")) {
+        hintSeen = true;
+        markerExistedWhenHintArrived = fs.existsSync(markerPath);
+      }
+    });
+    await collectCli(child);
+
+    expect(hintSeen).toBe(true);
+    expect(markerExistedWhenHintArrived).toBe(false);
+    expect(fs.existsSync(markerPath)).toBe(true);
   });
 
   it("exactly one mutant form is required: two given (-r and -p) is usage_error, exit 2", async () => {
