@@ -7,10 +7,10 @@
   `test/template-markers.test.ts` in
   `run-state-lifecycle-and-markers.md` and `review-gate-and-waivers.md`
   (the only two bundle docs with line-numbered citations into it)
-  against the reformatted file: the reformat's only hunk collapses
-  `test/template-markers.test.ts:246-248` from three lines to two
-  (`const testEvidenceIndex = implementationTemplate.indexOf(` wraps
-  onto one line), below every cited range in the bundle (the highest is
+  against the reformatted file: the reformat's only hunk collapses the
+  three lines that were 246-248 before this commit into two, now
+  `test/template-markers.test.ts:246-247#"const testEvidenceIndex ="`,
+  below every cited range in the bundle (the highest is
   `test/template-markers.test.ts:187-193`), so no cited line or anchor
   moved; `okf-kit check --json docs/okf --require-anchors` returns the
   same finding set before and after the reformat. No bundle doc cites a
