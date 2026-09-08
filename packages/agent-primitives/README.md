@@ -815,6 +815,32 @@ that bound is `status: "inconclusive"`, `reason: "git_apply_timeout"`,
 exit `2`, kept apart from `mutant_not_applicable`, which means the patch
 itself did not apply.
 
+`--env NAME=VALUE` (repeatable) sets an environment variable for both
+`--pre` and `-t`, in both the baseline and the mutant run (they share one
+merged environment, `process.env` plus every `--env` given): the
+alternative -- smuggling `HOME=<dir> npx vitest ...` into `-t` itself,
+needed whenever the suite under test requires an isolated environment
+variable the caller cannot otherwise set for a plain shell command --
+is no longer necessary. Every override actually given is echoed back
+under the mutant's `test.env` in the result, so the isolation a caller
+asked for is visible in the report rather than only inferable from the
+command string. No `=` at all, or an empty name before it, is a usage
+error rather than a silently dropped variable. Not available under
+`--plan`: combined with `--plan` it is refused outright as a usage
+error, the same way every other single-mutant-only option is.
+
+With no `--timeout` given and a test command that looks like a whole
+test suite rather than one targeted file (`npm test`, or `vitest run` --
+bare or through `npx` -- with nothing after it but flags), `probe`
+prints one line to stderr before the baseline starts, naming that the
+baseline and the mutant run the command serially with no time bound and
+that `--timeout` caps each run: worth knowing before a probe over, say,
+`npx vitest run --coverage` sits for minutes running the whole suite
+twice. A targeted command such as `vitest run test/x.test.ts` (a file
+argument after `run`) prints nothing; passing `--timeout` also
+suppresses it, whatever the command looks like. The stderr line is
+never part of the JSON envelope.
+
 Every `--pre`/`-t` invocation runs in a process group of its own, and the
 timeout, `SIGINT`, and `SIGTERM` all signal that whole group: the timeout
 sends `SIGTERM` and escalates to `SIGKILL` after a short grace, while a
@@ -952,20 +978,25 @@ before the containment check, the lock, the in-flight marker or any
 worktree, so a refusal leaves nothing behind and applies the same
 whether `--file` was given explicitly or is derived from the patch.
 
-Output beside the envelope: `status` (`killed`, `survived`, or
-`inconclusive`), `reason` (when inconclusive), `mutant: { file, line,
-before, after, form }` (plus `diff`, for a `-p/--patch` mutant whose
-change is not fully shown by `before`/`after` alone; see above),
-`mutation_probe: { mutant, verified_applied_via,
-result, restored_verified }` (paste straight into an implementer's
-`mutation_probes` output field), `baseline: { exitCode, durationMs,
-logPath, timedOut }`, `test: { command, exitCode, durationMs, timedOut,
-stdoutTail, stderrTail, logPath }`, `isolation: { mode, path, linked,
-syncedTrackedFiles, syncedUntrackedFiles }` (`path` is the worktree
-directory for `worktree`, `null` for `inplace`; `linked` lists the
-absolute source-tree paths symlinked in; `syncedTrackedFiles` and
-`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for
-every `inplace` run).
+### Result shape
+
+The single source of truth for a consumer of `probe`'s JSON: every field
+beside the common envelope (`tool`, `version`, `command`, `status`,
+`durationMs`, `cwd`, `truncated`, `logs`, `warnings`; see
+[Output shape](#output-shape)), what type it is, and when it is present.
+Update this table in the same change as any change to the shape it
+describes.
+
+| Field | Type | Present | Notes |
+| --- | --- | --- | --- |
+| `status` | string | always | `"killed"`, `"survived"`, `"inconclusive"`, `"usage_error"`, or `"baseline_failed"`. The last is the CLI envelope's own literal status for a failing baseline (the library's `probe()` itself still returns `status: "inconclusive"`, `reason: "baseline_failed"`; the CLI remaps it so a consumer does not also have to read `reason` to tell a failing baseline apart from every other inconclusive outcome). Same exit-code class either way (`cannot-conclude`, exit `2`), so a caller gating on the exit code alone sees no difference. |
+| `reason` | string | whenever `status` is not a clean verdict | machine-readable cause, e.g. `"baseline_failed"`, `"pre_failed"`, `"restore_failed"` |
+| `mutant` | `{ file, line, before, after, form, diff? }` | once the mutant has been computed | `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above) |
+| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason? }` | once the mutant has been computed, a failing baseline included | `result` is always a string (never omitted once this object is present), so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for a failing baseline, whose `reason` names `"baseline_failed"`. Paste straight into an implementer's `mutation_probes` output field. |
+| `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | |
+| `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given, echoing exactly those overrides (never the whole merged environment) |
+| `isolation` | `{ mode, path, linked, syncedTrackedFiles, syncedUntrackedFiles }` | always | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths symlinked in; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
+| `totalDurationMs` | number | always | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
 
 The `file` part of `mutation_probe.mutant`/`verified_applied_via` (the
 `<file>:<line>` header both descriptors start with) is capped at 200

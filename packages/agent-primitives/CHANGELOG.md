@@ -94,6 +94,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already bound. A short, ordinary path (every existing fixture) is
   unaffected.
 
+- `probe`'s CLI envelope for a failing baseline (task `b00efca1`): a
+  failing baseline used to report `status: "inconclusive"`/`reason:
+  "baseline_failed"` with `mutation_probe` entirely absent, so a
+  consumer that read `mutation_probe.result` on every outcome without
+  shape-sniffing threw on this one. The CLI now
+  reports a literal `status: "baseline_failed"` for this case (the exit
+  code is unchanged: same `cannot-conclude` class, exit `2`, so a caller
+  gating on the exit code alone sees no difference), and the library's
+  own `ProbeResult` (`probe()` in `src/probe/index.ts`) now always
+  carries a `mutation_probe` object here too (`result: "not_run"`, a
+  `reason: "baseline_failed"`, and the mutant this run would have
+  applied -- already computed by the dry run before the baseline ever
+  started, so there is a real mutant to describe rather than a
+  placeholder). `baseline.exitCode` was already reported and is
+  unchanged. Covered by a library-level test in `test/probe.test.ts` and
+  a CLI-level test in `test/cli.test.ts` that spawns the built CLI
+  against a failing baseline and asserts the envelope shape.
+
 ### Added
 
 - A sweep of `-m` budgets against a real `probe --plan` envelope (in-process
@@ -394,6 +412,31 @@ derive it from the patch)` / `probe: -n/--line is required for
   warns when the two differ (`-n 5 differs from the patch's first
 changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
   mutate exactly the line `-n` names.
+
+- `probe --env NAME=VALUE` (repeatable, task `b00efca1`): applied to
+  both the baseline and the mutant's `--pre`/`-t` runs (they share one
+  merged environment), and echoed back under the mutant's `test.env` so
+  the isolation a caller asked for is visible in the report instead of
+  only inferable from the command string. Fixes a friction measured
+  across 109 real `probe` invocations in one batch: `agent-preflight`'s
+  suite needs an isolated `HOME`, and every one of those invocations had
+  to smuggle `HOME=<dir> npx vitest ...` into `-t` instead. No `=`, or
+  an empty name before it, is a usage error. Not wired into `--plan`:
+  combining `--env` with `--plan` is refused outright (added to
+  `PLAN_EXCLUSIVE_OPTIONS` in `src/cli.ts`) rather than silently
+  ignored.
+- `probe`: a one-line stderr notice, printed before the baseline starts,
+  when no `--timeout` was given and the test command looks like a whole
+  test suite rather than one targeted file (`npm test`, or `vitest run`
+  -- bare or through `npx` -- with nothing after it but flags); a
+  targeted command such as `vitest run test/x.test.ts` prints nothing.
+  Names that the baseline and the mutant run the command serially with
+  no bound and that `--timeout` caps each run. The result also now
+  carries `totalDurationMs` (wall-clock time of the whole `probe()`
+  call, every branch), the same field name and meaning `verify`'s
+  result already carries. Motivated by the same friction as `--env`
+  above: a probe over a full-suite command runs it twice with no
+  visible runtime hint.
 
 ### Fixed
 
