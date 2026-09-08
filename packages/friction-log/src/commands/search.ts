@@ -1,7 +1,7 @@
-import { FrictionDb, type ListFrictionsFilter } from '../db.js';
-import { defaultDbPath } from '../paths.js';
-import type { Friction, FrictionSource, FrictionStatus } from '../types.js';
-import { parseAge } from './list.js';
+import { FrictionDb, type ListFrictionsFilter } from "../db.js";
+import { defaultDbPath } from "../paths.js";
+import type { Friction, FrictionSource, FrictionStatus } from "../types.js";
+import { parseAge } from "./list.js";
 
 export interface SearchCommandInput {
   query: string;
@@ -20,7 +20,7 @@ export interface SearchCommandOutput {
 
 export function runSearch(input: SearchCommandInput): SearchCommandOutput {
   if (!input.query || !input.query.trim()) {
-    throw new Error('friction-log: search query must not be empty');
+    throw new Error("friction-log: search query must not be empty");
   }
   const db = new FrictionDb(input.dbPath ?? defaultDbPath());
   try {
@@ -42,7 +42,7 @@ export function runSearch(input: SearchCommandInput): SearchCommandOutput {
       // MATCH expression. Turn it into a hint pointing at the FTS5 docs.
       if (/fts5|MATCH|unterminated|syntax error|near "/i.test(msg)) {
         throw new Error(
-          `friction-log: invalid FTS5 query "${input.query}". See https://sqlite.org/fts5.html#full_text_query_syntax`
+          `friction-log: invalid FTS5 query "${input.query}". See https://sqlite.org/fts5.html#full_text_query_syntax`,
         );
       }
       throw err;

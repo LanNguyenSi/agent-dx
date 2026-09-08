@@ -7,7 +7,14 @@ function code(text: string, fileName = "fixture.ts"): FileTarget {
 }
 
 const config: ResolvedConfig = {
-  packs: { "agent-tics": false, "prose-slop": false, "comment-slop": true, "code-slop": false, "ui-slop": false, "placement-slop": false },
+  packs: {
+    "agent-tics": false,
+    "prose-slop": false,
+    "comment-slop": true,
+    "code-slop": false,
+    "ui-slop": false,
+    "placement-slop": false,
+  },
   ruleOverrides: {},
   ignorePaths: [],
   treatAsProse: [],
@@ -116,7 +123,10 @@ function f() {
 
 describe("comment-slop/orphan-markers", () => {
   it("flags `// removed`", () => {
-    const v = run("comment-slop/orphan-markers", code(`// removed\nfunction x() { return 1; }\n`));
+    const v = run(
+      "comment-slop/orphan-markers",
+      code(`// removed\nfunction x() { return 1; }\n`),
+    );
     expect(v).toHaveLength(1);
   });
 
@@ -131,7 +141,9 @@ describe("comment-slop/orphan-markers", () => {
   it("does not flag a real comment that mentions the word 'removed'", () => {
     const v = run(
       "comment-slop/orphan-markers",
-      code(`// Items removed from the queue are returned to the caller.\nfunction pop() { return 1; }\n`),
+      code(
+        `// Items removed from the queue are returned to the caller.\nfunction pop() { return 1; }\n`,
+      ),
     );
     expect(v).toHaveLength(0);
   });
@@ -210,14 +222,21 @@ describe("comment-slop/ascii-banner", () => {
   });
 
   it("does not flag a short `// --` comment", () => {
-    const v = run("comment-slop/ascii-banner", code(`// --\nfunction f() { return 1; }\n`));
+    const v = run(
+      "comment-slop/ascii-banner",
+      code(`// --\nfunction f() { return 1; }\n`),
+    );
     expect(v).toHaveLength(0);
   });
 });
 
 describe("comment-slop applies-to gating", () => {
   it("does not run on .md files", () => {
-    const proseFile: FileTarget = { path: "a.md", text: "// removed\n", kind: "prose" };
+    const proseFile: FileTarget = {
+      path: "a.md",
+      text: "// removed\n",
+      kind: "prose",
+    };
     for (const rule of commentSlopPack.rules) {
       expect(rule.appliesTo(proseFile)).toBe(false);
     }

@@ -1,9 +1,13 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { loadConfig, type FrictionLogConfig, type SyncExportConfig } from '../config.js';
-import { FrictionDb } from '../db.js';
-import { defaultDbPath } from '../paths.js';
-import { frictionToExport, type ExportRecord } from './export.js';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import {
+  loadConfig,
+  type FrictionLogConfig,
+  type SyncExportConfig,
+} from "../config.js";
+import { FrictionDb } from "../db.js";
+import { defaultDbPath } from "../paths.js";
+import { frictionToExport, type ExportRecord } from "./export.js";
 
 export interface SyncExportCommandInput {
   dbPath?: string;
@@ -23,17 +27,23 @@ export interface SyncExportCommandOutput {
  * the file; unlike the write-through helper below, silence would be
  * surprising here.
  */
-export function runSyncExport(input: SyncExportCommandInput = {}): SyncExportCommandOutput {
+export function runSyncExport(
+  input: SyncExportCommandInput = {},
+): SyncExportCommandOutput {
   const config = loadConfig(input.configPath);
   if (!config.syncExport) {
     throw new Error(
       'friction-log: sync-export requires a "sync_export" block (path + origin) in config.yml, or the ' +
-        'FRICTION_LOG_SYNC_EXPORT_PATH / FRICTION_LOG_SYNC_EXPORT_ORIGIN env vars'
+        "FRICTION_LOG_SYNC_EXPORT_PATH / FRICTION_LOG_SYNC_EXPORT_ORIGIN env vars",
     );
   }
   const dbPath = input.dbPath ?? defaultDbPath();
   const count = writeSyncExportFile(dbPath, config.syncExport);
-  return { path: config.syncExport.path, origin: config.syncExport.origin, count };
+  return {
+    path: config.syncExport.path,
+    origin: config.syncExport.origin,
+    count,
+  };
 }
 
 /**
@@ -56,8 +66,14 @@ export function runSyncExport(input: SyncExportCommandInput = {}): SyncExportCom
  * `config` (file.ts, which needs it beforehand anyway to merge sink
  * options, and would otherwise load it twice).
  */
-export function maybeSyncExport(params: { dbPath: string; configPath?: string }): void;
-export function maybeSyncExport(params: { dbPath: string; config: FrictionLogConfig }): void;
+export function maybeSyncExport(params: {
+  dbPath: string;
+  configPath?: string;
+}): void;
+export function maybeSyncExport(params: {
+  dbPath: string;
+  config: FrictionLogConfig;
+}): void;
 export function maybeSyncExport(params: {
   dbPath: string;
   configPath?: string;
@@ -69,7 +85,9 @@ export function maybeSyncExport(params: {
     if (!config.syncExport) return;
     writeSyncExportFile(dbPath, config.syncExport);
   } catch (err) {
-    process.stderr.write(`friction-log: warning: sync-export write-through failed: ${(err as Error).message}\n`);
+    process.stderr.write(
+      `friction-log: warning: sync-export write-through failed: ${(err as Error).message}\n`,
+    );
   }
 }
 
@@ -77,18 +95,21 @@ function writeSyncExportFile(dbPath: string, cfg: SyncExportConfig): number {
   const db = new FrictionDb(dbPath);
   try {
     const frictions = db.listAllFrictionsForSyncExport();
-    const records: ExportRecord[] = frictions.map((f) => ({ ...frictionToExport(f), tags: db.tagsFor(f.id) }));
+    const records: ExportRecord[] = frictions.map((f) => ({
+      ...frictionToExport(f),
+      tags: db.tagsFor(f.id),
+    }));
     // Fixed key order ({ origin, records }, ExportRecord fields always built
     // in the same order by frictionToExport) and no exportedAt/timestamp
     // field: two runs with no intervening mutation produce byte-identical
     // JSON, which is exploited immediately below to skip the write (and the
     // mtime bump) entirely when nothing actually changed.
     const payload = { origin: cfg.origin, records };
-    const json = JSON.stringify(payload, null, 2) + '\n';
+    const json = JSON.stringify(payload, null, 2) + "\n";
 
     let existing: string | null = null;
     try {
-      existing = readFileSync(cfg.path, 'utf8');
+      existing = readFileSync(cfg.path, "utf8");
     } catch {
       existing = null;
     }
@@ -101,7 +122,7 @@ function writeSyncExportFile(dbPath: string, cfg: SyncExportConfig): number {
       // scan racing an operator-run command) must not share a temp file,
       // or the rename can publish a mix of two snapshots.
       const tmpPath = `${cfg.path}.${process.pid}.tmp`;
-      writeFileSync(tmpPath, json, 'utf8');
+      writeFileSync(tmpPath, json, "utf8");
       renameSync(tmpPath, cfg.path);
     }
     return records.length;

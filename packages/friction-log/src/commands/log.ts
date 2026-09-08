@@ -1,7 +1,7 @@
-import { FrictionDb, type InsertFrictionInput } from '../db.js';
-import { defaultDbPath } from '../paths.js';
-import type { Severity } from '../types.js';
-import { maybeSyncExport } from './sync-export.js';
+import { FrictionDb, type InsertFrictionInput } from "../db.js";
+import { defaultDbPath } from "../paths.js";
+import type { Severity } from "../types.js";
+import { maybeSyncExport } from "./sync-export.js";
 
 export interface LogCommandInput {
   title: string;
@@ -28,14 +28,16 @@ export function runLog(input: LogCommandInput): LogCommandOutput {
     if (input.recurrenceOfId !== undefined) {
       const parent = db.getFriction(input.recurrenceOfId);
       if (!parent) {
-        throw new Error(`friction-log: --recurrence-of ${input.recurrenceOfId} does not match any friction`);
+        throw new Error(
+          `friction-log: --recurrence-of ${input.recurrenceOfId} does not match any friction`,
+        );
       }
     }
     // Normalise empty string to null so a `--session ''` (or a wrapper
     // that always passes the flag with a possibly-empty value) does not
     // sneak past the upsert and then trip the FK on the friction insert.
     const sessionId =
-      typeof input.sessionId === 'string' && input.sessionId !== ''
+      typeof input.sessionId === "string" && input.sessionId !== ""
         ? input.sessionId
         : null;
     // Sessions row must exist before the friction insert, otherwise the
@@ -56,11 +58,15 @@ export function runLog(input: LogCommandInput): LogCommandOutput {
       severity: input.severity ?? null,
       sessionId,
       recurrenceOfId: input.recurrenceOfId ?? null,
-      source: 'manual',
+      source: "manual",
     };
     const f = db.insertFriction(insert);
     maybeSyncExport({ dbPath, configPath: input.configPath });
-    return { id: f.id, capturedAt: f.capturedAt, recurrenceOfId: f.recurrenceOfId };
+    return {
+      id: f.id,
+      capturedAt: f.capturedAt,
+      recurrenceOfId: f.recurrenceOfId,
+    };
   } finally {
     db.close();
   }

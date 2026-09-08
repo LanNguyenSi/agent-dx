@@ -1,4 +1,10 @@
-import type { FileTarget, PackDefinition, Rule, RuleContext, Violation } from "../types.js";
+import type {
+  FileTarget,
+  PackDefinition,
+  Rule,
+  RuleContext,
+  Violation,
+} from "../types.js";
 import { offsetToLineCol } from "../util/text.js";
 
 // ─────────────────────────── shared helpers ───────────────────────────
@@ -182,12 +188,19 @@ function expandShortHex(hex: string): string {
   // `#abc` → `aabbcc`; `#aabbcc` → `aabbcc`
   const stripped = hex.replace(/^#/, "");
   if (stripped.length === 3) {
-    return stripped.split("").map((c) => c + c).join("");
+    return stripped
+      .split("")
+      .map((c) => c + c)
+      .join("");
   }
   if (stripped.length === 6) return stripped;
   // 4- or 8-char hex with alpha — strip alpha
   if (stripped.length === 4) {
-    return stripped.slice(0, 3).split("").map((c) => c + c).join("");
+    return stripped
+      .slice(0, 3)
+      .split("")
+      .map((c) => c + c)
+      .join("");
   }
   if (stripped.length === 8) return stripped.slice(0, 6);
   return "";
@@ -244,7 +257,10 @@ function classifyColor(token: string): ColorClass {
     return out;
   }
   // hsl()/hsla()
-  const hslMatch = /^hsla?\(\s*(-?\d+(?:\.\d+)?)\s*(?:deg)?[\s,]+(\d+(?:\.\d+)?)%[\s,]+(\d+(?:\.\d+)?)%/.exec(t);
+  const hslMatch =
+    /^hsla?\(\s*(-?\d+(?:\.\d+)?)\s*(?:deg)?[\s,]+(\d+(?:\.\d+)?)%[\s,]+(\d+(?:\.\d+)?)%/.exec(
+      t,
+    );
   if (hslMatch) {
     let h = Number(hslMatch[1]);
     const s = Number(hslMatch[2]) / 100;
@@ -351,7 +367,10 @@ const aiColorPalette: Rule = {
             file,
             grad.startOffset,
             grad.endOffset,
-            text.slice(grad.startOffset, Math.min(grad.endOffset, grad.startOffset + 80)),
+            text.slice(
+              grad.startOffset,
+              Math.min(grad.endOffset, grad.startOffset + 80),
+            ),
             "Purple/violet + cyan/teal gradient — the signature LLM color combo. Pick a palette that wasn't auto-generated.",
           ),
         );
@@ -448,8 +467,7 @@ const animateLayoutProperties: Rule = {
     // (b) `transition: <props>` and `transition-property: <props>`. Match
     // declarations across the whole file (declarations outside any rule
     // still apply for the lint).
-    const transitionRe =
-      /\btransition(?:-property)?\s*:\s*([^;}]+)/gi;
+    const transitionRe = /\btransition(?:-property)?\s*:\s*([^;}]+)/gi;
     let tm: RegExpExecArray | null;
     while ((tm = transitionRe.exec(text)) !== null) {
       const value = tm[1];
@@ -469,7 +487,14 @@ const animateLayoutProperties: Rule = {
             ? `\`transition: all\` animates every changed property, including width/height/padding/margin. Name the properties you actually want to transition.`
             : `\`transition\` on layout property \`${propName}\` — animates layout on every frame. Use \`transform\` / \`opacity\`.`;
           violations.push(
-            makeViolation(animateLayoutProperties, file, start, end, tm[0], reason),
+            makeViolation(
+              animateLayoutProperties,
+              file,
+              start,
+              end,
+              tm[0],
+              reason,
+            ),
           );
           break; // one violation per declaration is enough
         }
@@ -540,7 +565,13 @@ const MONOSPACE_FONTS = new Set([
   "cascadia mono",
 ]);
 
-const TOP_LEVEL_SELECTORS = new Set([":root", "html", "body", "html, body", "body, html"]);
+const TOP_LEVEL_SELECTORS = new Set([
+  ":root",
+  "html",
+  "body",
+  "html, body",
+  "body, html",
+]);
 
 function normalizeSelector(sel: string): string {
   return sel.trim().replace(/\s+/g, " ").toLowerCase();
@@ -550,7 +581,12 @@ function parseFontFamilyValue(value: string): string[] {
   // split on commas, strip quotes + whitespace
   return value
     .split(",")
-    .map((part) => part.trim().replace(/^['"]|['"]$/g, "").toLowerCase())
+    .map((part) =>
+      part
+        .trim()
+        .replace(/^['"]|['"]$/g, "")
+        .toLowerCase(),
+    )
     .filter((part) => part.length > 0);
 }
 
@@ -571,7 +607,10 @@ const monospaceEverywhere: Rule = {
       const selectorText = text.slice(cursor, block.openIndex);
       cursor = block.closeIndex;
       // Trim leading `}` / `;` etc. Take the substring after the last `}` or `;` (works for sequential rules).
-      const lastTerm = Math.max(selectorText.lastIndexOf("}"), selectorText.lastIndexOf(";"));
+      const lastTerm = Math.max(
+        selectorText.lastIndexOf("}"),
+        selectorText.lastIndexOf(";"),
+      );
       const selector = normalizeSelector(selectorText.slice(lastTerm + 1));
       if (!TOP_LEVEL_SELECTORS.has(selector)) continue;
 

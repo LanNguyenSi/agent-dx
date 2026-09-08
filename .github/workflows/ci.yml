@@ -553,14 +553,13 @@ jobs:
         run: npm run lint --if-present
 
       # Allowlisted rather than run for every matrix entry: the list names
-      # the packages that define a `format:check` script AND pass it today
-      # (agent-dev-kit, agent-primitives, mcp-token-audit, okf-kit).
-      # friction-log, orchestrator-workflow and slop-detector define the
-      # script but are red under it and join the list once they are
-      # formatted; git-batch-cli and github-api-tool define no such
-      # script. Grow this list as packages become format-clean.
+      # every package that defines a `format:check` script (agent-dev-kit,
+      # agent-primitives, friction-log, mcp-token-audit, okf-kit,
+      # orchestrator-workflow, slop-detector). git-batch-cli and
+      # github-api-tool define no such script. Grow this list when a new
+      # package adds the script.
       - name: Format check
-        if: contains(fromJSON('["agent-dev-kit","agent-primitives","mcp-token-audit","okf-kit"]'), matrix.package)
+        if: contains(fromJSON('["agent-dev-kit","agent-primitives","friction-log","mcp-token-audit","okf-kit","orchestrator-workflow","slop-detector"]'), matrix.package)
         run: npm run format:check
 
       - name: Test

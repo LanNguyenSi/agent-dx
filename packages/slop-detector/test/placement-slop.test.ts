@@ -886,7 +886,10 @@ describe("placement-slop: packages/*/README.md rollout (agent-dx #80e4743d)", ()
     fs.mkdirSync(path.join(tmp, "packages", "x"), { recursive: true });
     const evidenceLine =
       "As of 2026-08-24 (n=8), the low tier reached accept a median 320 seconds slower.\n";
-    fs.writeFileSync(path.join(tmp, "packages", "x", "README.md"), evidenceLine);
+    fs.writeFileSync(
+      path.join(tmp, "packages", "x", "README.md"),
+      evidenceLine,
+    );
     fs.writeFileSync(path.join(tmp, "README.md"), evidenceLine);
   });
 
@@ -915,9 +918,9 @@ describe("placement-slop: packages/*/README.md rollout (agent-dx #80e4743d)", ()
           v.ruleId === "placement-slop/dated-evidence",
       ),
     ).toBe(true);
-    expect(
-      summary.violations.some((v) => v.path === rootReadmePath),
-    ).toBe(false);
+    expect(summary.violations.some((v) => v.path === rootReadmePath)).toBe(
+      false,
+    );
   });
 });
 
@@ -978,7 +981,11 @@ describe("placement-slop: a bare '~/' allow entry stays narrow", () => {
   });
 
   it("does not fire at all on a bare ~/ idiom alone", () => {
-    const v = checkText("Clone your work into ~/git before running the sweep.", "x/SKILL.md", opts);
+    const v = checkText(
+      "Clone your work into ~/git before running the sweep.",
+      "x/SKILL.md",
+      opts,
+    );
     expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
   });
 });
@@ -1023,7 +1030,11 @@ describe("placement-slop: lowercase org-marker vs. a lowercase GitHub URL allow"
   });
 
   it("still fires org-marker on a lowercase non-URL occurrence", () => {
-    const v = checkText("Clone via ~/../lannguyensi/x before running.", "x/SKILL.md", opts);
+    const v = checkText(
+      "Clone via ~/../lannguyensi/x before running.",
+      "x/SKILL.md",
+      opts,
+    );
     const hit = v.find((x) => x.ruleId === "placement-slop/org-marker");
     expect(hit).toBeDefined();
     expect(hit?.matched).toBe("lannguyensi");

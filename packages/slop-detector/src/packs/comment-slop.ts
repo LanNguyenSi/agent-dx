@@ -1,6 +1,18 @@
 import type { TSESTree } from "@typescript-eslint/types";
-import type { FileTarget, PackDefinition, Rule, RuleContext, Violation } from "../types.js";
-import { isTypeScriptOrJavaScript, parseTsFile, walk, type AnyNode, type ParsedTsFile } from "../util/ts-ast.js";
+import type {
+  FileTarget,
+  PackDefinition,
+  Rule,
+  RuleContext,
+  Violation,
+} from "../types.js";
+import {
+  isTypeScriptOrJavaScript,
+  parseTsFile,
+  walk,
+  type AnyNode,
+  type ParsedTsFile,
+} from "../util/ts-ast.js";
 
 function appliesToCode(file: FileTarget): boolean {
   return isTypeScriptOrJavaScript(file);
@@ -28,7 +40,12 @@ function makeViolation(
   };
 }
 
-function commentLoc(comment: TSESTree.Comment): { line: number; column: number; endLine: number; endColumn: number } {
+function commentLoc(comment: TSESTree.Comment): {
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+} {
   return {
     line: comment.loc.start.line,
     column: comment.loc.start.column + 1,
@@ -37,7 +54,12 @@ function commentLoc(comment: TSESTree.Comment): { line: number; column: number; 
   };
 }
 
-function nodeLoc(node: TSESTree.Node): { line: number; column: number; endLine: number; endColumn: number } {
+function nodeLoc(node: TSESTree.Node): {
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+} {
   return {
     line: node.loc.start.line,
     column: node.loc.start.column + 1,
@@ -48,7 +70,9 @@ function nodeLoc(node: TSESTree.Node): { line: number; column: number; endLine: 
 
 // ─────────────────────────── Rule 1: jsdoc on trivial accessor ────────────
 
-function isTrivialBody(body: TSESTree.BlockStatement | TSESTree.Expression | null | undefined): boolean {
+function isTrivialBody(
+  body: TSESTree.BlockStatement | TSESTree.Expression | null | undefined,
+): boolean {
   if (!body) return false;
   if (body.type !== "BlockStatement") {
     // Arrow with expression body is trivial only if the expression itself is.
@@ -74,11 +98,16 @@ function isTrivialExpression(expr: TSESTree.Node): boolean {
     case "ThisExpression":
       return true;
     case "MemberExpression":
-      return !expr.computed && (expr.object.type === "ThisExpression" || expr.object.type === "Identifier");
+      return (
+        !expr.computed &&
+        (expr.object.type === "ThisExpression" ||
+          expr.object.type === "Identifier")
+      );
     case "AssignmentExpression":
       return (
         expr.operator === "=" &&
-        (expr.left.type === "Identifier" || expr.left.type === "MemberExpression") &&
+        (expr.left.type === "Identifier" ||
+          expr.left.type === "MemberExpression") &&
         isTrivialExpression(expr.right)
       );
     case "ArrowFunctionExpression":
@@ -88,13 +117,19 @@ function isTrivialExpression(expr: TSESTree.Node): boolean {
   }
 }
 
-function findPrecedingJsDoc(ast: ParsedTsFile, node: TSESTree.Node): TSESTree.Comment | null {
+function findPrecedingJsDoc(
+  ast: ParsedTsFile,
+  node: TSESTree.Node,
+): TSESTree.Comment | null {
   const targetStart = node.range?.[0] ?? node.loc.start.line;
   const comments = ast.comments ?? [];
   let candidate: TSESTree.Comment | null = null;
   for (const c of comments) {
     const end = c.range?.[1] ?? -1;
-    if (end <= (typeof targetStart === "number" ? targetStart : Number.MAX_SAFE_INTEGER)) {
+    if (
+      end <=
+      (typeof targetStart === "number" ? targetStart : Number.MAX_SAFE_INTEGER)
+    ) {
       if (c.type === "Block" && c.value.startsWith("*")) {
         const linesBetween = node.loc.start.line - c.loc.end.line;
         if (linesBetween >= 0 && linesBetween <= 1) {
@@ -124,7 +159,10 @@ const jsdocOnTrivialAccessor: Rule = {
     walk(ast as unknown as AnyNode, (node) => {
       let candidate: TSESTree.Node | null = null;
       let body: TSESTree.BlockStatement | TSESTree.Expression | null = null;
-      if (node.type === "MethodDefinition" && (node.kind === "get" || node.kind === "set")) {
+      if (
+        node.type === "MethodDefinition" &&
+        (node.kind === "get" || node.kind === "set")
+      ) {
         candidate = node;
         body = node.value.body ?? null;
       } else if (node.type === "FunctionDeclaration" && node.body) {
@@ -161,9 +199,35 @@ const jsdocOnTrivialAccessor: Rule = {
 // ─────────────────────────── Rule 2: comment restates next line ───────────
 
 const STOPWORDS = new Set([
-  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have",
-  "in", "into", "is", "it", "its", "of", "on", "or", "over", "that", "the",
-  "this", "to", "was", "were", "will", "with",
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "has",
+  "have",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "of",
+  "on",
+  "or",
+  "over",
+  "that",
+  "the",
+  "this",
+  "to",
+  "was",
+  "were",
+  "will",
+  "with",
 ]);
 
 const SIGNIFICANT_WORD = /[a-z][a-z0-9]+/gi;
@@ -222,7 +286,12 @@ function nextNonBlankCodeLine(text: string, afterLine: number): string | null {
   for (let i = afterLine; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (trimmed.length === 0) continue;
-    if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) continue;
+    if (
+      trimmed.startsWith("//") ||
+      trimmed.startsWith("/*") ||
+      trimmed.startsWith("*")
+    )
+      continue;
     return lines[i];
   }
   return null;
@@ -245,7 +314,10 @@ const commentRestatesNextLine: Rule = {
       if (comment.type !== "Line") continue;
       const tokens = commentTokens(comment.value);
       if (tokens.length === 0 || tokens.length > 6) continue;
-      const nextLine = nextNonBlankCodeLine(ctx.file.text, comment.loc.end.line);
+      const nextLine = nextNonBlankCodeLine(
+        ctx.file.text,
+        comment.loc.end.line,
+      );
       if (!nextLine) continue;
       const ids = new Set(codeIdentifiers(nextLine));
       const matched = tokens.filter((t) => ids.has(t));
@@ -268,12 +340,34 @@ const commentRestatesNextLine: Rule = {
 // ─────────────────────────── Rule 3: orphan markers ───────────────────────
 
 const ORPHAN_PATTERNS: Array<{ re: RegExp; reason: string }> = [
-  { re: /^\s*removed\s*$/i, reason: "isolated `// removed` marker — delete the line and the surrounding leftover" },
-  { re: /^\s*kept\s+for\s+back(?:wards?[\s-]?)?compat(?:ibility)?\.?\s*$/i, reason: "`// kept for backcompat` orphan — if there's no caller, delete" },
-  { re: /^\s*deprecated[,\s]+kept\s+for\s+back(?:wards?[\s-]?)?compat(?:ibility)?.*$/i, reason: "`// deprecated, kept for backcompat` shim marker — verify the caller exists or delete" },
-  { re: /^\s*todo\s+old\s*[:.]?\s*.*$/i, reason: "`// TODO old` is a stale follow-up marker — convert to a real TODO with context or delete" },
-  { re: /^\s*legacy\s*$/i, reason: "isolated `legacy` marker — delete or expand into a real comment" },
-  { re: /^\s*\(\s*deprecated\s*\)\s*$/i, reason: "`(deprecated)` orphan marker — use `@deprecated` JSDoc on the symbol instead" },
+  {
+    re: /^\s*removed\s*$/i,
+    reason:
+      "isolated `// removed` marker — delete the line and the surrounding leftover",
+  },
+  {
+    re: /^\s*kept\s+for\s+back(?:wards?[\s-]?)?compat(?:ibility)?\.?\s*$/i,
+    reason: "`// kept for backcompat` orphan — if there's no caller, delete",
+  },
+  {
+    re: /^\s*deprecated[,\s]+kept\s+for\s+back(?:wards?[\s-]?)?compat(?:ibility)?.*$/i,
+    reason:
+      "`// deprecated, kept for backcompat` shim marker — verify the caller exists or delete",
+  },
+  {
+    re: /^\s*todo\s+old\s*[:.]?\s*.*$/i,
+    reason:
+      "`// TODO old` is a stale follow-up marker — convert to a real TODO with context or delete",
+  },
+  {
+    re: /^\s*legacy\s*$/i,
+    reason: "isolated `legacy` marker — delete or expand into a real comment",
+  },
+  {
+    re: /^\s*\(\s*deprecated\s*\)\s*$/i,
+    reason:
+      "`(deprecated)` orphan marker — use `@deprecated` JSDoc on the symbol instead",
+  },
 ];
 
 const orphanMarkers: Rule = {
@@ -313,7 +407,10 @@ const orphanMarkers: Rule = {
 // ─────────────────────────── Rule 4: comment-heavier-than-body helpers ────
 
 function countNonEmptyLines(text: string): number {
-  return text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0).length;
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0).length;
 }
 
 function commentLinesIn(comment: TSESTree.Comment): number {
@@ -321,7 +418,10 @@ function commentLinesIn(comment: TSESTree.Comment): number {
   return Math.max(1, comment.loc.end.line - comment.loc.start.line + 1);
 }
 
-function findFunctionBodyText(file: FileTarget, body: TSESTree.BlockStatement): string {
+function findFunctionBodyText(
+  file: FileTarget,
+  body: TSESTree.BlockStatement,
+): string {
   if (!body.range) return "";
   return file.text.slice(body.range[0] + 1, body.range[1] - 1);
 }
@@ -342,15 +442,25 @@ const commentHeavierThanBody: Rule = {
     walk(ast as unknown as AnyNode, (node) => {
       let body: TSESTree.BlockStatement | null = null;
       let candidate: TSESTree.Node | null = null;
-      if ((node.type === "FunctionDeclaration" || node.type === "FunctionExpression") && node.body) {
+      if (
+        (node.type === "FunctionDeclaration" ||
+          node.type === "FunctionExpression") &&
+        node.body
+      ) {
         body = node.body;
         candidate = node;
-      } else if (node.type === "ArrowFunctionExpression" && node.body && node.body.type === "BlockStatement") {
+      } else if (
+        node.type === "ArrowFunctionExpression" &&
+        node.body &&
+        node.body.type === "BlockStatement"
+      ) {
         body = node.body;
         candidate = node;
       }
       if (!body || !candidate) return;
-      const bodyLines = countNonEmptyLines(findFunctionBodyText(ctx.file, body));
+      const bodyLines = countNonEmptyLines(
+        findFunctionBodyText(ctx.file, body),
+      );
       if (bodyLines === 0 || bodyLines > 8) return; // only flag small helpers
       const jsdoc = findPrecedingJsDoc(ast, candidate);
       if (!jsdoc) return;

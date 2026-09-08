@@ -1,13 +1,22 @@
 import type { FileTarget, PackDefinition, Rule, Violation } from "../types.js";
-import { findAllRegex, offsetToLineCol, stripFencedCode, stripInlineCode } from "../util/text.js";
+import {
+  findAllRegex,
+  offsetToLineCol,
+  stripFencedCode,
+  stripInlineCode,
+} from "../util/text.js";
 
-const STRAY_INVOKE_TAG = /<\/?(?:invoke|antml:function_calls|function_calls|antml:parameter)\b[^>]*>/g;
+const STRAY_INVOKE_TAG =
+  /<\/?(?:invoke|antml:function_calls|function_calls|antml:parameter)\b[^>]*>/g;
 const STRAY_RESULT_TAG = /<\/result>/g;
-const CLAUDE_CODE_FOOTER = /(?:🤖\s*Generated\s+with|Generated\s+with)\s+\[?Claude\s+Code\]?/gi;
+const CLAUDE_CODE_FOOTER =
+  /(?:🤖\s*Generated\s+with|Generated\s+with)\s+\[?Claude\s+Code\]?/gi;
 const COAUTHORED_BY_CLAUDE = /^Co-Authored-By:\s+Claude\b.*$/gim;
 const DOUBLED_SUMMARY_HEADING = /^#{1,4}\s*Summary\s*$/gim;
-const PLACEHOLDER_TODO = /\b(TODO|FIXME):\s*\[?(insert|add|fill in|describe|tbd)\b[^\n]*/gi;
-const ELLIPSIS_PROMISE = /\b(I'?ll|let me|let's)\s+(now\s+)?(continue|proceed|implement|add|fix|update)\s+(this|that|the [a-z]+)\.{2,}/gi;
+const PLACEHOLDER_TODO =
+  /\b(TODO|FIXME):\s*\[?(insert|add|fill in|describe|tbd)\b[^\n]*/gi;
+const ELLIPSIS_PROMISE =
+  /\b(I'?ll|let me|let's)\s+(now\s+)?(continue|proceed|implement|add|fix|update)\s+(this|that|the [a-z]+)\.{2,}/gi;
 
 function makeViolation(
   rule: Rule,
@@ -57,7 +66,12 @@ const strayInvokeTag: Rule = {
   appliesTo: appliesEverywhere,
   check({ file }) {
     return findAllRegex(scanText(file), STRAY_INVOKE_TAG).map((m) =>
-      makeViolation(strayInvokeTag, file, m, `Stray tool-call tag \`${m.match}\` — looks like leaked agent XML wrapping`),
+      makeViolation(
+        strayInvokeTag,
+        file,
+        m,
+        `Stray tool-call tag \`${m.match}\` — looks like leaked agent XML wrapping`,
+      ),
     );
   },
 };
@@ -72,7 +86,12 @@ const strayResultTag: Rule = {
   appliesTo: appliesEverywhere,
   check({ file }) {
     return findAllRegex(scanText(file), STRAY_RESULT_TAG).map((m) =>
-      makeViolation(strayResultTag, file, m, "Stray `</result>` tag — MCP free-form params are plain strings, not XML"),
+      makeViolation(
+        strayResultTag,
+        file,
+        m,
+        "Stray `</result>` tag — MCP free-form params are plain strings, not XML",
+      ),
     );
   },
 };
@@ -89,7 +108,12 @@ const claudeCodeFooter: Rule = {
   },
   check({ file }) {
     return findAllRegex(scanText(file), CLAUDE_CODE_FOOTER).map((m) =>
-      makeViolation(claudeCodeFooter, file, m, "Auto-appended Claude Code attribution footer — remove or replace with project-specific provenance"),
+      makeViolation(
+        claudeCodeFooter,
+        file,
+        m,
+        "Auto-appended Claude Code attribution footer — remove or replace with project-specific provenance",
+      ),
     );
   },
 };
@@ -104,7 +128,12 @@ const coauthoredByClaude: Rule = {
   appliesTo: appliesEverywhere,
   check({ file }) {
     return findAllRegex(scanText(file), COAUTHORED_BY_CLAUDE).map((m) =>
-      makeViolation(coauthoredByClaude, file, m, "Claude Code commit trailer — strip if your project does not want agent attribution in git log"),
+      makeViolation(
+        coauthoredByClaude,
+        file,
+        m,
+        "Claude Code commit trailer — strip if your project does not want agent attribution in git log",
+      ),
     );
   },
 };
@@ -120,9 +149,16 @@ const doubledSummaryHeading: Rule = {
   check({ file }) {
     const matches = findAllRegex(scanText(file), DOUBLED_SUMMARY_HEADING);
     if (matches.length < 2) return [];
-    return matches.slice(1).map((m) =>
-      makeViolation(doubledSummaryHeading, file, m, "Second `Summary` heading in the same document — collapse into one"),
-    );
+    return matches
+      .slice(1)
+      .map((m) =>
+        makeViolation(
+          doubledSummaryHeading,
+          file,
+          m,
+          "Second `Summary` heading in the same document — collapse into one",
+        ),
+      );
   },
 };
 
@@ -136,7 +172,12 @@ const placeholderTodo: Rule = {
   appliesTo: appliesEverywhere,
   check({ file }) {
     return findAllRegex(scanText(file), PLACEHOLDER_TODO).map((m) =>
-      makeViolation(placeholderTodo, file, m, "Unresolved template placeholder — replace with real content or remove"),
+      makeViolation(
+        placeholderTodo,
+        file,
+        m,
+        "Unresolved template placeholder — replace with real content or remove",
+      ),
     );
   },
 };
@@ -151,14 +192,20 @@ const ellipsisPromise: Rule = {
   appliesTo: appliesToProse,
   check({ file }) {
     return findAllRegex(file.text, ELLIPSIS_PROMISE).map((m) =>
-      makeViolation(ellipsisPromise, file, m, "Agent self-narration leaking into prose — drop or rewrite as a statement"),
+      makeViolation(
+        ellipsisPromise,
+        file,
+        m,
+        "Agent self-narration leaking into prose — drop or rewrite as a statement",
+      ),
     );
   },
 };
 
 export const agentTicsPack: PackDefinition = {
   id: "agent-tics",
-  description: "Catches the visible tells of agent serialisation leaking into committed content (XML wrappers, footers, placeholders).",
+  description:
+    "Catches the visible tells of agent serialisation leaking into committed content (XML wrappers, footers, placeholders).",
   rules: [
     strayInvokeTag,
     strayResultTag,

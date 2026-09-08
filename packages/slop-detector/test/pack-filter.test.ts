@@ -20,7 +20,10 @@ describe("--pack filter enables off-by-default packs", () => {
   it("`--pack code-slop` runs the rule even when config has comment-slop and code-slop off", () => {
     // A file with a clear code-slop hit: async function with no await and no
     // Promise<T> return type.
-    fs.writeFileSync(path.join(tmp, "x.ts"), `async function f() { return 42; }\n`);
+    fs.writeFileSync(
+      path.join(tmp, "x.ts"),
+      `async function f() { return 42; }\n`,
+    );
 
     const config = defaultConfig();
     expect(config.packs["code-slop"]).toBe(false); // sanity: still off-by-default.
@@ -35,9 +38,17 @@ describe("--pack filter enables off-by-default packs", () => {
   });
 
   it("without --pack, off-by-default packs stay silent on the same file", () => {
-    fs.writeFileSync(path.join(tmp, "x.ts"), `async function f() { return 42; }\n`);
-    const summary = checkPath(tmp, { packs: allPacks, config: defaultConfig() });
-    expect(summary.violations.filter((v) => v.pack === "code-slop")).toHaveLength(0);
+    fs.writeFileSync(
+      path.join(tmp, "x.ts"),
+      `async function f() { return 42; }\n`,
+    );
+    const summary = checkPath(tmp, {
+      packs: allPacks,
+      config: defaultConfig(),
+    });
+    expect(
+      summary.violations.filter((v) => v.pack === "code-slop"),
+    ).toHaveLength(0);
   });
 
   it("`--pack agent-tics` does not enable off-by-default rules within an enabled pack", () => {
@@ -52,6 +63,10 @@ describe("--pack filter enables off-by-default packs", () => {
       config: defaultConfig(),
       packFilter: ["agent-tics"],
     });
-    expect(summary.violations.some((v) => v.ruleId === "agent-tics/coauthored-by-claude")).toBe(false);
+    expect(
+      summary.violations.some(
+        (v) => v.ruleId === "agent-tics/coauthored-by-claude",
+      ),
+    ).toBe(false);
   });
 });

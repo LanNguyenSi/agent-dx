@@ -21,12 +21,19 @@ export function buildDisableMap(text: string): DisableMap {
 
   return {
     lineDisabled(line, ruleId, pack) {
-      return tokenMatches(sameLine.get(line), ruleId, pack) || tokenMatches(nextLine.get(line), ruleId, pack);
+      return (
+        tokenMatches(sameLine.get(line), ruleId, pack) ||
+        tokenMatches(nextLine.get(line), ruleId, pack)
+      );
     },
   };
 }
 
-function addTokens(map: Map<number, Set<string>>, line: number, raw: string | undefined): void {
+function addTokens(
+  map: Map<number, Set<string>>,
+  line: number,
+  raw: string | undefined,
+): void {
   const set = map.get(line) ?? new Set<string>();
   if (raw === undefined) {
     set.add("*");
@@ -39,7 +46,11 @@ function addTokens(map: Map<number, Set<string>>, line: number, raw: string | un
   map.set(line, set);
 }
 
-function tokenMatches(tokens: Set<string> | undefined, ruleId: string, pack: string): boolean {
+function tokenMatches(
+  tokens: Set<string> | undefined,
+  ruleId: string,
+  pack: string,
+): boolean {
   if (!tokens) return false;
   if (tokens.has("*")) return true;
   if (tokens.has(ruleId)) return true;

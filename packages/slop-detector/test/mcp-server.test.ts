@@ -86,7 +86,10 @@ describe("slop-detector MCP wiring — tool handler", () => {
       text: "Hello world",
       filename: "msg.md",
       packs: ["prose-slop"],
-    })) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+    })) as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+    };
 
     expect(runSlopCheck).toHaveBeenCalledWith(
       expect.objectContaining({ text: "Hello world", filename: "msg.md" }),
@@ -106,7 +109,10 @@ describe("slop-detector MCP wiring — tool handler", () => {
     const result = (await box.handler!({
       text: "x",
       path: "y",
-    })) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+    })) as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+    };
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain(

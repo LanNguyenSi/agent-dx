@@ -1,5 +1,10 @@
 import type { FileTarget, PackDefinition, Rule, Violation } from "../types.js";
-import { findAllRegex, offsetToLineCol, stripFencedCode, stripInlineCode } from "../util/text.js";
+import {
+  findAllRegex,
+  offsetToLineCol,
+  stripFencedCode,
+  stripInlineCode,
+} from "../util/text.js";
 
 const EM_DASH = /—/g;
 const HEDGING_OPENER =
@@ -8,8 +13,7 @@ const MARKETING_ADJECTIVES =
   /\b(seamless(?:ly)?|robust|powerful|cutting-?edge|state-of-the-art|world-?class|enterprise-?grade|blazing\s?fast|next-?gen(?:eration)?|game-?changing|revolutionary|industry-?leading|best-in-class)\b/gi;
 const DELVE_TAPESTRY =
   /\b(delve(?:s|d|ing)?\s+(?:into|deeper)|tapestry\s+of|in\s+the\s+realm\s+of|navigate\s+the\s+complexities|underscore(?:s|d)?\s+the\s+importance|leverag(?:e|es|ing)\s+the\s+power\s+of)\b/gi;
-const TRIPLE_ADJECTIVE =
-  /\b(\w+),\s+(\w+),\s+and\s+(\w+)\b/gi;
+const TRIPLE_ADJECTIVE = /\b(\w+),\s+(\w+),\s+and\s+(\w+)\b/gi;
 const REDUNDANT_TRAILING_NOTE =
   /(^|\n)\s*(Note:|Please note(?:\s+that)?|Important:)\s*[^\n]+/gim;
 const TLDR_AT_END = /(^|\n)#{0,4}\s*(TL;DR|TLDR|Summary)\s*:?\s*\n[\s\S]+$/i;
@@ -55,7 +59,12 @@ const emDashInProse: Rule = {
   appliesTo: appliesToProse,
   check({ file }) {
     return findAllRegex(proseText(file), EM_DASH).map((m) =>
-      makeViolation(emDashInProse, file, m, "Em-dash in prose — replace with comma, colon, or parentheses"),
+      makeViolation(
+        emDashInProse,
+        file,
+        m,
+        "Em-dash in prose — replace with comma, colon, or parentheses",
+      ),
     );
   },
 };
@@ -70,7 +79,12 @@ const hedgingOpener: Rule = {
   appliesTo: appliesToProse,
   check({ file }) {
     return findAllRegex(proseText(file), HEDGING_OPENER).map((m) =>
-      makeViolation(hedgingOpener, file, { index: m.index + (m.groups[1]?.length ?? 0), match: m.groups[2] }, `Hedging opener \`${m.groups[2]}\` — drop it or rewrite the sentence`),
+      makeViolation(
+        hedgingOpener,
+        file,
+        { index: m.index + (m.groups[1]?.length ?? 0), match: m.groups[2] },
+        `Hedging opener \`${m.groups[2]}\` — drop it or rewrite the sentence`,
+      ),
     );
   },
 };
@@ -85,7 +99,12 @@ const marketingAdjectives: Rule = {
   appliesTo: appliesToProse,
   check({ file }) {
     return findAllRegex(proseText(file), MARKETING_ADJECTIVES).map((m) =>
-      makeViolation(marketingAdjectives, file, m, `Empty marketing adjective \`${m.match}\` — describe what it actually does instead`),
+      makeViolation(
+        marketingAdjectives,
+        file,
+        m,
+        `Empty marketing adjective \`${m.match}\` — describe what it actually does instead`,
+      ),
     );
   },
 };
@@ -100,7 +119,12 @@ const delveTapestry: Rule = {
   appliesTo: appliesToProse,
   check({ file }) {
     return findAllRegex(proseText(file), DELVE_TAPESTRY).map((m) =>
-      makeViolation(delveTapestry, file, m, `LLM idiom \`${m.match}\` — rewrite plainly`),
+      makeViolation(
+        delveTapestry,
+        file,
+        m,
+        `LLM idiom \`${m.match}\` — rewrite plainly`,
+      ),
     );
   },
 };
@@ -115,7 +139,12 @@ const redundantTrailingNote: Rule = {
   appliesTo: appliesToProse,
   check({ file }) {
     return findAllRegex(proseText(file), REDUNDANT_TRAILING_NOTE).map((m) =>
-      makeViolation(redundantTrailingNote, file, m, "Redundant `Note:` / `Important:` aside — consider folding into surrounding text"),
+      makeViolation(
+        redundantTrailingNote,
+        file,
+        m,
+        "Redundant `Note:` / `Important:` aside — consider folding into surrounding text",
+      ),
     );
   },
 };
@@ -156,14 +185,27 @@ const tripleAdjective: Rule = {
     const text = proseText(file);
     const matches = findAllRegex(text, TRIPLE_ADJECTIVE);
     return matches
-      .filter((m) => /^[a-z]+$/i.test(m.groups[1]) && /^[a-z]+$/i.test(m.groups[2]) && /^[a-z]+$/i.test(m.groups[3]))
-      .map((m) => makeViolation(tripleAdjective, file, m, "Rule-of-three triple — vary cadence"));
+      .filter(
+        (m) =>
+          /^[a-z]+$/i.test(m.groups[1]) &&
+          /^[a-z]+$/i.test(m.groups[2]) &&
+          /^[a-z]+$/i.test(m.groups[3]),
+      )
+      .map((m) =>
+        makeViolation(
+          tripleAdjective,
+          file,
+          m,
+          "Rule-of-three triple — vary cadence",
+        ),
+      );
   },
 };
 
 export const proseSlopPack: PackDefinition = {
   id: "prose-slop",
-  description: "Catches AI-tic prose patterns: em-dashes, hedging openers, marketing adjectives, signature LLM idioms.",
+  description:
+    "Catches AI-tic prose patterns: em-dashes, hedging openers, marketing adjectives, signature LLM idioms.",
   rules: [
     emDashInProse,
     hedgingOpener,

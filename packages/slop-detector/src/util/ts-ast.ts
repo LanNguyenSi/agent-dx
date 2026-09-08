@@ -2,7 +2,16 @@ import { parse } from "@typescript-eslint/parser";
 import type { TSESTree } from "@typescript-eslint/types";
 import type { FileTarget } from "../types.js";
 
-const CODE_EXTENSIONS = [".ts", ".tsx", ".cts", ".mts", ".js", ".jsx", ".cjs", ".mjs"];
+const CODE_EXTENSIONS = [
+  ".ts",
+  ".tsx",
+  ".cts",
+  ".mts",
+  ".js",
+  ".jsx",
+  ".cjs",
+  ".mjs",
+];
 
 export type ParsedTsFile = TSESTree.Program & {
   comments?: TSESTree.Comment[];
@@ -34,7 +43,9 @@ const parseCache = new WeakMap<FileTarget, ParseResult | ParseFailure>();
 export function parseTsFile(file: FileTarget): ParseResult | ParseFailure {
   const cached = parseCache.get(file);
   if (cached) return cached;
-  const isTsx = file.path.toLowerCase().endsWith(".tsx") || file.path.toLowerCase().endsWith(".jsx");
+  const isTsx =
+    file.path.toLowerCase().endsWith(".tsx") ||
+    file.path.toLowerCase().endsWith(".jsx");
   let result: ParseResult | ParseFailure;
   try {
     const ast = parse(file.text, {
@@ -48,7 +59,10 @@ export function parseTsFile(file: FileTarget): ParseResult | ParseFailure {
     }) as ParsedTsFile;
     result = { ok: true, ast };
   } catch (err) {
-    result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    result = {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
   parseCache.set(file, result);
   return result;
@@ -57,7 +71,12 @@ export function parseTsFile(file: FileTarget): ParseResult | ParseFailure {
 export type AnyNode = TSESTree.Node;
 
 /** Violation location (1-indexed line/column) derived from an AST node's `loc`. */
-export function nodeLoc(node: TSESTree.Node): { line: number; column: number; endLine: number; endColumn: number } {
+export function nodeLoc(node: TSESTree.Node): {
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+} {
   return {
     line: node.loc.start.line,
     column: node.loc.start.column + 1,
@@ -67,9 +86,16 @@ export function nodeLoc(node: TSESTree.Node): { line: number; column: number; en
 }
 
 /** Short, whitespace-collapsed source snippet for a node's `matched` field. */
-export function snippet(file: FileTarget, node: TSESTree.Node, max = 80): string {
+export function snippet(
+  file: FileTarget,
+  node: TSESTree.Node,
+  max = 80,
+): string {
   if (!node.range) return "";
-  const raw = file.text.slice(node.range[0], Math.min(node.range[1], node.range[0] + max));
+  const raw = file.text.slice(
+    node.range[0],
+    Math.min(node.range[1], node.range[0] + max),
+  );
   return raw.replace(/\s+/g, " ");
 }
 
@@ -113,7 +139,10 @@ export function extractDeclaredNames(decl: AnyNode): string[] {
   return names;
 }
 
-export function walk(node: AnyNode, visit: (node: AnyNode, parent: AnyNode | null) => void): void {
+export function walk(
+  node: AnyNode,
+  visit: (node: AnyNode, parent: AnyNode | null) => void,
+): void {
   function recurse(current: AnyNode, parent: AnyNode | null): void {
     visit(current, parent);
     for (const key of Object.keys(current)) {
@@ -121,15 +150,22 @@ export function walk(node: AnyNode, visit: (node: AnyNode, parent: AnyNode | nul
       const value = (current as unknown as Record<string, unknown>)[key];
       if (Array.isArray(value)) {
         for (const item of value) {
-          if (item && typeof item === "object" && typeof (item as { type?: unknown }).type === "string") {
+          if (
+            item &&
+            typeof item === "object" &&
+            typeof (item as { type?: unknown }).type === "string"
+          ) {
             recurse(item as AnyNode, current);
           }
         }
-      } else if (value && typeof value === "object" && typeof (value as { type?: unknown }).type === "string") {
+      } else if (
+        value &&
+        typeof value === "object" &&
+        typeof (value as { type?: unknown }).type === "string"
+      ) {
         recurse(value as AnyNode, current);
       }
     }
   }
   recurse(node, null);
 }
-

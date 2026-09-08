@@ -20,22 +20,28 @@ function rows(document: string): string[][] {
   return document
     .split("\n")
     .filter((line) => /^\| D-\d+ \|/.test(line))
-    .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()));
+    .map((line) =>
+      line
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim()),
+    );
 }
 
 function links(document: string, owner: string): string[] {
   return [...document.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)].map((match) => {
     const target = join(dirname(owner), match[1]);
-    expect(target, `unresolvable reference ${match[1]} from ${owner}`).toSatisfy(
-      (path: string) => {
-        try {
-          readFileSync(path, "utf8");
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    );
+    expect(
+      target,
+      `unresolvable reference ${match[1]} from ${owner}`,
+    ).toSatisfy((path: string) => {
+      try {
+        readFileSync(path, "utf8");
+        return true;
+      } catch {
+        return false;
+      }
+    });
     return target;
   });
 }
@@ -72,8 +78,15 @@ function assertIllustrativeAuthority(
 describe("decision authority contract", () => {
   it("ships the seven-column decision schema without changing escalation markers", () => {
     const template = readAsset("templates/03-decisions.md");
-    const header = template.split("\n").find((line) => line.startsWith("| ID |"));
-    expect(header?.split("|").slice(1, -1).map((cell) => cell.trim())).toEqual([
+    const header = template
+      .split("\n")
+      .find((line) => line.startsWith("| ID |"));
+    expect(
+      header
+        ?.split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim()),
+    ).toEqual([
       "ID",
       "Date",
       "Trigger / Evidence",
@@ -82,9 +95,13 @@ describe("decision authority contract", () => {
       "Consequences",
       "Supersedes",
     ]);
-    expect(template).toContain("<!-- review-round-escalation: choice = n/a -->");
+    expect(template).toContain(
+      "<!-- review-round-escalation: choice = n/a -->",
+    );
     expect(template).toContain("Markdown alone does not grant authority");
-    expect(template).toContain("Established runs retain their recorded decision format.");
+    expect(template).toContain(
+      "Established runs retain their recorded decision format.",
+    );
   });
 
   it("resolves illustrative routine, baseline-revision, and critical-waiver decisions", () => {
@@ -102,7 +119,9 @@ describe("decision authority contract", () => {
     expect(byId.get("D-002")?.[6]).toBe("D-001");
     expect(byId.get("D-003")?.[4]).toContain("Operator approval");
     const decisionLinks = links(document, decisionsPath);
-    const scopePath = decisionLinks.find((path) => path.endsWith("scope-request.md"));
+    const scopePath = decisionLinks.find((path) =>
+      path.endsWith("scope-request.md"),
+    );
     const waiverRecordPath = decisionLinks.find((path) =>
       path.endsWith("critical-waiver.md"),
     );
@@ -135,14 +154,19 @@ describe("decision authority contract", () => {
       ),
     ).toThrow();
     expect(() =>
-      links(waiver.replace("operator-critical-waiver.md", "missing.md"), waiverPath),
+      links(
+        waiver.replace("operator-critical-waiver.md", "missing.md"),
+        waiverPath,
+      ),
     ).toThrow();
   });
 
   it("pins role separation in the skill and every generated reviewer prompt", () => {
     const skill = readAsset("skill/SKILL.md");
     expect(skill).toContain(authorityPin);
-    expect(skill).toContain("Markdown records evidence of real authority and never grant it by themselves.");
+    expect(skill).toContain(
+      "Markdown records evidence of real authority and never grant it by themselves.",
+    );
     expect(skill.replace(/\s+/g, " ")).toContain(
       "Established runs retain their recorded decision format; absent fields never create a retroactive blocker.",
     );
@@ -154,14 +178,15 @@ describe("decision authority contract", () => {
           effort: "high",
         }),
       ).developer_instructions,
-      ...ROLE_TIERS.reviewer.map((tier) =>
-        parse(
-          composeCodexAgent(
-            "reviewer",
-            { model: "gpt-6-astra", effort: tier },
-            tier,
-          ),
-        ).developer_instructions,
+      ...ROLE_TIERS.reviewer.map(
+        (tier) =>
+          parse(
+            composeCodexAgent(
+              "reviewer",
+              { model: "gpt-6-astra", effort: tier },
+              tier,
+            ),
+          ).developer_instructions,
       ),
     ];
     for (const body of codexBodies) expect(body).toContain(authorityPin);
@@ -187,7 +212,9 @@ describe("decision authority contract", () => {
             join(target, harness, "agents", `reviewer${suffix}.md`),
             "utf8",
           );
-          expect(rendered, `${harness}/reviewer${suffix}.md`).toContain(authorityPin);
+          expect(rendered, `${harness}/reviewer${suffix}.md`).toContain(
+            authorityPin,
+          );
         }
       }
     } finally {
@@ -198,8 +225,12 @@ describe("decision authority contract", () => {
   it("retains review and waiver rules without treating Markdown as authorization", () => {
     const skill = readAsset("skill/SKILL.md").replace(/\s+/g, " ");
     expect(skill).toContain("critical findings require operator sign-off");
-    expect(skill).toContain("high findings require the orchestrator to record a rationale");
+    expect(skill).toContain(
+      "high findings require the orchestrator to record a rationale",
+    );
     expect(skill).toContain("Review judgment still applies to every change");
-    expect(skill).toContain("trivial change (a typo, a one-line fix) may be done directly by the orchestrator and reviewed by it");
+    expect(skill).toContain(
+      "trivial change (a typo, a one-line fix) may be done directly by the orchestrator and reviewed by it",
+    );
   });
 });

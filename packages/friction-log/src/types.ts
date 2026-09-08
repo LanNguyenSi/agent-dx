@@ -1,10 +1,10 @@
-export type FrictionSource = 'scan' | 'manual' | 'import';
+export type FrictionSource = "scan" | "manual" | "import";
 
-export type FrictionStatus = 'open' | 'filed' | 'resolved' | 'wontfix';
+export type FrictionStatus = "open" | "filed" | "resolved" | "wontfix";
 
-export type Severity = 'low' | 'medium' | 'high' | 'critical';
+export type Severity = "low" | "medium" | "high" | "critical";
 
-export type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type Priority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 export interface Session {
   id: string;
@@ -80,7 +80,11 @@ export interface FileResult {
 
 export interface Sink {
   readonly name: string;
-  file(friction: Friction, rendered: RenderedTemplate, opts: FileOptions): Promise<FileResult>;
+  file(
+    friction: Friction,
+    rendered: RenderedTemplate,
+    opts: FileOptions,
+  ): Promise<FileResult>;
 }
 
 export interface ScannerInput {
@@ -89,8 +93,13 @@ export interface ScannerInput {
 }
 
 export interface ScannerOutput {
-  session: Omit<Session, 'adapter'> & { adapter?: string };
-  frictionCandidates: Array<Pick<Friction, 'toolSurface' | 'title' | 'description' | 'severity' | 'category'>>;
+  session: Omit<Session, "adapter"> & { adapter?: string };
+  frictionCandidates: Array<
+    Pick<
+      Friction,
+      "toolSurface" | "title" | "description" | "severity" | "category"
+    >
+  >;
 }
 
 export interface Scanner {

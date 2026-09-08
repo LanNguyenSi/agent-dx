@@ -1,7 +1,7 @@
-import { FrictionDb } from '../db.js';
-import { defaultDbPath } from '../paths.js';
-import { maybeSyncExport } from './sync-export.js';
-import type { FrictionStatus } from '../types.js';
+import { FrictionDb } from "../db.js";
+import { defaultDbPath } from "../paths.js";
+import { maybeSyncExport } from "./sync-export.js";
+import type { FrictionStatus } from "../types.js";
 
 export interface UpdateCommandInput {
   frictionId: number;
@@ -21,7 +21,9 @@ export function runUpdate(input: UpdateCommandInput): UpdateCommandOutput {
   try {
     const friction = db.getFriction(input.frictionId);
     if (!friction) {
-      throw new Error(`friction-log: friction id=${input.frictionId} not found`);
+      throw new Error(
+        `friction-log: friction id=${input.frictionId} not found`,
+      );
     }
     db.updateFrictionStatus(input.frictionId, input.status);
     // Skip write-through when the status did not actually change (the

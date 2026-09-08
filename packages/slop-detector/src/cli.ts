@@ -17,12 +17,21 @@ program
 
 program
   .command("check [path]")
-  .description("Scan a file, directory, or stdin (use '-' or omit path) for slop")
+  .description(
+    "Scan a file, directory, or stdin (use '-' or omit path) for slop",
+  )
   .option("-c, --config <file>", "Path to slop.config.yml / .json")
-  .option("-p, --pack <packs...>", "Only run these packs (comma- or space-separated)")
+  .option(
+    "-p, --pack <packs...>",
+    "Only run these packs (comma- or space-separated)",
+  )
   .option("-f, --format <fmt>", "Output format: text | json", "text")
   .option("--explain", "Print rule rationale alongside each violation")
-  .option("--stdin-path <path>", "Filename to assume when reading stdin", "<stdin>")
+  .option(
+    "--stdin-path <path>",
+    "Filename to assume when reading stdin",
+    "<stdin>",
+  )
   .action(async (rawPath: string | undefined, opts) => {
     try {
       await runCheck(rawPath, opts);
@@ -35,7 +44,9 @@ program
 
 program
   .command("list-rules")
-  .description("List all rules with their pack, default severity, and rationale")
+  .description(
+    "List all rules with their pack, default severity, and rationale",
+  )
   .option("-f, --format <fmt>", "Output format: text | json", "text")
   .action((opts) => {
     const rows = allPacks.flatMap((pack) =>
@@ -53,12 +64,16 @@ program
     }
     for (const row of rows) {
       const flag = row.enabledByDefault ? "on" : "off";
-      process.stdout.write(`${row.rule}\t${row.defaultSeverity}\t${flag}\t${row.rationale}\n`);
+      process.stdout.write(
+        `${row.rule}\t${row.defaultSeverity}\t${flag}\t${row.rationale}\n`,
+      );
     }
   });
 
 program.parseAsync().catch((err) => {
-  process.stderr.write(`slop-detector: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.stderr.write(
+    `slop-detector: ${err instanceof Error ? err.message : String(err)}\n`,
+  );
   process.exit(2);
 });
 
@@ -70,7 +85,10 @@ interface CheckOpts {
   stdinPath: string;
 }
 
-async function runCheck(rawPath: string | undefined, rawOpts: unknown): Promise<void> {
+async function runCheck(
+  rawPath: string | undefined,
+  rawOpts: unknown,
+): Promise<void> {
   const opts = normalizeOpts(rawOpts);
   const config = opts.config ? loadConfig(opts.config) : defaultConfig();
   const packFilter = opts.pack && opts.pack.length > 0 ? opts.pack : undefined;
@@ -79,7 +97,11 @@ async function runCheck(rawPath: string | undefined, rawOpts: unknown): Promise<
   let summary: CheckSummary;
   if (!rawPath || rawPath === "-") {
     const text = await readStdin();
-    const violations = checkText(text, opts.stdinPath, { packs, config, packFilter });
+    const violations = checkText(text, opts.stdinPath, {
+      packs,
+      config,
+      packFilter,
+    });
     summary = summarize(violations, 1);
   } else {
     if (!fs.existsSync(rawPath)) {
@@ -99,7 +121,12 @@ async function runCheck(rawPath: string | undefined, rawOpts: unknown): Promise<
 function normalizeOpts(raw: unknown): CheckOpts {
   const r = raw as Record<string, unknown>;
   const packs = Array.isArray(r.pack)
-    ? (r.pack as string[]).flatMap((s) => s.split(",").map((x) => x.trim()).filter(Boolean))
+    ? (r.pack as string[]).flatMap((s) =>
+        s
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+      )
     : undefined;
   return {
     config: typeof r.config === "string" ? r.config : undefined,
@@ -132,4 +159,3 @@ function readVersion(): string {
     return "0.0.0";
   }
 }
-

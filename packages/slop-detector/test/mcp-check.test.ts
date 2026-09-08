@@ -114,7 +114,9 @@ describe("renderSummary", () => {
       text: "Shipped the fix and ran the tests.",
       filename: "msg.md",
     });
-    summary.warnings = ['entrypointGlobs pattern "src/typo-index.ts" matched no scanned files'];
+    summary.warnings = [
+      'entrypointGlobs pattern "src/typo-index.ts" matched no scanned files',
+    ];
     const rendered = renderSummary(summary);
     expect(rendered.split("\n")[0]).toContain("src/typo-index.ts");
     expect(rendered).toMatch(/clean \(1 file\(s\) scanned\)/);
@@ -127,6 +129,8 @@ describe("renderSummary", () => {
     });
     summary.warnings = ["some warning"];
     const rendered = renderSummary(summary);
-    expect(rendered.indexOf("some warning")).toBeLessThan(rendered.indexOf("msg.md"));
+    expect(rendered.indexOf("some warning")).toBeLessThan(
+      rendered.indexOf("msg.md"),
+    );
   });
 });
