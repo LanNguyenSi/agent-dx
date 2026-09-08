@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-07T13:49:22Z
+timestamp: 2026-09-08T11:11:12Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -96,7 +96,7 @@ below.
    tiers" below).
 3. **Manifest.** `runInit` writes the resolved map to
    `.ai/workflow/manifest.json` under `models` (`src/init.ts:915-952#"force: true,"`,
-   `desired` object at `:621-629#"...(pin !== undefined ? { pin } : {}),"`), alongside `kit`, `version`, `harnesses`,
+   `desired` object at `:913-923#"...(pin !== undefined ? { pin } : {}),"`), alongside `kit`, `version`, `harnesses`,
    `profile`, `tiers` (since 0.19.0), and per-file hashes. On the next run,
    `readInstalledManifest` reads it back and re-validates every value with
    `assertValidModelId`; an invalid stored id is silently dropped (falling
@@ -151,7 +151,7 @@ below.
   `-fast`/`-thinking`/`-mini`/`-latest` deprioritized). `composeOpencodeAgent`
   emits `model:` only when a resolved value exists; otherwise the line is
   omitted entirely so the subagent inherits the session/default model
-  (`src/init.ts:350-370#"permission:"`, comment at `:268-269#"// Omitting it lets the subagent inherit the session/default model."`). Since 0.22.0 it also takes
+  (`src/init.ts:350-370#"permission:"`, comment at `:361-362#"// Omitting it lets the subagent inherit the session/default model."`). Since 0.22.0 it also takes
   an `effortLine` parameter, computed once by the caller via
   `opencodeEffortLine(DEFAULT_TIER[role], modelValue)` (`src/init.ts:862-866#"modelValue,"`)
   and emitted right after `model:` when the model was resolved; see "Pinned
@@ -364,7 +364,7 @@ that correction against regressing back to either stale claim.
 as it always has (now including its own pinned default effort, see "Pinned
 default effort (0.22.0)" below), then, only `if (tiers)`, loops
 `ROLE_TIERS[role]` skipping the role's `DEFAULT_TIER` and writes
-`<role>-<tier>.md` (`:547-557#"composeClaudeAgentVariant(role, tier),"` Claude Code, `:580-610#"variantModelValue,"` opencode, the
+`<role>-<tier>.md` (`:804#"composeClaudeAgentVariant("` Claude Code, `:899-902#"variantModelValue,"` opencode, the
 opencode loop now carrying the unresolved-class skip described above). The
 base file's own composition call takes no `tiers`-flag input at all, so a
 tiers-off install renders byte-identical output to a tiers-on install (not,
@@ -598,20 +598,20 @@ fifth role, the same "did I update every place a role is enumerated" check
 the "Solution-neutral notes" section below describes.
 
 - README's model-preselection table has one row per role
-  (`test/docs-consistency.test.ts:49#"expect(readmeMd).toMatch(new RegExp("`, matches `^\| <role> \|`).
+  (`test/docs-consistency.test.ts:50#"expect(readmeMd).toMatch(new RegExp("`, matches `^\| <role> \|`).
 - `INSTALL-AGENT.md`'s `--models` example names every role
-  (`test/docs-consistency.test.ts:62#"INSTALL-AGENT.md --models example names every role"`, checks for `<role>=<model>` per role).
+  (`test/docs-consistency.test.ts:63#"INSTALL-AGENT.md --models example names every role"`, checks for `<role>=<model>` per role).
 - `INSTALL-AGENT.md`'s manifest example JSON has one `models` key per role
-  (`test/docs-consistency.test.ts:77#"expect(Object.keys(manifest.models).sort()).toEqual(sortedRoles);"`, parses the fenced JSON block and compares sorted keys).
+  (`test/docs-consistency.test.ts:78#"expect(Object.keys(manifest.models).sort()).toEqual(sortedRoles);"`, parses the fenced JSON block and compares sorted keys).
 - `agents-md-section.md`'s "Per-role model preferences (...)" parenthetical
-  lists every role (`test/docs-consistency.test.ts:88#"expect(listed.sort()).toEqual(sortedRoles);"`).
+  lists every role (`test/docs-consistency.test.ts:89#"expect(listed.sort()).toEqual(sortedRoles);"`).
 
 A fifth, adjacent test guards the read-only-role brace lists
 (`agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`) in
-`INSTALL-AGENT.md` (`test/docs-consistency.test.ts:58#"expect(listed.sort()).toEqual(sortedRoles);"`); it is role-enumeration generally, not
+`INSTALL-AGENT.md` (`test/docs-consistency.test.ts:59#"expect(listed.sort()).toEqual(sortedRoles);"`); it is role-enumeration generally, not
 model-specific, but shares the same drift-prevention purpose.
 
-Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1608#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
+Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1609#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
 enumeration site: README's "Effort tiers" role/tier table against
 `ROLE_TIERS` and `DEFAULT_TIER` directly, per role and column
 (tiers-available list order, default-tier value, and a row-count check with
@@ -622,13 +622,13 @@ also covers the advisor row (`ROLE_TIERS.advisor = ["high", "xhigh"]`,
 `DEFAULT_TIER.advisor = "high"`), the test iterating `ROLES` so the new
 per-role assertions came for free from the `models.ts` addition alone, no
 test edit required. Since fix-round-1
-(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:1687#"const def = TIER_DEFS[tier];"`) guards
+(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:1688#"const def = TIER_DEFS[tier];"`) guards
 README's other tier-shaped table, Tier -> model class -> model alias ->
 requested effort, against `TIER_DEFS`/`CLASS_MODELS` directly, the same
 way; before this fix nothing guarded that second table, so it could drift
 from its source maps silently (this table is keyed by `Tier`, not `Role`,
 so it is unaffected by the role count itself). Since fix-round-2 (review finding R2-M1), a
-third, site-specific `describe` (`test/docs-consistency.test.ts:1748#"return readmeMd.slice(startIdx, endIdx);"`)
+third, site-specific `describe` (`test/docs-consistency.test.ts:1749#"return readmeMd.slice(startIdx, endIdx);"`)
 guards the opencode-effort prose in README's "Effort tiers" section
 directly: it isolates that prose block by its own lead-in phrase and the
 next bold lead-in that follows it, then asserts the prose contains the
@@ -640,7 +640,7 @@ claim fails a targeted assertion instead of only showing up as an
 unguarded prose diff.
 
 Since 0.22.0, a fourth, site-specific `describe`
-(`test/docs-consistency.test.ts:2353#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
+(`test/docs-consistency.test.ts:2354#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
 policy in `agents-md-section.md`'s Scaling delegation bullet list and
 `SKILL.md` step 6: a derivation-based check (not a hand-maintained role
 list, the same discipline the 0.20.0 tier-selection-policy guard above

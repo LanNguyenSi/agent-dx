@@ -77,3 +77,13 @@ falsify by reading exactly those two lines; a test re-checks that recorded
 geometry against the current files, so an exemption whose situation changed
 fails instead of quietly covering a different one. The classification
 itself belongs in [log.md](log.md), with the round that produced it.
+
+[log.md](log.md) itself is excluded from `ANCHOR_OKF_DOCS` and from both
+guards above, and its bundle-specific path-less continuation citation form
+is invisible to okf-kit's own grammar too, so a citation-shaped historical
+value written into a log entry would otherwise be checked by nothing. A
+third guard (also in `test/docs-consistency.test.ts`) closes that: every
+full, anchored citation `log.md` writes must still resolve at head, and it
+may never carry the continuation form at all, since a log entry has no
+governing-citation semantics for one to resolve against. A historical value
+belongs in plain prose ("moved to lines N through M") instead.
