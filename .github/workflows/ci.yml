@@ -500,6 +500,17 @@ jobs:
       - name: Check commander flag order (-short, --long)
         run: node scripts/check-cli-flag-order.mjs
 
+  lint-format-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Check ci job matrix.package covers every packages/*/package.json
+        run: node scripts/check-format-check-matrix.mjs
+
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -555,13 +566,12 @@ jobs:
       # Probed dynamically per matrix entry, like Typecheck (test files)
       # above: a package that defines `format:check` runs it. A package
       # that ships TypeScript sources (src/**/*.ts) but no `format:check`
-      # script fails closed instead of silently going unchecked
-      # (github-api-tool is that case today: 21 .ts files under src/, no
-      # format:check). A package with neither the script nor TS sources
-      # under src/ (git-batch-cli: plain .js) is skipped. Because the rule
-      # is fail-closed and per-package, no separate repo-level guard is
-      # needed to catch a package that adds format:check (or TS sources)
-      # later without exercising it here.
+      # script fails closed instead of silently going unchecked. A package
+      # with neither the script nor TS sources under src/ (a plain-JS
+      # package) is skipped. This rule only reaches packages listed in the
+      # `matrix.package` list above; scripts/check-format-check-matrix.mjs
+      # (wired as the lint-format-matrix job) guards that every
+      # packages/*/package.json directory is a matrix entry.
       - name: Format check
         shell: bash
         run: |
