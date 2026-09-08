@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-08T04:42:12Z
+timestamp: 2026-09-08T11:11:12Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -145,7 +145,7 @@ and set the row's Decision to `accepted`
 (`SKILL.md:317#"unchanged and setting Decision to"`; `05-review-findings.md:9-11#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The policy is
-pinned in `test/docs-consistency.test.ts:4300#"docs-only closing deltas stay narrowly bounded"`.
+pinned in `test/docs-consistency.test.ts:4543#"docs-only closing deltas stay narrowly bounded"`.
 
 ## The Decision legend in 05-review-findings.md
 
@@ -199,7 +199,7 @@ different fail-closed design than the run-base marker, which fails open; see
 
 ## Three surfaces kept in sync
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:148#"addressed or consciously accepted by the orchestrator"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:149#"addressed or consciously accepted by the orchestrator"`
 ("review gate ships in the policy, skill, and handoff template") pins the
 invariant across all three: `agents-md-section.md`'s `### Review gate`
 heading plus "block final acceptance until fixed or explicitly waived" and
@@ -221,7 +221,7 @@ reviewer output contract (`CHANGELOG.md:#[0.11.0]`). The Subagent misfire rule
 closes with the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
 (`SKILL.md:689#"review and never satisfies the review gate, since"`), pinned by
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:534#"never satisfies the review gate"`. Since
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:535#"never satisfies the review gate"`. Since
 0.18.0 the rule also names resume over a fresh respawn as the preferred
 response for the near-instant, no-tool-activity signal specifically (scoped
 away from a separately measured mid-run watchdog-stall class where resume
@@ -279,7 +279,7 @@ Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
 (`CHANGELOG.md:#[0.16.0]#"as a hard-mandatory"`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:1196#"the orchestrator asks the reviewer to resupply it"` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:1197#"the orchestrator asks the reviewer to resupply it"` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.
 
 ## Review-round escalation budget

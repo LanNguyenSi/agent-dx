@@ -166,6 +166,177 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mis-pairing was; both citations passed every existing check (including
   this guard) because nothing about either one, read alone or against its
   paragraph's siblings, looks wrong.
+- Citation-sibling-drift guard, continuation-citation coverage (task
+  agent-dx b50fd903): closed the guard's own documented coverage gap
+  (round 1) that a path-less continuation citation (`:N-M#"..."`, whose
+  path is implied by the preceding FULL citation earlier in the same
+  paragraph) never matched `ANCHOR_CITATION_RE`, so the guard could not
+  see one at all -- the form `model-preselection.md` alone carries four
+  of. `extractSiblingGuardCitations` now also matches the anchored,
+  path-less tail on its own (`ANCHOR_CONTINUATION_CITATION_RE`, anchor
+  group required so a bare `:N-M` digit pair in ordinary prose is never
+  mistaken for one) and resolves it against `governingPathByParagraph`,
+  the nearest preceding full citation's own `citedPath` in the same
+  paragraph -- the same "nearest preceding, same paragraph" BINDING RULE
+  okf-kit's own short-form/continuation citations use in
+  `citations-resolve.ts`. That mirrors the binding rule only, not the
+  grammar (review round 3 correction: this bundle's anchored, path-less
+  `:N-M#"..."` form IS backtick-wrapped; an earlier version of this
+  bullet said it was not). okf-kit's own `CONT_COLON_RE` still misses it
+  because its own closing backtick has to follow the digit range
+  immediately, and this form's closing backtick follows the `#"anchor"`
+  tail instead; `SHORT_FORM_COLON_RE` misses it too, both because a match
+  right after a backtick is skipped and because no serial connective
+  ("and", "also", ...) precedes it either -- okf-kit sees these citations
+  as nothing at all, not merely as unresolved ones. Two fixtures pin the
+  closed gap: a path-less
+  continuation duplicating its governing citation's own range and anchor
+  is flagged by the duplicate rule (drifted/corrected), and a
+  discriminating fixture with two different full citations in one
+  paragraph before the continuation, which only passes when the
+  continuation binds to the NEARER of the two, not the paragraph's first.
+  Run against the current bundle, the newly-visible continuation
+  citations in `model-preselection.md` produced no new SIBLING-GUARD
+  finding (duplicate-citation/wrong-sibling-anchor), allowlisted or
+  otherwise -- see `docs/okf/log.md`. That measurement did not cover
+  whether each continuation's own anchor still resolved against its
+  target at head; it did not, by the time this round's own CHANGELOG line
+  shift landed a few commits later -- see the round-2 follow-up bullet
+  below.
+- Citation-sibling-drift guard, okf-kit-porting decision (task agent-dx
+  b50fd903, run `.ai/runs/2026-09-08-open-pool-batch44` D-006): the guard
+  stays kit-local (this package's own `test/docs-consistency.test.ts`),
+  not ported to okf-kit as an opt-in `citations-sibling` check. Who pays:
+  kit-local means only this package's own OKF bundle is guarded by it,
+  and every other fleet bundle with sibling citations (a paragraph
+  repeating, or near-duplicating, one of its own citations) stays
+  unguarded until each such bundle's own docs-consistency-style suite
+  grows the same check by hand; porting would instead put the maintenance
+  on okf-kit's maintainers, who would then carry the rule itself, the
+  allowlist shape (recorded geometry, a falsifiable one-sentence claim,
+  and the independent-review-classification process this file's own
+  allowlist process block already documents) as a public, cross-repo
+  contract, and a fleet-wide pin bump on every fix to it. Trigger to
+  revisit: a second fleet bundle observed carrying real sibling-citation
+  drift in a review pass (not merely plausible in the abstract) reopens
+  the port decision.
+- Citation-sibling-drift guard, continuation-citation coverage, review
+  round 2 (task agent-dx b50fd903): the round-1 bullet above added
+  continuation-citation EXTRACTION but not RESOLUTION at the three
+  `matchAll(ANCHOR_CITATION_RE)` sites that check "anchor on last content
+  line", "anchor <=3 times file-wide/exactly once in-range", "unanchored
+  citation", and "citation stays inside one describe/it/test block" --
+  and, separately (review round 3 correction: an earlier version of this
+  bullet blamed a same-round CHANGELOG.md line shift for staling
+  `src/init.ts`'s own line numbers; false, since editing CHANGELOG.md
+  cannot move a different file's lines, and this branch had not touched
+  `src/` yet at that point), all four of `model-preselection.md`'s
+  continuation citations were already stale at this task's own merge
+  base: `src/init.ts` last moved on 2026-09-05 (`60cb546`, task agent-dx
+  #184, native Codex routing), and nothing detected the drift, since this
+  round-1 bullet's own fix added continuation extraction only, not
+  resolution, at the three sites above -- so the round-1 bundle re-run's
+  "zero unallowlisted findings" never actually re-checked those four
+  anchors' text against `src/init.ts` at head. All four re-pointed
+  (citation-only) against `src/init.ts` at head; the fourth (into
+  `composeClaudeAgentVariant`'s own call site) needed a freshly-derived
+  anchor since its old text no longer occurs there at all (the call now
+  takes three arguments, not two). `extractSiblingGuardCitations` is now
+  also what the three resolution sites above call, instead of each
+  running its own bespoke `matchAll(ANCHOR_CITATION_RE)` loop, so a
+  resolved continuation is checked by those properties exactly like a
+  full citation is; this is what would have caught the stale
+  `model-preselection.md` anchors, had it existed in round 1. Four
+  further gaps closed in the same extractor: `governingPathByParagraph`
+  now resets (not merely leaves stale) on an unresolved/ambiguous full
+  citation, matching okf-kit's own reset behaviour; a continuation-match
+  overlap filter now also drops a match whose immediately preceding text
+  is path-shaped regardless of file extension, so a citation into an
+  extension `ANCHOR_CITATION_RE` does not recognise (a `.toml`, a `.tsx`)
+  cannot have its own tail misread as a phantom continuation; the
+  left-to-right, nearest-preceding ordering of full and continuation
+  matches on one line, and the paragraph-scoping property (a continuation
+  never resolves across a paragraph boundary), are now both pinned by
+  fixtures rather than only described in a comment; and
+  `ANCHOR_CONTINUATION_CITATION_RE`'s anchor alternation (previously a
+  hand copy of `ANCHOR_CITATION_RE`'s own group 4 pattern) is now asserted
+  to be a substring of it, throwing at module load on drift. Residual,
+  unclosed this round, named next to the pre-existing fenced-code-block
+  gap in the extractor's own comment: this guard's continuation form
+  mirrors okf-kit's short-form BINDING RULE only, not its grammar (see
+  the round-1 bullet above), so okf-kit's own `citations-resolve` rule
+  still cannot see one of these citations at all; closing that gap means
+  either changing okf-kit's own grammar (out of this task's scope) or
+  accepting the guard-only coverage as the design. Review round 3 (LOW
+  5): the three resolution sites above inherit the extractor's two other
+  latent costs too, since they now call it -- a citation inside a fenced
+  code block goes unchecked at those sites as well, and a document ending
+  inside an unclosed fence makes them throw, same as this guard -- both
+  accepted as the same currently-unused-shape cost, not a new one.
+- Citation-sibling-drift guard, docs/okf/log.md's own citations (task
+  agent-dx b50fd903, review round 3, D-037): review round 2 found that
+  `log.md` -- excluded from `ANCHOR_OKF_DOCS` and therefore from every
+  guard above, and from okf-kit's own citation grammar too -- is read by
+  nothing, so citation-shaped historical text written into a log entry
+  goes unchecked; round 1 of this task had already removed such text from
+  one entry (`0f054d2`) and round 2 wrote the same shape into its own
+  entry again. Rather than another round of rephrasing that recurs on the
+  next entry, `log.md` gets its own guard in
+  `test/docs-consistency.test.ts`: every full, anchored citation it writes
+  must still resolve at head (the target exists, the anchor text sits
+  somewhere inside the cited range), and it may never carry the bundle's
+  path-less continuation form at all, since that form has no
+  governing-citation semantics in `log.md` -- nothing resolves a
+  continuation written there against anything, so it can only be stale
+  prose dressed as a citation. Fixtures pin both rules both ways (a stale
+  full citation fails, an unresolvable path fails, a continuation form
+  fails even when it would resolve, a clean entry passes); run against
+  the current bundle, both checks are clean, and every citation-shaped
+  historical value the run reported was rephrased as plain prose, in the
+  round-2 entry and in an older entry from task 9f72ae6d. Review round 4
+  (D-050) removed this bullet's original hit counts rather than
+  correcting them: they were typed by hand and did not match what the
+  guard produces (see the round-4 bullet below for the rule and for where
+  the live figures live instead).
+  The round-2 entry's own false same-round-CHANGELOG-line-shift narration
+  is corrected in place (see the review round 3 correction two bullets
+  above for the identical fix here); `docs/okf/index.md`'s Maintenance
+  section now names the new guard.
+- Citation scanning is paragraph-joined, and the log guard is no longer
+  silenceable (task agent-dx b50fd903, review round 4, D-050): both
+  citation scanners in `test/docs-consistency.test.ts` matched per
+  physical line while every doc in this bundle hard-wraps its prose, so a
+  citation whose own text straddled a wrap matched neither regex and was
+  invisible to every check built on them -- and re-running the regexes
+  over raw document text cannot close that, since the string-anchor
+  alternation forbids a newline inside the anchor by construction. Both
+  scanners now consume one shared `citationScanParagraphs` helper that
+  joins each paragraph's lines the way a hard wrap split them and maps
+  every joined offset back to its physical line, so findings, allowlist
+  geometry and failure messages still name real doc lines; a wrapped full
+  citation with a stale anchor and a wrapped continuation form are each
+  pinned by their own fixture. The same helper carries the one fence
+  pass, so the `log.md` guard inherits the unbalanced-fence throw the
+  round-3 hand copy had left behind (a single stray ``` excused every
+  citation after it), and its non-vacuity floor now carries the live
+  count in its own computed test name. The unanchored-citation brake and
+  the block-straddle collector take their doc set and resolver as
+  parameters, like the string-anchor collector already did, so the
+  "a resolved continuation survives this collector" property is pinned by
+  a synthetic doc set at all three sites instead of by source text alone;
+  the brake's examined count is pinned as an exact delta (one added full
+  citation raises it by one, one added continuation by one more) rather
+  than by a floor a dropped-continuation mutant could sink under. The
+  `log.md` resolver rejects a cited path carrying a `..` segment and
+  asserts repository containment on its on-disk fallback, and a bare
+  basename that also exists at the repository root is reported ambiguous
+  with both candidates named instead of silently binding to this
+  package's own file; the deeper repo-wide basename ambiguity okf-kit
+  reports is still bound unconditionally by `anchorScopeResolve()`'s own
+  documented design, named as the residual. Convention this round
+  installs (D-050): a log entry or CHANGELOG bullet writes no hand-typed
+  count of what a guard found; the live figures are the guards' own
+  computed test names, read off a passing run.
 
 ## [0.31.0] - 2026-09-07
 

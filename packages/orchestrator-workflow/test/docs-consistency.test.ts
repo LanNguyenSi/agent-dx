@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { resolve as resolvePath, sep } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -2844,6 +2845,63 @@ function anchorScopeResolve(): Record<string, string> {
 const ANCHOR_CITATION_RE =
   /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
 
+// agent-tasks b50fd903 review round 2 (HIGH 1): defined here, right after
+// ANCHOR_CITATION_RE, instead of down by the "Citation-sibling-drift
+// guard" section where this regex and its full rationale originally lived
+// (see that section's own comment for the extraction pipeline and the
+// coverage-gap history). `extractSiblingGuardCitations` (also defined
+// further down, but a plain `function` declaration and therefore hoisted
+// to the top of the module, reachable from here) is what the three
+// `matchAll(ANCHOR_CITATION_RE)` resolution sites below now call so an
+// anchored continuation citation is resolved -- and checked -- exactly
+// like a full citation at those sites too, not only by the sibling guard
+// itself. The regex has to live here, textually, rather than just the
+// function that reads it: `describe()` callbacks run top-to-bottom as
+// this module loads (a describe body executes synchronously, in file
+// order, to register its `it`s), and every one of those three sites calls
+// its own citation collector eagerly at the top of its own describe body
+// -- so a `const` still declared AFTER those call sites would still be in
+// its temporal dead zone at the moment they run, even though the
+// `function` that closes over it is already callable by then.
+const ANCHOR_CONTINUATION_CITATION_RE =
+  /:(\d+)(?:-(\d+))?#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*")/g;
+
+// agent-tasks b50fd903 review round 2 (LOW 8): the anchor alternation
+// inside ANCHOR_CONTINUATION_CITATION_RE above is a hand copy of
+// ANCHOR_CITATION_RE's own group 4 anchor pattern, with no coupling
+// enforced between the two -- a future edit to one could silently drift
+// from the other. Reconstructing one regex from the other programmatically
+// would risk a regex-construction bug in a guard 78-plus other docs/okf
+// citations resolve through, so this instead asserts the coupling: the
+// continuation regex's own source is parsed for its anchor group (the
+// text between the known `:(\d+)(?:-(\d+))?#(` prefix and the closing
+// `)`), and that substring must occur, unchanged, inside
+// ANCHOR_CITATION_RE's own source. A drift between the two throws here,
+// at module load, rather than passing silently.
+{
+  const CONTINUATION_ANCHOR_PREFIX = ":(\\d+)(?:-(\\d+))?#(";
+  const continuationSource = ANCHOR_CONTINUATION_CITATION_RE.source;
+  if (
+    !continuationSource.startsWith(CONTINUATION_ANCHOR_PREFIX) ||
+    !continuationSource.endsWith(")")
+  ) {
+    throw new Error(
+      "ANCHOR_CONTINUATION_CITATION_RE's source shape changed; update the " +
+        "anchor-alternation coupling check next to its own definition",
+    );
+  }
+  const continuationAnchorAlternation = continuationSource.slice(
+    CONTINUATION_ANCHOR_PREFIX.length,
+    -1,
+  );
+  if (!ANCHOR_CITATION_RE.source.includes(continuationAnchorAlternation)) {
+    throw new Error(
+      "ANCHOR_CONTINUATION_CITATION_RE's anchor alternation has drifted " +
+        "from ANCHOR_CITATION_RE's own group 4 anchor pattern",
+    );
+  }
+}
+
 // agent-tasks 8c89aa12: same "last content line" semantics as okf-kit's
 // own opt-in `anchor-not-on-last-line` check
 // (packages/okf-kit/src/rules/citations-resolve.ts's
@@ -2986,27 +3044,52 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
     anchor: string;
   }
 
-  function collectStringAnchoredCitations(): AnchoredCitation[] {
+  // agent-tasks b50fd903 review round 2 (HIGH 1): now consumes
+  // `extractSiblingGuardCitations` (the citation-sibling-drift guard's own
+  // extractor, defined further down this file) instead of running its own
+  // `content.matchAll(ANCHOR_CITATION_RE)` loop, so a resolved, anchored
+  // continuation citation (`:N-M#"..."`, path implied by the preceding
+  // full citation in the same paragraph) is checked by the three
+  // properties below exactly like a full citation is -- this is the site
+  // that actually catches a stale continuation anchor: model-
+  // preselection.md's four continuations all resolve into `src/init.ts`,
+  // not a `*.test.ts` file, so the block-straddle collector further down
+  // never sees them either way.
+  // agent-tasks b50fd903 review round 3 (MEDIUM 2): `docs` is now an
+  // explicit parameter (default: the real ANCHOR_OKF_DOCS content) so a
+  // test below can drive this collector against a synthetic doc set
+  // carrying a resolved continuation citation and observe whether it
+  // survives intact. A mutant narrowing the `for (const c of citations)`
+  // filter below to also require the citation's own DOC line to literally
+  // contain `c.citedPath` is true for every FULL citation (the path is
+  // written right there) but false for a resolved CONTINUATION (whose
+  // `citedPath` is inherited from an earlier line, never written on its
+  // own) -- such a mutant silently drops every continuation from
+  // `anchored` while every existing per-anchor assertion below stays
+  // green on the smaller set. The real bundle's own continuations all
+  // happen to target `src/init.ts`, so running this collector against the
+  // real bundle alone can never prove that drop didn't happen; the
+  // synthetic fixture below can.
+  function collectStringAnchoredCitations(
+    docs: { doc: string; content: string }[] = ANCHOR_OKF_DOCS.map((doc) => ({
+      doc,
+      content: readRepoFile(`packages/orchestrator-workflow/docs/okf/${doc}`),
+    })),
+    resolveRealPath: (citedPath: string) => string | undefined = (citedPath) =>
+      RESOLVE[citedPath],
+  ): AnchoredCitation[] {
     const out: AnchoredCitation[] = [];
-    for (const doc of ANCHOR_OKF_DOCS) {
-      const content = readRepoFile(
-        `packages/orchestrator-workflow/docs/okf/${doc}`,
-      );
-      for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
-        const citedPath = m[1];
-        const anchorRaw = m[4];
-        if (!anchorRaw || !anchorRaw.startsWith('"')) continue;
-        const real = RESOLVE[citedPath];
-        if (!real) continue;
-        const start = Number(m[2]);
-        const end = m[3] ? Number(m[3]) : start;
+    for (const { doc, content } of docs) {
+      const citations = extractSiblingGuardCitations(content, resolveRealPath);
+      for (const c of citations) {
+        if (!c.isStringAnchor || c.anchorText === undefined) continue;
         out.push({
           doc,
-          citedPath,
-          real,
-          start,
-          end,
-          anchor: anchorRaw.slice(1, -1),
+          citedPath: c.citedPath,
+          real: c.real,
+          start: c.start,
+          end: c.end,
+          anchor: c.anchorText,
         });
       }
     }
@@ -3017,6 +3100,50 @@ describe("every string-anchored docs/okf citation's anchor is load-bearing (last
 
   it("found at least one string-anchored citation to check (sanity: not vacuously true)", () => {
     expect(anchored.length).toBeGreaterThan(0);
+  });
+
+  // agent-tasks b50fd903 review round 3 (MEDIUM 2): synthetic-doc-set
+  // regression guard for the coupling comment above. `fake/target.ts`
+  // resolves to itself; `collectStringAnchoredCitations` never reads the
+  // target's own content (only the anchor-load-bearing checks further
+  // below do that), so no real repo file is needed. The doc string below
+  // carries one full citation and, right after it, one path-less
+  // continuation into the same target -- exactly the shape
+  // `model-preselection.md` uses for real. Both must survive
+  // `collectStringAnchoredCitations` intact.
+  it("a resolved continuation citation survives collectStringAnchoredCitations alongside its governing full citation", () => {
+    const fakeTarget = "fake/target.ts";
+    const doc = [
+      "# Fixture",
+      "",
+      `- see \`${fakeTarget}:1#"line one"\` and, right after it,`,
+      '  `:3#"anchor line three"` in the same paragraph.',
+      "",
+    ].join("\n");
+    const found = collectStringAnchoredCitations(
+      [{ doc: "fixture.md", content: doc }],
+      (citedPath) => (citedPath === fakeTarget ? fakeTarget : undefined),
+    );
+    expect(
+      found.some(
+        (c) =>
+          c.citedPath === fakeTarget &&
+          c.start === 1 &&
+          c.anchor === "line one",
+      ),
+      "the full citation itself must survive",
+    ).toBe(true);
+    expect(
+      found.some(
+        (c) =>
+          c.citedPath === fakeTarget &&
+          c.start === 3 &&
+          c.anchor === "anchor line three",
+      ),
+      "the resolved continuation must survive too (kills a filter that " +
+        "requires the citation's own doc line to literally contain " +
+        "citedPath, which is only true for a full citation)",
+    ).toBe(true);
   });
 
   // agent-tasks 8c89aa12: aligned with okf-kit's own `--require-anchors`
@@ -3152,24 +3279,93 @@ describe("every docs/okf citation into a kit-source category this bundle anchors
     readFileSync(`${repoRoot}/${relPath}`, "utf8");
   const RESOLVE = anchorScopeResolve();
 
-  const missing: string[] = [];
-  let examined = 0;
-  for (const doc of ANCHOR_OKF_DOCS) {
-    const content = readRepoFile(
-      `packages/orchestrator-workflow/docs/okf/${doc}`,
-    );
-    for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
-      const citedPath = m[1];
-      const real = RESOLVE[citedPath];
-      if (!real) continue;
-      examined++;
-      if (!m[4]) {
-        const start = m[2];
-        const end = m[3] ? `-${m[3]}` : "";
-        missing.push(`${doc}: ${citedPath}:${start}${end}`);
+  // agent-tasks b50fd903 review round 2 (HIGH 1): consumes
+  // `extractSiblingGuardCitations` (defined further down this file, the
+  // citation-sibling-drift guard's own extractor) instead of a bespoke
+  // `content.matchAll(ANCHOR_CITATION_RE)` loop, so `examined` also counts
+  // a resolved continuation citation. A continuation can never land in
+  // `missing`: ANCHOR_CONTINUATION_CITATION_RE requires the anchor group,
+  // so every continuation this extractor returns already carries one.
+  // Review round 3 (MEDIUM 4), closed in round 4: `docs` and the resolver
+  // are parameters (defaulting to the real bundle) for the same reason
+  // `collectStringAnchoredCitations` took them in round 3 -- a mutant
+  // that silently drops every resolved continuation here leaves both
+  // assertions below green on the real bundle (nothing in it is an
+  // unanchored continuation, and `examined` only has to clear a floor),
+  // so the property is pinned against a synthetic doc set and as an
+  // exact DELTA instead.
+  function collectBrakeScan(
+    docs: { doc: string; content: string }[] = ANCHOR_OKF_DOCS.map((doc) => ({
+      doc,
+      content: readRepoFile(`packages/orchestrator-workflow/docs/okf/${doc}`),
+    })),
+    resolveRealPath: (citedPath: string) => string | undefined = (citedPath) =>
+      RESOLVE[citedPath],
+  ): { examined: number; missing: string[] } {
+    let examined = 0;
+    const missing: string[] = [];
+    for (const { doc, content } of docs) {
+      const citations = extractSiblingGuardCitations(content, resolveRealPath);
+      for (const c of citations) {
+        examined++;
+        if (c.anchorRaw === undefined) {
+          const end = c.end !== c.start ? `-${c.end}` : "";
+          missing.push(`${doc}: ${c.citedPath}:${c.start}${end}`);
+        }
       }
     }
+    return { examined, missing };
   }
+
+  const { examined, missing } = collectBrakeScan();
+
+  // Round 4 (MEDIUM 4): the floor below cannot tell 601 from 598, so the
+  // continuation-dropping mutant the reviewer found at this collector
+  // survived it. Pinned exactly, without hand-writing the live count
+  // anywhere: adding ONE doc carrying one full citation raises `examined`
+  // by exactly one, and adding one path-less continuation to that same
+  // doc raises it by exactly one more. A collector that drops resolved
+  // continuations gets the first delta right and the second one wrong.
+  const BRAKE_DELTA_TARGET = "fake/brake-target.ts";
+  const brakeDeltaResolve = (citedPath: string): string | undefined =>
+    citedPath === BRAKE_DELTA_TARGET ? BRAKE_DELTA_TARGET : RESOLVE[citedPath];
+  const brakeRealDocs = ANCHOR_OKF_DOCS.map((doc) => ({
+    doc,
+    content: readRepoFile(`packages/orchestrator-workflow/docs/okf/${doc}`),
+  }));
+  const brakeFullOnlyDoc = [
+    "# Fixture",
+    "",
+    `- see \`${BRAKE_DELTA_TARGET}:1#"line one"\` for the shape.`,
+    "",
+  ].join("\n");
+  const brakeWithContinuationDoc = [
+    "# Fixture",
+    "",
+    `- see \`${BRAKE_DELTA_TARGET}:1#"line one"\` for the shape, and`,
+    '  `:3#"line three"` right after it in the same paragraph.',
+    "",
+  ].join("\n");
+
+  it("one added full citation raises the brake's examined count by exactly one, and one added continuation citation by exactly one more", () => {
+    const base = collectBrakeScan(brakeRealDocs, brakeDeltaResolve).examined;
+    const withFull = collectBrakeScan(
+      [...brakeRealDocs, { doc: "fixture.md", content: brakeFullOnlyDoc }],
+      brakeDeltaResolve,
+    ).examined;
+    const withContinuation = collectBrakeScan(
+      [
+        ...brakeRealDocs,
+        { doc: "fixture.md", content: brakeWithContinuationDoc },
+      ],
+      brakeDeltaResolve,
+    ).examined;
+    expect(withFull - base, "the added full citation must be examined").toBe(1);
+    expect(
+      withContinuation - withFull,
+      "the added path-less continuation citation must be examined too",
+    ).toBe(1);
+  });
 
   // Review round 3 (LOW 6a): a brake that only checks "zero missing"
   // would stay green if the collection logic itself broke and silently
@@ -3328,19 +3524,40 @@ describe("every full citation into a *.test.ts target stays inside one describe/
     return best;
   }
 
-  function collectFullTestCitations(): Checked[] {
+  // agent-tasks b50fd903 review round 2 (HIGH 1): consumes
+  // `extractSiblingGuardCitations` (defined further down this file, the
+  // citation-sibling-drift guard's own extractor) instead of a bespoke
+  // `content.matchAll(ANCHOR_CITATION_RE)` loop, so a resolved continuation
+  // citation into a `*.test.ts` target is checked for block-straddle
+  // exactly like a full citation is.
+  // Review round 3 (MEDIUM 4), closed in round 4: `docs` and the resolver
+  // are parameters (defaulting to the real bundle) so the
+  // resolved-continuation property can be pinned against a synthetic doc
+  // set here too. The real bundle's own continuations all resolve into
+  // `src/init.ts`, never into a `*.test.ts` target, so this collector's
+  // own output cannot distinguish "continuations are collected" from
+  // "continuations are silently dropped" on the real bundle at all --
+  // the mutant that drops them survived every assertion in this file.
+  function collectFullTestCitations(
+    docs: { doc: string; content: string }[] = ANCHOR_OKF_DOCS.map((doc) => ({
+      doc,
+      content: readRepoFile(`packages/orchestrator-workflow/docs/okf/${doc}`),
+    })),
+    resolveRealPath: (citedPath: string) => string | undefined = (citedPath) =>
+      RESOLVE[citedPath],
+  ): Checked[] {
     const out: Checked[] = [];
-    for (const doc of ANCHOR_OKF_DOCS) {
-      const content = readRepoFile(
-        `packages/orchestrator-workflow/docs/okf/${doc}`,
-      );
-      for (const m of content.matchAll(ANCHOR_CITATION_RE)) {
-        const citedPath = m[1];
-        const real = RESOLVE[citedPath];
-        if (!real || !real.endsWith(".test.ts")) continue;
-        const start = Number(m[2]);
-        const end = m[3] ? Number(m[3]) : start;
-        out.push({ doc, citedPath, real, start, end });
+    for (const { doc, content } of docs) {
+      const citations = extractSiblingGuardCitations(content, resolveRealPath);
+      for (const c of citations) {
+        if (!c.real.endsWith(".test.ts")) continue;
+        out.push({
+          doc,
+          citedPath: c.citedPath,
+          real: c.real,
+          start: c.start,
+          end: c.end,
+        });
       }
     }
     return out;
@@ -3359,6 +3576,32 @@ describe("every full citation into a *.test.ts target stays inside one describe/
 
   it("found at least one full citation into a *.test.ts target to check (sanity: not vacuously true)", () => {
     expect(checked.length).toBeGreaterThan(0);
+  });
+
+  // Round 4 (MEDIUM 4): the synthetic-doc-set half of the pin above --
+  // one full citation into a `*.test.ts` target and one path-less
+  // continuation chained off it in the same paragraph, both of which
+  // this collector must return. A mutant that keeps the call to
+  // `extractSiblingGuardCitations` but drops resolved continuations
+  // afterwards passes every real-bundle assertion in this describe and
+  // fails here.
+  it("a resolved continuation citation into a *.test.ts target survives collectFullTestCitations alongside its governing full citation", () => {
+    const fakeTarget = "fake/target.test.ts";
+    const doc = [
+      "# Fixture",
+      "",
+      `- see \`${fakeTarget}:1#"line one"\` and, right after it,`,
+      '  `:3#"line three"` in the same paragraph.',
+      "",
+    ].join("\n");
+    const found = collectFullTestCitations(
+      [{ doc: "fixture.md", content: doc }],
+      (citedPath) => (citedPath === fakeTarget ? fakeTarget : undefined),
+    );
+    expect(
+      found.map((c) => `${c.real}:${c.start}`),
+      "both the full citation and the resolved continuation must survive",
+    ).toEqual([`${fakeTarget}:1`, `${fakeTarget}:3`]);
   });
 
   it("every citation's start and end line resolve to the same containing describe/it/test block", () => {
@@ -4902,40 +5145,109 @@ describe("the reviewer checklist items mirrored in this table still carry their 
 // of this comment per this file's own D31 convention of leaving numbers to
 // the log rather than hand-writing them at two sites that can drift apart.
 //
-// Two known coverage gaps, not yet closed: (1) a path-less continuation
-// citation (`:N-M#"..."`, whose path is implied by the preceding citation
-// in the same sentence) never matches ANCHOR_CITATION_RE, so this guard
-// cannot see one -- model-preselection.md alone carries several; extending
-// the regex to resolve a continuation's implied path is a follow-up (see
-// CHANGELOG.md), not done this round. (2) a citation-shaped string sitting
-// inside a fenced ``` code block is skipped below rather than matched --
-// cheap to add and closes the reverse risk (a code sample being
-// misread as a real citation), but means a genuine citation someone
+// A path-less continuation citation (`:N-M#"..."`, whose path is implied
+// by the preceding FULL citation in the same paragraph) used to never
+// match ANCHOR_CITATION_RE at all, so this guard could not see one --
+// model-preselection.md alone carries four. Closed:
+// ANCHOR_CONTINUATION_CITATION_RE (defined earlier in this file,
+// immediately after ANCHOR_CITATION_RE -- see the comment there for why
+// it has to live there textually) matches the path-less tail on its own,
+// and `governingPathByParagraph` below resolves it against the nearest
+// preceding full citation's own `citedPath` in the SAME paragraph (reset
+// per paragraph, exactly like the paragraph id itself; and reset again,
+// not carried, across an unresolved or ambiguous full citation in that
+// paragraph -- see the `else` branch below), the same "nearest preceding,
+// same paragraph" BINDING RULE okf-kit's own short-form/continuation
+// citations use in citations-resolve.ts. That is a mirror of the binding
+// rule only, not of the grammar: this bundle's anchored, path-less
+// `:N-M#"..."` form IS backtick-wrapped (round 3 correction: an earlier
+// version of this comment said "no backticks, no connective", which is
+// false), but okf-kit's own `CONT_COLON_RE`/`SHORT_FORM_COLON_RE` still
+// cannot see it. `CONT_COLON_RE` requires its own closing backtick to
+// follow the digit range immediately (`` `:N-M` ``); this bundle's form
+// closes the backtick after the `#"anchor"` tail instead, so it never
+// matches. `SHORT_FORM_COLON_RE` has no backtick requirement of its own,
+// but `collectShortFormMatches` skips any match immediately preceded by
+// a backtick (true here) and requires a serial-connective prefix
+// ("and", "also", ...) otherwise (absent here too) -- either reason
+// alone would already exclude it. okf-kit sees these citations as
+// nothing at all, not merely as unresolved ones. This guard, and (as of
+// this round) the three ANCHOR_CITATION_RE resolution sites above that
+// now also call `extractSiblingGuardCitations`, are the only things that
+// check them; that is the residual, named here next to the other
+// remaining one below. Deliberately scoped to the anchored form only
+// (`#"..."`/`#heading`): the anchor group is REQUIRED in
+// ANCHOR_CONTINUATION_CITATION_RE, not optional as it is in
+// ANCHOR_CITATION_RE, so a bare `:N-M` (a page range, a ratio, a time --
+// this bundle's prose is not free of digit pairs) is never mistaken for a
+// continuation citation; every real continuation this bundle uses carries
+// an anchor. A continuation match that lands inside an already-matched
+// full citation's own character span (the tail of `path.ext:N-M#anchor`
+// itself) is excluded, so the two regexes never double-count the same
+// characters.
+//
+// One remaining known coverage gap, not yet closed: a citation-shaped
+// string sitting inside a fenced ``` code block is skipped below rather
+// than matched -- cheap to add and closes the reverse risk (a code sample
+// being misread as a real citation), but means a genuine citation someone
 // mistakenly wrote inside a fence would also go unseen; fenced citations
-// are not a pattern this bundle currently uses.
-function extractSiblingGuardCitations(
+// are not a pattern this bundle currently uses. Round 3 (LOW 5): the
+// three `matchAll(ANCHOR_CITATION_RE)` resolution sites above that now
+// call this function inherit both consequences too -- a citation inside
+// a fence goes unchecked by them as well, and a document ending inside
+// an unclosed fence makes them throw, same as this guard -- accepted
+// as the same latent, currently-unused-shape cost, not a new one.
+
+interface CitationScanParagraph {
+  paragraphId: number;
+  /** The paragraph's own lines, trimmed and re-joined with one space. */
+  text: string;
+  /** 1-based physical doc line an offset into `text` came from. */
+  lineOf: (offset: number) => number;
+}
+
+// agent-tasks b50fd903 review round 3 (MEDIUM 2/3), closed in round 4:
+// both citation scanners in this file used to match per PHYSICAL LINE
+// (`lines.forEach`), while every doc in this bundle hard-wraps its prose
+// at roughly 72 columns -- so a citation whose own text straddles a wrap
+// (`src/init.ts:915-952#"force:` ending one line, `true,"` starting the
+// next) matched NEITHER regex and was invisible to every check built on
+// them. Re-running the same regexes over the raw document text does not
+// close it either: ANCHOR_CITATION_RE's string-anchor alternation
+// forbids a newline inside the anchor (`"[^"\n`]*"`) by construction, so
+// the text has to be re-joined the way the wrap split it, first. That
+// join is this helper, shared by `extractSiblingGuardCitations` below
+// and by the `docs/okf/log.md` guard at the end of this file so the two
+// cannot drift apart again (round 3 hand-copied this function's fence
+// pass into that guard and left its throw behind; there is one copy
+// now). Each paragraph -- a run of consecutive non-blank lines, the same
+// unit `governingPathByParagraph` binds a continuation citation within
+// -- is trimmed per line and joined with exactly ONE space, which is
+// what a hard wrap replaced; `lineOf` maps every joined offset back to
+// the physical line it came from, so findings, allowlist geometry and
+// failure messages still name real doc lines.
+//
+// Fenced ``` lines are dropped from the joined text (coverage gap (2)
+// above: a citation-shaped string in a code sample is never matched as a
+// real citation; the delimiter line itself counts as fenced, it is never
+// citation-shaped in this bundle) without breaking the paragraph they
+// sit in, so paragraph ids are unchanged by fencing. Round 3 (F7): the
+// fence toggle flips on ANY delimiter line and never checks that they
+// balance, so a single stray ``` (a typo, a half-pasted code sample)
+// would silently mark every remaining line of the doc as fenced and drop
+// every citation after it -- the guard would then report zero findings
+// for that doc and look green for exactly the wrong reason. Fail loudly
+// instead of scanning a doc the fence pass cannot read. The bundle
+// currently uses no fences at all, so this is a guard against a future
+// edit, not a description of today's content; the paired "every bundle
+// doc yields at least one citation" assertion further below, and the
+// log guard's own computed-count floor, are what catch the same
+// silent-zero outcome from any other cause.
+function citationScanParagraphs(
   docText: string,
-  resolveRealPath: (citedPath: string) => string | undefined,
-): SiblingGuardCitation[] {
+  guardName: string,
+): CitationScanParagraph[] {
   const lines = docText.split("\n");
-  const paragraphOfLine: number[] = [];
-  let paragraphId = 0;
-  let prevBlank = true;
-  for (const line of lines) {
-    const isBlank = line.trim() === "";
-    if (isBlank) {
-      paragraphOfLine.push(-1);
-      prevBlank = true;
-    } else {
-      if (prevBlank) paragraphId += 1;
-      paragraphOfLine.push(paragraphId);
-      prevBlank = false;
-    }
-  }
-  // Coverage gap (2) above: skip lines inside fenced ``` code blocks so a
-  // citation-shaped string in a code sample is never matched as a real
-  // citation. The fence delimiter line itself is treated as fenced too
-  // (it is never citation-shaped in this bundle).
   let inFence = false;
   const fencedLine: boolean[] = lines.map((line) => {
     if (/^\s*```/.test(line)) {
@@ -4944,47 +5256,182 @@ function extractSiblingGuardCitations(
     }
     return inFence;
   });
-  // Round 3 (F7): the toggle above flips on ANY fence delimiter line and
-  // never checks that they balance, so a single stray ``` (a typo, a
-  // half-pasted code sample) would silently mark every remaining line of
-  // the doc as fenced and drop every citation after it -- the guard would
-  // then report zero findings for that doc and look green for exactly the
-  // wrong reason. Fail loudly instead of scanning a doc the fence pass
-  // cannot read. The bundle currently uses no fences at all, so this is a
-  // guard against a future edit, not a description of today's content;
-  // the paired "every bundle doc yields at least one citation" assertion
-  // below is what catches the same silent-zero outcome from any other
-  // cause.
   if (inFence) {
     throw new Error(
-      "citation-sibling-drift guard: document ends inside an unclosed code fence; " +
+      `${guardName}: document ends inside an unclosed code fence; ` +
         "every citation after the stray delimiter would be silently skipped",
     );
   }
-  const citations: SiblingGuardCitation[] = [];
-  lines.forEach((line, idx) => {
-    if (fencedLine[idx]) return;
-    const paragraph = paragraphOfLine[idx];
-    if (paragraph === -1) return;
-    for (const m of line.matchAll(ANCHOR_CITATION_RE)) {
-      const citedPath = m[1];
-      const real = resolveRealPath(citedPath);
-      if (!real) continue;
-      const start = Number(m[2]);
-      const end = m[3] ? Number(m[3]) : start;
-      const anchorRaw = m[4];
-      const isStringAnchor = !!anchorRaw && anchorRaw.startsWith('"');
-      citations.push({
-        citedPath,
-        real,
-        start,
-        end,
-        anchorRaw,
-        isStringAnchor,
-        anchorText: isStringAnchor ? anchorRaw!.slice(1, -1) : undefined,
-        line: idx + 1,
-        paragraphId: paragraph,
+  const paragraphs: CitationScanParagraph[] = [];
+  let paragraphId = 0;
+  let prevBlank = true;
+  let parts: string[] = [];
+  let marks: { offset: number; line: number }[] = [];
+  let length = 0;
+  const flush = (): void => {
+    if (marks.length > 0) {
+      const text = parts.join(" ");
+      const lineMarks = marks;
+      paragraphs.push({
+        paragraphId,
+        text,
+        lineOf: (offset: number): number => {
+          let line = lineMarks[0].line;
+          for (const mark of lineMarks) {
+            if (mark.offset > offset) break;
+            line = mark.line;
+          }
+          return line;
+        },
       });
+    }
+    parts = [];
+    marks = [];
+    length = 0;
+  };
+  lines.forEach((line, idx) => {
+    if (line.trim() === "") {
+      flush();
+      prevBlank = true;
+      return;
+    }
+    if (prevBlank) {
+      paragraphId += 1;
+      prevBlank = false;
+    }
+    if (fencedLine[idx]) return;
+    const piece = line.trim();
+    if (parts.length > 0) length += 1;
+    marks.push({ offset: length, line: idx + 1 });
+    parts.push(piece);
+    length += piece.length;
+  });
+  flush();
+  return paragraphs;
+}
+
+function extractSiblingGuardCitations(
+  docText: string,
+  resolveRealPath: (citedPath: string) => string | undefined,
+): SiblingGuardCitation[] {
+  const citations: SiblingGuardCitation[] = [];
+  // Nearest preceding full citation's own `citedPath` string, per
+  // paragraph id -- the governing path a path-less continuation in that
+  // same paragraph resolves against. Never read across a paragraph
+  // boundary: paragraph ids are unique per paragraph already (see the
+  // `paragraphOfLine` pass above), so there is nothing to reset between
+  // paragraphs, only nothing to find yet.
+  const governingPathByParagraph = new Map<number, string>();
+  // agent-tasks b50fd903 review round 2 (LOW 5): a continuation match is
+  // dropped as an already-matched full citation's own tail only when it
+  // falls inside that match's own span (below). ANCHOR_CITATION_RE only
+  // recognises a fixed extension allowlist (ts|js|mjs|md|yml|yaml|json),
+  // so a full citation into a path with a DIFFERENT extension (a
+  // `.toml`, a `.tsx`) never produces a fullMatches entry to overlap
+  // against, and that citation's own `:N-M#"..."` tail would be misread
+  // as a real, path-less continuation. Cheaper and more general than
+  // growing ANCHOR_CITATION_RE's own extension list: drop a continuation
+  // match whenever the text immediately before it, on the same line, is
+  // itself path-shaped (ends in `something.ext`) regardless of what that
+  // extension is -- a real continuation is always preceded by prose or a
+  // citation delimiter (`;`, `,`, whitespace), never directly by a bare
+  // path.
+  const PATH_SHAPED_BEFORE_MATCH_RE = /[\w./-]+\.[A-Za-z0-9]+$/;
+  const scanned = citationScanParagraphs(
+    docText,
+    "citation-sibling-drift guard",
+  );
+  scanned.forEach((scan) => {
+    const text = scan.text;
+    const paragraph = scan.paragraphId;
+    const fullMatches = [...text.matchAll(ANCHOR_CITATION_RE)].map((m) => ({
+      kind: "full" as const,
+      index: m.index!,
+      end: m.index! + m[0].length,
+      match: m,
+    }));
+    const continuationMatches = [
+      ...text.matchAll(ANCHOR_CONTINUATION_CITATION_RE),
+    ]
+      .map((m) => ({
+        kind: "continuation" as const,
+        index: m.index!,
+        end: m.index! + m[0].length,
+        match: m,
+      }))
+      // Drop a "continuation" match that is really just the path-less
+      // tail of an already-matched full citation in this same paragraph
+      // (e.g. the `:915-952#"force: true,"` substring of
+      // `src/init.ts:915-952#"force: true,"`), never a real continuation.
+      .filter(
+        (cm) =>
+          !fullMatches.some((fm) => cm.index >= fm.index && cm.index < fm.end),
+      )
+      .filter(
+        (cm) => !PATH_SHAPED_BEFORE_MATCH_RE.test(text.slice(0, cm.index)),
+      );
+    // Process both kinds in true left-to-right document order so a full
+    // citation earlier in the same paragraph updates the governing path
+    // before a continuation later in that same paragraph reads it --
+    // "nearest preceding", not "last full citation anywhere above".
+    const ordered = [...fullMatches, ...continuationMatches].sort(
+      (a, b) => a.index - b.index,
+    );
+    for (const entry of ordered) {
+      if (entry.kind === "full") {
+        const m = entry.match;
+        const citedPath = m[1];
+        const real = resolveRealPath(citedPath);
+        // agent-tasks b50fd903 review round 2 (LOW 4): okf-kit RESETS its
+        // own governing path on an unresolved/ambiguous citation rather
+        // than leaving the previous one in place; this mirror used to
+        // just leave `governingPathByParagraph` holding the last
+        // RESOLVABLE path (latent today: no fixture in this bundle
+        // currently exercises an unresolved citation sitting between a
+        // governing citation and a later continuation). Matched here: a
+        // full citation that fails to resolve clears the paragraph's
+        // governing path instead of leaving a stale one behind, so a
+        // continuation after it has nothing to bind to either.
+        if (real) governingPathByParagraph.set(paragraph, citedPath);
+        else governingPathByParagraph.delete(paragraph);
+        if (!real) continue;
+        const start = Number(m[2]);
+        const end = m[3] ? Number(m[3]) : start;
+        const anchorRaw = m[4];
+        const isStringAnchor = !!anchorRaw && anchorRaw.startsWith('"');
+        citations.push({
+          citedPath,
+          real,
+          start,
+          end,
+          anchorRaw,
+          isStringAnchor,
+          anchorText: isStringAnchor ? anchorRaw!.slice(1, -1) : undefined,
+          line: scan.lineOf(entry.index),
+          paragraphId: paragraph,
+        });
+      } else {
+        const citedPath = governingPathByParagraph.get(paragraph);
+        if (citedPath === undefined) continue;
+        const real = resolveRealPath(citedPath);
+        if (!real) continue;
+        const m = entry.match;
+        const start = Number(m[1]);
+        const end = m[2] ? Number(m[2]) : start;
+        const anchorRaw = m[3];
+        const isStringAnchor = anchorRaw.startsWith('"');
+        citations.push({
+          citedPath,
+          real,
+          start,
+          end,
+          anchorRaw,
+          isStringAnchor,
+          anchorText: isStringAnchor ? anchorRaw.slice(1, -1) : undefined,
+          line: scan.lineOf(entry.index),
+          paragraphId: paragraph,
+        });
+      }
     }
   });
   return citations;
@@ -5513,6 +5960,308 @@ describe("citation-sibling-drift guard: fixtures reproduce the three review-batc
       ),
     ).toThrow(/unclosed code fence/);
   });
+
+  // Closes coverage gap (1) from the block comment above
+  // `extractSiblingGuardCitations`: a path-less continuation citation
+  // (`:N-M#"..."`) must participate in the duplicate-citation rule the
+  // same as a full citation would. The drifted form's second citation is
+  // written as a bare continuation (`:10-12#"..."`, no path, chained off
+  // the full citation right before it in the same paragraph) repeating
+  // the SAME range and anchor as the full citation -- a literal
+  // duplicate, indistinguishable in shape from the three review-batch
+  // shapes above except that the repeat is spelled as a continuation, not
+  // a second full citation. If continuation resolution were disabled (or
+  // never implemented), this guard would see only ONE citation in this
+  // paragraph (the continuation is invisible to ANCHOR_CITATION_RE) and
+  // report no finding at all -- this is the mutation-probe (a) target.
+  it('a path-less continuation citation (`:N-M#"..."`) duplicating the preceding full citation\'s range and anchor is flagged by the duplicate rule; re-pointing the continuation to a different range clears it', () => {
+    const target = buildSiblingGuardFixtureFile(28, {
+      10: "    checkContinuationFixture(x);",
+      12: "    // end checkContinuationFixture(x);",
+      20: "    checkContinuationFixture(x);",
+      22: "    // end checkContinuationFixture(x);",
+    });
+    const readTarget = (): string => target;
+
+    const drifted =
+      "the mirrored README bullet and the write-surface listing both point\n" +
+      "at the same helper, cited once in full and once as a continuation\n" +
+      '(fixture-continuation.test.ts:10-12#"checkContinuationFixture(x)";\n' +
+      ':10-12#"checkContinuationFixture(x)").\n';
+    const driftedFindings = findCitationSiblingDrift(
+      drifted,
+      identity,
+      readTarget,
+    );
+    expect(
+      driftedFindings.some((f) => f.kind === "duplicate-citation"),
+      "a path-less continuation repeating the preceding citation's own " +
+        "range and anchor must be seen as a duplicate: " +
+        formatSiblingGuardFindings(driftedFindings),
+    ).toBe(true);
+
+    const corrected =
+      "the mirrored README bullet and the write-surface listing both point\n" +
+      "at the same helper, cited once in full and once as a continuation\n" +
+      '(fixture-continuation.test.ts:10-12#"checkContinuationFixture(x)";\n' +
+      ':20-22#"checkContinuationFixture(x)").\n';
+    const correctedFindings = findCitationSiblingDrift(
+      corrected,
+      identity,
+      readTarget,
+    );
+    expect(
+      correctedFindings,
+      formatSiblingGuardFindings(correctedFindings),
+    ).toEqual([]);
+  });
+
+  // Discriminates "resolves against the NEAREST PRECEDING full citation in
+  // the paragraph" from the plausible bug "resolves against the FIRST
+  // full citation in the paragraph" -- the mutation-probe (b) target. The
+  // paragraph below names two full citations to two DIFFERENT target
+  // files, then a bare continuation. Only the correct (nearest-preceding)
+  // binding makes the continuation an exact duplicate of the SECOND full
+  // citation (same real file, range, and anchor): a "first in paragraph"
+  // binding would instead resolve the continuation against the first
+  // file, at a range and anchor it never actually repeats there, so no
+  // duplicate-citation finding would be produced at all. A silent zero
+  // findings on this fixture is exactly what a wrong-sibling continuation
+  // binding would produce, and is what this test is written to catch.
+  it("a path-less continuation resolves against the nearest PRECEDING full citation in the paragraph, not the paragraph's first one", () => {
+    const readTarget = (): string => buildSiblingGuardFixtureFile(15, {});
+
+    const docText =
+      "one paragraph names two different helpers before the continuation\n" +
+      '(fixture-cont-a.test.ts:5-5#"noop", fixture-cont-b.test.ts:9-9#"marker",\n' +
+      ':9-9#"marker").\n';
+    const findings = findCitationSiblingDrift(docText, identity, readTarget);
+    // agent-tasks b50fd903 review round 2 (LOW 9): asserts the full
+    // `findings` array, not only the `duplicate-citation`-filtered subset
+    // of it -- the filtered form would stay green even if a wrong-sibling
+    // continuation binding produced some OTHER, unexpected finding
+    // alongside (or instead of) the one this fixture is written to check.
+    expect(
+      findings,
+      'the continuation must duplicate fixture-cont-b.test.ts:9-9#"marker" ' +
+        "(the SECOND, nearer full citation), not fixture-cont-a.test.ts's " +
+        'unrelated 5-5#"noop", and no other finding: ' +
+        formatSiblingGuardFindings(findings),
+    ).toHaveLength(1);
+    const [finding] = findings;
+    if (finding.kind !== "duplicate-citation") {
+      throw new Error(
+        `expected a duplicate-citation finding, got ${finding.kind}`,
+      );
+    }
+    expect(finding.real).toBe("fixture-cont-b.test.ts");
+    expect(finding.start).toBe(9);
+    expect(finding.end).toBe(9);
+  });
+
+  // agent-tasks b50fd903 review round 2 (MEDIUM, tests): the paragraph-
+  // scoping property -- a continuation never resolves against a governing
+  // citation from a DIFFERENT (earlier) paragraph -- was previously
+  // asserted only in the comment above `governingPathByParagraph`, not by
+  // any fixture. A mutant that falls back to the whole map's last value
+  // when the current paragraph has none of its own
+  // (`governingPathByParagraph.get(paragraph) ?? [...values()].pop()`)
+  // passed every existing fixture and survived, because none of them put
+  // a bare continuation in a paragraph that never itself named a full
+  // citation. This one does: a full citation in the first paragraph, a
+  // blank line, then a bare continuation alone in the second paragraph.
+  // The continuation must produce no citation at all (nothing to resolve
+  // against in its OWN paragraph) and therefore no finding.
+  it("a path-less continuation in a paragraph that names no full citation of its own resolves against nothing, even though an earlier paragraph did", () => {
+    const readTarget = (): string => buildSiblingGuardFixtureFile(12, {});
+
+    const docText =
+      'the first paragraph names a real citation (fixture-para.test.ts:5-5#"noop").\n' +
+      "\n" +
+      'the second paragraph opens with a bare continuation (:5-5#"noop") that ' +
+      "must not silently inherit the first paragraph's governing path.\n";
+    const citations = extractSiblingGuardCitations(docText, identity);
+    expect(
+      citations.filter((c) => c.line === 3),
+      "the second paragraph's bare continuation must not resolve to any " +
+        "citation at all: " +
+        JSON.stringify(citations.filter((c) => c.line === 3)),
+    ).toEqual([]);
+    const findings = findCitationSiblingDrift(docText, identity, readTarget);
+    expect(findings, formatSiblingGuardFindings(findings)).toEqual([]);
+  });
+
+  // agent-tasks b50fd903 review round 2 (LOW 6): the true left-to-right,
+  // "nearest preceding" ordering of full and continuation matches on the
+  // SAME line (the `.sort((a, b) => a.index - b.index)` on the merged
+  // `ordered` array) was unpinned: a mutant replacing the comparator with
+  // a constant `() => 0` survived every existing fixture, because
+  // `Array.prototype.sort` is stable and the merged array is built as
+  // `[...fullMatches, ...continuationMatches]` -- with a no-op comparator
+  // every full match on a line is still processed before every
+  // continuation on that same line, in original (already left-to-right)
+  // order within each kind, which happens to reproduce the correct
+  // "nearest preceding" answer whenever a line's continuation comes AFTER
+  // every full citation on it, exactly the shape every prior fixture
+  // used. This fixture puts a continuation BETWEEN two full citations on
+  // one line: the correct sort binds it to the nearer, EARLIER one; the
+  // constant-comparator mutant instead processes both full citations
+  // first (setting the governing path to the LATER one) and only then the
+  // continuation, binding it to the wrong (later) file.
+  it("a path-less continuation between two full citations on the same line binds to the earlier one (left-to-right order, not full-matches-first)", () => {
+    const readTarget = (): string => buildSiblingGuardFixtureFile(15, {});
+
+    const docText =
+      "one line names an early file, a continuation, then a later file " +
+      '(fixture-order-a.test.ts:5-5#"noop" :5-5#"noop" ' +
+      'fixture-order-b.test.ts:9-9#"marker").\n';
+    const findings = findCitationSiblingDrift(docText, identity, readTarget);
+    expect(
+      findings,
+      "the continuation sits between the two full citations and must " +
+        "duplicate the EARLIER one (fixture-order-a.test.ts:5-5), not the " +
+        "later fixture-order-b.test.ts:9-9: " +
+        formatSiblingGuardFindings(findings),
+    ).toHaveLength(1);
+    const [finding] = findings;
+    if (finding.kind !== "duplicate-citation") {
+      throw new Error(
+        `expected a duplicate-citation finding, got ${finding.kind}`,
+      );
+    }
+    expect(finding.real).toBe("fixture-order-a.test.ts");
+    expect(finding.start).toBe(5);
+    expect(finding.end).toBe(5);
+  });
+
+  // agent-tasks b50fd903 review round 2 (LOW 4): okf-kit resets its own
+  // governing path when a citation fails to resolve/is ambiguous, rather
+  // than leaving the previous resolvable path in place; this mirror used
+  // to just leave it. An unresolved citation (a path `resolveRealPath`
+  // returns `undefined` for) sits between the governing citation and the
+  // continuation below: the continuation must NOT fall back to the
+  // earlier, still-resolvable path -- it must resolve to nothing, and the
+  // fixture's would-be duplicate must not be reported.
+  it("an unresolved citation between a governing citation and a continuation clears the governing path (the continuation resolves to nothing)", () => {
+    const readTarget = (): string => buildSiblingGuardFixtureFile(15, {});
+    const resolveExceptUnresolvable = (
+      citedPath: string,
+    ): string | undefined =>
+      citedPath === "fixture-unresolvable.test.ts" ? undefined : citedPath;
+
+    const docText =
+      'the paragraph cites a real file (fixture-reset.test.ts:5-5#"noop"), ' +
+      'then an unresolvable one (fixture-unresolvable.test.ts:1-1#"gone"), ' +
+      'then a bare continuation (:5-5#"noop") that must not fall back to ' +
+      "the first, no-longer-governing citation.\n";
+    const citations = extractSiblingGuardCitations(
+      docText,
+      resolveExceptUnresolvable,
+    );
+    expect(
+      citations.some((c) => c.real === "fixture-reset.test.ts" && c.line > 1),
+      "no citation after the unresolved one may resolve against " +
+        "fixture-reset.test.ts: " +
+        JSON.stringify(citations),
+    ).toBe(false);
+    const findings = findCitationSiblingDrift(
+      docText,
+      resolveExceptUnresolvable,
+      readTarget,
+    );
+    expect(findings, formatSiblingGuardFindings(findings)).toEqual([]);
+  });
+
+  // agent-tasks b50fd903 review round 2 (LOW 5): the continuation-vs-full-
+  // match overlap filter previously only dropped a "continuation" match
+  // sitting inside an ANCHOR_CITATION_RE match's own span -- but that
+  // regex only recognises a fixed extension allowlist
+  // (ts|js|mjs|md|yml|yaml|json). A path into a DIFFERENT extension (here
+  // `.toml`) is not itself citable by this guard (that allowlist is
+  // unchanged), but its `:N-M#"..."` tail is still syntactically a real
+  // ANCHOR_CONTINUATION_CITATION_RE match with nothing to overlap-filter
+  // it out, so it gets silently misread as resolving against whatever
+  // full citation DID govern the paragraph -- a phantom, wrong citation,
+  // not merely a missed one. The paragraph below cites one real target,
+  // then mentions an unrelated `.toml` setting later in the same
+  // sentence: extraction must yield exactly the one real citation, not a
+  // second, phantom one pointing at `fixture-guard.test.ts:3-4`.
+  it('a `.toml` path\'s own `:N-M#"..."` tail is not misread as a continuation of an earlier real citation in the same paragraph', () => {
+    const docText =
+      'the paragraph cites a real file (fixture-guard.test.ts:1-1#"marker"), ' +
+      'then names an unrelated setting (fixture.toml:3-4#"key = true") that ' +
+      "must not phantom-continue.\n";
+    const citations = extractSiblingGuardCitations(docText, identity);
+    expect(
+      citations,
+      "the `.toml` path's own tail must not be read as a continuation " +
+        "citation of fixture-guard.test.ts: " +
+        JSON.stringify(citations),
+    ).toHaveLength(1);
+    expect(citations[0].real).toBe("fixture-guard.test.ts");
+    expect(citations[0].start).toBe(1);
+    expect(citations[0].end).toBe(1);
+    expect(citations[0].anchorText).toBe("marker");
+  });
+
+  // agent-tasks b50fd903 review round 2 (HIGH 1 regression guard): the
+  // whole point of extending the three early ANCHOR_CITATION_RE
+  // resolution sites to also consume `extractSiblingGuardCitations` is
+  // that a resolved continuation citation gets checked -- last content
+  // line, occurrence count, block containment -- exactly like a full
+  // citation is. This is a smaller, direct reproduction of that
+  // property, independent of the real bundle docs those sites read: a
+  // continuation resolves to a real citation object with a `start`/`end`
+  // range and an `anchorText`, and `lastContentLineInRange` (the same
+  // helper the "last content line" resolution site uses) can find that
+  // its anchor does NOT actually sit on the range's own last content
+  // line when the continuation is stale -- the exact shape a mutant that
+  // disables continuation resolution (this round's probe (e), and the
+  // replayed round-1 probe that always `continue`s the continuation
+  // branch) would hide, by producing no citation for the resolution
+  // sites to check at all. Review round 3 correction: this pins
+  // `extractSiblingGuardCitations`'s own output only, not what the three
+  // resolution sites do with it afterward -- a round-2 survivor
+  // (`collectStringAnchoredCitations`'s own filter, narrowed to also
+  // require the citation's own doc line to literally contain
+  // `citedPath`) kept every continuation resolving here while still
+  // dropping it one step later; see the source-span pin and the
+  // synthetic-doc-set test next to that collector's own definition for
+  // the property this fixture alone does not cover.
+  it("a resolved continuation citation's anchor is checked against its own cited range the same way a full citation's is", () => {
+    const docText =
+      'the paragraph cites a real file (fixture-stale.test.ts:1-1#"first"), ' +
+      'then a stale continuation (:5-5#"first") whose anchor text does not ' +
+      "actually occur at that range.\n";
+    const citations = extractSiblingGuardCitations(docText, identity);
+    const continuation = citations.find(
+      (c) => c.real === "fixture-stale.test.ts" && c.start === 5,
+    );
+    expect(
+      continuation,
+      "the continuation must still resolve to a citation object for a " +
+        "resolution site to check at all: " +
+        JSON.stringify(citations),
+    ).toBeDefined();
+    const targetLines = buildSiblingGuardFixtureFile(6, {
+      1: '  const first = "first";',
+      5: '  const other = "different text";',
+    }).split("\n");
+    const lastContentLine = lastContentLineInRange(
+      targetLines,
+      continuation!.start,
+      continuation!.end,
+    );
+    const anchorLine = targetLines[lastContentLine - 1] ?? "";
+    expect(
+      anchorLine.includes(continuation!.anchorText!),
+      "a continuation whose anchor text does not occur at its own cited " +
+        "range must be detectable the same way a full citation's stale " +
+        "anchor is (the resolution sites' own \"anchor on last content " +
+        `line" check): got last content line ${lastContentLine} = ` +
+        JSON.stringify(anchorLine),
+    ).toBe(false);
+  });
 });
 
 // Imported here, not moved to the top-of-file import block, for the same
@@ -5655,8 +6404,8 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 534,
-    end: 534,
+    start: 535,
+    end: 535,
     anchorKey: "47aedb12",
     paragraphLine: 336,
     secondCitationLine: 341,
@@ -5667,8 +6416,8 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1055,
-    end: 1055,
+    start: 1056,
+    end: 1056,
     anchorKey: "03317257",
     paragraphLine: 421,
     secondCitationLine: 425,
@@ -5679,8 +6428,8 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1169,
-    end: 1169,
+    start: 1170,
+    end: 1170,
     anchorKey: "b19680bb",
     paragraphLine: 549,
     secondCitationLine: 555,
@@ -6495,4 +7244,474 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       );
     });
   }
+});
+
+// agent-tasks b50fd903 review round 2 (MEDIUM 2), closed in round 3: the
+// three ANCHOR_CITATION_RE resolution sites above were rewired to call
+// `extractSiblingGuardCitations` in round 2, but nothing pinned that
+// wiring -- a line-count-preserving mutant at `collectStringAnchoredCitations`'s
+// own filter (extending it to also require the citation's own doc line to
+// literally contain `c.citedPath`) silently dropped every resolved
+// continuation from its output while every existing assertion in this
+// file stayed green (313/313), because the real bundle's own
+// continuations all resolve into a target none of the other checks
+// happen to fail differently for. Two independent pins close that: a
+// source-span check that each of the three sites still calls the shared
+// extractor and carries no bare `matchAll(ANCHOR_CITATION_RE)` loop of
+// its own (below), and a synthetic-doc-set test driving
+// `collectStringAnchoredCitations` directly, defined right next to that
+// function's own definition above (it needs that function's closure over
+// `RESOLVE`'s sibling parameter, so it cannot live down here).
+describe("the three ANCHOR_CITATION_RE resolution sites stay wired to extractSiblingGuardCitations (task agent-dx b50fd903, review round 3, MEDIUM 2)", () => {
+  const selfSource = readFileSync(
+    fileURLToPath(new URL("docs-consistency.test.ts", import.meta.url)),
+    "utf8",
+  );
+  const selfLines = selfSource.split("\n");
+
+  function sliceSpan(startMarker: string, closeLine: string): string {
+    const startIdx = selfLines.findIndex((l) => l.includes(startMarker));
+    if (startIdx === -1) {
+      throw new Error(
+        `could not locate "${startMarker}" in this file's own source`,
+      );
+    }
+    let endIdx = -1;
+    for (let i = startIdx + 1; i < selfLines.length; i++) {
+      if (selfLines[i] === closeLine) {
+        endIdx = i;
+        break;
+      }
+    }
+    if (endIdx === -1) {
+      throw new Error(`could not find "${closeLine}" closing "${startMarker}"`);
+    }
+    return selfLines.slice(startIdx, endIdx + 1).join("\n");
+  }
+
+  const collectorSpans: Record<string, string> = {
+    collectStringAnchoredCitations: sliceSpan(
+      "function collectStringAnchoredCitations(",
+      "  }",
+    ),
+    "the unanchored-citation brake": sliceSpan(
+      "function collectBrakeScan(",
+      "  }",
+    ),
+    collectFullTestCitations: sliceSpan(
+      "function collectFullTestCitations(",
+      "  }",
+    ),
+  };
+
+  for (const [name, span] of Object.entries(collectorSpans)) {
+    it(`${name} calls extractSiblingGuardCitations and carries no bare matchAll(ANCHOR_CITATION_RE) loop of its own`, () => {
+      expect(
+        span,
+        `could not find a call to extractSiblingGuardCitations( inside ${name}'s own span`,
+      ).toContain("extractSiblingGuardCitations(");
+      expect(
+        span,
+        `${name}'s own span still runs a bare content.matchAll(ANCHOR_CITATION_RE) loop`,
+      ).not.toContain("content.matchAll(ANCHOR_CITATION_RE)");
+    });
+  }
+});
+
+// agent-tasks b50fd903 review round 2 (MEDIUM 3), redesigned in round 3
+// per D-037: `docs/okf/log.md` is excluded from `ANCHOR_OKF_DOCS` (it is
+// the bundle's own changelog, not a knowledge doc) and therefore from
+// every guard above, and okf-kit's own citation grammar cannot see this
+// bundle's path-less continuation form at all (see the reason correction
+// next to `extractSiblingGuardCitations`'s own definition) -- so
+// citation-shaped historical text written into a log entry is read by
+// NOTHING. Round 1 of this task removed exactly such text from a log
+// entry (0f054d2) and round 2 wrote five more (see review round 2,
+// MEDIUM 3). Rather than another round of rephrasing that recurs on the
+// next entry, log.md gets its own guard: every full, anchored citation it
+// writes must still resolve at head (the target exists, the anchor text
+// sits somewhere inside the cited range), and it may never carry the
+// bundle's path-less continuation form at all, since that form has no
+// governing-citation semantics of its own here -- nothing in this bundle
+// resolves a continuation written in log.md against anything, so it can
+// only ever be stale prose masquerading as a citation. A historical value
+// belongs in plain prose instead (see the log entry this round adds for
+// the convention: "moved to lines N through M", not `` `:N-M#"..."` ``).
+describe("docs/okf/log.md's own citations resolve, and it carries no path-less continuation citation form (task agent-dx b50fd903, review round 3, D-037)", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+  const scopedResolve = anchorScopeResolve();
+
+  // log.md narrates the whole package's history, so it cites files
+  // ANCHOR_OKF_DOCS's own resolver (`anchorScopeResolve`) never needed to
+  // know about: the package's own CHANGELOG/README/INSTALL-AGENT, and its
+  // docs/okf siblings by their own bare or full path. Extended here,
+  // local to this guard, rather than widening `anchorScopeResolve` itself
+  // for every other caller.
+  const EXTRA_LOG_CITATION_TARGETS: Record<string, string> = {
+    "CHANGELOG.md": "packages/orchestrator-workflow/CHANGELOG.md",
+    "packages/orchestrator-workflow/CHANGELOG.md":
+      "packages/orchestrator-workflow/CHANGELOG.md",
+    "INSTALL-AGENT.md": "packages/orchestrator-workflow/INSTALL-AGENT.md",
+    "packages/orchestrator-workflow/INSTALL-AGENT.md":
+      "packages/orchestrator-workflow/INSTALL-AGENT.md",
+    "README.md": "packages/orchestrator-workflow/README.md",
+    "assets/skill/SKILL.md":
+      "packages/orchestrator-workflow/assets/skill/SKILL.md",
+    "packages/orchestrator-workflow/README.md":
+      "packages/orchestrator-workflow/README.md",
+  };
+  for (const doc of ANCHOR_OKF_DOCS) {
+    EXTRA_LOG_CITATION_TARGETS[`docs/okf/${doc}`] =
+      `packages/orchestrator-workflow/docs/okf/${doc}`;
+    EXTRA_LOG_CITATION_TARGETS[
+      `packages/orchestrator-workflow/docs/okf/${doc}`
+    ] = `packages/orchestrator-workflow/docs/okf/${doc}`;
+  }
+
+  // Review round 3 (LOW), closed in round 4: a bare basename that BOTH
+  // the bespoke map above binds to this package's own file AND exists at
+  // the repository root is genuinely ambiguous -- `README.md:108` in a
+  // log entry could mean either, and the map silently picked this
+  // package's every time. Computed from the map and the disk rather than
+  // hand-listed, so it stays right when a root file of the same name is
+  // added or removed later; such a citation is reported unresolved with
+  // both candidates named, and the entry has to write the path out in
+  // full (`packages/orchestrator-workflow/README.md:108`), which both
+  // maps already accept. Residual, unchanged and named here: the deeper
+  // repo-wide basename ambiguity okf-kit reports (`SKILL.md` exists in
+  // more than one package) is still bound unconditionally, by
+  // `anchorScopeResolve()`'s own documented design, and this guard
+  // inherits that binding rather than second-guessing it.
+  const ROOT_AMBIGUOUS_BARE_NAMES = new Set(
+    Object.keys(EXTRA_LOG_CITATION_TARGETS).filter(
+      (name) =>
+        !name.includes("/") &&
+        EXTRA_LOG_CITATION_TARGETS[name] !== name &&
+        existsSync(`${repoRoot}/${name}`),
+    ),
+  );
+
+  interface LogPathResolution {
+    real?: string;
+    /** Why it did not resolve, for the failure message. */
+    reason?: string;
+  }
+
+  function resolveLogCitationPath(citedPath: string): LogPathResolution {
+    // Review round 3 (LOW), closed in round 4: the on-disk fallback below
+    // used to join `repoRoot` with the cited path unchecked, so a
+    // `../outside-target.md` citation resolved to a real file OUTSIDE the
+    // repository and was then read and anchor-checked against it. A `..`
+    // segment is never a legitimate citation in this bundle; reject it
+    // before any lookup, and assert containment on the fallback anyway
+    // (belt and braces for a path the segment check does not model).
+    if (citedPath.split("/").includes("..")) {
+      return {
+        reason:
+          "cited path escapes the repository with a `..` segment; write it repo-root-relative instead",
+      };
+    }
+    if (ROOT_AMBIGUOUS_BARE_NAMES.has(citedPath)) {
+      return {
+        reason:
+          `bare \`${citedPath}\` is ambiguous between ${EXTRA_LOG_CITATION_TARGETS[citedPath]} ` +
+          `and the repository root's own ${citedPath}; write the full repo-root-relative path`,
+      };
+    }
+    if (scopedResolve[citedPath]) return { real: scopedResolve[citedPath] };
+    if (EXTRA_LOG_CITATION_TARGETS[citedPath]) {
+      return { real: EXTRA_LOG_CITATION_TARGETS[citedPath] };
+    }
+    // Fallback for anything already fully repo-root-relative that the
+    // maps above do not name explicitly (e.g. a future citation into a
+    // sibling package): a real file on disk at exactly that path, inside
+    // the repository.
+    const candidate = resolvePath(repoRoot, citedPath);
+    if (
+      candidate.startsWith(`${resolvePath(repoRoot)}${sep}`) &&
+      existsSync(candidate)
+    ) {
+      return { real: citedPath };
+    }
+    return { reason: "no such file inside the repository" };
+  }
+
+  interface LogCitationCheckResult {
+    unresolvedFullCitations: string[];
+    anchorNotInRange: string[];
+    continuationForms: string[];
+    /** Anchored full citations this scan actually read and checked. */
+    fullCitationsChecked: number;
+  }
+
+  // Review round 3 (MEDIUM 2/3), closed in round 4: this scan used to
+  // hand-copy `extractSiblingGuardCitations`'s fence-skip pass -- without
+  // its unbalanced-fence throw, so one stray ``` anywhere in log.md
+  // silently excused every citation after it -- and to match per physical
+  // line, so any citation whose own text wrapped across a hard line break
+  // was invisible to BOTH rules below. Both closed by consuming the
+  // shared `citationScanParagraphs` helper (defined next to that
+  // function): one fence pass, one throw, and paragraph-joined text with
+  // an offset-to-line map, so a wrapped citation is matched and still
+  // reported at the physical line it starts on.
+  function checkLogCitations(
+    docText: string,
+    resolveRealPath: (citedPath: string) => LogPathResolution,
+    readTarget: (real: string) => string,
+  ): LogCitationCheckResult {
+    // Round 2's own `PATH_SHAPED_BEFORE_MATCH_RE` (see
+    // `extractSiblingGuardCitations` above), duplicated here narrowly: a
+    // real continuation is never directly preceded by a bare path (e.g. a
+    // `.toml` citation's own `:N-M#"..."` tail), and this guard forbids
+    // the continuation FORM outright rather than resolving it, so it
+    // cannot reuse that function's resolved-citations return value to
+    // tell the two apart.
+    const PATH_SHAPED_BEFORE_RE = /[\w./-]+\.[A-Za-z0-9]+$/;
+    const unresolvedFullCitations: string[] = [];
+    const anchorNotInRange: string[] = [];
+    const continuationForms: string[] = [];
+    let fullCitationsChecked = 0;
+    const scanned = citationScanParagraphs(
+      docText,
+      "docs/okf/log.md citation guard",
+    );
+    scanned.forEach((scan) => {
+      const text = scan.text;
+      const fullMatches = [...text.matchAll(ANCHOR_CITATION_RE)];
+      for (const m of fullMatches) {
+        const anchorRaw = m[4];
+        if (!anchorRaw || !anchorRaw.startsWith('"')) continue;
+        const citedPath = m[1];
+        const start = Number(m[2]);
+        const end = m[3] ? Number(m[3]) : start;
+        const rangeSuffix = m[3] ? `-${end}` : "";
+        const anchorText = anchorRaw.slice(1, -1);
+        const line = scan.lineOf(m.index!);
+        const resolved = resolveRealPath(citedPath);
+        const real = resolved.real;
+        if (real === undefined) {
+          unresolvedFullCitations.push(
+            `log.md:${line}: ${citedPath}:${start}${rangeSuffix} -- ${resolved.reason ?? "no such file"}`,
+          );
+          continue;
+        }
+        fullCitationsChecked++;
+        const targetLines = readTarget(real).split("\n");
+        const rangeLines = targetLines.slice(start - 1, end);
+        if (!rangeLines.some((l) => l.includes(anchorText))) {
+          anchorNotInRange.push(
+            `log.md:${line}: ${citedPath}:${start}${rangeSuffix}#"${anchorText}" -- anchor text not found inside its own cited range of ${real}`,
+          );
+        }
+      }
+      const continuationMatches = [
+        ...text.matchAll(ANCHOR_CONTINUATION_CITATION_RE),
+      ]
+        .filter(
+          (m) =>
+            !fullMatches.some(
+              (fm) =>
+                m.index! >= fm.index! && m.index! < fm.index! + fm[0].length,
+            ),
+        )
+        .filter((m) => !PATH_SHAPED_BEFORE_RE.test(text.slice(0, m.index!)));
+      for (const m of continuationMatches) {
+        continuationForms.push(
+          `log.md:${scan.lineOf(m.index!)}: \`${m[0]}\` -- path-less continuation citation form is forbidden in docs/okf/log.md (log.md has no governing-citation semantics; rephrase as plain prose)`,
+        );
+      }
+    });
+    return {
+      unresolvedFullCitations,
+      anchorNotInRange,
+      continuationForms,
+      fullCitationsChecked,
+    };
+  }
+
+  const FIXTURE_TARGET = "fake/target.ts";
+  const FIXTURE_TARGET_CONTENT = ["line one", "line two", "line three"].join(
+    "\n",
+  );
+  const fixtureResolve = (citedPath: string): LogPathResolution =>
+    citedPath === FIXTURE_TARGET
+      ? { real: FIXTURE_TARGET }
+      : { reason: "no such file inside the repository" };
+  const fixtureReadTarget = (real: string): string => {
+    if (real === FIXTURE_TARGET) return FIXTURE_TARGET_CONTENT;
+    throw new Error(`fixture readTarget: unexpected real path ${real}`);
+  };
+
+  it("fixture: a full citation whose anchor text is not inside its own cited range fails", () => {
+    const doc = [
+      "# Bundle log",
+      "",
+      `- an entry citing \`${FIXTURE_TARGET}:1#"line two"\` (stale: "line two" is on line 2, not inside the cited range 1-1).`,
+    ].join("\n");
+    const result = checkLogCitations(doc, fixtureResolve, fixtureReadTarget);
+    expect(result.anchorNotInRange.length).toBeGreaterThan(0);
+    expect(result.unresolvedFullCitations).toEqual([]);
+    expect(result.continuationForms).toEqual([]);
+  });
+
+  it("fixture: a full citation into a nonexistent path fails", () => {
+    const doc = [
+      "# Bundle log",
+      "",
+      '- an entry citing `nope/does-not-exist.ts:1#"anchor"`.',
+    ].join("\n");
+    const result = checkLogCitations(doc, fixtureResolve, fixtureReadTarget);
+    expect(result.unresolvedFullCitations.length).toBeGreaterThan(0);
+    expect(result.continuationForms).toEqual([]);
+  });
+
+  it("fixture: a path-less continuation citation form fails, even when it would resolve", () => {
+    const doc = [
+      "# Bundle log",
+      "",
+      `- an entry citing \`${FIXTURE_TARGET}:2#"line two"\` and, in the same paragraph, the old value \`:1#"line one"\`.`,
+    ].join("\n");
+    const result = checkLogCitations(doc, fixtureResolve, fixtureReadTarget);
+    expect(result.continuationForms.length).toBeGreaterThan(0);
+  });
+
+  it("fixture: a clean log entry (a resolving full citation, an old value described in plain prose) passes", () => {
+    const doc = [
+      "# Bundle log",
+      "",
+      `- an entry citing \`${FIXTURE_TARGET}:2#"line two"\` only; the old value sat on line 1, described here in prose, not backticked as a citation.`,
+    ].join("\n");
+    const result = checkLogCitations(doc, fixtureResolve, fixtureReadTarget);
+    expect(result.unresolvedFullCitations).toEqual([]);
+    expect(result.anchorNotInRange).toEqual([]);
+    expect(result.continuationForms).toEqual([]);
+  });
+
+  // Round 4 (MEDIUM 2): the two rules above are matched over
+  // paragraph-joined text, so a citation that a hard wrap split across
+  // two physical lines is seen. Both fixtures fail under the round-3
+  // per-line scan and pass under this one; the wrap point sits inside the
+  // anchor string, which is where this bundle's own wraps land (the
+  // anchor is the longest part of a citation and the only part that
+  // contains spaces).
+  it("fixture: a full citation whose anchor wraps across a hard line break is still checked (a stale wrapped anchor fails)", () => {
+    const doc = [
+      "# Bundle log",
+      "",
+      `- an entry citing \`${FIXTURE_TARGET}:1#"line one and`,
+      '  something that is not there"` across a wrapped line.',
+    ].join("\n");
+    const result = checkLogCitations(doc, fixtureResolve, fixtureReadTarget);
+    expect(
+      result.anchorNotInRange,
+      "a wrapped full citation with a bogus anchor must be reported",
+    ).toHaveLength(1);
+    expect(result.anchorNotInRange[0]).toContain("log.md:3");
+    expect(result.unresolvedFullCitations).toEqual([]);
+  });
+
+  it("fixture: a path-less continuation citation form that wraps across a hard line break is still flagged", () => {
+    const doc = [
+      "# Bundle log",
+      "",
+      `- an entry citing \`${FIXTURE_TARGET}:2#"line two"\` and then, in the`,
+      '  same paragraph, the old value `:1#"line one is what it',
+      '  said"` written as a citation.',
+    ].join("\n");
+    const result = checkLogCitations(doc, fixtureResolve, fixtureReadTarget);
+    expect(
+      result.continuationForms,
+      "the wrapped continuation form must be reported",
+    ).toHaveLength(1);
+    expect(result.continuationForms[0]).toContain("log.md:4");
+  });
+
+  // Round 4 (MEDIUM 3): the round-3 scan hand-copied the fence-skip pass
+  // without its throw, so a single stray ``` (this doc's own line 4 here)
+  // silently excused every citation after it -- a deliberately stale
+  // citation and a forbidden continuation both passed. The shared
+  // `citationScanParagraphs` helper throws instead.
+  it("fixture: a log that ends inside an unclosed ``` fence throws instead of silently excusing every citation after the stray delimiter", () => {
+    const doc = [
+      "# Bundle log",
+      "",
+      "- an entry.",
+      "```",
+      "",
+      `- an entry citing \`${FIXTURE_TARGET}:1#"line two"\` and \`:3#"line one"\`.`,
+    ].join("\n");
+    expect(() =>
+      checkLogCitations(doc, fixtureResolve, fixtureReadTarget),
+    ).toThrow(/unclosed code fence/);
+  });
+
+  it("fixture: a cited path escaping the repository with a `..` segment does not resolve", () => {
+    expect(resolveLogCitationPath("../outside-target.md").real).toBeUndefined();
+    expect(resolveLogCitationPath("../outside-target.md").reason).toContain(
+      "escapes the repository",
+    );
+    expect(
+      resolveLogCitationPath("packages/orchestrator-workflow/../../README.md")
+        .real,
+    ).toBeUndefined();
+  });
+
+  it("fixture: a bare basename that also exists at the repository root is reported ambiguous, not silently bound to this package's own file", () => {
+    // Computed, not assumed: this only pins behaviour for the bare names
+    // that really are ambiguous on disk right now, and states the
+    // guard's contract for each side.
+    expect(
+      ROOT_AMBIGUOUS_BARE_NAMES.size,
+      "no bare basename in the log-citation map collides with a repository-root file any more; drop this fixture or pick a new example",
+    ).toBeGreaterThan(0);
+    for (const name of ROOT_AMBIGUOUS_BARE_NAMES) {
+      const bare = resolveLogCitationPath(name);
+      expect(bare.real, `bare ${name} must not resolve`).toBeUndefined();
+      expect(bare.reason).toContain("ambiguous");
+      const explicit = EXTRA_LOG_CITATION_TARGETS[name];
+      expect(resolveLogCitationPath(explicit).real).toBe(explicit);
+    }
+  });
+
+  // Round 4 (MEDIUM 3), the paired half of the fence throw: a scan that
+  // found nothing at all is indistinguishable, from the two assertions
+  // below, from a clean log. The live count is computed here, at
+  // collection time, and carried in the test's own NAME -- the same
+  // `liveLog` object the assertions read, so title and verdict cannot
+  // diverge -- rather than hand-written into this file, the CHANGELOG or
+  // a log entry, where it would drift on the next edit (D-050; the
+  // unanchored-citation brake above uses the same shape). Read the
+  // current number off the passing test's own name:
+  // `npx vitest run test/docs-consistency.test.ts -t "anchored full
+  // citations of docs/okf/log.md"`. The floor keeps headroom below the
+  // live count for the same reason the brake's does.
+  const liveLog = checkLogCitations(
+    readRepoFile("packages/orchestrator-workflow/docs/okf/log.md"),
+    resolveLogCitationPath,
+    readRepoFile,
+  );
+
+  it(`read and checked ${liveLog.fullCitationsChecked} anchored full citations of docs/okf/log.md (sanity: this guard did not go blind on the real file)`, () => {
+    expect(liveLog.fullCitationsChecked).toBeGreaterThan(20);
+  });
+
+  it("every anchored full citation in docs/okf/log.md resolves at head (path exists, anchor text inside the cited range)", () => {
+    expect(
+      liveLog.unresolvedFullCitations,
+      liveLog.unresolvedFullCitations.join("\n"),
+    ).toEqual([]);
+    expect(
+      liveLog.anchorNotInRange,
+      liveLog.anchorNotInRange.join("\n"),
+    ).toEqual([]);
+  });
+
+  it("docs/okf/log.md carries no anchored, path-less continuation citation form", () => {
+    expect(
+      liveLog.continuationForms,
+      liveLog.continuationForms.join("\n"),
+    ).toEqual([]);
+  });
 });
