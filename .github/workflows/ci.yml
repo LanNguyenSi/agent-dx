@@ -500,6 +500,17 @@ jobs:
       - name: Check commander flag order (-short, --long)
         run: node scripts/check-cli-flag-order.mjs
 
+  lint-format-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Check ci job matrix.package covers every packages/*/package.json
+        run: node scripts/check-format-check-matrix.mjs
+
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -552,15 +563,26 @@ jobs:
       - name: Lint
         run: npm run lint --if-present
 
-      # Allowlisted rather than run for every matrix entry: the list names
-      # every package that defines a `format:check` script (agent-dev-kit,
-      # agent-primitives, friction-log, mcp-token-audit, okf-kit,
-      # orchestrator-workflow, slop-detector). git-batch-cli and
-      # github-api-tool define no such script. Grow this list when a new
-      # package adds the script.
+      # Probed dynamically per matrix entry, like Typecheck (test files)
+      # above: a package that defines `format:check` runs it. A package
+      # that ships TypeScript sources (src/**/*.ts) but no `format:check`
+      # script fails closed instead of silently going unchecked. A package
+      # with neither the script nor TS sources under src/ (a plain-JS
+      # package) is skipped. This rule only reaches packages listed in the
+      # `matrix.package` list above; scripts/check-format-check-matrix.mjs
+      # (wired as the lint-format-matrix job) guards that every
+      # packages/*/package.json directory is a matrix entry.
       - name: Format check
-        if: contains(fromJSON('["agent-dev-kit","agent-primitives","friction-log","mcp-token-audit","okf-kit","orchestrator-workflow","slop-detector"]'), matrix.package)
-        run: npm run format:check
+        shell: bash
+        run: |
+          if node -e "process.exit((require('./package.json').scripts || {})['format:check'] ? 0 : 1)"; then
+            npm run format:check
+          elif [ -n "$(find src -type f -name '*.ts' -print -quit 2>/dev/null)" ]; then
+            echo "::error::package ships TypeScript sources (src/**/*.ts) but no format:check script - files would go format-unchecked"
+            exit 1
+          else
+            echo "No format:check script and no TypeScript sources under src/, skipping format check"
+          fi
 
       - name: Test
         shell: bash
