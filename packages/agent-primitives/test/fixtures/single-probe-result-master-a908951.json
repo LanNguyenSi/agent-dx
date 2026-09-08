@@ -135,6 +135,13 @@
     "status": "inconclusive",
     "reason": "baseline_failed",
     "warnings": [],
+    "mutant": {
+      "file": "<REPO>/fixture.js",
+      "line": 2,
+      "before": "  return n > 0;",
+      "after": "  return false;",
+      "form": "replace"
+    },
     "mutation_probe": {
       "mutant": "<REPO>/fixture.js:2:   return n > 0; ->   return false;",
       "verified_applied_via": "<REPO>/fixture.js:2\n-   return n > 0;\n+   return false;",

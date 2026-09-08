@@ -57,7 +57,11 @@ export type PreparedMutant =
       verifiedAppliedVia: string;
       logPaths: string[];
     }
-  | { ok: false; reason: string; logPaths: string[] };
+  | {
+      ok: false;
+      reason: "mutant_not_applicable" | "git_apply_timeout" | "aborted";
+      logPaths: string[];
+    };
 
 /**
  * Step 1 of a mutant: compute what it would do WITHOUT touching the real

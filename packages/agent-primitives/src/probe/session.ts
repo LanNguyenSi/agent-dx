@@ -96,9 +96,15 @@ export interface TestPhaseField extends ExecPhaseField {
 }
 
 /** A `--env` override name that looks like it carries a credential:
- * `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` anywhere in the name
- * (case-insensitive), or a name ending in `_KEY`. */
-const SECRET_ENV_NAME_PATTERN = /TOKEN|SECRET|PASSWORD|_KEY$|CREDENTIAL/i;
+ * `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS` or `KEY` as
+ * its own `_`-delimited segment (case-insensitive) -- anchored on `^`/
+ * `_` before it and `_`/`$` after it, so it matches a whole SCREAMING_
+ * SNAKE_CASE word, e.g. `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`,
+ * `DATABASE_PASSWORD`, `MY_CREDENTIALS`, never a substring inside a
+ * longer segment: `TOKENIZER_MODEL` and `KEYBOARD` are left alone,
+ * since neither word appears as its own segment there. */
+const SECRET_ENV_NAME_PATTERN =
+  /(^|_)(TOKEN|SECRET|PASSWORD|CREDENTIALS?|KEY)(_|$)/i;
 
 /**
  * Redacts `--env` override values whose NAME matches
@@ -129,6 +135,92 @@ export interface IsolationField {
 
 export type ProbeStatus =
   "killed" | "survived" | "inconclusive" | "usage_error";
+
+/** Every `reason` a single-mutant `probe()` run's refusal (a status
+ * short of `killed`/`survived`, reported before or during
+ * `setup.ts`'s `openRunSetup`) can carry. Covers both how `refuse()`
+ * itself is called (`setup.ts`) and the one refusal `openRunSetup`
+ * builds by hand instead (the worktree sync failure, `"aborted"` or
+ * `"worktree_sync_failed"`), so every reason that can reach
+ * `index.ts`'s refusal-to-envelope mapping has exactly one entry in
+ * `REFUSAL_RESULT_SHAPE` below. Deliberately excludes the reasons a
+ * mutant-phase outcome (`step.ts`'s `runMutantAttempt`, past
+ * `openRunSetup`) can report (`apply_hash_mismatch`,
+ * `worktree_original_tree_modified`, `restore_failed`, `timeout`, a
+ * mutant-phase `pre_failed`/`aborted`): those already always carry both
+ * `mutant` and `mutation_probe` (a real mutant was applied), so they
+ * need no contract entry to stay consistent. */
+export type RefusalReason =
+  | "worktree_allow_outside_unsupported"
+  | "file_outside_root"
+  | "probe_in_progress"
+  | "lock_unavailable"
+  | "stale_probe_marker"
+  | "file_not_found"
+  | "stale_worktree"
+  | "worktree_sync_failed"
+  | "target_not_synced"
+  | "backup_verification_failed"
+  | "mutant_not_applicable"
+  | "git_apply_timeout"
+  | "aborted"
+  | "pre_failed"
+  | "baseline_failed"
+  | "target_changed_during_baseline";
+
+/**
+ * The single source of truth for which fields a single-mutant `probe()`
+ * refusal reports beside the common envelope: whether `mutant` (the
+ * computed-but-never-applied mutant) and `mutation_probe` (its
+ * `result: "not_run"` summary) are present. One rule decides every row:
+ * present once `openRunSetup`'s `beforeBaseline` hook has computed the
+ * run's one mutant, absent before that point -- so `pre_failed`,
+ * `baseline_failed`, `target_changed_during_baseline`, and `aborted`
+ * (both of the baseline phase's own abort paths: an aborted `--pre` and
+ * an aborted baseline test, `setup.ts`'s two `baselineRun`/
+ * `baselineTest` branches) are `true`; `mutant_not_applicable` and
+ * every earlier refusal (a containment, lock, stale-marker, or
+ * worktree-sync refusal, `git_apply_timeout` included) are `false`.
+ * `"aborted"` is also the reason two OTHER refusals report from a point
+ * BEFORE the mutant is computed (the worktree sync's own abort, and the
+ * dry run's own abort inside `beforeBaseline`): this table's `true` for
+ * `"aborted"` is still correct for those, because `index.ts` gates the
+ * actual fields on the mutant/mutant-summary values it captured itself,
+ * which stay `undefined` on both of those earlier paths regardless of
+ * what this table says -- so a `true` entry here only ever manifests
+ * once one of the two baseline-phase abort paths actually set them.
+ * `"stale_worktree"` is the third reason the worktree sync can report,
+ * a leftover worktree from a previous run that could not be removed;
+ * also always before the mutant is computed, so also `false`.
+ * `refuse()` (`setup.ts`) reads this table to fill `reportsMutant`
+ * mechanically, one shared lookup rather than a per-call-site flag;
+ * `index.ts` reads it a second time, by `mutationProbe`, to decide
+ * `mutation_probe`. Checked exhaustively against `probe()`'s own
+ * behavior by `test/probe.test.ts`'s "refusal result shape" suite, and
+ * against the README's "Result shape" table by
+ * `test/readme-conformance.test.ts`; update all three together with any
+ * change here. */
+export const REFUSAL_RESULT_SHAPE: Record<
+  RefusalReason,
+  { mutant: boolean; mutationProbe: boolean }
+> = {
+  worktree_allow_outside_unsupported: { mutant: false, mutationProbe: false },
+  file_outside_root: { mutant: false, mutationProbe: false },
+  probe_in_progress: { mutant: false, mutationProbe: false },
+  lock_unavailable: { mutant: false, mutationProbe: false },
+  stale_probe_marker: { mutant: false, mutationProbe: false },
+  file_not_found: { mutant: false, mutationProbe: false },
+  stale_worktree: { mutant: false, mutationProbe: false },
+  worktree_sync_failed: { mutant: false, mutationProbe: false },
+  target_not_synced: { mutant: false, mutationProbe: false },
+  backup_verification_failed: { mutant: false, mutationProbe: false },
+  mutant_not_applicable: { mutant: false, mutationProbe: false },
+  git_apply_timeout: { mutant: false, mutationProbe: false },
+  aborted: { mutant: true, mutationProbe: true },
+  pre_failed: { mutant: true, mutationProbe: true },
+  baseline_failed: { mutant: true, mutationProbe: true },
+  target_changed_during_baseline: { mutant: true, mutationProbe: true },
+};
 
 /** Restores `session` and verifies the restore by hash. A restore whose
  * copy itself throws is treated the same as a restore that copies but
@@ -908,7 +1000,7 @@ export async function prepareWorktreeSession(input: {
   | { ok: true; session: WorktreeSyncSuccess }
   | {
       ok: false;
-      reason: string;
+      reason: "stale_worktree" | "worktree_sync_failed" | "aborted";
       warnings: string[];
       /** Present only for a failure that produced exec logs (the sync
        * itself); a refusal before any worktree existed carries none, and

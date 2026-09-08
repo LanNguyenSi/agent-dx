@@ -217,17 +217,16 @@ const FLAGS_CONSUMING_NEXT_TOKEN = new Set(["-t"]);
  * argument, consumed via `FLAGS_CONSUMING_NEXT_TOKEN`): true for
  * `["--coverage"]` and `["-t", "some pattern"]`, false the moment a
  * token that is neither is reached (a file or pattern argument, e.g.
- * `test/x.test.ts`). A literal `--` is never a flag here, even though
- * it starts with `-`: it is npm/yarn/pnpm's own argument separator, not
- * a flag any of them recognizes, so a caller that reaches this function
- * with one still in `tokens` (`restLooksLikeFullSuite` below strips a
- * single LEADING one before calling this) is treated as carrying a real
- * argument, not a flag -- this is what makes that stripping observable
- * rather than redundant with the `startsWith("-")` check alone. */
+ * `test/x.test.ts`). A bare `--` (npm/yarn/pnpm's own argument
+ * separator) is flag-shaped here, the same as any other token that
+ * starts with `-`: it never by itself disqualifies a command from
+ * looking full-suite, and whatever follows it is judged by this exact
+ * same rule, token by token -- there is no separate stripping step
+ * anywhere in this matcher. */
 function tokensLookLikeFlagsOnly(tokens: string[]): boolean {
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (token === "--" || !token.startsWith("-")) return false;
+    if (!token.startsWith("-")) return false;
     if (FLAGS_CONSUMING_NEXT_TOKEN.has(token)) i++;
   }
   return true;
@@ -235,27 +234,31 @@ function tokensLookLikeFlagsOnly(tokens: string[]): boolean {
 
 /** Whether `rest` (everything after the recognized test-runner prefix,
  * already trimmed) still looks like the whole suite: empty, or nothing
- * but flags once a single bare `--` argument-separator (npm/yarn/pnpm's
- * own divider before forwarded args) is skipped. Shared by the
- * `npm test`, `npm run test[:*]`, `yarn test` and `pnpm test` shapes
- * below, all of which forward extra arguments to the underlying runner
- * the same way. */
+ * but flags per `tokensLookLikeFlagsOnly` above, a bare `--`
+ * argument-separator (npm/yarn/pnpm's own divider before forwarded
+ * args) included -- it is flag-shaped there too, so `npm test --
+ * --coverage` is still full-suite while `npm test -- test/x.test.ts`
+ * is not, with no separate handling for the separator itself. Shared by
+ * the `npm test`, `npm run test[:*]`, `yarn test` and `pnpm test`
+ * shapes below, all of which forward extra arguments to the underlying
+ * runner the same way. */
 function restLooksLikeFullSuite(rest: string): boolean {
   if (rest === "") return true;
-  const tokens = rest.split(/\s+/);
-  const afterSeparator = tokens[0] === "--" ? tokens.slice(1) : tokens;
-  if (afterSeparator.length === 0) return true;
-  return tokensLookLikeFlagsOnly(afterSeparator);
+  return tokensLookLikeFlagsOnly(rest.split(/\s+/));
 }
 
 /**
  * Whether `cmd` looks like it runs a whole test suite rather than one
  * targeted file: `npm test`, `npm run test`/`npm run test:<anything>`,
  * `yarn test` or `pnpm test`, each with nothing after it but flags (a
- * bare `--` argument separator is skipped first, so `npm test --
- * test/x.test.ts` -- a file forwarded through it -- is NOT full-suite
- * shaped); or `vitest run` (bare, through `npx` or not) with nothing
- * after it but flags, `-t <name>` (a pattern, not a file) included. A
+ * bare `--` argument separator is flags-only shaped in its own right,
+ * so `npm test -- --coverage` is still full-suite while `npm test --
+ * test/x.test.ts` -- a real file forwarded through it -- is not, the
+ * same rule applied to every token, the separator included, with no
+ * special-case stripping anywhere); or `vitest run` (bare, through
+ * `npx` or not) with nothing after it but flags, `-t <name>` (a
+ * pattern, not a file) and a forwarded `--` (`npx vitest run --
+ * --coverage`) included. A
  * `probe` over a command like this runs it twice, serially (baseline,
  * then mutant), with no bound when `--timeout` was not given -- exactly
  * the shape that printed the CLI's own full-suite hint. Deliberately

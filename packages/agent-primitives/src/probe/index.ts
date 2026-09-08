@@ -16,6 +16,7 @@ import {
   type IsolationField,
   type IsolationMode,
   redactEnvOverrides,
+  REFUSAL_RESULT_SHAPE,
   type MutantField,
   type MutationProbeField,
   type ProbeStatus,
@@ -498,6 +499,23 @@ async function runProbePipeline(
     });
     if (!setup.ok) {
       const { refusal } = setup;
+      // `mutant` is gated on `refusal.reportsMutant` (`setup.ts`'s own
+      // `REFUSAL_RESULT_SHAPE[refusal.reason].mutant`, read mechanically
+      // inside `refuse()`); `mutation_probe` is gated on this same
+      // table's `.mutationProbe`, read here a second time -- one
+      // contract, keyed on `refusal.reason`, rather than two
+      // independently-drifting rules. Both agree for every reason
+      // today, but are read separately so a future reason that needs to
+      // diverge (report one field but not the other) is one table edit
+      // away, not a new per-site flag. Either still requires the mutant
+      // to have actually been computed (`mutantField`/`mutantSummary`/
+      // `verifiedAppliedVia` set): a refusal whose `reason` maps to
+      // `true` here from a point BEFORE `beforeBaseline` ever ran (the
+      // dry run's own `aborted`, or the worktree sync's, both of which
+      // hardcode `reportsMutant: false` rather than trust this table)
+      // still reports neither field, because those variables stay
+      // `undefined` on those paths regardless of what the contract says
+      // for `"aborted"` -- see `RefusalReason`'s own docblock.
       return {
         status: refusal.status,
         reason: refusal.reason,
@@ -505,24 +523,9 @@ async function runProbePipeline(
         ...(refusal.reportsMutant && mutantField !== undefined
           ? { mutant: mutantField }
           : {}),
-        // Every refusal `openRunSetup` can return past the
-        // `beforeBaseline` dry run above (`pre_failed`, an aborted
-        // baseline, `baseline_failed`, `target_changed_during_baseline`)
-        // shares the same fact: this run's one mutant was already
-        // computed, before the baseline (or the `--pre` ahead of it)
-        // ever ran -- so unlike every other envelope shape this hole
-        // used to leave, there is a real mutant to describe, whichever
-        // of those reasons this refusal carries. Reported here rather
-        // than left absent, so a consumer reading `mutation_probe.result`
-        // gets a string ("not_run") instead of `undefined` for any of
-        // them. Gated on `mutantSummary`/`verifiedAppliedVia` alone (not
-        // on `refusal.reason`): a refusal from BEFORE the dry run
-        // completes (`mutant_not_applicable`, a containment or lock
-        // refusal) never set either, so this still correctly omits the
-        // object there. `restored_verified: true`: nothing was ever
-        // mutated at any of these reasons, so the target is (trivially)
-        // still at its original content.
-        ...(mutantSummary !== undefined && verifiedAppliedVia !== undefined
+        ...(REFUSAL_RESULT_SHAPE[refusal.reason].mutationProbe &&
+        mutantSummary !== undefined &&
+        verifiedAppliedVia !== undefined
           ? {
               mutation_probe: {
                 mutant: mutantSummary,

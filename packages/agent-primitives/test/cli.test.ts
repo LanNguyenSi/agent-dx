@@ -1740,24 +1740,39 @@ describe("cli: probe", () => {
       "-i",
       "inplace",
       "--env",
-      "API_TOKEN=super-secret",
+      "GITHUB_TOKEN=super-secret",
       "--env",
-      "DB_PASSWORD=hunter2",
+      "NPM_TOKEN=npm-secret",
       "--env",
-      "SIGNING_KEY=abc",
+      "AWS_SECRET_ACCESS_KEY=aws-secret",
       "--env",
-      "AWS_CREDENTIAL_ID=xyz",
+      "API_KEY=abc",
+      "--env",
+      "DATABASE_PASSWORD=hunter2",
+      "--env",
+      "MY_CREDENTIALS=xyz",
       "--env",
       "PROBE_MARKER=1",
+      // Negative space for the new word-boundary-anchored pattern: each
+      // contains one of the redacted words as a substring, but not as
+      // its own `_`-delimited segment, so neither is redacted.
+      "--env",
+      "TOKENIZER_MODEL=gpt-tokenizer",
+      "--env",
+      "KEYBOARD=qwerty",
     ]);
 
     const parsed = JSON.parse(run.stdout);
     const expectedRedacted = {
-      API_TOKEN: "<redacted>",
-      DB_PASSWORD: "<redacted>",
-      SIGNING_KEY: "<redacted>",
-      AWS_CREDENTIAL_ID: "<redacted>",
+      GITHUB_TOKEN: "<redacted>",
+      NPM_TOKEN: "<redacted>",
+      AWS_SECRET_ACCESS_KEY: "<redacted>",
+      API_KEY: "<redacted>",
+      DATABASE_PASSWORD: "<redacted>",
+      MY_CREDENTIALS: "<redacted>",
       PROBE_MARKER: "1",
+      TOKENIZER_MODEL: "gpt-tokenizer",
+      KEYBOARD: "qwerty",
     };
     expect(parsed.env).toEqual(expectedRedacted);
     expect(parsed.test.env).toEqual(expectedRedacted);
@@ -1856,6 +1871,9 @@ describe("cli: probe", () => {
     ["pnpm test -- --coverage", true],
     ["npx vitest run --coverage", true],
     ["npx vitest run test/x.test.ts", false],
+    // A forwarded "--" ahead of vitest's own flags is flags-shaped too,
+    // the same rule as every npm/yarn/pnpm case above: still full-suite.
+    ["npx vitest run -- --coverage", true],
     ["vitest run", true],
     ["vitest run -t some-pattern", true],
     ["npm run testing", false],
@@ -1960,13 +1978,17 @@ describe("cli: probe", () => {
 
   it("prints the full-suite hint before the baseline run starts, not after", async () => {
     // Observable ordering, not just presence: the test command writes a
-    // timestamped marker the instant it runs, so "before the baseline
-    // starts" is asserted against a real event this run produced rather
-    // than inferred from stderr appearing at all. Streamed (not
-    // collected after close), so the hint's own arrival time is
-    // captured live -- collecting only the final stderr text would lose
-    // when each piece of it showed up, which is exactly what this test
-    // needs to tell "printed first" apart from "printed last".
+    // marker file the instant it runs, so "before the baseline starts"
+    // is asserted against a real event this run produced rather than
+    // inferred from stderr appearing at all. Streamed (not collected
+    // after close), so the hint's own arrival is observed live -- the
+    // assertion below checks, at the exact moment the hint chunk
+    // reaches this handler, whether the marker file exists yet. A
+    // cross-process wall-clock comparison (hint-seen `Date.now()` here
+    // vs. a timestamp the child wrote to the marker) would carry the
+    // scheduling and clock-resolution noise of two separate processes;
+    // this is a same-process, single-tick fact instead: the marker
+    // either exists at that instant or it does not.
     const repo = initRepo();
     const markerPath = path.join(makeTmpDir(), "baseline-started.marker");
     fs.writeFileSync(
@@ -2016,21 +2038,19 @@ describe("cli: probe", () => {
       "inplace",
     ]);
     child.stderr.setEncoding("utf8");
-    let hintSeenAt: number | undefined;
+    let hintSeen = false;
+    let markerExistedWhenHintArrived: boolean | undefined;
     child.stderr.on("data", (chunk: string) => {
-      if (
-        hintSeenAt === undefined &&
-        chunk.includes("looks like a full test suite")
-      ) {
-        hintSeenAt = Date.now();
+      if (!hintSeen && chunk.includes("looks like a full test suite")) {
+        hintSeen = true;
+        markerExistedWhenHintArrived = fs.existsSync(markerPath);
       }
     });
     await collectCli(child);
 
-    expect(hintSeenAt).toBeDefined();
+    expect(hintSeen).toBe(true);
+    expect(markerExistedWhenHintArrived).toBe(false);
     expect(fs.existsSync(markerPath)).toBe(true);
-    const markerWrittenAt = Number(fs.readFileSync(markerPath, "utf8"));
-    expect(hintSeenAt!).toBeLessThan(markerWrittenAt);
   });
 
   it("exactly one mutant form is required: two given (-r and -p) is usage_error, exit 2", async () => {
