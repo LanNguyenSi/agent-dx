@@ -542,4 +542,32 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
     const result = await probeWithAbortedCall(1, { preCommand: "true" });
     expectMatchesContract(result, "aborted");
   }, 30000);
+
+  it("aborted: the dry run's OWN abort (before the baseline ever runs) reports neither mutant nor mutation_probe, unlike the baseline-phase pair above", async () => {
+    // Same seam and idiom as `provokeGitApplyTimeout` above (stubs
+    // `computeMutant`, the call `prepareMutant`'s dry run makes, before
+    // the baseline ever runs), but with `reasonCode: "aborted"` instead
+    // of `"git_apply_timeout"`: this is the `step.ts:110-122` abort
+    // path the round-3 review named, distinct from the baseline-phase
+    // `aborted` the loop above already provokes through
+    // `provokeAbortedBaselineTest`. `REFUSAL_RESULT_SHAPE.aborted.mutant`
+    // is `true` (it also covers the baseline-phase pair, where a mutant
+    // HAS been computed by then), but `index.ts` only attaches `mutant`/
+    // `mutation_probe` once the dry run actually produced one
+    // (`mutantField`/`mutantSummary`/`verifiedAppliedVia` stay
+    // `undefined` on this path) -- so this dry-run-phase `aborted`
+    // reports neither field even though the table says `true`.
+    useLockDir();
+    const { repo } = initRepo();
+    vi.mocked(computeMutant).mockImplementationOnce(async () => ({
+      applicable: false,
+      reasonCode: "aborted",
+      reason: "the dry run was aborted before the baseline ever ran",
+      logPaths: [],
+    }));
+    const result = await probe(baseOptions(repo));
+    expect(result.reason).toBe("aborted");
+    expect(result.mutant).toBeUndefined();
+    expect(result.mutation_probe).toBeUndefined();
+  }, 30000);
 });

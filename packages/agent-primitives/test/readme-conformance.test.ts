@@ -51,8 +51,41 @@ function parseRefusalReasonShapeTable(readme: string): ParsedRow[] {
         'reason shape"',
     );
   }
-  // headerRowIndex + 1 is the `| --- | --- | ... |` separator row; data
-  // rows start right after it.
+  // Bind columns by header cell, not by position: a swap of the
+  // `mutant`/`mutation_probe` header cells is a real regression (the
+  // rows beneath would then be read under the wrong column), and
+  // reading positionally instead of checking the header text would
+  // silently let that swap through.
+  const headerLine = lines[headerRowIndex];
+  const headerCells = headerLine
+    .split("|")
+    .slice(1, -1)
+    .map((cell) => cell.trim());
+  const [reasonHeader, mutantHeader, mutationProbeHeader, ...restHeaders] =
+    headerCells;
+  if (
+    reasonHeader !== "`reason`" ||
+    mutantHeader !== "`mutant`" ||
+    mutationProbeHeader !== "`mutation_probe`" ||
+    restHeaders.length !== 1
+  ) {
+    throw new Error(
+      'expected the header row to be exactly "| `reason` | `mutant` | ' +
+        `\`mutation_probe\` | <description> |", got: "${headerLine}"`,
+    );
+  }
+  // headerRowIndex + 1 must be the `| --- | --- | ... |` separator row;
+  // destroying it (dropping a cell, losing the dashes) would otherwise
+  // just shift every data row parsed below by one line without any
+  // parse failure to flag it.
+  const separatorLine = (lines[headerRowIndex + 1] ?? "").trim();
+  if (!/^\|(\s*-{3,}\s*\|)+$/.test(separatorLine)) {
+    throw new Error(
+      'expected a "| --- | --- | ... |" separator row right after the ' +
+        `header, got: "${separatorLine}"`,
+    );
+  }
+  // Data rows start right after the separator row.
   const rows: ParsedRow[] = [];
   for (let i = headerRowIndex + 2; i < lines.length; i++) {
     const line = lines[i];

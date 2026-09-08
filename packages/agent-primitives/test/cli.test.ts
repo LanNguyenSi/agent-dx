@@ -1751,6 +1751,16 @@ describe("cli: probe", () => {
       "DATABASE_PASSWORD=hunter2",
       "--env",
       "MY_CREDENTIALS=xyz",
+      // Plural forms of the same words: still their own `_`-delimited
+      // segment, so still redacted.
+      "--env",
+      "MY_SECRETS=xyz",
+      "--env",
+      "API_KEYS=abc",
+      "--env",
+      "AUTH_TOKENS=super-secret",
+      "--env",
+      "PASSWORDS=hunter2",
       "--env",
       "PROBE_MARKER=1",
       // Negative space for the new word-boundary-anchored pattern: each
@@ -1770,6 +1780,10 @@ describe("cli: probe", () => {
       API_KEY: "<redacted>",
       DATABASE_PASSWORD: "<redacted>",
       MY_CREDENTIALS: "<redacted>",
+      MY_SECRETS: "<redacted>",
+      API_KEYS: "<redacted>",
+      AUTH_TOKENS: "<redacted>",
+      PASSWORDS: "<redacted>",
       PROBE_MARKER: "1",
       TOKENIZER_MODEL: "gpt-tokenizer",
       KEYBOARD: "qwerty",

@@ -1027,12 +1027,12 @@ library caller sees it (`exitOnSignal: false`, `probe()`'s own default):
 a SIGINT/SIGTERM lands, the in-flight run is stopped and restored, and
 the call returns this envelope like any other refusal. Under the CLI,
 `exitOnSignal` is `true` (`src/cli.ts`, the single-mutant `probe({ ... })`
-call, near line 1348): there, the same signal instead ends the process with its own
-conventional exit code once the restore has settled, and prints no
-envelope at all -- an `aborted` row is reachable from a library caller,
-never from the CLI's own JSON output. A consumer that only needs to know
-whether THIS run ever got as far as computing a mutant, without keying
-off which particular refusal reason fired, reads
+call the CLI's own probe action makes): there, the same signal instead ends
+the process with its own conventional exit code once the restore has
+settled, and prints no envelope at all -- an `aborted` row is reachable
+from a library caller, never from the CLI's own JSON output. A consumer
+that only needs to know whether THIS run ever got as far as computing a
+mutant, without keying off which particular refusal reason fired, reads
 `result.mutation_probe?.result`: it is always the string `"not_run"`
 once this run's dry run had already computed the one mutant it would
 have applied, and `undefined` on every refusal from before that point
@@ -1054,16 +1054,27 @@ exactly which `reason` is which).
 
 #### Refusal reason shape
 
-Every `reason` a single-mutant run's own refusal -- a status short of
-`killed`/`survived`, reported before or during the run's shared setup,
-past option parsing -- can carry, and whether `mutant`/`mutation_probe`
-are present for it. `src/probe/session.ts`'s `REFUSAL_RESULT_SHAPE`
-constant is this table's single source of truth in code (typed
-`Record<RefusalReason, ...>`, so a reason with no entry there fails to
-compile); `test/probe-refusal-contract.test.ts` provokes every row below
-through `probe()` itself and asserts the presence matches exactly, in
-both directions, so this table cannot drift from what the package
-actually reports without a failing test.
+Every `reason` `openRunSetup` (`src/probe/setup.ts`) itself can return for
+a single-mutant run -- a status short of `killed`/`survived`, reported
+before or during the run's shared setup, past option parsing -- and
+whether `mutant`/`mutation_probe` are present for it. `src/probe/session.ts`'s
+`REFUSAL_RESULT_SHAPE` constant is this table's single source of truth in
+code (typed `Record<RefusalReason, ...>`, so a reason with no entry there
+fails to compile); `test/probe-refusal-contract.test.ts` provokes every
+row below through `probe()` itself and asserts the presence matches
+exactly, in both directions, so this table cannot drift from what
+`REFUSAL_RESULT_SHAPE` itself declares, and every reason below is
+provoked at the table-named site the row below describes. Five more
+`usage_error` reasons fire earlier, in `probe()`'s own option-shape
+checks (`src/probe/index.ts`), before `openRunSetup` is ever called:
+`--patch` combined with `--allow-outside` outside its supported shape
+(`patch_allow_outside_unsupported`), an unreadable `--patch` file
+(`patch_not_readable`), a `--patch` whose touched paths cannot pick a
+single `--file` for it (`patch_file_ambiguous`), a missing `--file`
+(`file_required`), and a missing `-n`/`--line` (`line_required`). They
+sit outside this table entirely, reporting neither `mutant` nor
+`mutation_probe`, the same as the top-level usage error carve-out
+above.
 
 | `reason` | `mutant` | `mutation_probe` | When it fires |
 | --- | --- | --- | --- |
@@ -1099,6 +1110,22 @@ mutant-phase outcome (`apply_hash_mismatch`, `restore_failed`,
 `pre_failed`/`aborted`), because a real apply was already attempted
 against the real target by then; this table's `absent` row for each of
 those two names only the earlier, setup-phase site.
+
+`aborted` is itself a three-site reason, the mirror image of
+`mutant_not_applicable`/`git_apply_timeout` above: this table's `present`
+row names only the baseline-phase pair (an aborted `--pre` or an aborted
+baseline test, both past the dry run, both with a mutant already
+computed to report). Two earlier sites report the same `"aborted"`
+string with neither field, the same as every `absent` row above, because
+both fire before `beforeBaseline` ever runs: the dry run's own abort
+(`src/probe/step.ts`, `prepareMutant`'s `computeMutant` call) and, for
+`-i worktree`, the worktree sync's own abort (`src/probe/isolation.ts`'s
+`abortedResult` helper, surfaced through `session.ts` to `setup.ts`'s
+`openRunSetup`, which hardcodes `reportsMutant: false` for this one site
+rather than trusting `REFUSAL_RESULT_SHAPE.aborted`, precisely because
+that table's `true` is right only for the baseline-phase pair). A
+consumer keying off `reason === "aborted"` alone cannot tell these three
+sites apart; `mutant`/`mutation_probe`'s presence does that instead.
 
 The `file` part of `mutation_probe.mutant`/`verified_applied_via` (the
 `<file>:<line>` header both descriptors start with) is capped at 200

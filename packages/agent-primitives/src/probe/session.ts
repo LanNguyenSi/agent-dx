@@ -96,15 +96,17 @@ export interface TestPhaseField extends ExecPhaseField {
 }
 
 /** A `--env` override name that looks like it carries a credential:
- * `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS` or `KEY` as
- * its own `_`-delimited segment (case-insensitive) -- anchored on `^`/
- * `_` before it and `_`/`$` after it, so it matches a whole SCREAMING_
- * SNAKE_CASE word, e.g. `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`,
- * `DATABASE_PASSWORD`, `MY_CREDENTIALS`, never a substring inside a
- * longer segment: `TOKENIZER_MODEL` and `KEYBOARD` are left alone,
- * since neither word appears as its own segment there. */
+ * `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` or `KEY`, singular or
+ * plural, as its own `_`-delimited segment (case-insensitive) --
+ * anchored on `^`/`_` before it and `_`/`$` after it, so it matches a
+ * whole SCREAMING_SNAKE_CASE word, e.g. `GITHUB_TOKEN`,
+ * `AWS_SECRET_ACCESS_KEY`, `DATABASE_PASSWORD`, `MY_CREDENTIALS`,
+ * `MY_SECRETS`, `API_KEYS`, `AUTH_TOKENS`, `PASSWORDS`, never a
+ * substring inside a longer segment: `TOKENIZER_MODEL` and `KEYBOARD`
+ * are left alone, since neither word appears as its own segment
+ * there. */
 const SECRET_ENV_NAME_PATTERN =
-  /(^|_)(TOKEN|SECRET|PASSWORD|CREDENTIALS?|KEY)(_|$)/i;
+  /(^|_)(TOKEN|SECRET|PASSWORD|CREDENTIAL|KEY)S?(_|$)/i;
 
 /**
  * Redacts `--env` override values whose NAME matches
