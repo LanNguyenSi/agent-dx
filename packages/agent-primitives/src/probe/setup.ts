@@ -18,6 +18,7 @@ import {
   prepareWorktreeSession,
   REFUSAL_RESULT_SHAPE,
   runPreThenTest,
+  type BaselineOutput,
   type ExecPhaseField,
   type IsolationField,
   type IsolationMode,
@@ -200,7 +201,7 @@ export interface OpenedRun {
    * zero-tests evidence, for the generic byte-identical fallback
    * (`zero-tests.ts`'s `hasKnownTestSummary`) a suite neither built-in
    * detector recognizes needs. */
-  baselineOutput: { stdoutTail: string; stderrTail: string };
+  baselineOutput: BaselineOutput;
   /** The caller's own prior logs, the worktree sync's, and whatever
    * `beforeBaseline` produced: what a caller folds into the log paths of
    * everything it reports from here on. */
@@ -825,8 +826,22 @@ export async function openRunSetup(
     const combined = `${baselineOutput.stdoutTail}\n${baselineOutput.stderrTail}`;
     if (!input.requireBaselineEvidence.test(combined)) {
       discardOpened();
+      // Both this check and the zero-tests detectors above only ever see
+      // the CAPTURED tail (`exec.ts`'s `TAIL_LINES`/`TAIL_CHARS` bound),
+      // never the command's full output: a pattern that matched earlier
+      // output now scrolled out of the tail reads as a plain miss unless
+      // the warning says so, so a caller does not chase a pattern fix
+      // for output truncation instead.
+      const truncatedSides = [
+        baselineTest.stdoutTruncated ? "stdout" : undefined,
+        baselineTest.stderrTruncated ? "stderr" : undefined,
+      ].filter((side): side is string => side !== undefined);
+      const truncatedNote =
+        truncatedSides.length > 0
+          ? ` (the baseline's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
+          : "";
       warnings.push(
-        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output; see ${baselineTest.logPath}`,
+        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncatedNote}; see ${baselineTest.logPath}`,
       );
       return refuse(
         "inconclusive",
@@ -839,6 +854,19 @@ export async function openRunSetup(
 
   return {
     ok: true,
-    run: { rt, targets, baseline, baselineOutput, logPaths: stepLogPaths },
+    run: {
+      rt,
+      targets,
+      baseline,
+      baselineOutput: {
+        stdoutTail: baselineOutput.stdoutTail,
+        stderrTail: baselineOutput.stderrTail,
+        stdoutTruncated: baselineTest.stdoutTruncated,
+        stderrTruncated: baselineTest.stderrTruncated,
+        requireBaselineEvidenceMatched:
+          input.requireBaselineEvidence !== undefined,
+      },
+      logPaths: stepLogPaths,
+    },
   };
 }

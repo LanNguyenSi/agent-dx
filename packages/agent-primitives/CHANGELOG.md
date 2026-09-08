@@ -50,6 +50,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`src/verify/detectors/vitest.ts`) rather than re-parsing vitest's
   summary shapes a second time.
 
+- `probe`'s zero-tests-executed detection, round 2 (task `273b3851`,
+  review round 1): the mutant-side detector (`step.ts`) and the
+  exit-code-independent ordering of the baseline-stage check
+  (`setup.ts`) had no test coverage of their own -- a probe removing
+  either survived the full suite -- now pinned by a `probe()`-level test
+  each (a runner script whose own mutant flips its output to a known
+  zero-tests shape at exit `0`; a synthetic vitest exit-`1` "No test
+  files found" baseline). The generic byte-identical fallback is now
+  skipped once a given `--require-baseline-evidence` matched the
+  baseline (the caller's own evidence is exactly what the fallback
+  otherwise stands in for), so a genuine survivor of a quiet
+  deterministic runner (`node --test --test-reporter=dot`'s bare `..`)
+  is reported `survived` with the flag, `inconclusive`/
+  `no_tests_executed` without it, by design. Both zero-tests detectors
+  and the fallback only ever see each side's CAPTURED output tail
+  (`exec.ts`'s 60-line/6000-character bound); the fallback now stays out
+  of the way entirely once either side's tail was truncated, and a
+  `--require-baseline-evidence` miss now names a truncated tail in its
+  warning instead of reading as a plain, unexplained miss. The
+  mutant-side detector and the fallback now also apply to a `killed`
+  verdict under `--expect pass` whose "killed"-ness rests on nothing but
+  a passing exit code -- the same silent exit-0 evidence, just
+  certifying the opposite verdict, previously left uncaught (a quiet
+  unknown runner with identical exit-0 output on both runs was
+  certified `killed` with empty warnings). README documents the
+  captured-tail scope, the `--require-baseline-evidence` escape hatch,
+  the default-reporter-only limitation (`--reporter=json`/`dot`, node's
+  `--test-name-pattern` matching nothing), and that a suite printing
+  nothing at all on either run is protected by neither mechanism.
+  `zero-tests.ts`'s node `--test` summary regex is no longer duplicated
+  between the zero-count detector and the generic summary check.
+
 - `reconcileEnvelopeDiffTruncation`'s `enforceEnvelopeBudget` (task
   `e82f341a`): the `targets.length === 0` early return skipped the whole
   bound re-check whenever every correction was a case 3 (the whole `diff`

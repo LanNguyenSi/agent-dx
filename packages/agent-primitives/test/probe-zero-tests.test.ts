@@ -204,6 +204,25 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
     expect(result.mutant).toBeDefined();
   });
 
+  it("a baseline that exits 1 with vitest's own 'No test files found' text is no_tests_executed, never baseline_failed", async () => {
+    // Reviewer round-1 finding: the check just above is ordered BEFORE
+    // the exit-code branch specifically so vitest's exit-1 "No test
+    // files found" shape (as opposed to the exit-0 all-skipped/`-t`
+    // shape the test above pins) is still read as `no_tests_executed`,
+    // never misread as a genuinely failing baseline.
+    const repo = initGitRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand:
+          "node -e \"console.log('No test files found, exiting with code 1'); process.exit(1);\"",
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.reason).not.toBe("baseline_failed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+  });
+
   it("negative control: a baseline that genuinely runs and passes (and a mutant the suite genuinely catches) is never flagged", async () => {
     const repo = initGitRepo();
     const result = await probe(
@@ -239,6 +258,234 @@ describe("probe(): --require-baseline-evidence", () => {
     expect(result.status).toBe("killed");
     expect(result.reason).toBeUndefined();
   });
+
+  it("a truncated baseline tail that missed the pattern names the truncation in the warning", async () => {
+    // Reviewer round-1 finding: `--require-baseline-evidence` (like the
+    // zero-tests detectors) only ever sees the CAPTURED tail
+    // (`exec.ts`'s 60-line/6000-char bound). A pattern printed first,
+    // then scrolled out of the tail by >60 filler lines, reads as a
+    // plain miss unless the warning names the truncation.
+    const repo = initGitRepo();
+    const fillerLines = Array.from(
+      { length: 120 },
+      (_, i) => `console.log('filler line ${i}');`,
+    ).join(" ");
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand: `node -e "console.log('EVIDENCE-LINE'); ${fillerLines}"`,
+        requireBaselineEvidence: /EVIDENCE-LINE/,
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_evidence_not_matched");
+    expect(
+      result.warnings.some((w) => /captured stdout tail was truncated/.test(w)),
+    ).toBe(true);
+  });
+});
+
+// --- The mutant-side zero-tests detector (step.ts's classify step),
+// pinned independently of criterion 2's fixture pair: there, the
+// BASELINE itself is zero-tests-shaped, so setup.ts refuses before
+// step.ts is ever reached and the mutant-side branch is never exercised.
+// Here the baseline is a genuine, executed pass and only the MUTANT run
+// flips to a known zero-tests shape, so only step.ts's own detector (not
+// setup.ts's) can catch it. -------------------------------------------
+
+function initRunnerRepo(): string {
+  const repo = makeTmpDir();
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["config", "user.email", "test@example.com"], {
+    cwd: repo,
+  });
+  execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+  fs.writeFileSync(
+    path.join(repo, "runner.js"),
+    [
+      "console.log(' Test Files  1 passed (1)');",
+      "console.log('      Tests  2 passed (2)');",
+      "",
+    ].join("\n"),
+  );
+  execFileSync("git", ["add", "-A"], { cwd: repo });
+  execFileSync(
+    "git",
+    ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+    { cwd: repo },
+  );
+  return repo;
+}
+
+describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
+  it("a mutant that flips the runner's own summary line to a known zero-tests shape, still exit 0, is refused, never survived", async () => {
+    const repo = initRunnerRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        file: "runner.js",
+        line: 2,
+        replaceText: "console.log('No test files found, exiting with code 1');",
+        testCommand: "node runner.js",
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(
+      result.warnings.some((w) =>
+        /the mutant run's own output shows no test was actually executed/.test(
+          w,
+        ),
+      ),
+    ).toBe(true);
+  });
+});
+
+// --- The generic byte-identical fallback's opt-out via
+// `--require-baseline-evidence`, and its truncation guard: real `node
+// --test` runs, since the `--test-reporter=dot` shape (bare `..`, no
+// summary line either built-in detector recognizes) is exactly the
+// "quiet deterministic runner" the fallback exists for and the escape
+// hatch is meant to unblock. -------------------------------------------
+
+/** A throwaway `node --test` project: `calc.js` exports `add` (tested)
+ * and `unused` (never referenced by the test file at all), `calc.test.js`
+ * runs two passing tests against `add` with `--test-reporter=dot`
+ * (bare `..`, no summary line either built-in detector recognizes).
+ * Mutating `unused` is a genuine, legitimate survivor: the suite never
+ * exercises it, so both the baseline and the mutant run print the exact
+ * same `..` and exit `0` -- this is real "the test does not cover this
+ * line" evidence, not a runner that ran nothing. */
+function initNodeTestDotRepo(): string {
+  const repo = makeTmpDir();
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["config", "user.email", "test@example.com"], {
+    cwd: repo,
+  });
+  execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+  fs.writeFileSync(
+    path.join(repo, "calc.js"),
+    [
+      "function add(a, b) {",
+      "  return a + b;",
+      "}",
+      "function unused(a, b) {",
+      "  return a + b;",
+      "}",
+      "module.exports = { add, unused };",
+      "",
+    ].join("\n"),
+  );
+  fs.writeFileSync(
+    path.join(repo, "calc.test.js"),
+    [
+      "const test = require('node:test');",
+      "const assert = require('node:assert');",
+      "const { add } = require('./calc.js');",
+      "test('add', () => { assert.strictEqual(add(1, 2), 3); });",
+      "test('add2', () => { assert.strictEqual(add(2, 2), 4); });",
+      "",
+    ].join("\n"),
+  );
+  execFileSync("git", ["add", "-A"], { cwd: repo });
+  execFileSync(
+    "git",
+    ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+    { cwd: repo },
+  );
+  return repo;
+}
+
+function dotReporterOptions(
+  repo: string,
+  overrides: Partial<ProbeOptions> = {},
+): ProbeOptions {
+  return {
+    file: "calc.js",
+    line: 5,
+    form: "replace",
+    // Mutates the untested `unused` function only: the tested `add`
+    // path, and therefore the dot reporter's `..` output, is unaffected
+    // either way -- a genuine, legitimate survivor.
+    replaceText: "  return a - b;",
+    testCommand: "node --test --test-reporter=dot calc.test.js",
+    isolation: "inplace",
+    expect: "fail",
+    cwd: repo,
+    logDir: makeTmpDir(),
+    ...overrides,
+  };
+}
+
+describe("probe(): generic byte-identical fallback, --require-baseline-evidence opt-out", () => {
+  it("without --require-baseline-evidence, a genuine dot-reporter survivor is read as inconclusive/no_tests_executed by design", async () => {
+    const repo = initNodeTestDotRepo();
+    const result = await probe(dotReporterOptions(repo));
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+  });
+
+  it("with a matching --require-baseline-evidence, the same dot-reporter survivor stays survived, not second-guessed", async () => {
+    const repo = initNodeTestDotRepo();
+    const result = await probe(
+      dotReporterOptions(repo, { requireBaselineEvidence: /\.\./ }),
+    );
+    expect(result.status).toBe("survived");
+    expect(result.reason).toBeUndefined();
+  });
+});
+
+describe("probe(): generic byte-identical fallback, truncated-tail guard", () => {
+  it("never fires when either side's captured tail was truncated, even on byte-identical unknown output", async () => {
+    // A genuine, legitimate survivor (an untested function mutated) whose
+    // runner prints >60 identical lines of unrecognized text on both the
+    // baseline and the mutant run: without the truncation guard, the
+    // byte-identical (truncated) tails would misread this as
+    // `no_tests_executed`; with it, the real `survived` verdict stands.
+    const repo = initGitRepo();
+    const fillerLines = Array.from(
+      { length: 120 },
+      (_, i) => `console.log('noise line ${i}');`,
+    ).join(" ");
+    const result = await probe(
+      baseOptions(repo, {
+        // The default mutant (flips `flag`) is a genuine survivor here:
+        // the noisy command below never requires('./fixture.js') at all,
+        // so it cannot observe the mutation either way.
+        testCommand: `node -e "${fillerLines}"`,
+      }),
+    );
+    expect(result.status).toBe("survived");
+    expect(result.reason).toBeUndefined();
+  });
+});
+
+// --- The mutant-side detector and the generic fallback also apply to a
+// `killed` verdict whose "killed"-ness rests on nothing but a PASSING
+// exit code (`--expect pass`): the exact silent exit-0 evidence this
+// whole mechanism distrusts, whichever direction `--expect` points. ----
+
+describe("probe(): --expect pass, a killed verdict resting on a passing exit code", () => {
+  it("a quiet unknown runner with identical exit-0 output on both runs is refused, never certified killed", async () => {
+    const repo = initGitRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        expect: "pass",
+        // A constant, unrecognized line on both the baseline and the
+        // mutant run (the mutant here is irrelevant to this command's
+        // output either way): under `--expect pass`, exit 0 on both
+        // sides alone would otherwise be certified `killed` with no
+        // evidence anything real ran.
+        testCommand: "node -e \"console.log('constant-output')\"",
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+  });
+  // See "criterion 2 fixture pair" below for the negative control (a
+  // real, executed vitest summary under --expect pass is unaffected):
+  // it needs the real-vitest fixture defined further down this file.
 });
 
 // --- Criterion 2's discriminating fixture pair, through a REAL vitest
@@ -331,5 +578,28 @@ describe("probe(): criterion 2 fixture pair, real vitest (task 273b3851)", () =>
       fixtureOptions(cwd, `node ${VITEST_ENTRY} run ${FIXTURE_TEST_FILE}`),
     );
     expect(result.status).toBe("killed");
+  }, 20000);
+
+  it("negative control: --expect pass with a real, executed vitest summary is unaffected by the widened exit-0 check", async () => {
+    // A harmless mutant (renames the describe block; the assertions
+    // themselves are untouched, so the suite still genuinely passes) run
+    // under --expect pass: a real "Tests 2 passed (2)" summary on both
+    // the baseline and the mutant run means neither the mutant-side
+    // zero-tests detector nor the generic fallback has anything to catch
+    // here, whatever the exit code says.
+    const cwd = makeVitestFixture();
+    const result: ProbeResult = await probe({
+      file: FIXTURE_TEST_FILE,
+      line: 2,
+      form: "replace",
+      replaceText: 'describe("sample renamed", () => {',
+      testCommand: `node ${VITEST_ENTRY} run ${FIXTURE_TEST_FILE}`,
+      isolation: "inplace",
+      expect: "pass",
+      cwd,
+      logDir: makeTmpDir(),
+    });
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
   }, 20000);
 });

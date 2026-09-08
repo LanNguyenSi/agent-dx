@@ -73,6 +73,17 @@ export function detectKnownZeroTestsEvidence(
 }
 
 /**
+ * Node's built-in test runner summary line, count-agnostic: reused by
+ * `detectKnownZeroTestsEvidence` above (which additionally checks the
+ * captured count is `0`) and by `hasKnownTestSummary` below, so the two
+ * never drift apart into two independently-maintained copies of the
+ * same pattern.
+ */
+function hasNodeTestSummaryLine(combined: string): boolean {
+  return NODE_TEST_SUMMARY_LINE.test(combined);
+}
+
+/**
  * Whether `stdoutTail`/`stderrTail` carries ANY summary line one of the
  * detectors above recognizes, zero-count or not (a normal `Tests  5
  * passed (5)` included): used by the generic byte-identical fallback
@@ -88,5 +99,5 @@ export function hasKnownTestSummary(
   if (vitestDetector.matches({ output: combined, command: "", exitCode: 0 })) {
     return true;
   }
-  return /^[ℹ#]\s*tests\s+\d+\s*$/m.test(combined);
+  return hasNodeTestSummaryLine(combined);
 }

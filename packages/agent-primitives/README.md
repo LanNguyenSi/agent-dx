@@ -847,19 +847,39 @@ test inside files vitest still loaded produces), and node's built-in
 `--test` runner's own zero-count summary line. Either hit is
 `status: "inconclusive"`, `reason: "no_tests_executed"`, exit `2`,
 `mutation_probe.result: "not_run"` -- never `"killed"`/`"survived"`, a
-verdict that measured nothing. For a test runner neither detector
-recognizes, a `survived`-shaped mutant run additionally falls back to
-comparing its own output against the baseline's: byte-identical
-stdout/stderr on both sides, with no summary line either detector
-recognizes on either side either, is read as "this ran the same nothing
-twice" rather than a real survivor. That fallback only ever touches a
-`survived` verdict (a `killed` one already carries a real signal -- the
-exit code disagreed with the baseline -- this output-only heuristic has
-no business second-guessing), and only when there is some real output to
-compare: two empty tails are common and legitimate (many hand-rolled
-test scripts print nothing on a pass, relying on the exit code alone) and
-carry no discriminating signal either way, so empty output on both sides
-never triggers it.
+verdict that measured nothing. **Both detectors, and the generic
+fallback and `--require-baseline-evidence` described below, only ever
+see each side's CAPTURED output tail** (the same 60-line/6000-character
+bound every exec result reports as `stdoutTruncated`/`stderrTruncated`),
+never a command's full, untruncated output; a summary line or a
+`--require-baseline-evidence` pattern that scrolled out of the tail
+reads as a plain miss, not "not present at all" -- see the truncation
+paragraph below for how that is surfaced.
+
+For a test runner neither built-in detector recognizes, a
+`survived`-shaped mutant run -- or, symmetrically, a `killed`-shaped one
+under `--expect pass` whose "killed"-ness rests on nothing but a PASSING
+exit code (the exact same silent exit-0 evidence, just certifying the
+opposite verdict) -- additionally falls back to comparing its own output
+against the baseline's: byte-identical stdout/stderr on both sides, with
+no summary line either detector recognizes on either side either, is
+read as "this ran the same nothing twice" rather than a real verdict. A
+`survived`/`killed` verdict resting on a FAILING exit code already
+carries a real signal (the process itself disagreed with the baseline)
+this output-only heuristic has no business second-guessing, whichever
+direction `--expect` points. The fallback is further scoped to only when
+there is some real output to compare (two empty tails are common and
+legitimate -- many hand-rolled test scripts print nothing on a pass,
+relying on the exit code alone -- and carry no discriminating signal
+either way, so empty output on both sides never triggers it), when
+NEITHER side's captured tail was truncated (a byte-identical comparison
+of two truncated tails proves nothing about the untruncated output), and
+when `--require-baseline-evidence` was not given and matched (see next).
+A test command that prints nothing at all on either run is protected by
+neither mechanism -- no regex can match empty output, and there is
+nothing to compare -- so a genuinely silent suite must be made to print
+some real, discriminating evidence (even just an "N tests ran" line)
+before either one can protect it.
 
 `--require-baseline-evidence <regex>` is the opt-in safety net for a
 suite neither built-in detector recognizes at all: when given, the
@@ -867,11 +887,37 @@ baseline's own stdout+stderr (concatenated) must match the pattern
 before this run may go on to apply a mutant, whatever the exit code and
 the zero-tests detectors said. A miss is
 `status: "inconclusive"`, `reason: "baseline_evidence_not_matched"`,
-exit `2`, `mutation_probe.result: "not_run"`. The pattern is a bare JS
-`RegExp` source with no flags syntax (fold `i`/`m`/`s` into the pattern
-itself, e.g. `(?i)` is not supported); an unparseable one is a usage
-error before the run ever starts. Not available under `--plan`, the same
-way `--env` is not.
+exit `2`, `mutation_probe.result: "not_run"`; when either side of the
+baseline's own captured tail was truncated, the warning names which
+side, since a pattern that matched output outside the captured tail
+would otherwise read as a plain, unexplained miss. The pattern is a bare
+JS `RegExp` source with no flags syntax (fold `i`/`m`/`s` into the
+pattern itself, e.g. `(?i)` is not supported); an unparseable one is a
+usage error before the run ever starts. Not available under `--plan`,
+the same way `--env` is not. Once given AND matched against the
+baseline, it is also the escape hatch for the generic fallback above: a
+quiet, deterministic runner with real, non-empty, non-summary output on
+both runs (`node --test --test-reporter=dot`'s bare `..`, for example)
+is exactly what this flag exists to vouch for, so a genuine `survived`
+of such a runner is reported as `survived`, not second-guessed by the
+fallback -- without the flag, the SAME command reads `inconclusive`/
+`no_tests_executed` by design (no way to tell "ran nothing" from "ran
+the same thing twice" without the caller's own evidence).
+
+Both detectors understand only each runner's DEFAULT text reporters:
+`node --test` with `--test-reporter=dot` (or any reporter besides the
+default `spec`/`tap` shapes), and vitest's own `--reporter=json` output,
+are invisible to them (neither carries the `tests <n>`/`Tests <n>
+passed` text either detector matches on) -- a `-t`/`--test-name-pattern`
+filter matching nothing under one of those reporters reads `survived`,
+not `no_tests_executed`. Node's `--test-name-pattern` matching no test
+name is a second, reporter-independent gap: the file itself still counts
+as "a test" in node's own summary (`tests 1`), so the zero-count check
+never fires for a name-filter miss even under the default reporter.
+`--require-baseline-evidence` is the remedy for all three: recognizing
+vitest's `--reporter=json` `numTotalTests` field is possible but not
+implemented here (out of scope for this task; add it, with its own
+fixture pair, if a real case needs it).
 
 With no `--timeout` given and a test command that looks like a whole test
 suite rather than one targeted file -- `npm test`, `npm run test`/`npm

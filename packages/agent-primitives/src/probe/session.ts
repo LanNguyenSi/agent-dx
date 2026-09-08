@@ -95,6 +95,30 @@ export interface TestPhaseField extends ExecPhaseField {
   env?: Record<string, string>;
 }
 
+/**
+ * The baseline run's own captured tail, plus everything `step.ts`'s
+ * classify step needs about it beyond the raw text: whether either tail
+ * was itself truncated (`exec.ts`'s `TAIL_LINES`/`TAIL_CHARS` bound --
+ * both zero-tests checks and the generic byte-identical fallback only
+ * ever see this captured tail, never the command's full output), and
+ * whether `--require-baseline-evidence` was given AND matched this
+ * baseline (as opposed to not given at all -- a miss already refuses
+ * before any mutant is applied, so a caller-supplied miss never reaches
+ * here). `true` here is the caller's own opt-in evidence that this
+ * runner's output is trustworthy, which is exactly the evidence the
+ * generic fallback exists to stand in for absent that opt-in -- so the
+ * fallback is skipped entirely once this is `true` (see `step.ts`).
+ * Declared here (the bottom of the `session.ts <- step.ts <- setup.ts <-
+ * index.ts` layering) rather than in `setup.ts`, which produces it, so
+ * `step.ts` can name the type without importing `setup.ts` at all. */
+export interface BaselineOutput {
+  stdoutTail: string;
+  stderrTail: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  requireBaselineEvidenceMatched: boolean;
+}
+
 /** A `--env` override name that looks like it carries a credential:
  * `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` or `KEY`, singular or
  * plural, as its own `_`-delimited segment (case-insensitive) --
