@@ -458,16 +458,58 @@ const provocations: Record<RefusalReason, Provocation> = {
   target_changed_during_baseline: provokeTargetChangedDuringBaseline,
 };
 
-/** Asserts a provoked `ProbeResult` matches `REFUSAL_RESULT_SHAPE` for
- * `reason` exactly: `mutant`/`mutation_probe` present or absent per the
- * contract, and, where present, `mutation_probe`'s own fixed shape
- * (`result: "not_run"`, `reason` echoing, `restored_verified: true`). */
+/**
+ * The expected `mutant`/`mutation_probe` presence, hardcoded here
+ * rather than read from `REFUSAL_RESULT_SHAPE` at assertion time: if
+ * this test instead compared a provoked result against the SAME table
+ * `refuse()`/`index.ts` compute their own fields from, a change to that
+ * table (a flipped entry, say) would move the expectation and the
+ * actual result together and the test would keep passing -- caught
+ * directly, provoking `session.ts`'s own `aborted: { mutant: false,
+ * mutationProbe: false }` mutation through `agent-primitives probe`:
+ * the self-referential version of this function passed. This literal
+ * is typed `Record<RefusalReason, ...>` too, so it still fails to
+ * compile on an added `RefusalReason` with no entry here, the same
+ * exhaustiveness guarantee `provocations` above already gives; it is
+ * simply never DERIVED from the table under test.
+ */
+const EXPECTED_SHAPE: Record<
+  RefusalReason,
+  { mutant: boolean; mutationProbe: boolean }
+> = {
+  worktree_allow_outside_unsupported: { mutant: false, mutationProbe: false },
+  file_outside_root: { mutant: false, mutationProbe: false },
+  probe_in_progress: { mutant: false, mutationProbe: false },
+  lock_unavailable: { mutant: false, mutationProbe: false },
+  stale_probe_marker: { mutant: false, mutationProbe: false },
+  file_not_found: { mutant: false, mutationProbe: false },
+  stale_worktree: { mutant: false, mutationProbe: false },
+  worktree_sync_failed: { mutant: false, mutationProbe: false },
+  target_not_synced: { mutant: false, mutationProbe: false },
+  backup_verification_failed: { mutant: false, mutationProbe: false },
+  mutant_not_applicable: { mutant: false, mutationProbe: false },
+  git_apply_timeout: { mutant: false, mutationProbe: false },
+  aborted: { mutant: true, mutationProbe: true },
+  pre_failed: { mutant: true, mutationProbe: true },
+  baseline_failed: { mutant: true, mutationProbe: true },
+  target_changed_during_baseline: { mutant: true, mutationProbe: true },
+};
+
+/** Asserts a provoked `ProbeResult` matches the hardcoded
+ * `EXPECTED_SHAPE` for `reason` exactly: `mutant`/`mutation_probe`
+ * present or absent per the contract, and, where present,
+ * `mutation_probe`'s own fixed shape (`result: "not_run"`, `reason`
+ * echoing, `restored_verified: true`). Also cross-checks `REFUSAL_RESULT_SHAPE`
+ * itself against the same hardcoded literal, so a change to the code
+ * contract that this file's own literal was not updated to match fails
+ * here too, independent of what any provocation observes. */
 function expectMatchesContract(
   result: ProbeResult,
   reason: RefusalReason,
 ): void {
   expect(result.reason).toBe(reason);
-  const shape = REFUSAL_RESULT_SHAPE[reason];
+  const shape = EXPECTED_SHAPE[reason];
+  expect(REFUSAL_RESULT_SHAPE[reason]).toEqual(shape);
   if (shape.mutant) {
     expect(result.mutant).toBeDefined();
   } else {
