@@ -1,7 +1,7 @@
-import { readFile, writeFile, mkdir, chmod } from 'fs/promises';
-import { homedir } from 'os';
-import { join } from 'path';
-import { existsSync } from 'fs';
+import { readFile, writeFile, mkdir, chmod } from "fs/promises";
+import { homedir } from "os";
+import { join } from "path";
+import { existsSync } from "fs";
 
 export interface Config {
   token: string;
@@ -9,8 +9,8 @@ export interface Config {
   defaultRepo?: string;
 }
 
-const CONFIG_DIR = join(homedir(), '.github-api-tool');
-const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
+const CONFIG_DIR = join(homedir(), ".github-api-tool");
+const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 /**
  * Load config from file or environment variable
@@ -25,7 +25,7 @@ export async function loadConfig(): Promise<Config> {
   // Priority 2: Config file
   if (existsSync(CONFIG_FILE)) {
     try {
-      const content = await readFile(CONFIG_FILE, 'utf-8');
+      const content = await readFile(CONFIG_FILE, "utf-8");
       return JSON.parse(content) as Config;
     } catch (error) {
       throw new Error(`Failed to read config file: ${CONFIG_FILE}`);
@@ -33,7 +33,7 @@ export async function loadConfig(): Promise<Config> {
   }
 
   throw new Error(
-    'No GitHub token found. Set GITHUB_TOKEN environment variable or run: github config set-token <token>'
+    "No GitHub token found. Set GITHUB_TOKEN environment variable or run: github config set-token <token>",
   );
 }
 
@@ -50,7 +50,7 @@ export async function saveConfig(config: Config): Promise<void> {
   // only applied when the file is created, so chmod the path afterwards to also
   // harden the overwrite of an existing, world-readable config file.
   await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), {
-    encoding: 'utf-8',
+    encoding: "utf-8",
     mode: 0o600,
   });
   await chmod(CONFIG_FILE, 0o600);
@@ -62,7 +62,7 @@ export async function saveConfig(config: Config): Promise<void> {
 export async function getToken(): Promise<string> {
   const config = await loadConfig();
   if (!config.token) {
-    throw new Error('GitHub token not configured');
+    throw new Error("GitHub token not configured");
   }
   return config.token;
 }
