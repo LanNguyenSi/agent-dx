@@ -567,7 +567,7 @@ jobs:
         run: |
           if node -e "process.exit((require('./package.json').scripts || {})['format:check'] ? 0 : 1)"; then
             npm run format:check
-          elif find src -type f -name '*.ts' 2>/dev/null | grep -q .; then
+          elif [ -n "$(find src -type f -name '*.ts' -print -quit 2>/dev/null)" ]; then
             echo "::error::package ships TypeScript sources (src/**/*.ts) but no format:check script - files would go format-unchecked"
             exit 1
           else
