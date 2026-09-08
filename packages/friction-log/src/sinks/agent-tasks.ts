@@ -1,10 +1,17 @@
-import type { FileOptions, FileResult, Friction, Priority, RenderedTemplate, Sink } from '../types.js';
+import type {
+  FileOptions,
+  FileResult,
+  Friction,
+  Priority,
+  RenderedTemplate,
+  Sink,
+} from "../types.js";
 
 export interface AgentTasksOpts {
   /** Defaults to "rest". "mcp-emit" prints the equivalent
    * mcp__agent-tasks__task_create JSON to stdout instead of POSTing.
    */
-  mode: 'rest' | 'mcp-emit';
+  mode: "rest" | "mcp-emit";
   projectId?: string;
   /** REST base URL, e.g. https://agent-tasks.opentriologue.ai */
   apiBase?: string;
@@ -31,48 +38,52 @@ export type StdoutWriter = (line: string) => void;
  * it doesn't pretend to speak MCP, it just emits the structured intent.
  */
 export class AgentTasksSink implements Sink {
-  readonly name = 'agent-tasks';
+  readonly name = "agent-tasks";
 
   constructor(
     private readonly fetchImpl: Fetcher = (url, init) => fetch(url, init),
-    private readonly write: StdoutWriter = (line) => process.stdout.write(line)
+    private readonly write: StdoutWriter = (line) => process.stdout.write(line),
   ) {}
 
-  async file(friction: Friction, rendered: RenderedTemplate, opts: FileOptions): Promise<FileResult> {
+  async file(
+    friction: Friction,
+    rendered: RenderedTemplate,
+    opts: FileOptions,
+  ): Promise<FileResult> {
     const parsed = parseOpts(opts);
     const payload = buildPayload(friction, rendered, parsed);
 
-    if (parsed.mode === 'mcp-emit') {
+    if (parsed.mode === "mcp-emit") {
       const intent = {
-        tool: 'mcp__agent-tasks__task_create',
+        tool: "mcp__agent-tasks__task_create",
         params: payload,
       };
-      this.write(JSON.stringify(intent) + '\n');
+      this.write(JSON.stringify(intent) + "\n");
       return {
         ok: true,
         sinkTarget: `agent-tasks:mcp-emit:${payload.projectId}`,
-        message: 'emitted MCP task_create intent to stdout (no network call)',
+        message: "emitted MCP task_create intent to stdout (no network call)",
       };
     }
 
     const apiBase = parsed.apiBase;
     if (!apiBase) {
       throw new Error(
-        `friction-log: agent-tasks sink in REST mode requires "apiBase". Set sinks.agent-tasks.apiBase in config.yml or pass --sink-opt apiBase=https://...`
+        `friction-log: agent-tasks sink in REST mode requires "apiBase". Set sinks.agent-tasks.apiBase in config.yml or pass --sink-opt apiBase=https://...`,
       );
     }
     const token = parsed.token ?? process.env.AGENT_TASKS_TOKEN;
     if (!token) {
       throw new Error(
-        `friction-log: agent-tasks REST mode requires a token. Set AGENT_TASKS_TOKEN env var or sinks.agent-tasks.token.`
+        `friction-log: agent-tasks REST mode requires a token. Set AGENT_TASKS_TOKEN env var or sinks.agent-tasks.token.`,
       );
     }
-    const url = `${apiBase.replace(/\/$/, '')}/api/projects/${encodeURIComponent(payload.projectId)}/tasks`;
+    const url = `${apiBase.replace(/\/$/, "")}/api/projects/${encodeURIComponent(payload.projectId)}/tasks`;
     const response = await this.fetchImpl(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
+        "content-type": "application/json",
+        accept: "application/json",
         authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
@@ -85,14 +96,17 @@ export class AgentTasksSink implements Sink {
     if (!response.ok) {
       const body = await safeText(response);
       throw new Error(
-        `friction-log: agent-tasks REST returned ${response.status}: ${body.slice(0, 400)}`
+        `friction-log: agent-tasks REST returned ${response.status}: ${body.slice(0, 400)}`,
       );
     }
-    const parsedBody = (await response.json()) as { task?: { id?: string }; id?: string };
+    const parsedBody = (await response.json()) as {
+      task?: { id?: string };
+      id?: string;
+    };
     const taskId = parsedBody.task?.id ?? parsedBody.id;
-    if (typeof taskId !== 'string') {
+    if (typeof taskId !== "string") {
       throw new Error(
-        `friction-log: agent-tasks REST response missing task id: ${JSON.stringify(parsedBody).slice(0, 400)}`
+        `friction-log: agent-tasks REST response missing task id: ${JSON.stringify(parsedBody).slice(0, 400)}`,
       );
     }
     return {
@@ -115,14 +129,16 @@ interface AgentTasksPayload {
 function buildPayload(
   friction: Friction,
   rendered: RenderedTemplate,
-  opts: AgentTasksOpts
+  opts: AgentTasksOpts,
 ): AgentTasksPayload {
   if (!opts.projectId) {
     throw new Error(
-      `friction-log: agent-tasks sink requires "projectId" (uuid). Set sinks.agent-tasks.projectId in config.yml or pass --sink-opt projectId=...`
+      `friction-log: agent-tasks sink requires "projectId" (uuid). Set sinks.agent-tasks.projectId in config.yml or pass --sink-opt projectId=...`,
     );
   }
-  const labels = Array.from(new Set([...(opts.labels ?? []), ...rendered.labels]));
+  const labels = Array.from(
+    new Set([...(opts.labels ?? []), ...rendered.labels]),
+  );
   const description = renderDescription(friction, rendered);
   return {
     projectId: opts.projectId,
@@ -136,58 +152,66 @@ function buildPayload(
 function parseOpts(opts: FileOptions): AgentTasksOpts {
   const raw = opts.sinkOpts ?? {};
   const mode = parseMode(raw.mode);
-  const projectId = optionalString(raw.projectId, 'projectId');
-  const apiBase = optionalString(raw.apiBase, 'apiBase');
-  const token = optionalString(raw.token, 'token');
+  const projectId = optionalString(raw.projectId, "projectId");
+  const apiBase = optionalString(raw.apiBase, "apiBase");
+  const token = optionalString(raw.token, "token");
   const priority = parsePriority(raw.priority);
-  const labels = parseStringList(raw.labels, 'labels');
+  const labels = parseStringList(raw.labels, "labels");
   return { mode, projectId, apiBase, token, priority, labels };
 }
 
-function parseMode(value: unknown): 'rest' | 'mcp-emit' {
-  if (value == null) return 'rest';
-  if (value === 'rest' || value === 'mcp-emit') return value;
+function parseMode(value: unknown): "rest" | "mcp-emit" {
+  if (value == null) return "rest";
+  if (value === "rest" || value === "mcp-emit") return value;
   throw new Error(
-    `friction-log: agent-tasks "mode" must be "rest" or "mcp-emit", got ${JSON.stringify(value)}`
+    `friction-log: agent-tasks "mode" must be "rest" or "mcp-emit", got ${JSON.stringify(value)}`,
   );
 }
 
 function optionalString(value: unknown, name: string): string | undefined {
   if (value == null) return undefined;
-  if (typeof value === 'string') return value;
+  if (typeof value === "string") return value;
   throw new Error(`friction-log: agent-tasks "${name}" must be a string`);
 }
 
 function parsePriority(value: unknown): Priority | undefined {
   if (value == null) return undefined;
-  const valid: Priority[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-  if (typeof value === 'string' && (valid as string[]).includes(value)) return value as Priority;
+  const valid: Priority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+  if (typeof value === "string" && (valid as string[]).includes(value))
+    return value as Priority;
   throw new Error(
-    `friction-log: agent-tasks "priority" must be one of ${valid.join('|')}`
+    `friction-log: agent-tasks "priority" must be one of ${valid.join("|")}`,
   );
 }
 
 function parseStringList(value: unknown, name: string): string[] | undefined {
   if (value == null) return undefined;
-  if (typeof value === 'string') return [value];
-  if (Array.isArray(value) && value.every((v) => typeof v === 'string')) return value as string[];
-  throw new Error(`friction-log: agent-tasks "${name}" must be a string or array of strings`);
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value) && value.every((v) => typeof v === "string"))
+    return value as string[];
+  throw new Error(
+    `friction-log: agent-tasks "${name}" must be a string or array of strings`,
+  );
 }
 
-function renderDescription(friction: Friction, rendered: RenderedTemplate): string {
+function renderDescription(
+  friction: Friction,
+  rendered: RenderedTemplate,
+): string {
   const meta: string[] = [];
   meta.push(`friction-log id ${friction.id} captured ${friction.capturedAt}`);
   if (friction.toolSurface) meta.push(`tool: ${friction.toolSurface}`);
   if (friction.category) meta.push(`category: ${friction.category}`);
   if (friction.severity) meta.push(`severity: ${friction.severity}`);
-  if (friction.recurrenceOfId != null) meta.push(`recurrence of friction #${friction.recurrenceOfId}`);
-  return `${rendered.body}\n\n---\n${meta.join('\n')}\n`;
+  if (friction.recurrenceOfId != null)
+    meta.push(`recurrence of friction #${friction.recurrenceOfId}`);
+  return `${rendered.body}\n\n---\n${meta.join("\n")}\n`;
 }
 
 async function safeText(response: Response): Promise<string> {
   try {
     return await response.text();
   } catch {
-    return '(no body)';
+    return "(no body)";
   }
 }

@@ -1,13 +1,21 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { loadConfig } from '../src/config.js';
-import { runImport, parseMarkdownContent } from '../src/commands/import.js';
-import { mergeConfigYaml, mergeStopHook, runInit } from '../src/commands/init.js';
-import { FrictionDb } from '../src/db.js';
-import { listTemplates, loadTemplate, pickTemplateForCategory } from '../src/templates.js';
+import { loadConfig } from "../src/config.js";
+import { runImport, parseMarkdownContent } from "../src/commands/import.js";
+import {
+  mergeConfigYaml,
+  mergeStopHook,
+  runInit,
+} from "../src/commands/init.js";
+import { FrictionDb } from "../src/db.js";
+import {
+  listTemplates,
+  loadTemplate,
+  pickTemplateForCategory,
+} from "../src/templates.js";
 
 let workDir: string;
 let dbPath: string;
@@ -15,12 +23,15 @@ let dbPath: string;
 // Guard against ambient FRICTION_LOG_SYNC_EXPORT_* env vars (which
 // loadConfig honors as overrides) leaking into the sync_export roundtrip
 // tests below and making them depend on the host environment.
-const SYNC_EXPORT_ENV_KEYS = ['FRICTION_LOG_SYNC_EXPORT_PATH', 'FRICTION_LOG_SYNC_EXPORT_ORIGIN'] as const;
+const SYNC_EXPORT_ENV_KEYS = [
+  "FRICTION_LOG_SYNC_EXPORT_PATH",
+  "FRICTION_LOG_SYNC_EXPORT_ORIGIN",
+] as const;
 let savedSyncExportEnv: Record<string, string | undefined>;
 
 beforeEach(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'friction-log-m5-'));
-  dbPath = join(workDir, 'db.sqlite');
+  workDir = mkdtempSync(join(tmpdir(), "friction-log-m5-"));
+  dbPath = join(workDir, "db.sqlite");
   savedSyncExportEnv = {};
   for (const k of SYNC_EXPORT_ENV_KEYS) {
     savedSyncExportEnv[k] = process.env[k];
@@ -36,17 +47,17 @@ afterEach(() => {
   }
 });
 
-describe('m5 templates', () => {
-  it('loads all four new templates plus the three from M1', () => {
+describe("m5 templates", () => {
+  it("loads all four new templates plus the three from M1", () => {
     const names = listTemplates();
     for (const n of [
-      'tool-error',
-      'output-overflow',
-      'workflow-friction',
-      'tool-missing-capability',
-      'auth-expiry',
-      'schema-drift',
-      'doc-gap',
+      "tool-error",
+      "output-overflow",
+      "workflow-friction",
+      "tool-missing-capability",
+      "auth-expiry",
+      "schema-drift",
+      "doc-gap",
     ]) {
       expect(names).toContain(n);
       const tpl = loadTemplate(n);
@@ -55,17 +66,19 @@ describe('m5 templates', () => {
     }
   });
 
-  it('auto-picks the new templates by category match', () => {
-    expect(pickTemplateForCategory('auth-expiry')).toBe('auth-expiry');
-    expect(pickTemplateForCategory('schema-drift')).toBe('schema-drift');
-    expect(pickTemplateForCategory('doc-gap')).toBe('doc-gap');
-    expect(pickTemplateForCategory('tool-missing-capability')).toBe('tool-missing-capability');
+  it("auto-picks the new templates by category match", () => {
+    expect(pickTemplateForCategory("auth-expiry")).toBe("auth-expiry");
+    expect(pickTemplateForCategory("schema-drift")).toBe("schema-drift");
+    expect(pickTemplateForCategory("doc-gap")).toBe("doc-gap");
+    expect(pickTemplateForCategory("tool-missing-capability")).toBe(
+      "tool-missing-capability",
+    );
   });
 });
 
-describe('import markdown-frontmatter', () => {
+describe("import markdown-frontmatter", () => {
   function seedDir(files: Record<string, string>): string {
-    const root = join(workDir, 'memory');
+    const root = join(workDir, "memory");
     for (const [name, content] of Object.entries(files)) {
       const path = join(root, name);
       writeFileSync(makeDir(path), content);
@@ -74,68 +87,82 @@ describe('import markdown-frontmatter', () => {
   }
 
   function makeDir(filepath: string): string {
-    const { dirname } = require('node:path') as typeof import('node:path');
-    const { mkdirSync } = require('node:fs') as typeof import('node:fs');
+    const { dirname } = require("node:path") as typeof import("node:path");
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(dirname(filepath), { recursive: true });
     return filepath;
   }
 
-  it('parses YAML frontmatter and falls back to H1 + body when keys are absent', () => {
+  it("parses YAML frontmatter and falls back to H1 + body when keys are absent", () => {
     const parsed = parseMarkdownContent(
-      '---\ntitle: a friction\ntool_surface: mcp:foo\nseverity: high\ncategory: tool-error\n---\nbody line\n'
+      "---\ntitle: a friction\ntool_surface: mcp:foo\nseverity: high\ncategory: tool-error\n---\nbody line\n",
     );
-    expect(parsed?.title).toBe('a friction');
-    expect(parsed?.toolSurface).toBe('mcp:foo');
-    expect(parsed?.severity).toBe('high');
-    expect(parsed?.description).toBe('body line');
+    expect(parsed?.title).toBe("a friction");
+    expect(parsed?.toolSurface).toBe("mcp:foo");
+    expect(parsed?.severity).toBe("high");
+    expect(parsed?.description).toBe("body line");
 
-    const fromH1 = parseMarkdownContent('# headline title\n\ndetailed body\n');
-    expect(fromH1?.title).toBe('headline title');
-    expect(fromH1?.description).toBe('detailed body');
+    const fromH1 = parseMarkdownContent("# headline title\n\ndetailed body\n");
+    expect(fromH1?.title).toBe("headline title");
+    expect(fromH1?.description).toBe("detailed body");
   });
 
-  it('imports a directory, preserves unknown frontmatter as tags, and is idempotent on rerun', () => {
+  it("imports a directory, preserves unknown frontmatter as tags, and is idempotent on rerun", () => {
     const root = seedDir({
-      'a.md':
-        '---\ntitle: tasks_list overflow\ntool_surface: mcp:agent-tasks/tasks_list\ncategory: output-overflow\nseverity: high\npriority: HIGH\n---\nbody\n',
-      'subdir/b.md':
-        '---\ntitle: gh JWT 401\ntool_surface: gh-token.sh\ncategory: auth-expiry\nseverity: medium\n---\nshort body\n',
-      'notes.md': '# untitled-from-h1\n\nsome content\n',
-      'ignore.txt': 'not markdown\n',
+      "a.md":
+        "---\ntitle: tasks_list overflow\ntool_surface: mcp:agent-tasks/tasks_list\ncategory: output-overflow\nseverity: high\npriority: HIGH\n---\nbody\n",
+      "subdir/b.md":
+        "---\ntitle: gh JWT 401\ntool_surface: gh-token.sh\ncategory: auth-expiry\nseverity: medium\n---\nshort body\n",
+      "notes.md": "# untitled-from-h1\n\nsome content\n",
+      "ignore.txt": "not markdown\n",
     });
-    const first = runImport({ format: 'markdown-frontmatter', path: root, dbPath });
+    const first = runImport({
+      format: "markdown-frontmatter",
+      path: root,
+      dbPath,
+    });
     expect(first.scanned).toBe(3);
     expect(first.imported).toBe(3);
     expect(first.skipped).toBe(0);
 
     const db = new FrictionDb(dbPath);
     try {
-      const all = db.listFrictions({ source: 'import' });
+      const all = db.listFrictions({ source: "import" });
       expect(all).toHaveLength(3);
-      const overflowTags = db.tagsFor(all.find((f) => f.title === 'tasks_list overflow')!.id);
-      expect(overflowTags.some((t) => t.startsWith('imported-from:a.md'))).toBe(true);
-      expect(overflowTags.some((t) => t.startsWith('import-hash:'))).toBe(true);
-      expect(overflowTags).toContain('priority:HIGH');
+      const overflowTags = db.tagsFor(
+        all.find((f) => f.title === "tasks_list overflow")!.id,
+      );
+      expect(overflowTags.some((t) => t.startsWith("imported-from:a.md"))).toBe(
+        true,
+      );
+      expect(overflowTags.some((t) => t.startsWith("import-hash:"))).toBe(true);
+      expect(overflowTags).toContain("priority:HIGH");
     } finally {
       db.close();
     }
 
-    const second = runImport({ format: 'markdown-frontmatter', path: root, dbPath });
+    const second = runImport({
+      format: "markdown-frontmatter",
+      path: root,
+      dbPath,
+    });
     expect(second.imported).toBe(0);
     expect(second.skipped).toBe(3);
   });
 
-  it('rejects unknown formats', () => {
-    expect(() => runImport({ format: 'csv' as never, path: workDir, dbPath })).toThrow(/not supported/);
+  it("rejects unknown formats", () => {
+    expect(() =>
+      runImport({ format: "csv" as never, path: workDir, dbPath }),
+    ).toThrow(/not supported/);
   });
 });
 
-describe('init', () => {
-  it('writes a fresh config.yml with the chosen sink and returns next-steps', async () => {
-    const configPath = join(workDir, 'config.yml');
+describe("init", () => {
+  it("writes a fresh config.yml with the chosen sink and returns next-steps", async () => {
+    const configPath = join(workDir, "config.yml");
     const out = await runInit({
       configPath,
-      sink: 'markdown-file',
+      sink: "markdown-file",
       yes: true,
       installStopHook: false,
       detect: () => ({
@@ -147,34 +174,44 @@ describe('init', () => {
     });
     expect(out.configWritten).toBe(true);
     expect(out.configExistedBefore).toBe(false);
-    expect(out.defaultSink).toBe('markdown-file');
+    expect(out.defaultSink).toBe("markdown-file");
     expect(out.stopHookWrittenTo).toBeNull();
-    const written = readFileSync(configPath, 'utf8');
+    const written = readFileSync(configPath, "utf8");
     expect(written).toMatch(/default_sink:\s*markdown-file/);
-    expect(written).toContain('sinks:');
-    expect(out.nextSteps.join('\n')).toContain('first friction');
+    expect(written).toContain("sinks:");
+    expect(out.nextSteps.join("\n")).toContain("first friction");
   });
 
-  it('is idempotent on re-run with the same sink', async () => {
-    const configPath = join(workDir, 'config.yml');
+  it("is idempotent on re-run with the same sink", async () => {
+    const configPath = join(workDir, "config.yml");
     const noopDetect = () => ({
       claudeCodeSettingsPath: null,
       ghAvailable: false,
       linearKeyPresent: false,
       agentTasksTokenPresent: false,
     });
-    await runInit({ configPath, sink: 'stdout-json', yes: true, detect: noopDetect });
-    const second = await runInit({ configPath, sink: 'stdout-json', yes: true, detect: noopDetect });
+    await runInit({
+      configPath,
+      sink: "stdout-json",
+      yes: true,
+      detect: noopDetect,
+    });
+    const second = await runInit({
+      configPath,
+      sink: "stdout-json",
+      yes: true,
+      detect: noopDetect,
+    });
     expect(second.configWritten).toBe(false);
     expect(second.configExistedBefore).toBe(true);
   });
 
-  it('installs the Stop-hook into a Claude settings.json when asked', async () => {
-    const claudeSettings = join(workDir, 'claude', 'settings.json');
-    const configPath = join(workDir, 'config.yml');
+  it("installs the Stop-hook into a Claude settings.json when asked", async () => {
+    const claudeSettings = join(workDir, "claude", "settings.json");
+    const configPath = join(workDir, "config.yml");
     const out = await runInit({
       configPath,
-      sink: 'markdown-file',
+      sink: "markdown-file",
       yes: true,
       installStopHook: true,
       detect: () => ({
@@ -185,54 +222,68 @@ describe('init', () => {
       }),
     });
     expect(out.stopHookWrittenTo).toBe(claudeSettings);
-    const json = JSON.parse(readFileSync(claudeSettings, 'utf8')) as {
-      hooks: { Stop: Array<{ matcher: string; hooks: Array<{ command: string }> }> };
+    const json = JSON.parse(readFileSync(claudeSettings, "utf8")) as {
+      hooks: {
+        Stop: Array<{ matcher: string; hooks: Array<{ command: string }> }>;
+      };
     };
     const group = json.hooks.Stop[0];
-    expect(group.matcher).toBe('');
-    expect(group.hooks.some((h) => h.command.includes('friction-log scan'))).toBe(true);
+    expect(group.matcher).toBe("");
+    expect(
+      group.hooks.some((h) => h.command.includes("friction-log scan")),
+    ).toBe(true);
   });
 
-  it('mergeStopHook is idempotent and merges into an existing Stop group', () => {
+  it("mergeStopHook is idempotent and merges into an existing Stop group", () => {
     const existing = JSON.stringify({
-      hooks: { Stop: [{ matcher: '', hooks: [{ type: 'command', command: 'other' }] }] },
+      hooks: {
+        Stop: [{ matcher: "", hooks: [{ type: "command", command: "other" }] }],
+      },
     });
     const once = mergeStopHook(existing);
     const twice = mergeStopHook(once);
     expect(once).toBe(twice);
-    const parsed = JSON.parse(once) as { hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> } };
+    const parsed = JSON.parse(once) as {
+      hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> };
+    };
     const commands = parsed.hooks.Stop[0].hooks.map((h) => h.command);
-    expect(commands).toContain('other');
-    expect(commands.some((c) => c.includes('friction-log scan'))).toBe(true);
+    expect(commands).toContain("other");
+    expect(commands.some((c) => c.includes("friction-log scan"))).toBe(true);
   });
 
-  it('mergeConfigYaml preserves user-set fields outside the touched sink', () => {
-    const existing = 'sinks:\n  github-issues:\n    repo: x/y\nsome_user_key: kept\n';
-    const merged = mergeConfigYaml(existing, 'markdown-file');
-    expect(merged).toContain('repo: x/y');
-    expect(merged).toContain('some_user_key: kept');
-    expect(merged).toContain('default_sink: markdown-file');
+  it("mergeConfigYaml preserves user-set fields outside the touched sink", () => {
+    const existing =
+      "sinks:\n  github-issues:\n    repo: x/y\nsome_user_key: kept\n";
+    const merged = mergeConfigYaml(existing, "markdown-file");
+    expect(merged).toContain("repo: x/y");
+    expect(merged).toContain("some_user_key: kept");
+    expect(merged).toContain("default_sink: markdown-file");
   });
 
-  it('mergeConfigYaml leaves sync_export untouched when init is not asked to write one (no drift-bug repeat)', () => {
+  it("mergeConfigYaml leaves sync_export untouched when init is not asked to write one (no drift-bug repeat)", () => {
     // The pre-existing drift bug: init.ts wrote `default_sink` but loadConfig
     // never read it back. Guard the opposite failure mode for sync_export: a
     // plain `init` run (no --sync-export-* flags) must not silently drop or
     // rewrite an already-configured sync_export block.
-    const existing = 'sync_export:\n  path: /tmp/export.json\n  origin: macbook\n';
-    const merged = mergeConfigYaml(existing, 'markdown-file');
-    expect(merged).toContain('path: /tmp/export.json');
-    expect(merged).toContain('origin: macbook');
+    const existing =
+      "sync_export:\n  path: /tmp/export.json\n  origin: macbook\n";
+    const merged = mergeConfigYaml(existing, "markdown-file");
+    expect(merged).toContain("path: /tmp/export.json");
+    expect(merged).toContain("origin: macbook");
   });
 
-  it('roundtrip: init writes the sync_export block and loadConfig reads it back (AC4)', async () => {
-    const configPath = join(workDir, 'config.yml');
+  it("roundtrip: init writes the sync_export block and loadConfig reads it back (AC4)", async () => {
+    const configPath = join(workDir, "config.yml");
     const out = await runInit({
       configPath,
-      sink: 'markdown-file',
+      sink: "markdown-file",
       yes: true,
       installStopHook: false,
-      syncExport: { path: '/tmp/friction-log-sync.json', origin: 'macbook', peerPaths: ['/tmp/peer.json'] },
+      syncExport: {
+        path: "/tmp/friction-log-sync.json",
+        origin: "macbook",
+        peerPaths: ["/tmp/peer.json"],
+      },
       detect: () => ({
         claudeCodeSettingsPath: null,
         ghAvailable: false,
@@ -243,15 +294,15 @@ describe('init', () => {
     expect(out.configWritten).toBe(true);
     const cfg = loadConfig(configPath);
     expect(cfg.syncExport).toEqual({
-      path: '/tmp/friction-log-sync.json',
-      origin: 'macbook',
-      peerPaths: ['/tmp/peer.json'],
+      path: "/tmp/friction-log-sync.json",
+      origin: "macbook",
+      peerPaths: ["/tmp/peer.json"],
     });
-    expect(out.nextSteps.join('\n')).toContain('sync-export configured');
+    expect(out.nextSteps.join("\n")).toContain("sync-export configured");
   });
 
-  it('re-running init without --sync-export-* preserves a previously-written block', async () => {
-    const configPath = join(workDir, 'config.yml');
+  it("re-running init without --sync-export-* preserves a previously-written block", async () => {
+    const configPath = join(workDir, "config.yml");
     const noopDetect = () => ({
       claudeCodeSettingsPath: null,
       ghAvailable: false,
@@ -260,13 +311,22 @@ describe('init', () => {
     });
     await runInit({
       configPath,
-      sink: 'markdown-file',
+      sink: "markdown-file",
       yes: true,
-      syncExport: { path: '/tmp/friction-log-sync.json', origin: 'macbook' },
+      syncExport: { path: "/tmp/friction-log-sync.json", origin: "macbook" },
       detect: noopDetect,
     });
-    await runInit({ configPath, sink: 'markdown-file', yes: true, detect: noopDetect });
+    await runInit({
+      configPath,
+      sink: "markdown-file",
+      yes: true,
+      detect: noopDetect,
+    });
     const cfg = loadConfig(configPath);
-    expect(cfg.syncExport).toEqual({ path: '/tmp/friction-log-sync.json', origin: 'macbook', peerPaths: [] });
+    expect(cfg.syncExport).toEqual({
+      path: "/tmp/friction-log-sync.json",
+      origin: "macbook",
+      peerPaths: [],
+    });
   });
 });

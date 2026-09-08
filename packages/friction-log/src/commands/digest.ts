@@ -1,11 +1,11 @@
-import { readFileSync } from 'node:fs';
-import { basename } from 'node:path';
-import { loadConfig } from '../config.js';
-import { FrictionDb, type DigestGroupBy, type DigestRow } from '../db.js';
-import { defaultDbPath } from '../paths.js';
-import type { ExportRecord } from './export.js';
-import type { FrictionSource, FrictionStatus, Severity } from '../types.js';
-import { parseAge } from './list.js';
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
+import { loadConfig } from "../config.js";
+import { FrictionDb, type DigestGroupBy, type DigestRow } from "../db.js";
+import { defaultDbPath } from "../paths.js";
+import type { ExportRecord } from "./export.js";
+import type { FrictionSource, FrictionStatus, Severity } from "../types.js";
+import { parseAge } from "./list.js";
 
 export interface DigestCommandInput {
   groupBy: DigestGroupBy;
@@ -52,7 +52,9 @@ export function runDigest(input: DigestCommandInput): DigestCommandOutput {
     if (input.includePeers) {
       const config = loadConfig(input.configPath);
       const peerPaths = config.syncExport?.peerPaths ?? [];
-      out.peers = peerPaths.map((p) => buildPeerSection(p, input.groupBy, sinceIso));
+      out.peers = peerPaths.map((p) =>
+        buildPeerSection(p, input.groupBy, sinceIso),
+      );
     }
     return out;
   } finally {
@@ -84,11 +86,11 @@ interface NormalizedPeerRecord {
  * after any real date).
  */
 function normalizePeerRecord(raw: unknown): NormalizedPeerRecord | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== "object") return null;
   const rec = raw as Partial<ExportRecord>;
-  if (typeof rec.title !== 'string' || rec.title.trim() === '') return null;
+  if (typeof rec.title !== "string" || rec.title.trim() === "") return null;
   if (!isFrictionStatus(rec.status)) return null;
-  if (typeof rec.capturedAt !== 'string') return null;
+  if (typeof rec.capturedAt !== "string") return null;
   // Lenient on input, canonical in storage: Date.parse accepts many
   // non-ISO spellings ('Jan 1 1999'), and every downstream comparison
   // (--last windows, recurrence cutoffs) is a plain string compare
@@ -97,19 +99,20 @@ function normalizePeerRecord(raw: unknown): NormalizedPeerRecord | null {
   const capturedAtDate = new Date(rec.capturedAt);
   if (Number.isNaN(capturedAtDate.getTime())) return null;
   return {
-    toolSurface: typeof rec.toolSurface === 'string' ? rec.toolSurface : null,
+    toolSurface: typeof rec.toolSurface === "string" ? rec.toolSurface : null,
     title: rec.title,
-    description: typeof rec.description === 'string' ? rec.description : null,
+    description: typeof rec.description === "string" ? rec.description : null,
     capturedAt: capturedAtDate.toISOString(),
     severity: isSeverity(rec.severity) ? rec.severity : null,
-    category: typeof rec.category === 'string' ? rec.category : null,
+    category: typeof rec.category === "string" ? rec.category : null,
     status: rec.status,
     // Unlike status/capturedAt/title, an invalid severity or source
     // degrades gracefully to a legitimate "unknown" value instead of
     // dropping the whole record: severity is already nullable in the
     // schema, and 'import' is a real, meaningful "unclassified" source.
-    source: isFrictionSource(rec.source) ? rec.source : 'import',
-    recurrenceOfId: typeof rec.recurrenceOfId === 'number' ? rec.recurrenceOfId : null,
+    source: isFrictionSource(rec.source) ? rec.source : "import",
+    recurrenceOfId:
+      typeof rec.recurrenceOfId === "number" ? rec.recurrenceOfId : null,
   };
 }
 
@@ -126,11 +129,15 @@ function normalizePeerRecord(raw: unknown): NormalizedPeerRecord | null {
  * recurrence_of_id (see countPeerRecurrences for why) and is patched onto
  * the rows afterward.
  */
-function buildPeerSection(peerPath: string, groupBy: DigestGroupBy, sinceIso: string | null): DigestPeerSection {
+function buildPeerSection(
+  peerPath: string,
+  groupBy: DigestGroupBy,
+  sinceIso: string | null,
+): DigestPeerSection {
   const fallbackOrigin = basename(peerPath);
   let raw: string;
   try {
-    raw = readFileSync(peerPath, 'utf8');
+    raw = readFileSync(peerPath, "utf8");
   } catch (err) {
     return {
       origin: fallbackOrigin,
@@ -152,9 +159,18 @@ function buildPeerSection(peerPath: string, groupBy: DigestGroupBy, sinceIso: st
       error: `could not parse peer file as JSON: ${(err as Error).message}`,
     };
   }
-  const origin = typeof payload.origin === 'string' && payload.origin.trim() ? payload.origin : fallbackOrigin;
+  const origin =
+    typeof payload.origin === "string" && payload.origin.trim()
+      ? payload.origin
+      : fallbackOrigin;
   if (!Array.isArray(payload.records)) {
-    return { origin, sourcePath: peerPath, rows: [], skipped: 0, error: 'peer file is missing a "records" array' };
+    return {
+      origin,
+      sourcePath: peerPath,
+      rows: [],
+      skipped: 0,
+      error: 'peer file is missing a "records" array',
+    };
   }
 
   let skipped = 0;
@@ -168,7 +184,7 @@ function buildPeerSection(peerPath: string, groupBy: DigestGroupBy, sinceIso: st
     validRecords.push(normalized);
   }
 
-  const scratch = new FrictionDb(':memory:');
+  const scratch = new FrictionDb(":memory:");
   try {
     for (const rec of validRecords) {
       const inserted = scratch.insertFriction({
@@ -180,16 +196,29 @@ function buildPeerSection(peerPath: string, groupBy: DigestGroupBy, sinceIso: st
         category: rec.category,
         source: rec.source,
       });
-      if (rec.status !== 'open') {
+      if (rec.status !== "open") {
         scratch.updateFrictionStatus(inserted.id, rec.status);
       }
     }
     const rows = scratch.digest(groupBy, sinceIso ?? undefined);
-    const recurrenceCounts = countPeerRecurrences(validRecords, groupBy, sinceIso);
-    const withRecurrences = rows.map((r) => ({ ...r, recurrences: recurrenceCounts.get(r.group) ?? 0 }));
+    const recurrenceCounts = countPeerRecurrences(
+      validRecords,
+      groupBy,
+      sinceIso,
+    );
+    const withRecurrences = rows.map((r) => ({
+      ...r,
+      recurrences: recurrenceCounts.get(r.group) ?? 0,
+    }));
     return { origin, sourcePath: peerPath, rows: withRecurrences, skipped };
   } catch (err) {
-    return { origin, sourcePath: peerPath, rows: [], skipped, error: `could not replay peer records: ${(err as Error).message}` };
+    return {
+      origin,
+      sourcePath: peerPath,
+      rows: [],
+      skipped,
+      error: `could not replay peer records: ${(err as Error).message}`,
+    };
   } finally {
     scratch.close();
   }
@@ -214,7 +243,7 @@ function buildPeerSection(peerPath: string, groupBy: DigestGroupBy, sinceIso: st
 function countPeerRecurrences(
   records: NormalizedPeerRecord[],
   groupBy: DigestGroupBy,
-  sinceIso: string | null
+  sinceIso: string | null,
 ): Map<string, number> {
   const counts = new Map<string, number>();
   for (const rec of records) {
@@ -226,62 +255,86 @@ function countPeerRecurrences(
   return counts;
 }
 
-function groupValueFor(rec: NormalizedPeerRecord, groupBy: DigestGroupBy): string {
+function groupValueFor(
+  rec: NormalizedPeerRecord,
+  groupBy: DigestGroupBy,
+): string {
   switch (groupBy) {
-    case 'tool':
-      return rec.toolSurface ?? '(unset)';
-    case 'category':
-      return rec.category ?? '(unset)';
-    case 'severity':
-      return rec.severity ?? '(unset)';
-    case 'source':
+    case "tool":
+      return rec.toolSurface ?? "(unset)";
+    case "category":
+      return rec.category ?? "(unset)";
+    case "severity":
+      return rec.severity ?? "(unset)";
+    case "source":
       return rec.source;
   }
 }
 
-const SEVERITIES: readonly Severity[] = ['low', 'medium', 'high', 'critical'];
-const SOURCES: readonly FrictionSource[] = ['scan', 'manual', 'import'];
-const STATUSES: readonly FrictionStatus[] = ['open', 'filed', 'resolved', 'wontfix'];
+const SEVERITIES: readonly Severity[] = ["low", "medium", "high", "critical"];
+const SOURCES: readonly FrictionSource[] = ["scan", "manual", "import"];
+const STATUSES: readonly FrictionStatus[] = [
+  "open",
+  "filed",
+  "resolved",
+  "wontfix",
+];
 
 function isSeverity(v: unknown): v is Severity {
-  return typeof v === 'string' && (SEVERITIES as readonly string[]).includes(v);
+  return typeof v === "string" && (SEVERITIES as readonly string[]).includes(v);
 }
 
 function isFrictionSource(v: unknown): v is FrictionSource {
-  return typeof v === 'string' && (SOURCES as readonly string[]).includes(v);
+  return typeof v === "string" && (SOURCES as readonly string[]).includes(v);
 }
 
 function isFrictionStatus(v: unknown): v is FrictionStatus {
-  return typeof v === 'string' && (STATUSES as readonly string[]).includes(v);
+  return typeof v === "string" && (STATUSES as readonly string[]).includes(v);
 }
 
 export function formatDigest(output: DigestCommandOutput): string {
   const { groupBy, sinceIso, rows, peers } = output;
-  const window = sinceIso ? `since ${sinceIso}` : 'all-time';
+  const window = sinceIso ? `since ${sinceIso}` : "all-time";
   const parts: string[] = [];
   if (rows.length === 0) {
     parts.push(`digest by ${groupBy} (${window}): no frictions match`);
   } else {
-    parts.push(`digest by ${groupBy} (${window})`, '', renderDigestTable(rows));
+    parts.push(`digest by ${groupBy} (${window})`, "", renderDigestTable(rows));
   }
   if (peers) {
     for (const peer of peers) {
-      const skippedNote = peer.skipped > 0 ? `, ${peer.skipped} record(s) skipped as malformed` : '';
-      parts.push('', `peer origin=${peer.origin} (${peer.sourcePath})${skippedNote}:`);
+      const skippedNote =
+        peer.skipped > 0
+          ? `, ${peer.skipped} record(s) skipped as malformed`
+          : "";
+      parts.push(
+        "",
+        `peer origin=${peer.origin} (${peer.sourcePath})${skippedNote}:`,
+      );
       if (peer.error) {
         parts.push(`  WARNING: ${peer.error}`);
       } else if (peer.rows.length === 0) {
-        parts.push('  no frictions match');
+        parts.push("  no frictions match");
       } else {
-        parts.push(indent(renderDigestTable(peer.rows), '  '));
+        parts.push(indent(renderDigestTable(peer.rows), "  "));
       }
     }
   }
-  return parts.join('\n');
+  return parts.join("\n");
 }
 
 function renderDigestTable(rows: DigestRow[]): string {
-  const header = ['group', 'total', 'open', 'filed', 'resolved', 'wontfix', 'open%', 'recurrences', 'avg-h-triage'];
+  const header = [
+    "group",
+    "total",
+    "open",
+    "filed",
+    "resolved",
+    "wontfix",
+    "open%",
+    "recurrences",
+    "avg-h-triage",
+  ];
   const body = rows.map((r) => [
     r.group,
     String(r.total),
@@ -289,19 +342,22 @@ function renderDigestTable(rows: DigestRow[]): string {
     String(r.filed),
     String(r.resolved),
     String(r.wontfix),
-    r.total > 0 ? `${Math.round((r.open / r.total) * 100)}%` : '-',
+    r.total > 0 ? `${Math.round((r.open / r.total) * 100)}%` : "-",
     String(r.recurrences),
-    r.avgHoursToTriage == null ? '-' : r.avgHoursToTriage.toFixed(1),
+    r.avgHoursToTriage == null ? "-" : r.avgHoursToTriage.toFixed(1),
   ]);
-  const widths = header.map((h, i) => Math.max(h.length, ...body.map((row) => row[i].length)));
-  const sep = widths.map((w) => '-'.repeat(w)).join('  ');
-  const fmt = (row: string[]): string => row.map((c, i) => c.padEnd(widths[i])).join('  ');
-  return [fmt(header), sep, ...body.map(fmt)].join('\n');
+  const widths = header.map((h, i) =>
+    Math.max(h.length, ...body.map((row) => row[i].length)),
+  );
+  const sep = widths.map((w) => "-".repeat(w)).join("  ");
+  const fmt = (row: string[]): string =>
+    row.map((c, i) => c.padEnd(widths[i])).join("  ");
+  return [fmt(header), sep, ...body.map(fmt)].join("\n");
 }
 
 function indent(text: string, prefix: string): string {
   return text
-    .split('\n')
+    .split("\n")
     .map((line) => prefix + line)
-    .join('\n');
+    .join("\n");
 }

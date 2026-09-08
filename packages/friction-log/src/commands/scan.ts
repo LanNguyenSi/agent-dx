@@ -1,8 +1,8 @@
-import { FrictionDb, type InsertFrictionInput } from '../db.js';
-import { defaultDbPath } from '../paths.js';
-import { loadScanner } from '../scanners/index.js';
-import { maybeSyncExport } from './sync-export.js';
-import type { Friction } from '../types.js';
+import { FrictionDb, type InsertFrictionInput } from "../db.js";
+import { defaultDbPath } from "../paths.js";
+import { loadScanner } from "../scanners/index.js";
+import { maybeSyncExport } from "./sync-export.js";
+import type { Friction } from "../types.js";
 
 export interface ScanCommandInput {
   sessionId?: string;
@@ -20,8 +20,10 @@ export interface ScanCommandOutput {
   adapter: string;
 }
 
-export async function runScan(input: ScanCommandInput): Promise<ScanCommandOutput> {
-  const adapterName = input.adapter ?? 'claude-code';
+export async function runScan(
+  input: ScanCommandInput,
+): Promise<ScanCommandOutput> {
+  const adapterName = input.adapter ?? "claude-code";
   const scanner = loadScanner(adapterName);
   const result = await scanner.scan({
     sessionId: input.sessionId,
@@ -43,7 +45,11 @@ export async function runScan(input: ScanCommandInput): Promise<ScanCommandOutpu
     let inserted = 0;
     let skipped = 0;
     for (const c of result.frictionCandidates) {
-      const existing = db.findFrictionByTriple(result.session.id, c.toolSurface ?? null, c.title);
+      const existing = db.findFrictionByTriple(
+        result.session.id,
+        c.toolSurface ?? null,
+        c.title,
+      );
       if (existing) {
         skipped++;
         continue;
@@ -55,7 +61,7 @@ export async function runScan(input: ScanCommandInput): Promise<ScanCommandOutpu
         description: c.description ?? null,
         severity: c.severity ?? null,
         category: c.category ?? null,
-        source: 'scan',
+        source: "scan",
       };
       db.insertFriction(insert);
       inserted++;
@@ -88,7 +94,10 @@ export interface StopHookPayload {
   transcriptPath?: string;
 }
 
-export function payloadToScanInput(payload: StopHookPayload, adapter?: string): ScanCommandInput {
+export function payloadToScanInput(
+  payload: StopHookPayload,
+  adapter?: string,
+): ScanCommandInput {
   return {
     sessionId: payload.session_id ?? payload.sessionId,
     transcriptPath: payload.transcript_path ?? payload.transcriptPath,
@@ -96,7 +105,10 @@ export function payloadToScanInput(payload: StopHookPayload, adapter?: string): 
   };
 }
 
-export function summarize(output: ScanCommandOutput, sessionId: string): string {
+export function summarize(
+  output: ScanCommandOutput,
+  sessionId: string,
+): string {
   return (
     `scanned session=${sessionId} adapter=${output.adapter} ` +
     `candidates=${output.candidatesFound} inserted=${output.inserted} skipped=${output.skippedDuplicates}`

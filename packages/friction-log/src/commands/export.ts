@@ -1,10 +1,10 @@
-import { writeFileSync } from 'node:fs';
-import { FrictionDb, type ListFrictionsFilter } from '../db.js';
-import { defaultDbPath } from '../paths.js';
-import type { Friction, FrictionSource, FrictionStatus } from '../types.js';
-import { parseAge } from './list.js';
+import { writeFileSync } from "node:fs";
+import { FrictionDb, type ListFrictionsFilter } from "../db.js";
+import { defaultDbPath } from "../paths.js";
+import type { Friction, FrictionSource, FrictionStatus } from "../types.js";
+import { parseAge } from "./list.js";
 
-export type ExportFormat = 'json' | 'csv' | 'md';
+export type ExportFormat = "json" | "csv" | "md";
 
 export interface ExportCommandInput {
   format: ExportFormat;
@@ -52,24 +52,30 @@ export function runExport(input: ExportCommandInput): ExportCommandOutput {
       sinceIso: parseAge(input.age),
       limit: input.limit,
     };
-    const frictions = input.query && input.query.trim()
-      ? db.searchFrictions(input.query, filter)
-      : db.listFrictions(filter);
+    const frictions =
+      input.query && input.query.trim()
+        ? db.searchFrictions(input.query, filter)
+        : db.listFrictions(filter);
     const records: ExportRecord[] = frictions.map((f) => ({
       ...frictionToExport(f),
       tags: db.tagsFor(f.id),
     }));
     const rendered = render(input.format, records);
     if (input.out) {
-      writeFileSync(input.out, rendered, 'utf8');
+      writeFileSync(input.out, rendered, "utf8");
     }
-    return { format: input.format, rendered, out: input.out ?? null, count: records.length };
+    return {
+      format: input.format,
+      rendered,
+      out: input.out ?? null,
+      count: records.length,
+    };
   } finally {
     db.close();
   }
 }
 
-export function frictionToExport(f: Friction): Omit<ExportRecord, 'tags'> {
+export function frictionToExport(f: Friction): Omit<ExportRecord, "tags"> {
   return {
     id: f.id,
     sessionId: f.sessionId,
@@ -86,37 +92,37 @@ export function frictionToExport(f: Friction): Omit<ExportRecord, 'tags'> {
 }
 
 function render(format: ExportFormat, records: ExportRecord[]): string {
-  if (format === 'json') return JSON.stringify(records, null, 2) + '\n';
-  if (format === 'csv') return renderCsv(records);
+  if (format === "json") return JSON.stringify(records, null, 2) + "\n";
+  if (format === "csv") return renderCsv(records);
   return renderMarkdown(records);
 }
 
 const CSV_COLUMNS: Array<keyof ExportRecord> = [
-  'id',
-  'sessionId',
-  'toolSurface',
-  'title',
-  'description',
-  'capturedAt',
-  'severity',
-  'category',
-  'status',
-  'recurrenceOfId',
-  'source',
-  'tags',
+  "id",
+  "sessionId",
+  "toolSurface",
+  "title",
+  "description",
+  "capturedAt",
+  "severity",
+  "category",
+  "status",
+  "recurrenceOfId",
+  "source",
+  "tags",
 ];
 
 function renderCsv(records: ExportRecord[]): string {
-  const header = CSV_COLUMNS.join(',');
+  const header = CSV_COLUMNS.join(",");
   const rows = records.map((r) =>
-    CSV_COLUMNS.map((c) => csvCell(r[c])).join(',')
+    CSV_COLUMNS.map((c) => csvCell(r[c])).join(","),
   );
-  return [header, ...rows].join('\n') + '\n';
+  return [header, ...rows].join("\n") + "\n";
 }
 
 function csvCell(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  const s = Array.isArray(v) ? v.join('|') : String(v);
+  if (v === null || v === undefined) return "";
+  const s = Array.isArray(v) ? v.join("|") : String(v);
   if (/[",\n\r]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }
@@ -124,23 +130,27 @@ function csvCell(v: unknown): string {
 }
 
 function renderMarkdown(records: ExportRecord[]): string {
-  if (records.length === 0) return '_no frictions match the filter_\n';
-  const parts: string[] = [`# friction-log export (${records.length} records)`, ''];
+  if (records.length === 0) return "_no frictions match the filter_\n";
+  const parts: string[] = [
+    `# friction-log export (${records.length} records)`,
+    "",
+  ];
   for (const r of records) {
     parts.push(`## #${r.id}: ${r.title}`);
-    parts.push('');
+    parts.push("");
     parts.push(`- captured: \`${r.capturedAt}\``);
     parts.push(`- status: ${r.status}  source: ${r.source}`);
     if (r.toolSurface) parts.push(`- tool: \`${r.toolSurface}\``);
     if (r.category) parts.push(`- category: ${r.category}`);
     if (r.severity) parts.push(`- severity: ${r.severity}`);
-    if (r.recurrenceOfId != null) parts.push(`- recurrence-of: #${r.recurrenceOfId}`);
-    if (r.tags.length) parts.push(`- tags: ${r.tags.join(', ')}`);
+    if (r.recurrenceOfId != null)
+      parts.push(`- recurrence-of: #${r.recurrenceOfId}`);
+    if (r.tags.length) parts.push(`- tags: ${r.tags.join(", ")}`);
     if (r.description) {
-      parts.push('');
+      parts.push("");
       parts.push(r.description);
     }
-    parts.push('');
+    parts.push("");
   }
-  return parts.join('\n');
+  return parts.join("\n");
 }

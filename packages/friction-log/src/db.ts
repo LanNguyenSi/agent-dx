@@ -1,6 +1,6 @@
-import Database from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import Database from "better-sqlite3";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type {
   Friction,
   FrictionSource,
@@ -8,7 +8,7 @@ import type {
   Severity,
   Session,
   Task,
-} from './types.js';
+} from "./types.js";
 
 const MIGRATIONS: Array<{ version: number; sql: string }> = [
   {
@@ -224,7 +224,9 @@ function rowToSession(r: SessionRow): Session {
     id: r.id,
     startedAt: r.started_at,
     endedAt: r.ended_at,
-    projectPaths: r.project_paths ? (JSON.parse(r.project_paths) as string[]) : null,
+    projectPaths: r.project_paths
+      ? (JSON.parse(r.project_paths) as string[])
+      : null,
     transcriptPath: r.transcript_path,
     adapter: r.adapter,
   };
@@ -251,7 +253,7 @@ export interface ListFrictionsFilter {
   limit?: number;
 }
 
-export type DigestGroupBy = 'tool' | 'category' | 'severity' | 'source';
+export type DigestGroupBy = "tool" | "category" | "severity" | "source";
 
 export interface DigestRow {
   group: string;
@@ -277,24 +279,28 @@ export class FrictionDb {
   private readonly db: Database.Database;
 
   constructor(path: string) {
-    if (path !== ':memory:') {
+    if (path !== ":memory:") {
       mkdirSync(dirname(path), { recursive: true });
     }
     this.db = new Database(path);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
+    this.db.pragma("journal_mode = WAL");
+    this.db.pragma("foreign_keys = ON");
     this.migrate();
   }
 
   private migrate(): void {
     const hasVersionTable = this.db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'`)
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'`,
+      )
       .get();
 
     const currentVersion = hasVersionTable
-      ? ((this.db.prepare(`SELECT MAX(version) AS v FROM schema_version`).get() as
-          | { v: number | null }
-          | undefined)?.v ?? 0)
+      ? ((
+          this.db
+            .prepare(`SELECT MAX(version) AS v FROM schema_version`)
+            .get() as { v: number | null } | undefined
+        )?.v ?? 0)
       : 0;
 
     const ordered = [...MIGRATIONS].sort((a, b) => a.version - b.version);
@@ -304,30 +310,32 @@ export class FrictionDb {
       // migrations (notably v2's DROP+RENAME on `frictions`) trip incoming
       // FKs from `tasks` and `tags`, so we drop enforcement, run the
       // migration, then re-enable and re-check before moving on.
-      this.db.pragma('foreign_keys = OFF');
+      this.db.pragma("foreign_keys = OFF");
       try {
         this.db.transaction(() => {
           this.db.exec(m.sql);
           this.db
-            .prepare(`INSERT INTO schema_version (version, applied_at) VALUES (?, ?)`)
+            .prepare(
+              `INSERT INTO schema_version (version, applied_at) VALUES (?, ?)`,
+            )
             .run(m.version, new Date().toISOString());
         })();
-        const violations = this.db.pragma('foreign_key_check') as unknown[];
+        const violations = this.db.pragma("foreign_key_check") as unknown[];
         if (violations.length > 0) {
           throw new Error(
-            `friction-log: migration v${m.version} left orphan foreign keys: ${JSON.stringify(violations)}`
+            `friction-log: migration v${m.version} left orphan foreign keys: ${JSON.stringify(violations)}`,
           );
         }
       } finally {
-        this.db.pragma('foreign_keys = ON');
+        this.db.pragma("foreign_keys = ON");
       }
     }
   }
 
   schemaVersion(): number {
-    const row = this.db.prepare(`SELECT MAX(version) AS v FROM schema_version`).get() as
-      | { v: number | null }
-      | undefined;
+    const row = this.db
+      .prepare(`SELECT MAX(version) AS v FROM schema_version`)
+      .get() as { v: number | null } | undefined;
     return row?.v ?? 0;
   }
 
@@ -340,7 +348,7 @@ export class FrictionDb {
            ended_at = excluded.ended_at,
            project_paths = excluded.project_paths,
            transcript_path = excluded.transcript_path,
-           adapter = excluded.adapter`
+           adapter = excluded.adapter`,
       )
       .run({
         id: s.id,
@@ -365,15 +373,15 @@ export class FrictionDb {
     this.db
       .prepare(
         `INSERT OR IGNORE INTO sessions (id, started_at, adapter)
-         VALUES (?, ?, ?)`
+         VALUES (?, ?, ?)`,
       )
-      .run(id, new Date().toISOString(), 'manual');
+      .run(id, new Date().toISOString(), "manual");
   }
 
   getSession(id: string): Session | null {
-    const row = this.db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as
-      | SessionRow
-      | undefined;
+    const row = this.db
+      .prepare(`SELECT * FROM sessions WHERE id = ?`)
+      .get(id) as SessionRow | undefined;
     return row ? rowToSession(row) : null;
   }
 
@@ -384,12 +392,13 @@ export class FrictionDb {
     // and title. The chain always points to a root, so callers reading
     // recurrence_of_id see a stable parent.
     const recurrenceOfId =
-      input.recurrenceOfId ?? this.findRecurrenceRoot(input.toolSurface ?? null, input.title);
+      input.recurrenceOfId ??
+      this.findRecurrenceRoot(input.toolSurface ?? null, input.title);
     const result = this.db
       .prepare(
         `INSERT INTO frictions
            (session_id, tool_surface, title, description, captured_at, severity, category, source, recurrence_of_id)
-         VALUES (@sessionId, @toolSurface, @title, @description, @capturedAt, @severity, @category, @source, @recurrenceOfId)`
+         VALUES (@sessionId, @toolSurface, @title, @description, @capturedAt, @severity, @category, @source, @recurrenceOfId)`,
       )
       .run({
         sessionId: input.sessionId ?? null,
@@ -415,7 +424,7 @@ export class FrictionDb {
            AND title = @title
            AND coalesce(tool_surface, '') = coalesce(@toolSurface, '')
          ORDER BY captured_at ASC
-         LIMIT 1`
+         LIMIT 1`,
       )
       .get({ title, toolSurface: toolSurface ?? null }) as
       | { id: number }
@@ -424,50 +433,65 @@ export class FrictionDb {
   }
 
   getFriction(id: number): Friction | null {
-    const row = this.db.prepare(`SELECT * FROM frictions WHERE id = ?`).get(id) as
-      | FrictionRow
-      | undefined;
+    const row = this.db
+      .prepare(`SELECT * FROM frictions WHERE id = ?`)
+      .get(id) as FrictionRow | undefined;
     return row ? rowToFriction(row) : null;
   }
 
   updateFrictionStatus(id: number, status: FrictionStatus): void {
-    this.db.prepare(`UPDATE frictions SET status = ? WHERE id = ?`).run(status, id);
+    this.db
+      .prepare(`UPDATE frictions SET status = ? WHERE id = ?`)
+      .run(status, id);
   }
 
   deleteFriction(id: number): boolean {
     const tx = this.db.transaction((fid: number) => {
       this.db.prepare(`DELETE FROM tasks WHERE friction_id = ?`).run(fid);
       this.db.prepare(`DELETE FROM tags WHERE friction_id = ?`).run(fid);
-      return this.db.prepare(`DELETE FROM frictions WHERE id = ?`).run(fid).changes > 0;
+      return (
+        this.db.prepare(`DELETE FROM frictions WHERE id = ?`).run(fid).changes >
+        0
+      );
     });
     return tx(id);
   }
 
-  findFrictionByTriple(sessionId: string | null, toolSurface: string | null, title: string): Friction | null {
+  findFrictionByTriple(
+    sessionId: string | null,
+    toolSurface: string | null,
+    title: string,
+  ): Friction | null {
     const row = this.db
       .prepare(
         `SELECT * FROM frictions
          WHERE coalesce(session_id, '') = coalesce(@sessionId, '')
            AND coalesce(tool_surface, '') = coalesce(@toolSurface, '')
            AND title = @title
-         LIMIT 1`
+         LIMIT 1`,
       )
-      .get({ sessionId: sessionId ?? null, toolSurface: toolSurface ?? null, title }) as
-      | FrictionRow
-      | undefined;
+      .get({
+        sessionId: sessionId ?? null,
+        toolSurface: toolSurface ?? null,
+        title,
+      }) as FrictionRow | undefined;
     return row ? rowToFriction(row) : null;
   }
 
   listFrictionsForSession(sessionId: string): Friction[] {
     const rows = this.db
-      .prepare(`SELECT * FROM frictions WHERE session_id = ? ORDER BY captured_at ASC`)
+      .prepare(
+        `SELECT * FROM frictions WHERE session_id = ? ORDER BY captured_at ASC`,
+      )
       .all(sessionId) as FrictionRow[];
     return rows.map(rowToFriction);
   }
 
   getMostRecentSession(): Session | null {
     const row = this.db
-      .prepare(`SELECT * FROM sessions ORDER BY coalesce(ended_at, started_at) DESC LIMIT 1`)
+      .prepare(
+        `SELECT * FROM sessions ORDER BY coalesce(ended_at, started_at) DESC LIMIT 1`,
+      )
       .get() as SessionRow | undefined;
     return row ? rowToSession(row) : null;
   }
@@ -495,9 +519,12 @@ export class FrictionDb {
       where.push(`captured_at >= @sinceIso`);
       params.sinceIso = filter.sinceIso;
     }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const rawLimit = filter.limit ?? 100;
-    const limit = Math.max(1, Math.min(10_000, Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : 100));
+    const limit = Math.max(
+      1,
+      Math.min(10_000, Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : 100),
+    );
     params.limit = limit;
     // Tiebreaker on `id` makes ordering deterministic when two frictions
     // share a captured_at timestamp (e.g. a bulk import landing in the same
@@ -505,7 +532,9 @@ export class FrictionDb {
     // of distinct timestamps this changes nothing, and SQLite gave no
     // ordering guarantee on ties before this either.
     const rows = this.db
-      .prepare(`SELECT * FROM frictions ${whereSql} ORDER BY captured_at DESC, id DESC LIMIT @limit`)
+      .prepare(
+        `SELECT * FROM frictions ${whereSql} ORDER BY captured_at DESC, id DESC LIMIT @limit`,
+      )
       .all(params) as FrictionRow[];
     return rows.map(rowToFriction);
   }
@@ -528,7 +557,7 @@ export class FrictionDb {
     const result = this.db
       .prepare(
         `INSERT INTO tasks (friction_id, sink_name, sink_target, external_ref, pr_url, resolution_status, created_at)
-         VALUES (@frictionId, @sinkName, @sinkTarget, @externalRef, @prUrl, @resolutionStatus, @createdAt)`
+         VALUES (@frictionId, @sinkName, @sinkTarget, @externalRef, @prUrl, @resolutionStatus, @createdAt)`,
       )
       .run({
         frictionId: input.frictionId,
@@ -551,13 +580,17 @@ export class FrictionDb {
 
   listTasksForFriction(frictionId: number): Task[] {
     const rows = this.db
-      .prepare(`SELECT * FROM tasks WHERE friction_id = ? ORDER BY created_at ASC`)
+      .prepare(
+        `SELECT * FROM tasks WHERE friction_id = ? ORDER BY created_at ASC`,
+      )
       .all(frictionId) as TaskRow[];
     return rows.map(rowToTask);
   }
 
   addTag(frictionId: number, tag: string): void {
-    this.db.prepare(`INSERT OR IGNORE INTO tags (friction_id, tag) VALUES (?, ?)`).run(frictionId, tag);
+    this.db
+      .prepare(`INSERT OR IGNORE INTO tags (friction_id, tag) VALUES (?, ?)`)
+      .run(frictionId, tag);
   }
 
   tagsFor(frictionId: number): string[] {
@@ -593,12 +626,15 @@ export class FrictionDb {
       params.sinceIso = filter.sinceIso;
     }
     const rawLimit = filter.limit ?? 100;
-    const limit = Math.max(1, Math.min(10_000, Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : 100));
+    const limit = Math.max(
+      1,
+      Math.min(10_000, Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : 100),
+    );
     params.limit = limit;
     const sql = `
       SELECT f.* FROM frictions f
       JOIN frictions_fts fts ON fts.rowid = f.id
-      WHERE ${where.join(' AND ')}
+      WHERE ${where.join(" AND ")}
       ORDER BY rank
       LIMIT @limit
     `;
@@ -608,10 +644,10 @@ export class FrictionDb {
 
   digest(groupBy: DigestGroupBy, sinceIso?: string): DigestRow[] {
     const columnByGroup: Record<DigestGroupBy, string> = {
-      tool: 'tool_surface',
-      category: 'category',
-      severity: 'severity',
-      source: 'source',
+      tool: "tool_surface",
+      category: "category",
+      severity: "severity",
+      source: "source",
     };
     const column = columnByGroup[groupBy];
     const where: string[] = [];
@@ -620,7 +656,7 @@ export class FrictionDb {
       where.push(`f.captured_at >= @sinceIso`);
       params.sinceIso = sinceIso;
     }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     // Subquery picks each friction's earliest task creation, then we compute
     // hours from captured_at to that first sink-file event ("time to triage").
     // Frictions never filed contribute NULL and are excluded from the average.
