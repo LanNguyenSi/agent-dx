@@ -243,9 +243,8 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
   });
 
   it("places the Mutation Probes subsection between Test Evidence and Risks / Notes", () => {
-    const testEvidenceIndex = implementationTemplate.indexOf(
-      "## Test Evidence",
-    );
+    const testEvidenceIndex =
+      implementationTemplate.indexOf("## Test Evidence");
     const mutationProbesIndex = implementationTemplate.indexOf(
       "### Mutation Probes",
     );

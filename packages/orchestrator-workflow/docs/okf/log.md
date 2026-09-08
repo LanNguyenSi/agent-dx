@@ -1,5 +1,27 @@
 # Bundle log
 
+- 2026-09-08T04:42:12Z (format-allowlist, task agent-dx f7a022c3): ran
+  `npm run format` on the two pre-existing red files,
+  `test/decision-authority.test.ts` and `test/template-markers.test.ts`,
+  formatting only, no token changes. Re-checked every citation into
+  `test/template-markers.test.ts` in
+  `run-state-lifecycle-and-markers.md` and `review-gate-and-waivers.md`
+  (the only two bundle docs with line-numbered citations into it)
+  against the reformatted file: the reformat's only hunk collapses
+  `test/template-markers.test.ts:246-248` from three lines to two
+  (`const testEvidenceIndex = implementationTemplate.indexOf(` wraps
+  onto one line), below every cited range in the bundle (the highest is
+  `test/template-markers.test.ts:187-193`), so no cited line or anchor
+  moved; `okf-kit check --json docs/okf --require-anchors` returns the
+  same finding set before and after the reformat. No bundle doc cites a
+  line number into `test/decision-authority.test.ts` (it is only listed
+  as a bare `sources:` entry in `subagent-contracts-superset.md` and
+  `review-gate-and-waivers.md`), so there is nothing to re-point there.
+  Bumped `timestamp` in `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`, and `review-gate-and-waivers.md`
+  (each lists one or both reformatted files under `sources:`) to the
+  commit that carries this reformat, so `sources-fresh-future` does not
+  flag them stale against the two files' new commit time.
 - 2026-09-07T13:36:36Z (citation-sibling-drift guard, review round 4, task
   agent-dx 9f72ae6d): a third consecutive independent review re-read every
   allowlist entry against the two lines its own `claim` names, rather than
