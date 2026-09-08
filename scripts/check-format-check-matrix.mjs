@@ -4,7 +4,7 @@
  * `ci` job's `strategy.matrix.package` list in .github/workflows/ci.yml,
  * and every entry in that list must exist as a packages/ directory.
  *
- * Why this exists (e8d88adf, T-002 round 2 finding 3):
+ * Why this exists (task e8d88adf):
  * The per-package "Format check" step (and the rest of the `ci` job) only
  * runs for packages named in `matrix.package`, a hand-maintained list. A
  * new packages/<x> with a package.json that is never added to that list
@@ -25,10 +25,11 @@
  * Exits 0 when clean, 1 with a report when the sets disagree or the
  * matrix block cannot be located.
  */
-import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
+const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const PACKAGES_DIR = join(REPO_ROOT, "packages");
 const CI_YML = join(REPO_ROOT, ".github", "workflows", "ci.yml");
 
@@ -60,7 +61,14 @@ if (matrixPackages.length === 0) {
   fail("matched the matrix.package block but found no `- <name>` entries in it");
 }
 
-const packageDirs = readdirSync(PACKAGES_DIR, { withFileTypes: true })
+let packageEntries;
+try {
+  packageEntries = readdirSync(PACKAGES_DIR, { withFileTypes: true });
+} catch (err) {
+  fail(`could not read ${PACKAGES_DIR}: ${err.message}`);
+}
+
+const packageDirs = packageEntries
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
   .filter((name) => existsSync(join(PACKAGES_DIR, name, "package.json")));
