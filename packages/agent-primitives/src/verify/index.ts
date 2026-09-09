@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { execCommand } from "../exec.js";
+import { combinedOutput, execCommand } from "../exec.js";
 import type { ExecResult } from "../exec.js";
 import { UsageError } from "../envelope.js";
 import { genericDetector } from "./detectors/generic.js";
@@ -516,7 +516,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     }
 
     const status = classifyStatus(execResult.exitCode, execResult.timedOut);
-    const output = `${execResult.stdoutTail}\n${execResult.stderrTail}`;
+    const output = combinedOutput(execResult.stdoutTail, execResult.stderrTail);
     const selection = selectDetector(detectors, fallbackDetector, {
       output,
       command,
