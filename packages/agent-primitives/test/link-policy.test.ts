@@ -987,8 +987,25 @@ describe("planLinks: rule 3's tracked-TARGET half", () => {
 
     expect(plan.links).toEqual([]);
     expect(plan.warnings[0]).toContain(
-      `its target ${path.join(root, ".git")} is the repository's own git directory`,
+      `its target ${path.join(root, ".git")} sits at or under the repository's own git directory`,
     );
+  });
+
+  it("still links a gitignored sibling whose name merely starts with '.git' (containment, not a string prefix)", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, ".git"));
+    fs.mkdirSync(path.join(root, ".git-cache"));
+    fs.symlinkSync(".git-cache", path.join(root, "node_modules"), "dir");
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      ctx(root),
+    );
+
+    expect(plan.links.map((l) => l.candidate.absDir)).toEqual([
+      path.join(root, "node_modules"),
+    ]);
+    expect(plan.warnings.some((w) => w.includes("git directory"))).toBe(false);
   });
 
   it("does not add the nested-repository clause when the target is already a directly tracked path (the gitlink itself)", () => {

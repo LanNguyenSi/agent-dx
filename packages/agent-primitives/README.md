@@ -985,14 +985,15 @@ The four rules, in this order:
    really named `SRC` is the tracked `src` the repository carries, which
    git's case-sensitive index would otherwise report as untracked. A
    refusal names the target and that git tracks it. A target at or under
-   the repository's OWN `.git` directory is refused outright, whatever
-   either question above would otherwise answer: `.git` is not itself a
+   the repository's OWN `.git` directory is refused outright for every
+   candidate but an operator's own `--link`, whatever either question
+   above would otherwise answer: `.git` is not itself a
    tracked path (git's own index never lists it) and it is not a nested
    repository's boundary either (that check looks for a `.git` entry
    BELOW the target, which a plain `.git` directory does not have), so
    an auto-discovered `node_modules -> .git` reaches neither question
    with a reason to refuse it; the refusal names the target and that it
-   is the repository's own git directory. A target sitting inside a
+   sits at or under the repository's own git directory. A target sitting inside a
    nested repository's own boundary -- a submodule's root, or a nested
    plain checkout's -- is refused the same way even though the OUTER
    index never lists its content, only the submodule's own gitlink (the

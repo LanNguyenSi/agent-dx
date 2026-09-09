@@ -401,7 +401,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restating their surface. Running PHPUnit itself is out of scope for this
   package's own CI: the new detectors and the zero-tests/drift
   additions are proven only against the captured fixtures.
-- Four round-9 corrections to the composer/`node_modules` link policy
+- Four corrections to the composer/`node_modules` link policy
   and the untracked-file sync's symlink check (task `6c7e1532`):
   (1) `copySymlink`'s containment check now runs on the link's OWN
   target -- resolved against the link's own directory the same way the

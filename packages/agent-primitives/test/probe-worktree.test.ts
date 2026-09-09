@@ -2852,7 +2852,7 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
         (w) =>
           w.startsWith("skipped linking ") &&
           w.includes("node_modules") &&
-          w.includes("is the repository's own git directory"),
+          w.includes("sits at or under the repository's own git directory"),
       ),
     ).toBe(true);
     expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);

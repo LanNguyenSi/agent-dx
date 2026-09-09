@@ -735,7 +735,9 @@ export function planLinks(
     // content), so a path below it is refused by the boundary alone.
     if (!hasOperatorLatitude(candidate)) {
       // A target at or under the repository's OWN `.git` directory is
-      // refused outright, before either question below is even asked:
+      // refused outright for every candidate but an operator's own
+      // `--link` (this whole block sits under the latitude check
+      // above), before either question below is even asked:
       // `.git` is not a tracked path (git's own index never lists it,
       // so `isTrackedPath` answers "untracked") and it is not a nested
       // repository's boundary either (`nestedRepoBoundaryRelPath` would
@@ -753,7 +755,7 @@ export function planLinks(
         warnings.push(
           skippedLinkWarning(
             candidate,
-            `its target ${resolved} is the repository's own git directory; ` +
+            `its target ${resolved} sits at or under the repository's own git directory; ` +
               "a write through such a link would reach the tree's real " +
               "git state directly",
           ),
