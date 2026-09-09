@@ -218,6 +218,24 @@ function parseRequireBaselineEvidence(value: string): RegExp {
   }
 }
 
+/** Compiles `--pass-regex <regex>` into a `RegExp`, the same way
+ * `parseRequireBaselineEvidence` above compiles its own option: an
+ * unparseable pattern is a usage error before it ever reaches
+ * `probe()`/`probePlan()`. Also documents `passWhen.regex`, the plan-file
+ * field this option is equivalent to (see the README's `--pass-regex`
+ * section): both compile the same way, and an invalid pattern in either
+ * place is a usage error. No flags syntax here either, for the same
+ * reason `--require-baseline-evidence` has none. */
+function parsePassRegex(value: string): RegExp {
+  try {
+    return new RegExp(value);
+  } catch (err) {
+    throw new InvalidArgumentError(
+      `--pass-regex must be a valid regular expression (got "${value}"): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 /** `--`-prefixed flags this matcher knows take a following argument, so
  * that argument is not itself mistaken for a targeted file/pattern:
  * `vitest run -t <name>` names one test by pattern, not a file, and
@@ -981,6 +999,7 @@ interface ProbeCliOptions {
   link?: string[];
   allowOutside?: boolean;
   requireBaselineEvidence?: RegExp;
+  passRegex?: RegExp;
 }
 
 function parseLine(value: string): number {
@@ -1185,6 +1204,12 @@ async function runProbePlanCommand(
     : (plan.expect ?? opts.expect);
   const timeoutMs =
     opts.timeout !== undefined ? Number(opts.timeout) * 1000 : plan.timeoutMs;
+  // `--pass-regex` has no default value (unlike `isolation`/`expect`
+  // above), so its own presence IS "explicitly given": a command-line
+  // value wins over the plan file's own `passWhen.regex` when both are
+  // given, the same precedence rule `--require-baseline-evidence` would
+  // follow if a plan file ever grew a key for it too.
+  const passRegex = opts.passRegex ?? plan.passRegex;
   // Handed to `probePlan` for the duration of the call, the same as for a
   // single probe: it owns SIGINT and SIGTERM while it runs, because it
   // has a mutated file to restore before the process may end.
@@ -1203,6 +1228,7 @@ async function runProbePlanCommand(
       cwd: global.cwd,
       logDir: global.logDir,
       requireBaselineEvidence: opts.requireBaselineEvidence,
+      passRegex,
       exitOnSignal: true,
     });
   } finally {
@@ -1305,6 +1331,11 @@ program
     parseRequireBaselineEvidence,
   )
   .option(
+    "--pass-regex <regex>",
+    "opt-in success predicate (or plan.passWhen.regex): a match against the baseline's and each mutant's combined stdout+stderr is a pass, its absence a failure, in place of the exit code -- for a test runner whose exit code alone is not trustworthy (e.g. phpunit exiting non-zero on a green suite over deprecation notices)",
+    parsePassRegex,
+  )
+  .option(
     "-i, --isolation <mode>",
     "worktree (default; mutates a detached git worktree, leaving the working tree untouched) or inplace",
     parseIsolationMode,
@@ -1379,6 +1410,7 @@ program
         preCommand: opts.pre,
         env: opts.env,
         requireBaselineEvidence: opts.requireBaselineEvidence,
+        passRegex: opts.passRegex,
         isolation: opts.isolation,
         expect: opts.expect,
         timeoutMs:

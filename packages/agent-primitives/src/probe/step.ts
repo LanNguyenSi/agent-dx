@@ -472,10 +472,50 @@ export async function runMutantAttempt(
     reason = "timeout";
     mutationProbeResult = status;
   } else {
-    const testPassed = testResult.exitCode === 0;
+    // `rt.passRegex` (`--pass-regex`/`passWhen.regex`): once given, it
+    // is THIS mutant run's verdict in place of its exit code too, the
+    // same predicate `setup.ts` already applied to the baseline --
+    // "passed" is the regex matching the run's own combined
+    // stdout+stderr, "failed" is the regex absent, whatever the exit
+    // code says.
+    const testCombinedOutput = `${testResult.stdoutTail}\n${testResult.stderrTail}`;
+    const testPassed =
+      rt.passRegex !== undefined
+        ? rt.passRegex.test(testCombinedOutput)
+        : testResult.exitCode === 0;
     const killed = spec.expect === "fail" ? !testPassed : testPassed;
     status = killed ? "killed" : "survived";
     mutationProbeResult = status;
+
+    if (rt.passRegex !== undefined) {
+      if (testPassed && testResult.exitCode !== 0) {
+        // Same deprecation-notice shape `setup.ts` warns about for the
+        // baseline: named here too, so a caller reading `warnings` sees
+        // why a red exit code was still read as a pass on the mutant
+        // side as well.
+        warnings.push(
+          `--pass-regex (${rt.passRegex.source}) matched the mutant run's output despite a non-zero exit code (${String(testResult.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${testResult.logPath}`,
+        );
+      } else if (
+        !testPassed &&
+        testResult.stdoutTail.length === 0 &&
+        testResult.stderrTail.length === 0
+      ) {
+        // No output at all: a regex can never match empty output, so
+        // this reads as "failed" the same as a real test failure would
+        // -- but a process that crashed before printing anything (a
+        // segfault, an uncaught exception before the runner's own
+        // reporter ever ran) is not the same finding as a suite that
+        // ran and reported failures. Distinguishable in the envelope
+        // via `test.exitCode` (kept as data regardless of `passRegex`)
+        // together with the empty `test.stdoutTail`/`test.stderrTail`
+        // this warning already names; a caller that cares tells the two
+        // apart by checking for exactly this shape.
+        warnings.push(
+          `the mutant run produced no output at all (exit code ${String(testResult.exitCode)}); --pass-regex (${rt.passRegex.source}) cannot match empty output, so this reads as a crash, not a genuine test failure -- see test.exitCode and the empty test.stdoutTail/test.stderrTail; see ${testResult.logPath}`,
+        );
+      }
+    }
 
     // Zero-tests-executed detection, mutant side: the mutant run's OWN
     // output shows a known test runner executed nothing (the same
@@ -533,6 +573,13 @@ export async function runMutantAttempt(
       // deterministic runner (e.g. `node --test --test-reporter=dot`'s
       // bare `..`) is reported `survived`, not second-guessed here.
       !baselineOutput.requireBaselineEvidenceMatched &&
+      // `--pass-regex`/`passWhen.regex` is the same kind of opt-in
+      // evidence, read directly rather than through the exit code: once
+      // given, `testPassed` above already reflects the caller's own
+      // reading of this run's real output, so this exit-code-shaped
+      // heuristic (built to distrust a runner's exit code, not its
+      // content) has nothing left to add and must not override it.
+      rt.passRegex === undefined &&
       !hasKnownTestSummary(testResult.stdoutTail, testResult.stderrTail) &&
       !hasKnownTestSummary(
         baselineOutput.stdoutTail,

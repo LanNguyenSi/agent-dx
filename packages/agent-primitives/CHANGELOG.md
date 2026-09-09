@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe --pass-regex <regex>` (plan files: `passWhen: { "regex": "<pattern>" }`,
+  documented as the same thing) is an opt-in success predicate that
+  replaces the exit code as the verdict for both the baseline and every
+  mutant run: "passed" is the regex matching that run's own combined
+  stdout+stderr, "failed" is the regex absent, whatever the exit code
+  says (task `a435469b`, GitHub issue #225). Motivated by a PHP/Drupal
+  monorepo running orchestrator-workflow 0.31.0, where phpunit 9.6
+  exits `1` on a fully green suite because of deprecation notices, so
+  every probe against it reported `baseline_failed`, and a
+  `sh -c '... | grep -q "^OK ("'` shell-out workaround fixed the
+  baseline only by losing the mutant run's own exit-code signal (a
+  crash and a genuinely failing test then looked identical). A
+  non-zero exit alongside a regex match is reported as a pass, with a
+  `warnings` entry naming the exit code; a zero exit without a match is
+  still a failure. Independent of `--require-baseline-evidence`, which
+  stays a gate on the baseline only (checked first; a miss still
+  refuses `baseline_evidence_not_matched` before `--pass-regex` is even
+  consulted) -- the two may be given together, one without the other,
+  or neither. A mutant run that crashes outright (no output on either
+  stream, an unusual exit code) is reported `killed` the same as a
+  genuine test failure would be (neither can match an absent regex),
+  but is distinguishable in the envelope via `test.exitCode` (kept as
+  data regardless of `--pass-regex`) together with the empty
+  `test.stdoutTail`/`test.stderrTail`, and gets its own `warnings` entry
+  naming the crash. Given on both the command line and inside a
+  `--plan` file at once, the command-line value wins, the same
+  precedence `-i`/`--expect`/`--timeout` already follow against their
+  own plan-file counterparts. An unparseable pattern, in either place,
+  is a usage error before any run starts.
+
 ### Changed
 
 - Test hygiene from the PR #218 reviews (task `482c3ef7`, no behaviour

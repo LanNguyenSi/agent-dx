@@ -911,6 +911,64 @@ fallback -- without the flag, the SAME command reads `inconclusive`/
 `no_tests_executed` by design (no way to tell "ran nothing" from "ran
 the same thing twice" without the caller's own evidence).
 
+`--pass-regex <regex>` (plan files: `passWhen: { "regex": "<pattern>" }`,
+the same thing) is an opt-in success PREDICATE, not another gate: once
+given, it REPLACES the exit code as the verdict for both the baseline
+and every mutant run -- "test passed" is the regex matching that run's
+own combined stdout+stderr, "test failed" is the regex absent, whatever
+the exit code says. It exists for a runner whose exit code alone cannot
+be trusted at all, the motivating case a shell-out gate cannot fix:
+phpunit 9.6 exits `1` on a fully green suite because of deprecation
+notices, so every probe against it reports `baseline_failed` without
+this flag, and a `sh -c '... | grep -q "^OK ("'` wrapper "fixes" the
+baseline only by losing the mutant run's own exit-code signal (a crash
+and a genuinely failing test then look identical). With `--pass-regex
+'^OK \('` against that same suite: the baseline passes despite its
+exit `1` (a `warnings` entry names the exit code, so the override is
+visible rather than silently swallowed), and a mutant that flips the
+runner's own output to `FAILURES!` is killed, exactly as it would be
+under the exit-code default. The pattern is a bare JS `RegExp` source
+with no flags syntax, the same as `--require-baseline-evidence`; an
+unparseable one (on the command line, or in a plan file's
+`passWhen.regex`) is a usage error before any run starts. Given on both
+the command line and inside a `--plan` file at once, the command-line
+value wins, the same precedence `-i`/`--expect`/`--timeout` follow
+against their own plan-file counterparts.
+
+`--pass-regex` is independent of `--require-baseline-evidence`: the two
+answer different questions and may be given together, one without the
+other, or neither. `--require-baseline-evidence` stays a GATE on the
+baseline only ("may this run go on to apply a mutant at all", checked
+once, before the first mutant) and never touches a mutant's own verdict;
+`--pass-regex` decides the VERDICT itself, for the baseline and for
+every mutant run alike. Given together, the evidence regex is checked
+first (a miss still refuses `baseline_evidence_not_matched` before any
+mutant runs, whatever `--pass-regex` would have said), and once it
+matches, `--pass-regex` -- not the exit code -- decides the baseline's
+(and then each mutant's) own pass/fail. Given only
+`--require-baseline-evidence`, verdicts are still read from the exit
+code exactly as before this option existed; given only `--pass-regex`,
+there is no evidence gate to satisfy at all, and the regex alone
+decides every verdict; given neither, behavior is entirely unchanged.
+
+A test command's own output can go silent in a way no exit code
+distinguishes from a real failure: a mutant run that crashes outright
+(a segfault, an uncaught exception before the runner's own reporter
+ever printed anything) produces no output at all, and `--pass-regex`
+cannot match empty output any more than a real failure's non-matching
+output -- both read as "failed", and (under the default `--expect
+fail`) as `killed`. The two are NOT the same finding, and the envelope
+keeps them distinguishable: `test.exitCode` is never dropped from the
+result just because `--pass-regex` is in charge of the verdict (a
+crash's unusual exit code, e.g. `2`, differs from whatever exit code a
+real failing run of that same command uses), and a mutant run with
+`--pass-regex` set that produced no output on EITHER stream at all gets
+its own `warnings` entry naming the crash outright, distinct from the
+plain "matched despite a non-zero exit code" warning above. A caller
+that cares checks `test.exitCode` together with empty
+`test.stdoutTail`/`test.stderrTail` to tell a crash apart from a run
+that printed real (non-matching) output.
+
 Both detectors understand only each runner's DEFAULT text reporters:
 `node --test` with `--test-reporter=dot` (or any reporter besides the
 default `spec`/`tap` shapes), and vitest's own `--reporter=json` output,
@@ -1249,6 +1307,7 @@ is a placeholder, not a real one, and the file is not runnable as-is.
   "isolation": "worktree",
   "expect": "fail",
   "timeout": 900,
+  "passWhen": { "regex": "^OK \\(" },
   "mutants": [
     { "file": "src/example.ts", "line": 42, "replace": "  return true;" },
     { "file": "src/example-two.ts", "line": 44, "match": "n > 0", "with": "n >= 0" },
@@ -1262,7 +1321,10 @@ is a placeholder, not a real one, and the file is not runnable as-is.
 ```
 
 Every key except `test` and `mutants` is optional; `timeout` is in
-seconds, the same unit `--timeout` takes. Each mutant needs `file` and
+seconds, the same unit `--timeout` takes; `passWhen: { "regex":
+"<pattern>" }` is the plan-file equivalent of `--pass-regex <regex>` (see
+its own section above), and a command-line `--pass-regex` given
+alongside a plan wins over this key when both are given. Each mutant needs `file` and
 exactly one form: `replace` (with `line`), `match` together with `with`
 (with `line`), or `patch` (whose line comes from the diff, as with `-p`).
 Unlike the single-probe `-p`, a plan mutant's `file` is never derived
@@ -1296,7 +1358,12 @@ since it is the only one of them that is per mutant rather than per run.
 command-line only and there is nothing for them to override.
 `--require-baseline-evidence` is the same shape: no plan key, command-line
 only, and (unlike `--env`) not refused under `--plan` -- see its own
-paragraph above.
+paragraph above. `--pass-regex` is different again: it DOES have a plan
+key (`passWhen.regex`), so it follows the `-i`/`--expect`/`--timeout`
+precedence instead -- a command-line `--pass-regex` wins over the plan
+file's own `passWhen.regex` when both are given -- rather than being
+command-line only; see its own paragraph above for what it does once
+resolved.
 
 Output: the envelope carries `plan: { baseline, results, summary }`
 instead of the single probe's top-level `mutant`/`mutation_probe`/`test`.

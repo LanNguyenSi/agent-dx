@@ -238,6 +238,20 @@ export interface RunSetupInput {
    * test runner's own zero-tests evidence absent, no target rewritten
    * mid-baseline); a miss refuses `baseline_evidence_not_matched`. */
   requireBaselineEvidence?: RegExp;
+  /** Opt-in `--pass-regex <regex>` (or a plan's own `passWhen.regex`):
+   * when given, decides the BASELINE's own verdict in place of its exit
+   * code -- "passed" is the regex matching the baseline's combined
+   * stdout+stderr, "failed" is the regex absent, whatever the exit code
+   * says (so a non-zero exit alongside a match is reported as a pass,
+   * with a warning naming the exit code, and a zero exit without a
+   * match is still `baseline_failed`). Independent of
+   * `requireBaselineEvidence` above: that stays a gate on the baseline
+   * (must match, or this refuses `baseline_evidence_not_matched`,
+   * whatever this option says), never the verdict itself; both may be
+   * given together, one given without the other, or neither. Threaded
+   * onto `rt.passRegex` so `step.ts`'s classify step reads the SAME
+   * regex for every mutant run. */
+  passRegex?: RegExp;
   exitOnSignal: boolean;
   /** The run's warnings: every warning this setup produces is pushed
    * here, and a refusal carries the array as it stood when it happened. */
@@ -574,6 +588,7 @@ export async function openRunSetup(
     effectiveIsolation,
     testCommand: input.testCommand,
     preCommand: input.preCommand,
+    ...(input.passRegex !== undefined ? { passRegex: input.passRegex } : {}),
     signal: controller.execController.signal,
     track: controller.track,
     crashHandlers,
@@ -768,7 +783,23 @@ export async function openRunSetup(
     }
   }
 
-  if (baselineTest.exitCode !== 0 || baselineTest.aborted) {
+  // `--pass-regex`/`passWhen.regex`: once given, it is the baseline's
+  // verdict in place of its exit code -- "passed" is the regex matching
+  // the baseline's own combined stdout+stderr, "failed" is the regex
+  // absent, whatever the exit code says. Checked only on a baseline that
+  // was not aborted: an aborted run answered nothing about the test, so
+  // its own (non-)output must never be read as a pass or a fail either.
+  const baselineCombinedOutput = `${baselineOutput.stdoutTail}\n${baselineOutput.stderrTail}`;
+  const baselinePassRegexMatched =
+    input.passRegex !== undefined &&
+    input.passRegex.test(baselineCombinedOutput);
+  const baselineFailed =
+    !baselineTest.aborted &&
+    (input.passRegex !== undefined
+      ? !baselinePassRegexMatched
+      : baselineTest.exitCode !== 0);
+
+  if (baselineFailed || baselineTest.aborted) {
     if (baselineTest.aborted) {
       // If the handler is active it may already have restored a target
       // (a no-op copy of still-original content, since nothing has
@@ -791,6 +822,16 @@ export async function openRunSetup(
       baselineTest.aborted ? "aborted" : "baseline_failed",
       undefined,
       { logPaths: stepLogPaths, baseline },
+    );
+  }
+
+  // A baseline the regex passed despite a non-zero exit code: named
+  // explicitly (deprecation-notice noise -- phpunit 9.6 on a green suite,
+  // the motivating case -- is the expected shape here), so a reader of
+  // `warnings` sees why a red exit code was still treated as a pass.
+  if (input.passRegex !== undefined && baselineTest.exitCode !== 0) {
+    warnings.push(
+      `--pass-regex (${input.passRegex.source}) matched the baseline output despite a non-zero exit code (${String(baselineTest.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${baselineTest.logPath}`,
     );
   }
 

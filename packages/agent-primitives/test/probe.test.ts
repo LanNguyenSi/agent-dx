@@ -4337,3 +4337,198 @@ describe("probe(): totalDurationMs", () => {
     expect(result.totalDurationMs).toBeGreaterThanOrEqual(2 * busyWaitMs);
   });
 });
+
+describe("probe(): --pass-regex", () => {
+  // The motivating case (task `a435469b`, GitHub issue #225): phpunit
+  // 9.6 prints its usual green summary but still exits 1 because of
+  // deprecation notices. `RUNNER_JS` reproduces that exact shape (a
+  // real pass, wrong exit code) without needing phpunit itself: a pure
+  // text/exit-code fixture is enough to provoke the predicate. Every
+  // fixture below mutates line 2 or line 4, never anything else.
+  const RUNNER_JS = [
+    "function summary() {",
+    '  return "OK (3 tests, 5 assertions)";',
+    "}",
+    "console.log(summary());",
+    "process.exit(1);",
+    "",
+  ].join("\n");
+
+  function initRunnerRepo(): { repo: string } {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "runner.js"), RUNNER_JS);
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo };
+  }
+
+  /** Mutates line 2 to print `FAILURES!` instead of the green summary,
+   * by default: the fixture pair's own "flips the output" mutant. */
+  function runnerOptions(
+    repo: string,
+    overrides: Partial<ProbeOptions> = {},
+  ): ProbeOptions {
+    return {
+      file: "runner.js",
+      line: 2,
+      form: "replace",
+      replaceText: '  return "FAILURES!";',
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      ...overrides,
+    };
+  }
+
+  it("without --pass-regex, the fake phpunit-style runner (green suite, exit 1) reports baseline_failed", async () => {
+    useLockDir();
+    const { repo } = initRunnerRepo();
+
+    const result = await probe(runnerOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_failed");
+    expect(result.baseline?.exitCode).toBe(1);
+  });
+
+  it("with --pass-regex, the same baseline passes despite exit 1 (warning names the exit code), and the FAILURES! mutant is killed", async () => {
+    useLockDir();
+    const { repo } = initRunnerRepo();
+
+    const result = await probe(runnerOptions(repo, { passRegex: /^OK \(/ }));
+
+    expect(result.baseline?.exitCode).toBe(1);
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+    expect(result.test?.exitCode).toBe(1);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("--pass-regex") &&
+          w.includes("deprecation-notice noise") &&
+          w.includes("exit code (1)"),
+      ),
+    ).toBe(true);
+  });
+
+  it("--expect pass inverts the --pass-regex verdict too, the same as it does for the exit-code default", async () => {
+    useLockDir();
+    const { repo } = initRunnerRepo();
+
+    const result = await probe(
+      runnerOptions(repo, { passRegex: /^OK \(/, expect: "pass" }),
+    );
+
+    // The mutant's own output ("FAILURES!") does not match the regex,
+    // so it "failed" the predicate; under --expect pass that is
+    // "survived", not "killed".
+    expect(result.status).toBe("survived");
+  });
+
+  it("a mutant whose run crashes (no output, exit 2) is reported killed, the crash named in a warning, distinguishable from a real test failure via test.exitCode and the empty test.stdoutTail/stderrTail", async () => {
+    useLockDir();
+    const { repo } = initRunnerRepo();
+
+    const result = await probe(
+      runnerOptions(repo, {
+        passRegex: /^OK \(/,
+        line: 4,
+        replaceText: "process.exit(2);",
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.test?.exitCode).toBe(2);
+    expect(result.test?.stdoutTail).toBe("");
+    expect(result.test?.stderrTail).toBe("");
+    expect(
+      result.warnings.some(
+        (w) => /no output at all/.test(w) && /exit code 2/.test(w),
+      ),
+    ).toBe(true);
+  });
+
+  it("a zero exit with no --pass-regex match is still a failure (baseline_failed), not a silent pass", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand: "node -e \"console.log('done')\"",
+        passRegex: /^OK \(/,
+      }),
+    );
+
+    expect(result.baseline?.exitCode).toBe(0);
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_failed");
+  });
+
+  describe("interaction with --require-baseline-evidence: the evidence regex stays a gate on the baseline, --pass-regex is the verdict", () => {
+    it("both given, and the evidence regex matches: the gate passes, and --pass-regex (not the exit code) still decides the exit-1 baseline's own verdict", async () => {
+      useLockDir();
+      const { repo } = initRunnerRepo();
+
+      const result = await probe(
+        runnerOptions(repo, {
+          passRegex: /^OK \(/,
+          requireBaselineEvidence: /assertions/,
+        }),
+      );
+
+      expect(result.baseline?.exitCode).toBe(1);
+      expect(result.status).toBe("killed");
+    });
+
+    it("both given, and the evidence regex misses: baseline_evidence_not_matched, even though --pass-regex would itself have matched", async () => {
+      useLockDir();
+      const { repo } = initRunnerRepo();
+
+      const result = await probe(
+        runnerOptions(repo, {
+          passRegex: /^OK \(/,
+          requireBaselineEvidence: /this text never appears/,
+        }),
+      );
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_evidence_not_matched");
+    });
+
+    it("only --require-baseline-evidence given: the verdict is still the exit code (baseline_failed for this exit-1 runner)", async () => {
+      useLockDir();
+      const { repo } = initRunnerRepo();
+
+      const result = await probe(
+        runnerOptions(repo, { requireBaselineEvidence: /assertions/ }),
+      );
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+    });
+
+    it("only --pass-regex given: no evidence gate to satisfy, the regex alone decides the verdict (killed)", async () => {
+      useLockDir();
+      const { repo } = initRunnerRepo();
+
+      const result = await probe(runnerOptions(repo, { passRegex: /^OK \(/ }));
+
+      expect(result.status).toBe("killed");
+    });
+
+    it("neither given: unchanged exit-code-only behavior (baseline_failed)", async () => {
+      useLockDir();
+      const { repo } = initRunnerRepo();
+
+      const result = await probe(runnerOptions(repo));
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+    });
+  });
+});

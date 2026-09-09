@@ -43,6 +43,14 @@ export interface ProbePlanSpec {
   /** Milliseconds, converted from the file's `timeout` (seconds, the
    * unit `--timeout` itself takes). */
   timeoutMs?: number;
+  /** From `passWhen.regex`: the plan-file equivalent of `--pass-regex
+   * <regex>`, documented as the same thing in the README. A command-line
+   * `--pass-regex` wins over this when both are given (`cli.ts`
+   * reconciles the two the same way it reconciles `isolation`/`expect`/
+   * `timeout`); an invalid pattern here is `plan_invalid`, the same
+   * usage-error shape an unparseable `--pass-regex` gets on the command
+   * line. */
+  passRegex?: RegExp;
   mutants: PlanMutantSpec[];
 }
 
@@ -59,8 +67,11 @@ const PLAN_KEYS = [
   "isolation",
   "expect",
   "timeout",
+  "passWhen",
   "mutants",
 ] as const;
+
+const PASS_WHEN_KEYS = ["regex"] as const;
 
 const MUTANT_KEYS = [
   "file",
@@ -308,6 +319,34 @@ export function validatePlan(
       );
     }
     plan.timeoutMs = Math.round(parsed.timeout * 1000);
+  }
+  if (parsed.passWhen !== undefined) {
+    if (!isPlainObject(parsed.passWhen)) {
+      return invalid(planPath, "plan.passWhen", "must be a JSON object");
+    }
+    const extraPassWhenKey = unknownKey(parsed.passWhen, PASS_WHEN_KEYS);
+    if (extraPassWhenKey !== undefined) {
+      return invalid(
+        planPath,
+        `plan.passWhen.${extraPassWhenKey}`,
+        `is not a known passWhen key (${PASS_WHEN_KEYS.join(", ")})`,
+      );
+    }
+    const regexSource = readString(
+      parsed.passWhen.regex,
+      planPath,
+      "plan.passWhen.regex",
+    );
+    if (!regexSource.ok) return regexSource.result;
+    try {
+      plan.passRegex = new RegExp(regexSource.value);
+    } catch (err) {
+      return invalid(
+        planPath,
+        "plan.passWhen.regex",
+        `must be a valid regular expression: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
   if (!Array.isArray(parsed.mutants)) {
     return invalid(planPath, "plan.mutants", "must be an array");
