@@ -80,6 +80,69 @@ export interface ExecResult {
   stderrTruncated: boolean;
 }
 
+/** The two `ExecResult` fields the verdict predicates below read: a
+ * narrow parameter type, so a caller may pass a whole `ExecResult` or
+ * any smaller record carrying just these two. */
+export type RunVerdictFields = Pick<ExecResult, "timedOut" | "exitCode">;
+
+/**
+ * Whether a run ended without reporting an exit code of its own, so it
+ * carries no verdict about the command at all: this package's own
+ * `--timeout` killed it (`timedOut: true`), or something outside it did
+ * (a `kill` reaching the run's own process-group leader, an OOM killer
+ * picking that leader, a CI cancel), which arrives here as
+ * `exitCode: null` with `timedOut: false`.
+ *
+ * The single source for that question: `probe` refuses such a run on
+ * both sides (baseline and mutant) rather than reading a verdict out of
+ * it, and the zero-tests guard stays out of its way, so all of those
+ * sites must agree on what "no verdict" means instead of each spelling
+ * the disjunction out again.
+ */
+export function reportedNoVerdict(run: RunVerdictFields): boolean {
+  return run.timedOut || run.exitCode === null;
+}
+
+/**
+ * The subset of `reportedNoVerdict` that something OUTSIDE this package
+ * caused: no exit code, and this package's own `--timeout` was not what
+ * killed the run. Kept apart because a timeout already reports itself
+ * through the envelope's own `timedOut` field, so only this shape needs
+ * a warning to say what happened to the run.
+ */
+export function wasSignalKilled(run: RunVerdictFields): boolean {
+  return !run.timedOut && run.exitCode === null;
+}
+
+/**
+ * The signal number a shell's exit code encodes, or `undefined` when
+ * the code is outside that range. A POSIX shell reports a child killed
+ * by signal N as exit code 128 + N, so a kill that lands on the test
+ * process while the `sh -c` wrapper this module spawns SURVIVES it
+ * reaches a caller as an ordinary non-zero exit code, not as the
+ * `exitCode: null` a kill reaching the wrapper itself produces.
+ *
+ * The bound is 129 through 192: 128 + N for every signal number a POSIX
+ * system can deliver, the 1..31 macOS and Linux share plus Linux's
+ * real-time signals 32..64. 128 itself is excluded (there is no signal
+ * 0 to die of; `kill -0` only tests for a process), and 193 and up
+ * cannot be a 128 + N code at all, since an exit status is 8-bit and no
+ * signal number reaches 65.
+ *
+ * This is a CONVENTION about how shells report a signal death, never a
+ * fact about the process: a runner is free to exit `137` of its own
+ * accord, and nothing in the exit code tells that apart from a shell
+ * reporting SIGKILL. Callers use this to WARN, never to decide a
+ * verdict.
+ */
+export function signalNumberFromExitCode(
+  exitCode: number | null,
+): number | undefined {
+  if (exitCode === null) return undefined;
+  if (exitCode < 129 || exitCode > 192) return undefined;
+  return exitCode - 128;
+}
+
 const TAIL_LINES = 60;
 const TAIL_CHARS = 6000;
 // Buffer is allowed to grow up to this multiple of the tail cap before

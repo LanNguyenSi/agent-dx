@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import { sha256File } from "../hash.js";
 import { removeMarkerFor, writeMarker } from "../lock.js";
-import { combinedOutput } from "../exec.js";
+import {
+  combinedOutput,
+  reportedNoVerdict,
+  signalNumberFromExitCode,
+  wasSignalKilled,
+} from "../exec.js";
 import {
   applyPatchForReal,
   computeMutant,
@@ -377,10 +382,21 @@ export async function runMutantAttempt(
     // `restore_failed` carries.
     if (!ok || !verified) return restoreFailedOutcome();
     const preAborted = mutantRun.pre.aborted;
+    // A `--pre` that never reported an exit code of its own is named as
+    // such, rather than through the plain form's `--pre exited null`,
+    // which reads as if `null` were a status the command itself chose;
+    // the two no-verdict shapes (this package's `--timeout`, and a kill
+    // from outside it) are named apart, since `--pre` has no `timedOut`
+    // field of its own in the envelope. Mirrors `setup.ts`'s own
+    // baseline-side `--pre` prose.
     warnings.push(
       preAborted
         ? `--pre was aborted during the mutant run; see ${mutantRun.pre.logPath}`
-        : `--pre exited ${mutantRun.pre.exitCode} during the mutant run; see ${mutantRun.pre.logPath}`,
+        : mutantRun.pre.exitCode === null
+          ? mutantRun.pre.timedOut
+            ? `--pre timed out during the mutant run, no exit code was reported; see ${mutantRun.pre.logPath}`
+            : `--pre was terminated by a signal during the mutant run, no exit code was reported; see ${mutantRun.pre.logPath}`
+          : `--pre exited ${mutantRun.pre.exitCode} during the mutant run; see ${mutantRun.pre.logPath}`,
     );
     return {
       status: "inconclusive",
@@ -468,12 +484,13 @@ export async function runMutantAttempt(
     reason = "aborted";
     mutationProbeResult = status;
     warnings.push(`the mutant run was aborted; see ${testResult.logPath}`);
-  } else if (testResult.timedOut || testResult.exitCode === null) {
+  } else if (reportedNoVerdict(testResult)) {
     // The mutant run never reported an exit code of its own: this
-    // package's own `--timeout` killed it (`timedOut: true`), or
-    // something outside this probe did (an OOM killer, a CI cancel, a
-    // `kill` reaching the run's own process group), which `exec.ts`
-    // reports as `exitCode: null` with `timedOut: false`. Neither
+    // package's own `--timeout` killed it (`timedOut: true`), or a kill
+    // from outside this probe reached the run's own process-group
+    // leader, which `exec.ts` reports as `exitCode: null` with
+    // `timedOut: false` (the same `reportedNoVerdict` shapes
+    // `setup.ts` refuses a baseline for). Neither
     // `killed` nor `survived` may be read out of such a run: under
     // `--pass-regex` a partial output printed before the kill can match
     // the pattern and read as a PASS the run never earned, and under
@@ -488,7 +505,11 @@ export async function runMutantAttempt(
     status = "inconclusive";
     reason = "timeout";
     mutationProbeResult = status;
-    if (!testResult.timedOut) {
+    // A timeout is excluded (`wasSignalKilled`, not the branch condition
+    // itself): this package's own `--timeout` already reports itself
+    // through `test.timedOut`, so only the kill-from-outside shape needs
+    // a warning to say what happened to the run.
+    if (wasSignalKilled(testResult)) {
       warnings.push(
         `the mutant run was terminated by a signal, no exit code was reported; nothing about this mutant was measured; see ${testResult.logPath}`,
       );
@@ -521,8 +542,22 @@ export async function runMutantAttempt(
         // whole block: a run that reported none returned above as
         // `inconclusive`/`timeout`, so no warning here can frame a
         // `null` as an exit code.
+        //
+        // And the same 128 + N band gets the same separate wording it
+        // gets on the baseline side: a kill that lands on the test
+        // process while its `sh -c` wrapper survives arrives as an
+        // ordinary non-zero exit code, never as the `null` the
+        // no-verdict branch above catches, so a mutant run cut short
+        // that way would otherwise be reported `survived` with nothing
+        // said about it. The verdict stands (nothing here can tell that
+        // code apart from a runner exiting `137` on its own, and
+        // `--pass-regex` means "ignore the exit code" by construction);
+        // the reader is told.
+        const mutantSignalCode = signalNumberFromExitCode(testResult.exitCode);
         warnings.push(
-          `--pass-regex (${rt.passRegex.source}) matched the mutant run's output despite a non-zero exit code (${String(testResult.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${testResult.logPath}`,
+          mutantSignalCode !== undefined
+            ? `--pass-regex (${rt.passRegex.source}) matched the mutant run's output but the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the suite may have been cut short; see ${testResult.logPath}`
+            : `--pass-regex (${rt.passRegex.source}) matched the mutant run's output despite a non-zero exit code (${String(testResult.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${testResult.logPath}`,
         );
       } else if (
         !testPassed &&

@@ -843,7 +843,16 @@ verdict. `--timeout <seconds>` bounds every `--pre`/`-t` invocation (both
 the baseline and the mutant run); a run that hits it is killed and
 reported as `timedOut: true` on that run's own phase (`baseline` or
 `test`), so a killed baseline is distinguishable from one that genuinely
-failed. It also bounds every `git apply` the `-p` form runs (the path
+failed. A run that reported no exit code for any other reason (something
+outside this probe killed it: a `kill` reaching the run's own
+process-group leader, an OOM killer picking that leader, a CI cancel) is
+treated the same way, with or without `--pass-regex`: the baseline
+refuses `baseline_failed`, and such a MUTANT run is
+`status: "inconclusive"`, `reason: "timeout"`, never `killed`/`survived`
+-- a `null` exit code is not a test failure, so `--expect fail` may not
+certify a kill from it; `test.timedOut` is `false` there, and a
+`warnings` entry names the signal, so the two are distinguishable in the
+envelope. It also bounds every `git apply` the `-p` form runs (the path
 check, the dry run, and the real apply); with no `--timeout` those keep a
 fixed ten-second bound of their own, so an apply that hangs cannot leave
 the probe sitting under an in-flight marker forever. An apply killed by
@@ -883,7 +892,13 @@ test inside files vitest still loaded produces), and node's built-in
 `--test` runner's own zero-count summary line. Either hit is
 `status: "inconclusive"`, `reason: "no_tests_executed"`, exit `2`,
 `mutation_probe.result: "not_run"` -- never `"killed"`/`"survived"`, a
-verdict that measured nothing. **Both detectors, and the generic
+verdict that measured nothing. A baseline that reported no exit code of
+its own is never reclassified this way: a run this package's `--timeout`
+killed, or one something outside it killed, has a cut-short tail that
+proves nothing about the suite, whatever happens to sit at its end, so a
+zero-count summary line in such a tail leaves the refusal at
+`baseline_failed` (with the signal named in `warnings`) rather than
+claiming the suite executed nothing. **Both detectors, and the generic
 fallback, `--require-baseline-evidence`, and `--pass-regex`, all
 described below, only ever see each side's CAPTURED output tail** (the
 same 60-line/6000-character bound every exec result reports as
@@ -1013,8 +1028,7 @@ the miss warning fires only for an AMBIGUOUS miss -- either side of
 that run's own captured tail was truncated (the pattern may have
 matched output the run never captured), the exit code reads `0` while
 the predicate reads "failed" (the process and the predicate disagree),
-the run reported NO exit code at all (see the killed-run paragraph
-below), or `--expect pass`, where a miss means the mutant SURVIVED
+or `--expect pass`, where a miss means the mutant SURVIVED
 rather than being killed. A textbook kill -- real non-matching output,
 a non-zero exit code, an untruncated tail, under `--expect fail` --
 carries no miss warning at all.
@@ -1069,15 +1083,16 @@ for an output-only predicate to see past a crash that happens after the
 evidence it looks for was already printed.
 
 One shape IS ruled out, though the predicate alone could not tell: a run
-that never reported an exit code of its own. `--timeout` killing a
-hanging run, or anything outside this probe killing it (an OOM killer, a
-CI cancel, a `kill` reaching the run's own process group -- `exitCode:
-null` with `timedOut: false`), leaves a run that measured nothing, and
-whatever partial output it printed before dying may well match the
-pattern. Neither side reads such a run as a pass: the BASELINE refuses
-`inconclusive`/`baseline_failed`, with the signal case named in its own
-`warnings` entry (`baseline.timedOut` and a `null` `baseline.exitCode`
-tell the two apart in the envelope), and never as
+that reported NO exit code at all. `--timeout` killing a hanging run, or
+a kill from outside this probe reaching the run's own process-group
+LEADER -- the `sh -c` wrapper each `--pre`/`-t` command runs under, which
+`exec.ts` starts in a process group of its own -- leaves `exitCode:
+null` (with `timedOut: false` for the second shape), a run that measured
+nothing whose partial output printed before dying may well match the
+pattern anyway. Neither side reads such a run as a pass: the BASELINE
+refuses `inconclusive`/`baseline_failed`, with the signal case named in
+its own `warnings` entry (`baseline.timedOut` and a `null`
+`baseline.exitCode` tell the two apart in the envelope), and never as
 `baseline_evidence_not_matched`, which is a finding about a pattern
 rather than about a run that never finished; a MUTANT run reports
 `inconclusive`/`timeout` -- one reason for both shapes, with the signal
@@ -1087,6 +1102,32 @@ having fired. This holds with or without `--pass-regex`: under the
 exit-code default a `null` exit code is not `0` either, which would
 otherwise read as "the test failed" and, under `--expect fail`, certify
 a kill the suite never actually made.
+
+What that does NOT cover is a kill the wrapper shell SURVIVES, which is
+the everyday shape of most of the examples usually reached for: an OOM
+killer picks the memory hog (the test process), not the shell above it,
+and a `kill <pid>` aimed at the runner leaves the shell running too.
+The shell then exits normally and reports the death the way any POSIX
+shell reports a signal death, as exit code 128 + N (`137` for SIGKILL).
+That is an ordinary non-zero exit code, so it never reaches the
+no-exit-code handling above, and under `--pass-regex` -- which means
+"ignore the exit code" by construction -- a green summary line printed
+before the kill still reads as a pass, the same way the green-then-crash
+shape above does. It is one more inherent limit of an output-only
+predicate rather than a gap this package closes: nothing distinguishes
+`137` from a shell reporting SIGKILL from `137` chosen by a runner
+exiting on its own. Both sides do WARN, though: when a `--pass-regex`
+pass rests on an exit code in the 128 + N band (`129` through `192`:
+128 plus every signal number a POSIX system can deliver, the 1..31 macOS
+and Linux share plus Linux's real-time signals 32..64), the `warnings`
+entry names the code, the signal number it would encode, and that the
+suite may have been cut short, in place of the plain "matched despite a
+non-zero exit code" entry every other non-zero code gets. The verdict is
+unchanged either way (a killed mutant stays `killed`, a matching mutant
+run stays `survived`); the warning exists so a reader has something to
+check. A runner that exits `137` of its own accord, nothing killed at
+all, gets the same warning, since the exit code cannot tell the two
+apart.
 
 Both detectors understand only each runner's DEFAULT text reporters:
 `node --test` with `--test-reporter=dot` (or any reporter besides the

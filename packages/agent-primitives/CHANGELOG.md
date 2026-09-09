@@ -57,17 +57,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   green summary before crashing in its own teardown reads as a pass,
   same as a naive `grep` wrapper would read it -- both are inherent
   limits of an output-only predicate, not gaps this package closes. A
-  run that never reported an exit code of its own is never a pass under
+  run that reported NO exit code at all is never a pass under
   `--pass-regex`, whatever its partial output matched: a baseline that
-  timed out or was killed by a signal refuses
+  timed out, or whose own process-group LEADER (the `sh -c` wrapper each
+  command runs under) was killed, refuses
   `inconclusive`/`baseline_failed` (never `baseline_evidence_not_matched`,
   a finding about a pattern rather than about a run that never
   finished), and such a mutant run reports `inconclusive`/`timeout`
   rather than `killed`/`survived`, with the signal shape named in
   `warnings` on both sides and no reason string added to the contract.
+  A kill the wrapper shell SURVIVES is a different, un-ruled-out shape
+  and is documented as such: an OOM killer picks the memory hog rather
+  than the group leader, the shell then exits normally and reports the
+  death as an ordinary exit code 128 + N, and a green summary line
+  printed before the kill still reads as a pass, one more inherent limit
+  of an output-only predicate (nothing distinguishes `137` from a shell
+  reporting SIGKILL from `137` a runner chose itself). Both sides warn
+  on it: a `--pass-regex` pass resting on an exit code in the 128 + N
+  band (`129` through `192`, 128 plus every signal number a POSIX system
+  can deliver) gets a `warnings` entry naming the code, the signal
+  number it would encode and that the suite may have been cut short, in
+  place of the plain "matched despite a non-zero exit code" entry every
+  other non-zero code gets; the verdict is unchanged.
   The mutant-run miss warning fires only for an AMBIGUOUS miss (a
-  truncated tail, an exit code of `0` disagreeing with the predicate, no
-  exit code at all, or `--expect pass`, where a miss means the mutant
+  truncated tail, an exit code of `0` disagreeing with the predicate, or
+  `--expect pass`, where a miss means the mutant
   survived); a textbook kill under `--expect fail` carries none, so a
   healthy plan run's `warnings` stays empty instead of collecting one
   near-duplicate entry per killed mutant.
@@ -153,6 +167,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exercised on the plan path, not only the single-probe path.
 
 ### Fixed
+
+- `probe`'s handling of a run that reported no exit code of its own, on
+  the DEFAULT exit-code path and not only under `--pass-regex` (task
+  `a435469b`): a mutant run killed without this package's own
+  `--timeout` having fired (`exitCode: null`, `timedOut: false`: a kill
+  reaching the run's own process-group leader) used to be classified
+  from that `null`, which is not `0` and so certified a `killed` mutant
+  under `--expect fail` out of a run that measured nothing. It is now
+  `status: "inconclusive"`, `reason: "timeout"` with the signal named in
+  `warnings`, matching what the baseline side already refused. The
+  zero-tests guard is likewise skipped for a baseline that reported no
+  exit code at all: a cut-short tail that happens to end on a zero-count
+  summary line no longer reclassifies such a run as `no_tests_executed`
+  (which both dropped the signal warning and claimed the suite executed
+  nothing), so it stays `baseline_failed` with the signal named. And a
+  `--pre` that reported no exit code is now named as timed out, or as
+  terminated by a signal, on both the baseline and the mutant side,
+  instead of through the literal prose `--pre exited null`.
 
 - `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
   (or mutant run) that exited `0` with nothing actually executed was
