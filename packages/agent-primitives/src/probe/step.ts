@@ -486,22 +486,22 @@ export async function runMutantAttempt(
     warnings.push(`the mutant run was aborted; see ${testResult.logPath}`);
   } else if (reportedNoVerdict(testResult)) {
     // The mutant run never reported an exit code of its own: this
-    // package's own `--timeout` killed it (`timedOut: true`), or a kill
-    // from outside this probe reached the run's own process-group
+    // package's own `--timeout` killed it (`timedOut: true`), or a
+    // kill from outside this probe reached the run's own process-group
     // leader, which `exec.ts` reports as `exitCode: null` with
     // `timedOut: false` (the same `reportedNoVerdict` shapes
-    // `setup.ts` refuses a baseline for). Neither
-    // `killed` nor `survived` may be read out of such a run: under
-    // `--pass-regex` a partial output printed before the kill can match
-    // the pattern and read as a PASS the run never earned, and under
-    // the exit-code default a `null` exit code is not `0`, which reads
-    // as "the test failed" and, under `--expect fail`, certifies a KILL
-    // the suite never actually made. Same handling for both shapes --
-    // one run without a verdict, one `inconclusive`/`timeout` outcome,
-    // so the reported reason contract is unchanged -- with the signal
-    // shape named in `warnings`, since `reason: "timeout"` beside
-    // `test.timedOut: false` would otherwise read as this package's own
-    // bound having fired.
+    // `setup.ts` refuses a baseline for). Neither `killed` nor
+    // `survived` may be read out of such a run: under `--pass-regex` a
+    // partial output printed before the kill can match the pattern and
+    // read as a PASS the run never earned, and under the exit-code
+    // default a `null` exit code is not `0`, which reads as "the test
+    // failed" and, under `--expect fail`, certifies a KILL the suite
+    // never actually made. Same handling for both shapes -- one run
+    // without a verdict, one `inconclusive`/`timeout` outcome, so the
+    // reported reason contract is unchanged -- with the signal shape
+    // named in `warnings`, since `reason: "timeout"` beside
+    // `test.timedOut: false` would otherwise read as this package's
+    // own bound having fired.
     status = "inconclusive";
     reason = "timeout";
     mutationProbeResult = status;
