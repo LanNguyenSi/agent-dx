@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compilePassRegex } from "../src/pass-regex.js";
 
 /**
- * `compilePassRegex` (task `a435469b` round 2, GitHub issue #225): the
+ * `compilePassRegex` (GitHub issue #225): the
  * one compile both `cli.ts`'s `parsePassRegex` and `probe/plan.ts`'s
  * `validatePlan` use for `--pass-regex`/`passWhen.regex`. The `m` flag
  * it always applies is what lets `^OK \(` match a summary line that is
@@ -32,8 +32,8 @@ describe("compilePassRegex()", () => {
     expect(() => compilePassRegex("(")).toThrow(SyntaxError);
   });
 
-  // Round 3 (task a435469b): `(?m)` is not "redundant, not a usage
-  // error" the way the README used to claim -- JS `RegExp` has no
+  // `(?m)` is not "redundant, not a usage
+  // error" the way the README once claimed -- JS `RegExp` has no
   // inline-flag syntax at all, so `(?m)` is not valid source and is
   // rejected exactly like any other unparseable pattern, `m` already
   // being always-on notwithstanding.

@@ -286,10 +286,9 @@ describe("exec.ts's combinedOutput() is the ONLY place that joins a stdout tail 
   // something containing "stdoutTail", then a literal newline, then an
   // interpolation containing "stderrTail") anywhere under `src/`, so a
   // future site that reintroduces the raw join instead of importing
-  // `combinedOutput` is caught the same way `verify/index.ts:498` was
-  // (task `a435469b` round 3): it had drifted into exactly this raw
-  // join while `combinedOutput`'s docblock already claimed it as one of
-  // the five converted sites.
+  // `combinedOutput` is caught the same way `verify/index.ts:498` was:
+  // it had drifted into exactly this raw join while `combinedOutput`'s
+  // docblock already claimed it as one of the five converted sites.
   const RAW_JOIN_PATTERN =
     /\$\{[^}]*stdoutTail[^}]*\}\\n\$\{[^}]*stderrTail[^}]*\}/;
 

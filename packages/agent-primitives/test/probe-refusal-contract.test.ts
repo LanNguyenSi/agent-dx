@@ -583,7 +583,7 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
     // `computeMutant`, the call `prepareMutant`'s dry run makes, before
     // the baseline ever runs), but with `reasonCode: "aborted"` instead
     // of `"git_apply_timeout"`: this is the `step.ts:110-122` abort
-    // path the round-3 review named, distinct from the baseline-phase
+    // path, distinct from the baseline-phase
     // `aborted` the loop above already provokes through
     // `provokeAbortedBaselineTest`. `REFUSAL_RESULT_SHAPE.aborted.mutant`
     // is `true` (it also covers the baseline-phase pair, where a mutant

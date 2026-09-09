@@ -1588,8 +1588,8 @@ describe("plan.passWhen.regex: the plan-file equivalent of --pass-regex", () => 
 
 describe("probePlan(): --pass-regex, threaded through the shared baseline and every mutant", () => {
   // Same fake phpunit-style runner as `probe.test.ts`'s own --pass-regex
-  // describe block (task `a435469b`, GitHub issue #225): a green suite
-  // that still exits 1 over deprecation notices.
+  // describe block (GitHub issue #225): a green suite that still exits 1
+  // over deprecation notices.
   const RUNNER_JS = [
     "function summary() {",
     '  return "OK (3 tests, 5 assertions)";',

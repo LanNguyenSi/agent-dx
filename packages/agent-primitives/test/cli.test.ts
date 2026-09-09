@@ -1756,8 +1756,8 @@ describe("cli: probe", () => {
   });
 
   // Fake phpunit-style runner, shared by every --pass-regex test below
-  // (task `a435469b`, GitHub issue #225): a green suite that still
-  // exits 1 over deprecation notices.
+  // (GitHub issue #225): a green suite that still exits 1 over
+  // deprecation notices.
   const RUNNER_JS = [
     "function summary() {",
     '  return "OK (3 tests, 5 assertions)";',

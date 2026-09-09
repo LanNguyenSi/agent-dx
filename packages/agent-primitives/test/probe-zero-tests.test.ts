@@ -624,7 +624,7 @@ describe("probe(): --expect pass, which verdicts rest on the mutant run's own ex
   // it needs the real-vitest fixture defined further down this file.
 
   it("a survived verdict under --expect pass whose mutant run exited NON-ZERO stands, even with byte-identical output on both sides", async () => {
-    // Round-2 review finding: the generic byte-identical fallback used
+    // The generic byte-identical fallback used
     // to be entered by verdict shape alone (`survived`, or `killed`
     // under `--expect pass`), which pulls in EVERY `--expect pass`
     // `survived` verdict regardless of the mutant run's own exit code --
