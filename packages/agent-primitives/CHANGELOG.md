@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- PHP support (task `55b0a5cc`, issue #225 part 3): `verify` gains three
+  default detectors built from real captured tool output (see
+  `test/fixtures/README.md`) -- `phpunit` (`OK (N tests, M assertions)`,
+  `FAILURES!` plus its `Tests: N, Assertions: M, Failures: F.` tally
+  line, `No tests executed!`, and PHP-level deprecation notices
+  surfaced as detector warnings), `phpstan` (` [OK] No errors` / a
+  per-file table closed by ` [ERROR] Found N errors`), and `phpcs` (a
+  `FOUND N ERRORS ... AFFECTING M LINES` summary over per-finding
+  rows) -- selected by output shape exactly like the existing
+  vitest/tsc/eslint detectors, pinned to never shadow them (a vitest
+  fixture still selects `vitest` with every PHP detector present as a
+  candidate). `probe`'s zero-tests guard now also recognizes PHPUnit's
+  `No tests executed!` and a stated `OK (0 tests, 0 assertions)`,
+  yielding `inconclusive`/`no_tests_executed` the same way it already
+  does for vitest's and node's zero-count shapes (reusing the new
+  `phpunit` detector rather than restating its patterns). `drift` now
+  scans `.php` comment sites too: `//`, `#`, `/* ... */`, and docblock
+  ` * ` continuation lines (PHP is the only recognized language that
+  accepts both the `//`/`/* */` and `#` comment grammars). README and
+  the installed skill (`assets/skill/SKILL.md`) gain a "Non-JS test
+  runners" section naming the exit-code assumption these three
+  inherit, the `--pass-regex`/`passWhen: { regex }` pass predicate
+  (issue #225 part 1, task `a435469b`), and the composer `vendor-dir`/
+  `bin-dir` auto-link rule (issue #225 part 2, task `6c7e1532`, plan
+  `link:`, repo-level `.agent-primitives.json` `{ "link": [...] }`).
+  Running PHPUnit itself is out of scope for this package's own CI:
+  the new detectors and the zero-tests/drift additions are proven only
+  against the captured fixtures.
+
 ### Changed
 
 - Test hygiene from the PR #218 reviews (task `482c3ef7`, no behaviour

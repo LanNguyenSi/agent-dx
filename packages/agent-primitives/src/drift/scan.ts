@@ -9,6 +9,14 @@ const SLASH_STAR_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs"]);
 /** Source extensions scanned for `#` comment lines. */
 const HASH_COMMENT_EXTENSIONS = new Set(["py", "sh", "yml", "yaml"]);
 
+/** PHP scans BOTH comment grammars: `//`, `/* ... *\/`, and docblock
+ * ` * ` continuation lines (like `SLASH_STAR_EXTENSIONS`), plus `#`
+ * line comments (like `HASH_COMMENT_EXTENSIONS`) -- PHP is the only
+ * language this command recognizes that accepts both forms, so it gets
+ * its own set and its own branch in `classifyLine` rather than being
+ * folded into either existing set. */
+const PHP_EXTENSIONS = new Set(["php"]);
+
 /** `git grep` pathspecs this command searches: docs, plus the source
  * extensions above. Anything outside this list is a known, documented
  * prototype limitation, never scanned at all. */
@@ -26,6 +34,7 @@ export const SCAN_PATHSPECS: readonly string[] = [
   "*.sh",
   "*.yml",
   "*.yaml",
+  "*.php",
 ];
 
 function extOf(filePath: string): string {
@@ -59,6 +68,17 @@ export function classifyLine(
   }
   if (HASH_COMMENT_EXTENSIONS.has(ext)) {
     return trimmed.startsWith("#") ? "comment" : undefined;
+  }
+  if (PHP_EXTENSIONS.has(ext)) {
+    if (
+      trimmed.startsWith("//") ||
+      trimmed.startsWith("/*") ||
+      trimmed.startsWith("*") ||
+      trimmed.startsWith("#")
+    ) {
+      return "comment";
+    }
+    return undefined;
   }
   return undefined;
 }

@@ -9,6 +9,9 @@ import {
   vitestDetector,
   tscDetector,
   eslintDetector,
+  phpunitDetector,
+  phpstanDetector,
+  phpcsDetector,
   DEFAULT_CHECKS,
   DEFAULT_DETECTORS,
 } from "../src/verify/index.js";
@@ -2260,4 +2263,277 @@ describe("verify: detector selection precedence, output shape first, real tools"
       });
     }
   }, 20000);
+});
+
+describe("phpunitDetector: captured real output", () => {
+  it("matches a green run, a red run, and the no-tests-executed case", () => {
+    expect(
+      phpunitDetector.matches({
+        output: readCaptured("phpunit-pass"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(true);
+    expect(
+      phpunitDetector.matches({
+        output: readCaptured("phpunit-fail"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+    expect(
+      phpunitDetector.matches({
+        output: readCaptured("phpunit-no-tests-executed"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not match vitest, tsc, or eslint captured output (shape disjointness)", () => {
+    for (const name of [
+      "vitest-fail",
+      "vitest-pass",
+      "vitest-no-tests",
+      "tsc-errors",
+      "tsc-clean",
+      "eslint-errors",
+      "eslint-warnings",
+      "eslint-clean",
+    ]) {
+      expect(
+        phpunitDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: name.includes("clean") ? 0 : 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("vitest, tsc, and eslint detectors do not match phpunit captured output (pin: PHP detectors never shadow the JS ones)", () => {
+    for (const name of [
+      "phpunit-pass",
+      "phpunit-fail",
+      "phpunit-no-tests-executed",
+      "phpunit-deprecation-notice",
+    ]) {
+      const output = readCaptured(name);
+      expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+        false,
+      );
+      expect(tscDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+        false,
+      );
+      expect(eslintDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+        false,
+      );
+    }
+  });
+
+  it("selectDetector against DEFAULT_DETECTORS: a real vitest fixture still selects vitest, not phpunit (shape-first selection is not order-dependent)", () => {
+    const selection = selectDetector(DEFAULT_DETECTORS, genericDetector, {
+      output: readCaptured("vitest-pass"),
+      command: "npm run test --silent",
+      exitCode: 0,
+    });
+    expect(selection.detector.name).toBe("vitest");
+    expect(selection.ambiguousCandidates).toBeUndefined();
+  });
+
+  it("selectDetector against DEFAULT_DETECTORS: a real phpunit fixture selects phpunit", () => {
+    const selection = selectDetector(DEFAULT_DETECTORS, genericDetector, {
+      output: readCaptured("phpunit-fail"),
+      command: "vendor/bin/phpunit",
+      exitCode: 1,
+    });
+    expect(selection.detector.name).toBe("phpunit");
+  });
+
+  it("parses a green run: 0 failures, summary passed equals the total", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-pass"),
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary).toEqual({
+      passed: 2,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+  });
+
+  it("parses a red run: one failure with class::method name, message, and file:line", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-fail"),
+      command: "vendor/bin/phpunit",
+      exitCode: 1,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 1,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe("CalcFailTest::testAddWrong");
+    expect(parsed.failures[0].file).toBe("tests/CalcFailTest.php");
+    expect(parsed.failures[0].line).toBe(11);
+    expect(parsed.failures[0].message).toContain(
+      "Failed asserting that 4 is identical to 5.",
+    );
+  });
+
+  it("parses the no-tests-executed case: no false passed/failed claim, no failures", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-no-tests-executed"),
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+  });
+
+  it("surfaces a PHP-level deprecation notice on an otherwise green run as a detector warning, not a failure", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-deprecation-notice"),
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary.passed).toBe(1);
+    expect(parsed.summary.failed).toBe(0);
+    expect(
+      parsed.warnings.some(
+        (w) =>
+          w.includes("phpunit_deprecation") && w.includes("dynamic property"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("phpstanDetector: captured real output", () => {
+  it("matches a clean run and an errors run, not vitest/tsc/eslint/phpunit output", () => {
+    expect(
+      phpstanDetector.matches({
+        output: readCaptured("phpstan-clean"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(true);
+    expect(
+      phpstanDetector.matches({
+        output: readCaptured("phpstan-errors"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+    for (const name of [
+      "vitest-pass",
+      "tsc-errors",
+      "eslint-errors",
+      "phpunit-pass",
+      "phpunit-fail",
+      "phpcs-errors",
+    ]) {
+      expect(
+        phpstanDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("parses a clean run as one pass, no failures", () => {
+    const parsed = phpstanDetector.parse({
+      output: readCaptured("phpstan-clean"),
+      command: "vendor/bin/phpstan analyse",
+      exitCode: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+  });
+
+  it("parses an errors run: every table row, file from the table header, and the tool's own total", () => {
+    const parsed = phpstanDetector.parse({
+      output: readCaptured("phpstan-errors"),
+      command: "vendor/bin/phpstan analyse",
+      exitCode: 1,
+    });
+    expect(parsed.summary.errors).toBe(2);
+    expect(parsed.failures).toHaveLength(2);
+    expect(parsed.failures[0].file).toBe("Bad.php");
+    expect(parsed.failures[0].line).toBe(7);
+    expect(parsed.failures[0].message).toContain("should return int");
+    expect(parsed.failures[1].line).toBe(12);
+    expect(parsed.failures[1].message).toContain("Undefined variable");
+  });
+});
+
+describe("phpcsDetector: captured real output", () => {
+  it("matches an errors run, not the clean (empty) case, and not vitest/tsc/eslint/phpunit/phpstan output", () => {
+    expect(
+      phpcsDetector.matches({
+        output: readCaptured("phpcs-errors"),
+        command: "",
+        exitCode: 2,
+      }),
+    ).toBe(true);
+    expect(
+      phpcsDetector.matches({
+        output: readCaptured("phpcs-clean"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(false);
+    for (const name of [
+      "vitest-pass",
+      "tsc-errors",
+      "eslint-errors",
+      "phpunit-pass",
+      "phpunit-fail",
+      "phpstan-errors",
+    ]) {
+      expect(
+        phpcsDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("parses an errors run: every ERROR row (not WARNING rows), file from the FILE header, and the tool's own total", () => {
+    const parsed = phpcsDetector.parse({
+      output: readCaptured("phpcs-errors"),
+      command: "vendor/bin/phpcs --standard=PSR12",
+      exitCode: 2,
+    });
+    expect(parsed.summary.errors).toBe(12);
+    expect(parsed.failures.length).toBeGreaterThan(0);
+    expect(parsed.failures[0].file).toBe("phpcs-errors/Bad.php");
+    expect(parsed.failures[0].line).toBe(1);
+    expect(parsed.failures[0].message).toContain(
+      "Header blocks must be separated",
+    );
+  });
 });

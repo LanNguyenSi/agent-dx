@@ -200,18 +200,31 @@ diagnostics), and `eslint`'s stylish formatter (a file header line, then
 with the rule id appended to the message when the row carries one, and
 omitted for a rule-less row such as a `Parsing error: ...`; `warning` rows
 count into `summary.warnings` alone and never become a failure, even on a
-zero-exit check). No reporter flags are injected: whichever of these three
-shapes a check's own script happens to print is parsed as-is; a check that
-emits more than one shape at once (a `pretest` build followed by `vitest`,
-say) is ambiguous and falls back to `generic`, same as any other ambiguous
-case. Every file-path capture across the three detectors is matched
+zero-exit check). Three more default candidates cover PHP: `phpunit`
+(`OK (N tests, M assertions)`, `FAILURES!` plus its `Tests: N,
+Assertions: M, Failures: F.` tally line, and `No tests executed!`; a
+PHP-level deprecation notice on an otherwise green run is reported as a
+detector warning, not a failure), `phpstan` (` [OK] No errors`, or a
+per-file table closed by ` [ERROR] Found N errors`, `summary.errors`
+preferring that stated total over the row count), and `phpcs` (a
+`FOUND N ERRORS ... AFFECTING M LINES` summary over one `<line> | ERROR
+| message` row per finding; a clean run prints nothing at all, so there
+is no "no errors" shape for this one to match, same as the tsc/eslint
+detectors' own clean captures). See "Non-JS test runners" below for the
+exit-code assumption these three inherit like every other check here.
+No reporter flags are injected: whichever of these shapes a check's own
+script happens to print is parsed as-is; a check that emits more than
+one shape at once (a `pretest` build followed by `vitest`, say) is
+ambiguous and falls back to `generic`, same as any other ambiguous
+case. Every file-path capture across these detectors is matched
 structurally (up to the shape's own separator, such as vitest's `>` or
 tsc's `(line,col):`), never merely up to the first whitespace, so a path
 containing a space is still captured whole. ANSI color codes are stripped
-before any of these three detectors matches or parses, since a tool run in
-a fully non-interactive environment can still default to colorized output
-(only SGR sequences are stripped; none of these three tools' default text
-output emits cursor-movement or other non-SGR escape sequences). eslint 10
+before any of the vitest/tsc/eslint detectors matches or parses, since a
+tool run in a fully non-interactive environment can still default to
+colorized output (only SGR sequences are stripped; none of these three
+tools' default text output emits cursor-movement or other non-SGR
+escape sequences). eslint 10
 (a devDependency, used only for this package's own lint check and for the
 `eslint` detector's fixtures) requires Node `^20.19.0 || ^22.13.0 ||
 
@@ -1483,8 +1496,10 @@ identifiers still present at `--head` in a Markdown/plain-text doc or in
 a source comment (never a code line). A doc site is any line of a
 `.md`/`.mdx`/`.txt` file; a comment site is a `//`, `/* ... */` or
 `*`-continuation line in a `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs` file,
-or a `#` line in a `.py`/`.sh`/`.yml`/`.yaml` file. Every other file
-extension is out of scope and never scanned at all. Matching is
+a `#` line in a `.py`/`.sh`/`.yml`/`.yaml` file, or (PHP accepts both
+comment grammars) a `//`, `#`, `/* ... */`, or docblock `*`-continuation
+line in a `.php` file. Every other file extension is out of scope and
+never scanned at all. Matching is
 whole-word (`RuntimeError` never matches `setRuntimeError`), so a
 mention only reports when the removed name reappears as its own word.
 `--base`/`--head`/`--allow` and every reported path are resolved
@@ -1564,6 +1579,52 @@ than about 60 characters before the identifier's own mention (or behind
 a `. `/`; ` sentence boundary within that lookback), or more than about
 20 characters after it, is still reported rather than allowlisted; use
 `--allow` or reword the mention to bring it inside the window.
+
+## Non-JS test runners
+
+`verify`, `probe`, and `drift` were built against Node tooling first,
+but nothing in any of the three assumes JavaScript: a PHP repository
+using PHPUnit, PHPStan, and PHP_CodeSniffer works the same way, with
+three things worth naming explicitly.
+
+**The exit-code assumption.** `verify`'s `classifyStatus` reads
+`pass`/`fail` from the command's own exit code (`0` is `pass`,
+`126`/`127` are infra `error`s, anything else non-zero is `fail`), and
+`probe`'s `survived`/`killed` verdict is built on the same exit code
+too. PHPUnit, PHPStan, and PHPCS all follow this convention already
+(PHPUnit exits non-zero on any failure or error; PHPStan exits `1` when
+it finds errors; PHPCS exits `1` when it finds errors, `2` when it also
+finds fixable ones), so no wrapper is needed to make a `composer.json`
+`scripts` entry (or an `-x` override) work with either command as-is.
+The PHPUnit-specific corollary lives in `probe`'s zero-tests guard,
+below.
+
+**The zero-tests guard now knows PHPUnit.** The same
+`no_tests_executed` refusal `probe` already applies to vitest's
+all-skipped/no-test-files shapes and node `--test`'s zero-count summary
+now also recognizes PHPUnit's own `No tests executed!` line and a
+stated `OK (0 tests, 0 assertions)`: a baseline (or mutant run) that
+exits `0` with nothing actually executed is `status: "inconclusive"`,
+`reason: "no_tests_executed"`, never read as a real pass, exactly like
+the vitest/node cases documented under `probe` above.
+
+**The pass predicate.** `--pass-regex <regex>` (`passWhen: { regex }`
+in a `--plan` file) lets `probe` and `verify` judge a check by matching
+a pattern against its output instead of by exit code alone -- useful
+for a runner whose own exit code is not the whole story (a wrapper
+script, a runner that always exits `0`), and shipped in this same
+release.
+
+**The composer link rule.** A worktree-isolated `probe` run
+(`isolation: "worktree"`) auto-links `node_modules` into the fresh
+worktree so a Node project's dependencies do not need reinstalling per
+mutant; the same now happens for a PHP project's `composer.json`
+`vendor-dir` and `bin-dir` (auto-detected and auto-linked the same way
+`node_modules` is), so `vendor/bin/phpunit` and friends resolve in the
+isolated worktree without a `composer install` per mutant. A plan
+file's own `link:` list, and a repo-level `.agent-primitives.json`
+defaults file (`{ "link": [...] }`), extend this to any other directory
+a project wants linked the same way. Shipped in this same release.
 
 ## Output shape
 

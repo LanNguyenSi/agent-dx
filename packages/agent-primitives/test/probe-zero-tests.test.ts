@@ -113,6 +113,38 @@ describe("detectKnownZeroTestsEvidence()", () => {
     const evidence = detectKnownZeroTestsEvidence("all good, 0 issues\n", "");
     expect(evidence).toEqual({ detected: false });
   });
+
+  it("phpunit: 'No tests executed!' (an empty suite, or a --filter matching nothing)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.\n\nNo tests executed!\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+  });
+
+  it("phpunit: a stated zero-count OK summary ('OK (0 tests, 0 assertions)')", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.\n\nOK (0 tests, 0 assertions)\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+  });
+
+  it("phpunit: a real, executed, passing summary is NOT flagged (negative control)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.\n\nOK (2 tests, 2 assertions)\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: a real failing run (Tests: N, Assertions: M, Failures: F.) is NOT flagged", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "FAILURES!\nTests: 2, Assertions: 2, Failures: 1.\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
 });
 
 describe("hasKnownTestSummary()", () => {
@@ -123,6 +155,11 @@ describe("hasKnownTestSummary()", () => {
 
   it("true for a node --test summary line", () => {
     expect(hasKnownTestSummary("ℹ tests 3\n", "")).toBe(true);
+  });
+
+  it("true for a phpunit summary, zero-count or not", () => {
+    expect(hasKnownTestSummary("OK (2 tests, 2 assertions)\n", "")).toBe(true);
+    expect(hasKnownTestSummary("No tests executed!\n", "")).toBe(true);
   });
 
   it("false for output neither detector recognizes", () => {
@@ -230,6 +267,21 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
     );
     expect(result.status).toBe("killed");
     expect(result.reason).toBeUndefined();
+  });
+
+  it("a baseline that exits 0 but whose own output is PHPUnit's 'No tests executed!' is refused, never a verdict", async () => {
+    const repo = initGitRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand:
+          "node -e \"console.log('PHPUnit 9.6.36 by Sebastian Bergmann and contributors.'); console.log(''); console.log('No tests executed!');\"",
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("no_tests_executed");
+    expect(result.mutant).toBeDefined();
   });
 });
 

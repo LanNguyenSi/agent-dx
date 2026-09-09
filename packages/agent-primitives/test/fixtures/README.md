@@ -72,6 +72,52 @@ plugin, of a scoped, slash-separated rule id
 carry an inline regex literal (`/^_/u`) right before the rule id column,
 exercising the rule id capture's grammar against both shapes at once.
 
+### PHP captures (`phpunit-*`, `phpstan-*`, `phpcs-*`)
+
+No PHP toolchain lives on the dev machine these were captured on: each
+was produced in a throwaway `composer` project under a scratch
+directory (never committed), run through disposable Docker containers
+(`composer:2` for `composer require`, `php:8.3-cli` for the tools
+themselves), then trimmed of the capture directory's own absolute path
+(`/app/...` -> the project-relative path) and wall-clock timing
+(`Time: 00:00.NNN, Memory: N.NN MB` / `Time: NNNms; Memory: NMB` ->
+`Time: [elided]`), the same convention the vitest/tsc/eslint captures
+above use. Tool versions used for the capture: PHP 8.3.33 (cli),
+PHPUnit 9.6.36, PHPStan 2.2.13, PHP_CodeSniffer 3.13.6 (`--standard=PSR12`).
+
+- `phpunit-pass.txt`: `vendor/bin/phpunit --colors=never
+  tests/CalcTest.php` against a two-test suite, both passing. Exit `0`.
+- `phpunit-fail.txt`: the same command against a suite with one failing
+  assertion (`assertSame(5, Calc::add(2, 2))`), exercising the numbered
+  `N) Class::method` entry, its message, and its `file:line` locator
+  line. Exit `1`.
+- `phpunit-no-tests-executed.txt`: `vendor/bin/phpunit --colors=never
+  tests/CalcTest.php --filter=NoSuchTest` (a filter matching nothing).
+  Exit `0` -- the shape `probe`'s zero-tests guard exists to catch,
+  since a `0` exit here is not a real pass.
+- `phpunit-deprecation-notice.txt`: a green single-test run against a
+  class that creates a dynamic property (deprecated on PHP 8.2+),
+  capturing PHP's own `Deprecated: ...` notice line alongside PHPUnit's
+  `OK (1 test, 1 assertion)`. Exit `0`. PHPUnit 9.6 has no
+  `--fail-on-deprecation`-style flag (that is a PHPUnit 10+ feature),
+  and neither `convertWarningsToExceptions`/`convertNoticesToExceptions`
+  in `phpunit.xml` nor `assertArraySubset` (removed outright in 9.6,
+  not merely deprecated) produced a non-zero-exit green run under 9.6.36
+  on PHP 8.3; this fixture is therefore the deprecation-notice capture
+  the task asked for, on a `0` exit, not the non-zero-exit variant.
+- `phpstan-clean.txt` / `phpstan-errors.txt`: `vendor/bin/phpstan
+  analyse --level=5 --no-progress --no-ansi <dir>` against a clean
+  one-class file (exit `0`, ` [OK] No errors`) and a two-error file (a
+  wrong return type, an undefined variable; exit `1`, the per-file table
+  plus ` [ERROR] Found 2 errors`).
+- `phpcs-clean.txt` / `phpcs-errors.txt`: `vendor/bin/phpcs
+  --standard=PSR12 --no-colors <dir>` against a PSR-12-clean one-class
+  file (exit `0`, empty stdout -- PHPCS's own default report prints
+  nothing at all on a clean run, so there is no "no errors" shape to
+  capture) and a file with tabs, missing braces/visibility, and no
+  namespace (exit `2`, `FOUND 12 ERRORS AFFECTING 5 LINES` plus one row
+  per finding).
+
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 
 Minimal, self-contained projects with one deliberately failing check

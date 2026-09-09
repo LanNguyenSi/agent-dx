@@ -125,3 +125,22 @@ changes nothing (a line that disagrees with the patch is reported in a
 warning). `--file` is long-only, since the global `-f` is `--format`;
 every global option (`-f`, `-C`, `-m`, `-l`) may precede the
 subcommand.
+
+## 7. Non-JS test runners
+
+`verify` and `probe` are not JS-specific: a PHP repository using
+PHPUnit, PHPStan, or PHP_CodeSniffer works the same way, since both
+commands read the command's own exit code (`0` pass, non-zero fail),
+which all three tools already follow. `verify`'s default detectors
+parse PHPUnit/PHPStan/PHPCS output the same way they parse
+vitest/tsc/eslint output; `probe`'s zero-tests guard recognizes
+PHPUnit's `No tests executed!` the same way it recognizes vitest's and
+node's zero-count shapes. `--pass-regex <regex>` (`passWhen: { regex }`
+in a `--plan` file) judges a check by matching its output instead of by
+exit code alone, for a runner whose exit code alone is not enough.
+`--link` (and a plan file's own `link:`, and a repo's
+`.agent-primitives.json` `{ "link": [...] }` defaults) auto-links a
+PHP project's composer `vendor-dir`/`bin-dir` into an isolated worktree
+the same way `node_modules` is auto-linked, so `vendor/bin/phpunit`
+resolves without a `composer install` per mutant. See the package
+README's "Non-JS test runners" section for the full detail.
