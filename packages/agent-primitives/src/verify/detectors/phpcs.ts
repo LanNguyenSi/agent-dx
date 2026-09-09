@@ -6,10 +6,11 @@ import type { Detector, DetectorInput, DetectorParseResult } from "../types.js";
  * `<line> | ERROR|WARNING | [fixable-marker] message` row per finding
  * under it, each file's own block closed by its OWN `FOUND N ERRORS
  * (AND M WARNINGS)? AFFECTING K LINES` summary -- PHPCS never prints a
- * single grand-total summary across files, only one per file (round-1
- * review finding: a single `SUMMARY_LINE.exec` took only the first
- * file's block, undercounting a multi-file run; `matchAll` below sums
- * every block instead). A clean run prints nothing at all (empty
+ * single grand-total summary across files, only one per file (a single
+ * `SUMMARY_LINE.exec` would take only the first file's block,
+ * undercounting a multi-file run; `matchAll` below sums every block
+ * instead, see `test/fixtures/README.md`'s `phpcs-two-files.txt`). A
+ * clean run prints nothing at all (empty
  * stdout, exit 0) -- there is no "no errors" shape to match, the same
  * convention as this package's tsc and eslint detectors, whose own
  * clean captures do not match their detector either. Anchored on the

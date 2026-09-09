@@ -2346,6 +2346,21 @@ describe("phpunitDetector: captured real output", () => {
     }
   });
 
+  it("matches a port-suffixed error message and a plural-header (2 failures, 2 risky) run", () => {
+    for (const [name, exitCode] of [
+      ["phpunit-error-message-with-port", 2],
+      ["phpunit-two-failures-and-risky", 1],
+    ] as const) {
+      expect(
+        phpunitDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode,
+        }),
+      ).toBe(true);
+    }
+  });
+
   it("does not match vitest, tsc, or eslint captured output (shape disjointness)", () => {
     for (const name of [
       "vitest-fail",
@@ -2380,6 +2395,8 @@ describe("phpunitDetector: captured real output", () => {
       "phpunit-risky-and-real",
       "phpunit-risky-only",
       "phpunit-errors-and-skipped",
+      "phpunit-error-message-with-port",
+      "phpunit-two-failures-and-risky",
     ]) {
       const output = readCaptured(name);
       expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
@@ -2626,12 +2643,93 @@ describe("phpunitDetector: captured real output", () => {
     expect(parsed.failures[0].message).toBe("RuntimeException: boom");
   });
 
+  it("parses an error message ending in ':<digits>': the port suffix is never mistaken for the file:line locator (round-3 review finding)", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-error-message-with-port"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe("PortTest::testUnreachable");
+    // The message ends in `:8080`, structurally identical to a
+    // `file:line` locator, but sits on the entry's own first line (never
+    // preceded by a blank line), so it is read as the message, not the
+    // locator.
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: upstream unreachable at api.example.com:8080",
+    );
+    // The real locator, two lines below and preceded by a blank line,
+    // is still captured correctly.
+    expect(parsed.failures[0].file).toBe("tests/PortTest.php");
+    expect(parsed.failures[0].line).toBe(14);
+  });
+
+  it("parses a chained multi-frame locator shape unchanged: the entry's first `file:line` candidate preceded by a blank line still wins", () => {
+    // Not a real PHPUnit capture (PHPUnit's own default reporter prints
+    // exactly one locator line per entry; a multi-frame stack trace is a
+    // hand-built worst case for the blank-line guard added in this
+    // round, run through the same parser). Guards against a regression
+    // where the blank-line precondition itself, rather than picking the
+    // wrong line, breaks locator capture altogether.
+    const output = [
+      "There was 1 error:",
+      "",
+      "1) DiffTest::testChained",
+      "RuntimeException: boom",
+      "",
+      "/app/src/Thrower.php:4",
+      "",
+      "ERRORS!",
+      "Tests: 1, Assertions: 1, Errors: 1.",
+    ].join("\n");
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("/app/src/Thrower.php");
+    expect(parsed.failures[0].line).toBe(4);
+    expect(parsed.failures[0].message).toBe("RuntimeException: boom");
+  });
+
+  it("parses a plural-header run (2 failures, 2 risky tests): failed 2, passed 2, both risky entries excluded from failures", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-two-failures-and-risky"),
+      command: "vendor/bin/phpunit",
+      exitCode: 1,
+    });
+    // `Tests: 4, Assertions: 2, Failures: 2, Risky: 2.`: 4 total, 2
+    // failed, the 2 risky tests ran and did not fail, so they land in
+    // `passed`.
+    expect(parsed.summary).toEqual({
+      passed: 2,
+      failed: 2,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toHaveLength(2);
+    expect(parsed.failures.map((f) => f.name)).toEqual([
+      "PluralTest::testFailOne",
+      "PluralTest::testFailTwo",
+    ]);
+    // The plural `There were 2 risky tests:` header is recognized
+    // (`DEFECT_SECTION_HEADER`'s `s?`), so neither
+    // `PluralTest::testRiskyOne` nor `PluralTest::testRiskyTwo` lands in
+    // `failures`, even though the `--` divider separates them from the
+    // failure section above.
+    expect(parsed.failures.some((f) => f.name?.includes("Risky"))).toBe(false);
+  });
+
   it("failures invariant: summary.failed + summary.errors is never less than the parsed failures list, across every red/error fixture", () => {
     for (const [name, exitCode] of [
       ["phpunit-fail", 1],
       ["phpunit-skip-and-fail", 1],
       ["phpunit-errors-and-failures", 2],
       ["phpunit-errors-and-skipped", 2],
+      ["phpunit-error-message-with-port", 2],
+      ["phpunit-two-failures-and-risky", 1],
     ] as const) {
       const parsed = phpunitDetector.parse({
         output: readCaptured(name),
@@ -2663,6 +2761,8 @@ describe("phpunitDetector: captured real output", () => {
     "phpunit-risky-and-real",
     "phpunit-risky-only",
     "phpunit-errors-and-skipped",
+    "phpunit-error-message-with-port",
+    "phpunit-two-failures-and-risky",
   ] as const;
 
   /** The run's own stated total: the tally line's `Tests: N`, or a green
@@ -2686,7 +2786,7 @@ describe("phpunitDetector: captured real output", () => {
     return sum;
   }
 
-  it("summary invariant across every captured phpunit fixture: the parts never exceed the stated total, and passed + failed + errors equals the executed count", () => {
+  it("summary invariant across every captured phpunit fixture: the parts exactly account for the stated total, and passed + failed + errors equals the executed count", () => {
     for (const name of PHPUNIT_FIXTURES) {
       const output = readCaptured(name);
       const parsed = phpunitDetector.parse({
@@ -2697,12 +2797,15 @@ describe("phpunitDetector: captured real output", () => {
       const total = statedTotal(output);
       const { passed, failed, errors, skipped, warnings } = parsed.summary;
       // Compared as an object carrying the fixture name, so a failure
-      // says WHICH capture broke the invariant.
+      // says WHICH capture broke the invariant. Equality, not `<=`: a
+      // mutant that silently drops part of the budget (spends it out of
+      // `remaining` without ever crediting a `summary` field) still
+      // satisfies `<=` but not `===`.
       expect({
         name,
-        withinStatedTotal:
-          passed + failed + errors + skipped + warnings <= total,
-      }).toEqual({ name, withinStatedTotal: true });
+        accountsForStatedTotal:
+          passed + failed + errors + skipped + warnings === total,
+      }).toEqual({ name, accountsForStatedTotal: true });
       expect({ name, executed: passed + failed + errors }).toEqual({
         name,
         executed: total - statedNotExecuted(output),

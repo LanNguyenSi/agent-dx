@@ -118,25 +118,26 @@ PHPUnit 9.6.36, PHPStan 2.2.13, PHP_CodeSniffer 3.13.6 (`--standard=PSR12`).
   namespace (exit `2`, `FOUND 12 ERRORS AFFECTING 5 LINES` plus one row
   per finding).
 
-### Round-2 PHP captures (task `55b0a5cc` review round 2)
+### PHPUnit tally-shape and PHPCS multi-file captures
 
 Same throwaway-`composer`-project-under-scratch-directory, same
 disposable-Docker-container, same trimming convention as the captures
 above; same tool versions (PHP 8.3.33, PHPUnit 9.6.36, PHPStan 2.2.13,
-PHP_CodeSniffer 3.13.6, `--standard=PSR12`).
+PHP_CodeSniffer 3.13.6, `--standard=PSR12`). See CHANGELOG (Unreleased)
+for the detector behaviour these captures pin.
 
 - `phpunit-skip-and-fail.txt`: `vendor/bin/phpunit --colors=never
   tests/SkipFailTest.php` against a three-test suite (one pass, one
   failing assertion, one `markTestSkipped`). Exit `1`. `FAILURES!` plus
-  `Tests: 3, Assertions: 2, Failures: 1, Skipped: 1.` -- the round-1
-  review's caught-mutant regression: the old fixed-order tally regex
-  parsed this to `failed: 0`, misread by `probe`'s zero-tests guard as
-  nothing executed.
+  `Tests: 3, Assertions: 2, Failures: 1, Skipped: 1.` -- a tally regex
+  that assumed a fixed `Failures`-then-`Skipped` order parses this to
+  `failed: 0`, misread by `probe`'s zero-tests guard as nothing
+  executed.
 - `phpunit-all-skipped.txt`: the same command against a two-test suite
   where both tests `markTestSkipped`. Exit `0`. `OK, but incomplete,
   skipped, or risky tests!` plus `Tests: 2, Assertions: 0, Skipped: 2.`
-  -- no `FAILURES!`/`ERRORS!` marker at all, the shape `probe`'s
-  zero-tests guard previously never matched.
+  -- no `FAILURES!`/`ERRORS!` marker at all, a shape `probe`'s
+  zero-tests guard must still recognize as zero tests executed.
 - `phpunit-errors-and-failures.txt`: the same command against a
   six-test suite (two pass, one failing assertion, one thrown
   exception, one skipped, one incomplete). Exit `2`. `ERRORS!` (not
@@ -147,37 +148,36 @@ PHP_CodeSniffer 3.13.6, `--standard=PSR12`).
   order-independent named-count parsing.
 - `phpunit-warnings.txt`: the same command against a test class with
   no public test methods (`No tests found in class "..."`, a genuine
-  PHPUnit-level warning, not an exception). Exit `0` -- re-run and
-  re-measured in round 3 (this file's own bytes came back identical, the
-  exit code did not: `2` as recorded here through round 2 was wrong, and
-  two tests were passing that wrong code in as an argument). A
-  PHPUnit-level warning does not fail the run under 9.6, which is why
-  `probe`'s zero-tests guard, not the exit code, is what catches this
-  shape. `WARNINGS!` plus `Tests: 1, Assertions: 0, Warnings: 1.`
+  PHPUnit-level warning, not an exception). Exit `0`, measured directly
+  against a live run (an earlier recording of this same fixture's exit
+  code as `2` was wrong). A PHPUnit-level warning does not fail the run
+  under 9.6, which is why `probe`'s zero-tests guard, not the exit
+  code, is what catches this shape. `WARNINGS!` plus `Tests: 1,
+  Assertions: 0, Warnings: 1.`
 - `phpcs-two-files.txt`: `vendor/bin/phpcs --standard=PSR12 --no-colors
   <dir>` against two files, each with the same tab-indentation and
   missing-visibility violations. Exit `2`. Two separate `FILE: ...` /
   `FOUND 8 ERRORS AFFECTING 6 LINES` blocks, one per file -- PHPCS never
-  prints one grand-total summary across files; the round-1 review's
-  caught bug undercounted a multi-file run by taking only the first
-  block.
+  prints one grand-total summary across files, so summing every block
+  (rather than reading only the first) is required to avoid
+  undercounting a multi-file run.
 - `phpcs-warnings-only.txt`: the same command against a file with two
   over-long lines (PSR12's `Generic.Files.LineLength` warns above 120
   characters, with no hard error threshold under PSR12's own
-  configuration). Exit `1` -- the round-1 review's measured PHPCS exit
-  mapping this fixture pins: `0` clean, `1` warnings only (no errors),
-  `2` errors present (fixable or not), `3` a processing error (verified
+  configuration). Exit `1` -- the measured PHPCS exit mapping this
+  fixture pins: `0` clean, `1` warnings only (no errors), `2` errors
+  present (fixable or not), `3` a processing error (verified
   separately, not captured here as a fixture: `phpcs` prints usage help
   to stderr and exits `3` when a standard names no sniffs at all, an
   operator-input error rather than a lint result).
 
-### Round-3 PHP captures (task `55b0a5cc` review round 3)
+### Risky and errors-plus-skipped captures
 
 Same throwaway-`composer`-project-under-scratch-directory, same
 disposable-Docker-container (`composer:2`, `php:8.3-cli`), same trimming
 convention as the captures above; PHP 8.3.33 (cli), PHPUnit 9.6.36. All
-three exist to pin the executed/not-executed line the round-3
-redesign draws through PHPUnit's tally categories.
+three exist to pin the executed/not-executed line drawn through
+PHPUnit's tally categories (see CHANGELOG (Unreleased)).
 
 - `phpunit-risky-and-real.txt`: `vendor/bin/phpunit --colors=never
   tests/RiskyRealTest.php` against a two-test class, one asserting, one
@@ -198,6 +198,31 @@ redesign draws through PHPUnit's tally categories.
   with no failing assertion anywhere. Exit `2`. `ERRORS!` plus `Tests:
   3, Assertions: 1, Errors: 1, Skipped: 1.` -- an `Errors:` count with
   no `Failures:` count beside it.
+
+### Entry-locator and plural-header captures
+
+Same throwaway-`composer`-project-under-scratch-directory, same
+disposable-Docker-container (`composer:2`, `php:8.3-cli`), same trimming
+convention as the captures above; PHP 8.3.33 (cli), PHPUnit 9.6.36.
+
+- `phpunit-error-message-with-port.txt`: `vendor/bin/phpunit
+  --colors=never tests/PortTest.php` against a two-test class, one
+  passing, one throwing `RuntimeException('upstream unreachable at
+  api.example.com:8080')`. Exit `2`. The entry's message ("RuntimeException:
+  upstream unreachable at api.example.com:8080") ends in `:8080` and
+  sits on the entry's own first line, not preceded by a blank line, so
+  it is never mistaken for the `file:line` locator that follows it two
+  lines later (`tests/PortTest.php:14`), which IS preceded by a blank
+  line.
+- `phpunit-two-failures-and-risky.txt`: `vendor/bin/phpunit
+  --colors=never tests/PluralTest.php` against a four-test class (two
+  failing assertions, two tests performing no assertion at all). Exit
+  `1`. `There were 2 failures:` and, after a `--` divider, `There were 2
+  risky tests:` in the same run -- pins the plural form of the
+  defect-section header (`DEFECT_SECTION_HEADER`'s `s?` is otherwise
+  only exercised by its singular forms) and that both risky entries are
+  excluded from `failures` even when a plural section precedes them.
+  `FAILURES!` plus `Tests: 4, Assertions: 2, Failures: 2, Risky: 2.`
 
 Measured in the same session, not captured as fixtures: PHPUnit's
 `--testdox` and `--teamcity` reporters both still print the run's marker

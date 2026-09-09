@@ -26,33 +26,18 @@ const FAILURES_MARKER = /^FAILURES!\s*$/m;
 const ERRORS_MARKER = /^ERRORS!\s*$/m;
 const WARNINGS_MARKER = /^WARNINGS!\s*$/m;
 /**
- * The all-skipped/incomplete/risky "still exit 0" marker (captured real:
- * an all-skipped run, an all-risky run, and a risky-plus-real run, see
- * `test/fixtures/README.md`).
- *
- * Deliberately NOT part of `matches` below. Every captured run that
- * prints this marker prints its `Tests: ...` tally on the very next
- * line, and `exec.ts` keeps the TAIL of a truncated output, so a
- * truncation that drops the tally has already dropped this marker above
- * it: as a shape signal the marker can only ever fire where `TALLY_LINE`
- * fires too (round-2 review finding: the marker's own `matches` arm was
- * dead, a mutant removing it survived). It stays live as one of the
- * entry-body terminators in `isMarkerLine` below, single-sourced here so
- * the marker text exists exactly once in this module.
- */
-const INCOMPLETE_SKIPPED_RISKY_MARKER =
-  /^OK, but incomplete, skipped, or risky tests!\s*$/m;
-/**
  * The tally line's own head (`Tests: N, Assertions: M`), always present
- * whenever any of `FAILURES!`/`ERRORS!`/`WARNINGS!`/
- * `INCOMPLETE_SKIPPED_RISKY_MARKER` is. The trailing `, Name: N` groups
+ * whenever a `FAILURES!`/`ERRORS!`/`WARNINGS!` marker or the
+ * all-skipped/incomplete/risky "still exit 0" marker (`OK, but
+ * incomplete, skipped, or risky tests!`, captured real: an all-skipped
+ * run, an all-risky run, and a risky-plus-real run, see
+ * `test/fixtures/README.md`) is. The trailing `, Name: N` groups
  * (any of `Errors`, `Failures`, `Warnings`, `Skipped`, `Incomplete`,
  * `Risky`) are captured whole here and picked apart by `NAMED_COUNT`
- * below rather than by position: round-1 review finding, PHPUnit prints
- * `Errors:` before `Failures:` when a run has both (`ERRORS!` wins the
- * marker in that case), so a tally parsed by a fixed `Failures`-then-
- * `Errors` position would either miss the shape or misread which count
- * is which.
+ * below rather than by position: PHPUnit prints `Errors:` before
+ * `Failures:` when a run has both (`ERRORS!` wins the marker in that
+ * case), so a tally parsed by a fixed `Failures`-then-`Errors` position
+ * would either miss the shape or misread which count is which.
  */
 const TALLY_LINE =
   /^Tests: (\d+), Assertions: (\d+)((?:, [A-Za-z]+: \d+)*)\.\s*$/m;
@@ -71,26 +56,26 @@ const NO_TESTS_EXECUTED = /^No tests executed!\s*$/m;
  * numbered entries: `There was 1 error:` / `There were 2 errors:` and
  * the same singular/plural pair for `failure`, `warning`, `risky test`,
  * `incomplete test`, `skipped test`. The captured fixtures exercise the
- * singular `error`, `failure`, `warning` and `risky test` forms; the
- * plural `s` is optional here so the same pattern reads a multi-defect
- * run's header, and the kind is captured (`error`, `risky test`, ...)
- * rather than assumed, since only some kinds contribute to `failures`
- * (see `COLLECTED_SECTION_KINDS`).
+ * singular `error`, `failure`, `warning` and `risky test` forms and the
+ * plural `failure`/`risky test` forms (`There were 2 failures:` / `There
+ * were 2 risky tests:` in `phpunit-two-failures-and-risky.txt`); the
+ * kind is captured (`error`, `risky test`, ...) rather than assumed,
+ * since only some kinds contribute to `failures` (see
+ * `COLLECTED_SECTION_KINDS`).
  */
 const DEFECT_SECTION_HEADER = /^There (?:was|were) \d+ (.+?)s?:\s*$/;
 /**
- * The defect kinds whose numbered entries become `failures` entries.
- * DECISION (round-3 redesign): only the error and failure sections. A
- * risky, warning, incomplete or skipped entry names a real
- * `Class::method` too (captured real: `1) RiskyRealTest::
- * testNoAssertions` in `phpunit-risky-and-real.txt`), so the entry
- * header's own grammar cannot tell them apart -- the section header
- * above them can, and it is the only thing that can. Those entries are
- * dropped rather than reported: `DetectorParseResult` has no `notes`
- * field to put them in, and `summary.skipped`/`summary.warnings` already
- * carry their counts, so dropping them keeps the result contract
- * unchanged (round-2 review finding: a risky entry was landing in
- * `failures` while this module's own docblock promised it never would).
+ * The defect kinds whose numbered entries become `failures` entries:
+ * only the error and failure sections. A risky, warning, incomplete or
+ * skipped entry names a real `Class::method` too (captured real: `1)
+ * RiskyRealTest::testNoAssertions` in `phpunit-risky-and-real.txt`, and
+ * the two risky entries of `phpunit-two-failures-and-risky.txt`), so the
+ * entry header's own grammar cannot tell them apart -- the section
+ * header above them can, and it is the only thing that can. Those
+ * entries are dropped rather than reported: `DetectorParseResult` has no
+ * `notes` field to put them in, and `summary.skipped`/`summary.warnings`
+ * already carry their counts, so dropping them keeps the result contract
+ * unchanged.
  */
 const COLLECTED_SECTION_KINDS = new Set(["error", "failure"]);
 
@@ -104,17 +89,23 @@ const ENTRY_HEADER = /^\d+\) (.+?)::(.+)$/;
 const ENTRY_START = /^\d+\) /;
 /** The `--` divider PHPUnit prints between two defect sections (captured
  * real: between the error and failure sections of
- * `phpunit-errors-and-failures.txt`). An entry-body terminator: without
- * it the divider and everything after it up to the next entry header was
- * being folded into the preceding entry's message (round-2 review
- * finding). */
+ * `phpunit-errors-and-failures.txt`, and again between the failure and
+ * risky sections of `phpunit-two-failures-and-risky.txt`). An
+ * entry-body terminator: without it the divider and everything after it
+ * up to the next entry header was being folded into the preceding
+ * entry's message. */
 const ENTRY_DIVIDER = /^--\s*$/;
 /** The `file:line` locator line PHPUnit prints under each entry's own
- * message (its own line, set off by a blank line above and below in the
- * default reporter). Captured structurally (`.+` up to the last `:`
- * followed by only digits to end of line), not `\S+`, so a path
- * containing a colon is still handled the same way any other detector
- * here treats a locator line. */
+ * message, set off by a blank line above (and below) in the default
+ * reporter -- never the entry's first line, which is always its message.
+ * Captured structurally (`.+` up to the last `:` followed by only digits
+ * to end of line), not `\S+`, so a path containing a colon is still
+ * handled the same way any other detector here treats a locator line;
+ * the blank-line precondition is what the entry loop below actually
+ * enforces (captured real: `phpunit-error-message-with-port.txt`'s
+ * first message line, "RuntimeException: upstream unreachable at
+ * api.example.com:8080", ends in `:8080` and is not preceded by a blank
+ * line, so it is never mistaken for the locator that follows it). */
 const ENTRY_FILE_LINE = /^(.+):(\d+)$/;
 /** A PHP-level deprecation notice PHPUnit lets through to its own
  * output (e.g. a dynamic-property-creation notice on PHP 8.2+, captured
@@ -144,16 +135,18 @@ const DEPRECATION_LINE = /^Deprecated: (.+)$/gm;
  * whole `Tests: 1` on its own), so treating a warning as executed reads
  * a run in which nothing at all ran as a green `passed: 1`. Erring
  * toward "inconclusive" is the fail-safe direction for both the summary
- * and `probe`'s zero-tests guard; erring toward "green" is the round-2
- * review's HIGH finding.
+ * and `probe`'s zero-tests guard; erring toward "green" would misread a
+ * warnings-only run (captured real: `phpunit-warnings.txt`) as passing.
  *
- * Round-2 review's structural finding: before this table, `executed` and
- * `passed` were derived by subtracting one named category at a time, a
- * new subtraction per newly captured shape and no invariant tying them
- * to the stated total. `deriveCounts` below now spends the stated total
- * once, category by category, so `passed + failed + errors + skipped +
- * warnings === total` holds by construction for every input, including
- * an inconsistent one.
+ * `executed` and `passed` are derived by spending the stated total once,
+ * category by category, rather than by subtracting one named category
+ * at a time (a derivation that grows a new subtraction per newly
+ * captured shape with no invariant tying the result to the stated
+ * total): `deriveCounts` below spends the total exactly once, so
+ * `passed + failed + errors + skipped + warnings === total` holds by
+ * construction for every input, including an inconsistent one (see
+ * `test/verify.test.ts`'s summary-invariant test, which pins the
+ * equality, not merely a `<=` bound).
  */
 interface TallyCategory {
   /** The `Name:` token PHPUnit prints for this category in its tally. */
@@ -306,18 +299,19 @@ function deriveCounts(output: string): DerivedCounts | undefined {
  * assertions)` (defensive -- not observed from a real capture; PHPUnit
  * 9.6.36 prints `No tests executed!` for an empty suite instead), an
  * all-skipped/all-incomplete run, and a warnings-only run (`Tests: 1,
- * Assertions: 0, Warnings: 1.`, exit `0`, captured real: round-2 review
- * finding, that shape was read as a green `passed: 1`). It deliberately
- * does NOT cover a risky run: `Tests: 1, Assertions: 0, Risky: 1.` ran
- * its test.
+ * Assertions: 0, Warnings: 1.`, exit `0`, captured real:
+ * `phpunit-warnings.txt`, a shape that reads as a green `passed: 1`
+ * under any derivation that counts a synthetic PHPUnit warning as an
+ * executed test). It deliberately does NOT cover a risky run: `Tests:
+ * 1, Assertions: 0, Risky: 1.` ran its test.
  *
  * Reused by `probe/zero-tests.ts` so its gate is never built on
- * `passed`/`failed`/`errors` alone -- round-1 review finding: a red run
- * with both a real failure and a real skip (`Tests: 3, Assertions: 2,
- * Failures: 1, Skipped: 1.`) parsed those three fields to 0 under the
- * OLD fixed-shape tally regex, which a `passed === 0 && failed === 0 &&
- * errors === 0` check misread as "nothing executed" even though the
- * suite genuinely caught something.
+ * `passed`/`failed`/`errors` alone: a red run with both a real failure
+ * and a real skip (`Tests: 3, Assertions: 2, Failures: 1, Skipped: 1.`,
+ * captured real: `phpunit-skip-and-fail.txt`) parses those three fields
+ * to 0 under a `passed === 0 && failed === 0 && errors === 0` check,
+ * which misreads it as "nothing executed" even though the suite
+ * genuinely caught something.
  */
 export function phpunitZeroTestsExecuted(output: string): boolean {
   if (NO_TESTS_EXECUTED.test(output)) return true;
@@ -325,15 +319,24 @@ export function phpunitZeroTestsExecuted(output: string): boolean {
   return counts !== undefined && counts.executed === 0;
 }
 
-/** Whether `line` is one of PHPUnit's own end-of-run marker lines. Built
+/**
+ * Whether `line` is one of PHPUnit's own end-of-run marker lines. Built
  * from the marker constants above rather than a second copy of their
- * text. */
+ * text.
+ *
+ * Does NOT check the all-skipped/incomplete/risky "still exit 0" marker
+ * (`OK, but incomplete, skipped, or risky tests!`): PHPUnit only ever
+ * prints that marker when the run has no error/failure section at all,
+ * so every real capture that carries it reaches this function (both
+ * call sites below) with `collecting` already `false` -- the check
+ * would be a no-op in both places it would run, and a mutant removing
+ * it survived the whole suite for exactly that reason.
+ */
 function isMarkerLine(line: string): boolean {
   return (
     FAILURES_MARKER.test(line) ||
     ERRORS_MARKER.test(line) ||
     WARNINGS_MARKER.test(line) ||
-    INCOMPLETE_SKIPPED_RISKY_MARKER.test(line) ||
     NO_TESTS_EXECUTED.test(line)
   );
 }
@@ -341,15 +344,31 @@ function isMarkerLine(line: string): boolean {
 /**
  * Where one numbered entry's message body ends. PHPUnit closes an entry
  * with no terminator of its own, so the body runs until the next thing
- * that cannot belong to it (all five captured real, see
- * `test/fixtures/README.md`):
+ * that cannot belong to it:
  *
  *   1. the next numbered entry header (`N) ...`, `Class::method` or the
- *      `1) Warning` shape),
- *   2. the `--` divider between two defect sections,
- *   3. the next defect-section header (`There was 1 failure:`),
- *   4. an end-of-run marker line (`ERRORS!`, `WARNINGS!`, ...),
- *   5. the tally line's head (`Tests: N, Assertions: M`).
+ *      `1) Warning` shape) -- captured real:
+ *      `phpunit-errors-and-failures.txt`'s two entries, and
+ *      `phpunit-two-failures-and-risky.txt`'s four.
+ *   2. the `--` divider between two defect sections -- captured real:
+ *      the same two fixtures' dividers between their error/failure and
+ *      failure/risky sections.
+ *   3. the next defect-section header (`There was 1 failure:`) --
+ *      defensive, no capture behind it: every real capture measured so
+ *      far prints the `--` divider ahead of a second section header too
+ *      (arm 2 above already terminates the entry in that case), so this
+ *      arm has never been observed to fire on its own; kept in case a
+ *      PHPUnit version or reporter omits the divider.
+ *   4. an end-of-run marker line (`ERRORS!`, `WARNINGS!`, `FAILURES!`,
+ *      `No tests executed!`, see `isMarkerLine`) -- captured real:
+ *      `phpunit-fail.txt`'s single entry ends at `FAILURES!` with no
+ *      divider ahead of it.
+ *   5. the tally line's head (`Tests: N, Assertions: M`) -- defensive,
+ *      no capture behind it: `exec.ts` truncates a long capture by
+ *      dropping lines off the FRONT and keeping the tail, so the tally
+ *      line, always the very last thing PHPUnit prints, is never itself
+ *      cut short in any output this package produces; kept for an
+ *      output truncated some other way.
  *
  * The scan resumes ON the terminator line rather than after it, so a
  * section header terminator still flips the collecting state.
@@ -386,6 +405,22 @@ function isEntryBodyTerminator(line: string): boolean {
  */
 export const phpunitDetector: Detector = {
   name: "phpunit",
+  /**
+   * `OK_LINE`, `TALLY_LINE` and `NO_TESTS_EXECUTED` are the only
+   * load-bearing shapes here: every captured fixture that carries a
+   * `FAILURES!`/`ERRORS!`/`WARNINGS!` marker also carries `TALLY_LINE`
+   * on the very next line, so `TALLY_LINE` alone already selects this
+   * detector for all of them (measured: replacing any one of the three
+   * marker checks below with `false` still leaves the whole suite
+   * green). They are kept anyway as redundant, cheap shape signals, not
+   * because any of them is required by a captured shape. The one marker
+   * check actually removed from here was the all-skipped/incomplete/
+   * risky "still exit 0" marker (`OK, but incomplete, skipped, or risky
+   * tests!`): unlike the three kept above, a mutant removing IT
+   * survived too, so it was dropped rather than kept as decoration (see
+   * `isMarkerLine`'s docblock for the same marker's other, still-real,
+   * removal).
+   */
   matches(input: DetectorInput): boolean {
     const output = input.output;
     return (
@@ -432,21 +467,35 @@ export const phpunitDetector: Detector = {
       let file: string | undefined;
       let entryLine: number | undefined;
       let message = "";
+      // Whether the previous non-terminator line inside this entry was
+      // blank: PHPUnit always sets its `file:line` locator off with a
+      // blank line above it, and the entry's own message never is (the
+      // message starts on the line right after the `N) Class::method`
+      // header). Without this guard a message ending in `:<digits>`
+      // (captured real: `phpunit-error-message-with-port.txt`'s
+      // "RuntimeException: upstream unreachable at api.example.com:8080")
+      // is misread as the locator on its own first line.
+      let precededByBlank = false;
       let j = i + 1;
       for (; j < lines.length; j++) {
         const line = lines[j];
         if (isEntryBodyTerminator(line)) break;
         const trimmed = line.trim();
-        if (trimmed.length === 0) continue;
-        if (file === undefined) {
+        if (trimmed.length === 0) {
+          precededByBlank = true;
+          continue;
+        }
+        if (file === undefined && precededByBlank) {
           const fileLine = ENTRY_FILE_LINE.exec(trimmed);
           if (fileLine) {
             file = fileLine[1];
             entryLine = Number(fileLine[2]);
+            precededByBlank = false;
             continue;
           }
         }
         message = message.length > 0 ? `${message} ${trimmed}` : trimmed;
+        precededByBlank = false;
       }
       // Resume ON the terminator line, so a section header or marker
       // that ended this entry is still seen by the outer scan.

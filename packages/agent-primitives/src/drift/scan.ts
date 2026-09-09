@@ -76,8 +76,8 @@ export function classifyLine(
       trimmed.startsWith("*") ||
       // `#` alone is a line comment, but `#[` starts a PHP 8 attribute
       // (`#[Test]`, `#[Route(...)]`) -- real code, never a comment.
-      // Round-1 review finding: without this exclusion, an attribute
-      // line was misclassified as a comment.
+      // Without this exclusion an attribute line is misclassified as a
+      // comment.
       (trimmed.startsWith("#") && !trimmed.startsWith("#["))
     ) {
       return "comment";

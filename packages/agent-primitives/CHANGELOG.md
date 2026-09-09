@@ -26,13 +26,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that run exits `0`), Failures, Errors and Risky did, so `executed` is
   the total less the first group and `passed` is what remains of it
   after failures and errors -- clamped, so `passed + failed + errors +
-  skipped + warnings` never exceeds the stated total and `passed` never
+  skipped + warnings` always equals the stated total and `passed` never
   goes negative, for a truncated or self-contradictory tally too. A
   numbered `N) Class::method` entry becomes a `failures` entry only
   under an error or failure section header, since a risky or incomplete
-  entry carries the same header shape; an entry's message ends at the
-  next entry, the `--` divider, the next section header, a marker line,
-  or the tally. `phpstan` (` [OK] No errors` / a per-file table
+  entry carries the same header shape (including the plural-header
+  shape, `There were 2 failures:` / `There were 2 risky tests:` in one
+  run); an entry's message ends at the next entry, the `--` divider, the
+  next section header, a marker line, or the tally; the entry's own
+  `file:line` locator is read only from a line preceded by a blank line
+  inside the entry, PHPUnit's own convention, so a message ending in
+  `:<digits>` (an address-and-port, say) on the entry's own first line
+  is never mistaken for it. `phpstan` (` [OK] No errors` / a per-file table
   closed by ` [ERROR] Found N errors`), and `phpcs` (one `FOUND N
   ERRORS ... AFFECTING M LINES` summary PER FILE, summed across every
   file rather than read from the first alone, over per-finding rows) --
@@ -63,8 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   catches it) and pointing at the `--pass-regex`/`passWhen` pass
   predicate and the composer `vendor-dir`/`bin-dir` auto-link rule
   (issue #225 parts 1 and 2, tasks `a435469b`/`6c7e1532`) without
-  restating their surface, since both are still open, unmerged siblings
-  of this task. Running PHPUnit itself is out of scope for this
+  restating their surface. Running PHPUnit itself is out of scope for this
   package's own CI: the new detectors and the zero-tests/drift
   additions are proven only against the captured fixtures.
 

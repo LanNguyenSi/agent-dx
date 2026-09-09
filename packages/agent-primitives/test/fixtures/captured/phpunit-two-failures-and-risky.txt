@@ -1,0 +1,34 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+FFRR                                                                4 / 4 (100%)
+
+Time: [elided]
+
+There were 2 failures:
+
+1) PluralTest::testFailOne
+Failed asserting that 2 is identical to 1.
+
+tests/PluralTest.php:9
+
+2) PluralTest::testFailTwo
+Failed asserting that 4 is identical to 3.
+
+tests/PluralTest.php:14
+
+--
+
+There were 2 risky tests:
+
+1) PluralTest::testRiskyOne
+This test did not perform any assertions
+
+tests/PluralTest.php:17
+
+2) PluralTest::testRiskyTwo
+This test did not perform any assertions
+
+tests/PluralTest.php:21
+
+FAILURES!
+Tests: 4, Assertions: 2, Failures: 2, Risky: 2.
