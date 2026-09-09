@@ -1755,6 +1755,155 @@ describe("cli: probe", () => {
     expect(parsed.reason).toBe("baseline_evidence_not_matched");
   });
 
+  // Fake phpunit-style runner, shared by every --pass-regex test below
+  // (GitHub issue #225): a green suite that still exits 1 over
+  // deprecation notices.
+  const RUNNER_JS = [
+    "function summary() {",
+    '  return "OK (3 tests, 5 assertions)";',
+    "}",
+    "console.log(summary());",
+    "process.exit(1);",
+    "",
+  ].join("\n");
+
+  it("--pass-regex with an unparseable regex is a usage error, exit 2", async () => {
+    const run = await spawnCli(["probe", "--pass-regex", "(", "-t", "true"]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+  });
+
+  it("--pass-regex: the fake phpunit-style runner reports baseline_failed without the flag, and killed with it", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "runner.js"), RUNNER_JS);
+    commitAll(repo);
+
+    const without = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "runner.js",
+      "-n",
+      "2",
+      "-r",
+      '  return "FAILURES!";',
+      "-t",
+      "node runner.js",
+      "-i",
+      "inplace",
+    ]);
+    expect(JSON.parse(without.stdout).status).toBe("baseline_failed");
+
+    const withRegex = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "runner.js",
+      "-n",
+      "2",
+      "-r",
+      '  return "FAILURES!";',
+      "-t",
+      "node runner.js",
+      "-i",
+      "inplace",
+      "--pass-regex",
+      "^OK \\(",
+    ]);
+    const parsedWithRegex = JSON.parse(withRegex.stdout);
+    expect(parsedWithRegex.status).toBe("killed");
+    expect(parsedWithRegex.baseline.exitCode).toBe(1);
+  });
+
+  it("--pass-regex is compiled with the m flag: a header line ahead of the summary still lets ^OK \\( match per-line, not only at the whole buffer's start", async () => {
+    const repo = initRepo();
+    // Same fake phpunit-style runner, with a version banner printed
+    // BEFORE the green summary -- real phpunit's own shape. Without the
+    // `m` flag, `^` anchors to the whole combined buffer's first
+    // character (the banner line), and `^OK \(` can never match this
+    // baseline at all.
+    const HEADER_RUNNER_JS = [
+      'console.log("PHPUnit 9.6.13 by Sebastian Bergmann and contributors.");',
+      ...RUNNER_JS.split("\n"),
+    ].join("\n");
+    fs.writeFileSync(path.join(repo, "runner.js"), HEADER_RUNNER_JS);
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "runner.js",
+      "-n",
+      "3",
+      "-r",
+      '  return "FAILURES!";',
+      "-t",
+      "node runner.js",
+      "-i",
+      "inplace",
+      "--pass-regex",
+      "^OK \\(",
+    ]);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.baseline.exitCode).toBe(1);
+    expect(parsed.status).toBe("killed");
+    expect(parsed.reason).toBeUndefined();
+  });
+
+  it("--pass-regex is allowed alongside --plan (unlike --env); plan.passWhen.regex is the plan-file equivalent, and a command-line --pass-regex wins when both are given", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "runner.js"), RUNNER_JS);
+    commitAll(repo);
+    const planPath = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        test: "node runner.js",
+        isolation: "inplace",
+        passWhen: { regex: "^OK \\(" },
+        mutants: [
+          { file: "runner.js", line: 2, replace: '  return "FAILURES!";' },
+        ],
+      }),
+    );
+
+    const viaPlanField = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+    ]);
+    expect(JSON.parse(viaPlanField.stdout).status).toBe("killed");
+
+    // A command-line --pass-regex that would NOT match wins over the
+    // plan's own matching passWhen.regex: the baseline then genuinely
+    // fails (exit 1, no match), proving the CLI value is the one used.
+    const overridden = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "--pass-regex",
+      "this text never appears",
+    ]);
+    const parsedOverridden = JSON.parse(overridden.stdout);
+    expect(parsedOverridden.status).toBe("inconclusive");
+    expect(parsedOverridden.reason).toBe("baseline_failed");
+  });
+
+  it("probe --help documents --pass-regex", async () => {
+    const run = await spawnCli(["probe", "--help"]);
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain("--pass-regex <regex>");
+  });
+
   it("--env overrides are still visible on a baseline_failed run, at the run level, even though there is no test field", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");

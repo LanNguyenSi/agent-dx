@@ -9,6 +9,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `probe --pass-regex <regex>` (plan files: `passWhen: { "regex": "<pattern>" }`,
+  documented as the same thing) is an opt-in success predicate that
+  replaces the exit code as the verdict for both the baseline and every
+  mutant run: "passed" is the regex matching that run's own combined
+  stdout+stderr, "failed" is the regex absent, whatever the exit code
+  says (task `a435469b`, GitHub issue #225). Motivated by a PHP/Drupal
+  monorepo running orchestrator-workflow 0.31.0, where phpunit 9.6
+  exits `1` on a fully green suite because of deprecation notices, so
+  every probe against it reported `baseline_failed`, and a
+  `sh -c '... | grep -q "^OK ("'` shell-out workaround fixed the
+  baseline only by losing the mutant run's own exit-code signal (a
+  crash and a genuinely failing test then looked identical). A
+  non-zero exit alongside a regex match is reported as a pass, with a
+  `warnings` entry naming the exit code; a zero exit without a match is
+  still a failure, with its own `warnings` entry naming the pattern, the
+  side (baseline or mutant), the log path, and a truncation caveat when
+  either side's captured tail was cut. The compiled pattern (both
+  `--pass-regex` and `passWhen.regex`, through one shared
+  `compilePassRegex`) always carries the `m` flag, unlike
+  `--require-baseline-evidence`'s flagless compile: `^`/`$` anchor per
+  LINE of the combined buffer, not only to its very first/last
+  character, so the README's own `^OK \(` recipe still matches a real
+  runner that prints something (a version banner) ahead of its green
+  summary line. Independent of `--require-baseline-evidence`: the two
+  may be given together, one without the other, or neither; given
+  together, the evidence gate is now genuinely checked first (a
+  same-baseline miss on both refuses `baseline_evidence_not_matched`,
+  never `baseline_failed`, matching what was always documented). The
+  generic byte-identical fallback (the zero-tests safety net for a
+  runner neither built-in detector recognizes) is NOT disabled by
+  `--pass-regex`: a custom "pass" string that itself matches on
+  byte-identical, nothing-executed output from both runs is exactly the
+  false-positive shape the fallback exists to catch, whichever predicate
+  is in charge of the verdict. A mutant run that crashes SILENTLY (no
+  output on either stream, an unusual exit code) is reported `killed`
+  the same as a genuine test failure would be (neither can match an
+  absent regex), and is distinguishable in the envelope via
+  `test.exitCode` (kept as data regardless of `--pass-regex`) together
+  with the empty `test.stdoutTail`/`test.stderrTail`, plus its own
+  `warnings` entry naming the crash; no new typed field was added for
+  this, and none is planned -- a crash that prints its own stack trace
+  before exiting (an ordinary uncaught `throw`, not a segfault) is NOT
+  distinguishable from a real test failure by this or any other
+  mechanism here (same exit-non-zero, same `killed` verdict, and
+  neither carries a miss warning), and a runner that prints its full
+  green summary before crashing in its own teardown reads as a pass,
+  same as a naive `grep` wrapper would read it -- both are inherent
+  limits of an output-only predicate, not gaps this package closes. A
+  run that reported NO exit code at all is never a pass under
+  `--pass-regex`, whatever its partial output matched: a baseline that
+  timed out, or whose own process-group LEADER (the `sh -c` wrapper each
+  command runs under) was killed, refuses
+  `inconclusive`/`baseline_failed` (never `baseline_evidence_not_matched`,
+  a finding about a pattern rather than about a run that never
+  finished), and such a mutant run reports `inconclusive`/`timeout`
+  rather than `killed`/`survived`, with the signal shape named in
+  `warnings` on both sides and no reason string added to the contract.
+  A kill the wrapper shell SURVIVES is a different, un-ruled-out shape
+  and is documented as such: an OOM killer picks the memory hog rather
+  than the group leader, and whether the shell then reports the death as
+  an ordinary exit code 128 + N depends on what runs after the killed
+  command in the `-t`/`--pre` string itself -- a trailing `; exit $?`
+  reports it that way, but a script whose last command still succeeds
+  afterward (`; echo done`) or a pipeline (`| tee log`) reports that
+  command's own exit code instead (typically `0`, no warning at all),
+  and the single bare command most values actually are is `exec`'d by
+  the wrapper in place of itself, so a kill on it reaches the
+  process-group leader and lands in the no-exit-code case above, never
+  in the 128 + N one. When the code IS reported, a green summary line
+  printed before the kill still reads as a pass, one more inherent limit
+  of an output-only predicate (nothing distinguishes `137` from a shell
+  reporting SIGKILL from `137` a runner chose itself). Both verdict
+  directions warn on it: an exit code in the 128 + N band (`129` through
+  `192`, 128 plus every signal number a POSIX system can deliver) gets a
+  `warnings` entry naming the code, the signal number it would encode
+  and that the run may have been cut short: on the pass direction in
+  place of the plain "matched despite a non-zero exit code" entry, on
+  the fail direction as an additional entry (an out-of-band non-zero
+  failing code carries no warning at all); the verdict is unchanged.
+  The mutant-run miss warning fires only for an AMBIGUOUS miss (a
+  truncated tail, an exit code of `0` disagreeing with the predicate, or
+  `--expect pass`, where a miss means the mutant
+  survived); a textbook kill under `--expect fail` carries none, so a
+  healthy plan run's `warnings` stays empty instead of collecting one
+  near-duplicate entry per killed mutant.
+  Given on both the command line and inside a `--plan` file at once, the
+  command-line value wins, the same precedence `-i`/`--expect`/
+  `--timeout` already follow against their own plan-file counterparts.
+  An unparseable pattern, in either place, is a usage error before any
+  run starts.
 - PHP support (task `55b0a5cc`, issue #225 part 3): `verify` gains three
   default detectors built from real captured tool output (see
   `test/fixtures/README.md`) -- `phpunit` (`OK (N tests, M assertions)`;
@@ -86,6 +176,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exercised on the plan path, not only the single-probe path.
 
 ### Fixed
+
+- `probe`'s handling of a run that reported no exit code of its own, on
+  the DEFAULT exit-code path and not only under `--pass-regex` (task
+  `a435469b`): a mutant run killed without this package's own
+  `--timeout` having fired (`exitCode: null`, `timedOut: false`: a kill
+  reaching the run's own process-group leader) used to be classified
+  from that `null`, which is not `0` and so certified a `killed` mutant
+  under `--expect fail` out of a run that measured nothing. It is now
+  `status: "inconclusive"`, `reason: "timeout"` with the signal named in
+  `warnings`, matching what the baseline side already refused. The
+  zero-tests guard is likewise skipped for a baseline that reported no
+  exit code at all: a cut-short tail that happens to end on a zero-count
+  summary line no longer reclassifies such a run as `no_tests_executed`
+  (which both dropped the signal warning and claimed the suite executed
+  nothing), so it stays `baseline_failed` with the signal named. And a
+  `--pre` that reported no exit code is now named as timed out, or as
+  terminated by a signal, on both the baseline and the mutant side,
+  instead of through the literal prose `--pre exited null`.
 
 - `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
   (or mutant run) that exited `0` with nothing actually executed was

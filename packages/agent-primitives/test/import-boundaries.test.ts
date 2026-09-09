@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROBE_DIR = path.join(__dirname, "..", "src", "probe");
+const SRC_DIR = path.join(__dirname, "..", "src");
 
 /** Every module specifier a file imports from, relative or bare, `type`
  * keyword included: this guard treats a type-only import exactly like a
@@ -260,5 +261,90 @@ describe("relativeModuleName", () => {
     expect(
       [...modules].filter((m) => ["step", "setup", "index"].includes(m)),
     ).toEqual(["index"]);
+  });
+});
+
+/** Every `.ts` file under `src/`, recursively, as an absolute path. */
+function allSourceFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...allSourceFiles(full));
+    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
+describe("exec.ts's combinedOutput() is the ONLY place that joins a stdout tail and a stderr tail", () => {
+  // `exec.ts`'s own docblock on `combinedOutput` claims five call sites
+  // "can never drift into independently-maintained copies of the same
+  // `${a}\n${b}` join" -- a claim only a structural guard can keep
+  // honest. Matches the literal shape (a template literal interpolating
+  // something containing "stdoutTail", then a literal newline, then an
+  // interpolation containing "stderrTail") anywhere under `src/`, so a
+  // future site that reintroduces the raw join instead of importing
+  // `combinedOutput` is caught the same way `verify/index.ts:498` was:
+  // it had drifted into exactly this raw join while `combinedOutput`'s
+  // docblock already claimed it as one of the five converted sites.
+  const RAW_JOIN_PATTERN =
+    /\$\{[^}]*stdoutTail[^}]*\}\\n\$\{[^}]*stderrTail[^}]*\}/;
+
+  it("no file outside exec.ts contains the raw `${...stdoutTail}\\n${...stderrTail}` join", () => {
+    const offenders: string[] = [];
+    for (const file of allSourceFiles(SRC_DIR)) {
+      if (path.basename(file) === "exec.ts") continue;
+      const source = fs.readFileSync(file, "utf8");
+      if (RAW_JOIN_PATTERN.test(source)) {
+        offenders.push(path.relative(SRC_DIR, file));
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("exec.ts itself still contains exactly the one raw join, inside combinedOutput()'s own definition (the pattern is not stale)", () => {
+    const execSource = fs.readFileSync(path.join(SRC_DIR, "exec.ts"), "utf8");
+    const matches = execSource.match(new RegExp(RAW_JOIN_PATTERN, "g")) ?? [];
+    expect(matches.length).toBe(1);
+  });
+});
+
+describe("exec.ts's reportedNoVerdict() and wasSignalKilled() are the ONLY place that spells out the no-verdict disjunction by hand", () => {
+  // Before these two predicates existed, every call site spelled the
+  // same disjunction out inline: `X.timedOut || X.exitCode === null`
+  // (reportedNoVerdict's shape) and `!X.timedOut && X.exitCode ===
+  // null` (wasSignalKilled's shape). `exec.ts`'s own docblock on
+  // `reportedNoVerdict` claims "all of those sites must agree on what
+  // 'no verdict' means instead of each spelling the disjunction out
+  // again" -- a claim only a structural guard can keep honest. Matches
+  // either hand-written form (any dotted-property prefix on both
+  // `timedOut` and `exitCode`) anywhere under `src/`, so a future site
+  // that reintroduces a hand-rolled copy instead of calling the shared
+  // predicate is caught rather than silently drifting alongside it.
+  // Neither form matches a call site (`reportedNoVerdict(x)`,
+  // `wasSignalKilled(x)`): those spell neither `timedOut` nor
+  // `exitCode` at all.
+  const HAND_WRITTEN_DISJUNCTION_PATTERN =
+    /(?:!\s*[\w.]*\btimedOut\b\s*&&\s*[\w.]*\bexitCode\b\s*===\s*null)|(?:[\w.]*\btimedOut\b\s*\|\|\s*[\w.]*\bexitCode\b\s*===\s*null)/;
+
+  it("no file outside exec.ts contains a hand-written copy of either form", () => {
+    const offenders: string[] = [];
+    for (const file of allSourceFiles(SRC_DIR)) {
+      if (path.basename(file) === "exec.ts") continue;
+      const source = fs.readFileSync(file, "utf8");
+      if (HAND_WRITTEN_DISJUNCTION_PATTERN.test(source)) {
+        offenders.push(path.relative(SRC_DIR, file));
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("exec.ts itself still contains exactly the two forms, one inside each predicate's own definition (the pattern is not stale)", () => {
+    const execSource = fs.readFileSync(path.join(SRC_DIR, "exec.ts"), "utf8");
+    const matches =
+      execSource.match(new RegExp(HAND_WRITTEN_DISJUNCTION_PATTERN, "g")) ?? [];
+    expect(matches.length).toBe(2);
   });
 });

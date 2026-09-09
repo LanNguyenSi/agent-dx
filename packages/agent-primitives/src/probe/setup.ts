@@ -2,6 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { sha256File } from "../hash.js";
 import {
+  combinedOutput,
+  reportedNoVerdict,
+  signalNumberFromExitCode,
+  wasSignalKilled,
+} from "../exec.js";
+import {
   acquireLock,
   markerFilePathFor,
   readMarkerFor,
@@ -238,6 +244,20 @@ export interface RunSetupInput {
    * test runner's own zero-tests evidence absent, no target rewritten
    * mid-baseline); a miss refuses `baseline_evidence_not_matched`. */
   requireBaselineEvidence?: RegExp;
+  /** Opt-in `--pass-regex <regex>` (or a plan's own `passWhen.regex`):
+   * when given, decides the BASELINE's own verdict in place of its exit
+   * code -- "passed" is the regex matching the baseline's combined
+   * stdout+stderr, "failed" is the regex absent, whatever the exit code
+   * says (so a non-zero exit alongside a match is reported as a pass,
+   * with a warning naming the exit code, and a zero exit without a
+   * match is still `baseline_failed`). Independent of
+   * `requireBaselineEvidence` above: that stays a gate on the baseline
+   * (must match, or this refuses `baseline_evidence_not_matched`,
+   * whatever this option says), never the verdict itself; both may be
+   * given together, one given without the other, or neither. Threaded
+   * onto `rt.passRegex` so `step.ts`'s classify step reads the SAME
+   * regex for every mutant run. */
+  passRegex?: RegExp;
   exitOnSignal: boolean;
   /** The run's warnings: every warning this setup produces is pushed
    * here, and a refusal carries the array as it stood when it happened. */
@@ -292,6 +312,28 @@ export interface RunSetupInput {
 
 export type RunSetupOutcome =
   { ok: true; run: OpenedRun } | { ok: false; refusal: RunSetupRefusal };
+
+/**
+ * The `(the baseline's captured ... tail was truncated; the pattern may
+ * have matched output outside the captured tail)` suffix (or `""` when
+ * neither side was truncated) every baseline-stage warning that names a
+ * pattern miss appends -- `--require-baseline-evidence`'s own miss and
+ * a `--pass-regex` miss alike -- so the caveat is worded identically
+ * wherever it fires rather than maintained as separate copies that
+ * could drift apart.
+ */
+function truncationNote(
+  stdoutTruncated: boolean,
+  stderrTruncated: boolean,
+): string {
+  const truncatedSides = [
+    stdoutTruncated ? "stdout" : undefined,
+    stderrTruncated ? "stderr" : undefined,
+  ].filter((side): side is string => side !== undefined);
+  return truncatedSides.length > 0
+    ? ` (the baseline's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
+    : "";
+}
 
 /**
  * The setup both entry points run before their first mutant: isolation
@@ -574,6 +616,7 @@ export async function openRunSetup(
     effectiveIsolation,
     testCommand: input.testCommand,
     preCommand: input.preCommand,
+    ...(input.passRegex !== undefined ? { passRegex: input.passRegex } : {}),
     signal: controller.execController.signal,
     track: controller.track,
     crashHandlers,
@@ -695,12 +738,24 @@ export async function openRunSetup(
       await deferToHandlerIfActive(crashHandlers, exitOnSignal);
     }
     discardOpened();
+    // A `--pre` that never reported an exit code of its own is named as
+    // such: the plain form would read `--pre exited null`, as if `null`
+    // were a status the command itself chose. The same two shapes the
+    // baseline's own no-verdict handling below separates reach here too
+    // -- this package's `--timeout`, and a kill from outside it -- and
+    // are named apart, since `--pre` has no `timedOut` field of its own
+    // in the envelope for a reader to tell them apart by.
+    const preMessage = preAborted
+      ? `--pre was aborted during the baseline run; see ${baselineRun.pre.logPath}`
+      : baselineRun.pre.exitCode === null
+        ? baselineRun.pre.timedOut
+          ? `--pre timed out during the baseline run, no exit code was reported; see ${baselineRun.pre.logPath}`
+          : `--pre was terminated by a signal during the baseline run, no exit code was reported; see ${baselineRun.pre.logPath}`
+        : `--pre exited ${baselineRun.pre.exitCode} during the baseline run; see ${baselineRun.pre.logPath}`;
     return refuse(
       "inconclusive",
       preAborted ? "aborted" : "pre_failed",
-      preAborted
-        ? `--pre was aborted during the baseline run; see ${baselineRun.pre.logPath}`
-        : `--pre exited ${baselineRun.pre.exitCode} during the baseline run; see ${baselineRun.pre.logPath}`,
+      preMessage,
       { logPaths: [...stepLogPaths, baselineRun.pre.logPath] },
     );
   }
@@ -748,10 +803,16 @@ export async function openRunSetup(
   // below, on both an exit-0 and a non-zero baseline (vitest exits 1 on
   // "No test files found" but 0 on an all-skipped/`-t`-matched-nothing
   // run; a caller cannot tell the two apart from the exit code alone).
-  // Skipped for an aborted or timed-out baseline: neither learned
-  // anything real about the suite, so neither should be reclassified by
-  // what happens to be in a truncated/killed run's own tail.
-  if (!baselineTest.aborted && !baselineTest.timedOut) {
+  // Skipped for an aborted baseline and for one that reported no
+  // verdict of its own at all (`reportedNoVerdict`: this package's own
+  // `--timeout`, or a kill from outside it): none of the three learned
+  // anything real about the suite, so none may be reclassified by what
+  // happens to sit in a truncated, cut-short tail -- a signal-killed
+  // baseline whose cut tail happens to end on a zero-count summary line
+  // is a baseline that never finished, reported as such, not one whose
+  // suite "executed nothing". The same guard the evidence gate below
+  // carries, for the same reason.
+  if (!baselineTest.aborted && !reportedNoVerdict(baselineTest)) {
     const zeroTestsEvidence = detectKnownZeroTestsEvidence(
       baselineOutput.stdoutTail,
       baselineOutput.stderrTail,
@@ -768,7 +829,44 @@ export async function openRunSetup(
     }
   }
 
-  if (baselineTest.exitCode !== 0 || baselineTest.aborted) {
+  // `--pass-regex`/`passWhen.regex`: once given, it is the baseline's
+  // verdict in place of its exit code -- "passed" is the regex matching
+  // the baseline's own combined stdout+stderr, "failed" is the regex
+  // absent, whatever the exit code says. Checked only on a baseline that
+  // was not aborted: an aborted run answered nothing about the test, so
+  // its own (non-)output must never be read as a pass or a fail either.
+  const baselineCombinedOutput = combinedOutput(
+    baselineOutput.stdoutTail,
+    baselineOutput.stderrTail,
+  );
+  const baselinePassRegexMatched =
+    input.passRegex !== undefined &&
+    input.passRegex.test(baselineCombinedOutput);
+  // A baseline that never reported an exit code of its own is a failed
+  // baseline regardless of what its (necessarily incomplete) output
+  // looks like. Two shapes reach that state, both carried by
+  // `reportedNoVerdict` (`exec.ts`): this package's own `--timeout`
+  // killed the run (`timedOut: true`), or a kill from outside this
+  // probe reached the run's own process-group leader, which `exec.ts`
+  // reports as `exitCode: null` with `timedOut: false`. The old
+  // `exitCode !== 0` form carried BOTH implicitly, since a killed
+  // child's `exitCode` is `null`, itself `!== 0`. `--pass-regex`
+  // replaces that whole right-hand side with a text match that has no
+  // such fallback -- a runner that prints a matching line and is then
+  // killed (or hangs before ever reaching its own teardown) matches the
+  // pattern despite having produced no real verdict at all -- so the
+  // no-verdict shapes must be their OWN disjunct here, rather than
+  // folded into the pass-regex/exit-code branch that no longer carries
+  // them. Their order against the predicate disjunct is not
+  // load-bearing; that both are present is.
+  const baselineFailed =
+    !baselineTest.aborted &&
+    (reportedNoVerdict(baselineTest) ||
+      (input.passRegex !== undefined
+        ? !baselinePassRegexMatched
+        : baselineTest.exitCode !== 0));
+
+  if (baselineFailed || baselineTest.aborted) {
     if (baselineTest.aborted) {
       // If the handler is active it may already have restored a target
       // (a no-op copy of still-original content, since nothing has
@@ -776,7 +874,93 @@ export async function openRunSetup(
       // below, so the re-hash reads settled content.
       await deferToHandlerIfActive(crashHandlers, exitOnSignal);
     }
+
+    // The evidence gate is checked ahead of the pass-regex verdict (see
+    // the README's `--pass-regex`/`--require-baseline-evidence`
+    // interaction paragraph): when this baseline would otherwise refuse
+    // `baseline_failed` because `--pass-regex` did not match, a
+    // `--require-baseline-evidence` miss on the same (non-aborted)
+    // baseline is the more informative reason -- nothing proves tests
+    // ran at all -- so it wins over the pass-regex miss instead of
+    // being masked by it. Scoped to a baseline that reported an exit
+    // code of its own: a run that timed out or was killed by a signal
+    // failed for a reason its own truncated, cut-short tail cannot
+    // explain, so reclassifying it by what that tail happens to
+    // contain would report `baseline_evidence_not_matched` for a
+    // baseline whose real finding is that it never finished -- it
+    // stays `baseline_failed`.
+    if (
+      !baselineTest.aborted &&
+      !reportedNoVerdict(baselineTest) &&
+      input.passRegex !== undefined &&
+      input.requireBaselineEvidence !== undefined &&
+      !input.requireBaselineEvidence.test(baselineCombinedOutput)
+    ) {
+      await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
+      warnings.push(
+        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
+      );
+      return refuse(
+        "inconclusive",
+        "baseline_evidence_not_matched",
+        undefined,
+        { logPaths: stepLogPaths, baseline },
+      );
+    }
+
     await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
+    // A baseline killed by a signal without ever reporting an exit code
+    // of its own (a `kill` reaching the run's process-group leader, an
+    // OOM killer picking that leader, a CI cancel): named explicitly,
+    // because `baseline_failed` alone reads as "the suite ran and was
+    // red", and because `baseline.exitCode` is `null` there -- a value
+    // no "exited non-zero" prose can honestly describe. A timeout is
+    // excluded (`wasSignalKilled`, not `reportedNoVerdict`): this
+    // package's own `--timeout` already reports itself through
+    // `baseline.timedOut`.
+    if (!baselineTest.aborted && wasSignalKilled(baselineTest)) {
+      warnings.push(
+        `the baseline run was terminated by a signal, no exit code was reported; nothing about the suite was measured; see ${baselineTest.logPath}`,
+      );
+    }
+    // The 128 + N band, on the FAIL direction: a kill that lands on the
+    // test process while its `sh -c` wrapper SURVIVES arrives as an
+    // ordinary non-zero exit code, distinct from the no-verdict shape
+    // `wasSignalKilled` just above catches. Scoped to a baseline that
+    // reported a real exit code of its own (`reportedNoVerdict`
+    // excludes it otherwise, and that shape already got its own warning
+    // above), and fires whether the plain exit-code default or a
+    // `--pass-regex` miss is what made this baseline fail: either way
+    // the `baseline_failed` verdict may rest on a run that was cut
+    // short, the same thing the PASS direction, further down, already
+    // warns about for a baseline that matched despite a band exit code.
+    const baselineFailSignalCode =
+      !baselineTest.aborted && !reportedNoVerdict(baselineTest)
+        ? signalNumberFromExitCode(baselineTest.exitCode)
+        : undefined;
+    if (baselineFailSignalCode !== undefined) {
+      warnings.push(
+        `the baseline run exited with ${String(baselineTest.exitCode)}, the code a shell reports for a process killed by signal ${String(baselineFailSignalCode)}; the baseline_failed verdict may rest on a run that was cut short; see ${baselineTest.logPath}`,
+      );
+    }
+    // A `--pass-regex` miss (reached here means the baseline is not
+    // aborted, so this fires only when `baselineFailed` is true BECAUSE
+    // the pattern did not match, never merely because the baseline timed
+    // out or was killed by a signal despite a match --
+    // `!baselinePassRegexMatched` excludes those cases explicitly):
+    // named explicitly, the same as a `--require-baseline-evidence`
+    // miss is, so a caller reading `warnings` sees which pattern was
+    // checked and against what, rather than only the bare
+    // `baseline_failed` reason.
+    if (
+      !baselineTest.aborted &&
+      input.passRegex !== undefined &&
+      !baselinePassRegexMatched
+    ) {
+      warnings.push(
+        `--pass-regex (${input.passRegex.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
+      );
+    }
     // An aborted baseline is not a red baseline: nothing about the test
     // was learned, the run was stopped. Reported apart from a baseline
     // that genuinely failed, so a caller cannot read a cancelled run as
@@ -791,6 +975,39 @@ export async function openRunSetup(
       baselineTest.aborted ? "aborted" : "baseline_failed",
       undefined,
       { logPaths: stepLogPaths, baseline },
+    );
+  }
+
+  // A baseline the regex passed despite a non-zero exit code: named
+  // explicitly (deprecation-notice noise -- phpunit 9.6 on a green suite,
+  // the motivating case -- is the expected shape here), so a reader of
+  // `warnings` sees why a red exit code was still treated as a pass.
+  // `baselineTest.exitCode` is a real number by the time this line runs:
+  // an aborted, a timed-out, and a signal-killed baseline all returned
+  // above (the first two and the `reportedNoVerdict` disjunct of
+  // `baselineFailed`), so this warning can never frame a `null` -- a
+  // process that never reported an exit code at all, neither zero nor
+  // non-zero -- as "a non-zero exit code (null)"; that case gets the
+  // signal warning above and the `baseline_failed` refusal instead.
+  //
+  // One band of those real numbers gets its own wording: 128 + N, what a
+  // shell reports for a child killed by signal N. A kill that lands on
+  // the test process while the `sh -c` wrapper around it SURVIVES (the
+  // OOM killer picking the memory hog rather than the group leader is
+  // the everyday shape) never reaches the no-verdict handling above --
+  // the wrapper exits normally, with a perfectly ordinary non-zero code
+  // -- so a matching partial output printed before the kill still reads
+  // as a pass here. The verdict is not second-guessed (nothing in this
+  // package can tell that code apart from a runner exiting `137` of its
+  // own accord, and `--pass-regex` means "ignore the exit code" by
+  // construction), but a reader is told, since "the suite may have been
+  // cut short" is a different thing to check than deprecation noise.
+  const baselineSignalCode = signalNumberFromExitCode(baselineTest.exitCode);
+  if (input.passRegex !== undefined && baselineTest.exitCode !== 0) {
+    warnings.push(
+      baselineSignalCode !== undefined
+        ? `--pass-regex (${input.passRegex.source}) matched the baseline output but the baseline run exited with ${String(baselineTest.exitCode)}, the code a shell reports for a process killed by signal ${String(baselineSignalCode)}; the suite may have been cut short; see ${baselineTest.logPath}`
+        : `--pass-regex (${input.passRegex.source}) matched the baseline output despite a non-zero exit code (${String(baselineTest.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${baselineTest.logPath}`,
     );
   }
 
@@ -823,8 +1040,7 @@ export async function openRunSetup(
   // match `--require-baseline-evidence` before this run may go on to
   // apply a mutant, whatever the exit code said.
   if (input.requireBaselineEvidence !== undefined) {
-    const combined = `${baselineOutput.stdoutTail}\n${baselineOutput.stderrTail}`;
-    if (!input.requireBaselineEvidence.test(combined)) {
+    if (!input.requireBaselineEvidence.test(baselineCombinedOutput)) {
       discardOpened();
       // Both this check and the zero-tests detectors above only ever see
       // the CAPTURED tail (`exec.ts`'s `TAIL_LINES`/`TAIL_CHARS` bound),
@@ -832,16 +1048,8 @@ export async function openRunSetup(
       // output now scrolled out of the tail reads as a plain miss unless
       // the warning says so, so a caller does not chase a pattern fix
       // for output truncation instead.
-      const truncatedSides = [
-        baselineTest.stdoutTruncated ? "stdout" : undefined,
-        baselineTest.stderrTruncated ? "stderr" : undefined,
-      ].filter((side): side is string => side !== undefined);
-      const truncatedNote =
-        truncatedSides.length > 0
-          ? ` (the baseline's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
-          : "";
       warnings.push(
-        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncatedNote}; see ${baselineTest.logPath}`,
+        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
       );
       return refuse(
         "inconclusive",

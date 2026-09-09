@@ -3,6 +3,7 @@ import {
   phpunitDetector,
   phpunitZeroTestsExecuted,
 } from "../verify/detectors/phpunit.js";
+import { combinedOutput } from "../exec.js";
 
 /**
  * Detects when a test command's own output shows that no test actually
@@ -41,10 +42,6 @@ export interface ZeroTestsEvidence {
   via?: ZeroTestsDetectorName;
 }
 
-function combinedOutput(stdoutTail: string, stderrTail: string): string {
-  return `${stdoutTail}\n${stderrTail}`;
-}
-
 /**
  * Node's built-in test runner (`node --test`) summary line, in either of
  * its two default shapes: the "spec" reporter's `ℹ tests <n>` (the
@@ -79,10 +76,6 @@ export function detectKnownZeroTestsEvidence(
     }
     return { detected: false };
   }
-  // The PHPUnit branch is kept as its own block, separate from the
-  // `combinedOutput` helper above: T-003 (merging separately) hoists an
-  // equivalent helper out of this file into `exec.ts`, and this block
-  // must not be entangled with that move.
   if (phpunitDetector.matches(input)) {
     // Built on PHPUnit's own STATED total (via `phpunitZeroTestsExecuted`),
     // never on `passed`/`failed`/`errors` alone: those three parse to `0`
