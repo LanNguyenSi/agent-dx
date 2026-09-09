@@ -83,15 +83,190 @@ function pathSpellings(p: string): string[] {
 }
 
 /**
- * Every spelling of `root` (see `pathSpellings`) that occurs in `text`
- * as a literal substring, after first removing every occurrence of
- * `scratchRoot`'s own spellings from `text` (when `scratchRoot` is
- * given) -- so a `--log-dir` pointed inside the repository (the one
- * case an absolute path under `root` legitimately names the isolation
- * copy itself, at `<scratchRoot>/wt-<uuid>/wt`) does not read as an
- * escape. Returns every root spelling that matched (usually one; more
- * than one only when `text` happens to spell the path two different
- * ways), empty when `root` does not occur in `text` at all.
+ * Characters that cannot continue a path component in a scanned
+ * command string, so a path that ends right before one of them is
+ * finished: whitespace, either quote, and the shell separators that
+ * can follow a path without a space (`;`, `&`, `|`, `)`, `,`).
+ * `\u0000` is in the set for the scratch-root blanking in
+ * `escapingRootMentions` below, which overwrites a stripped mention
+ * with a NUL run of the same length rather than deleting it (so every
+ * index still lines up with the original text).
+ */
+const PATH_REGION_TERMINATORS = new Set([
+  " ",
+  "\t",
+  "\n",
+  "\r",
+  "\v",
+  "\f",
+  '"',
+  "'",
+  ";",
+  "&",
+  "|",
+  ")",
+  ",",
+  "\u0000",
+]);
+
+/**
+ * True when the character at `index` ends the path spelled just before
+ * it: the end of the text, a `/` (the same directory, named with a
+ * deeper component after it), or a character that cannot continue a
+ * path component at all. A spelling NOT followed by one of these is
+ * the prefix of a DIFFERENT path that merely starts with the same
+ * characters -- a sibling `<root>2`, or `<root>-backup` -- and naming
+ * one of those is not an escape into `root`.
+ */
+function isPathBoundaryAt(text: string, index: number): boolean {
+  if (index >= text.length) return true;
+  const ch = text[index];
+  return ch === "/" || PATH_REGION_TERMINATORS.has(ch);
+}
+
+/**
+ * The end index of the path that starts before `start` and continues
+ * from it: everything up to the first terminator, treating a
+ * backslash and the character after it as one escaped unit (so the
+ * `\ ` inside a space-escaped path does not read as the end of the
+ * path). Used to report the ACTUAL region matched (the root spelling
+ * plus the path text that follows it, e.g. `<root>/pkg`) instead of
+ * only the bare root, which reads as if the command had named the
+ * root itself.
+ */
+function pathRegionEnd(text: string, start: number): number {
+  let i = start;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "\\" && i + 1 < text.length) {
+      i += 2;
+      continue;
+    }
+    if (PATH_REGION_TERMINATORS.has(ch)) break;
+    i++;
+  }
+  return i;
+}
+
+/**
+ * `s` with every character that has a single-character lowercase form
+ * replaced by it, and every other character kept as it is. Unlike a
+ * plain `toLowerCase()` this is LENGTH-PRESERVING (a few code points,
+ * e.g. `U+0130`, lowercase into two characters), which every index in
+ * the scan below depends on: the match is found in the folded text and
+ * then sliced out of the ORIGINAL text, so the caller sees the
+ * spelling the command actually used.
+ */
+function foldCase(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    const lower = ch.toLowerCase();
+    out += lower.length === ch.length ? lower : ch;
+  }
+  return out;
+}
+
+/** `s` with the case of every letter flipped, used to probe the
+ * filesystem below; characters with no other case are kept. */
+function swapCase(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    const lower = ch.toLowerCase();
+    const upper = ch.toUpperCase();
+    if (ch !== upper && upper.length === ch.length) out += upper;
+    else if (ch !== lower && lower.length === ch.length) out += lower;
+    else out += ch;
+  }
+  return out;
+}
+
+const caseInsensitiveByDir = new Map<string, boolean>();
+
+/**
+ * True when `dir` can be reached through a differently-cased spelling
+ * of its own path, measured rather than assumed: `dir` is stat'ed
+ * again under the case-flipped spelling of its whole absolute path and
+ * the two are compared by device and inode. macOS's default APFS
+ * volume and Windows answer true here; a case-sensitive volume answers
+ * false because the flipped spelling does not resolve at all (ENOENT),
+ * and so does a path with no letter to flip and any other stat error
+ * -- false meaning "match exactly", the conservative answer, which
+ * never reports a mention the exact rule would not report anyway.
+ * Memoized per resolved directory: the answer is a property of the
+ * volume `dir` sits on, and the scan below asks once per channel.
+ */
+export function isCaseInsensitiveFilesystem(dir: string): boolean {
+  const key = path.resolve(dir);
+  const cached = caseInsensitiveByDir.get(key);
+  if (cached !== undefined) return cached;
+  let insensitive = false;
+  try {
+    const swapped = swapCase(key);
+    if (swapped !== key) {
+      const own = fs.statSync(key);
+      const other = fs.statSync(swapped);
+      insensitive = own.dev === other.dev && own.ino === other.ino;
+    }
+  } catch {
+    insensitive = false;
+  }
+  caseInsensitiveByDir.set(key, insensitive);
+  return insensitive;
+}
+
+/**
+ * Whether `scratchRoot`'s spellings may be stripped from the scanned
+ * text before `root` is looked for: only when the scratch root is a
+ * PROPER descendant of the root, compared on both sides' realpaths the
+ * way every other consumer of `isPathContained` compares.
+ *
+ * `isPathContained` alone is not the test, because it also answers
+ * true for the root ITSELF (`path.relative` returns `""`): a
+ * `--log-dir` pointed AT the repository root (or above it, which
+ * `isPathContained` does reject) would then blank every mention of the
+ * root out of the text and pass a command that escapes as plainly as
+ * `cd '<root>/pkg' && node t.js` (round 3's own defect, reproduced 3/3
+ * by that round's review). The exemption exists for the isolation copy
+ * at `<log-dir>/wt-<uuid>/wt`; with `--log-dir` AT the root the
+ * exemption would have to swallow the root itself, so it is not
+ * granted at all and such a mention is refused, with the same two
+ * remedies the message already names.
+ */
+function stripsScratchRoot(root: string, scratchRoot: string): boolean {
+  const realRoot = resolveDeepestExisting(path.resolve(root));
+  const realScratch = resolveDeepestExisting(path.resolve(scratchRoot));
+  return realScratch !== realRoot && isPathContained(realRoot, realScratch);
+}
+
+/**
+ * Every mention of `root` in `text`: each region of `text` that starts
+ * with one of `root`'s spellings (see `pathSpellings`), ends at a path
+ * boundary, and does not resolve under `scratchRoot` instead. The
+ * returned strings are the matched REGIONS as the text spells them
+ * (the root spelling plus any deeper path text after it, e.g.
+ * `<root>/pkg`), deduplicated, empty when `root` is not mentioned at
+ * all.
+ *
+ * Three things narrow the plain substring test:
+ *
+ * - a match must be followed by a path boundary (`isPathBoundaryAt`),
+ *   so a sibling `<root>2` is NOT a mention of `root`;
+ * - on a case-insensitive filesystem (measured, see
+ *   `isCaseInsensitiveFilesystem`; `caseInsensitive` overrides the
+ *   measurement, for tests) both sides are case-folded, so a miscased
+ *   but literal spelling that the filesystem resolves to the same
+ *   directory is matched too; on a case-sensitive filesystem the match
+ *   stays exact, since a miscased spelling there names a different
+ *   path;
+ * - every occurrence of `scratchRoot`'s own spellings is blanked out
+ *   of the scanned text first, but ONLY when the scratch root is a
+ *   proper descendant of `root` (`stripsScratchRoot`) and only where
+ *   the occurrence itself ends at a path boundary -- so a `--log-dir`
+ *   pointed inside the repository (the one case an absolute path under
+ *   `root` legitimately names the isolation copy itself, at
+ *   `<scratchRoot>/wt-<uuid>/wt`) does not read as an escape, while
+ *   `<scratchRoot>rc/x.js`, an unrelated path that merely starts with
+ *   those characters, is left in the text and still reported.
  *
  * `setup.ts` refuses `-i worktree`'s test command, `--pre`, and the
  * VALUE half of every `--env NAME=VALUE` against this: a SUBSTRING
@@ -119,7 +294,9 @@ function pathSpellings(p: string): string[] {
  * variants, are recognized here -- a third, unrelated symlink pointing
  * at the same target is invisible to a substring scan, unlike round
  * 1/2's per-token realpath resolution, which this rule deliberately
- * drops along with the tokenizer it belonged to); and a repository
+ * drops along with the tokenizer it belonged to); a path the shell
+ * expands into the root only at run time, `~` expansion included
+ * (`cd ~/git/repo && ...` never spells the root out); and a repository
  * root containing a character neither spelling represents (e.g. a
  * literal quote inside the path).
  */
@@ -127,14 +304,55 @@ export function escapingRootMentions(
   text: string,
   root: string,
   scratchRoot?: string,
+  caseInsensitive?: boolean,
 ): string[] {
-  let scanned = text;
-  if (scratchRoot !== undefined) {
+  const folds =
+    caseInsensitive ?? isCaseInsensitiveFilesystem(path.resolve(root));
+  const fold = (s: string): string => (folds ? foldCase(s) : s);
+
+  // The scan runs over the FOLDED text and every index is used to slice
+  // the original `text`, which only works because `foldCase` and the
+  // blanking below both preserve length exactly.
+  let scanned = fold(text);
+  if (scratchRoot !== undefined && stripsScratchRoot(root, scratchRoot)) {
     for (const spelling of pathSpellings(scratchRoot)) {
-      scanned = scanned.split(spelling).join("");
+      const needle = fold(spelling);
+      if (needle.length === 0) continue;
+      let from = 0;
+      while (true) {
+        const at = scanned.indexOf(needle, from);
+        if (at === -1) break;
+        const end = at + needle.length;
+        if (isPathBoundaryAt(scanned, end)) {
+          scanned =
+            scanned.slice(0, at) +
+            "\u0000".repeat(needle.length) +
+            scanned.slice(end);
+        }
+        from = end;
+      }
     }
   }
-  return pathSpellings(root).filter((spelling) => scanned.includes(spelling));
+
+  const regions: string[] = [];
+  const seen = new Set<string>();
+  for (const spelling of pathSpellings(root)) {
+    const needle = fold(spelling);
+    if (needle.length === 0) continue;
+    let from = 0;
+    while (true) {
+      const at = scanned.indexOf(needle, from);
+      if (at === -1) break;
+      const end = at + needle.length;
+      from = end;
+      if (!isPathBoundaryAt(scanned, end)) continue;
+      const region = text.slice(at, pathRegionEnd(text, end));
+      if (seen.has(region)) continue;
+      seen.add(region);
+      regions.push(region);
+    }
+  }
+  return regions;
 }
 
 /**
@@ -151,13 +369,14 @@ export const ISOLATION_ESCAPE_CHANNEL_LABEL = {
 } as const;
 
 /**
- * The fixed remedy text of the `test_command_escapes_isolation` refusal
- * message, appended after the offending channel(s) and matched
- * spelling(s): the two fixes (a relative invocation, or
- * `--isolation inplace`) and the runner-binary clause naming `--link`.
- * Exported so its own load-bearing fragments (`--isolation inplace`,
- * `--link`) can be pinned directly, rather than only indirectly through
- * a probe scenario that happens to trigger this message.
+ * The remedy text of the `test_command_escapes_isolation` refusal
+ * message for the two COMMAND channels (`-t` and `--pre`), appended
+ * after the offending channel(s) and matched region(s): the two fixes
+ * (a relative invocation, or `--isolation inplace`) and the
+ * runner-binary clause naming `--link`. Exported so its own
+ * load-bearing fragments (`--isolation inplace`, `--link`) can be
+ * pinned directly, rather than only indirectly through a probe
+ * scenario that happens to trigger this message.
  */
 export const ISOLATION_ESCAPE_FIX_HINT =
   "Run the command as a relative command from the package directory " +
@@ -165,3 +384,22 @@ export const ISOLATION_ESCAPE_FIX_HINT =
   "--isolation inplace. An absolute path to a runner binary under the " +
   "root is refused for the same reason; name it relatively, or pass " +
   "its directory to --link so the copy carries it too.";
+
+/**
+ * The remedy text for an `--env NAME=VALUE` match, which the command
+ * hint above does not fit: an env VALUE is not a command, so "run the
+ * command as a relative command" names nothing the caller can do to
+ * it, and `--link` is about a runner binary the value need not be.
+ * A legitimate directory under the repository root (a cache or output
+ * directory, `--env CACHE_DIR=<root>/.cache`) is refused by the same
+ * rule, since the tool cannot tell it apart from a path that pulls the
+ * run back into the real tree; both share the same two remedies, so
+ * they are named here rather than left to the reader.
+ */
+export const ISOLATION_ESCAPE_ENV_FIX_HINT =
+  "Pass the value as a path relative to the package directory (both " +
+  "--pre and the test command run with the isolation copy's package " +
+  "directory as their cwd, so a relative value resolves inside the " +
+  "copy), or pass --isolation inplace. A cache or output directory " +
+  "under the root (--env CACHE_DIR=<root>/.cache) is refused by the " +
+  "same rule and takes the same two fixes.";

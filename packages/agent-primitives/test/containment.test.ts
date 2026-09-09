@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
 import {
   escapingRootMentions,
+  isCaseInsensitiveFilesystem,
   isPathContained,
   resolveDeepestExisting,
 } from "../src/probe/containment.js";
@@ -38,13 +39,31 @@ afterEach(() => {
 });
 
 describe("escapingRootMentions()", () => {
-  it("a plain absolute path under the root is reported as escaping", () => {
+  it("a plain absolute path under the root is reported as escaping, as the region actually matched", () => {
     const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
     const inside = path.join(root, "backend");
     fs.mkdirSync(inside);
+    // The reported string is the whole path the command names, not the
+    // bare root: a message saying only `<root>` reads as if the command
+    // had named the root itself (round-3 review, MEDIUM).
     expect(
       escapingRootMentions(`cd ${inside} && npx vitest run`, root),
-    ).toEqual([root]);
+    ).toEqual([inside]);
+  });
+
+  it("the reported region stops at the end of the path, not at the end of the command", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    expect(escapingRootMentions(`cd ${root}/a/b.js;node t.js`, root)).toEqual([
+      `${root}/a/b.js`,
+    ]);
+    expect(
+      escapingRootMentions(`node --prefix="${root}/a" t.js`, root),
+    ).toEqual([`${root}/a`]);
+    // A backslash-escaped space belongs to the path, so the region does
+    // not stop at it.
+    expect(escapingRootMentions(`cd ${root}/a\\ b && node t.js`, root)).toEqual(
+      [`${root}/a\\ b`],
+    );
   });
 
   it("a single- or double-quoted absolute path containing whitespace is reported", () => {
@@ -135,7 +154,7 @@ describe("escapingRootMentions()", () => {
 
     // Without a scratchRoot, this reads as an escape (it contains root).
     expect(escapingRootMentions(`cd ${copy} && node t.js`, root)).toEqual([
-      root,
+      copy,
     ]);
     // The scratchRoot exemption (the --log-dir-inside-the-repo case)
     // excludes it: this IS the isolation copy, not an escape.
@@ -147,7 +166,115 @@ describe("escapingRootMentions()", () => {
     fs.mkdirSync(other);
     expect(
       escapingRootMentions(`cd ${other} && node t.js`, root, scratchRoot),
+    ).toEqual([other]);
+  });
+
+  // --- Round 4: the exemption's own boundary, the case rule, and the
+  // path boundary after a match (round-3 review: two HIGHs and a
+  // MEDIUM, each reproduced 3/3). ---
+
+  it("does NOT strip when the scratchRoot IS the root itself: the exemption would otherwise erase every mention", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const inside = path.join(root, "pkg");
+    fs.mkdirSync(inside);
+    // `--log-dir <root>`: `isPathContained(root, root)` is true, so a
+    // containment test alone would strip the root's own spelling out of
+    // the text and pass this escape (the round-3 defect).
+    expect(
+      escapingRootMentions(`cd '${inside}' && node t.js`, root, root),
+    ).toEqual([inside]);
+  });
+
+  it("does NOT strip when the scratchRoot is an ANCESTOR of the root", () => {
+    const parent = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const root = path.join(parent, "repo");
+    fs.mkdirSync(root);
+    const inside = path.join(root, "pkg");
+    fs.mkdirSync(inside);
+    expect(
+      escapingRootMentions(`cd '${inside}' && node t.js`, root, parent),
+    ).toEqual([inside]);
+  });
+
+  it("strips the scratchRoot only at a path boundary: a real path that merely starts with its spelling survives the strip", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "logs");
+    fs.mkdirSync(scratchRoot);
+    const sibling = path.join(root, "logsrc", "x.js");
+    fs.mkdirSync(path.dirname(sibling), { recursive: true });
+    // `<root>/logsrc/x.js` starts with `<root>/logs` as a string but is
+    // NOT under it; a plain string removal would erase the prefix and
+    // hide the escape.
+    expect(escapingRootMentions(`node ${sibling}`, root, scratchRoot)).toEqual([
+      sibling,
+    ]);
+    // The genuine copy path under the scratch root is still exempt.
+    const copy = path.join(scratchRoot, "wt-1", "wt");
+    expect(
+      escapingRootMentions(`cd ${copy} && node t.js`, root, scratchRoot),
+    ).toEqual([]);
+  });
+
+  it("a sibling directory whose name merely starts with the root is not a mention of the root", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    expect(escapingRootMentions(`ls '${root}2'; node t.js`, root)).toEqual([]);
+    expect(escapingRootMentions(`ls ${root}-backup; node t.js`, root)).toEqual(
+      [],
+    );
+    // The same command naming the root itself (a real boundary after
+    // the spelling) still is one.
+    expect(escapingRootMentions(`ls '${root}'; node t.js`, root)).toEqual([
+      root,
+    ]);
+  });
+
+  it("case-folds both sides only when told the filesystem is case-insensitive", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const miscased = root.toUpperCase();
+    expect(miscased).not.toBe(root);
+    // Injected flag rather than the ambient filesystem, so both branches
+    // are exercised on every runner (the probe-level test in
+    // probe-refusal-contract.test.ts covers the measured path).
+    expect(
+      escapingRootMentions(
+        `cd '${miscased}/pkg' && node t.js`,
+        root,
+        undefined,
+        true,
+      ),
+    ).toEqual([`${miscased}/pkg`]);
+    expect(
+      escapingRootMentions(
+        `cd '${miscased}/pkg' && node t.js`,
+        root,
+        undefined,
+        false,
+      ),
+    ).toEqual([]);
+    // An exactly-spelled mention is reported either way.
+    expect(
+      escapingRootMentions(`cd '${root}' && node t.js`, root, undefined, false),
     ).toEqual([root]);
+  });
+
+  it("the case-insensitivity measurement answers for the filesystem the root sits on", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const insensitive = isCaseInsensitiveFilesystem(root);
+    // Whatever this filesystem answers, the answer must be consistent
+    // with what the flipped-case spelling actually resolves to.
+    let flippedResolves = false;
+    try {
+      const own = fs.statSync(root);
+      const other = fs.statSync(
+        root.replace(/[A-Za-z]/g, (c) =>
+          c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase(),
+        ),
+      );
+      flippedResolves = own.dev === other.dev && own.ino === other.ino;
+    } catch {
+      flippedResolves = false;
+    }
+    expect(insensitive).toBe(flippedResolves);
   });
 
   it("an --env value carrying the root is reported the same as a bare command mention", () => {

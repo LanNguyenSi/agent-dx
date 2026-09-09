@@ -562,39 +562,86 @@ absolute path; a path outside the root never contains it, so nothing
 outside the root is ever flagged. The root is matched under two
 spellings (its own, as resolved, and its realpath, so a repository
 root itself reached through a symlink still refuses under either
-spelling), each also with every space backslash-escaped -- UNLESS the
-match instead resolves under this run's own `--log-dir`, the one case
-an absolute path under the repository root legitimately names the
-isolation copy itself (`--log-dir` pointed inside the repository puts
-the copy at `<log-dir subpath>/wt-<uuid>/wt`, still under the
-repository root); that one case is excluded from the scan rather than
-refused. The refusal message names the offending channel(s) (the test
-command, `--pre`, or `--env NAME`), the matched spelling, and the fix:
-run the command as a relative invocation resolved inside the copy, or
-pass `--isolation inplace` (exempt from this check entirely, since the
-real tree IS the intended target there). An absolute path to a runner
-binary under the root (e.g. `node <repo>/tools/runner.js`, or an
-absolute `node_modules/.bin` entry) is refused for the same reason and
-by the same message; the fix there is the same relative-invocation
-form, or `--link` naming the binary's own directory so the isolation
-copy carries it too.
+spelling), each also with every space backslash-escaped, and three
+rules narrow the plain substring test:
+
+- A match must END AT A PATH BOUNDARY: the end of the string, a `/`,
+  or a character that cannot continue a path component (whitespace,
+  either quote, `;`, `&`, `|`, `)`, `,`). A sibling directory whose
+  name merely starts with the root (`<root>2`, `<root>-backup`) is
+  therefore not a mention of the root and is not refused.
+- On a filesystem that resolves a differently-cased spelling to the
+  same directory, both sides are compared CASE-FOLDED, so
+  `cd '/PRIVATE/TMP/MY REPO/PKG'` is refused exactly as the
+  exactly-cased spelling is. Whether the filesystem does that is
+  measured, not assumed: the root is stat'ed again under the
+  case-flipped spelling of its own absolute path and the two are
+  compared by device and inode (macOS's default APFS volume and
+  Windows answer yes; a case-sensitive volume answers no, and so does
+  any stat error). On a case-sensitive filesystem the match stays
+  exact, since a miscased spelling there names a different path.
+- A match that resolves under this run's own `--log-dir` is EXCLUDED
+  rather than refused: that is the one case an absolute path under the
+  repository root legitimately names the isolation copy itself
+  (`--log-dir` pointed inside the repository puts the copy at
+  `<log-dir subpath>/wt-<uuid>/wt`, still under the repository root).
+  The exclusion applies only when `--log-dir` is STRICTLY under the
+  repository root, and only to a mention that itself ends at a path
+  boundary: with `--log-dir` at the repository root (or above it) the
+  exclusion would erase every mention of the root and pass an escape
+  as plain as `cd '<root>/pkg'`, and a `--log-dir` of `<root>/logs`
+  must not swallow the unrelated `<root>/logsrc/x.js`. With
+  `--log-dir` at or above the root, an absolute mention under the root
+  is refused like any other, with the same fixes.
+
+The refusal message names the offending channel(s) (the test command,
+`--pre`, or `--env NAME`), the matched REGION as that channel spells
+it (the root spelling plus the path text that follows it, e.g.
+`<root>/pkg`, rather than the bare root, which would read as if the
+command had named the root itself), and the fix FOR THAT CHANNEL. For
+the test command and `--pre`: run the command as a relative invocation
+resolved inside the copy, or pass `--isolation inplace` (exempt from
+this check entirely, since the real tree IS the intended target
+there). For an `--env` value, which is not a command and cannot be
+"run relatively": pass the value as a path relative to the package
+directory, which resolves inside the copy because both `--pre` and the
+test command run with the copy's package directory as their cwd, or
+pass `--isolation inplace`. An absolute path to a runner binary under
+the root (e.g. `node <repo>/tools/runner.js`, or an absolute
+`node_modules/.bin` entry) is refused for the same reason and by the
+same message; the fix there is the same relative-invocation form, or
+`--link` naming the binary's own directory so the isolation copy
+carries it too.
+
+The check cannot tell a path that pulls the run back into the real
+tree apart from a path under the root that would have been harmless,
+so a legitimate cache or output directory named absolutely (`--env
+CACHE_DIR=<root>/.cache`, or the same path inside `-t`) is refused
+too, and takes those same two fixes: name it relative to the package
+directory, or pass `--isolation inplace`. That is the deliberate
+trade, in both directions: a false refusal names itself and has a
+remedy, whereas the verdict this check prevents is a silent
+`survived` for a mutant the tests would have killed.
 
 Known residuals follow directly from a substring rule matching only
 the root's own two spellings: a path reached only through a shell
 variable this tool does not own (`cd "$REPO" && ...`) or a command
 substitution (`$(...)`) is invisible, since neither ever spells the
-root out literally in the scanned string; a RELATIVE path that walks
-out of the isolation copy via `..` (e.g. `cd ../../real-checkout &&
-...`) is not inspected either, since it never names the root as an
-absolute path at all; a wrapper script that itself `cd`s using a path
-not spelled out in the scanned string is the same shell-level
-indirection; a path reaching the root only through a THIRD, unrelated
-symlink alias (one that is neither the root's own as-given spelling
-nor its realpath) is not recognized, since the rule matches spellings,
-not filesystem identity; and a repository root containing a character
-neither spelling represents (e.g. a literal quote inside the path)
-falls outside what the two spellings cover. These are the shapes a
-substring rule structurally cannot see, as opposed to rounds 1 and 2's
+root out literally in the scanned string; `~` expansion is the same
+shape (`cd ~/git/repo && ...` reaches the root without the scanned
+string ever containing it), as is any other expansion the shell
+performs at run time; a RELATIVE path that walks out of the isolation
+copy via `..` (e.g. `cd ../../real-checkout && ...`) is not inspected
+either, since it never names the root as an absolute path at all; a
+wrapper script that itself `cd`s using a path not spelled out in the
+scanned string is the same shell-level indirection; a path reaching
+the root only through a THIRD, unrelated symlink alias (one that is
+neither the root's own as-given spelling nor its realpath) is not
+recognized, since the rule matches spellings, not filesystem identity;
+and a repository root containing a character neither spelling
+represents (e.g. a literal quote inside the path) falls outside what
+the two spellings cover. These are the shapes a substring rule
+structurally cannot see, as opposed to rounds 1 and 2's
 tokenizer, which missed shapes a tokenizer COULD have been extended to
 catch (and each extension left another) -- the substring rule is
 exhaustive for every literal-absolute-path shape, and its residuals
@@ -1236,7 +1283,7 @@ above.
 | `reason` | `mutant` | `mutation_probe` | When it fires |
 | --- | --- | --- | --- |
 | `worktree_allow_outside_unsupported` | absent | absent | `--allow-outside` combined with `--isolation worktree`; refused before containment is even checked |
-| `test_command_escapes_isolation` | absent | absent | `-i worktree`'s test command, `--pre`, or an `--env` value contains the real repository root as a literal substring (any quoting, escaping, `=`-form or wrapper), which the isolated copy never receives -- unless the match resolves under this run's own `--log-dir` instead, which the isolated copy does |
+| `test_command_escapes_isolation` | absent | absent | `-i worktree`'s test command, `--pre`, or an `--env` value names the real repository root as a literal path (any quoting, escaping, `=`-form, wrapper, and any casing on a case-insensitive filesystem), which the isolated copy never receives -- unless the mention resolves under a `--log-dir` strictly inside the repository, which the isolated copy does |
 | `file_outside_root` | absent | absent | `--file` (or a `--link`) resolves outside the containment root |
 | `probe_in_progress` | absent | absent | the repository- or file-scoped lock is already held by another run |
 | `lock_unavailable` | absent | absent | the lock directory itself could not be acquired (an unwritable lock dir, an ancestor owned by another user) |

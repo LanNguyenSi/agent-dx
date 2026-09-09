@@ -34,20 +34,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token, or a `sh -c "..."` wrapper) is now refused outright
   (`reason: "test_command_escapes_isolation"`, a `usage_error`) before
   the run reaches its baseline, naming the offending channel(s), the
-  matched spelling, and the fix (a relative invocation resolved inside
-  the copy, or `--isolation inplace`); an absolute path to a runner
-  binary under the root is refused the same way, with `--link` named as
-  the fix for that shape. The root is matched under two spellings (its
-  own, as resolved, and its realpath, each also with spaces
-  backslash-escaped), excluding any match that resolves under the run's
-  own `--log-dir` instead (the one case a path under the repository
-  root legitimately names the isolation copy itself); `--isolation
-  inplace` is exempt, and an absolute path outside the repository root
-  is left alone. Known residuals: a path reached only through a shell
-  variable or command substitution, a relative path that walks out via
-  `..`, a wrapper script that itself `cd`s using an unspelled path, a
-  third unrelated symlink alias to the root, and a root path containing
-  a character neither spelling represents (README).
+  matched region as that channel spells it (the root plus the path text
+  after it, not the bare root), and the fix for that channel: a
+  relative invocation resolved inside the copy or `--isolation inplace`
+  for `-t`/`--pre`, a value relative to the package directory or
+  `--isolation inplace` for an `--env` value, which cannot be "run
+  relatively"; an absolute path to a runner binary under the root is
+  refused the same way, with `--link` named as the fix for that shape.
+  The root is matched under two spellings (its own, as resolved, and
+  its realpath, each also with spaces backslash-escaped), case-folded
+  on a filesystem measured (by device and inode under the case-flipped
+  spelling) to resolve a miscased path to the same directory and
+  matched exactly otherwise, and only where the match ends at a path
+  boundary, so a sibling `<root>2` is not a mention of the root. A
+  match that resolves under the run's own `--log-dir` is excluded
+  rather than refused (the one case a path under the repository root
+  legitimately names the isolation copy itself), but only when that
+  `--log-dir` is strictly under the root and only at a path boundary,
+  so a `--log-dir` at or above the root cannot erase the root from the
+  scan and a `--log-dir` of `<root>/logs` does not swallow
+  `<root>/logsrc/x.js`; `--isolation inplace` is exempt, and an
+  absolute path outside the repository root is left alone. A legitimate
+  absolute path under the root (a cache directory, `--env
+  CACHE_DIR=<root>/.cache`) is refused too, with the same two fixes
+  named. Known residuals: a path reached only through a shell variable,
+  command substitution or `~` expansion, a relative path that walks out
+  via `..`, a wrapper script that itself `cd`s using an unspelled path,
+  a third unrelated symlink alias to the root, and a root path
+  containing a character neither spelling represents (README).
 
 - `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
   (or mutant run) that exited `0` with nothing actually executed was

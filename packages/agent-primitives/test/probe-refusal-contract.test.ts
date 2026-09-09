@@ -18,7 +18,9 @@ import { computeMutant } from "../src/probe/mutant.js";
 import { beginInplace } from "../src/probe/isolation.js";
 import {
   ISOLATION_ESCAPE_CHANNEL_LABEL,
+  ISOLATION_ESCAPE_ENV_FIX_HINT,
   ISOLATION_ESCAPE_FIX_HINT,
+  isCaseInsensitiveFilesystem,
   resolveDeepestExisting,
 } from "../src/probe/containment.js";
 import { expectNoIsolationLeftovers } from "./helpers/no-leftovers.js";
@@ -116,6 +118,15 @@ const FIXTURE_TEST_JS = [
   "assert.strictEqual(isPositive(-5), false);",
   "",
 ].join("\n");
+
+/** `s` with the case of every ASCII letter flipped: a spelling of the
+ * same path that resolves to the same directory on a case-insensitive
+ * filesystem and to nothing at all on a case-sensitive one. */
+function flipCase(s: string): string {
+  return s.replace(/[A-Za-z]/g, (c) =>
+    c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase(),
+  );
+}
 
 /** A fresh git repo (built in a mkdtemp dir) with a committed
  * fixture.js and fixture.test.js. Same fixture and same git config
@@ -879,9 +890,130 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     expect(result.status).toBe("killed");
   });
 
+  // --- Round 4 (D-042): the scratch-root exemption's own boundary (a
+  // `--log-dir` AT or ABOVE the root erased every mention and passed
+  // the D-033 shape), a miscased spelling on a case-insensitive
+  // filesystem, the path boundary after a match, and the `--env`
+  // channel's own fix hint. Each of the four was reproduced 3/3 by the
+  // round-3 review. ---
+
+  it("--log-dir pointed AT the repository root does not exempt the root itself: the escaping command is still refused", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        logDir: repo,
+        testCommand: `cd '${path.join(repo, "pkg")}' && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(path.join(repo, "pkg"));
+  });
+
+  it("--log-dir pointed ABOVE the repository root does not exempt the root either", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const parent = makeTmpDir();
+    const repoDir = path.join(parent, "repo");
+    fs.renameSync(repo, repoDir);
+    const result = await probe(
+      baseOptions(repoDir, {
+        isolation: "worktree",
+        logDir: parent,
+        testCommand: `cd '${path.join(repoDir, "pkg")}' && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+  });
+
+  it("a miscased but literal spelling of the repository root is refused on a case-insensitive filesystem", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const miscased = flipCase(repo);
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd '${miscased}' && node fixture.test.js`,
+      }),
+    );
+    if (isCaseInsensitiveFilesystem(repo)) {
+      // The miscased spelling resolves to the SAME directory here, so
+      // the command escapes exactly as the exact spelling would.
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("test_command_escapes_isolation");
+      expect(result.warnings.join(" ")).toContain(miscased);
+    } else {
+      // Documented behaviour on a case-sensitive filesystem: the
+      // miscased spelling names a different (here: nonexistent) path,
+      // so it is not an escape and the match stays exact.
+      expect(result.reason).not.toBe("test_command_escapes_isolation");
+    }
+  });
+
+  it("a SIBLING directory whose name merely starts with the repository root is not refused", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        // `<repo>2` is a different directory; a substring test without a
+        // path boundary after the match refuses this and reports the
+        // bare root as "matched" (round-3 review, MEDIUM).
+        testCommand: `ls '${repo}2' > /dev/null 2>&1; node fixture.test.js`,
+      }),
+    );
+    expect(result.reason).toBeUndefined();
+    expect(result.status).toBe("killed");
+  });
+
+  it("the refusal message reports the matched region, not only the bare repository root", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const inside = path.join(repo, "backend", "suite");
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd ${inside} && node fixture.test.js`,
+      }),
+    );
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(`matched as: ${inside}.`);
+  });
+
+  it("an --env value under the root is refused with the VALUE remedy, not the command remedy", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const cacheDir = path.join(repo, ".cache");
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        env: { CACHE_DIR: cacheDir },
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    const message = result.warnings.join(" ");
+    expect(message).toContain("--env CACHE_DIR");
+    expect(message).toContain(cacheDir);
+    expect(message).toContain(ISOLATION_ESCAPE_ENV_FIX_HINT);
+    // The command channel's own hint (relative COMMAND, --link for a
+    // runner binary) does not apply to a value and is not appended.
+    expect(message).not.toContain("--link");
+  });
+
   it("pins the load-bearing fragments of the isolation-escape refusal message against the shared message constants", () => {
     expect(ISOLATION_ESCAPE_FIX_HINT).toContain("--isolation inplace");
     expect(ISOLATION_ESCAPE_FIX_HINT).toContain("--link");
+    expect(ISOLATION_ESCAPE_ENV_FIX_HINT).toContain(
+      "relative to the package directory",
+    );
+    expect(ISOLATION_ESCAPE_ENV_FIX_HINT).toContain("--isolation inplace");
+    expect(ISOLATION_ESCAPE_ENV_FIX_HINT).toContain("CACHE_DIR");
+    expect(ISOLATION_ESCAPE_ENV_FIX_HINT).not.toContain("--link");
     expect(ISOLATION_ESCAPE_CHANNEL_LABEL.pre).toBe("--pre");
     expect(ISOLATION_ESCAPE_CHANNEL_LABEL.env("REPO")).toBe("--env REPO");
   });

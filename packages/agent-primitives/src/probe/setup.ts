@@ -12,6 +12,7 @@ import {
   isPathContained,
   ISOLATION_ESCAPE_CHANNEL_LABEL,
   ISOLATION_ESCAPE_FIX_HINT,
+  ISOLATION_ESCAPE_ENV_FIX_HINT,
 } from "./containment.js";
 import type { WorktreeSyncSuccess } from "./isolation.js";
 import { detectKnownZeroTestsEvidence } from "./zero-tests.js";
@@ -406,49 +407,60 @@ export async function openRunSetup(
   // repository, so `escapingRootMentions` is given this run's own
   // scratch root (`wtScratchRoot`, resolved the same way
   // `cleanupWorktree` checks removals against) to strip first -- the
-  // copy itself does not need to exist yet for this check to hold.
-  // `-i inplace` is exempt: the real tree IS the intended target there,
-  // so an absolute path back into it is not an escape.
+  // copy itself does not need to exist yet for this check to hold, and
+  // the strip only applies when that scratch root is a PROPER
+  // descendant of the root, so a `--log-dir` AT or ABOVE the root
+  // cannot blank the root out of the text and pass an escape (round
+  // 3's own defect). `-i inplace` is exempt: the real tree IS the
+  // intended target there, so an absolute path back into it is not an
+  // escape.
   if (effectiveIsolation === "worktree") {
-    const escapes: { channel: string; spellings: string[] }[] = [];
-    const testSpellings = escapingRootMentions(
+    // Each channel carries its own remedy: an `--env` VALUE is not a
+    // command, so the command hint's "run the command as a relative
+    // command"/`--link` advice names nothing its caller can act on.
+    const escapes: { channel: string; hint: string; regions: string[] }[] = [];
+    const testRegions = escapingRootMentions(
       input.testCommand,
       root,
       wtScratchRoot,
     );
-    if (testSpellings.length > 0) {
+    if (testRegions.length > 0) {
       escapes.push({
         channel: ISOLATION_ESCAPE_CHANNEL_LABEL.testCommand,
-        spellings: testSpellings,
+        hint: ISOLATION_ESCAPE_FIX_HINT,
+        regions: testRegions,
       });
     }
     if (input.preCommand !== undefined) {
-      const preSpellings = escapingRootMentions(
+      const preRegions = escapingRootMentions(
         input.preCommand,
         root,
         wtScratchRoot,
       );
-      if (preSpellings.length > 0) {
+      if (preRegions.length > 0) {
         escapes.push({
           channel: ISOLATION_ESCAPE_CHANNEL_LABEL.pre,
-          spellings: preSpellings,
+          hint: ISOLATION_ESCAPE_FIX_HINT,
+          regions: preRegions,
         });
       }
     }
     if (input.env !== undefined) {
       for (const [name, value] of Object.entries(input.env)) {
-        const envSpellings = escapingRootMentions(value, root, wtScratchRoot);
-        if (envSpellings.length > 0) {
+        const envRegions = escapingRootMentions(value, root, wtScratchRoot);
+        if (envRegions.length > 0) {
           escapes.push({
             channel: ISOLATION_ESCAPE_CHANNEL_LABEL.env(name),
-            spellings: envSpellings,
+            hint: ISOLATION_ESCAPE_ENV_FIX_HINT,
+            regions: envRegions,
           });
         }
       }
     }
     if (escapes.length > 0) {
       const channels = escapes.map((e) => e.channel);
-      const named = [...new Set(escapes.flatMap((e) => e.spellings))];
+      const named = [...new Set(escapes.flatMap((e) => e.regions))];
+      const hints = [...new Set(escapes.map((e) => e.hint))];
       return refuse(
         "usage_error",
         "test_command_escapes_isolation",
@@ -456,7 +468,7 @@ export async function openRunSetup(
           `an absolute path under the real repository root (${root}), ` +
           `which "-i worktree" never mutates, so the run would exercise ` +
           `the real tree instead of the isolated copy, matched as: ` +
-          `${named.join(", ")}. ${ISOLATION_ESCAPE_FIX_HINT}`,
+          `${named.join(", ")}. ${hints.join(" ")}`,
       );
     }
   }
