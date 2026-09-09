@@ -62,6 +62,17 @@ that class recurred on one change. Prefer string-anchored
 citations over bare line ranges for the same reason: only anchored
 citations are covered by the in-repo docs-consistency guard.
 
+`CHANGELOG.md` is cited by heading, never by line number:
+`CHANGELOG.md:#[Unreleased]` or `CHANGELOG.md:#[0.31.0]`, with a
+`#"..."` content anchor added when the cited text is a specific line.
+A bare `CHANGELOG.md:N` citation shifts under every entry added above
+it (agent-dx task b50fd903: 38 added lines forced two re-points and
+four re-stamps in one round); the heading form resolves against the
+section instead of a line offset and survives that churn (agent-dx
+task 25dfbf57, resolved by okf-kit 0.10.0). This rule applies to
+`CHANGELOG.md` citations only; log.md's own historical prose narrating
+past line numbers is exempt (see above).
+
 A citation-sibling-drift guard (also in `test/docs-consistency.test.ts`)
 checks a class the anchor guard above cannot: a citation that resolves and
 anchors correctly on its own but names the wrong sibling among near-identical
