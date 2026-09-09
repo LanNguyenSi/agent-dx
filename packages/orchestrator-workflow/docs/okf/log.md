@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-09-09T00:00:00Z (CHANGELOG citations stay heading-form, task
+- 2026-09-09T04:49:10Z (CHANGELOG citations stay heading-form, task
   agent-dx 25dfbf57): re-checked every live `CHANGELOG.md:N`-shaped
   citation in this bundle (`rg -n "CHANGELOG.md:[0-9]" docs/okf`,
   excluding this file's own historical prose); all 17 non-log.md hits
