@@ -554,6 +554,10 @@ export async function runMutantAttempt(
     // told. The PASS direction gets its own wording below, scoped to
     // `--pass-regex` (the plain default can never read a non-zero exit
     // code as a pass), so the two never both fire for the same run.
+    // Unlike the miss warning below, this one is not gated on
+    // ambiguity: a band code is rare enough per plan that one entry per
+    // affected mutant stays readable, and each names the code and the
+    // signal the reader has to check.
     if (!testPassed && mutantSignalCode !== undefined) {
       warnings.push(
         `the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the ${status} verdict may rest on a run that was cut short; see ${testResult.logPath}`,

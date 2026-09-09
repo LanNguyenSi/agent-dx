@@ -5232,10 +5232,10 @@ describe("probe(): --pass-regex", () => {
     // reached that way, since the plain exit-code default can never
     // read a non-zero code as a pass. The FAIL direction is different:
     // a band exit code reads as an ordinary failure under the plain
-    // default too, with nothing said about it before this task -- these
-    // three tests are that gap, one per shape named in the round-5
-    // review: the default path, `--pass-regex` with the kill landing
-    // before the match, and the baseline side failing in the band.
+    // default too, and used to carry no warning at all -- these three
+    // tests pin that gap, one per shape: the default path, `--pass-regex`
+    // with the kill landing before the match, and the baseline side
+    // failing in the band.
     const FAIL_DIRECTION_MUTANT_WARNING =
       /the mutant run exited with 137, the code a shell reports for a process killed by signal 9; the killed verdict may rest on a run that was cut short/;
     const FAIL_DIRECTION_BASELINE_WARNING =

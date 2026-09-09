@@ -1118,8 +1118,9 @@ own exit code instead -- typically `0` -- with no warning of any kind,
 since nothing in the envelope distinguishes it from a genuinely green
 run; and the single bare command most `-t`/`--pre` values actually are
 (`node runner.js`, nothing after it) is `exec`'d by the `sh -c` wrapper
-in place of itself, so a kill on it reaches the process-group LEADER
-after all and lands in the no-exit-code case just above (refused), never
+in place of itself on the shells this package has been measured against
+(`/bin/sh` on macOS and Linux), so a kill on it reaches the process-group
+LEADER after all and lands in the no-exit-code case just above (refused), never
 in the 128 + N one. Only the first of these three shapes is an ordinary
 non-zero exit code that never reaches the no-exit-code handling above,
 and under `--pass-regex` -- which means "ignore the exit code" by
@@ -1134,11 +1135,13 @@ whenever it IS reported: an exit code in the 128 + N band (`129` through
 `192`: 128 plus every signal number a POSIX system can deliver, the 1..31
 macOS and Linux share plus Linux's real-time signals 32..64) gets a
 `warnings` entry naming the code, the signal number it would encode, and
-that the run may have been cut short, in place of the plain "matched
-despite a non-zero exit code" entry every other non-zero code gets --
-whether that run's own predicate (the plain exit-code default, or a given
-`--pass-regex`) reads the code as a PASS or as a genuine FAILURE. The
-verdict is unchanged either way (a killed mutant stays `killed`, a
+that the run may have been cut short. On the PASS direction (a
+`--pass-regex` match despite the code) it takes the place of the plain
+"matched despite a non-zero exit code" entry every other non-zero code
+gets; on the FAIL direction (the plain exit-code default, or a
+`--pass-regex` miss) it is an additional entry, since a failing run with
+an out-of-band non-zero code carries no warning at all. The verdict is
+unchanged either way (a killed mutant stays `killed`, a
 matching mutant run stays `survived`); the warning exists so a reader has
 something to check. A runner that exits `137` of its own accord, nothing
 killed at all, gets the same warning, since the exit code cannot tell the

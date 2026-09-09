@@ -84,10 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directions warn on it: an exit code in the 128 + N band (`129` through
   `192`, 128 plus every signal number a POSIX system can deliver) gets a
   `warnings` entry naming the code, the signal number it would encode
-  and that the run may have been cut short, in place of the plain
-  "matched despite a non-zero exit code" entry every other non-zero code
-  gets -- whether the run's own predicate reads that code as a pass or
-  as a genuine failure; the verdict is unchanged.
+  and that the run may have been cut short: on the pass direction in
+  place of the plain "matched despite a non-zero exit code" entry, on
+  the fail direction as an additional entry (an out-of-band non-zero
+  failing code carries no warning at all); the verdict is unchanged.
   The mutant-run miss warning fires only for an AMBIGUOUS miss (a
   truncated tail, an exit code of `0` disagreeing with the predicate, or
   `--expect pass`, where a miss means the mutant
