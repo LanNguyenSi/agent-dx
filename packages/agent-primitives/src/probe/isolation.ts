@@ -5,6 +5,7 @@ import { isPidAlive } from "../lock.js";
 import { isPathContained, resolveDeepestExisting } from "./containment.js";
 import {
   canonicalDestRelPath,
+  entryRelationTo,
   linkRelPath,
   planLinks,
   relContains,
@@ -1103,6 +1104,30 @@ export async function beginWorktree(
         );
         continue;
       }
+      // The mirror of the check above, and the same invariant seen from
+      // the other side: a target that CONTAINS the copy makes the copy
+      // refer to itself just as surely as one inside it, only through a
+      // longer path. A `--log-dir` placed inside the repository is the
+      // shape that reaches it -- the copy lives under that directory, so
+      // a committed defaults file naming that same directory offers back
+      // a target the copy sits in. Decided by filesystem identity, for
+      // the reason `entryRelationTo` gives: a case-variant or NFD
+      // spelling of an ancestor is the same directory under a name no
+      // string comparison catches.
+      const copyRelation = entryRelationTo(targetReal, wtReal);
+      if (copyRelation !== undefined) {
+        syncWarnings.push(
+          skippedLinkWarning(
+            candidate,
+            copyRelation === "same"
+              ? `its target resolves to ${targetReal}, the isolation copy ` +
+                  "itself; a link may only point at the source tree"
+              : `its target resolves to ${targetReal}, which contains the ` +
+                  "isolation copy; a link may only point at the source tree",
+          ),
+        );
+        continue;
+      }
       // Immediately before the `mkdirSync` below, never once per
       // candidate: `mkdirSync`, `rmSync` and `symlinkSync` all resolve
       // symlinks in the path they are given, and the links this same
@@ -1163,6 +1188,29 @@ export async function beginWorktree(
             `its destination ${canonicalRel} in the isolation copy contains ` +
               `${destroyed.relPath} -> ${destroyed.absDir}, linked earlier ` +
               "in this run, which the delete at that destination would remove",
+          ),
+        );
+        continue;
+      }
+      // A candidate whose destination has a FILE (or anything else that
+      // is not a directory) as an existing ancestor segment: the
+      // `mkdirSync` below cannot create a directory under it and throws
+      // EEXIST/ENOTDIR, which the `catch` around this whole loop would
+      // turn into `worktree_sync_failed` for the entire run. Repository
+      // content naming `SRC/FILE.TXT/x` over a tracked `src/file.txt`
+      // reaches exactly that: the canonical destination is
+      // `src/file.txt/x`, which git does not track (nothing is tracked
+      // UNDER a file), so rule 3 has nothing to refuse. One candidate's
+      // impossible destination is a warning and a skipped link, the same
+      // as every other refusal in this loop -- never a failed run.
+      const blockingAncestor = nonDirectoryAncestor(worktreePath, relPath);
+      if (blockingAncestor !== undefined) {
+        syncWarnings.push(
+          skippedLinkWarning(
+            candidate,
+            `its destination ${relPath} in the isolation copy sits under ` +
+              `${blockingAncestor}, which is not a directory in the copy; ` +
+              "a link cannot be created below it",
           ),
         );
         continue;
@@ -1317,6 +1365,44 @@ export async function beginWorktree(
     warnings: syncWarnings,
     logPaths,
   };
+}
+
+/**
+ * The first existing ancestor segment of `base`/`relPath` that is not a
+ * directory, as a path relative to `base`, or `undefined` when every
+ * existing one is (which includes the ordinary case of nothing being
+ * there yet). The destination's own last segment is not examined: what
+ * is already at the destination is deleted before the link is created,
+ * so a file there is replaceable; what cannot be replaced is a file
+ * standing where a PARENT directory has to be.
+ *
+ * A segment that resolves to nothing at all ends the walk: `mkdirSync`
+ * creates the rest. A segment that does not resolve while something IS
+ * there (a dangling symlink) is reported as blocking, because
+ * `mkdirSync` cannot create through it either.
+ */
+function nonDirectoryAncestor(
+  base: string,
+  relPath: string,
+): string | undefined {
+  const segments = relPath.split(path.sep).filter((s) => s.length > 0);
+  let current = base;
+  let rel = "";
+  for (const segment of segments.slice(0, -1)) {
+    current = path.join(current, segment);
+    rel = rel === "" ? segment : path.join(rel, segment);
+    try {
+      if (!fs.statSync(current).isDirectory()) return rel;
+    } catch {
+      try {
+        fs.lstatSync(current);
+      } catch {
+        return undefined; // nothing there; the recursive mkdir creates it
+      }
+      return rel; // something is there but resolves nowhere
+    }
+  }
+  return undefined;
 }
 
 /** What `dest` actually resolves to, or `undefined` when nothing is

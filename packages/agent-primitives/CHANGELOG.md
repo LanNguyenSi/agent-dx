@@ -86,12 +86,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clobbered the operator's tracked file whenever the mutant lived
   outside the aliased parent. Rule 4 is decided on the copy's spelling
   too, on both sides of the comparison. Alongside it, three narrower
-  fixes to the same policy: a candidate from ANY source whose realpath
-  IS the repository root or CONTAINS it (a gitignored `esc -> .` a
-  composer `vendor-dir` names, an auto-discovered `node_modules -> .`)
-  is refused, where before only a value repository content named was
-  checked and only for resolving OUTSIDE the root, so the root itself
-  passed; a destination that CONTAINS a link this run already created is
+  fixes to the same policy: a candidate from ANY source that resolves to
+  the repository root or to a directory containing it (a gitignored
+  `esc -> .` a composer `vendor-dir` names, an auto-discovered
+  `node_modules -> .`) is refused, where before only a value repository
+  content named was checked and only for resolving OUTSIDE the root, so
+  the root itself passed (that refusal compared realpath STRINGS when it
+  was written; it compares filesystem identity as of the entry below); a destination that CONTAINS a link this run already created is
   refused rather than linked, since the recursive delete before each
   link create would otherwise remove that earlier link while leaving it
   listed in `isolation.linked`; and a destination the untracked-file
@@ -113,6 +114,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `canonicalDestRelPath`'s per-segment walk, its missing-segment
   fallback and the two new policy refusals are unit-tested in
   `test/link-policy.test.ts`.
+- Whether a link candidate IS the repository root or CONTAINS it is
+  decided by filesystem identity (inode and device), not by comparing
+  the two resolved path strings (task `6c7e1532`). `realpath` resolves
+  symlinks and normalises neither case nor Unicode form, so an
+  auto-discovered gitignored `node_modules` whose target reached the
+  root under a second spelling passed every rule with no warning at all,
+  was listed in `isolation.linked`, and a `--pre` writing through it
+  created a file in the operator's real repository root. Three spellings
+  did it: a relative target naming the repository's own directory in
+  another case (`../REPO` for `repo`), an absolute target spelling an
+  ANCESTOR segment in another case, and an NFD target for an NFC
+  directory name. The containment half walks the root's own ancestors up
+  to the filesystem root, comparing identity at each step, so an alias
+  of a grandparent is caught as readily as one of the parent; the exact
+  spellings (`-> ..`, `-> .`, `-> <the root>`) keep the wording they
+  already had. Two narrower fixes ride along. A link target that
+  CONTAINS the isolation copy is refused, the mirror of the existing
+  refusal of a target INSIDE it: a defaults file naming the same in-repo
+  directory a `--log-dir` puts the copy under is that shape. And a
+  candidate whose destination has a FILE as an existing ancestor segment
+  in the copy is skipped with a warning naming the blocking path,
+  instead of throwing EEXIST out of the recursive `mkdir` and failing
+  the whole sync (`worktree_sync_failed`) for every other link in the
+  run: repository content naming `SRC/FILE.TXT/x` over a tracked
+  `src/file.txt` reaches that honestly, since git tracks nothing UNDER a
+  file and the tracked-directory rule has nothing to refuse. New
+  end-to-end fixtures in `test/probe-worktree.test.ts`, each hashing the
+  source tree before and after: "a link target that reaches the
+  repository root under a SECOND SPELLING" runs all three aliases plus
+  the three exact spellings as negative controls in one test, "a
+  destination whose ancestor in the copy is a file" asserts the run
+  completes with the warning, and "a link target that CONTAINS the
+  isolation copy" pins the mirror. The identity helper itself is
+  unit-tested in `test/link-policy.test.ts` ("entryRelationTo" and
+  "planLinks: a target that reaches the root under a second spelling"),
+  including a grandparent alias, which a walk stopping at the root's own
+  parent never reaches. Every test that depends on the volume measures
+  it first: case behaviour through `test/helpers/case-fs.ts`, and
+  normalisation behaviour by creating an NFC name and asking for the NFD
+  one.
 - `isolation.linkedNamedBy` in the result envelope (task `6c7e1532`):
   one `{ path, namedBy }` entry per ACCEPTED link that repository
   content asked for, carrying the same provenance phrase a refusal of

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   canonicalDestRelPath,
+  entryRelationTo,
   linkRelPath,
   planLinks,
   relContains,
@@ -561,5 +562,148 @@ describe("planLinks: candidates outside the root", () => {
         `("../x/vendor" named in "vendor-dir" of composer.json): ` +
         "it does not sit inside the repository root",
     );
+  });
+});
+
+/** The same directory name in the two Unicode normalisation forms:
+ * `é` as one code point (NFC) and as `e` plus a combining acute (NFD).
+ * Written as escapes so the two are unmistakable in the source, where
+ * an editor would render them identically. */
+const NFC_NAME = "r\u00e9sources";
+const NFD_NAME = "re\u0301sources";
+
+/**
+ * Whether the volume `dir` sits on treats two spellings that differ only
+ * in normalisation form as one entry, MEASURED on that volume rather
+ * than assumed from the platform: APFS's case-insensitive variant is
+ * normalisation-insensitive, its case-sensitive variant is not, and a
+ * Linux host is neither. The sibling of `caseInsensitiveVolume` for the
+ * second spelling `fs.realpathSync` does not normalise away.
+ */
+function normalisingVolume(dir: string): boolean {
+  const probe = path.join(dir, "nfd\u00e9probe");
+  fs.mkdirSync(probe);
+  try {
+    return fs.existsSync(path.join(dir, "nfde\u0301probe"));
+  } finally {
+    fs.rmSync(probe, { recursive: true, force: true });
+  }
+}
+
+describe("entryRelationTo: 'is the root' and 'contains the root' by identity", () => {
+  it("answers the exact spellings from the path strings alone", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "a", "b", "repo");
+    fs.mkdirSync(root, { recursive: true });
+
+    expect(entryRelationTo(root, root)).toBe("same");
+    expect(entryRelationTo(path.join(base, "a", "b"), root)).toBe("contains");
+    expect(entryRelationTo(base, root)).toBe("contains");
+    expect(entryRelationTo(path.join(root, "vendor"), root)).toBeUndefined();
+    expect(
+      entryRelationTo(path.join(base, "a", "other"), root),
+    ).toBeUndefined();
+  });
+
+  it("reports nothing for a path that is not on disk and is no ancestor by spelling either", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "repo");
+    fs.mkdirSync(root);
+
+    expect(entryRelationTo(path.join(base, "gone"), root)).toBeUndefined();
+  });
+
+  it("reports 'same' for a CASE variant of the root, which realpath leaves alone", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "repo");
+    fs.mkdirSync(root);
+    const variant = path.join(base, "REPO");
+    if (!caseInsensitiveVolume(base)) {
+      // `REPO` names a different directory here, and nothing is there.
+      expect(entryRelationTo(variant, root)).toBeUndefined();
+      return;
+    }
+
+    // What makes this shape dangerous, stated as measurements: the two
+    // spellings are different STRINGS, realpath does not close the gap,
+    // and they are one directory.
+    expect(variant).not.toBe(root);
+    expect(fs.realpathSync(variant)).not.toBe(root);
+    expect(fs.statSync(variant).ino).toBe(fs.statSync(root).ino);
+
+    expect(entryRelationTo(variant, root)).toBe("same");
+  });
+
+  it("reports 'contains' for a CASE variant of an ancestor two levels above the root, which a walk that stops at the parent never reaches", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "Ancestor", "mid", "repo");
+    fs.mkdirSync(root, { recursive: true });
+    const variant = path.join(base, "ancestor");
+    if (!caseInsensitiveVolume(base)) {
+      expect(entryRelationTo(variant, root)).toBeUndefined();
+      return;
+    }
+
+    expect(fs.realpathSync(variant)).not.toBe(path.join(base, "Ancestor"));
+
+    expect(entryRelationTo(variant, root)).toBe("contains");
+  });
+
+  it("reports 'same' for an NFD spelling of an NFC root on a volume that normalises", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, NFC_NAME);
+    fs.mkdirSync(root);
+    const variant = path.join(base, NFD_NAME);
+    if (!normalisingVolume(base)) {
+      expect(entryRelationTo(variant, root)).toBeUndefined();
+      return;
+    }
+
+    expect(variant).not.toBe(root);
+    expect(fs.realpathSync(variant)).not.toBe(root);
+    expect(fs.statSync(variant).ino).toBe(fs.statSync(root).ino);
+
+    expect(entryRelationTo(variant, root)).toBe("same");
+  });
+});
+
+describe("planLinks: a target that reaches the root under a second spelling", () => {
+  it("skips an auto-discovered node_modules whose target is a CASE variant of the repository root, in the same wording the exact spelling gets", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "repo");
+    fs.mkdirSync(root);
+    if (!caseInsensitiveVolume(base)) return;
+    const absDir = path.join(root, "node_modules");
+    fs.symlinkSync(path.join("..", "REPO"), absDir);
+
+    // No `namedBy`: the auto-discovery lane, which rule 1 grants its
+    // latitude to, is exactly the lane this shape reaches through.
+    const plan = planLinks([{ absDir }], ctx(root));
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings).toEqual([
+      `skipped linking ${absDir}: it resolves to the repository root ` +
+        "itself; linking it would put the source tree inside the isolation " +
+        "copy",
+    ]);
+  });
+
+  it("skips one whose target is a CASE variant of a directory containing the root", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "Ancestor", "repo");
+    fs.mkdirSync(root, { recursive: true });
+    if (!caseInsensitiveVolume(base)) return;
+    const absDir = path.join(root, "node_modules");
+    const variant = path.join(base, "ancestor");
+    fs.symlinkSync(variant, absDir);
+
+    const plan = planLinks([{ absDir }], ctx(root));
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings).toEqual([
+      `skipped linking ${absDir}: it resolves to ${variant}, which contains ` +
+        "the repository root; linking it would put the source tree inside " +
+        "the isolation copy",
+    ]);
   });
 });

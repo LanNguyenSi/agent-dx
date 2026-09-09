@@ -2154,6 +2154,350 @@ describe("probe(): worktree isolation, a destination the copy spells differently
   });
 });
 
+describe("probe(): worktree isolation, a link target that reaches the repository root under a SECOND SPELLING", () => {
+  /** The same directory name in the two Unicode normalisation forms:
+   * `e` with an acute as one code point (NFC) and as `e` plus a
+   * combining acute (NFD). Written as escapes because an editor renders
+   * the two identically. */
+  const NFC_NAME = "r\u00e9sources";
+  const NFD_NAME = "re\u0301sources";
+
+  /** A `--pre` that makes sure `node_modules/` is there and writes a
+   * byte into it. With the auto-discovered `node_modules` refused, that
+   * byte lands in a real directory of the isolation copy; with it
+   * linked, it lands wherever the link points -- which for every target
+   * below is the source tree. */
+  const CLOBBER_PRE =
+    "node -e \"const fs=require('node:fs');" +
+    "fs.mkdirSync('node_modules',{recursive:true});" +
+    "fs.writeFileSync('node_modules/CLOBBER.txt','x')\"";
+
+  /** A repo whose own directory name AND its parent's are chosen here:
+   * `mkdtemp` picks a random name that may itself mix case, and every
+   * case below needs a second spelling of one specific segment. The
+   * `node_modules` these tests add afterwards is gitignored, so the copy
+   * can only ever see it through a link. */
+  function initNamedRepo(
+    parentName: string,
+    repoName: string,
+  ): { base: string; repo: string } {
+    const base = makeTmpDir();
+    const repo = path.join(base, parentName, repoName);
+    fs.mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), FIXTURE_JS);
+    fs.writeFileSync(path.join(repo, "fixture.test.js"), FIXTURE_TEST_JS);
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { base, repo };
+  }
+
+  /** Creates the gitignored `node_modules -> target` the auto-discovery
+   * walk finds, runs a probe whose `--pre` writes through it, and
+   * reports the source tree's own hashes on both sides of the run. */
+  async function probeThroughNodeModules(
+    repo: string,
+    target: string,
+  ): Promise<{
+    before: Map<string, { symlink: boolean; hash: string }>;
+    after: Map<string, { symlink: boolean; hash: string }>;
+    result: Awaited<ReturnType<typeof probe>>;
+  }> {
+    fs.symlinkSync(target, path.join(repo, "node_modules"));
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+    return { before, after, result };
+  }
+
+  it("refuses every spelling that resolves to the repository root or an ancestor of it -- a case-variant repo directory, a case-variant ancestor segment, an NFD target for an NFC directory -- and still refuses the three exact spellings, leaving the source tree byte-identical in all six", async () => {
+    useLockDir();
+
+    // 1. `node_modules -> ../REPO` for a repository directory really
+    //    named `repo`: realpath reports `.../p1/REPO` against a root of
+    //    `.../p1/repo`, two strings for one directory.
+    {
+      const { base, repo } = initNamedRepo("p1", "repo");
+      const caseInsensitive = caseInsensitiveVolume(base);
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        path.join("..", "REPO"),
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      if (caseInsensitive) {
+        // The two spellings really are one directory on this volume,
+        // and realpath really does not close the gap.
+        expect(fs.realpathSync(path.join(repo, "node_modules"))).not.toBe(
+          resolveDeepestExisting(repo),
+        );
+        expect(fs.statSync(path.join(repo, "node_modules")).ino).toBe(
+          fs.statSync(repo).ino,
+        );
+        expect(
+          result.warnings.some(
+            (w) =>
+              w.includes("node_modules") &&
+              w.includes("resolves to the repository root itself"),
+          ),
+        ).toBe(true);
+      } else {
+        // `../REPO` names nothing here, so the walk never offers the
+        // entry as a linkable directory at all.
+        expect(result.warnings.some((w) => w.includes("node_modules"))).toBe(
+          false,
+        );
+      }
+    }
+
+    // 2. An ABSOLUTE target whose ancestor segment is spelled in another
+    //    case: the repository root itself, reached as
+    //    `<base>/ancestor/repo` for a real `<base>/Ancestor/repo`.
+    {
+      const { base, repo } = initNamedRepo("Ancestor", "repo");
+      const caseInsensitive = caseInsensitiveVolume(base);
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        path.join(base, "ancestor", "repo"),
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      if (caseInsensitive) {
+        expect(
+          result.warnings.some(
+            (w) =>
+              w.includes("node_modules") &&
+              w.includes("resolves to the repository root itself"),
+          ),
+        ).toBe(true);
+      } else {
+        expect(result.warnings.some((w) => w.includes("node_modules"))).toBe(
+          false,
+        );
+      }
+    }
+
+    // 3. An NFD target for a repository directory stored in NFC.
+    {
+      const { base, repo } = initNamedRepo("p3", NFC_NAME);
+      // Measured on this volume rather than assumed: APFS's
+      // case-insensitive variant is normalisation-insensitive, its
+      // case-sensitive variant is not, and a Linux host is neither.
+      const normalises = fs.existsSync(path.join(base, "p3", NFD_NAME));
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        path.join("..", NFD_NAME),
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      if (normalises) {
+        expect(fs.realpathSync(path.join(repo, "node_modules"))).not.toBe(
+          resolveDeepestExisting(repo),
+        );
+        expect(
+          result.warnings.some(
+            (w) =>
+              w.includes("node_modules") &&
+              w.includes("resolves to the repository root itself"),
+          ),
+        ).toBe(true);
+      } else {
+        expect(result.warnings.some((w) => w.includes("node_modules"))).toBe(
+          false,
+        );
+      }
+    }
+
+    // The three EXACT spellings, as negative controls in the same test:
+    // these were already refused before identity was consulted, and the
+    // wording each one gets must not have moved.
+    // 4. `node_modules -> ..`: an ancestor, spelled the way it is.
+    {
+      const { repo } = initNamedRepo("p4", "repo");
+      const parent = path.dirname(repo);
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        "..",
+      );
+
+      expect(after).toEqual(before);
+      // This target's write would land beside the repository, not in it.
+      expect(fs.existsSync(path.join(parent, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("node_modules") &&
+            w.includes("which contains the repository root"),
+        ),
+      ).toBe(true);
+    }
+
+    // 5. `node_modules -> <the root's own absolute path>`.
+    {
+      const { repo } = initNamedRepo("p5", "repo");
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        repo,
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("node_modules") &&
+            w.includes("resolves to the repository root itself"),
+        ),
+      ).toBe(true);
+    }
+
+    // 6. `node_modules -> .`.
+    {
+      const { repo } = initNamedRepo("p6", "repo");
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        ".",
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("node_modules") &&
+            w.includes("resolves to the repository root itself"),
+        ),
+      ).toBe(true);
+    }
+  }, 90000);
+});
+
+describe("probe(): worktree isolation, a destination whose ancestor in the copy is a file", () => {
+  it("skips a defaults-file link naming a path under a TRACKED FILE ('SRC/FILE.TXT/x' over 'src/file.txt') with a warning, and the run completes instead of failing the whole sync", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src", "file.txt"), "tracked\n");
+    // Repository content naming a path UNDER a tracked file. It passes
+    // rule 3 honestly: git tracks `src/file.txt`, but nothing is tracked
+    // under it, so `src/file.txt/x` is untracked and the rule has
+    // nothing to refuse.
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [path.join("SRC", "FILE.TXT", "x")] }),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "tracked file",
+    ]);
+    if (!caseInsensitiveVolume(repo)) {
+      // `SRC/FILE.TXT` is free space in the copy on this volume: the
+      // recursive mkdir creates it, the link is made, and the shape this
+      // test is about has nothing to act on.
+      return;
+    }
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.readFileSync(path.join(repo, "src", "file.txt"), "utf8")).toBe(
+      "tracked\n",
+    );
+    // The run completed: one impossible destination is a skipped link,
+    // never a failed sync for everything else in the run.
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join("SRC", "FILE.TXT", "x")) &&
+          w.includes(path.join("SRC", "FILE.TXT")) &&
+          w.includes("is not a directory in the copy"),
+      ),
+    ).toBe(true);
+    expect(
+      result.warnings.some((w) => w.includes("worktree_sync_failed")),
+    ).toBe(false);
+  });
+});
+
+describe("probe(): worktree isolation, a link target that CONTAINS the isolation copy", () => {
+  it("refuses a defaults-file link naming the in-repo --log-dir the copy itself lives under, the mirror of the target-inside-the-copy refusal", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, ".probe-logs");
+    fs.mkdirSync(logDir);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".probe-logs\n");
+    // Repository content naming the directory the isolation copy is
+    // created inside: it sits in the repository, resolves inside it, is
+    // not tracked, and contains no path this run writes to, so every
+    // up-front rule accepts it.
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [".probe-logs"] }),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "log dir"]);
+
+    /** The source tree without the log directory, whose contents this
+     * run legitimately writes. */
+    const hashTreeOutsideLogs = (): Map<
+      string,
+      { symlink: boolean; hash: string }
+    > => {
+      const all = hashTree(repo);
+      for (const key of [...all.keys()]) {
+        if (key === ".probe-logs" || key.startsWith(".probe-logs" + path.sep)) {
+          all.delete(key);
+        }
+      }
+      return all;
+    };
+
+    const before = hashTreeOutsideLogs();
+    const result = await probe(baseOptions(repo, { logDir }));
+    const after = hashTreeOutsideLogs();
+
+    expect(after).toEqual(before);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(".probe-logs") &&
+          w.includes("which contains the isolation copy"),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("probe(): worktree isolation, the tracked-file listing behind the link policy", () => {
   it("fails closed when git cannot answer which candidates it tracks: no link repository content named is created, and the envelope says so", async () => {
     useLockDir();

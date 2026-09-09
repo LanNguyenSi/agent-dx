@@ -690,7 +690,16 @@ The four rules, in this order:
    root, or to a directory containing it (`esc -> .`, `node_modules ->
    .`), is skipped, since linking it would hand the copy the whole
    source tree under that name and every write through it would land in
-   the real one. A `--link`, a `--plan` file's `link`, or a
+   the real one. Both halves of that -- IS the root, CONTAINS the
+   root -- are decided by filesystem identity (inode and device), not by
+   comparing the two resolved path strings: `realpath` resolves symlinks
+   and normalises neither case nor Unicode form, so a `node_modules ->
+   ../REPO` for a directory really named `repo`, an absolute target
+   spelling an ANCESTOR segment in another case, and an NFD target for
+   an NFC directory name each resolve to the root while spelling a path
+   outside it. The root's own ancestors are walked up to the filesystem
+   root and compared the same way, so an alias of a grandparent is seen
+   as readily as one of the parent. A `--link`, a `--plan` file's `link`, or a
    defaults-file `link` whose value resolves outside the root never
    reaches this rule: it refuses the whole run up front (`reason:
    "file_outside_root"`), before the policy sees any candidate, since a
@@ -714,6 +723,13 @@ The four rules, in this order:
    any spelling is refused with a warning naming the file and the entry.
    `--link`, typed by the person running the probe, keeps its latitude
    here; rules 1, 2 and 4 apply to it the same as to everything else.
+   That latitude has a price worth naming: a `--link` that does name a
+   tracked directory SHARES it with the source tree, so a `--pre` or a
+   `-t` that writes there writes into the operator's own tracked files,
+   and the isolation copy is no longer isolated for that subtree. Rule 2
+   still refuses it whenever the run's own cwd or the file a mutant is
+   written into sits inside it, which is the case that would corrupt
+   this run's own measurement; everything else is the operator's call.
 4. A candidate at or underneath a path this run already linked is
    skipped as already covered (composer's own defaults, `vendor` and
    `vendor/bin`, are exactly this shape). Nesting is judged on the
@@ -748,7 +764,18 @@ The invariant, enforced immediately before each of the three syscalls
 that create a link (the recursive `mkdir` of the destination's parent,
 the delete at the destination, the symlink-create): the destination's
 parent must still RESOLVE inside the copy, and a link may only ever
-point at the source tree, never back into the copy. This is what the
+point at the source tree, never back into the copy and never at a
+directory the copy itself sits inside (a defaults file naming the same
+in-repo directory a `--log-dir` puts the copy under is that second
+shape, and it is judged by the same identity comparison rule 1 uses).
+A destination whose own existing ancestor in the copy is a file rather
+than a directory is skipped here too, naming the blocking path: the
+recursive `mkdir` cannot create a directory below a file, and one
+candidate's impossible destination is a skipped link like any other,
+never a failed sync for the whole run. Repository content naming
+`SRC/FILE.TXT/x` over a tracked `src/file.txt` is that shape, and it
+reaches this point honestly, since git tracks no path UNDER a file and
+rule 3 therefore has nothing to refuse. This is what the
 rules above cannot decide on their own, because it is not a property of
 the candidate at all: the links this same step created earlier are part
 of the path those syscalls walk, so a destination that was a plain path
@@ -768,10 +795,15 @@ file this run mutates must still resolve inside the copy. A miss is
 `reason: "worktree_sync_failed"`, never a warning and never a verdict,
 since the run's next act is to write there.
 
-Limitations. The invariant is checked and then acted on, so a second
-process that changes the copy in between (replacing a directory with a
-symlink in the microseconds between the check and the syscall) is not
-covered; the copy lives in a fresh, per-run scratch directory under
+Limitations. A linked directory is SHARED with the source tree, not
+copied, and the policy judges only that link's own destination and its
+own target: a symlink INSIDE a linked directory that points back into
+the repository (a sibling install carrying a `back -> ../repo`) is
+reached through the link like any other file in it, so a `--pre` writing
+through that inner path writes into the source tree. The invariant is
+checked and then acted on, so a second process that changes the copy in
+between (replacing a directory with a symlink in the microseconds
+between the check and the syscall) is not covered; the copy lives in a fresh, per-run scratch directory under
 `--log-dir` that nothing else is expected to write into, and the
 repository-keyed lock keeps a second probe out of it. The rules compare
 each candidate's destination, in the copy's spelling, against the
@@ -1561,7 +1593,7 @@ exactly which `reason` is which).
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
-| `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced); `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, a `--plan` file's `link`, the defaults file's `link`), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
+| `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced), and a listed path may be a DANGLING link when the target it names does not exist -- a defaults-file entry naming a path that is simply not there is linked as given rather than dropped, since a link is created by the name it points at, not by what is behind it; `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, a `--plan` file's `link`, the defaults file's `link`), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
 | `totalDurationMs` | number | always, for this envelope (see the top-level-usage-error carve-out above, and `--plan`, whose own envelope carries no `totalDurationMs` at all) | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
 
 #### Refusal reason shape

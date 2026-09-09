@@ -215,12 +215,101 @@ export function canonicalDestRelPath(wtReal: string, relPath: string): string {
   return canonical.join(path.sep);
 }
 
+/**
+ * How `resolved` relates to `base`, decided by FILESYSTEM IDENTITY
+ * rather than by comparing path strings: `"same"` when the two paths
+ * name one directory, `"contains"` when `resolved` is an ancestor of
+ * `base`, and `undefined` for every other relation (including a
+ * `resolved` that is not on disk at all).
+ *
+ * The string comparison this replaces does not merely miss cases, it
+ * fails OPEN, which is the one direction that reaches the operator's
+ * tree. `fs.realpathSync` resolves symlinks and nothing else: measured
+ * on APFS, it normalises neither CASE (`/base/REPO` comes back as
+ * `/base/REPO` for a directory really named `repo`) nor Unicode FORM (an
+ * NFD spelling of an NFC directory name comes back NFD). A gitignored
+ * `node_modules -> ../REPO`, or one whose absolute target spells an
+ * ANCESTOR segment in another case, therefore resolves TO the
+ * repository root while comparing as a path outside it, and linking it
+ * hands the isolation copy the whole source tree under that name.
+ *
+ * `ino`/`dev` is what the destination side of this same module already
+ * decides on (`canonicalEntryName`), against the same aliasing, and this
+ * is the target side of it. The `"contains"` half walks `base`'s own
+ * ancestors up to the filesystem root and compares identity at each
+ * step, rather than testing one string for a prefix of the other:
+ * `base` is already realpath'd, so each of its ancestors is a real
+ * directory, and any alias of one of them is that same entry under
+ * another spelling. Directories cannot be hard-linked, so for the
+ * directories this decides about, one `ino`/`dev` is one directory.
+ *
+ * The plain string comparison is kept ahead of the syscalls as a
+ * pre-filter: it answers the ordinary case without touching the
+ * filesystem, and it is the only thing that CAN answer for a `resolved`
+ * that does not exist (there is nothing to stat, and nothing to write
+ * through either).
+ */
+export type EntryRelation = "same" | "contains";
+
+export function entryRelationTo(
+  resolved: string,
+  base: string,
+): EntryRelation | undefined {
+  if (resolved === base) return "same";
+  if (isPathContained(resolved, base)) return "contains";
+  const resolvedId = entryIdentity(resolved);
+  if (resolvedId === undefined) return undefined;
+  if (sameEntry(resolvedId, entryIdentity(base))) return "same";
+  let dir = path.dirname(base);
+  while (true) {
+    if (sameEntry(resolvedId, entryIdentity(dir))) return "contains";
+    const parent = path.dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+/** `ino`/`dev` of what `p` resolves to -- symlinks followed, the same
+ * way the syscalls that create a link follow them -- or `undefined` when
+ * nothing is there to identify. */
+function entryIdentity(p: string): { ino: number; dev: number } | undefined {
+  try {
+    const stat = fs.statSync(p);
+    return { ino: stat.ino, dev: stat.dev };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Two entries are the same entry only when they agree on BOTH halves.
+ * The `dev` half is defensive rather than exercised: an `ino` repeats
+ * across filesystems, so without it a candidate on a second volume that
+ * happened to carry the root's inode number would read as the root
+ * itself. Reproducing that needs a second device (a disk image, a
+ * mount), which no fixture in this package sets up, so the half is
+ * documented here rather than pinned by a test -- the same standing as
+ * the `dev` half of `canonicalEntryName`'s own identity check. */
+function sameEntry(
+  a: { ino: number; dev: number },
+  b: { ino: number; dev: number } | undefined,
+): boolean {
+  return b !== undefined && a.ino === b.ino && a.dev === b.dev;
+}
+
 /** The name the directory entry `parent`/`name` really carries, found by
  * `ino`/`dev` identity among `parent`'s entries; `name` itself when the
  * entry exists but `parent` cannot be listed, and `undefined` when
  * nothing is there under any spelling. Split out so
  * `canonicalDestRelPath` can tell those last two apart: one keeps
- * walking, the other stops looking. */
+ * walking, the other stops looking.
+ *
+ * The `dev` half is defensive rather than exercised. Every entry
+ * compared here is a child of one directory, so all of them are on one
+ * filesystem already and `ino` alone decides in practice; `dev` is what
+ * keeps that from being an assumption a mount point inside the copy
+ * could quietly break. Pinning it would need a second device (a disk
+ * image, a mount), which no fixture in this package sets up, so it is
+ * documented rather than tested. */
 function canonicalEntryName(parent: string, name: string): string | undefined {
   let target: fs.Stats;
   try {
@@ -303,6 +392,12 @@ export function skippedLinkWarning(
  *    directory containing it (`esc -> .`, `node_modules -> .`), is
  *    skipped, since linking it puts the source tree inside the copy
  *    under that name and every write through it lands in the real tree.
+ *    Both halves of that -- IS the root, CONTAINS the root -- are
+ *    decided by filesystem identity (`entryRelationTo`), never by
+ *    comparing the two resolved path strings: realpath normalises
+ *    neither case nor Unicode form, so `node_modules -> ../REPO` for a
+ *    directory really named `repo` is the same shape as
+ *    `node_modules -> ..` under a spelling no string comparison sees.
  * 2. The copy's root itself is never linked (a candidate whose relative
  *    path is empty), and neither is any candidate that contains the
  *    run's mapped cwd or the directory of a file the run mutates: those
@@ -375,11 +470,17 @@ export function planLinks(
     // walk found on disk: rule 1's latitude is for a target pointing
     // AWAY from the root (a sibling checkout's install, linked as the
     // same symlink the real tree carries), never for one pointing at it.
-    if (isPathContained(resolved, ctx.rootReal)) {
+    // Decided by filesystem IDENTITY (`entryRelationTo`), never by
+    // comparing the two realpath strings: realpath normalises neither
+    // case nor Unicode form, so a `node_modules -> ../REPO` for a
+    // directory really named `repo` resolves to the root while spelling
+    // a path outside it.
+    const rootRelation = entryRelationTo(resolved, ctx.rootReal);
+    if (rootRelation !== undefined) {
       warnings.push(
         skippedLinkWarning(
           candidate,
-          resolved === ctx.rootReal
+          rootRelation === "same"
             ? "it resolves to the repository root itself; linking it would " +
                 "put the source tree inside the isolation copy"
             : `it resolves to ${resolved}, which contains the repository ` +
