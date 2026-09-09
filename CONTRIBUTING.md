@@ -11,7 +11,7 @@ Thanks for your interest. This is a TypeScript monorepo of small, independent to
 
 1. Fork, branch off `master` (e.g. `feat/slop-detector-rule-x`, `fix/okf-kit-bug`).
 2. Keep changes scoped to one package where possible. Cross-package refactors should be split.
-3. Run whatever checks the changed package defines (commonly `npm run build`, `npm test`, plus `npm run format:check` / `npm run typecheck` where present). CI uses `--if-present` so missing scripts are not a blocker.
+3. Run whatever checks the changed package defines (commonly `npm run build`, `npm test`, plus `npm run format:check` / `npm run typecheck` where present). The `ci` job's Typecheck, Build, and Lint steps use `--if-present` so a missing script there is not a blocker, and its Test step falls back to `npm test --if-present` when `test:ci` is absent; but two checks fail closed instead: the Format check step fails the build if a package ships TypeScript sources under `src/` without a `format:check` script, and the `lint-format-matrix` job fails if a `packages/*/package.json` directory is missing from the `ci` job's `matrix.package` list.
 4. Open the PR with a clear summary, motivation, and test plan.
 
 ## Dev Setup
