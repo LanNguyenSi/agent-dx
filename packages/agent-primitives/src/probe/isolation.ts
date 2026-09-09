@@ -6,7 +6,9 @@ import { isPathContained, resolveDeepestExisting } from "./containment.js";
 import {
   canonicalDestRelPath,
   entryRelationTo,
+  hasOperatorLatitude,
   linkRelPath,
+  linkTargetRelPath,
   planLinks,
   relContains,
   skippedLinkWarning,
@@ -334,12 +336,18 @@ export function findComposerLinkDirs(root: string): string[] {
  * without an explicit `--link`: `node_modules` directories first (the
  * pre-existing order), then composer `vendor-dir`/`bin-dir`s -- one
  * shared walk (`walkAutoLinkDirs`) rather than two separate traversals
- * of the same tree. A `node_modules` carries no `namedBy`: the walk
- * found the directory itself on disk, rather than repository content
- * naming a path (see `LinkCandidate`). */
+ * of the same tree. A `node_modules` carries no `namedBy` but is marked
+ * `discovered`: the walk found the directory itself on disk, rather than
+ * repository content naming a path (see `LinkCandidate`). A composer
+ * candidate carries `namedBy` instead, since a `composer.json` value is
+ * what named it. Neither is an operator's own `--link`, which is the one
+ * source rule 3 leaves its latitude to. */
 export function findAutoLinkDirs(root: string): LinkCandidate[] {
   const { nodeModules, composer } = walkAutoLinkDirs(root);
-  return [...nodeModules.map((absDir) => ({ absDir })), ...composer];
+  return [
+    ...nodeModules.map((absDir) => ({ absDir, discovered: true as const })),
+    ...composer,
+  ];
 }
 
 /** Number of file records in a `git diff --numstat -z` listing. Parsed
@@ -974,37 +982,56 @@ export async function beginWorktree(
     .filter(
       (rel) => rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel),
     );
-  // Rule 3 of the link policy: a directory named by repository content
-  // (a composer config value, a `--plan` file's or the repo defaults
-  // file's `link`) may only be linked when git does not track it. Asked
-  // once, for every such candidate that sits inside the root, rather
-  // than per candidate: one `git ls-files` listing restricted to those
-  // paths, whose output is any tracked path under any of them. The
-  // paths are the COPY's own spelling of each destination, the same one
-  // the policy decides rule 3 on: git's index is case-sensitive, so a
-  // `vendor-dir` of `SRC` asked about under that spelling comes back
-  // untracked while naming the tracked `src` the copy carries. The
-  // repository root itself (an empty relative path) is dropped rather
-  // than sent as a pathspec matching the entire index; the policy
-  // refuses that candidate outright anyway.
-  const fileSourced = candidates
-    .filter((c) => c.namedBy !== undefined)
-    .map((c) => ({ candidate: c, relPath: linkRelPath(c.absDir, rootReal) }))
-    .filter(
-      (entry): entry is { candidate: LinkCandidate; relPath: string } =>
-        entry.relPath !== undefined && entry.relPath !== "",
-    )
-    .map((entry) => ({
-      ...entry,
-      canonicalRelPath: canonicalRelPath(entry.relPath),
-    }));
+  // The SOURCE tree's own spelling of an in-root path, the mirror of
+  // `canonicalRelPath` above: `canonicalDestRelPath` is anchored at
+  // whichever directory it is given, and the tracked-TARGET half of rule
+  // 3 asks about paths in the source tree rather than in the copy.
+  const canonicalRootRelPath = (relPath: string): string =>
+    canonicalDestRelPath(rootReal, relPath);
+  // Rule 3 of the link policy, both halves: a directory named by
+  // repository content (a composer config value, a `--plan` file's or
+  // the repo defaults file's `link`) may only be linked when git does
+  // not track that DESTINATION, and no candidate but an operator's own
+  // `--link` may be linked when git tracks what it POINTS AT. Asked
+  // once, for every path either half will be asked about, rather than
+  // per candidate: one `git ls-files` listing restricted to those paths,
+  // whose output is any tracked path under any of them. The set is built
+  // from `hasOperatorLatitude` and `linkTargetRelPath`, the very
+  // functions the policy decides with, because a path the policy asks
+  // about that this listing never covered comes back untracked for want
+  // of a pathspec -- a fail-open in the one direction that reaches the
+  // source tree. Each destination is the COPY's own spelling of it and
+  // each target the SOURCE tree's, the same two the policy uses: git's
+  // index is case-sensitive, so a `vendor-dir` of `SRC` asked about
+  // under that spelling comes back untracked while naming the tracked
+  // `src` either tree really carries. The repository root itself (an
+  // empty relative path) is dropped rather than sent as a pathspec
+  // matching the entire index; the policy refuses that candidate
+  // outright anyway.
+  const askedRelPaths = new Set<string>();
+  for (const candidate of candidates) {
+    if (hasOperatorLatitude(candidate)) continue;
+    if (candidate.namedBy !== undefined) {
+      const destRel = linkRelPath(candidate.absDir, rootReal);
+      if (destRel !== undefined && destRel !== "") {
+        askedRelPaths.add(canonicalRelPath(destRel));
+      }
+    }
+    const targetRel = linkTargetRelPath(
+      resolveDeepestExisting(candidate.absDir),
+      rootReal,
+    );
+    if (targetRel !== undefined && targetRel !== "") {
+      askedRelPaths.add(canonicalRootRelPath(targetRel));
+    }
+  }
   const trackedRelPaths: string[] = [];
-  // Fail closed: a listing that could not run leaves every file-sourced
-  // candidate treated as tracked (so none is linked) rather than
-  // treated as untracked, which is the direction that reaches the
-  // source tree.
+  // Fail closed: a listing that could not run leaves every candidate the
+  // policy would have asked about treated as tracked (so none of them is
+  // linked) rather than treated as untracked, which is the direction
+  // that reaches the source tree.
   let trackedUnknown = false;
-  if (fileSourced.length > 0) {
+  if (askedRelPaths.size > 0) {
     const lsFilesResult = await runGit(
       [
         "ls-files",
@@ -1012,7 +1039,7 @@ export async function beginWorktree(
         "--",
         // `:(literal)` so a path containing a glob character is matched
         // as the literal directory it is, never as a pattern.
-        ...fileSourced.map((entry) => `:(literal)${entry.canonicalRelPath}`),
+        ...[...askedRelPaths].map((relPath) => `:(literal)${relPath}`),
       ],
       "link-tracked-files.log",
       root,
@@ -1025,7 +1052,7 @@ export async function beginWorktree(
       trackedUnknown = true;
       syncWarnings.push(
         `git ls-files could not check which link candidates git tracks (see ${lsFilesResult.logPath}); ` +
-          "every directory named by repository content is treated as tracked",
+          "every candidate but an operator's own --link is treated as tracked",
       );
     } else {
       trackedRelPaths.push(
@@ -1048,6 +1075,7 @@ export async function beginWorktree(
     rootReal,
     protectedRelPaths,
     isTrackedPath,
+    canonicalRootRelPath,
     canonicalRelPath,
   });
   syncWarnings.push(...plan.warnings);
@@ -1114,6 +1142,17 @@ export async function beginWorktree(
       // the reason `entryRelationTo` gives: a case-variant or NFD
       // spelling of an ancestor is the same directory under a name no
       // string comparison catches.
+      // The `"contains"` arm is the one this shape reaches; the `"same"`
+      // arm below is defensive rather than exercised, and stays for the
+      // same reason `sameEntry`'s `dev` half does. Its exact spelling is
+      // already caught by the string containment check above (a target
+      // equal to `wtReal` is contained in it), so reaching it would take
+      // an alias of the copy's OWN path -- and the copy sits in a
+      // per-run scratch directory named after a fresh uuid, which no
+      // committed file and no operator can name in advance. It is
+      // written out anyway rather than folded into the `"contains"`
+      // wording, so that a target which IS the copy is never reported as
+      // one that merely contains it.
       const copyRelation = entryRelationTo(targetReal, wtReal);
       if (copyRelation !== undefined) {
         syncWarnings.push(

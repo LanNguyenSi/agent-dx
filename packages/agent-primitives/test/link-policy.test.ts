@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   canonicalDestRelPath,
   entryRelationTo,
+  hasOperatorLatitude,
   linkRelPath,
+  linkTargetRelPath,
   planLinks,
   relContains,
 } from "../src/probe/link-policy.js";
@@ -31,30 +33,40 @@ afterEach(() => {
 /** The policy's defaults for a repository with nothing to protect and
  * nothing tracked; each test overrides only the part it is about.
  *
- * `canonicalRelPath` defaults to the identity: a copy whose own
- * filesystem spells every destination exactly the way the source tree
- * does, which is what a case-sensitive filesystem always gives and what
- * a case-insensitive one gives for every candidate spelled the way the
- * directory really is. The tests that are ABOUT the other case pass
- * their own. */
+ * `tracked` is a list of paths git's index carries, and the stub
+ * answers it the way `beginWorktree`'s own `isTrackedPath` does: a
+ * question about a DIRECTORY is answered by any tracked path at or
+ * under it, since `git ls-files` reports the files in a directory and
+ * never the directory itself.
+ *
+ * `canonicalRelPath` and `canonicalRootRelPath` default to the
+ * identity: a copy and a source tree that spell every path exactly the
+ * way the other does, which is what a case-sensitive filesystem always
+ * gives and what a case-insensitive one gives for every candidate
+ * spelled the way the directory really is. The tests that are ABOUT the
+ * other case pass their own. */
 function ctx(
   rootReal: string,
   over: {
     protectedRelPaths?: string[];
     tracked?: string[];
     canonicalRelPath?: (relPath: string) => string;
+    canonicalRootRelPath?: (relPath: string) => string;
   } = {},
 ): {
   rootReal: string;
   protectedRelPaths: string[];
   isTrackedPath: (relPath: string) => boolean;
+  canonicalRootRelPath: (relPath: string) => string;
   canonicalRelPath: (relPath: string) => string;
 } {
   const tracked = over.tracked ?? [];
   return {
     rootReal,
     protectedRelPaths: over.protectedRelPaths ?? [],
-    isTrackedPath: (relPath) => tracked.includes(relPath),
+    isTrackedPath: (relPath) =>
+      tracked.some((t) => t === relPath || t.startsWith(relPath + path.sep)),
+    canonicalRootRelPath: over.canonicalRootRelPath ?? ((relPath) => relPath),
     canonicalRelPath: over.canonicalRelPath ?? ((relPath) => relPath),
   };
 }
@@ -664,6 +676,241 @@ describe("entryRelationTo: 'is the root' and 'contains the root' by identity", (
     expect(fs.statSync(variant).ino).toBe(fs.statSync(root).ino);
 
     expect(entryRelationTo(variant, root)).toBe("same");
+  });
+});
+
+describe("entryRelationTo: pinned on any volume, through a symlinked alias", () => {
+  it("reports 'same' for an ALIAS of the root: statSync follows the link, so identity answers what neither path string can (the identity branch, whatever the volume's case behaviour)", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "repo");
+    fs.mkdirSync(root);
+    const alias = path.join(base, "REPOLINK");
+    fs.symlinkSync(root, alias, "dir");
+
+    // The string pre-filter cannot answer this one: the alias is a
+    // SIBLING of the root, neither equal to it nor under it, so both
+    // halves of the pre-filter are false and only identity is left.
+    // That is what makes this test volume-independent, where every
+    // other test of this function needs a case-insensitive (or a
+    // normalising) volume to produce two spellings of one directory.
+    expect(alias).not.toBe(root);
+    expect(path.relative(root, alias).startsWith("..")).toBe(true);
+
+    expect(entryRelationTo(alias, root)).toBe("same");
+  });
+
+  it("reports 'contains' for an alias of a GRANDPARENT of the base, on any volume: the walk up the base's own ancestors is what reaches it", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "repo");
+    const deep = path.join(root, "sub", "deep");
+    fs.mkdirSync(deep, { recursive: true });
+    const alias = path.join(base, "ROOTLINK");
+    fs.symlinkSync(root, alias, "dir");
+
+    // Again a sibling spelling, so the pre-filter is silent and the
+    // ancestor walk is the branch under test; `root` is two levels
+    // above `deep`, so a walk that stopped at the parent would miss it.
+    expect(path.relative(deep, alias).startsWith("..")).toBe(true);
+
+    expect(entryRelationTo(alias, deep)).toBe("contains");
+  });
+});
+
+describe("linkTargetRelPath: where a candidate's TARGET sits inside the root", () => {
+  it("answers from the strings alone for a target spelled the way it sits, and reports the root itself as the empty path", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "a", "b"), { recursive: true });
+
+    expect(linkTargetRelPath(path.join(root, "a", "b"), root)).toBe(
+      path.join("a", "b"),
+    );
+    expect(linkTargetRelPath(root, root)).toBe("");
+  });
+
+  it("finds the in-root path of a target reached through a symlinked ALIAS of the root, which relativizing the two strings reads as outside it (the identity branch, on any volume)", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "repo");
+    fs.mkdirSync(path.join(root, "src"), { recursive: true });
+    fs.symlinkSync(root, path.join(base, "REPOLINK"), "dir");
+    const target = path.join(base, "REPOLINK", "src");
+
+    // What a plain relativize says about it, and why it is not enough:
+    // this is the same shape a `node_modules -> ../REPO/src` produces
+    // on a case-insensitive volume, reproduced here with a symlink so
+    // the branch is exercised on every volume.
+    expect(path.relative(root, target).startsWith("..")).toBe(true);
+
+    expect(linkTargetRelPath(target, root)).toBe("src");
+  });
+
+  it("reports nothing for a target genuinely outside the root: that is rule 1's latitude for a sibling checkout's install, not something to ask git about", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "repo");
+    fs.mkdirSync(root);
+    const sibling = path.join(base, "sibling", "node_modules");
+    fs.mkdirSync(sibling, { recursive: true });
+
+    expect(linkTargetRelPath(sibling, root)).toBeUndefined();
+  });
+});
+
+describe("planLinks: rule 3's tracked-TARGET half", () => {
+  it("hasOperatorLatitude is true for a candidate carrying neither provenance flag, and false for each flag on its own", () => {
+    expect(hasOperatorLatitude({ absDir: "/r/nm" })).toBe(true);
+    expect(hasOperatorLatitude({ absDir: "/r/nm", discovered: true })).toBe(
+      false,
+    );
+    expect(
+      hasOperatorLatitude({ absDir: "/r/nm", namedBy: '"v" named in x' }),
+    ).toBe(false);
+  });
+
+  it("refuses an auto-discovered candidate whose TARGET git tracks, naming the target: the destination is a name no other rule objects to", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "src"));
+    fs.symlinkSync("src", path.join(root, "node_modules"), "dir");
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      ctx(root, { tracked: ["src"] }),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toContain(path.join(root, "node_modules"));
+    expect(plan.warnings[0]).toContain(
+      `git tracks its target ${path.join(root, "src")}`,
+    );
+  });
+
+  it("refuses one repository content named for the same reason, in the same wording, with its provenance in the warning", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "src"));
+    fs.symlinkSync("src", path.join(root, "vendor"), "dir");
+
+    const plan = planLinks(
+      [
+        {
+          absDir: path.join(root, "vendor"),
+          namedBy: `"vendor" named in "vendor-dir" of ${root}/composer.json`,
+        },
+      ],
+      ctx(root, { tracked: ["src"] }),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain("vendor-dir");
+    expect(plan.warnings[0]).toContain(
+      `git tracks its target ${path.join(root, "src")}`,
+    );
+  });
+
+  it("keeps an operator's own --link usable for that same target: rule 3's documented latitude covers both of its halves", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "src"));
+    fs.symlinkSync("src", path.join(root, "node_modules"), "dir");
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules") }],
+      ctx(root, { tracked: ["src"] }),
+    );
+
+    expect(plan.links.map((planned) => planned.candidate.absDir)).toEqual([
+      path.join(root, "node_modules"),
+    ]);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("links a discovered candidate whose target is UNTRACKED and inside the root (a hoisted install, a shared cache): the rule is what git tracks, not where the target sits", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, ".cache"));
+    fs.symlinkSync(".cache", path.join(root, "node_modules"), "dir");
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      ctx(root, { tracked: ["src"] }),
+    );
+
+    expect(plan.links.map((planned) => planned.candidate.absDir)).toEqual([
+      path.join(root, "node_modules"),
+    ]);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("links a discovered candidate whose target is outside the root, tracked paths or not: it is not this repository's source at all", () => {
+    const base = makeTmpDir();
+    const root = path.join(base, "repo");
+    fs.mkdirSync(root);
+    fs.mkdirSync(path.join(base, "sibling", "node_modules"), {
+      recursive: true,
+    });
+    fs.symlinkSync(
+      path.join("..", "sibling", "node_modules"),
+      path.join(root, "node_modules"),
+      "dir",
+    );
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      // Everything tracked, so only "the target is outside the root"
+      // can be what lets this candidate through.
+      { ...ctx(root), isTrackedPath: () => true },
+    );
+
+    expect(plan.links.map((planned) => planned.candidate.absDir)).toEqual([
+      path.join(root, "node_modules"),
+    ]);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("asks git about the SOURCE tree's own spelling of the target, never the one realpath hands back: a target really named 'SRC' is the tracked 'src' the repository carries", () => {
+    const root = makeTmpDir();
+    // A directory really named `SRC` on any volume, so this test does
+    // not need a case-insensitive one to produce the two spellings.
+    fs.mkdirSync(path.join(root, "SRC"));
+    fs.symlinkSync("SRC", path.join(root, "node_modules"), "dir");
+    const candidates = [
+      { absDir: path.join(root, "node_modules"), discovered: true as const },
+    ];
+
+    // Asked with the raw spelling, git's case-sensitive index answers
+    // "untracked" and the link is created: the fail-open this
+    // canonicalisation exists to close.
+    expect(
+      planLinks(candidates, ctx(root, { tracked: ["src"] })).links,
+    ).toHaveLength(1);
+
+    const plan = planLinks(
+      candidates,
+      ctx(root, {
+        tracked: ["src"],
+        canonicalRootRelPath: (relPath) =>
+          relPath === "SRC" ? "src" : relPath,
+      }),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain(
+      `git tracks its target ${path.join(root, "SRC")}`,
+    );
+  });
+
+  it("refuses a target git tracks only BELOW it (a directory whose own path is not in the index, carrying a tracked file)", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "src"));
+    fs.symlinkSync("src", path.join(root, "node_modules"), "dir");
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      // What `git ls-files` really returns: the FILES under the
+      // directory, never the directory itself.
+      ctx(root, { tracked: [path.join("src", "tracked.js")] }),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain(
+      `git tracks its target ${path.join(root, "src")}`,
+    );
   });
 });
 

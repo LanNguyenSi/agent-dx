@@ -30,6 +30,34 @@ export interface LinkCandidate {
    * `--link` leaves it unset and keeps its latitude.
    */
   namedBy?: string;
+  /**
+   * Set exactly when the auto-discovery walk found this directory on
+   * disk (a `node_modules`), rather than any text naming a path: a
+   * composer `vendor-dir`/`bin-dir` carries `namedBy` instead, and an
+   * operator's own `--link` carries neither. The two flags together are
+   * what separate the candidates rule 3 questions from the one it
+   * leaves its latitude to (`hasOperatorLatitude`).
+   */
+  discovered?: true;
+}
+
+/**
+ * Whether rule 3 leaves this candidate its latitude: true only for a
+ * path an operator typed on the command line (`--link`), which carries
+ * neither provenance flag. A directory repository content named
+ * (`namedBy`) and one the walk found on disk (`discovered`) are both
+ * asked what git tracks; the operator's own is not, and the README's
+ * rule 3 says what that latitude costs.
+ *
+ * One exported predicate rather than the condition written out at each
+ * site, because `beginWorktree` builds its single `git ls-files`
+ * listing from EXACTLY the candidates this function will be asked
+ * about: a candidate the policy questions but the listing never covered
+ * comes back "untracked" for want of a pathspec, which is the direction
+ * that reaches the source tree.
+ */
+export function hasOperatorLatitude(candidate: LinkCandidate): boolean {
+  return candidate.namedBy === undefined && candidate.discovered !== true;
 }
 
 /** A candidate the policy accepted, with the worktree-relative path it
@@ -71,6 +99,24 @@ export interface LinkPolicyContext {
    * caller's listing is restricted to those same spellings.
    */
   isTrackedPath: (relPath: string) => boolean;
+  /**
+   * The SOURCE tree's OWN spelling of a path relative to the repository
+   * root: the same per-segment identity read `canonicalRelPath` performs
+   * for the copy, anchored at the root instead (`beginWorktree` passes
+   * `canonicalDestRelPath` bound to `rootReal`).
+   *
+   * Asked about the resolved TARGET of a candidate, and needed for the
+   * same reason the destination side needs its own: `realpath` hands a
+   * target back in the spelling it was GIVEN, so a `vendor-dir` of `SRC`
+   * resolves to `<root>/SRC` and git's case-sensitive index reports that
+   * spelling as untracked while naming exactly the tracked `src` the
+   * repository really carries.
+   *
+   * Required rather than optional with an identity default, for the same
+   * reason `canonicalRelPath` is: the default would silently be the
+   * string comparison this exists to replace, and it fails OPEN.
+   */
+  canonicalRootRelPath: (relPath: string) => string;
   /**
    * The isolation copy's OWN spelling of a destination (see
    * `canonicalDestRelPath`, which is what `beginWorktree` passes here).
@@ -269,6 +315,50 @@ export function entryRelationTo(
   }
 }
 
+/**
+ * Where a candidate's resolved TARGET sits inside the repository, as a
+ * path relative to `rootReal`, or `undefined` when it does not sit
+ * inside the root at all; `""` is the root itself. This is the TARGET
+ * side of the question `linkRelPath` answers for where a candidate
+ * SITS, and `resolvedTarget` is what `resolveDeepestExisting` made of
+ * the candidate: symlinks followed, a missing tail re-appended
+ * verbatim, so the path named is the candidate's own target rather than
+ * whichever ancestor of it happens to exist.
+ *
+ * It cannot be a `path.relative` against `rootReal`, for the reason
+ * `entryRelationTo` gives: `realpath` resolves symlinks and normalises
+ * neither case nor Unicode form, so a `node_modules -> ../REPO/src` for
+ * a directory really named `repo` resolves INTO the root while spelling
+ * a path outside it (measured on APFS), and a plain relativize reads it
+ * as outside and asks git nothing at all -- which is the direction that
+ * reaches the source tree. The target's ancestors are walked instead
+ * and compared to the root by filesystem IDENTITY, the segments walked
+ * past collected as the relative path.
+ *
+ * The spelling that comes back is the TARGET's own, which need not be
+ * the source tree's: `LinkPolicyContext.canonicalRootRelPath` is what
+ * turns it into the name git's index carries.
+ */
+export function linkTargetRelPath(
+  resolvedTarget: string,
+  rootReal: string,
+): string | undefined {
+  const rootId = entryIdentity(rootReal);
+  const segments: string[] = [];
+  let dir = resolvedTarget;
+  while (true) {
+    if (dir === rootReal) return segments.join(path.sep);
+    const dirId = entryIdentity(dir);
+    if (dirId !== undefined && sameEntry(dirId, rootId)) {
+      return segments.join(path.sep);
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return undefined;
+    segments.unshift(path.basename(dir));
+    dir = parent;
+  }
+}
+
 /** `ino`/`dev` of what `p` resolves to -- symlinks followed, the same
  * way the syscalls that create a link follow them -- or `undefined` when
  * nothing is there to identify. */
@@ -387,11 +477,14 @@ export function skippedLinkWarning(
  *    a `node_modules` symlinked to a sibling checkout's install, linked
  *    as the same symlink the real tree carries -- belongs to a
  *    candidate the walk found on disk, which names no path at all, and
- *    it is latitude for a target pointing AWAY from the root only: a
- *    candidate of ANY source that resolves TO the root, or to a
- *    directory containing it (`esc -> .`, `node_modules -> .`), is
- *    skipped, since linking it puts the source tree inside the copy
- *    under that name and every write through it lands in the real tree.
+ *    it is latitude for a target pointing AWAY from the root, or at an
+ *    untracked directory inside it, and no further: a candidate of ANY
+ *    source that resolves TO the root, or to a directory containing it
+ *    (`esc -> .`, `node_modules -> .`), is skipped here, and one that
+ *    resolves to TRACKED source inside the root (`node_modules -> src`)
+ *    is skipped by rule 3 below, since linking either puts the source
+ *    tree inside the copy under that name and every write through it
+ *    lands in the real tree.
  *    Both halves of that -- IS the root, CONTAINS the root -- are
  *    decided by filesystem identity (`entryRelationTo`), never by
  *    comparing the two resolved path strings: realpath normalises
@@ -403,13 +496,23 @@ export function skippedLinkWarning(
  *    run's mapped cwd or the directory of a file the run mutates: those
  *    paths must stay real directories in the copy, or the run's own
  *    writes land in the source tree.
- * 3. A candidate repository content named (`namedBy`) may only name a
- *    directory git does not track. These inputs exist for gitignored
+ * 3. What git tracks is never shared, asked in two places. A candidate
+ *    repository content named (`namedBy`) may only name a DESTINATION
+ *    git does not track; and no candidate except an operator's own
+ *    `--link` (`hasOperatorLatitude`) may point AT something git tracks,
+ *    whatever name it sits under. These inputs exist for gitignored
  *    runtime output (`vendor/`, `node_modules/`, a tool cache); a
  *    tracked directory is SOURCE, and source must be copied into the
- *    isolation copy, not shared with the tree being isolated from. An
- *    operator's own `--link` keeps its latitude here (rules 1, 2 and 4
- *    still apply to it).
+ *    isolation copy, not shared with the tree being isolated from. The
+ *    target half is what the auto-discovery lane needs: a gitignored (or
+ *    committed) `node_modules -> src`, and a `node_modules` git tracks
+ *    as a directory of its own, both sit under a name the rules above
+ *    have nothing to say about while handing the copy the operator's
+ *    real source. Only a target INSIDE the root is asked about, by
+ *    filesystem identity (`linkTargetRelPath`): a target outside it is
+ *    rule 1's latitude and is not this repository's source at all. An
+ *    operator's own `--link` keeps its latitude for both halves (rules
+ *    1, 2 and 4 still apply to it).
  * 4. Nesting: a candidate whose destination is at or under a
  *    destination this run already linked is skipped as already covered
  *    -- the only shape whose `rmSync`/`symlinkSync` would resolve
@@ -518,6 +621,43 @@ export function planLinks(
         ),
       );
       continue;
+    }
+    // Rule 3's other half, and the reason the auto-discovery lane needs
+    // one at all: what a candidate POINTS AT can be tracked source even
+    // when the name it sits under is neither tracked nor protected. A
+    // gitignored `node_modules -> src`, the same link committed, and a
+    // `node_modules` git tracks as a directory of its own all reach here
+    // past every rule above, and linking any of them puts the operator's
+    // real source inside the copy under that name -- every `--pre` write
+    // through it then lands in the tree this run exists to isolate from.
+    // Asked of every candidate but an operator's own `--link`, and only
+    // about a target that sits INSIDE the root: a target outside it (a
+    // sibling checkout's install) is the latitude rule 1 grants, and an
+    // untracked one inside it (a hoisted monorepo install, a shared
+    // cache) is exactly what these links exist for. Both the containment
+    // and the spelling are decided by filesystem identity, never by
+    // relativizing two realpath strings: `node_modules -> ../REPO/src`
+    // for a directory really named `repo` resolves into the root while
+    // spelling a path outside it, and `-> SRC` names the tracked `src`
+    // under a spelling git's case-sensitive index calls untracked.
+    if (!hasOperatorLatitude(candidate)) {
+      const targetRel = linkTargetRelPath(resolved, ctx.rootReal);
+      if (
+        targetRel !== undefined &&
+        targetRel !== "" &&
+        ctx.isTrackedPath(ctx.canonicalRootRelPath(targetRel))
+      ) {
+        warnings.push(
+          skippedLinkWarning(
+            candidate,
+            `git tracks its target ${resolved}; source is copied into the ` +
+              "isolation copy, never shared with the tree being isolated " +
+              "from, so every write through such a link would land in the " +
+              "source tree",
+          ),
+        );
+        continue;
+      }
     }
     const covering = links.find((planned) =>
       relContains(planned.canonicalRelPath, canonicalRel),

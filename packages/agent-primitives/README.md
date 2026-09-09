@@ -920,11 +920,14 @@ The four rules, in this order:
    and repository content gets no such latitude. The latitude this rule
    does grant belongs to a candidate the walk found on disk, which
    names no path at all, and it is latitude for a target pointing AWAY
-   from the root only: a candidate of ANY source that resolves TO the
-   root, or to a directory containing it (`esc -> .`, `node_modules ->
-   .`), is skipped, since linking it would hand the copy the whole
-   source tree under that name and every write through it would land in
-   the real one. Both halves of that -- IS the root, CONTAINS the
+   from the root, or at an UNTRACKED directory inside it, and no
+   further: a candidate of ANY source that resolves TO the root, or to
+   a directory containing it (`esc -> .`, `node_modules -> .`), is
+   skipped here, and one that resolves to TRACKED source inside the
+   root (a gitignored or a committed `node_modules -> src`) is skipped
+   by rule 3 below. Linking any of them would hand the copy the
+   operator's own source under that name, and every write through it
+   would land in the real tree. Both halves of that -- IS the root, CONTAINS the
    root -- are decided by filesystem identity (inode and device), not by
    comparing the two resolved path strings: `realpath` resolves symlinks
    and normalises neither case nor Unicode form, so a `node_modules ->
@@ -946,24 +949,46 @@ The four rules, in this order:
    copy's, or this run's own writes land in the source tree. A
    `composer.json` carrying `"bin-dir": "."`, or a defaults file naming
    the directory under test, is exactly this shape.
-3. A directory named by repository CONTENT -- a composer `config` value,
-   a `--plan` file's `link`, the repository defaults file's `link` -- is
-   linked only when git does not track it. Those three inputs exist for
-   gitignored runtime output (`vendor/`, an install directory, a tool
-   cache); a tracked directory is source, and source is copied into the
-   isolation copy, never shared with the tree being isolated from. The
-   question is asked about the copy's own spelling of the whole
-   destination (see below), so a value naming a tracked directory under
-   any spelling is refused with a warning naming the file and the entry.
+3. What git tracks is never shared, asked in two places. A directory
+   named by repository CONTENT -- a composer `config` value, a `--plan`
+   file's `link`, the repository defaults file's `link` -- is linked
+   only when git does not track that DESTINATION; and no candidate at
+   all, the auto-discovered ones included, is linked when git tracks
+   what it POINTS AT, whatever name it sits under. These inputs exist
+   for gitignored runtime output (`vendor/`, an install directory, a
+   tool cache); a tracked directory is source, and source is copied into
+   the isolation copy, never shared with the tree being isolated from.
+   The destination question is asked about the copy's own spelling of
+   the whole path (see below), so a value naming a tracked directory
+   under any spelling is refused with a warning naming the file and the
+   entry. The target question is the one the auto-discovery walk needs:
+   a `node_modules` symlinked at `src`, gitignored or committed, and a
+   `node_modules` git tracks as a directory of its own both sit under a
+   name the rules above have nothing to say about, while linking either
+   hands the copy the operator's real source. It is asked only about a
+   target INSIDE the root (one outside it is the latitude rule 1 grants,
+   and an untracked one inside it -- a hoisted monorepo install, a
+   shared cache -- is exactly what these links exist for), and both the
+   containment and the spelling of that target are decided by filesystem
+   identity rather than by relativizing two `realpath` strings: a
+   `node_modules -> ../REPO/src` for a directory really named `repo`
+   resolves INTO the root while spelling a path outside it, and a target
+   really named `SRC` is the tracked `src` the repository carries, which
+   git's case-sensitive index would otherwise report as untracked. A
+   refusal names the target and that git tracks it.
    `--link`, typed by the person running the probe, keeps its latitude
-   here; rules 1, 2 and 4 apply to it the same as to everything else.
-   That latitude has a price worth naming: a `--link` that does name a
-   tracked directory SHARES it with the source tree, so a `--pre` or a
-   `-t` that writes there writes into the operator's own tracked files,
-   and the isolation copy is no longer isolated for that subtree. Rule 2
-   still refuses it whenever the run's own cwd or the file a mutant is
-   written into sits inside it, which is the case that would corrupt
-   this run's own measurement; everything else is the operator's call.
+   for BOTH halves; rules 1, 2 and 4 apply to it the same as to
+   everything else. That latitude has a price worth naming: a `--link`
+   that names a tracked directory, or points at one, SHARES it with the
+   source tree, so a `--pre` or a `-t` that writes there writes into the
+   operator's own tracked files, and the isolation copy is no longer
+   isolated for that subtree. Rule 2 still refuses it whenever the run's
+   own cwd or the file a mutant is written into sits inside it, which is
+   the case that would corrupt this run's own measurement; everything
+   else is the operator's call. Whichever half is asked, one `git
+   ls-files` listing answers both for the whole run, and a listing that
+   cannot run leaves every candidate but an operator's own `--link`
+   treated as tracked, so none of them is linked.
 4. A candidate at or underneath a path this run already linked is
    skipped as already covered (composer's own defaults, `vendor` and
    `vendor/bin`, are exactly this shape). Nesting is judged on the
@@ -992,7 +1017,10 @@ before any rule looks at it and a case-variant PARENT is no more
 invisible than a case-variant final component. From the first segment
 that does not exist the rest is taken as given: nothing is on disk there
 to alias it, and the planned name is the one the link would be created
-under.
+under. Rule 3's target half asks the same question of the SOURCE tree
+instead, segment by segment from the repository root, since the path it
+is about is one of the source tree's own and `realpath` hands a target
+back in the spelling it was given.
 
 The invariant, enforced immediately before each of the three syscalls
 that create a link (the recursive `mkdir` of the destination's parent,
@@ -1037,8 +1065,9 @@ reached through the link like any other file in it, so a `--pre` writing
 through that inner path writes into the source tree. The invariant is
 checked and then acted on, so a second process that changes the copy in
 between (replacing a directory with a symlink in the microseconds
-between the check and the syscall) is not covered; the copy lives in a fresh, per-run scratch directory under
-`--log-dir` that nothing else is expected to write into, and the
+between the check and the syscall) is not covered; the copy lives in a
+fresh, per-run scratch directory under `--log-dir` that nothing else is
+expected to write into, and the
 repository-keyed lock keeps a second probe out of it. The rules compare
 each candidate's destination, in the copy's spelling, against the
 protected paths in the SOURCE tree's own spelling, so a run whose own

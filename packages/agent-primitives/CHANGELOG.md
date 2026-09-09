@@ -92,7 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `node_modules -> .`) is refused, where before only a value repository
   content named was checked and only for resolving OUTSIDE the root, so
   the root itself passed (that refusal compared realpath STRINGS when it
-  was written; it compares filesystem identity as of the entry below); a destination that CONTAINS a link this run already created is
+  was written; it compares filesystem identity as of the entry below);
+  a destination that CONTAINS a link this run already created is
   refused rather than linked, since the recursive delete before each
   link create would otherwise remove that earlier link while leaving it
   listed in `isolation.linked`; and a destination the untracked-file
@@ -154,6 +155,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it first: case behaviour through `test/helpers/case-fs.ts`, and
   normalisation behaviour by creating an NFC name and asking for the NFD
   one.
+- A NARROWING of the auto-discovery latitude: a link candidate is no
+  longer created when git tracks what it POINTS AT, whatever name it
+  sits under (task `6c7e1532`). The tracked-directory rule used to ask
+  only about the DESTINATION, and only for a value repository content
+  named, so an auto-discovered `node_modules` symlinked at the tracked
+  `src` -- gitignored, committed, or spelled through an alias of the
+  repository's own directory (`-> ../REPO/src`) -- and a `node_modules`
+  git tracks as a directory of its own were all linked with no warning,
+  listed in `isolation.linked`, and a `--pre` writing through any of
+  them wrote into the operator's real tracked source. The question is
+  now asked of every candidate but an operator's own `--link`, which
+  keeps its documented latitude for both halves of the rule, and only
+  about a target that sits INSIDE the repository root: a target outside
+  it (a sibling checkout's install, the shape rule 1's latitude exists
+  for) and an untracked one inside it (a hoisted monorepo install, a
+  shared cache) link exactly as before, and both keep a negative-control
+  test. Containment of the target and its spelling are decided by
+  filesystem identity, the same way rule 1 decides whether a target IS
+  the root, since `realpath` normalises neither case nor Unicode form;
+  one `git ls-files` listing answers both halves for the whole run, and
+  a listing that cannot run leaves every candidate but a `--link`
+  treated as tracked. New end-to-end fixtures in
+  `test/probe-worktree.test.ts` ("a link target that is TRACKED
+  source"), each hashing the source tree before and after and asserting
+  the refusal names the target: the gitignored symlink, the committed
+  one, the alias spelling, the tracked `node_modules` directory, and the
+  two negative controls. `linkTargetRelPath` and the rule's two
+  provenance flags are unit-tested in `test/link-policy.test.ts`, which
+  also pins `entryRelationTo`'s identity branches through a symlinked
+  alias rather than a case-variant spelling, so both are exercised on a
+  case-sensitive volume too. The dangling-symlink branch of the
+  blocking-ancestor check and the case-variant form of the
+  target-contains-the-copy mirror gained fixtures of their own.
 - `isolation.linkedNamedBy` in the result envelope (task `6c7e1532`):
   one `{ path, namedBy }` entry per ACCEPTED link that repository
   content asked for, carrying the same provenance phrase a refusal of
