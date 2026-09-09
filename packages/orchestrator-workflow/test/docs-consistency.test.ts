@@ -6470,7 +6470,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 336,
     secondCitationLine: 341,
     claim:
-      "the paragraph opens at :541 by naming the test that pins the 0.11.0 misfire rule, then closes at line 341 with an enumeration of that same test's clause-level pins (:511, :518, :524, :531, :536) whose last item is the review-gate consequence clause the :541 opening citation already named; the enumeration is complete, so the line-341 repeat is the doc's closing-list convention, not a skipped sibling.",
+      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 341 with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-341 repeat is the doc's closing-list convention, not a skipped sibling.",
   },
   {
     doc: "subagent-contracts-superset.md",

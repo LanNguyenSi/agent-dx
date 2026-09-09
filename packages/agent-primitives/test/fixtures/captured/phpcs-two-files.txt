@@ -1,0 +1,35 @@
+
+FILE: phpcs-two-files/FileB.php
+----------------------------------------------------------------------------
+FOUND 8 ERRORS AFFECTING 6 LINES
+----------------------------------------------------------------------------
+  7 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+  7 | ERROR | [ ] Visibility must be declared on method "doOther"
+  8 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+  9 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+  9 | ERROR | [x] Expected 1 space after IF keyword; 0 found
+ 10 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+ 11 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+ 12 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+----------------------------------------------------------------------------
+PHPCBF CAN FIX THE 7 MARKED SNIFF VIOLATIONS AUTOMATICALLY
+----------------------------------------------------------------------------
+
+
+FILE: phpcs-two-files/FileA.php
+----------------------------------------------------------------------------
+FOUND 8 ERRORS AFFECTING 6 LINES
+----------------------------------------------------------------------------
+  7 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+  7 | ERROR | [ ] Visibility must be declared on method "doThing"
+  8 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+  9 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+  9 | ERROR | [x] Expected 1 space after IF keyword; 0 found
+ 10 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+ 11 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+ 12 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+----------------------------------------------------------------------------
+PHPCBF CAN FIX THE 7 MARKED SNIFF VIOLATIONS AUTOMATICALLY
+----------------------------------------------------------------------------
+
+Time: [elided]

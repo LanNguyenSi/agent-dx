@@ -1,0 +1,10 @@
+
+FILE: phpcs-warnings-only/Warn.php
+----------------------------------------------------------------------
+FOUND 0 ERRORS AND 2 WARNINGS AFFECTING 2 LINES
+----------------------------------------------------------------------
+  9 | WARNING | Line exceeds 120 characters; contains 134 characters
+ 10 | WARNING | Line exceeds 120 characters; contains 137 characters
+----------------------------------------------------------------------
+
+Time: [elided]

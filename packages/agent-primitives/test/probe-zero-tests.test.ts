@@ -27,6 +27,16 @@ import { initNodeTestDotRepo } from "./helpers/node-test-dot-repo.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.join(__dirname, "..");
+
+/** Reads one captured real-tool-output fixture (see
+ * test/fixtures/README.md for the commands, tool versions and exit codes
+ * these were captured from). */
+function readCaptured(name: string): string {
+  return fs.readFileSync(
+    path.join(__dirname, "fixtures", "captured", `${name}.txt`),
+    "utf8",
+  );
+}
 const VITEST_ENTRY = path.join(
   PKG_ROOT,
   "node_modules",
@@ -113,6 +123,94 @@ describe("detectKnownZeroTestsEvidence()", () => {
     const evidence = detectKnownZeroTestsEvidence("all good, 0 issues\n", "");
     expect(evidence).toEqual({ detected: false });
   });
+
+  it("phpunit: 'No tests executed!' (an empty suite, or a --filter matching nothing)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.\n\nNo tests executed!\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+  });
+
+  it("phpunit: a stated zero-count OK summary ('OK (0 tests, 0 assertions)')", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.\n\nOK (0 tests, 0 assertions)\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+  });
+
+  it("phpunit: a real, executed, passing summary is NOT flagged (negative control)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.\n\nOK (2 tests, 2 assertions)\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: a real failing run (Tests: N, Assertions: M, Failures: F.) is NOT flagged", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "FAILURES!\nTests: 2, Assertions: 2, Failures: 1.\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: a run with a real failure AND a real skip is NOT flagged (round-1 review finding: the old fixed-shape tally regex parsed this to passed:0/failed:0/errors:0, misread as no_tests_executed even though the suite caught the mutant)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "FAILURES!\nTests: 3, Assertions: 2, Failures: 1, Skipped: 1.\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: an all-skipped run IS flagged, even though no FAILURES!/ERRORS! marker is present at all (round-1 review finding)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "OK, but incomplete, skipped, or risky tests!\nTests: 2, Assertions: 0, Skipped: 2.\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+  });
+
+  it("phpunit: an ERRORS! run (errors and failures together, Errors: printed before Failures:) is NOT flagged", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      "ERRORS!\nTests: 6, Assertions: 3, Errors: 1, Failures: 1, Skipped: 1, Incomplete: 1.\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: a warnings-only run IS flagged (round-2 review finding: this shape exits 0 with nothing executed and was read as a green passed: 1)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-warnings"),
+      "",
+    );
+    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+  });
+
+  it("phpunit: a risky test alongside a real one is NOT flagged (a risky test ran)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-risky-and-real"),
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: an all-risky run is NOT flagged either, even though it prints the same marker an all-skipped run does", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-risky-only"),
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: an errors-plus-skipped run with no failures is NOT flagged", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-errors-and-skipped"),
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
 });
 
 describe("hasKnownTestSummary()", () => {
@@ -123,6 +221,20 @@ describe("hasKnownTestSummary()", () => {
 
   it("true for a node --test summary line", () => {
     expect(hasKnownTestSummary("ℹ tests 3\n", "")).toBe(true);
+  });
+
+  it("true for a phpunit summary, zero-count or not", () => {
+    expect(hasKnownTestSummary("OK (2 tests, 2 assertions)\n", "")).toBe(true);
+    expect(hasKnownTestSummary("No tests executed!\n", "")).toBe(true);
+  });
+
+  it("true for phpunit's all-skipped marker, even with no FAILURES!/ERRORS! line (round-1 review finding: this must be true so the generic byte-identical fallback stays out of the way and the phpunit branch alone decides)", () => {
+    expect(
+      hasKnownTestSummary(
+        "OK, but incomplete, skipped, or risky tests!\nTests: 2, Assertions: 0, Skipped: 2.\n",
+        "",
+      ),
+    ).toBe(true);
   });
 
   it("false for output neither detector recognizes", () => {
@@ -231,6 +343,36 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
     expect(result.status).toBe("killed");
     expect(result.reason).toBeUndefined();
   });
+
+  it("a baseline that exits 0 but whose own output is PHPUnit's 'No tests executed!' is refused, never a verdict", async () => {
+    const repo = initGitRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand:
+          "node -e \"console.log('PHPUnit 9.6.36 by Sebastian Bergmann and contributors.'); console.log(''); console.log('No tests executed!');\"",
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("no_tests_executed");
+    expect(result.mutant).toBeDefined();
+  });
+
+  it("a baseline that exits 0 but whose own output is PHPUnit's all-skipped marker (no FAILURES!/ERRORS! at all) is refused, never a verdict (round-1 review finding)", async () => {
+    const repo = initGitRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand:
+          "node -e \"console.log('PHPUnit 9.6.36 by Sebastian Bergmann and contributors.'); console.log(''); console.log('OK, but incomplete, skipped, or risky tests!'); console.log('Tests: 2, Assertions: 0, Skipped: 2.');\"",
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("no_tests_executed");
+    expect(result.mutant).toBeDefined();
+  });
 });
 
 describe("probe(): --require-baseline-evidence", () => {
@@ -333,6 +475,48 @@ describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
     expect(
       result.warnings.some((w) =>
         /the mutant run's own output shows no test was actually executed/.test(
+          w,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("a mutant that flips a genuinely-passing phpunit-shaped baseline to the all-skipped marker, still exit 0, is refused via the phpunit branch, not the byte-identical fallback (round-1 review finding: baseline and mutant text differ by construction here, so a pass on this test proves the marker itself is recognized, not that the fallback happened to mask the gap)", async () => {
+    const repo = makeTmpDir();
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: repo,
+    });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
+    fs.writeFileSync(
+      path.join(repo, "runner.js"),
+      [
+        "console.log('PHPUnit 9.6.36 by Sebastian Bergmann and contributors.');",
+        "console.log('OK (2 tests, 2 assertions)');",
+        "",
+      ].join("\n"),
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+      { cwd: repo },
+    );
+    const result = await probe(
+      baseOptions(repo, {
+        file: "runner.js",
+        line: 2,
+        replaceText:
+          "console.log('OK, but incomplete, skipped, or risky tests!'); console.log('Tests: 2, Assertions: 0, Skipped: 2.');",
+        testCommand: "node runner.js",
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(
+      result.warnings.some((w) =>
+        /the mutant run's own output shows no test was actually executed \(phpunit\)/.test(
           w,
         ),
       ),

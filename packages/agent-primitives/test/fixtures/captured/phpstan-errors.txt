@@ -1,0 +1,11 @@
+ ------ ---------------------------------------------------------
+  Line   Bad.php
+ ------ ---------------------------------------------------------
+  7      Method Bad::add() should return int but returns string.
+         🪪  return.type
+  12     Undefined variable: $undefinedVariable
+         🪪  variable.undefined
+ ------ ---------------------------------------------------------
+
+
+ [ERROR] Found 2 errors
