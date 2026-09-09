@@ -13,6 +13,7 @@ import {
   detectKnownZeroTestsEvidence,
   hasKnownTestSummary,
 } from "../src/probe/zero-tests.js";
+import { initNodeTestDotRepo } from "./helpers/node-test-dot-repo.js";
 
 /**
  * Zero-tests-executed detection (task `273b3851`): a baseline (or a
@@ -346,54 +347,6 @@ describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
 // "quiet deterministic runner" the fallback exists for and the escape
 // hatch is meant to unblock. -------------------------------------------
 
-/** A throwaway `node --test` project: `calc.js` exports `add` (tested)
- * and `unused` (never referenced by the test file at all), `calc.test.js`
- * runs two passing tests against `add` with `--test-reporter=dot`
- * (bare `..`, no summary line either built-in detector recognizes).
- * Mutating `unused` is a genuine, legitimate survivor: the suite never
- * exercises it, so both the baseline and the mutant run print the exact
- * same `..` and exit `0` -- this is real "the test does not cover this
- * line" evidence, not a runner that ran nothing. */
-function initNodeTestDotRepo(): string {
-  const repo = makeTmpDir();
-  execFileSync("git", ["init", "-q"], { cwd: repo });
-  execFileSync("git", ["config", "user.email", "test@example.com"], {
-    cwd: repo,
-  });
-  execFileSync("git", ["config", "user.name", "test"], { cwd: repo });
-  fs.writeFileSync(
-    path.join(repo, "calc.js"),
-    [
-      "function add(a, b) {",
-      "  return a + b;",
-      "}",
-      "function unused(a, b) {",
-      "  return a + b;",
-      "}",
-      "module.exports = { add, unused };",
-      "",
-    ].join("\n"),
-  );
-  fs.writeFileSync(
-    path.join(repo, "calc.test.js"),
-    [
-      "const test = require('node:test');",
-      "const assert = require('node:assert');",
-      "const { add } = require('./calc.js');",
-      "test('add', () => { assert.strictEqual(add(1, 2), 3); });",
-      "test('add2', () => { assert.strictEqual(add(2, 2), 4); });",
-      "",
-    ].join("\n"),
-  );
-  execFileSync("git", ["add", "-A"], { cwd: repo });
-  execFileSync(
-    "git",
-    ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
-    { cwd: repo },
-  );
-  return repo;
-}
-
 function dotReporterOptions(
   repo: string,
   overrides: Partial<ProbeOptions> = {},
@@ -417,7 +370,7 @@ function dotReporterOptions(
 
 describe("probe(): generic byte-identical fallback, --require-baseline-evidence opt-out", () => {
   it("without --require-baseline-evidence, a genuine dot-reporter survivor is read as inconclusive/no_tests_executed by design", async () => {
-    const repo = initNodeTestDotRepo();
+    const repo = initNodeTestDotRepo(makeTmpDir);
     const result = await probe(dotReporterOptions(repo));
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("no_tests_executed");
@@ -425,7 +378,7 @@ describe("probe(): generic byte-identical fallback, --require-baseline-evidence 
   });
 
   it("with a matching --require-baseline-evidence, the same dot-reporter survivor stays survived, not second-guessed", async () => {
-    const repo = initNodeTestDotRepo();
+    const repo = initNodeTestDotRepo(makeTmpDir);
     const result = await probe(
       dotReporterOptions(repo, { requireBaselineEvidence: /\.\./ }),
     );

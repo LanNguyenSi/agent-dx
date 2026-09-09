@@ -1283,7 +1283,7 @@ marker, the baseline or any worktree, so a plan that cannot run leaves
 nothing behind.
 
 `--plan` is mutually exclusive with `--file`, `-n`, `-r`, `-M`, `-w`,
-`-p`, `-t` and `--pre`: the plan file supplies all of those, and a
+`-p`, `-t`, `--pre` and `--env`: the plan file supplies all of those, and a
 command line naming one beside `--plan` is a `usage_error` naming the
 conflicting option. The run-shaping options are accepted instead of
 refused, under one rule: a value given on the command line wins over the
