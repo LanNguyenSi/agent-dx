@@ -624,16 +624,15 @@ describe("probe(): --expect pass, which verdicts rest on the mutant run's own ex
   // it needs the real-vitest fixture defined further down this file.
 
   it("a survived verdict under --expect pass whose mutant run exited NON-ZERO stands, even with byte-identical output on both sides", async () => {
-    // The generic byte-identical fallback used
-    // to be entered by verdict shape alone (`survived`, or `killed`
-    // under `--expect pass`), which pulls in EVERY `--expect pass`
-    // `survived` verdict regardless of the mutant run's own exit code --
-    // including this one, whose `survived`-ness rests on the mutant run
-    // exiting NON-ZERO, the opposite of the silent exit-0 evidence this
-    // mechanism exists to distrust. The fallback is now entered only
-    // when the mutant run's OWN predicate reads as passing (its exit
-    // code by default, `--pass-regex`'s match when that is given), so
-    // this case never enters it at all.
+    // The generic byte-identical fallback used to be entered by verdict shape
+    // alone (`survived`, or `killed` under `--expect pass`), which pulls in
+    // EVERY `--expect pass` `survived` verdict regardless of the mutant run's
+    // own exit code -- including this one, whose `survived`-ness rests on the
+    // mutant run exiting NON-ZERO, the opposite of the silent exit-0 evidence
+    // this mechanism exists to distrust. The fallback is now entered only when
+    // the mutant run's OWN predicate reads as passing (its exit code by
+    // default, `--pass-regex`'s match when that is given), so this case never
+    // enters it at all.
     const repo = initGitRepo();
     const result = await probe(
       baseOptions(repo, {
