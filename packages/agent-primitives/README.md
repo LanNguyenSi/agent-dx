@@ -850,7 +850,12 @@ of its own. A path inside `--log-dir` itself (this probe's own scratch
 space, including the worktree just created) is never treated as a
 source to sync; that is decided by where the entry itself sits, so an
 untracked symlink that merely points into `--log-dir` is recreated
-like any other symlink. `isolation.syncedUntrackedFiles` counts the
+like any other symlink. The copy therefore carries the SAME symlink the
+source tree does: an absolute target, or a relative one resolving out
+of the copy through `..`, still reaches the real tree, so a `--pre`/`-t`
+writing through it is not isolated for that path; the sync warns when a
+recreated untracked symlink resolves outside the copy, naming the
+symlink and where it resolves. `isolation.syncedUntrackedFiles` counts the
 `ls-files` entries this sync acted on, not the number of files that
 ended up on disk -- a skipped entry still counts as one. A gitignored
 `--file` is therefore never synced either way (not tracked, and
@@ -865,14 +870,259 @@ submodule directory is tracked as a gitlink, not walked into.
 
 Every `node_modules` directory or directory symlink (e.g. a hoisted or
 workspace-linked install) found in the source tree up to 3 levels deep
-(never one nested inside another `node_modules`) is symlinked into the
-worktree at the same relative path, alongside every `--link` extra, so
-installed dependencies and tool caches are shared rather than
+(never one nested inside another `node_modules`) is a candidate for
+being symlinked into the worktree at the same relative path. A composer
+project gets the same treatment: wherever a `composer.json` sits, at the
+same depth (the repository root included), its `vendor-dir` and
+`bin-dir` -- read from `composer.json`'s own `config` object, defaulting
+to `vendor` and `vendor/bin` the way composer itself does -- are
+candidates too, provided each already exists as a directory on disk (one
+that does not exist yet, the common case before `composer install` has
+run, is not a candidate at all, and is not reported either). Neither the
+node_modules nor the composer walk descends into what it just matched
+anywhere in the walk, not only inside the directory a `composer.json`
+itself sits in, so a vendored package's own nested
+`node_modules`/`composer.json`, however many directories below a matched
+`vendor-dir`, is never found a second time. All of that, plus every
+`--link` extra, a `--plan` file's own `link`, and the repository
+defaults file's `link` (see below, and "Non-JS repositories"), is merged
+and deduplicated into one candidate list, and everything the link policy
+below accepts is symlinked into the worktree at the same relative path,
+so installed dependencies and tool caches are shared rather than
 reinstalled per probe. `--pre`/`-t` run with their cwd mapped onto the
-worktree at `--cwd`'s own relative offset from the containment root.
-Any non-zero exit while syncing, or a genuine filesystem failure while
-copying/linking, is `status: "inconclusive"`, `reason:
-"worktree_sync_failed"`, exit `2`, never a verdict.
+worktree at `--cwd`'s own relative offset from the containment root. Any
+non-zero exit while syncing, or a genuine filesystem failure while
+copying/linking, is `status: "inconclusive"`,
+`reason: "worktree_sync_failed"`, exit `2`, never a verdict.
+
+The link policy decides about every candidate, from every source, BEFORE
+any link is created, and every refusal is a warning in the envelope,
+never a silent drop. Each link is a delete followed by a symlink-create
+at a path inside the copy, and both of those resolve symlinks in the
+path they are given: a link created at the copy's own root, over a
+directory this run writes into, or underneath a link the same step
+already created does not replace something inside the copy at all -- it
+reaches straight back into the real source tree, which is why the
+decision comes first rather than as a check afterwards. Four rules
+decided up front, plus an invariant enforced at each syscall, plus a
+postcondition once the links exist.
+
+The four rules, in this order:
+
+1. Where a candidate SITS decides whether it is inside the repository,
+   never where it points. A `node_modules` that is itself a symlink to a
+   directory outside the repository (a checkout provisioned by
+   symlinking a sibling checkout's install) sits inside the repository
+   and is linked, and the copy gets the same symlink the real tree has;
+   a candidate whose own parent chain leaves the root (a `vendor-dir` of
+   `../../elsewhere`) is skipped. The parent chain is resolved through
+   realpath on both sides of the comparison, so a repository reached
+   through a symlinked ancestor (macOS's `/tmp` -> `/private/tmp` is the
+   common case) links exactly the same as one reached directly. A
+   directory named by repository CONTENT must additionally RESOLVE
+   inside the root: a gitignored `esc -> ..` that a `composer.json`
+   points its `vendor-dir` at sits inside the repository and leaves it,
+   and repository content gets no such latitude. The latitude this rule
+   does grant belongs to a candidate the walk found on disk, which
+   names no path at all, and it is latitude for a target pointing AWAY
+   from the root, or at an UNTRACKED directory inside it, and no
+   further: a candidate of ANY source that resolves TO the root, or to
+   a directory containing it (`esc -> .`, `node_modules -> .`), is
+   skipped here, and one that resolves to TRACKED source inside the
+   root (a gitignored or a committed `node_modules -> src`) is skipped
+   by rule 3 below. Linking any of them would hand the copy the
+   operator's own source under that name, and every write through it
+   would land in the real tree. Both halves of that -- IS the root, CONTAINS the
+   root -- are decided by filesystem identity (inode and device), not by
+   comparing the two resolved path strings: `realpath` resolves symlinks
+   and normalises neither case nor Unicode form, so a `node_modules ->
+   ../REPO` for a directory really named `repo`, an absolute target
+   spelling an ANCESTOR segment in another case, and an NFD target for
+   an NFC directory name each resolve to the root while spelling a path
+   outside it. The root's own ancestors are walked up to the filesystem
+   root and compared the same way, so an alias of a grandparent is seen
+   as readily as one of the parent. A `--link`, a `--plan` file's `link`, or a
+   defaults-file `link` whose value resolves outside the root never
+   reaches this rule: it refuses the whole run up front (`reason:
+   "file_outside_root"`), before the policy sees any candidate, since a
+   path an invocation explicitly asked for and cannot have is a usage
+   error rather than something to skip past. Only an auto-discovered
+   candidate is skipped with a warning and the run carried on.
+2. The copy's own root is never linked, and neither is any directory
+   that CONTAINS the cwd `--pre`/`-t` will run in or the directory a
+   mutant is written into: those have to stay real directories of the
+   copy's, or this run's own writes land in the source tree. A
+   `composer.json` carrying `"bin-dir": "."`, or a defaults file naming
+   the directory under test, is exactly this shape.
+3. What git tracks is never shared, asked in two places. A directory
+   named by repository CONTENT -- a composer `config` value, a `--plan`
+   file's `link`, the repository defaults file's `link` -- is linked
+   only when git does not track that DESTINATION; and no candidate but
+   an operator's own `--link`, the auto-discovered ones included, is
+   linked when git tracks what it POINTS AT, whatever name it sits
+   under -- including a target inside a nested repository's own
+   boundary (a submodule, or a nested plain checkout), which the outer
+   index lists nowhere but a `--pre`/`-t` would still write straight
+   into. These inputs exist for gitignored runtime output (`vendor/`, an
+   install directory, a tool cache); a tracked directory is source, and
+   source is copied into
+   the isolation copy, never shared with the tree being isolated from.
+   The destination question is asked about the copy's own spelling of
+   the whole path (see below), so a value naming a tracked directory
+   under any spelling is refused with a warning naming the file and the
+   entry. The target question is the one the auto-discovery walk needs:
+   a `node_modules` symlinked at `src`, gitignored or committed, and a
+   `node_modules` git tracks as a directory of its own both sit under a
+   name the rules above have nothing to say about, while linking either
+   hands the copy the operator's real source. It is asked only about a
+   target INSIDE the root (one outside it is the latitude rule 1 grants,
+   and an untracked one inside it -- a hoisted monorepo install, a
+   shared cache -- is exactly what these links exist for), and both the
+   containment and the spelling of that target are decided by filesystem
+   identity rather than by relativizing two `realpath` strings: a
+   `node_modules -> ../REPO/src` for a directory really named `repo`
+   resolves INTO the root while spelling a path outside it, and a target
+   really named `SRC` is the tracked `src` the repository carries, which
+   git's case-sensitive index would otherwise report as untracked. A
+   refusal names the target and that git tracks it. A target at or under
+   the repository's OWN `.git` directory is refused outright for every
+   candidate but an operator's own `--link`, whatever either question
+   above would otherwise answer: `.git` is not itself a
+   tracked path (git's own index never lists it) and it is not a nested
+   repository's boundary either (that check looks for a `.git` entry
+   BELOW the target, which a plain `.git` directory does not have), so
+   an auto-discovered `node_modules -> .git` reaches neither question
+   with a reason to refuse it; the refusal names the target and that it
+   sits at or under the repository's own git directory. A target sitting inside a
+   nested repository's own boundary -- a submodule's root, or a nested
+   plain checkout's -- is refused the same way even though the OUTER
+   index never lists its content, only the submodule's own gitlink (the
+   boundary is the same one an untracked nested repository is skipped at
+   during the untracked-file sync, walked from the root down to the
+   target, reporting the outermost boundary crossed); that refusal names
+   the target and the nested repository's own path, and asks nothing of
+   the nested repository's own index -- sitting inside the boundary is
+   enough. A listing that cannot run leaves every such destination or
+   target treated as tracked, and either refusal says the listing could
+   not check rather than claiming git answered.
+   `--link`, typed by the person running the probe, keeps its latitude
+   for BOTH halves; rules 1, 2 and 4 apply to it the same as to
+   everything else. That latitude has a price worth naming: a `--link`
+   that names a tracked directory, or points at one, SHARES it with the
+   source tree, so a `--pre` or a `-t` that writes there writes into the
+   operator's own tracked files, and the isolation copy is no longer
+   isolated for that subtree. Rule 2 still refuses it whenever the run's
+   own cwd or the file a mutant is written into sits inside it, which is
+   the case that would corrupt this run's own measurement; everything
+   else is the operator's call. Whichever half is asked, one `git
+   ls-files` listing answers both for the whole run, and a listing that
+   cannot run leaves every candidate but an operator's own `--link`
+   treated as tracked, so none of them is linked.
+4. A candidate at or underneath a path this run already linked is
+   skipped as already covered (composer's own defaults, `vendor` and
+   `vendor/bin`, are exactly this shape). Nesting is judged on the
+   destination paths inside the copy, both sides in the copy's own
+   spelling, not on what the links resolve to, so two different in-repo
+   symlinks pointing at one shared install are both linked while a case
+   variant of a destination already planned is seen as the same one.
+   Every comparison here is containment, never a prefix match on the
+   string: `vendor-bin` is not covered by `vendor`, and `src-cache/app`
+   does not make `src` a directory that must stay real. The other
+   direction is refused too: a destination that CONTAINS a link this run
+   already created is skipped rather than linked, since the delete that
+   precedes every link create is recursive and would take that earlier
+   link with it (a defaults file naming `CACHE/inner` and then `cache`
+   is that shape on a case-insensitive volume).
+
+Rules 2, 3 and 4 are decided on the COPY's own spelling of a
+destination, not on the source tree's. On a case-insensitive filesystem
+(APFS and HFS+ by default) `SRC` and `src` are one directory, so a
+`vendor-dir` of `SRC` names the directory under test while comparing as
+a different string against every protected and tracked path, and git's
+own index, which is case-sensitive, reports that spelling as untracked.
+The copy is asked instead: each segment of the destination is read back
+from the copy by inode identity, in turn, so `SRC/sub` is `src/sub`
+before any rule looks at it and a case-variant PARENT is no more
+invisible than a case-variant final component. From the first segment
+that does not exist the rest is taken as given: nothing is on disk there
+to alias it, and the planned name is the one the link would be created
+under. Rule 3's target half asks the same question of the SOURCE tree
+instead, segment by segment from the repository root, since the path it
+is about is one of the source tree's own and `realpath` hands a target
+back in the spelling it was given.
+
+The invariant, enforced immediately before each of the three syscalls
+that create a link (the recursive `mkdir` of the destination's parent,
+the delete at the destination, the symlink-create): the destination's
+parent must still RESOLVE inside the copy, and a link may only ever
+point at the source tree, never back into the copy and never at a
+directory the copy itself sits inside (a defaults file naming the same
+in-repo directory a `--log-dir` puts the copy under is that second
+shape, and it is judged by the same identity comparison rule 1 uses).
+A destination whose own existing ancestor in the copy is a file rather
+than a directory is skipped here too, naming the blocking path: the
+recursive `mkdir` cannot create a directory below a file, and one
+candidate's impossible destination is a skipped link like any other,
+never a failed sync for the whole run. Repository content naming
+`SRC/FILE.TXT/x` over a tracked `src/file.txt` is that shape, and it
+reaches this point honestly, since git tracks no path UNDER a file and
+rule 3 therefore has nothing to refuse. This is what the
+rules above cannot decide on their own, because it is not a property of
+the candidate at all: the links this same step created earlier are part
+of the path those syscalls walk, so a destination that was a plain path
+in the copy when the policy looked at it can resolve into the source
+tree by the time it is acted on. A candidate refused here is a warning
+naming the destination, where it resolves to, and the earlier link it
+would have resolved through; the run carries on without that link. One
+destination that resolves out of the copy is reported for what it is
+rather than refused: one that is ALREADY the very symlink this link
+would have created, which the untracked-file copy leaves behind whenever
+the source tree carries a non-ignored symlink there. Nothing is deleted
+or recreated, and the directory is listed in `isolation.linked` all the
+same, because the copy really does resolve through it.
+
+The postcondition, once every link exists: the mapped cwd and every
+file this run mutates must still resolve inside the copy. A miss is
+`reason: "worktree_sync_failed"`, never a warning and never a verdict,
+since the run's next act is to write there.
+
+Limitations. A linked directory is SHARED with the source tree, not
+copied, and the policy judges only that link's own destination and its
+own target: a symlink INSIDE a linked directory that points back into
+the repository (a sibling install carrying a `back -> ../repo`) is
+reached through the link like any other file in it, so a `--pre` writing
+through that inner path writes into the source tree. The same limit
+applies without any link at all: an untracked, non-ignored symlink that
+is itself absolute, or that resolves outside the copy, carries the
+sync's warning (see above) but is still recreated and still reaches the
+real tree -- a DANGLING target (nothing exists there yet) carries the
+same warning, checked against the target's own spelling rather than
+against the recreated link, whose realpath a missing target would
+otherwise make unfollowable; a COMMITTED absolute symlink is written by
+`git worktree add` itself, before this package's own sync ever runs, so
+it reaches the copy with no warning at all. Either way, a `--pre`/`-t`
+must not assume such a path is isolated. The nested-repository boundary
+(rule 3's target half, and the untracked-file sync's own skip) is
+decided by `fs.existsSync` on a `.git` entry at each ancestor; a `.git`
+that is itself a DANGLING symlink answers `false` there, so a nested
+repository marked only that way is not caught by either check -- a
+known, unaddressed gap rather than a fixed one. The invariant is
+checked and then acted on, so a second process that changes the copy in
+between (replacing a directory with a symlink in the microseconds
+between the check and the syscall) is not covered; the copy lives in a
+fresh, per-run scratch directory under `--log-dir` that nothing else is
+expected to write into, and the
+repository-keyed lock keeps a second probe out of it. The rules compare
+each candidate's destination, in the copy's spelling, against the
+protected paths in the SOURCE tree's own spelling, so a run whose own
+two inputs spell one directory two ways (a `--file` reaching the mutant
+through `SRC/sub` while a `--link` names `src/sub`, or an invocation
+whose cwd is spelled differently from the directory it names) is caught
+by the postcondition rather than by the rules: the whole sync is refused
+instead of one link being skipped, which is safe but blunter. Windows is
+not a supported
+platform for this package, and its own aliasing (8.3 short names, which
+are a second spelling no inode comparison resolves) is not addressed.
 
 The sync runs under the same abort machinery as `--pre`/`-t`: every git
 call it makes is killed on `SIGINT`/`SIGTERM` and waited for before
@@ -1063,7 +1313,50 @@ nothing else.
 `--file` and every `--link` entry must resolve inside the git work-tree
 root (or inside the cwd when not in a repo), unless `--allow-outside` is
 passed; otherwise the result is `status: "inconclusive"`,
-`reason: "file_outside_root"`, exit `2`.
+`reason: "file_outside_root"`, exit `2`. A `--link` value carrying a
+`$(...)` command substitution or a backtick is refused outright
+(`InvalidArgumentError`, before anything runs) rather than merely being
+inert the way it already is for `-p`/`--file` above: the same rule
+applies identically to a `--plan` file's own `link` field and to the
+repository defaults file's `link` field below, so all three `link`
+sources share one check rather than the command line being "safe" while
+the two file-sourced ones are merely "checked" -- see `link-list.ts`'s
+own docblock for why the check exists at all given none of the three
+ever reaches a shell.
+
+#### Non-JS repositories
+
+`node_modules` and a composer project's `vendor-dir`/`bin-dir` are the
+two auto-link rules probe ships with; anything else a non-JS
+repository's gitignored build/dependency output needs (Drupal's
+`docroot/core`, `docroot/modules/contrib`, `docroot/themes/contrib`,
+`docroot/libraries`, or an ecosystem with no auto-link rule at all) goes
+into `--link`, a `--plan` file's own `link`, or -- so every invocation
+picks it up without repeating any of them -- the repository defaults
+file below.
+
+#### Repo defaults file
+
+`.agent-primitives.json` at the repository root (the same directory
+`probe` treats as the containment root: the git work-tree root, or the
+invocation cwd outside a repository) is read on every `probe`/`--plan`
+invocation, no flag required. Its schema is `{ "link": [...] }` only,
+paths relative to the repository root: any other key is a usage error
+naming the file's path and the offending key (`reason:
+"defaults_file_invalid"`, fail-closed, so a typo does not silently do
+nothing), and a present-but-unparsable file (not JSON, not a JSON
+object, `link` not an array of valid link strings) is a usage error
+naming the path. An absent file is not an error: nothing to add. Every
+`link` entry is checked the same way `--link`/a plan's own `link` is
+(non-empty, no `$(...)` or backtick), and, like a plan's own `link` and
+a composer `config` value, may only name a directory git does not track
+(rule 3 of the link policy above).
+
+Precedence across all three `link` sources is additive, not an
+override: the defaults file's own entries, then the plan's, then
+`--link`'s, are merged and deduplicated (each distinct resolved path
+kept once, in that order) -- a later source can only ADD a path, never
+remove one an earlier source already named.
 
 `--pre <command>` runs (e.g. a rebuild) before each test invocation, in
 both the baseline and mutant runs, and in the invocation cwd (not the
@@ -1607,7 +1900,7 @@ exactly which `reason` is which).
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
-| `isolation` | `{ mode, path, linked, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths symlinked in; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
+| `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced), and a listed path may be a DANGLING link when the target it names does not exist -- a defaults-file entry naming a path that is simply not there is linked as given rather than dropped, since a link is created by the name it points at, not by what is behind it; `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, a `--plan` file's `link`, the defaults file's `link`), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
 | `totalDurationMs` | number | always, for this envelope (see the top-level-usage-error carve-out above, and `--plan`, whose own envelope carries no `totalDurationMs` at all) | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
 
 #### Refusal reason shape
@@ -1720,6 +2013,7 @@ is a placeholder, not a real one, and the file is not runnable as-is.
   "isolation": "worktree",
   "expect": "fail",
   "timeout": 900,
+  "link": ["vendor", "docroot/core"],
   "passWhen": { "regex": "^OK \\(" },
   "mutants": [
     { "file": "src/example.ts", "line": 42, "replace": "  return true;" },
@@ -1744,9 +2038,14 @@ Unlike the single-probe `-p`, a plan mutant's `file` is never derived
 from the patch: every path in the plan is known before the run starts, so
 the containment check below can cover all of them up front. Paths in a
 plan file (`file`, `patch`) are resolved against the invocation cwd
-(`-C/--cwd`). An unknown key, a missing `test`, an empty `mutants`, a
-mutant with two forms or none, or a `replace`/`match` mutant without a
-`line` is `status: "usage_error"`, `reason: "plan_invalid"` (or
+(`-C/--cwd`); `link` is the one exception, resolved against the
+repository root instead, so a plan's own `link` entries
+mean the same thing regardless of which subdirectory `--cwd` names, the
+same way the repository defaults file's entries do. An unknown key, a
+missing `test`, an empty `mutants`, a mutant with two forms or none, a
+`link` entry that is empty or carries a `$(...)`/backtick, or a
+`replace`/`match` mutant without a `line` is `status: "usage_error"`,
+`reason: "plan_invalid"` (or
 `"plan_empty"`), exit `2`, naming the offending path inside the plan
 (`plan.mutants[2].patch`). A plan file that cannot be used at all
 (missing, not a regular file, unreadable, or over the 1&nbsp;MiB cap) is
@@ -1766,17 +2065,22 @@ plan file's own value, which wins over the CLI default. That covers the
 three a plan file can set -- `-i` (`isolation`), `--expect` (`expect`)
 and `--timeout` (`timeout`); a mutant's own `expect` wins over both,
 since it is the only one of them that is per mutant rather than per run.
-`--link` and `--allow-outside` have no plan key at all (`plan.link` is a
-`plan_invalid` refusal naming the unknown key), so for a plan they are
-command-line only and there is nothing for them to override.
-`--require-baseline-evidence` is the same shape: no plan key, command-line
-only, and (unlike `--env`) not refused under `--plan` -- see its own
-paragraph above. `--pass-regex` is different again: it DOES have a plan
-key (`passWhen.regex`), so it follows the `-i`/`--expect`/`--timeout`
-precedence instead -- a command-line `--pass-regex` wins over the plan
-file's own `passWhen.regex` when both are given -- rather than being
-command-line only; see its own paragraph above for what it does once
-resolved.
+`--allow-outside` has no plan key at all: for a plan it is command-line
+only and there is nothing for it to override. `--link` is different:
+a plan's own `link` (see above) is not a run-shaping
+override at all, so the CLI/plan precedence rule above does not apply to
+it -- instead it is merged and deduplicated with `--link`'s own values
+(and with the repository defaults file's `link`, read for a plan the
+same as for a single probe), in that order: defaults file, then plan,
+then `--link`, each source only ever adding a path, never removing one
+an earlier source already named. `--require-baseline-evidence` keeps the
+older shape: no plan key, command-line only, and (unlike `--env`) not
+refused under `--plan` -- see its own paragraph above. `--pass-regex` is
+different again: it DOES have a plan key (`passWhen.regex`), so it
+follows the `-i`/`--expect`/`--timeout` precedence instead -- a
+command-line `--pass-regex` wins over the plan file's own
+`passWhen.regex` when both are given -- rather than being command-line
+only; see its own paragraph above for what it does once resolved.
 
 Output: the envelope carries `plan: { baseline, results, summary }`
 instead of the single probe's top-level `mutant`/`mutation_probe`/`test`.

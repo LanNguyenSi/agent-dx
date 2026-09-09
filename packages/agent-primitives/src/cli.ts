@@ -35,6 +35,7 @@ import {
 import { parsePlanFile, type ProbePlanSpec } from "./probe/plan.js";
 import { compilePassRegex } from "./pass-regex.js";
 import { reconcileEnvelopeDiffTruncation } from "./probe/mutant.js";
+import { linkEntryUsageError } from "./probe/link-list.js";
 import {
   init,
   ALL_HARNESSES,
@@ -100,6 +101,22 @@ function parseList(value: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/** `--link`'s own comma-separated parse, plus `linkEntryUsageError`
+ * (shared with a `--plan` file's own `link` field and the repo defaults
+ * file), so all three `link` sources genuinely share one rule -- see
+ * that function's own docblock for why a `--link` value is checked at
+ * all when it never reaches a shell either way. */
+function parseLinkList(value: string): string[] {
+  const raw = parseList(value);
+  for (const entry of raw) {
+    const err = linkEntryUsageError(entry);
+    if (err !== undefined) {
+      throw new InvalidArgumentError(`--link: "${entry}" ${err}`);
+    }
+  }
+  return raw;
 }
 
 /** `-H, --harness <list>`: `claude`, `codex`, `opencode`, comma-separated,
@@ -1174,7 +1191,8 @@ async function runProbePlanCommand(
   start: number,
 ): Promise<void> {
   requirePlanExclusive(opts);
-  const parsed = parsePlanFile(path.resolve(global.cwd, opts.plan ?? ""));
+  const planPath = path.resolve(global.cwd, opts.plan ?? "");
+  const parsed = parsePlanFile(planPath);
   if (!parsed.ok) {
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
@@ -1222,7 +1240,15 @@ async function runProbePlanCommand(
       isolation,
       expect,
       timeoutMs,
+      // The plan's own `link` stays SEPARATE from `--link` all the way
+      // into `probePlan`, which merges all three sources itself in one
+      // place ("defaults file, then plan, then CLI"): the plan's
+      // entries are repository content and the link policy holds them
+      // to a stricter rule than an operator's own `--link`, which a
+      // merge here would erase.
       links: opts.link ?? [],
+      planLinks: plan.link ?? [],
+      planPath,
       allowOutside: opts.allowOutside ?? false,
       cwd: global.cwd,
       logDir: global.logDir,
@@ -1357,8 +1383,10 @@ program
   )
   .option(
     "--link <dirs>",
-    "comma-separated extra directories checked for containment",
-    parseList,
+    "comma-separated extra directories checked for containment; merged " +
+      "and deduplicated with a --plan file's own link and with " +
+      ".agent-primitives.json at the repo root (no $(...) or backtick)",
+    parseLinkList,
   )
   .option(
     "--allow-outside",

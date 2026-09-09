@@ -21,6 +21,7 @@ import {
   SCRATCH_OWNER_FILE,
 } from "../src/probe/isolation.js";
 import { runArgv } from "../src/probe/run.js";
+import { caseInsensitiveVolume } from "./helpers/case-fs.js";
 import { withPathPrepended, writeGitShim } from "./helpers/git-shim.js";
 
 // Call-through mock, the same shape as the one below for
@@ -93,6 +94,45 @@ function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd });
 }
 
+/** Every entry under `root` (`.git` excluded), keyed by its path relative
+ * to `root`, mapped to whether it is a symlink and, either way, a hash
+ * of its own content (a symlink's own target string, a regular file's
+ * bytes, never a followed read): proof a tree is byte-identical AND
+ * shape-identical (no path silently turned into a symlink) before and
+ * after a run, for the composer nested-bin-dir regression test, which
+ * must catch the SOURCE tree's own `vendor/bin` being deleted and
+ * replaced with a symlink through the parent `vendor` symlink the old
+ * `beginWorktree` loop created. */
+function hashTree(
+  root: string,
+): Map<string, { symlink: boolean; hash: string }> {
+  const out = new Map<string, { symlink: boolean; hash: string }>();
+  function walk(dir: string): void {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === ".git") continue;
+      const abs = path.join(dir, entry.name);
+      const rel = path.relative(root, abs);
+      if (entry.isSymbolicLink()) {
+        out.set(rel, {
+          symlink: true,
+          hash: createHash("sha256").update(fs.readlinkSync(abs)).digest("hex"),
+        });
+        continue;
+      }
+      if (entry.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      out.set(rel, {
+        symlink: false,
+        hash: createHash("sha256").update(fs.readFileSync(abs)).digest("hex"),
+      });
+    }
+  }
+  walk(root);
+  return out;
+}
+
 const FIXTURE_JS = [
   "function isPositive(n) {",
   "  return n > 0;",
@@ -127,6 +167,196 @@ function initRepo(): { repo: string } {
   git(repo, ["add", "-A"]);
   git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
   return { repo };
+}
+
+/** A gitignored file that exists ONLY in the source tree: the copy
+ * never syncs it (gitignored) and never links `src` (the link policy
+ * refuses that), so a test command that finds it under `src/` inside
+ * the copy is looking at the operator's real tree. Named by
+ * `SRC_TEST_COMMAND`'s own baseline assertion, which is what turns a
+ * broken refusal into a failing baseline rather than a silently
+ * different envelope. */
+const SOURCE_ONLY_SENTINEL = ".only-in-source";
+
+/**
+ * The baseline's own witness, run from INSIDE the isolation copy: it
+ * asserts where it is standing (not in the source tree) and that the
+ * `src/` it can see is the copy's own directory rather than a link back
+ * to the source tree, before it asserts anything about the fixture. A
+ * link the policy should have refused therefore shows up as a failing
+ * BASELINE naming what went wrong, at a point where no mutant has been
+ * written yet -- not as a subtly different envelope, and not as a
+ * damaged source tree.
+ *
+ * `sourceReal` is the source repository's realpath, embedded as a
+ * literal: the copy lives under the run's `--log-dir`, somewhere else
+ * entirely, so "my cwd is not under the source tree" is decidable from
+ * inside the command.
+ */
+function srcCheckJs(sourceReal: string): string {
+  return [
+    "const assert = require('node:assert');",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    `const SOURCE = ${JSON.stringify(sourceReal)};`,
+    "const cwdReal = fs.realpathSync(process.cwd());",
+    "assert.ok(",
+    "  cwdReal !== SOURCE && !cwdReal.startsWith(SOURCE + path.sep),",
+    "  'the command ran in the SOURCE tree, not in the isolation copy',",
+    ");",
+    "assert.ok(",
+    "  fs.realpathSync('src').startsWith(cwdReal + path.sep),",
+    "  'src/ in the isolation copy resolves outside the copy',",
+    ");",
+    "assert.strictEqual(",
+    `  fs.existsSync('src/${SOURCE_ONLY_SENTINEL}'),`,
+    "  false,",
+    "  'src/ in the isolation copy is a link to the SOURCE tree',",
+    ");",
+    "const { isPositive } = require('./src/fixture.js');",
+    "assert.strictEqual(isPositive(5), true);",
+    "",
+  ].join("\n");
+}
+
+const SRC_TEST_COMMAND = "node src-check.test.js";
+const SRC_FIXTURE_JS = FIXTURE_JS;
+
+/** A repo whose probe target sits in a TRACKED subdirectory (`src/`),
+ * with a repo defaults file naming that same directory. Every link
+ * source that could reach `src` is the shape the link policy exists to
+ * refuse: linking it would replace the copy's own `src` with the source
+ * tree's, and this run's mutant would then be written to the
+ * operator's real file. */
+function initSrcRepo(
+  opts: {
+    defaultsLinks?: string[] | null;
+    /** Written as this repo's `composer.json` `config` object, for the
+     * cases where the value under test comes from composer rather than
+     * from the defaults file or `--link`. */
+    composerConfig?: Record<string, string>;
+  } = {},
+): string {
+  const repo = makeTmpDir();
+  git(repo, ["init", "-q"]);
+  git(repo, ["config", "user.email", "test@example.com"]);
+  git(repo, ["config", "user.name", "test"]);
+  git(repo, ["config", "core.autocrlf", "false"]);
+  fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "src", "fixture.js"), SRC_FIXTURE_JS);
+  fs.writeFileSync(
+    path.join(repo, "src-check.test.js"),
+    srcCheckJs(resolveDeepestExisting(repo)),
+  );
+  fs.writeFileSync(path.join(repo, ".gitignore"), `${SOURCE_ONLY_SENTINEL}\n`);
+  if (opts.composerConfig !== undefined) {
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget", config: opts.composerConfig }),
+    );
+  }
+  // A second TRACKED directory, unrelated to the target: the shape
+  // that reaches the tracked-directory rule without also containing
+  // the file this run mutates.
+  fs.mkdirSync(path.join(repo, "lib"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, "lib", "tracked.js"),
+    "module.exports = 1;\n",
+  );
+  const defaultsLinks =
+    opts.defaultsLinks === undefined ? ["src"] : opts.defaultsLinks;
+  if (defaultsLinks !== null) {
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: defaultsLinks }),
+    );
+  }
+  git(repo, ["add", "-A"]);
+  git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+  // After the commit, so it stays gitignored and untracked: the copy
+  // can only ever see it through a link to the source tree.
+  fs.writeFileSync(
+    path.join(repo, "src", SOURCE_ONLY_SENTINEL),
+    "source tree only\n",
+  );
+  return repo;
+}
+
+/** The `--pre` every tracked-target fixture runs, committed as a file
+ * rather than written as a `node -e` one-liner so shell quoting is not
+ * part of what those tests are about. It creates `node_modules` when
+ * the copy has none of its own, so the run COMPLETES whichever way the
+ * policy decides: with the link refused the write lands in the copy,
+ * and with the link created it lands wherever that link points, which
+ * is the escape these fixtures exist to catch. */
+const CLOBBER_JS = [
+  "const fs = require('node:fs');",
+  "fs.mkdirSync('node_modules', { recursive: true });",
+  "fs.writeFileSync('node_modules/CLOBBER.txt', 'x');",
+  "",
+].join("\n");
+
+const CLOBBER_PRE = "node clobber.js";
+
+/** `initRepo()` plus the two things every tracked-target fixture needs:
+ * a TRACKED `src/` (the source a link must never share with the copy)
+ * and the committed `clobber.js` the `--pre` runs. Each test then
+ * creates its own `node_modules` shape on top and commits or ignores
+ * it. */
+function initTrackedSrcRepo(): string {
+  const { repo } = initRepo();
+  fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, "src", "tracked.js"),
+    "module.exports = 1;\n",
+  );
+  fs.writeFileSync(path.join(repo, "clobber.js"), CLOBBER_JS);
+  git(repo, ["add", "-A"]);
+  git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "src"]);
+  return repo;
+}
+
+/** A standalone git repository with a committed `lib/file.txt`, meant to
+ * be added as a submodule (`-c protocol.file.allow=always submodule add
+ * <this> sub`) or copied in as a nested plain repository: the shape
+ * `nestedRepoBoundaryRelPath` looks for is a directory carrying its OWN
+ * `.git`, and a repo with real history is what both `git submodule add`
+ * and a plain `git init` in place naturally produce. */
+function initUpstreamLibRepo(): string {
+  const upstream = makeTmpDir();
+  git(upstream, ["init", "-q"]);
+  git(upstream, ["config", "user.email", "test@example.com"]);
+  git(upstream, ["config", "user.name", "test"]);
+  git(upstream, ["config", "core.autocrlf", "false"]);
+  fs.mkdirSync(path.join(upstream, "lib"), { recursive: true });
+  fs.writeFileSync(path.join(upstream, "lib", "file.txt"), "vendored\n");
+  git(upstream, ["add", "-A"]);
+  git(upstream, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+  return upstream;
+}
+
+function commitAll(repo: string, message: string): void {
+  git(repo, ["add", "-A"]);
+  git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", message]);
+}
+
+/** The one assertion every refusal in this group makes about the
+ * envelope: the candidate was skipped, naming it and the tracked target
+ * it points at. */
+function refusedForTrackedTarget(
+  warnings: readonly string[],
+  candidateName: string,
+  targetAbs: string,
+): boolean {
+  return warnings.some(
+    (w) =>
+      w.startsWith("skipped linking ") &&
+      w.includes(candidateName) &&
+      w.includes(
+        `git tracks its target ${resolveDeepestExisting(targetAbs)}; source ` +
+          "is copied into the isolation copy, never shared",
+      ),
+  );
 }
 
 function baseOptions(
@@ -340,6 +570,246 @@ describe("probe(): worktree isolation, node_modules and --pre", () => {
     );
   });
 
+  it("composer: symlinks vendor-dir and a custom, non-default bin-dir (both gitignored/untracked) and lists them in isolation.linked; the baseline needing vendor/autoload.php passes with no --link", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // vendor/ and the custom bin-dir are exactly what a real composer
+    // project gitignores: untracked, and never synced by the normal
+    // untracked-file copy (`git ls-files --others --exclude-standard`
+    // skips them) -- proving the fixture needs the auto-link, not a
+    // sync this package already did for another reason.
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\nbin/\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget", config: { "bin-dir": "bin" } }),
+    );
+    git(repo, ["add", "composer.json", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader, php need not be installed\n",
+    );
+    fs.mkdirSync(path.join(repo, "bin"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "bin", "composer-bin-marker.txt"),
+      "present\n",
+    );
+
+    // PHP is not assumed to be installed here: a `node` stand-in for a
+    // `phpunit`/composer test script, checking only that the isolation
+    // copy actually has `vendor/autoload.php` and the custom bin-dir on
+    // disk, never PHP's own autoloading semantics.
+    const testCommand =
+      "node -e \"require('node:fs').accessSync('vendor/autoload.php'); " +
+      "require('node:fs').accessSync('bin/composer-bin-marker.txt')\"";
+
+    const result = await probe(baseOptions(repo, { testCommand }));
+
+    expect(result.isolation.linked).toEqual(
+      expect.arrayContaining([
+        path.join(repo, "vendor"),
+        path.join(repo, "bin"),
+      ]),
+    );
+    // The test command never depends on fixture.js, so the mutant run
+    // observes the exact same outcome as the baseline: a deterministic
+    // "survived", not a mutation-probe result this fixture cares about,
+    // but proof the baseline itself did not fail -- which it would if
+    // vendor/bin were not on disk in the isolation copy.
+    expect(result.status).toBe("survived");
+  });
+
+  it("composer: without a composer.json, the same gitignored vendor/ is never synced and the baseline fails -- the bug the auto-link fixes", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\n");
+    git(repo, ["add", ".gitignore"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "gitignore",
+    ]);
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand:
+          "node -e \"require('node:fs').accessSync('vendor/autoload.php')\"",
+      }),
+    );
+
+    expect(result.isolation.linked).not.toContain(path.join(repo, "vendor"));
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_failed");
+  });
+
+  it("composer: DEFAULT layout (no config, real vendor/ and vendor/bin/) links vendor only and never touches the SOURCE tree -- regression for the bug where linking the default bin-dir separately deleted the real vendor/bin through the vendor symlink and replaced it with a self-referential (ELOOP) symlink", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget" }),
+    );
+    git(repo, ["add", "composer.json", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    fs.mkdirSync(path.join(repo, "vendor", "bin"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+    fs.writeFileSync(
+      path.join(repo, "vendor", "bin", "phpunit"),
+      "#!/bin/sh\necho phpunit\n",
+    );
+
+    const before = hashTree(repo);
+
+    const result = await probe(baseOptions(repo));
+
+    const after = hashTree(repo);
+    expect(after).toEqual(before);
+    for (const [, entry] of after) {
+      expect(entry.symlink).toBe(false);
+    }
+    expect(
+      fs.lstatSync(path.join(repo, "vendor", "bin")).isSymbolicLink(),
+    ).toBe(false);
+    expect(fs.existsSync(path.join(repo, "vendor", "bin", "phpunit"))).toBe(
+      true,
+    );
+    expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
+    // The default bin-dir IS a candidate (composer declares it, and
+    // discovery reports what composer declares); the link policy is
+    // what keeps it out of the copy, and says so rather than dropping
+    // it silently.
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "vendor", "bin")) &&
+          w.includes("already covered by vendor"),
+      ),
+    ).toBe(true);
+  });
+
+  it("the nesting rule protects an explicit --link nested inside an auto-linked composer vendor-dir from being destroyed through the parent symlink, and warns naming it", async () => {
+    // The same rule as the previous test, reached from the OTHER
+    // source: here the nested candidate is an operator's own --link,
+    // which no composer-side reasoning could ever have filtered, so
+    // the two tests together pin the rule for a discovered candidate
+    // and for a supplied one.
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget" }),
+    );
+    git(repo, ["add", "composer.json", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    fs.mkdirSync(path.join(repo, "vendor", "extra-tool"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+    fs.writeFileSync(
+      path.join(repo, "vendor", "extra-tool", "marker.txt"),
+      "present\n",
+    );
+
+    const before = hashTree(repo);
+
+    const result = await probe(
+      baseOptions(repo, {
+        links: [path.join(repo, "vendor", "extra-tool")],
+      }),
+    );
+
+    const after = hashTree(repo);
+    expect(after).toEqual(before);
+    expect(
+      fs.lstatSync(path.join(repo, "vendor", "extra-tool")).isSymbolicLink(),
+    ).toBe(false);
+    expect(
+      fs.existsSync(path.join(repo, "vendor", "extra-tool", "marker.txt")),
+    ).toBe(true);
+    expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "vendor", "extra-tool")) &&
+          w.includes("already covered by vendor"),
+      ),
+    ).toBe(true);
+  });
+
+  it("repo defaults file (.agent-primitives.json): every probe invocation reads it and links what it names, no --link needed -- exercised through a repo reached via a symlinked ancestor (os.tmpdir() itself, on macOS), pinning the fix for the realpath-vs-display-path mismatch that used to drop this silently", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "extra-cache/\n");
+    git(repo, ["add", ".gitignore"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "gitignore",
+    ]);
+    fs.mkdirSync(path.join(repo, "extra-cache"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "extra-cache", "marker.txt"), "present\n");
+    // The defaults file itself is untracked repo content, exactly like a
+    // real `.agent-primitives.json` an operator keeps out of git or
+    // commits alongside the project; either way `probe()` reads it by
+    // path, not from git.
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["extra-cache"] }),
+    );
+
+    const result = await probe(baseOptions(repo));
+
+    // `linked` carries the realpath'd form of an explicit link (the repo
+    // defaults file's own `link` entries are resolved the same way
+    // `--link` is, in `index.ts`'s `links[].abs`), which differs from
+    // `repo` itself exactly when `repo` sits under a symlinked ancestor
+    // -- the case this test exercises.
+    expect(result.isolation.linked).toContain(
+      resolveDeepestExisting(path.join(repo, "extra-cache")),
+    );
+  });
+
+  it("repo defaults file: an unknown key is a usage error naming the path and the key, fail-closed", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["vendor"], typoKey: true }),
+    );
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("defaults_file_invalid");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, ".agent-primitives.json")) &&
+          w.includes("typoKey"),
+      ),
+    ).toBe(true);
+  });
+
   it("--pre rebuilds inside the worktree, and the mutant reaches a test that executes built output", async () => {
     useLockDir();
     const repo = makeTmpDir();
@@ -387,6 +857,2325 @@ describe("probe(): worktree isolation, node_modules and --pre", () => {
     // Untouched by the whole run: the worktree's own dist/ absorbed the
     // rebuild, never the original tree's.
     expect(fs.readFileSync(path.join(repo, "dist", "lib.js"), "utf8")).toBe("");
+  });
+});
+
+/**
+ * The link policy end to end (`src/probe/link-policy.ts`): every
+ * candidate from every source is judged before any link is created,
+ * and each refusal reaches the envelope's own `warnings`. The unit
+ * tests for the four rules live in `test/link-policy.test.ts`; these
+ * are the shapes that only a real probe run can show -- what ends up
+ * in the isolation copy, what the source tree looks like afterwards,
+ * and what the operator is told.
+ */
+describe("probe(): worktree isolation, the link policy", () => {
+  /** A module directory a test command can `require`, so a link that
+   * silently dropped shows up as a failing BASELINE rather than as a
+   * subtly different envelope. */
+  function writeModule(dir: string, name: string): void {
+    fs.mkdirSync(path.join(dir, name), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, name, "package.json"),
+      JSON.stringify({ name, main: "index.js" }),
+    );
+    fs.writeFileSync(
+      path.join(dir, name, "index.js"),
+      `module.exports = ${JSON.stringify(name)};\n`,
+    );
+  }
+
+  it("links a node_modules that is itself a symlink to a directory OUTSIDE the repository, at the root and nested, and the copy resolves modules through both (containment is judged on where the candidate SITS, never on where it points)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // The provisioning this org's own worktrees use: no install of
+    // their own, node_modules symlinked to a sibling checkout's.
+    const outsideRoot = makeTmpDir();
+    const outsideNested = makeTmpDir();
+    writeModule(outsideRoot, "dep");
+    writeModule(outsideNested, "dep-nested");
+    fs.mkdirSync(path.join(repo, "packages", "app"), { recursive: true });
+    // Without a trailing slash, so the ignore rule matches the SYMLINK
+    // too (git sees a symlink as a file): the untracked sync must not
+    // be what puts these in the copy, or this test would pass with the
+    // link step doing nothing at all.
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    fs.writeFileSync(
+      path.join(repo, "link-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "assert.strictEqual(require('dep'), 'dep');",
+        "assert.strictEqual(",
+        "  require('./packages/app/node_modules/dep-nested'),",
+        "  'dep-nested',",
+        ");",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "links"]);
+    fs.symlinkSync(outsideRoot, path.join(repo, "node_modules"));
+    fs.symlinkSync(
+      outsideNested,
+      path.join(repo, "packages", "app", "node_modules"),
+    );
+
+    const result = await probe(
+      baseOptions(repo, { testCommand: "node link-check.test.js" }),
+    );
+
+    expect(result.isolation.linked).toEqual(
+      expect.arrayContaining([
+        path.join(repo, "node_modules"),
+        path.join(repo, "packages", "app", "node_modules"),
+      ]),
+    );
+    // The baseline resolved both modules through the copy's own links;
+    // the mutant then broke the assertion the fixture carries.
+    expect(result.status).toBe("killed");
+    expect(result.baseline?.exitCode).toBe(0);
+  });
+
+  it("links TWO distinct in-repo symlinks that point at ONE shared install: nesting is judged on the destination paths in the copy, not on what the links resolve to", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const shared = path.join(repo, "shared-install");
+    writeModule(shared, "dep");
+    fs.mkdirSync(path.join(repo, "packages", "app"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, ".gitignore"),
+      ["node_modules", "shared-install"].join("\n") + "\n",
+    );
+    fs.writeFileSync(
+      path.join(repo, "link-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "assert.strictEqual(require('dep'), 'dep');",
+        "assert.strictEqual(",
+        "  require('./packages/app/node_modules/dep'),",
+        "  'dep',",
+        ");",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "links"]);
+    fs.symlinkSync(shared, path.join(repo, "node_modules"));
+    fs.symlinkSync(shared, path.join(repo, "packages", "app", "node_modules"));
+
+    const result = await probe(
+      baseOptions(repo, { testCommand: "node link-check.test.js" }),
+    );
+
+    expect(result.isolation.linked).toEqual(
+      expect.arrayContaining([
+        path.join(repo, "node_modules"),
+        path.join(repo, "packages", "app", "node_modules"),
+      ]),
+    );
+    expect(result.warnings.some((w) => w.includes("already covered by"))).toBe(
+      false,
+    );
+    expect(result.status).toBe("killed");
+  });
+
+  it("refuses a composer bin-dir of '.' (repository content naming the root): the isolation copy is never replaced by a link to the source tree, the source stays byte-identical, the run still completes, and nothing is left behind", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      // The value a hostile (or merely wrong) composer.json carries:
+      // resolved, it IS the repository root.
+      JSON.stringify({ name: "acme/widget", config: { "bin-dir": "." } }),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    for (const [, entry] of after) expect(entry.symlink).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "composer.json")) &&
+          w.includes("bin-dir") &&
+          // The sits-rule's phrase, not the resolves-rule's ("it
+          // resolves to the repository root itself"): both would refuse
+          // this candidate.
+          w.includes("it is the repository root itself"),
+      ),
+    ).toBe(true);
+    // No leftover from the refusal: the worktree was removed and
+    // deregistered, and no repository-keyed marker survives.
+    expect(fs.existsSync(result.isolation.path as string)).toBe(false);
+    expect(worktreeList(repo)).not.toContain(result.isolation.path as string);
+    expect(fs.existsSync(markerFilePathFor(resolveDeepestExisting(repo)))).toBe(
+      false,
+    );
+  });
+
+  it("refuses a defaults-file link naming the directory this run's own mutant is written into, so the mutant reaches the copy's own file and never the operator's", async () => {
+    useLockDir();
+    const repo = initSrcRepo();
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, {
+        file: "src/fixture.js",
+        testCommand: SRC_TEST_COMMAND,
+      }),
+    );
+    const after = hashTree(repo);
+
+    // The whole source tree, not just the target: a link created over
+    // `src` would have made this run's mutant land in the operator's
+    // own file, and a delete through such a link would show here too.
+    expect(after).toEqual(before);
+    for (const [, entry] of after) expect(entry.symlink).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, ".agent-primitives.json")) &&
+          w.includes('"src"') &&
+          w.includes("must stay a real directory in the copy"),
+      ),
+    ).toBe(true);
+    expect(result.isolation.linked).toEqual([]);
+    // The baseline proves it from INSIDE the copy: a gitignored file
+    // that exists only in the source tree is not visible under the
+    // copy's own `src`, so `src` in the copy is a real directory of the
+    // copy's, not a link to the source.
+    expect(result.baseline?.exitCode).toBe(0);
+    expect(fs.readFileSync(path.join(repo, "src", "fixture.js"), "utf8")).toBe(
+      SRC_FIXTURE_JS,
+    );
+  });
+
+  it("refuses an operator's --link naming the mutated file's own directory too: the tracked-directory rule is for repository content, but the 'must stay a real directory in the copy' rule applies to every source", async () => {
+    useLockDir();
+    const repo = initSrcRepo({ defaultsLinks: null });
+
+    const result = await probe(
+      baseOptions(repo, {
+        file: "src/fixture.js",
+        testCommand: SRC_TEST_COMMAND,
+        links: ["src"],
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "src")) &&
+          w.includes("must stay a real directory in the copy"),
+      ),
+    ).toBe(true);
+    expect(result.isolation.linked).toEqual([]);
+    expect(result.baseline?.exitCode).toBe(0);
+    expect(fs.readFileSync(path.join(repo, "src", "fixture.js"), "utf8")).toBe(
+      SRC_FIXTURE_JS,
+    );
+  });
+
+  it("refuses a composer vendor-dir that names a TRACKED directory (source, which the copy syncs for itself), naming the composer.json and the value", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget", config: { "vendor-dir": "libs" } }),
+    );
+    fs.mkdirSync(path.join(repo, "libs"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "libs", "tracked.php"), "<?php // src\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "composer.json")) &&
+          w.includes('"libs"') &&
+          w.includes("git tracks it"),
+      ),
+    ).toBe(true);
+  });
+
+  it("every refusal reaches the envelope's warnings: an out-of-root composer value and a tracked defaults-file entry are both reported in one run", async () => {
+    useLockDir();
+    const repo = initSrcRepo({ defaultsLinks: ["lib"] });
+    const outside = makeTmpDir();
+    fs.mkdirSync(path.join(outside, "vendor"), { recursive: true });
+    const relEscape = path.relative(repo, path.join(outside, "vendor"));
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({
+        name: "acme/widget",
+        config: { "vendor-dir": relEscape },
+      }),
+    );
+    git(repo, ["add", "composer.json"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+
+    const result = await probe(
+      baseOptions(repo, {
+        file: "src/fixture.js",
+        testCommand: SRC_TEST_COMMAND,
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(relEscape) &&
+          w.includes("does not sit inside the repository root"),
+      ),
+    ).toBe(true);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, ".agent-primitives.json")) &&
+          w.includes('"lib"') &&
+          w.includes("git tracks it"),
+      ),
+    ).toBe(true);
+  });
+
+  it("links a gitignored directory the defaults file names, and refuses a TRACKED one from the same file in the same run: the rule is what git tracks, not where the value came from", async () => {
+    useLockDir();
+    const repo = initSrcRepo({ defaultsLinks: ["lib", "vendor"] });
+    fs.appendFileSync(path.join(repo, ".gitignore"), "vendor\n");
+    git(repo, ["add", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "ignore"]);
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        file: "src/fixture.js",
+        testCommand: SRC_TEST_COMMAND,
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([
+      resolveDeepestExisting(path.join(repo, "vendor")),
+    ]);
+    expect(
+      result.warnings.some(
+        (w) => w.includes('"lib"') && w.includes("git tracks it"),
+      ),
+    ).toBe(true);
+  });
+});
+
+/**
+ * The isolation copy's own FILESYSTEM, not the path strings the link
+ * policy compares. `mkdirSync`, `rmSync` and `symlinkSync` resolve
+ * symlinks in the path they are given, and on a case-insensitive
+ * volume (APFS and HFS+ by default) two spellings that differ only in
+ * case are one entry: a candidate the policy sees as a new path can be
+ * the same directory as one already linked, or the very directory this
+ * run writes into. Every test here runs a real probe over a scratch
+ * fixture, hashes the SOURCE tree before and after, and asserts what
+ * the operator is told as well as that nothing moved.
+ */
+describe("probe(): worktree isolation, a destination the copy spells differently", () => {
+  const PHPUNIT_STUB = "#!/bin/sh\necho phpunit\n";
+
+  /** A repo with a gitignored `vendor/` (an autoloader and a `bin/`),
+   * a committed `composer.json` carrying `config`, and the standard
+   * fixture the probe mutates at the root. */
+  function initVendorRepo(config: Record<string, string>): string {
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget", config }),
+    );
+    git(repo, ["add", "composer.json", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    fs.mkdirSync(path.join(repo, "vendor", "bin"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+    fs.writeFileSync(path.join(repo, "vendor", "bin", "phpunit"), PHPUNIT_STUB);
+    return repo;
+  }
+
+  it("a composer bin-dir of 'VENDOR/bin' over a linked 'vendor': the destination resolves through the link this run just created, so it is refused and the operator's real vendor/bin survives byte for byte", async () => {
+    useLockDir();
+    const repo = initVendorRepo({
+      "vendor-dir": "vendor",
+      "bin-dir": "VENDOR/bin",
+    });
+    const caseInsensitive = caseInsensitiveVolume(repo);
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    // Nothing in the source tree became a symlink: the shape this
+    // leaves behind when the delete goes through the `vendor` link is
+    // a `vendor/bin` that points at itself.
+    for (const [, entry] of after) expect(entry.symlink).toBe(false);
+    expect(
+      fs.lstatSync(path.join(repo, "vendor", "bin")).isSymbolicLink(),
+    ).toBe(false);
+    expect(
+      fs.readFileSync(path.join(repo, "vendor", "bin", "phpunit"), "utf8"),
+    ).toBe(PHPUNIT_STUB);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
+    if (caseInsensitive) {
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(path.join(repo, "VENDOR", "bin")) &&
+            w.includes("outside the copy") &&
+            w.includes("linked earlier in this run"),
+        ),
+      ).toBe(true);
+    } else {
+      // A case-sensitive volume has no `VENDOR` to stat, so the value
+      // is not a directory on disk and never becomes a candidate.
+      expect(
+        result.warnings.some((w) => w.includes(path.join(repo, "VENDOR"))),
+      ).toBe(false);
+    }
+  });
+
+  it("a committed defaults file naming both 'cache' and 'CACHE/inner': the second destination resolves through the first link, and the operator's real cache/inner is neither deleted nor replaced", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "cache/\n");
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["cache", path.join("CACHE", "inner")] }),
+    );
+    git(repo, ["add", ".gitignore", ".agent-primitives.json"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "defaults"]);
+    fs.mkdirSync(path.join(repo, "cache", "inner"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "cache", "inner", "marker.txt"),
+      "present\n",
+    );
+    const caseInsensitive = caseInsensitiveVolume(repo);
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    for (const [, entry] of after) expect(entry.symlink).toBe(false);
+    expect(
+      fs.readFileSync(path.join(repo, "cache", "inner", "marker.txt"), "utf8"),
+    ).toBe("present\n");
+    expect(result.status).toBe("killed");
+    if (caseInsensitive) {
+      expect(result.isolation.linked).toEqual([
+        resolveDeepestExisting(path.join(repo, "cache")),
+      ]);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(path.join(repo, ".agent-primitives.json")) &&
+            w.includes(path.join("CACHE", "inner")) &&
+            w.includes("outside the copy"),
+        ),
+      ).toBe(true);
+    } else {
+      // On a case-sensitive volume `CACHE/inner` is simply a second,
+      // untracked (and absent) directory: linked as a dangling link in
+      // the copy, nothing created in the source tree (the hash above).
+      expect(result.isolation.linked).toEqual([
+        resolveDeepestExisting(path.join(repo, "cache")),
+        path.join(repo, "CACHE", "inner"),
+      ]);
+    }
+  });
+
+  it("a defaults-file link naming a path that does NOT exist under a linked directory's case variant: nothing is created in the operator's real vendor, which is what the check before the mkdir buys", async () => {
+    useLockDir();
+    // Two sources in one run, for the two halves of the mkdir shape:
+    // composer's own `bin-dir` naming a path that is not there is
+    // dropped at DISCOVERY (a value that is not a directory on disk is
+    // never a candidate), so the only way to reach the loop with a
+    // missing destination is a link source that has no such filter --
+    // the defaults file, `--plan`, or `--link`.
+    const repo = initVendorRepo({
+      "vendor-dir": "vendor",
+      "bin-dir": path.join("VENDOR", "deep", "nested"),
+    });
+    fs.rmSync(path.join(repo, "vendor", "bin"), {
+      recursive: true,
+      force: true,
+    });
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [path.join("VENDOR", "deep", "nested")] }),
+    );
+    const caseInsensitive = caseInsensitiveVolume(repo);
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    // The measured shape: with `vendor` linked, a recursive mkdir of
+    // `<copy>/VENDOR/deep` creates the directory in the operator's real
+    // `vendor/`.
+    expect(fs.existsSync(path.join(repo, "vendor", "deep"))).toBe(false);
+    expect(result.status).toBe("killed");
+    if (caseInsensitive) {
+      expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(path.join(repo, "VENDOR", "deep", "nested")) &&
+            w.includes("outside the copy"),
+        ),
+      ).toBe(true);
+    } else {
+      // On a case-sensitive volume `VENDOR/deep/nested` is a distinct,
+      // absent, untracked path: linked as a dangling link in the copy,
+      // and the real `vendor/` gains nothing (asserted above).
+      expect(result.isolation.linked).toEqual([
+        path.join(repo, "vendor"),
+        path.join(repo, "VENDOR", "deep", "nested"),
+      ]);
+    }
+  });
+
+  it("a composer vendor-dir of 'SRC' with the mutant in src/: rules 2 and 3 see the copy's own spelling, so the link is refused and the operator's src is untouched", async () => {
+    useLockDir();
+    const repo = initSrcRepo({
+      defaultsLinks: null,
+      composerConfig: { "vendor-dir": "SRC" },
+    });
+    const caseInsensitive = caseInsensitiveVolume(repo);
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, {
+        file: "src/fixture.js",
+        testCommand: SRC_TEST_COMMAND,
+      }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.readFileSync(path.join(repo, "src", "fixture.js"), "utf8")).toBe(
+      SRC_FIXTURE_JS,
+    );
+    // The baseline's own witness ran inside the copy and found its
+    // `src/` to be the copy's own directory (see `srcCheckJs`).
+    expect(result.status).toBe("killed");
+    expect(result.baseline?.exitCode).toBe(0);
+    if (caseInsensitive) {
+      expect(result.isolation.linked).toEqual([]);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(path.join(repo, "composer.json")) &&
+            w.includes('"SRC"') &&
+            w.includes("must stay a real directory in the copy"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("a defaults-file link of 'SRC' with the mutant in src/: the same refusal, reached from repository content that names a path rather than from composer", async () => {
+    useLockDir();
+    const repo = initSrcRepo({ defaultsLinks: ["SRC"] });
+    const caseInsensitive = caseInsensitiveVolume(repo);
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, {
+        file: "src/fixture.js",
+        testCommand: SRC_TEST_COMMAND,
+      }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.readFileSync(path.join(repo, "src", "fixture.js"), "utf8")).toBe(
+      SRC_FIXTURE_JS,
+    );
+    expect(result.status).toBe("killed");
+    expect(result.baseline?.exitCode).toBe(0);
+    if (caseInsensitive) {
+      expect(result.isolation.linked).toEqual([]);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(path.join(repo, ".agent-primitives.json")) &&
+            w.includes('"SRC"') &&
+            w.includes("must stay a real directory in the copy"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("an operator's --link of 'SRC' with the mutant in src/: rule 2 has no latitude for any source, so this one is refused too", async () => {
+    useLockDir();
+    const repo = initSrcRepo({ defaultsLinks: null });
+    const caseInsensitive = caseInsensitiveVolume(repo);
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, {
+        file: "src/fixture.js",
+        testCommand: SRC_TEST_COMMAND,
+        links: ["SRC"],
+      }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.readFileSync(path.join(repo, "src", "fixture.js"), "utf8")).toBe(
+      SRC_FIXTURE_JS,
+    );
+    expect(result.status).toBe("killed");
+    expect(result.baseline?.exitCode).toBe(0);
+    if (caseInsensitive) {
+      expect(result.isolation.linked).toEqual([]);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(path.join(repo, "SRC")) &&
+            w.includes("must stay a real directory in the copy"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("refuses a composer vendor-dir naming a gitignored 'esc -> ..': it sits inside the repository and leaves it, and repository content gets no such latitude", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "esc\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget", config: { "vendor-dir": "esc" } }),
+    );
+    git(repo, ["add", "composer.json", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    // The shape a checkout picks up from a tool that links a cache next
+    // to the repository: a relative symlink out of the tree.
+    fs.symlinkSync("..", path.join(repo, "esc"));
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "composer.json")) &&
+          w.includes('"esc"') &&
+          w.includes("resolves outside the repository root"),
+      ),
+    ).toBe(true);
+  });
+
+  it("links a case-variant candidate that is neither protected nor tracked (the negative control: the canonical spelling is not a blanket refusal)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "cache\n");
+    git(repo, ["add", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "ignore"]);
+    fs.mkdirSync(path.join(repo, "cache"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "cache", "marker.txt"), "present\n");
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["CACHE"] }),
+    );
+    const caseInsensitive = caseInsensitiveVolume(repo);
+    // On a case-insensitive volume the link resolves to the real
+    // `cache/`, so the copy can read the marker through it; on a
+    // case-sensitive one `CACHE` is simply a directory that is not
+    // there and the link is created dangling, which the baseline must
+    // not depend on.
+    const readsMarker = [
+      "const assert = require('node:assert');",
+      "const fs = require('node:fs');",
+      caseInsensitive
+        ? "assert.strictEqual(fs.readFileSync('CACHE/marker.txt', 'utf8'), 'present\\n');"
+        : "assert.ok(fs.lstatSync('CACHE').isSymbolicLink());",
+      "const { isPositive } = require('./fixture.js');",
+      "assert.strictEqual(isPositive(5), true);",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(repo, "cache-check.test.js"), readsMarker);
+
+    const result = await probe(
+      baseOptions(repo, { testCommand: "node cache-check.test.js" }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.baseline?.exitCode).toBe(0);
+    expect(result.isolation.linked).toEqual([
+      resolveDeepestExisting(path.join(repo, "CACHE")),
+    ]);
+    expect(result.warnings.some((w) => w.includes("skipped linking"))).toBe(
+      false,
+    );
+  });
+
+  it("links a sibling whose name merely starts with an earlier link's name: 'vendor' does not cover 'vendor-bin'", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(
+      path.join(repo, ".gitignore"),
+      ["vendor", "vendor-bin"].join("\n") + "\n",
+    );
+    git(repo, ["add", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "ignore"]);
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+    fs.mkdirSync(path.join(repo, "vendor-bin"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "vendor-bin", "marker.txt"), "present\n");
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["vendor", "vendor-bin"] }),
+    );
+    fs.writeFileSync(
+      path.join(repo, "both-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const fs = require('node:fs');",
+        "assert.ok(fs.existsSync('vendor/autoload.php'));",
+        "assert.strictEqual(",
+        "  fs.readFileSync('vendor-bin/marker.txt', 'utf8'),",
+        "  'present\\n',",
+        ");",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await probe(
+      baseOptions(repo, { testCommand: "node both-check.test.js" }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.baseline?.exitCode).toBe(0);
+    expect(result.isolation.linked).toEqual([
+      resolveDeepestExisting(path.join(repo, "vendor")),
+      resolveDeepestExisting(path.join(repo, "vendor-bin")),
+    ]);
+    expect(result.warnings.some((w) => w.includes("already covered by"))).toBe(
+      false,
+    );
+  });
+
+  it("reports the provenance of an accepted link repository content named, and nothing for one an operator typed", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(
+      path.join(repo, ".gitignore"),
+      ["vendor", "typed-cache"].join("\n") + "\n",
+    );
+    git(repo, ["add", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "ignore"]);
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+    fs.mkdirSync(path.join(repo, "typed-cache"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["vendor"] }),
+    );
+
+    const result = await probe(baseOptions(repo, { links: ["typed-cache"] }));
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linkedNamedBy).toEqual([
+      {
+        path: resolveDeepestExisting(path.join(repo, "vendor")),
+        namedBy: `"vendor" named in the "link" list of ${path.join(repo, ".agent-primitives.json")}`,
+      },
+    ]);
+    // Every path in `linkedNamedBy` is in `linked` too; the operator's
+    // own `--link` is in `linked` alone.
+    expect(result.isolation.linked).toEqual(
+      expect.arrayContaining([
+        resolveDeepestExisting(path.join(repo, "vendor")),
+        resolveDeepestExisting(path.join(repo, "typed-cache")),
+      ]),
+    );
+  });
+
+  it("refuses a candidate whose TARGET resolves inside the isolation copy: a --log-dir inside the repository puts the copy where the auto-discovery walk can find its composer.json and offer the copy's own vendor back", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // Tracked, so the copy carries both: the walk finds the copy's own
+    // `composer.json` (the copy sits at `<log-dir>/wt-<uuid>/wt`, three
+    // directories below the root, exactly the depth cutoff) and its
+    // `vendor` exists there to be offered as a candidate.
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget" }),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    const logDir = path.join(repo, "probe-logs");
+    fs.mkdirSync(logDir, { recursive: true });
+
+    const result = await probe(baseOptions(repo, { logDir }));
+
+    expect(result.status).toBe("killed");
+    const copy = result.isolation.path as string;
+    // Nothing linked points back into the copy: a link whose target is
+    // the copy's own directory makes the copy refer to itself.
+    for (const linked of result.isolation.linked) {
+      expect(linked.startsWith(copy + path.sep)).toBe(false);
+    }
+    expect(
+      result.warnings.some((w) =>
+        w.includes("inside the isolation copy itself"),
+      ),
+    ).toBe(true);
+    // The copy's own `.git` FILE sits inside `ctx.copyRootReal`, exempted
+    // from the nested-repository boundary check for exactly this reason
+    // (see `copyRootReal`'s docblock): this fixture's target resolves
+    // there, and must be refused by the more specific "inside the
+    // isolation copy itself" reason above, never by a false-sounding
+    // "nested repository" one.
+    expect(result.warnings.some((w) => w.includes("nested repository"))).toBe(
+      false,
+    );
+  });
+
+  it("leaves a destination the untracked sync already recreated as the SAME symlink alone, reports it as carried rather than as reaching out of the copy, and still lists it in isolation.linked", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    fs.mkdirSync(path.join(outside, "dep"), { recursive: true });
+    fs.writeFileSync(
+      path.join(outside, "dep", "package.json"),
+      JSON.stringify({ name: "dep", main: "index.js" }),
+    );
+    fs.writeFileSync(
+      path.join(outside, "dep", "index.js"),
+      'module.exports = "dep";\n',
+    );
+    // NOT gitignored, unlike the linked-node_modules test above: the
+    // untracked sync therefore lists this symlink and recreates it in
+    // the copy (never following it), so the destination the link step
+    // would use already exists and already points outside.
+    fs.writeFileSync(
+      path.join(repo, "link-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "assert.strictEqual(require('dep'), 'dep');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "check"]);
+    fs.symlinkSync(outside, path.join(repo, "node_modules"));
+
+    const beforeOutside = hashTree(outside);
+    const result = await probe(
+      baseOptions(repo, { testCommand: "node link-check.test.js" }),
+    );
+    const afterOutside = hashTree(outside);
+
+    // The install at the other end of the symlink is untouched.
+    expect(afterOutside).toEqual(beforeOutside);
+    expect(result.status).toBe("killed");
+    // The baseline resolved `dep` all the same: the copy carries the
+    // synced symlink, which points where this link would have.
+    expect(result.baseline?.exitCode).toBe(0);
+    // Reported as carried: the copy really does reach that install, and
+    // an envelope that omitted it could not be told from one where the
+    // directory never reached the copy at all.
+    expect(result.isolation.linked).toContain(path.join(repo, "node_modules"));
+    // Its own wording, not the danger wording every other destination
+    // that resolves out of the copy gets: nothing here is at risk.
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "node_modules")) &&
+          w.includes("already carries the same symlink the source tree does") &&
+          w.includes("left as synced"),
+      ),
+    ).toBe(true);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "node_modules")) &&
+          w.includes("outside the copy"),
+      ),
+    ).toBe(false);
+  });
+
+  it("a --link whose case variant aliases a PARENT of the mutated directory is refused by rule 2, on the copy's own spelling of the WHOLE destination: the run carries on without that link and the operator's tree is untouched", async () => {
+    useLockDir();
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.mkdirSync(path.join(repo, "src", "sub"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "src", "sub", "fixture.js"),
+      SRC_FIXTURE_JS,
+    );
+    fs.writeFileSync(
+      path.join(repo, "sub-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./src/sub/fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    const caseInsensitive = caseInsensitiveVolume(repo);
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, {
+        file: path.join("src", "sub", "fixture.js"),
+        testCommand: "node sub-check.test.js",
+        // Every segment of a destination is read back from the copy by
+        // entry identity, not just the last one, so this spelling of the
+        // PARENT canonicalises to `src/sub` and rule 2 sees that the
+        // directory this run's mutant is written into sits inside the
+        // candidate. Before that, only the final component was read back
+        // and `SRC/sub` compared as a different path, leaving the whole
+        // run to be refused by the postcondition instead.
+        links: [path.join("SRC", "sub")],
+      }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(
+      fs.readFileSync(path.join(repo, "src", "sub", "fixture.js"), "utf8"),
+    ).toBe(SRC_FIXTURE_JS);
+    // Either way the run reaches a verdict: one link is skipped, never
+    // the whole run.
+    expect(result.status).toBe("killed");
+    if (caseInsensitive) {
+      expect(result.isolation.linked).toEqual([]);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(path.join(repo, "SRC", "sub")) &&
+            w.includes(`own ${path.join("src", "sub")} sits inside it`) &&
+            w.includes("must stay a real directory in the copy"),
+        ),
+      ).toBe(true);
+    } else {
+      // A case-sensitive volume has no alias: `SRC/sub` is a directory
+      // that is not there, and the link is created dangling next to the
+      // copy's own `src`.
+      expect(result.isolation.linked).toEqual([path.join(repo, "SRC", "sub")]);
+    }
+  });
+
+  it("refuses a defaults-file link naming the mapped cwd when the run is invoked from a package subdirectory and mutates a file elsewhere", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.mkdirSync(path.join(repo, "packages", "app"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "src", "fixture.js"), SRC_FIXTURE_JS);
+    // Run from `packages/app`, mutate `src/fixture.js`: the cwd and the
+    // mutated directory are two different paths, and the copy has to
+    // keep BOTH real.
+    fs.writeFileSync(
+      path.join(repo, "packages", "app", "app.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('../../src/fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [path.join("packages", "app")] }),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "packages"]);
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, {
+        cwd: path.join(repo, "packages", "app"),
+        file: path.join("..", "..", "src", "fixture.js"),
+        testCommand: "node app.test.js",
+      }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "packages", "app")) &&
+          w.includes(`own ${path.join("packages", "app")} sits inside it`) &&
+          w.includes("must stay a real directory in the copy"),
+      ),
+    ).toBe(true);
+  });
+
+  /** A tracked module under `src/sub/`, unrelated to the probe's own
+   * fixture at the repository root: the shape where a link over a
+   * case-variant PARENT touches nothing this run writes to, so nothing
+   * but the rules themselves can notice it. */
+  const IMPORTANT_JS = "module.exports = { important: true };\n";
+
+  /** Writes the copy's own `src/sub/important.js` from inside the
+   * isolation copy. Harmless there and destructive through a link: on a
+   * case-insensitive volume a link created at `SRC/sub` IS the copy's
+   * `src/sub`, so this same write lands in the operator's tracked file.
+   * The true spelling rather than the variant one, so the command means
+   * the same thing on both kinds of volume. */
+  const CLOBBER_SUB_PRE =
+    "node -e \"require('node:fs').writeFileSync('src/sub/important.js','// CLOBBERED')\"";
+
+  function initTrackedSubRepo(): string {
+    const { repo } = initRepo();
+    fs.mkdirSync(path.join(repo, "src", "sub"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "src", "sub", "important.js"),
+      IMPORTANT_JS,
+    );
+    return repo;
+  }
+
+  function commitAll(repo: string, message: string): void {
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", message]);
+  }
+
+  it("refuses a defaults-file link whose case variant names a TRACKED PARENT ('SRC/sub' over 'src/sub'), with the mutant outside it and a --pre that writes there: every segment is canonicalised, so git's index is asked about the directory the copy really carries", async () => {
+    useLockDir();
+    const repo = initTrackedSubRepo();
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [path.join("SRC", "sub")] }),
+    );
+    commitAll(repo, "sub");
+    const caseInsensitive = caseInsensitiveVolume(repo);
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, { preCommand: CLOBBER_SUB_PRE }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(
+      fs.readFileSync(path.join(repo, "src", "sub", "important.js"), "utf8"),
+    ).toBe(IMPORTANT_JS);
+    expect(result.status).toBe("killed");
+    if (caseInsensitive) {
+      expect(result.isolation.linked).toEqual([]);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(path.join(repo, ".agent-primitives.json")) &&
+            w.includes(path.join("SRC", "sub")) &&
+            w.includes("git tracks it"),
+        ),
+      ).toBe(true);
+    } else {
+      // A case-sensitive volume has no alias: `SRC/sub` is a directory
+      // that is not there, and the link is created next to the copy's
+      // own `src`, pointing at nothing.
+      expect(result.isolation.linked).toEqual([
+        path.join(resolveDeepestExisting(repo), "SRC", "sub"),
+      ]);
+    }
+  });
+
+  it("refuses the same TRACKED PARENT alias when a composer vendor-dir names it, naming the composer.json and the value", async () => {
+    useLockDir();
+    const repo = initTrackedSubRepo();
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({
+        name: "acme/widget",
+        config: { "vendor-dir": path.join("SRC", "sub") },
+      }),
+    );
+    commitAll(repo, "composer");
+    const caseInsensitive = caseInsensitiveVolume(repo);
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, { preCommand: CLOBBER_SUB_PRE }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(
+      fs.readFileSync(path.join(repo, "src", "sub", "important.js"), "utf8"),
+    ).toBe(IMPORTANT_JS);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    if (caseInsensitive) {
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes(path.join(repo, "composer.json")) &&
+            w.includes(path.join("SRC", "sub")) &&
+            w.includes("git tracks it"),
+        ),
+      ).toBe(true);
+    } else {
+      // Composer values are dropped at DISCOVERY when they name nothing
+      // on disk, so on this volume there is no candidate at all.
+      expect(
+        result.warnings.some((w) => w.includes(path.join("SRC", "sub"))),
+      ).toBe(false);
+    }
+  });
+
+  it("refuses a composer vendor-dir naming a gitignored 'esc -> .' (a symlink to the repository root itself): it sits inside the repository under a name of its own, and a --pre writing through it never reaches the real root", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "esc\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget", config: { "vendor-dir": "esc" } }),
+    );
+    commitAll(repo, "composer");
+    // The shape a tool that links the project into itself leaves behind:
+    // a relative symlink whose target IS the repository root. It sits
+    // inside the repository (rule 1's containment) and resolves inside
+    // it too (rule 1's namedBy clause), and linking it would hand the
+    // copy the whole source tree under the name `esc`.
+    fs.symlinkSync(".", path.join(repo, "esc"));
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, {
+        preCommand:
+          "node -e \"const fs=require('node:fs');fs.mkdirSync('esc',{recursive:true});fs.writeFileSync('esc/clobber.txt','x')\"",
+      }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(repo, "clobber.txt"))).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "composer.json")) &&
+          w.includes('"esc"') &&
+          w.includes("resolves to the repository root itself"),
+      ),
+    ).toBe(true);
+  });
+
+  it("a committed defaults file naming 'CACHE/inner' BEFORE 'cache': the second destination's delete would remove the link the first one created, so it is refused, and linked/linkedNamedBy report exactly what the copy carries", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "cache/\n");
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [path.join("CACHE", "inner"), "cache"] }),
+    );
+    // The witness runs inside the copy: it asserts the SHAPE the copy
+    // carries, which is the only way to see what survived a run whose
+    // worktree is removed on the way out. With the second candidate
+    // linked, the copy's `CACHE` would itself be a symlink (its `rmSync`
+    // having taken the first link with it), not a real directory.
+    fs.writeFileSync(
+      path.join(repo, "cache-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const fs = require('node:fs');",
+        "const path = require('node:path');",
+        "assert.ok(",
+        "  fs.lstatSync('CACHE').isDirectory(),",
+        "  'CACHE in the isolation copy is not a real directory',",
+        ");",
+        "assert.ok(",
+        "  fs.lstatSync(path.join('CACHE', 'inner')).isSymbolicLink(),",
+        "  'CACHE/inner in the isolation copy is not a symlink',",
+        ");",
+        "assert.strictEqual(",
+        "  fs.readFileSync(path.join('CACHE', 'inner', 'marker.txt'), 'utf8'),",
+        "  'present\\n',",
+        ");",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo, "defaults");
+    fs.mkdirSync(path.join(repo, "cache", "inner"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "cache", "inner", "marker.txt"),
+      "present\n",
+    );
+    const caseInsensitive = caseInsensitiveVolume(repo);
+    if (!caseInsensitive) {
+      // `CACHE/inner` is simply not there on a case-sensitive volume, so
+      // the two destinations never alias and there is nothing to refuse.
+      return;
+    }
+
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, { testCommand: "node cache-check.test.js" }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    for (const [, entry] of after) expect(entry.symlink).toBe(false);
+    expect(
+      fs.readFileSync(path.join(repo, "cache", "inner", "marker.txt"), "utf8"),
+    ).toBe("present\n");
+    // The witness above ran inside the copy and found the first link
+    // still there.
+    expect(result.baseline?.exitCode).toBe(0);
+    expect(result.status).toBe("killed");
+    const firstLink = path.join(resolveDeepestExisting(repo), "CACHE", "inner");
+    expect(result.isolation.linked).toEqual([firstLink]);
+    expect(result.isolation.linkedNamedBy.map((e) => e.path)).toEqual([
+      firstLink,
+    ]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "cache")) &&
+          w.includes(path.join("CACHE", "inner")) &&
+          w.includes("linked earlier in this run") &&
+          w.includes("the delete at that destination would remove"),
+      ),
+    ).toBe(true);
+  });
+
+  it("the postcondition's mapped-cwd half: a defaults-file link over the cwd's own parent, reached under a spelling the copy does not use, fails the sync rather than running --pre and -t in the operator's tree", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "packages/\n");
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["packages"] }),
+    );
+    fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "src", "fixture.js"), SRC_FIXTURE_JS);
+    // The control's own witness, run from the copy's root: it asserts
+    // the link is really there before it asserts anything about the
+    // fixture. Its require of `src/fixture.js` does not cross the link,
+    // which is what keeps it looking at the copy's own mutant.
+    fs.writeFileSync(
+      path.join(repo, "root-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const fs = require('node:fs');",
+        "assert.ok(",
+        "  fs.lstatSync('packages').isSymbolicLink(),",
+        "  'packages was not linked into the isolation copy',",
+        ");",
+        "const { isPositive } = require('./src/fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo, "packages");
+    // Gitignored, so the copy never syncs it and can only reach it
+    // through the link the defaults file asks for: the shape a
+    // vendored/installed package directory really has.
+    fs.mkdirSync(path.join(repo, "packages", "app"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "packages", "app", "app.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('../../src/fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    // The control: the same defaults file, run from the repository root
+    // so the cwd is not inside the linked directory at all (rule 2
+    // refuses a candidate that contains the cwd, whatever its
+    // spelling). It shows the fixture links `packages` and reaches a
+    // verdict, so what the variant run below changes is the spelling
+    // and nothing else.
+    const control = await probe(
+      baseOptions(repo, {
+        file: path.join("src", "fixture.js"),
+        testCommand: "node root-check.test.js",
+      }),
+    );
+    expect(control.status).toBe("killed");
+    expect(control.isolation.linked).toEqual([
+      path.join(resolveDeepestExisting(repo), "packages"),
+    ]);
+
+    if (!caseInsensitiveVolume(repo)) {
+      // No alias on this volume: `PACKAGES/app` is not a directory at
+      // all, so there is no second spelling to be invoked under.
+      return;
+    }
+
+    const before = hashTree(repo);
+    // Same run, same link, invoked under a spelling of the cwd that the
+    // copy does not use for that directory. Rule 2 compares the
+    // candidate's canonical destination (`packages`) against the
+    // protected paths in the SOURCE tree's own spelling
+    // (`PACKAGES/app`), and those two strings do not meet; what the
+    // rules cannot see, the postcondition measures on the filesystem.
+    const result = await probe(
+      baseOptions(repo, {
+        file: path.join("..", "..", "src", "fixture.js"),
+        testCommand: "node app.test.js",
+        cwd: path.join(repo, "PACKAGES", "app"),
+      }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("worktree_sync_failed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join("PACKAGES", "app")) &&
+          w.includes("outside the") &&
+          w.includes("would have written to the source tree"),
+      ),
+    ).toBe(true);
+  });
+
+  it("the postcondition's mutated-path half: a --link over the mutated file's own directory, named in the spelling the copy uses while --file named the other one, fails the sync rather than writing the mutant into the operator's file", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.mkdirSync(path.join(repo, "src", "sub"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "src", "sub", "fixture.js"),
+      SRC_FIXTURE_JS,
+    );
+    fs.writeFileSync(
+      path.join(repo, "sub-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./src/sub/fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo, "sub");
+    if (!caseInsensitiveVolume(repo)) {
+      // Without an alias the two spellings name two directories, one of
+      // which does not exist, and nothing aliases anything.
+      return;
+    }
+
+    const before = hashTree(repo);
+    // The run's own two inputs spell one directory two ways: `--file`
+    // reaches the mutant through `SRC/sub`, the link names `src/sub`.
+    // The protected path is the source tree's spelling of the first, the
+    // candidate's canonical destination is the copy's spelling of the
+    // second, and rule 2 compares strings; only the postcondition, which
+    // resolves both against the copy's filesystem, sees that the link
+    // moved the file this run mutates out of the copy.
+    const result = await probe(
+      baseOptions(repo, {
+        file: path.join("SRC", "sub", "fixture.js"),
+        testCommand: "node sub-check.test.js",
+        links: [path.join(repo, "src", "sub")],
+      }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(
+      fs.readFileSync(path.join(repo, "src", "sub", "fixture.js"), "utf8"),
+    ).toBe(SRC_FIXTURE_JS);
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("worktree_sync_failed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join("SRC", "sub", "fixture.js")) &&
+          w.includes("outside the") &&
+          w.includes("would have written to the source tree"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("probe(): worktree isolation, a link target that reaches the repository root under a SECOND SPELLING", () => {
+  /** The same directory name in the two Unicode normalisation forms:
+   * `e` with an acute as one code point (NFC) and as `e` plus a
+   * combining acute (NFD). Written as escapes because an editor renders
+   * the two identically. */
+  const NFC_NAME = "r\u00e9sources";
+  const NFD_NAME = "re\u0301sources";
+
+  /** A `--pre` that makes sure `node_modules/` is there and writes a
+   * byte into it. With the auto-discovered `node_modules` refused, that
+   * byte lands in a real directory of the isolation copy; with it
+   * linked, it lands wherever the link points -- which for every target
+   * below is the source tree. */
+  const CLOBBER_PRE =
+    "node -e \"const fs=require('node:fs');" +
+    "fs.mkdirSync('node_modules',{recursive:true});" +
+    "fs.writeFileSync('node_modules/CLOBBER.txt','x')\"";
+
+  /** A repo whose own directory name AND its parent's are chosen here:
+   * `mkdtemp` picks a random name that may itself mix case, and every
+   * case below needs a second spelling of one specific segment. The
+   * `node_modules` these tests add afterwards is gitignored, so the copy
+   * can only ever see it through a link. */
+  function initNamedRepo(
+    parentName: string,
+    repoName: string,
+  ): { base: string; repo: string } {
+    const base = makeTmpDir();
+    const repo = path.join(base, parentName, repoName);
+    fs.mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    git(repo, ["config", "core.autocrlf", "false"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), FIXTURE_JS);
+    fs.writeFileSync(path.join(repo, "fixture.test.js"), FIXTURE_TEST_JS);
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { base, repo };
+  }
+
+  /** Creates the gitignored `node_modules -> target` the auto-discovery
+   * walk finds, runs a probe whose `--pre` writes through it, and
+   * reports the source tree's own hashes on both sides of the run. */
+  async function probeThroughNodeModules(
+    repo: string,
+    target: string,
+  ): Promise<{
+    before: Map<string, { symlink: boolean; hash: string }>;
+    after: Map<string, { symlink: boolean; hash: string }>;
+    result: Awaited<ReturnType<typeof probe>>;
+  }> {
+    fs.symlinkSync(target, path.join(repo, "node_modules"));
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+    return { before, after, result };
+  }
+
+  it("refuses every spelling that resolves to the repository root or an ancestor of it -- a case-variant repo directory, a case-variant ancestor segment, an NFD target for an NFC directory -- and still refuses the three exact spellings, leaving the source tree byte-identical in all six", async () => {
+    useLockDir();
+
+    // 1. `node_modules -> ../REPO` for a repository directory really
+    //    named `repo`: realpath reports `.../p1/REPO` against a root of
+    //    `.../p1/repo`, two strings for one directory.
+    {
+      const { base, repo } = initNamedRepo("p1", "repo");
+      const caseInsensitive = caseInsensitiveVolume(base);
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        path.join("..", "REPO"),
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      if (caseInsensitive) {
+        // The two spellings really are one directory on this volume,
+        // and realpath really does not close the gap.
+        expect(fs.realpathSync(path.join(repo, "node_modules"))).not.toBe(
+          resolveDeepestExisting(repo),
+        );
+        expect(fs.statSync(path.join(repo, "node_modules")).ino).toBe(
+          fs.statSync(repo).ino,
+        );
+        expect(
+          result.warnings.some(
+            (w) =>
+              w.includes("node_modules") &&
+              w.includes("resolves to the repository root itself"),
+          ),
+        ).toBe(true);
+      } else {
+        // `../REPO` names nothing here, so the walk never offers the
+        // entry as a linkable directory at all.
+        expect(result.warnings.some((w) => w.includes("node_modules"))).toBe(
+          false,
+        );
+      }
+    }
+
+    // 2. An ABSOLUTE target whose ancestor segment is spelled in another
+    //    case: the repository root itself, reached as
+    //    `<base>/ancestor/repo` for a real `<base>/Ancestor/repo`.
+    {
+      const { base, repo } = initNamedRepo("Ancestor", "repo");
+      const caseInsensitive = caseInsensitiveVolume(base);
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        path.join(base, "ancestor", "repo"),
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      if (caseInsensitive) {
+        expect(
+          result.warnings.some(
+            (w) =>
+              w.includes("node_modules") &&
+              w.includes("resolves to the repository root itself"),
+          ),
+        ).toBe(true);
+      } else {
+        expect(result.warnings.some((w) => w.includes("node_modules"))).toBe(
+          false,
+        );
+      }
+    }
+
+    // 3. An NFD target for a repository directory stored in NFC.
+    {
+      const { base, repo } = initNamedRepo("p3", NFC_NAME);
+      // Measured on this volume rather than assumed: APFS's
+      // case-insensitive variant is normalisation-insensitive, its
+      // case-sensitive variant is not, and a Linux host is neither.
+      const normalises = fs.existsSync(path.join(base, "p3", NFD_NAME));
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        path.join("..", NFD_NAME),
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      if (normalises) {
+        expect(fs.realpathSync(path.join(repo, "node_modules"))).not.toBe(
+          resolveDeepestExisting(repo),
+        );
+        expect(
+          result.warnings.some(
+            (w) =>
+              w.includes("node_modules") &&
+              w.includes("resolves to the repository root itself"),
+          ),
+        ).toBe(true);
+      } else {
+        expect(result.warnings.some((w) => w.includes("node_modules"))).toBe(
+          false,
+        );
+      }
+    }
+
+    // The three EXACT spellings, as negative controls in the same test:
+    // these were already refused before identity was consulted, and the
+    // wording each one gets must not have moved.
+    // 4. `node_modules -> ..`: an ancestor, spelled the way it is.
+    {
+      const { repo } = initNamedRepo("p4", "repo");
+      const parent = path.dirname(repo);
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        "..",
+      );
+
+      expect(after).toEqual(before);
+      // This target's write would land beside the repository, not in it.
+      expect(fs.existsSync(path.join(parent, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("node_modules") &&
+            w.includes("which contains the repository root"),
+        ),
+      ).toBe(true);
+    }
+
+    // 5. `node_modules -> <the root's own absolute path>`.
+    {
+      const { repo } = initNamedRepo("p5", "repo");
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        repo,
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("node_modules") &&
+            w.includes("resolves to the repository root itself"),
+        ),
+      ).toBe(true);
+    }
+
+    // 6. `node_modules -> .`.
+    {
+      const { repo } = initNamedRepo("p6", "repo");
+      const { before, after, result } = await probeThroughNodeModules(
+        repo,
+        ".",
+      );
+
+      expect(after).toEqual(before);
+      expect(fs.existsSync(path.join(repo, "CLOBBER.txt"))).toBe(false);
+      expect(result.isolation.linked).toEqual([]);
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("node_modules") &&
+            w.includes("resolves to the repository root itself"),
+        ),
+      ).toBe(true);
+    }
+  }, 90000);
+});
+
+describe("probe(): worktree isolation, a link target that is TRACKED source", () => {
+  // Every fixture here is auto-discovered: no `--link`, no file naming
+  // a path, nothing for rules 1, 2 or 4 to object to. What makes the
+  // link dangerous is only what it POINTS AT, and a `--pre` writing
+  // through it is what turns that into a write in the operator's own
+  // tracked tree.
+  it("refuses a gitignored 'node_modules -> src' the walk found: the run completes, nothing is linked, and the source tree is byte-identical", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    commitAll(repo, "ignore node_modules");
+    // Created after the commit, so it stays gitignored and untracked:
+    // only the walk can find it, and only its target is tracked.
+    fs.symlinkSync("src", path.join(repo, "node_modules"), "dir");
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      refusedForTrackedTarget(
+        result.warnings,
+        "node_modules",
+        path.join(repo, "src"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses the same link COMMITTED: what git tracks about the candidate is beside the point, the target is what decides", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.symlinkSync("src", path.join(repo, "node_modules"), "dir");
+    commitAll(repo, "commit the node_modules symlink");
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      refusedForTrackedTarget(
+        result.warnings,
+        "node_modules",
+        path.join(repo, "src"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a 'node_modules' git tracks as a DIRECTORY of its own (a vendored file committed under it), which no rule keyed on how the candidate was named ever sees", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.mkdirSync(path.join(repo, "node_modules"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "node_modules", "vendored.txt"),
+      "vendored\n",
+    );
+    commitAll(repo, "commit a vendored node_modules");
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(repo, "node_modules", "CLOBBER.txt"))).toBe(
+      false,
+    );
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      refusedForTrackedTarget(
+        result.warnings,
+        "node_modules",
+        path.join(repo, "node_modules"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses the ALIAS spelling of the same target ('node_modules -> ../REPO/src'), which resolves into the root while spelling a path outside it: containment of the target is decided by identity, never by relativizing two realpath strings", async (t) => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    commitAll(repo, "ignore node_modules");
+    // On a case-sensitive volume the uppercased repository name is
+    // simply a directory that is not there, the symlink dangles, and
+    // the walk never offers the candidate at all.
+    t.skip(!caseInsensitiveVolume(repo), "not on a case-insensitive volume");
+    fs.symlinkSync(
+      path.join("..", path.basename(repo).toUpperCase(), "src"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+    // The spelling the policy is handed, and what a plain relativize
+    // would make of it: `realpath` normalises no case, so this target
+    // reads as a path OUTSIDE the root while naming `src` inside it.
+    const targetSpelling = resolveDeepestExisting(
+      path.join(repo, "node_modules"),
+    );
+    expect(
+      path
+        .relative(resolveDeepestExisting(repo), targetSpelling)
+        .startsWith(".."),
+    ).toBe(true);
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("node_modules") &&
+          w.includes(`git tracks its target ${targetSpelling}`),
+      ),
+    ).toBe(true);
+  });
+
+  it("negative control: a target OUTSIDE the root (a sibling checkout's install) still links, and the copy really resolves through it", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    const sibling = makeTmpDir();
+    fs.mkdirSync(path.join(sibling, "install"), { recursive: true });
+    fs.writeFileSync(path.join(sibling, "install", "marker.txt"), "sibling\n");
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    commitAll(repo, "ignore node_modules");
+    fs.symlinkSync(
+      path.join(path.relative(repo, sibling), "install"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(result.status).toBe("killed");
+    // The walk's own spelling of what it found, which is what
+    // `isolation.linked` reports for an auto-discovered candidate.
+    expect(result.isolation.linked).toEqual([path.join(repo, "node_modules")]);
+    // The link was really used: the `--pre` wrote through it, into the
+    // sibling checkout and not into this repository.
+    expect(fs.existsSync(path.join(sibling, "install", "CLOBBER.txt"))).toBe(
+      true,
+    );
+    expect(after).toEqual(before);
+  });
+
+  it("negative control: an UNTRACKED target inside the root (a monorepo's hoisted install) still links, from both the root and the package that points at it", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    fs.mkdirSync(path.join(repo, "packages", "app"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "packages", "app", "index.js"),
+      "module.exports = 1;\n",
+    );
+    commitAll(repo, "a package and an ignored node_modules");
+    // The hoisted install, and the package-level symlink pointing back
+    // up at it: both gitignored, both inside the root, neither tracked.
+    fs.mkdirSync(path.join(repo, "node_modules"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "node_modules", "hoisted.txt"),
+      "hoisted\n",
+    );
+    fs.symlinkSync(
+      path.join("..", "..", "node_modules"),
+      path.join(repo, "packages", "app", "node_modules"),
+      "dir",
+    );
+
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([
+      path.join(repo, "node_modules"),
+      path.join(repo, "packages", "app", "node_modules"),
+    ]);
+    // Shared, which is exactly what these links exist for: the `--pre`
+    // wrote into the hoisted install through the copy's own link.
+    expect(fs.existsSync(path.join(repo, "node_modules", "CLOBBER.txt"))).toBe(
+      true,
+    );
+    // ... and nothing tracked moved.
+    expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
+    expect(fs.readFileSync(path.join(repo, "src", "tracked.js"), "utf8")).toBe(
+      "module.exports = 1;\n",
+    );
+  });
+
+  it("refuses a target BELOW a submodule's own root ('node_modules -> sub/lib'), which the outer index lists nowhere but the submodule's own gitlink", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    const upstream = initUpstreamLibRepo();
+    git(repo, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      upstream,
+      "sub",
+    ]);
+    commitAll(repo, "add submodule");
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    commitAll(repo, "ignore node_modules");
+    fs.symlinkSync(
+      path.join("sub", "lib"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(repo, "sub", "lib", "CLOBBER.txt"))).toBe(
+      false,
+    );
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("node_modules") &&
+          w.includes(
+            `its target ${resolveDeepestExisting(path.join(repo, "sub", "lib"))} sits inside a nested repository at sub`,
+          ) &&
+          w.includes("whose content the outer index never lists"),
+      ),
+    ).toBe(true);
+  });
+
+  it("control: the submodule's own ROOT ('node_modules -> sub') stays refused by the OUTER index's gitlink, the same as before the nested-repository boundary existed", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    const upstream = initUpstreamLibRepo();
+    git(repo, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      upstream,
+      "sub",
+    ]);
+    commitAll(repo, "add submodule");
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    commitAll(repo, "ignore node_modules");
+    fs.symlinkSync("sub", path.join(repo, "node_modules"), "dir");
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(repo, "sub", "CLOBBER.txt"))).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      refusedForTrackedTarget(
+        result.warnings,
+        "node_modules",
+        path.join(repo, "sub"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a target BELOW a gitignored NESTED PLAIN repository's own root ('node_modules -> nested/lib'), the same boundary a submodule's content sits behind", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.writeFileSync(
+      path.join(repo, ".gitignore"),
+      ["node_modules", "nested"].join("\n") + "\n",
+    );
+    commitAll(repo, "ignore node_modules and nested");
+    const nested = path.join(repo, "nested");
+    fs.mkdirSync(path.join(nested, "lib"), { recursive: true });
+    fs.writeFileSync(path.join(nested, "lib", "file.txt"), "nested\n");
+    git(nested, ["init", "-q"]);
+    git(nested, ["config", "user.email", "test@example.com"]);
+    git(nested, ["config", "user.name", "test"]);
+    git(nested, ["add", "-A"]);
+    git(nested, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "init nested",
+    ]);
+    fs.symlinkSync(
+      path.join("nested", "lib"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(nested, "lib", "CLOBBER.txt"))).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("node_modules") &&
+          w.includes("inside a nested repository at nested"),
+      ),
+    ).toBe(true);
+  });
+
+  it("negative control: a gitignored nested directory carrying no '.git' of its own still links -- nesting alone is not the boundary", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.writeFileSync(
+      path.join(repo, ".gitignore"),
+      ["node_modules", "plain"].join("\n") + "\n",
+    );
+    commitAll(repo, "ignore node_modules and plain");
+    fs.mkdirSync(path.join(repo, "plain", "lib"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "plain", "lib", "file.txt"), "plain\n");
+    fs.symlinkSync(
+      path.join("plain", "lib"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([path.join(repo, "node_modules")]);
+    expect(fs.existsSync(path.join(repo, "plain", "lib", "CLOBBER.txt"))).toBe(
+      true,
+    );
+    expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
+  });
+
+  it("refuses an auto-discovered 'node_modules -> .git' (gitignored, so untracked, and outside any nested-repository boundary): neither isTrackedPath nor nestedRepoBoundaryRelPath sees a target that IS the repository's own git directory", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    commitAll(repo, "ignore node_modules");
+    // `.git/.git` does not exist, so `nestedRepoBoundaryRelPath` finds no
+    // boundary here, and git's own index never lists `.git` at all --
+    // only the dedicated `.git` refusal catches this candidate.
+    fs.symlinkSync(
+      path.join(repo, ".git"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+
+    const gitBefore = hashTree(path.join(repo, ".git"));
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const gitAfter = hashTree(path.join(repo, ".git"));
+
+    expect(gitAfter).toEqual(gitBefore);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.startsWith("skipped linking ") &&
+          w.includes("node_modules") &&
+          w.includes("sits at or under the repository's own git directory"),
+      ),
+    ).toBe(true);
+    expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
+  });
+});
+
+describe("probe(): worktree isolation, a destination whose ancestor in the copy is a file", () => {
+  it("skips a defaults-file link naming a path under a TRACKED FILE ('SRC/FILE.TXT/x' over 'src/file.txt') with a warning, and the run completes instead of failing the whole sync", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src", "file.txt"), "tracked\n");
+    // Repository content naming a path UNDER a tracked file. It passes
+    // rule 3 honestly: git tracks `src/file.txt`, but nothing is tracked
+    // under it, so `src/file.txt/x` is untracked and the rule has
+    // nothing to refuse.
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [path.join("SRC", "FILE.TXT", "x")] }),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "tracked file",
+    ]);
+    if (!caseInsensitiveVolume(repo)) {
+      // `SRC/FILE.TXT` is free space in the copy on this volume: the
+      // recursive mkdir creates it, the link is made, and the shape this
+      // test is about has nothing to act on.
+      return;
+    }
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.readFileSync(path.join(repo, "src", "file.txt"), "utf8")).toBe(
+      "tracked\n",
+    );
+    // The run completed: one impossible destination is a skipped link,
+    // never a failed sync for everything else in the run.
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join("SRC", "FILE.TXT", "x")) &&
+          w.includes(path.join("SRC", "FILE.TXT")) &&
+          w.includes("is not a directory in the copy"),
+      ),
+    ).toBe(true);
+    expect(
+      result.warnings.some((w) => w.includes("worktree_sync_failed")),
+    ).toBe(false);
+  });
+
+  it("skips a defaults-file link under a DANGLING symlink ('dang -> nowhere-at-all', the entry naming 'dang/x') with the same warning, on any volume: something IS there, so the recursive mkdir cannot create through it either", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // A committed symlink resolving nowhere. It reaches the copy as the
+    // same dangling link, and the destination `dang/x` is a path the
+    // rules above have nothing to say about: git tracks `dang` itself
+    // but nothing under it, and the target resolves to no directory at
+    // all. Needs no case-insensitive volume: the entry names the
+    // ancestor in its own spelling.
+    fs.symlinkSync("nowhere-at-all", path.join(repo, "dang"));
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [path.join("dang", "x")] }),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "dangling symlink",
+    ]);
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    // One impossible destination is a skipped link, never a failed sync
+    // for the whole run: the branch that reports a dangling ancestor as
+    // blocking is what keeps the recursive mkdir from throwing EEXIST
+    // into the sync's own catch.
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join("dang", "x")) &&
+          w.includes("sits under dang, which is not a directory in the copy"),
+      ),
+    ).toBe(true);
+    expect(
+      result.warnings.some((w) => w.includes("worktree_sync_failed")),
+    ).toBe(false);
+  });
+});
+
+describe("probe(): worktree isolation, a link target that CONTAINS the isolation copy", () => {
+  it("refuses a defaults-file link naming the in-repo --log-dir the copy itself lives under, the mirror of the target-inside-the-copy refusal", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, ".probe-logs");
+    fs.mkdirSync(logDir);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".probe-logs\n");
+    // Repository content naming the directory the isolation copy is
+    // created inside: it sits in the repository, resolves inside it, is
+    // not tracked, and contains no path this run writes to, so every
+    // up-front rule accepts it.
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [".probe-logs"] }),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "log dir"]);
+
+    /** The source tree without the log directory, whose contents this
+     * run legitimately writes. */
+    const hashTreeOutsideLogs = (): Map<
+      string,
+      { symlink: boolean; hash: string }
+    > => {
+      const all = hashTree(repo);
+      for (const key of [...all.keys()]) {
+        if (key === ".probe-logs" || key.startsWith(".probe-logs" + path.sep)) {
+          all.delete(key);
+        }
+      }
+      return all;
+    };
+
+    const before = hashTreeOutsideLogs();
+    const result = await probe(baseOptions(repo, { logDir }));
+    const after = hashTreeOutsideLogs();
+
+    expect(after).toEqual(before);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(".probe-logs") &&
+          w.includes("which contains the isolation copy"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses the same in-repo --log-dir named under a CASE VARIANT ('.PROBE-LOGS' for a '.probe-logs' log dir): the mirror is decided by filesystem identity, which is the only thing that sees it", async (t) => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, ".probe-logs");
+    fs.mkdirSync(logDir);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".probe-logs\n");
+    // The same shape as the test above, spelled the one way no string
+    // comparison catches: `realpath` normalises no case, so this target
+    // resolves to `<repo>/.PROBE-LOGS`, which relativizes to a path
+    // OUTSIDE the copy while naming the very directory the copy sits
+    // in. Untracked and containing nothing this run writes to, so every
+    // rule up to the mirror accepts it.
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [".PROBE-LOGS"] }),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "log dir"]);
+    // On a case-sensitive volume `.PROBE-LOGS` is a directory that is
+    // not there: it contains no copy, and the mirror has nothing to
+    // decide.
+    t.skip(!caseInsensitiveVolume(repo), "not on a case-insensitive volume");
+    const targetSpelling = resolveDeepestExisting(
+      path.join(repo, ".PROBE-LOGS"),
+    );
+    expect(targetSpelling.endsWith(".PROBE-LOGS")).toBe(true);
+
+    /** The source tree without the log directory, whose contents this
+     * run legitimately writes. */
+    const hashTreeOutsideLogs = (): Map<
+      string,
+      { symlink: boolean; hash: string }
+    > => {
+      const all = hashTree(repo);
+      for (const key of [...all.keys()]) {
+        if (key === ".probe-logs" || key.startsWith(".probe-logs" + path.sep)) {
+          all.delete(key);
+        }
+      }
+      return all;
+    };
+
+    const before = hashTreeOutsideLogs();
+    const result = await probe(baseOptions(repo, { logDir }));
+    const after = hashTreeOutsideLogs();
+
+    expect(after).toEqual(before);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(`its target resolves to ${targetSpelling}`) &&
+          w.includes("which contains the isolation copy"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("probe(): worktree isolation, the tracked-file listing behind the link policy", () => {
+  it("fails closed when git cannot answer which candidates it tracks: no link repository content named is created, and the envelope says so", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(
+      path.join(repo, ".gitignore"),
+      ["vendor", "typed-cache", "node_modules"].join("\n") + "\n",
+    );
+    git(repo, ["add", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "ignore"]);
+    // Gitignored, so the real listing would report it as untracked and
+    // the link would be created: what keeps it out here is only that
+    // the listing could not run at all.
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+    fs.mkdirSync(path.join(repo, "typed-cache"), { recursive: true });
+    // Auto-discovered, gitignored, and untracked: the real listing
+    // would report its target as untracked too, so only the listing
+    // being unanswerable keeps it out. The fail-closed rule covers
+    // every candidate the policy would have asked about, not just the
+    // ones repository content named.
+    fs.mkdirSync(path.join(repo, "node_modules"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["vendor"] }),
+    );
+    const binDir = makeTmpDir();
+    writeGitShim(binDir, "fail-ls-files-pathspec");
+
+    const result = await withPathPrepended(binDir, () =>
+      probe(baseOptions(repo, { links: ["typed-cache"] })),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("git ls-files could not check which link candidates") &&
+          w.includes("treated as tracked"),
+      ),
+    ).toBe(true);
+    // The destination half's refusal says the listing could not check,
+    // never that git tracks it, the same as the target half below: the
+    // listing never got the chance to answer, and claiming it did would
+    // be false.
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "vendor")) &&
+          w.includes(
+            "could not check whether git tracks vendor; treated as tracked",
+          ),
+      ),
+    ).toBe(true);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "vendor")) && w.includes("git tracks it"),
+      ),
+    ).toBe(false);
+    // The target half's refusal says the listing could not check,
+    // never that git tracks it: the listing never got the chance to
+    // answer, and claiming it did would be false.
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "node_modules")) &&
+          w.includes(
+            `could not check whether git tracks its target ${resolveDeepestExisting(path.join(repo, "node_modules"))}; treated as tracked`,
+          ),
+      ),
+    ).toBe(true);
+    expect(
+      result.warnings.some((w) =>
+        w.includes(
+          `git tracks its target ${resolveDeepestExisting(path.join(repo, "node_modules"))}; source is copied`,
+        ),
+      ),
+    ).toBe(false);
+    // Both candidates rule 3 questions are refused; the operator's own
+    // `--link`, which neither half of it applies to, still links.
+    expect(result.isolation.linked).toEqual([
+      resolveDeepestExisting(path.join(repo, "typed-cache")),
+    ]);
+    expect(result.isolation.linkedNamedBy).toEqual([]);
   });
 });
 
@@ -1774,6 +4563,108 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
       if (previousEnv === undefined) delete process.env.LINK_CHECK_OUT_PATH;
       else process.env.LINK_CHECK_OUT_PATH = previousEnv;
     }
+  });
+
+  it("an untracked ABSOLUTE symlink that resolves outside the copy is still recreated, with a warning naming it and where it resolves", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const repoReal = resolveDeepestExisting(repo);
+    fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "src", "real.txt"), "real\n");
+    // Untracked and absolute: the copy recreates the same symlink the
+    // source tree has, which still resolves into the real repository
+    // rather than into the copy. No `--pre` here writes through it: the
+    // warning, not a byte-identical write-through demonstration, is
+    // what this fixture is about.
+    fs.symlinkSync(path.join(repoReal, "src"), path.join(repo, "docs"), "dir");
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("docs") &&
+          w.includes(`resolves to ${path.join(repoReal, "src")}`) &&
+          w.includes("outside the isolation copy"),
+      ),
+    ).toBe(true);
+  });
+
+  it("an untracked DANGLING symlink whose target sits outside the copy still warns, even though the target does not exist yet: the containment check runs on the link's own target, not on the recreated link (which realpath cannot follow through a missing target and would otherwise read back as trivially contained)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const repoReal = resolveDeepestExisting(repo);
+    const escapedFile = path.join(repoReal, "created-by-pre.txt");
+    // Untracked, absolute, and DANGLING: nothing named
+    // "created-by-pre.txt" exists in the source tree yet, so the
+    // recreated link's own realpath cannot be followed at all.
+    fs.symlinkSync(escapedFile, path.join(repo, "docs"));
+
+    const result = await probe(
+      baseOptions(repo, {
+        preCommand:
+          "node -e \"require('fs').writeFileSync('docs', 'ESCAPED')\"",
+      }),
+    );
+
+    try {
+      // The `--pre` wrote through the recreated symlink, which still
+      // points at the real repository: the copy carries the same
+      // dangling link the source tree has, and this fixture's whole
+      // point is that the escape happened -- the warning, not
+      // prevention, is the deliverable.
+      expect(fs.readFileSync(escapedFile, "utf8")).toBe("ESCAPED");
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("docs") &&
+            w.includes(`resolves to ${escapedFile}`) &&
+            w.includes("outside the isolation copy"),
+        ),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(escapedFile, { force: true });
+    }
+  });
+
+  it("an untracked RELATIVE symlink whose target escapes through '..' still warns, with the probe's own --log-dir placed inside the repository (the relative target is resolved against the link's own real directory in the copy, not against the log dir)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const repoReal = resolveDeepestExisting(repo);
+    fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "src", "real.txt"), "real\n");
+    // Climbs from the copy (three directories below an in-repo
+    // `--log-dir`: `<log-dir>/wt-<uuid>/wt`) back up to the repository
+    // root, then back down into `src` -- landing on the source tree's
+    // own directory rather than the copy's.
+    fs.symlinkSync(path.join("..", "..", "..", "src"), path.join(repo, "docs"));
+    const logDir = path.join(repo, "probe-logs-rel-escape");
+    fs.mkdirSync(logDir, { recursive: true });
+
+    const result = await probe(baseOptions(repo, { logDir }));
+
+    // No `--pre` here writes through the link: the log dir sits inside
+    // the repository for this fixture (so its own scratch output is
+    // itself part of the tree), which is exactly why a whole-tree hash
+    // comparison would be the wrong check -- `src/real.txt` unchanged is
+    // the property this fixture is actually about.
+    expect(fs.readFileSync(path.join(repo, "src", "real.txt"), "utf8")).toBe(
+      "real\n",
+    );
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("docs") &&
+          w.includes(`resolves to ${path.join(repoReal, "src")}`) &&
+          w.includes("outside the isolation copy"),
+      ),
+    ).toBe(true);
   });
 
   it("the probe's own --log-dir, when it sits inside the repository, is excluded from the untracked sync entirely", async () => {

@@ -34,6 +34,7 @@
       "mode": "inplace",
       "path": null,
       "linked": [],
+      "linkedNamedBy": [],
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },
@@ -75,6 +76,7 @@
       "mode": "worktree",
       "path": "<LOGS>/wt-<id>/wt",
       "linked": [],
+      "linkedNamedBy": [],
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },
@@ -125,6 +127,7 @@
       "mode": "inplace",
       "path": null,
       "linked": [],
+      "linkedNamedBy": [],
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },
@@ -159,6 +162,7 @@
       "mode": "inplace",
       "path": null,
       "linked": [],
+      "linkedNamedBy": [],
       "syncedTrackedFiles": 0,
       "syncedUntrackedFiles": 0
     },

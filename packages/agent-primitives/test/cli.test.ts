@@ -20,6 +20,7 @@ import {
   type StdoutSink,
 } from "../src/cli.js";
 import { UsageError } from "../src/envelope.js";
+import { resolveDeepestExisting } from "../src/probe/containment.js";
 import { trimToLastCompleteHunk } from "../src/probe/mutant.js";
 import type { VerifyResult, CheckResult } from "../src/verify/index.js";
 import {
@@ -3783,6 +3784,91 @@ describe("cli: probe --plan", () => {
     ]);
     expect(overridden.code).toBe(0);
     expect(JSON.parse(overridden.stdout).isolation.mode).toBe("worktree");
+  }, 30000);
+
+  it("--plan's own link and --link merge and deduplicate: both show up in isolation.linked, reached through a symlinked ancestor (os.tmpdir() itself, on macOS) -- pins the fix for the realpath-vs-display-path root mismatch that used to drop both silently", async () => {
+    const { repo } = initPlanRepo();
+    fs.mkdirSync(path.join(repo, "plan-link-dir"));
+    fs.mkdirSync(path.join(repo, "cli-link-dir"));
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      link: ["plan-link-dir"],
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "--link",
+      "cli-link-dir",
+    ]);
+
+    expect(run.code).toBe(0);
+    const envelope = JSON.parse(run.stdout);
+    // Both entries reach `linked` already realpath'd (`index.ts`'s
+    // `links[].abs`), which differs from `repo` itself exactly when
+    // `repo` sits under a symlinked ancestor -- the case this test
+    // exercises.
+    expect(envelope.isolation.linked).toEqual(
+      expect.arrayContaining([
+        resolveDeepestExisting(path.join(repo, "plan-link-dir")),
+        resolveDeepestExisting(path.join(repo, "cli-link-dir")),
+      ]),
+    );
+  }, 30000);
+
+  it("repo defaults file (.agent-primitives.json) contributes on the --plan path too, alongside the plan's own link: both show up in isolation.linked (regression: this path was untested and `values: defaultsFile.links` could silently become `values: []` with the full suite still green)", async () => {
+    const { repo } = initPlanRepo();
+    fs.mkdirSync(path.join(repo, "plan-link-dir"));
+    fs.mkdirSync(path.join(repo, "defaults-link-dir"));
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["defaults-link-dir"] }),
+    );
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      link: ["plan-link-dir"],
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    expect(run.code).toBe(0);
+    const envelope = JSON.parse(run.stdout);
+    expect(envelope.isolation.linked).toEqual(
+      expect.arrayContaining([
+        resolveDeepestExisting(path.join(repo, "plan-link-dir")),
+        resolveDeepestExisting(path.join(repo, "defaults-link-dir")),
+      ]),
+    );
+  }, 30000);
+
+  it("repo defaults file: an unknown key refuses the --plan run with defaults_file_invalid, naming the path and the key, fail-closed", async () => {
+    const { repo } = initPlanRepo();
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["vendor"], typoKey: true }),
+    );
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    const envelope = JSON.parse(run.stdout);
+    expect(envelope.status).toBe("usage_error");
+    expect(envelope.reason).toBe("defaults_file_invalid");
+    expect(
+      envelope.warnings.some(
+        (w: string) =>
+          w.includes(path.join(repo, ".agent-primitives.json")) &&
+          w.includes("typoKey"),
+      ),
+    ).toBe(true);
   }, 30000);
 
   /** A repository whose fixture carries `count` one-line functions and a

@@ -9,6 +9,8 @@ import {
   beginWorktree,
   cleanupWorktree,
   countNumstatFiles,
+  findAutoLinkDirs,
+  findComposerLinkDirs,
   findNodeModulesDirs,
   isScratchWorktreePath,
   listRegisteredWorktrees,
@@ -22,6 +24,7 @@ import {
   scratchOwnerState,
 } from "../src/probe/isolation.js";
 import { resolveDeepestExisting } from "../src/probe/containment.js";
+import { planLinks } from "../src/probe/link-policy.js";
 import { runArgv } from "../src/probe/run.js";
 import { parseGitVersion } from "../src/doctor/index.js";
 import {
@@ -299,6 +302,259 @@ describe("findNodeModulesDirs", () => {
   });
 });
 
+/** A composer.json declaring `config.vendor-dir`/`config.bin-dir` (or
+ * neither, to exercise composer's own defaults), plus the directories
+ * those names point at, so `findComposerLinkDirs` has something real to
+ * find. */
+function writeComposerProject(
+  dir: string,
+  config?: { vendorDir?: string; binDir?: string },
+): void {
+  fs.mkdirSync(dir, { recursive: true });
+  const composerJson: Record<string, unknown> = { name: "acme/widget" };
+  if (config !== undefined) {
+    composerJson.config = {
+      ...(config.vendorDir !== undefined
+        ? { "vendor-dir": config.vendorDir }
+        : {}),
+      ...(config.binDir !== undefined ? { "bin-dir": config.binDir } : {}),
+    };
+  }
+  fs.writeFileSync(
+    path.join(dir, "composer.json"),
+    JSON.stringify(composerJson),
+  );
+}
+
+describe("findComposerLinkDirs", () => {
+  it("finds both defaults for a composer.json with no config ('vendor' and 'vendor/bin'): discovery reports what composer declares, and whether the nested bin-dir may be linked is the link policy's single decision, not a second rule here", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root);
+    fs.mkdirSync(path.join(root, "vendor", "bin"), { recursive: true });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toEqual([
+      path.join(root, "vendor"),
+      path.join(root, "vendor", "bin"),
+    ]);
+    // ... and the policy is what keeps the nested one out of the copy.
+    expect(
+      planLinks(findAutoLinkDirs(root), {
+        rootReal: fs.realpathSync(root),
+        protectedRelPaths: [],
+        isTrackedPath: () => false,
+        trackedUnknown: false,
+        copyRootReal: undefined,
+        // No copy in this unit test to ask, and no case-variant
+        // spelling in the fixture either: the source tree's own
+        // spelling is the canonical one on both sides here.
+        canonicalRootRelPath: (relPath) => relPath,
+        canonicalRelPath: (relPath) => relPath,
+      }).links.map((planned) => planned.candidate.absDir),
+    ).toEqual([path.join(root, "vendor")]);
+  });
+
+  it("finds a custom vendor-dir and a custom, non-nested bin-dir", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { binDir: "bin" });
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+    fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toEqual(
+      expect.arrayContaining([
+        path.join(root, "vendor"),
+        path.join(root, "bin"),
+      ]),
+    );
+    expect(found).toHaveLength(2);
+  });
+
+  it("deduplicates when vendor-dir and bin-dir are configured to the same path", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { vendorDir: "tools", binDir: "tools" });
+    fs.mkdirSync(path.join(root, "tools"), { recursive: true });
+
+    expect(findComposerLinkDirs(root)).toEqual([path.join(root, "tools")]);
+  });
+
+  it("bin-dir left at its own composer default ('vendor/bin') is unrelated to a custom vendor-dir, so both survive as distinct entries", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { vendorDir: "deps" });
+    fs.mkdirSync(path.join(root, "deps"), { recursive: true });
+    fs.mkdirSync(path.join(root, "vendor", "bin"), { recursive: true });
+
+    expect(findComposerLinkDirs(root)).toEqual(
+      expect.arrayContaining([
+        path.join(root, "deps"),
+        path.join(root, "vendor", "bin"),
+      ]),
+    );
+  });
+
+  it("finds a composer.json at depth 3 but not at depth 4, the same cutoff node_modules uses", () => {
+    const root = makeTmpDir();
+    writeComposerProject(path.join(root, "a", "b", "c"));
+    fs.mkdirSync(path.join(root, "a", "b", "c", "vendor"), {
+      recursive: true,
+    });
+    writeComposerProject(path.join(root, "a", "b", "c", "d"));
+    fs.mkdirSync(path.join(root, "a", "b", "c", "d", "vendor"), {
+      recursive: true,
+    });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toContain(path.join(root, "a", "b", "c", "vendor"));
+    expect(found).not.toContain(path.join(root, "a", "b", "c", "d", "vendor"));
+  });
+
+  it("skips a vendor-dir/bin-dir that does not exist on disk", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { binDir: "bin" });
+    // Neither "vendor" nor "bin" created.
+
+    expect(findComposerLinkDirs(root)).toEqual([]);
+  });
+
+  it("skips a composer.json that is not valid JSON, rather than failing the whole walk", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, "composer.json"), "{ not json");
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+
+    expect(findComposerLinkDirs(root)).toEqual([]);
+  });
+
+  it("carries the composer.json and the raw value on every candidate, so a refusal can name both: a vendor-dir a malicious composer.json points outside the root is discovered, then refused by the link policy with that provenance in the warning", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.writeFileSync(path.join(outside, "marker.txt"), "outside\n");
+    const relEscape = path.relative(root, outside);
+    writeComposerProject(root, { vendorDir: relEscape });
+
+    const candidates = findAutoLinkDirs(root);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].namedBy).toContain(path.join(root, "composer.json"));
+    expect(candidates[0].namedBy).toContain(relEscape);
+    const plan = planLinks(candidates, {
+      rootReal: fs.realpathSync(root),
+      protectedRelPaths: [],
+      isTrackedPath: () => false,
+      trackedUnknown: false,
+      copyRootReal: undefined,
+      canonicalRootRelPath: (relPath) => relPath,
+      canonicalRelPath: (relPath) => relPath,
+    });
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toContain(path.join(root, "composer.json"));
+    expect(plan.warnings[0]).toContain(relEscape);
+    expect(plan.warnings[0]).toContain(
+      "does not sit inside the repository root",
+    );
+  });
+
+  it("a vendor-dir/bin-dir that does not exist on disk yet is not a candidate at all, so it produces no warning either (the common state before composer install has run)", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { vendorDir: "not-installed-yet" });
+
+    const plan = planLinks(findAutoLinkDirs(root), {
+      rootReal: fs.realpathSync(root),
+      protectedRelPaths: [],
+      isTrackedPath: () => false,
+      trackedUnknown: false,
+      copyRootReal: undefined,
+      canonicalRootRelPath: (relPath) => relPath,
+      canonicalRelPath: (relPath) => relPath,
+    });
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("recognizes a composer.json that is itself a symlink to a file", () => {
+    const root = makeTmpDir();
+    const realComposerJson = path.join(root, "real-composer.json");
+    fs.writeFileSync(realComposerJson, JSON.stringify({ name: "acme/widget" }));
+    fs.symlinkSync(realComposerJson, path.join(root, "composer.json"));
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toEqual([path.join(root, "vendor")]);
+  });
+
+  it("does not recurse into a linked vendor-dir looking for a nested composer.json (no double work / cycle)", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root);
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+    // A vendored package's own composer.json, which must never surface
+    // as a second, separate match.
+    writeComposerProject(path.join(root, "vendor", "some-pkg"));
+    fs.mkdirSync(path.join(root, "vendor", "some-pkg", "vendor"), {
+      recursive: true,
+    });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toEqual([path.join(root, "vendor")]);
+  });
+
+  it("does not recurse into a NESTED vendor-dir looking for a vendored package's own composer.json, even though the vendor-dir itself sits several directories below the composer.json naming it (README: 'wherever a composer.json sits ... its vendor-dir and bin-dir ... are symlinked in'; regression for a per-directory-only skip set)", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { vendorDir: "deps/vendor" });
+    fs.mkdirSync(path.join(root, "deps", "vendor"), { recursive: true });
+    // A vendored package's own composer.json, nested INSIDE the
+    // configured (non-default) vendor-dir: must never surface as a
+    // second, separate match just because "deps/vendor" itself sits
+    // below "deps", a directory this walk still has to descend into to
+    // reach it.
+    writeComposerProject(path.join(root, "deps", "vendor", "some-pkg"));
+    fs.mkdirSync(path.join(root, "deps", "vendor", "some-pkg", "vendor"), {
+      recursive: true,
+    });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toEqual([path.join(root, "deps", "vendor")]);
+  });
+});
+
+describe("findAutoLinkDirs", () => {
+  it("combines node_modules and composer directories from one repo, node_modules first", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "node_modules"), { recursive: true });
+    writeComposerProject(root, { binDir: "bin" });
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+    fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+
+    const found = findAutoLinkDirs(root);
+
+    expect(found.map((candidate) => candidate.absDir)).toEqual([
+      path.join(root, "node_modules"),
+      path.join(root, "vendor"),
+      path.join(root, "bin"),
+    ]);
+    // A `node_modules` the walk found on disk carries no provenance; a
+    // composer directory names the config value and file that asked
+    // for it, which is what the link policy's stricter rule for
+    // repository-content links keys on.
+    expect(found[0].namedBy).toBeUndefined();
+    expect(found[1].namedBy).toContain("composer.json");
+  });
+
+  it("is the union `beginWorktree` uses: a repo with neither shape finds nothing", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(root, { recursive: true });
+
+    expect(findAutoLinkDirs(root)).toEqual([]);
+  });
+});
+
 describe("beginWorktree / cleanupWorktree", () => {
   function git(cwd: string, args: string[]): void {
     execFileSync("git", args, { cwd });
@@ -327,6 +583,7 @@ describe("beginWorktree / cleanupWorktree", () => {
       cwd: repo,
       logDir,
       links: [],
+      mutatedPaths: [],
     });
 
     expect(result.ok).toBe(true);
@@ -357,6 +614,7 @@ describe("beginWorktree / cleanupWorktree", () => {
       cwd: repo,
       logDir: makeTmpDir(),
       links: [],
+      mutatedPaths: [],
     });
 
     expect(result.ok).toBe(true);
@@ -391,6 +649,7 @@ describe("beginWorktree / cleanupWorktree", () => {
       cwd: repo,
       logDir,
       links: [],
+      mutatedPaths: [],
     });
 
     expect(result.ok).toBe(true);
@@ -411,6 +670,7 @@ describe("beginWorktree / cleanupWorktree", () => {
       cwd: repo,
       logDir,
       links: [],
+      mutatedPaths: [],
     });
 
     expect(result.ok).toBe(true);
@@ -440,7 +700,8 @@ describe("beginWorktree / cleanupWorktree", () => {
       root: repo,
       cwd: repo,
       logDir,
-      links: [cacheDir],
+      links: [{ absDir: cacheDir }],
+      mutatedPaths: [],
     });
 
     expect(result.ok).toBe(true);
@@ -465,6 +726,7 @@ describe("beginWorktree / cleanupWorktree", () => {
       cwd: path.join(repo, "sub"),
       logDir,
       links: [],
+      mutatedPaths: [],
     });
 
     expect(result.ok).toBe(true);
@@ -481,6 +743,7 @@ describe("beginWorktree / cleanupWorktree", () => {
       cwd: notARepo,
       logDir,
       links: [],
+      mutatedPaths: [],
     });
 
     expect(result.ok).toBe(false);
@@ -552,6 +815,7 @@ describe("beginWorktree / cleanupWorktree", () => {
         cwd: repo,
         logDir,
         links: [],
+        mutatedPaths: [],
         signal: controller.signal,
         track: async (started, closed) => {
           tracked.push(started);
@@ -586,6 +850,7 @@ describe("beginWorktree / cleanupWorktree", () => {
         cwd: repo,
         logDir,
         links: [],
+        mutatedPaths: [],
         signal: controller.signal,
       });
       // `git diff --output=<path>` creates that file when it starts, so
@@ -653,6 +918,7 @@ describe("beginWorktree / cleanupWorktree", () => {
         cwd: repo,
         logDir,
         links: [],
+        mutatedPaths: [],
         signal: controller.signal,
         onWorktreeAttempt: (p) => {
           worktreePath = p;
@@ -699,6 +965,7 @@ describe("beginWorktree / cleanupWorktree", () => {
         cwd: repo,
         logDir,
         links: [],
+        mutatedPaths: [],
         signal: controller.signal,
         onWorktreeAttempt: (p) => {
           worktreePath = p;
@@ -737,6 +1004,7 @@ describe("beginWorktree / cleanupWorktree", () => {
       cwd: repo,
       logDir,
       links: [],
+      mutatedPaths: [],
     });
 
     expect(result.ok).toBe(true);
@@ -1889,6 +2157,49 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     );
     expect(fs.existsSync(elsewhere)).toBe(true);
   });
+
+  it("removes a scratch-shaped recorded path that is itself a SYMLINK under this run's log dir: the link goes, whatever it points at stays, and no marker is left waiting on it forever", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    // `beginWorktree` never creates a link here, so this can only be a
+    // leftover from a run whose linking step was broken (a candidate
+    // that named the copy's own root). The gate resolves a path through
+    // realpath, which for a link judges the tree at the other end --
+    // here the repository itself -- and refuses; without the unlink
+    // ahead of it, the link and its marker would survive every later
+    // run on this repository.
+    const leftover = scratchPath(logDir);
+    fs.mkdirSync(path.dirname(leftover), { recursive: true });
+    fs.symlinkSync(repo, leftover, "dir");
+
+    const cleanup = await cleanupWorktree(repo, leftover, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.refused).toBe(false);
+    expect(cleanup.ok).toBe(true);
+    expect(fs.existsSync(leftover)).toBe(false);
+    // Only the link went: the repository it pointed at is untouched,
+    // and it is still the repository git knows (its main worktree).
+    expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
+    expect(registeredPaths(repo)).toContain(resolveDeepestExisting(repo));
+  });
+
+  it("leaves a symlink that is NOT of the scratch shape alone, link and target both: the unlink is gated by the same shape and log-dir rules as every other removal", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const leftover = path.join(logDir, "not-a-scratch-name");
+    fs.symlinkSync(repo, leftover, "dir");
+
+    const cleanup = await cleanupWorktree(repo, leftover, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.refused).toBe(true);
+    expect(cleanup.ok).toBe(false);
+    expect(fs.lstatSync(leftover).isSymbolicLink()).toBe(true);
+    expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
+  });
 });
 
 describe("the scratch owner record", () => {
@@ -1923,6 +2234,7 @@ describe("the scratch owner record", () => {
       cwd: repo,
       logDir,
       links: [],
+      mutatedPaths: [],
       onWorktreeAttempt: (worktreePath) => {
         ownerAtAttempt = readScratchOwner(worktreePath);
       },

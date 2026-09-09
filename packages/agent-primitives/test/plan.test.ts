@@ -417,6 +417,76 @@ describe("plan file validation (before the lock, the marker or any run)", () => 
     );
     expect(result.ok).toBe(true);
   });
+
+  it("accepts plan.link as an array of repo-root-relative paths", () => {
+    const parsed = parsePlanFile(
+      writePlan({
+        test: "npm test",
+        link: ["vendor", "../shared-cache"],
+        mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.plan.link).toEqual(["vendor", "../shared-cache"]);
+  });
+
+  it("plan.link is optional; a plan with none carries no link key at all", () => {
+    const parsed = parsePlanFile(
+      writePlan({
+        test: "npm test",
+        mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.plan.link).toBeUndefined();
+  });
+
+  it("refuses plan.link that is not an array", () => {
+    const parsed = parsePlanFile(
+      writePlan({
+        test: "npm test",
+        link: "vendor",
+        mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+      }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reason).toBe("plan_invalid");
+    expect(parsed.message).toContain("plan.link");
+  });
+
+  it("refuses an empty-string plan.link entry, naming the entry", () => {
+    const parsed = parsePlanFile(
+      writePlan({
+        test: "npm test",
+        link: ["vendor", ""],
+        mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+      }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reason).toBe("plan_invalid");
+    expect(parsed.message).toContain("plan.link[1]");
+  });
+
+  it("rejects a plan.link entry carrying a $(...) command substitution or a backtick, naming the entry -- the same validation --link itself applies", () => {
+    for (const bad of ["vendor/$(rm -rf /)", "vendor/`rm -rf /`"]) {
+      const parsed = parsePlanFile(
+        writePlan({
+          test: "npm test",
+          link: [bad],
+          mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+        }),
+      );
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) continue;
+      expect(parsed.reason).toBe("plan_invalid");
+      expect(parsed.message).toContain("plan.link[0]");
+      expect(parsed.message).toMatch(/\$\(|backtick/);
+    }
+  });
 });
 
 describe("probePlan(): one baseline, every mutant against it (I1)", () => {

@@ -344,6 +344,7 @@ describe("probe(): killed and survived", () => {
       mode: "inplace",
       path: null,
       linked: [],
+      linkedNamedBy: [],
       syncedTrackedFiles: 0,
       syncedUntrackedFiles: 0,
     });
@@ -4219,6 +4220,14 @@ describe("probe(): the single-mutant result is what it was before the plan runne
   // inconsistency this task's contract fixes -- `mutant` and
   // `mutation_probe` now agree for every baseline-phase refusal. The
   // fixture was updated to add it rather than left to fail forever.
+  //
+  // `isolation.linkedNamedBy` is the second such update, and for the
+  // same reason: it is a field the envelope gained (the provenance of
+  // every link repository content asked for), so every recorded
+  // `isolation` block carries it as the empty list none of these four
+  // runs has anything to put in. Adding a field is the change this
+  // fixture is meant to SHOW rather than hide; what it still catches is
+  // an unannounced change to any field that was already there.
   const RECORDED = JSON.parse(
     fs.readFileSync(
       path.join(
