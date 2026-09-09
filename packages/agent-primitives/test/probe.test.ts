@@ -4618,6 +4618,39 @@ describe("probe(): --pass-regex", () => {
       expect(result.baseline?.timedOut).toBe(true);
       expect(result.baseline?.exitCode).toBeNull();
     }, 10000);
+
+    it("a timed-out baseline that TRAPPED the signal and exited with a code of its own stays baseline_failed with both regexes too: `timedOut`, not the `null` exit code, is what excludes it", async () => {
+      useLockDir();
+      const { repo } = initHangingRunnerRepo();
+
+      // The usual timed-out shape ends with `exitCode: null` (nothing
+      // handles the SIGTERM `exec.ts` sends the run's process group, so
+      // the escalation kills it), which makes the `null` exit code and
+      // `timedOut` indistinguishable there. A runner that TRAPS the
+      // signal and exits with a code of its own separates them: the run
+      // still hit its bound and still produced only a cut-short tail,
+      // so the evidence-gate reclassification must stay out of its way
+      // on the strength of `timedOut` alone.
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: 'console.log("irrelevant");',
+        testCommand: 'trap "exit 3" TERM; node runner.js & wait',
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        timeoutMs: 1000,
+        passRegex: /^OK \(/,
+        requireBaselineEvidence: /this text never appears/,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+      expect(result.baseline?.timedOut).toBe(true);
+      expect(result.baseline?.exitCode).toBe(3);
+    }, 20000);
   });
 
   describe("signal interaction (round 4 HIGH fix): a run killed without an exit code of its own is never read as a verdict", () => {
