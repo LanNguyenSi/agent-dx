@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documented
 
+- Decision (task agent-dx 27c4f709): the anchored, path-less continuation
+  form the `orchestrator-workflow` package's dogfood bundle writes
+  (`` `:N-M#"anchor"` ``) is declared bundle-local, not ported into
+  `CONT_COLON_RE`/`SHORT_FORM_COLON_RE`. See the README's "Citation
+  resolution (citations-resolve)" section for the who-pays and the port
+  trigger.
 - Decision, kept option (a): the rule stays as-is; two loosening
   alternatives were considered and rejected. The README's "Staleness
   (sources-fresh)" section now documents the two-branch squash-merge
