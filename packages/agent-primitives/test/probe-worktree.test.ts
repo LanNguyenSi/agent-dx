@@ -1297,10 +1297,10 @@ describe("probe(): worktree isolation, a destination the copy spells differently
       fs.readFileSync(path.join(repo, "cache", "inner", "marker.txt"), "utf8"),
     ).toBe("present\n");
     expect(result.status).toBe("killed");
-    expect(result.isolation.linked).toEqual([
-      resolveDeepestExisting(path.join(repo, "cache")),
-    ]);
     if (caseInsensitive) {
+      expect(result.isolation.linked).toEqual([
+        resolveDeepestExisting(path.join(repo, "cache")),
+      ]);
       expect(
         result.warnings.some(
           (w) =>
@@ -1309,6 +1309,14 @@ describe("probe(): worktree isolation, a destination the copy spells differently
             w.includes("outside the copy"),
         ),
       ).toBe(true);
+    } else {
+      // On a case-sensitive volume `CACHE/inner` is simply a second,
+      // untracked (and absent) directory: linked as a dangling link in
+      // the copy, nothing created in the source tree (the hash above).
+      expect(result.isolation.linked).toEqual([
+        resolveDeepestExisting(path.join(repo, "cache")),
+        path.join(repo, "CACHE", "inner"),
+      ]);
     }
   });
 
@@ -1344,8 +1352,8 @@ describe("probe(): worktree isolation, a destination the copy spells differently
     // `vendor/`.
     expect(fs.existsSync(path.join(repo, "vendor", "deep"))).toBe(false);
     expect(result.status).toBe("killed");
-    expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
     if (caseInsensitive) {
+      expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
       expect(
         result.warnings.some(
           (w) =>
@@ -1353,6 +1361,14 @@ describe("probe(): worktree isolation, a destination the copy spells differently
             w.includes("outside the copy"),
         ),
       ).toBe(true);
+    } else {
+      // On a case-sensitive volume `VENDOR/deep/nested` is a distinct,
+      // absent, untracked path: linked as a dangling link in the copy,
+      // and the real `vendor/` gains nothing (asserted above).
+      expect(result.isolation.linked).toEqual([
+        path.join(repo, "vendor"),
+        path.join(repo, "VENDOR", "deep", "nested"),
+      ]);
     }
   });
 
