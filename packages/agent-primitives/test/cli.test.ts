@@ -2522,7 +2522,12 @@ describe("cli: probe", () => {
     const optionLine = /^ {2}-/;
     const block: string[] = [];
     for (let i = startIndex; i < lines.length; i++) {
-      if (i > startIndex && optionLine.test(lines[i])) break;
+      if (
+        i > startIndex &&
+        (optionLine.test(lines[i]) || lines[i].trim() === "")
+      ) {
+        break;
+      }
       block.push(lines[i].trim());
     }
     const entry = block.join(" ");
@@ -2536,6 +2541,85 @@ describe("cli: probe", () => {
       .filter((s) => s.length > 0);
     expect(flagList).toEqual(
       PLAN_EXCLUSIVE_OPTIONS.map(({ flag }) => flag.split("/")[0]),
+    );
+  });
+
+  it("README.md's --plan exclusivity sentence names exactly PLAN_EXCLUSIVE_OPTIONS's flags: a third hand-mirrored copy pinned against drift", async () => {
+    // README.md carries its own prose mirror of the same flag list
+    // (independent of both cli.ts's array and its generated --help
+    // sentence, pinned above). This test reads that sentence back out
+    // of the committed README and asserts its flags match
+    // PLAN_EXCLUSIVE_OPTIONS exactly, so a flag added to the array
+    // without updating the README sentence is caught here too.
+    const readmePath = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "README.md",
+    );
+    const readme = fs.readFileSync(readmePath, "utf8");
+    const marker = "`--plan` is mutually exclusive with ";
+    const markerIndex = readme.indexOf(marker);
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    const afterMarker = readme.slice(markerIndex + marker.length);
+    const sentenceEnd = afterMarker.indexOf(": ");
+    expect(sentenceEnd).toBeGreaterThan(0);
+    const flagList = afterMarker
+      .slice(0, sentenceEnd)
+      .split(/,| and /)
+      .map((s) => s.replace(/`/g, "").trim())
+      .filter((s) => s.length > 0);
+    expect(flagList).toEqual(
+      PLAN_EXCLUSIVE_OPTIONS.map(({ flag }) => flag.split("/")[0]),
+    );
+  });
+
+  it("run-shaping options (--link, --timeout) are accepted beside --plan, not refused as a usage error: negative control for PLAN_EXCLUSIVE_OPTIONS", async () => {
+    // PLAN_EXCLUSIVE_OPTIONS deliberately excludes the run-shaping
+    // options (-i, --expect, --timeout, --link, --allow-outside): they
+    // override the plan's own value instead of being refused (see the
+    // docblock above PLAN_EXCLUSIVE_OPTIONS and requirePlanExclusive).
+    // This asserts that stays true: appending one of them to the array
+    // would make this fail with a usage_error it should never produce.
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "x\n");
+    commitAll(repo);
+    const planPath = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        test: 'node -e "process.exit(0)"',
+        isolation: "inplace",
+        mutants: [{ file: "fixture.js", line: 1, replace: "y" }],
+      }),
+    );
+    const linkDir = path.join(repo, "extra-link-dir");
+    fs.mkdirSync(linkDir);
+    const linkRun = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "--link",
+      linkDir,
+    ]);
+    expect(linkRun.stdout).not.toContain("usage_error");
+    expect(linkRun.stdout).not.toContain(
+      "probe: --plan cannot be combined with",
+    );
+
+    const timeoutRun = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "--timeout",
+      "30",
+    ]);
+    expect(timeoutRun.stdout).not.toContain("usage_error");
+    expect(timeoutRun.stdout).not.toContain(
+      "probe: --plan cannot be combined with",
     );
   });
 
