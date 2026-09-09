@@ -87,3 +87,17 @@ full, anchored citation `log.md` writes must still resolve at head, and it
 may never carry the continuation form at all, since a log entry has no
 governing-citation semantics for one to resolve against. A historical value
 belongs in plain prose ("moved to lines N through M") instead.
+
+This bundle's live, backtick-wrapped, anchored path-less continuation
+form (`` `:N-M#"anchor"` ``, used in [model-preselection.md](model-preselection.md))
+is recognised by no okf-kit rule: `citations-resolve`'s `CONT_COLON_RE`
+needs its closing backtick immediately after the digit range, and
+`SHORT_FORM_COLON_RE` excludes a match right after a backtick, so okf-kit
+sees these citations as nothing at all. It is guarded only by this
+package's own citation-sibling-drift guard above (task agent-dx
+27c4f709, decided bundle-local; see okf-kit's README "Citation resolution
+(citations-resolve)" section for the same statement and the who-pays).
+Port trigger, restated from task agent-dx b50fd903's "Citation-sibling-drift
+guard, okf-kit-porting decision" CHANGELOG entry: a second fleet bundle
+observed carrying real sibling-citation drift in a review pass (not merely
+plausible in the abstract) reopens the port decision.
