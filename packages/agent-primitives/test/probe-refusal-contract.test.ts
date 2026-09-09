@@ -1235,6 +1235,42 @@ describe("probe(): test-command isolation-escape detection", () => {
     expect(result.warnings.join(" ")).toContain(repo);
   });
 
+  // --- ANSI-C (`$'...'`) numeric escapes: bash/dash decode `\xHH`,
+  // `\uHHHH` and `\NNN` (octal) by numeric value, and `/` (0x2f) is
+  // reachable through any of them, so `$'<root>\x2fpkg'` reaches
+  // `<root>/pkg` exactly as an un-escaped `/` does. ---
+
+  it("the three ANSI-C forms that decode to a separator are refused in the test command", async () => {
+    useLockDir();
+    for (const escape of ["\\x2f", "\\057", "\\u002f"]) {
+      const { repo } = initRepo();
+      const result = await probe(
+        baseOptions(repo, {
+          isolation: "worktree",
+          testCommand: `cd $'${repo}${escape}pkg' && node fixture.test.js`,
+        }),
+      );
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("test_command_escapes_isolation");
+      useLockDir();
+    }
+  });
+
+  it("the \\x2f ANSI-C form is refused in --pre too", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        preCommand: `cd $'${repo}\\x2fpkg' && true`,
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain("--pre");
+  });
+
   it("a sibling reached across a line continuation is not refused: the shell deletes the pair, so the word names a SIBLING", async () => {
     useLockDir();
     const { repo } = initRepo();

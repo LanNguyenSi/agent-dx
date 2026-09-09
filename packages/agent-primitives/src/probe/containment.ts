@@ -124,9 +124,10 @@ function skipLineContinuations(text: string, index: number): number {
  *   mention;
  * - `/`, a further component: still a mention, since `<root>/pkg`
  *   names the root;
- * - `\` followed by any character other than `/` or a newline: an
- *   escaped character inside the SAME word, as in the sibling
- *   `<root>\ backup`, so NOT a mention;
+ * - `\` followed by any character other than `/`, a newline, or an
+ *   ANSI-C numeric-escape starter (`x`, `u`, `U`, or an octal digit
+ *   `0`-`7`, see below): an escaped character inside the SAME word,
+ *   as in the sibling `<root>\ backup`, so NOT a mention;
  * - `\` followed by a newline followed by a continuation: the shell
  *   deletes the `\`+newline pair, so the decision is made on what
  *   follows the pair (`<root>\`+newline+`/pkg` is a mention,
@@ -135,6 +136,23 @@ function skipLineContinuations(text: string, index: number): number {
  * `\` followed by `/` is a SEPARATOR rather than an escaped character
  * inside the word: every POSIX shell reads `\/` as `/`, so
  * `<root>\/pkg` names `<root>/pkg` and is a mention.
+ *
+ * `\` followed by `x`, `u`, `U`, or an octal digit (`0`-`7`) ALSO ends
+ * the word, over-refusing in the safe direction. Provenance: bash/dash
+ * `$'...'` (ANSI-C) quoting decodes `\xHH` and `\uHHHH`/`\UHHHHHHHH`
+ * (hex) and `\NNN` (one to three octal digits) by numeric value, and
+ * `/` (0x2f) is reachable through any of the three (`\x2f`, `/`,
+ * `\057`), so `$'<root>\x2fpkg'` reaches `<root>/pkg` exactly as
+ * `<root>/pkg` itself does. The scan does not decode the escape --
+ * that would mean modelling `$'...'` quoting in full -- so it treats
+ * the whole class as a boundary instead: a spelling like
+ * `$'<root>\x71pkg'` (`\x71` decodes to `q`, not a separator) is also
+ * refused even though the shell reaches a SIBLING there, the same
+ * over-refusal trade the rest of this rule already makes. A form this
+ * does not model -- a `\c`-style control escape, or a `$'...'` escape
+ * that decodes a root CHARACTER rather than the separator, e.g.
+ * `$'/x/re\x70o/pkg'` -- is a residual, named on `escapingRootMentions`
+ * below.
  *
  * Everything else terminates the word and therefore marks a boundary:
  * the end of the text, whitespace, either quote, every POSIX operator
@@ -147,8 +165,16 @@ function skipLineContinuations(text: string, index: number): number {
  * "terminates the word", so an unforeseen spelling OVER-refuses (a
  * refusal that names itself and carries two remedies) instead of
  * silently reaching the real tree. The same trade costs a sibling
- * named with a character outside the portable set (`<root>+backup`,
- * `<root>@2`) a false refusal.
+ * named with a character outside the portable set (`<root>~`, the
+ * likeliest real hit -- an editor's own backup-directory convention --
+ * and `<root>@2`) a false refusal. The scan also reads raw text rather
+ * than shell semantics, so a mention sitting in a here-doc body, or
+ * anywhere else the root's spelling occurs as DATA rather than as a
+ * path the shell would actually resolve, is refused the same way; so
+ * is a single-quoted `'<root>\`+newline+`/pkg'`, where the shell does
+ * NOT delete the `\`+newline pair (single quotes suspend backslash
+ * processing entirely) even though this scan's separator pattern
+ * tolerates one there.
  *
  * The `\` rules come from the shell's lexing, and an `--env` VALUE is
  * NOT shell-processed (it reaches the child as an environment entry,
@@ -158,6 +184,20 @@ function skipLineContinuations(text: string, index: number): number {
  * separator) by design; the remedies `ISOLATION_ESCAPE_ENV_FIX_HINT`
  * already names apply to it unchanged.
  */
+
+/**
+ * True when `ch` starts an ANSI-C (`$'...'`) numeric escape that can
+ * decode to a path separator: `x` (`\xHH`), `u`/`U`
+ * (`\uHHHH`/`\UHHHHHHHH`) and an octal digit `0`-`7` (`\NNN`, one to
+ * three digits) each name a byte or code point by its numeric value,
+ * and `/` (0x2f) is reachable through any of them. A named escape like
+ * `\n` or `\t` decodes to a fixed character that is never `/`, so it
+ * is not included here and stays an in-word escape.
+ */
+function startsAnsiCNumericEscape(ch: string): boolean {
+  return ch === "x" || ch === "u" || ch === "U" || (ch >= "0" && ch <= "7");
+}
+
 function isPathBoundaryAt(text: string, index: number): boolean {
   const i = skipLineContinuations(text, index);
   if (i >= text.length) return true;
@@ -165,10 +205,11 @@ function isPathBoundaryAt(text: string, index: number): boolean {
   if (ch === "/") return true;
   if (ch === "\\") {
     // A `\`+newline pair is already skipped above, so a `\` here
-    // either escapes the `/` of a separator or a character inside the
+    // either escapes the `/` of a separator, starts an ANSI-C numeric
+    // escape that may decode to one, or escapes a character inside the
     // word. A trailing `\` escapes nothing, so the word ends.
     const next = text[i + 1];
-    return next === undefined || next === "/";
+    return next === undefined || next === "/" || startsAnsiCNumericEscape(next);
   }
   return !continuesComponentName(ch);
 }
@@ -180,19 +221,24 @@ function isPathBoundaryAt(text: string, index: number): boolean {
  * character after it are one unit (a deleted `\`+newline pair, or an
  * escaped character inside the word, so the `\ ` of a space-escaped
  * path does not read as the end), and a trailing `\` escapes nothing
- * and ends it. Used to report the ACTUAL region matched (the root
- * spelling plus the path text that follows it, e.g. `<root>/pkg`)
- * instead of only the bare root, which reads as if the command had
- * named the root itself. A component carrying a character outside the
- * portable set truncates the REPORTED region there; what is refused,
- * and the remedies named with it, are unaffected.
+ * and ends it. A `\` followed by an ANSI-C numeric-escape starter
+ * (`x`, `u`, `U`, or an octal digit `0`-`7`) is the same kind of
+ * truncation as a trailing `\`: the reported region ends before the
+ * `\`, not after the decoded byte the scan does not compute. Used to
+ * report the ACTUAL region matched (the root spelling plus the path
+ * text that follows it, e.g. `<root>/pkg`) instead of only the bare
+ * root, which reads as if the command had named the root itself. A
+ * component carrying a character outside the portable set truncates
+ * the REPORTED region there; what is refused, and the remedies named
+ * with it, are unaffected.
  */
 function pathRegionEnd(text: string, start: number): number {
   let i = start;
   while (i < text.length) {
     const ch = text[i];
     if (ch === "\\") {
-      if (i + 1 >= text.length) break;
+      const next = text[i + 1];
+      if (next === undefined || startsAnsiCNumericEscape(next)) break;
       i += 2;
       continue;
     }
@@ -386,8 +432,14 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * absolute path under `root` spells `root` out whatever quoting,
  * escaping, `=`-form or wrapper surrounds it, and a path outside
  * `root` never spells it, so nothing outside the root is flagged.
- * Four things shape the match itself:
+ * Five things shape the match itself:
  *
+ * - the match needs a boundary only at its END, not at its START: a
+ *   longer path that merely CONTAINS the root's spelling somewhere
+ *   inside it (a bind mount or backup mirror at `/mnt/backup<root>/pkg`
+ *   or `/mnt/host<root>/...`) is refused too, and the reported region
+ *   begins at the root's own spelling, not at the start of the longer
+ *   path;
  * - separator noise inside a spelling is tolerated, so `<root>//pkg`,
  *   `<root>/./pkg`, `<parent>\/<base>/pkg` and
  *   `<parent>\`+newline+`/<base>/pkg` are mentions of `root`
@@ -417,16 +469,18 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  *   `<scratchRoot>rc/x.js`, an unrelated path that merely starts with
  *   those characters, is still reported.
  *
- * The scope is a LITERALLY SPELLED root path, not "every way a command
- * can reach the real tree". Quoting and backslash escaping AROUND a
- * spelling, `=`-forms, wrappers, separator noise and, where the
- * filesystem folds case, casing are covered; anything that reaches the
- * root without spelling it out that way is a residual. The residuals
- * KNOWN TODAY, which is not a claim that they are all of them (the
- * README's `-i worktree` section carries the same list for callers):
- * a path built at run time from a shell variable this tool does not
- * own (`cd "$REPO" && ...`), a command substitution whose own text
- * does not spell the root out (`$(git rev-parse --show-toplevel)`,
+ * The scope is a root path spelled out LITERALLY, IN A FORM THE SCAN
+ * MODELS, not "every way a command can reach the real tree". Quoting
+ * and backslash escaping AROUND a spelling, `=`-forms, wrappers,
+ * separator noise, the ANSI-C (`$'...'`) escapes that can decode to a
+ * separator (`isPathBoundaryAt`) and, where the filesystem folds case,
+ * casing are covered; anything that reaches the root without spelling
+ * it out in a form this scan models is a residual. The residuals KNOWN
+ * TODAY, which is not a claim that they are all of them (the README's
+ * `-i worktree` section carries the same list for callers): a path
+ * built at run time from a shell variable this tool does not own
+ * (`cd "$REPO" && ...`), a command substitution whose own text does
+ * not spell the root out (`$(git rev-parse --show-toplevel)`,
  * `$(cat .repo-path)`) -- a substitution that DOES spell it, backticks
  * included, is refused like any other literal spelling, since the
  * backtick that closes it terminates the path word -- or `~`
@@ -434,16 +488,18 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * `..`; an absolute path that walks back INTO the root through `..`
  * (`/abs/x/../my repo`), which this scan does not normalise; a
  * spelling broken up from the INSIDE by quoting or backslash escaping
- * (`/x/re"p"o`, `/x/re\po`), which the shell rejoins into the root but
- * the scanned text never carries as one run of characters; a spelling
- * that differs only in unicode normalisation (a decomposed spelling of
- * a composed root, which a filesystem may resolve to the same
- * directory); a wrapper script that itself `cd`s using a path not
- * spelled out in the scanned string; a path reaching `root` only
- * through a symlink alias that is neither `root`'s own as-given
- * spelling nor its realpath; and a repository root containing a
- * character neither spelling represents (e.g. a literal quote inside
- * the path).
+ * (`/x/re"p"o`, `/x/re\po`), or by an ANSI-C escape that decodes a root
+ * CHARACTER rather than a separator (`$'/x/re\x70o/pkg'`, where
+ * `\x70` decodes to `p`) or a `\c`-style control escape -- the shell
+ * reassembles each of these into the root, but the scan does not model
+ * what the shell decodes there; a spelling that differs only in
+ * unicode normalisation (a decomposed spelling of a composed root,
+ * which a filesystem may resolve to the same directory); a wrapper
+ * script that itself `cd`s using a path not spelled out in the scanned
+ * string; a path reaching `root` only through a symlink alias that is
+ * neither `root`'s own as-given spelling nor its realpath; and a
+ * repository root containing a character neither spelling represents
+ * (e.g. a literal quote inside the path).
  */
 export function escapingRootMentions(
   text: string,

@@ -445,11 +445,15 @@ describe("escapingRootMentions()", () => {
   const NAME_CHARACTERS =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-";
 
-  /** Every printable ASCII character (0x20..0x7e) plus TAB, LF and CR:
-   * the alphabet a scanned `-t`/`--pre`/`--env` string realistically
-   * carries right after a path. */
+  /** Every printable ASCII character (0x20..0x7e) plus TAB, LF, CR, VT,
+   * FF and DEL: the alphabet a scanned `-t`/`--pre`/`--env` string
+   * realistically carries right after a path. None of the three
+   * control characters added on top of the original TAB/LF/CR set is a
+   * name character, so both tables below already classify them
+   * correctly; they are included so the exhaustive walk actually
+   * exercises them instead of silently skipping them. */
   function scannedCharacters(): string[] {
-    const chars: string[] = ["\t", "\n", "\r"];
+    const chars: string[] = ["\t", "\n", "\r", "\v", "\f", "\x7f"];
     for (let code = 0x20; code <= 0x7e; code++) {
       chars.push(String.fromCharCode(code));
     }
@@ -491,16 +495,23 @@ describe("escapingRootMentions()", () => {
     ).toEqual([]);
   });
 
-  it("a `\\` plus each of those characters after the root spelling is a mention only for `\\/` and for `\\`+newline", () => {
+  it("a `\\` plus each of those characters after the root spelling is a mention only for `\\/`, `\\`+newline, and an ANSI-C numeric-escape starter (`x`, `u`, `U`, `0`-`7`)", () => {
     const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
     const wrong: string[] = [];
+    const isAnsiCNumericEscapeStarter = (ch: string): boolean =>
+      ch === "x" || ch === "u" || ch === "U" || (ch >= "0" && ch <= "7");
     for (const ch of scannedCharacters()) {
-      // `\/` is a separator (every POSIX shell reads it as `/`), and a
+      // `\/` is a separator (every POSIX shell reads it as `/`), a
       // `\`+newline pair is DELETED before the word is lexed, so what
       // follows the pair decides -- here nothing follows, which ends
-      // the word. Every other `\X` escapes a character inside the SAME
+      // the word -- and `\x`/`\u`/`\U`/`\0`-`\7` start an ANSI-C
+      // (`$'...'`) numeric escape that CAN decode to a separator, so
+      // the scan ends the word there too (over-refusing in the safe
+      // direction, since most of those escapes decode to something
+      // else). Every other `\X` escapes a character inside the SAME
       // word, so the spelling is a different path's prefix.
-      const expectMention = ch === "/" || ch === "\n";
+      const expectMention =
+        ch === "/" || ch === "\n" || isAnsiCNumericEscapeStarter(ch);
       const mentions = escapingRootMentions(
         `${root}\\${ch}`,
         root,
@@ -542,6 +553,60 @@ describe("escapingRootMentions()", () => {
         false,
       ),
     ).toEqual([`${root}\\\n\\\n/pkg/t.js`]);
+  });
+
+  // --- ANSI-C (`$'...'`) numeric escapes. bash/dash decode `\xHH`,
+  // `\uHHHH`/`\UHHHHHHHH` and `\NNN` (octal) by numeric value inside a
+  // `$'...'` word, and `/` (0x2f) is reachable through any of them:
+  // `$'<root>\x2fpkg'`, `$'<root>\057pkg'` and `$'<root>/pkg'` all
+  // reach `<root>/pkg` exactly as `$'<root>/pkg'` does. Round-7 left
+  // this open: `\` followed by `x` (or `u`/`U`/an octal digit) was
+  // classified as an in-word escape, so the ANSI-C forms read as a
+  // different path's prefix and were NOT refused while the shell still
+  // reached the real tree. ---
+
+  it("the ANSI-C forms that decode to a separator are mentions, same as the un-escaped control", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    for (const text of [
+      `cd $'${root}\\x2fpkg' && node t.js`,
+      `cd $'${root}\\057pkg' && node t.js`,
+      `cd $'${root}\\u002fpkg' && node t.js`,
+    ]) {
+      // The region ends right before the ANSI-C escape: the scan does
+      // not decode it, so it cannot report `<root>/pkg` as the region,
+      // only the bare root that is actually matched literally.
+      expect({ text, mentions: escapingRootMentions(text, root) }).toEqual({
+        text,
+        mentions: [root],
+      });
+    }
+    // The control: an un-escaped `/` inside the same `$'...'` quoting
+    // is a mention as usual, region extended through `/pkg`.
+    const control = `cd $'${root}/pkg' && node t.js`;
+    expect(escapingRootMentions(control, root)).toEqual([`${root}/pkg`]);
+    // The sibling control is unaffected: a bare backslash-escaped space
+    // still does not end the root's spelling.
+    expect(
+      escapingRootMentions(`ls ${root}\\ backup; node t.js`, root),
+    ).toEqual([]);
+  });
+
+  it("a longer path that merely CONTAINS the root's spelling is refused too: no boundary is required at the match's START (by-design over-refusal)", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    // `/mnt/backup<root>/pkg` and `x<root>/pkg` are not the root, and
+    // not paths under it either, but the scan matches the root's
+    // SPELLING wherever it occurs, with no requirement that a boundary
+    // (whitespace, a separator, the start of the string) precede it.
+    // The reported region starts at the root's own spelling, not at
+    // the start of the longer path -- a bind mount or backup mirror
+    // such as `/mnt/host<root>/...` reaches the real tree exactly the
+    // same way.
+    expect(
+      escapingRootMentions(`cd /mnt/backup${root}/pkg && node t.js`, root),
+    ).toEqual([`${root}/pkg`]);
+    expect(escapingRootMentions(`cd x${root}/pkg && node t.js`, root)).toEqual([
+      `${root}/pkg`,
+    ]);
   });
 
   it("the sibling controls stay siblings and the deeper-path and word-ending controls stay mentions", () => {
