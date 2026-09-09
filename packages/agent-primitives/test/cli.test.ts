@@ -36,7 +36,7 @@ import {
   spawnCli,
   spawnCliRaw,
 } from "./helpers/spawn-cli.js";
-import { signalExitCode } from "../src/cli.js";
+import { signalExitCode, PLAN_EXCLUSIVE_OPTIONS } from "../src/cli.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -2505,6 +2505,38 @@ describe("cli: probe", () => {
       "--file is long-only: the global -f is --format",
     );
     expect(run.stdout).toContain("may precede the subcommand");
+  });
+
+  it("probe --help's --plan entry names exactly PLAN_EXCLUSIVE_OPTIONS's flags: a flag added there without updating the sentence is caught here", async () => {
+    // Pins cli.ts's `--plan` help sentence to PLAN_EXCLUSIVE_OPTIONS
+    // itself (not a hand-typed copy of its flags), so a flag appended
+    // to the array without the sentence being regenerated is a missing
+    // short flag in the wrapped --help entry reassembled below.
+    const run = await spawnCli(["probe", "--help"]);
+    expect(run.code).toBe(0);
+    const lines = run.stdout.split("\n");
+    const startIndex = lines.findIndex((line) =>
+      line.trim().startsWith("--plan <path>"),
+    );
+    expect(startIndex).toBeGreaterThanOrEqual(0);
+    const optionLine = /^ {2}-/;
+    const block: string[] = [];
+    for (let i = startIndex; i < lines.length; i++) {
+      if (i > startIndex && optionLine.test(lines[i])) break;
+      block.push(lines[i].trim());
+    }
+    const entry = block.join(" ");
+    const marker = "mutually exclusive with ";
+    const markerIndex = entry.indexOf(marker);
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    const flagList = entry
+      .slice(markerIndex + marker.length)
+      .split(/,| and /)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    expect(flagList).toEqual(
+      PLAN_EXCLUSIVE_OPTIONS.map(({ flag }) => flag.split("/")[0]),
+    );
   });
 
   it("--json is accepted (a no-op alias for -f json) even after the subcommand", async () => {

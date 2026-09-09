@@ -1084,7 +1084,7 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
  * (`-i`, `--expect`, `--timeout`, `--link`, `--allow-outside`) are NOT in
  * this set either: they override the plan's own value when given (see
  * `runProbePlanCommand`'s own docblock for that precedence). */
-const PLAN_EXCLUSIVE_OPTIONS: readonly {
+export const PLAN_EXCLUSIVE_OPTIONS: readonly {
   flag: string;
   key: keyof ProbeCliOptions;
 }[] = [
@@ -1098,6 +1098,25 @@ const PLAN_EXCLUSIVE_OPTIONS: readonly {
   { flag: "--pre", key: "pre" },
   { flag: "--env", key: "env" },
 ];
+
+/** The short form of a `PLAN_EXCLUSIVE_OPTIONS` flag (`-n/--line` ->
+ * `-n`): what the `--plan` help sentence below lists, so that sentence
+ * is built from the same array `requirePlanExclusive` reads instead of
+ * a hand-maintained mirror of it. */
+function shortFlag(flag: string): string {
+  return flag.split("/")[0];
+}
+
+/** "--file, -n, -r, -M, -w, -p, -t, --pre and --env": the `--plan`
+ * help sentence's list of mutually exclusive flags, derived from
+ * `PLAN_EXCLUSIVE_OPTIONS` so a flag added there without updating this
+ * sentence is impossible rather than a drift a reviewer has to catch. */
+const PLAN_EXCLUSIVE_FLAG_LIST = ((): string => {
+  const shorts = PLAN_EXCLUSIVE_OPTIONS.map(({ flag }) => shortFlag(flag));
+  if (shorts.length === 0) return "";
+  if (shorts.length === 1) return shorts[0];
+  return `${shorts.slice(0, -1).join(", ")} and ${shorts[shorts.length - 1]}`;
+})();
 
 function requirePlanExclusive(opts: ProbeCliOptions): void {
   const conflicts = PLAN_EXCLUSIVE_OPTIONS.filter(
@@ -1304,7 +1323,7 @@ program
   )
   .option(
     "--plan <path>",
-    "JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with --file, -n, -r, -M, -w, -p, -t, --pre and --env",
+    `JSON file with one test command and a list of mutants, run against one shared baseline; mutually exclusive with ${PLAN_EXCLUSIVE_FLAG_LIST}`,
   )
   .option(
     "--link <dirs>",
