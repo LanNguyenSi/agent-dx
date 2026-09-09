@@ -16,6 +16,7 @@ import {
   type PlanMutantSpec,
 } from "../src/probe/plan.js";
 import { readMarkerFor } from "../src/lock.js";
+import { initNodeTestDotRepo } from "./helpers/node-test-dot-repo.js";
 import { sha256File } from "../src/hash.js";
 import { execCommand } from "../src/exec.js";
 import { computeMutant } from "../src/probe/mutant.js";
@@ -1399,48 +1400,10 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
 // --require-baseline-evidence opt-out" describe block, for the plan
 // path. -----------------------------------------------------------------
 
-/** A throwaway `node --test` project, the plan-path twin of
- * `probe-zero-tests.test.ts`'s `initNodeTestDotRepo()`: `calc.js`
- * exports `add` (tested) and `unused` (never referenced by the test
- * file at all), `calc.test.js` runs two passing tests against `add`
- * with `--test-reporter=dot` (bare `..`, no summary line either
- * built-in zero-tests detector recognizes). Mutating `unused` is a
- * genuine, legitimate survivor: the suite never exercises it, so both
- * the baseline and the mutant run print the exact same `..` and exit
- * `0`. */
-function initNodeTestDotRepo(): string {
-  const repo = makeTmpDir();
-  git(repo, ["init", "-q"]);
-  git(repo, ["config", "user.email", "test@example.com"]);
-  git(repo, ["config", "user.name", "test"]);
-  fs.writeFileSync(
-    path.join(repo, "calc.js"),
-    [
-      "function add(a, b) {",
-      "  return a + b;",
-      "}",
-      "function unused(a, b) {",
-      "  return a + b;",
-      "}",
-      "module.exports = { add, unused };",
-      "",
-    ].join("\n"),
-  );
-  fs.writeFileSync(
-    path.join(repo, "calc.test.js"),
-    [
-      "const test = require('node:test');",
-      "const assert = require('node:assert');",
-      "const { add } = require('./calc.js');",
-      "test('add', () => { assert.strictEqual(add(1, 2), 3); });",
-      "test('add2', () => { assert.strictEqual(add(2, 2), 4); });",
-      "",
-    ].join("\n"),
-  );
-  git(repo, ["add", "-A"]);
-  git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
-  return repo;
-}
+// `initNodeTestDotRepo` lives in ./helpers/node-test-dot-repo.ts, shared
+// with test/probe-zero-tests.test.ts's own use of it (this suite's `git`
+// helper is not used by the shared builder, which shells out to git
+// directly the same way both call sites always have).
 
 /** Mutates only the untested `unused` function, so the dot reporter's
  * `..` output is unaffected either way: a genuine, legitimate survivor. */
@@ -1468,7 +1431,7 @@ function dotReporterPlanOptions(
 describe("probePlan(): zero-tests-executed detection through the shared baseline", () => {
   it("without --require-baseline-evidence, a genuine dot-reporter survivor is read as inconclusive/no_tests_executed by design, per mutant", async () => {
     useLockDir();
-    const repo = initNodeTestDotRepo();
+    const repo = initNodeTestDotRepo(makeTmpDir);
 
     const result = await probePlan(dotReporterPlanOptions(repo));
 
@@ -1481,7 +1444,7 @@ describe("probePlan(): zero-tests-executed detection through the shared baseline
 
   it("with a matching --require-baseline-evidence, the same dot-reporter survivor stays survived, not second-guessed", async () => {
     useLockDir();
-    const repo = initNodeTestDotRepo();
+    const repo = initNodeTestDotRepo(makeTmpDir);
 
     const result = await probePlan(
       dotReporterPlanOptions(repo, { requireBaselineEvidence: /\.\./ }),
@@ -1503,7 +1466,7 @@ describe("probePlan(): zero-tests-executed detection through the shared baseline
     // is for a plan -- see the README's `--plan` section), with every
     // mutant reported `not_run`.
     useLockDir();
-    const repo = initNodeTestDotRepo();
+    const repo = initNodeTestDotRepo(makeTmpDir);
 
     const result = await probePlan(
       dotReporterPlanOptions(repo, {
@@ -1514,5 +1477,35 @@ describe("probePlan(): zero-tests-executed detection through the shared baseline
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("baseline_evidence_not_matched");
     expect(result.results.map((r) => r.status)).toEqual(["not_run"]);
+  }, 30000);
+
+  it("a truncated baseline tail that missed the pattern names the truncation in the warning", async () => {
+    // Plan-path twin of `probe-zero-tests.test.ts`'s "a truncated
+    // baseline tail that missed the pattern names the truncation in
+    // the warning" (`setup.ts`'s `--require-baseline-evidence` check is
+    // shared by `probe()` and `probePlan()`, so the same truncation
+    // note applies here): a pattern printed first, then scrolled out
+    // of the captured tail (`exec.ts`'s 60-line/6000-char bound) by 120
+    // filler lines, must not read as a plain miss without the warning
+    // naming the truncation.
+    useLockDir();
+    const repo = initNodeTestDotRepo(makeTmpDir);
+    const fillerLines = Array.from(
+      { length: 120 },
+      (_, i) => `console.log('filler line ${i}');`,
+    ).join(" ");
+
+    const result = await probePlan(
+      dotReporterPlanOptions(repo, {
+        testCommand: `node -e "console.log('EVIDENCE-LINE'); ${fillerLines}"`,
+        requireBaselineEvidence: /EVIDENCE-LINE/,
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_evidence_not_matched");
+    expect(
+      result.warnings.some((w) => /captured stdout tail was truncated/.test(w)),
+    ).toBe(true);
   }, 30000);
 });
