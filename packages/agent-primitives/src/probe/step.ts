@@ -2,6 +2,12 @@ import fs from "node:fs";
 import { sha256File } from "../hash.js";
 import { removeMarkerFor, writeMarker } from "../lock.js";
 import {
+  combinedOutput,
+  reportedNoVerdict,
+  signalNumberFromExitCode,
+  wasSignalKilled,
+} from "../exec.js";
+import {
   applyPatchForReal,
   computeMutant,
   formatMutantSummary,
@@ -376,10 +382,21 @@ export async function runMutantAttempt(
     // `restore_failed` carries.
     if (!ok || !verified) return restoreFailedOutcome();
     const preAborted = mutantRun.pre.aborted;
+    // A `--pre` that never reported an exit code of its own is named as
+    // such, rather than through the plain form's `--pre exited null`,
+    // which reads as if `null` were a status the command itself chose;
+    // the two no-verdict shapes (this package's `--timeout`, and a kill
+    // from outside it) are named apart, since `--pre` has no `timedOut`
+    // field of its own in the envelope. Mirrors `setup.ts`'s own
+    // baseline-side `--pre` prose.
     warnings.push(
       preAborted
         ? `--pre was aborted during the mutant run; see ${mutantRun.pre.logPath}`
-        : `--pre exited ${mutantRun.pre.exitCode} during the mutant run; see ${mutantRun.pre.logPath}`,
+        : mutantRun.pre.exitCode === null
+          ? mutantRun.pre.timedOut
+            ? `--pre timed out during the mutant run, no exit code was reported; see ${mutantRun.pre.logPath}`
+            : `--pre was terminated by a signal during the mutant run, no exit code was reported; see ${mutantRun.pre.logPath}`
+          : `--pre exited ${mutantRun.pre.exitCode} during the mutant run; see ${mutantRun.pre.logPath}`,
     );
     return {
       status: "inconclusive",
@@ -467,15 +484,169 @@ export async function runMutantAttempt(
     reason = "aborted";
     mutationProbeResult = status;
     warnings.push(`the mutant run was aborted; see ${testResult.logPath}`);
-  } else if (testResult.timedOut) {
+  } else if (reportedNoVerdict(testResult)) {
+    // The mutant run never reported an exit code of its own: this
+    // package's own `--timeout` killed it (`timedOut: true`), or a
+    // kill from outside this probe reached the run's own process-group
+    // leader, which `exec.ts` reports as `exitCode: null` with
+    // `timedOut: false` (the same `reportedNoVerdict` shapes
+    // `setup.ts` refuses a baseline for). Neither `killed` nor
+    // `survived` may be read out of such a run: under `--pass-regex` a
+    // partial output printed before the kill can match the pattern and
+    // read as a PASS the run never earned, and under the exit-code
+    // default a `null` exit code is not `0`, which reads as "the test
+    // failed" and, under `--expect fail`, certifies a KILL the suite
+    // never actually made. Same handling for both shapes -- one run
+    // without a verdict, one `inconclusive`/`timeout` outcome, so the
+    // reported reason contract is unchanged -- with the signal shape
+    // named in `warnings`, since `reason: "timeout"` beside
+    // `test.timedOut: false` would otherwise read as this package's
+    // own bound having fired.
     status = "inconclusive";
     reason = "timeout";
     mutationProbeResult = status;
+    // A timeout is excluded (`wasSignalKilled`, not the branch condition
+    // itself): this package's own `--timeout` already reports itself
+    // through `test.timedOut`, so only the kill-from-outside shape needs
+    // a warning to say what happened to the run.
+    if (wasSignalKilled(testResult)) {
+      warnings.push(
+        `the mutant run was terminated by a signal, no exit code was reported; nothing about this mutant was measured; see ${testResult.logPath}`,
+      );
+    }
   } else {
-    const testPassed = testResult.exitCode === 0;
+    // `rt.passRegex` (`--pass-regex`/`passWhen.regex`): once given, it
+    // is THIS mutant run's verdict in place of its exit code too, the
+    // same predicate `setup.ts` already applied to the baseline --
+    // "passed" is the regex matching the run's own combined
+    // stdout+stderr, "failed" is the regex absent, whatever the exit
+    // code says.
+    const testCombinedOutput = combinedOutput(
+      testResult.stdoutTail,
+      testResult.stderrTail,
+    );
+    const testPassed =
+      rt.passRegex !== undefined
+        ? rt.passRegex.test(testCombinedOutput)
+        : testResult.exitCode === 0;
     const killed = spec.expect === "fail" ? !testPassed : testPassed;
     status = killed ? "killed" : "survived";
     mutationProbeResult = status;
+
+    // The 128 + N band (see `exec.ts`'s `signalNumberFromExitCode`):
+    // computed once here, ahead of the `--pass-regex`-only block below,
+    // because the FAIL direction below needs it whether or not
+    // `--pass-regex` is even given -- the plain exit-code default reads
+    // a band code as an ordinary non-zero failure exactly the same way
+    // a real one would.
+    const mutantSignalCode = signalNumberFromExitCode(testResult.exitCode);
+    // A kill that lands on the test process while its `sh -c` wrapper
+    // SURVIVES arrives as an ordinary non-zero exit code, never as the
+    // `null` the no-verdict branch above catches. On the FAIL direction
+    // (`!testPassed`: the plain exit-code default reading a band code
+    // as a failure, or `--pass-regex` failing to match a run the kill
+    // cut off before it printed) that ordinary-looking exit code is
+    // read as a genuine failure -- which under `--expect fail` is
+    // exactly the KILLED verdict this whole mechanism exists to
+    // certify -- with nothing said about it unless this fires. The
+    // verdict is not second-guessed (nothing here can tell that code
+    // apart from a runner exiting `137` on its own); the reader is
+    // told. The PASS direction gets its own wording below, scoped to
+    // `--pass-regex` (the plain default can never read a non-zero exit
+    // code as a pass), so the two never both fire for the same run.
+    // Unlike the miss warning below, this one is not gated on
+    // ambiguity: a band code is rare enough per plan that one entry per
+    // affected mutant stays readable, and each names the code and the
+    // signal the reader has to check.
+    if (!testPassed && mutantSignalCode !== undefined) {
+      warnings.push(
+        `the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the ${status} verdict may rest on a run that was cut short; see ${testResult.logPath}`,
+      );
+    }
+
+    if (rt.passRegex !== undefined) {
+      if (testPassed && testResult.exitCode !== 0) {
+        // Same deprecation-notice shape `setup.ts` warns about for the
+        // baseline: named here too, so a caller reading `warnings` sees
+        // why a red exit code was still read as a pass on the mutant
+        // side as well. `testResult.exitCode` is a real number in this
+        // whole block: a run that reported none returned above as
+        // `inconclusive`/`timeout`, so no warning here can frame a
+        // `null` as an exit code.
+        //
+        // And the same 128 + N band gets the same separate wording it
+        // gets on the baseline side: a kill that lands on the test
+        // process while its `sh -c` wrapper survives arrives as an
+        // ordinary non-zero exit code, never as the `null` the
+        // no-verdict branch above catches, so a mutant run cut short
+        // that way would otherwise be reported `survived` with nothing
+        // said about it. The verdict stands (nothing here can tell that
+        // code apart from a runner exiting `137` on its own, and
+        // `--pass-regex` means "ignore the exit code" by construction);
+        // the reader is told.
+        warnings.push(
+          mutantSignalCode !== undefined
+            ? `--pass-regex (${rt.passRegex.source}) matched the mutant run's output but the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the suite may have been cut short; see ${testResult.logPath}`
+            : `--pass-regex (${rt.passRegex.source}) matched the mutant run's output despite a non-zero exit code (${String(testResult.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${testResult.logPath}`,
+        );
+      } else if (
+        !testPassed &&
+        testResult.stdoutTail.length === 0 &&
+        testResult.stderrTail.length === 0
+      ) {
+        // No output at all: a regex can never match empty output, so
+        // this reads as "failed" the same as a real test failure would
+        // -- but a process that crashed before printing anything (a
+        // segfault, an uncaught exception before the runner's own
+        // reporter ever ran) is not the same finding as a suite that
+        // ran and reported failures. Distinguishable in the envelope
+        // via `test.exitCode` (kept as data regardless of `passRegex`)
+        // together with the empty `test.stdoutTail`/`test.stderrTail`
+        // this warning already names; a caller that cares tells the two
+        // apart by checking for exactly this shape.
+        warnings.push(
+          `the mutant run produced no output at all (exit code ${String(testResult.exitCode)}); --pass-regex (${rt.passRegex.source}) cannot match empty output, so this reads as a crash, not a genuine test failure -- see test.exitCode and the empty test.stdoutTail/test.stderrTail; see ${testResult.logPath}`,
+        );
+      } else if (!testPassed) {
+        // A genuine miss with real (non-empty) output. Under the
+        // ordinary `--expect fail` shape this is the ROUTINE, expected
+        // outcome -- the predicate agrees the mutant broke the suite,
+        // exactly like every other killed mutant in an N-mutant plan --
+        // so warning on every one of them would fill `warnings` with N
+        // near-duplicate entries that read as noise, not as N distinct
+        // findings (a healthy plan run would otherwise never have an
+        // empty `warnings` array at all). Warned only when the miss is
+        // actually ambiguous: (1) either side of this run's own captured
+        // tail was truncated, so the pattern may have matched output
+        // this run never even captured; (2) the exit code itself reads
+        // `0` despite the predicate reading "failed" -- the process and
+        // the predicate disagree, worth a second look regardless of
+        // `--expect`; or (3) `--expect pass`, where a miss means the
+        // mutant SURVIVED rather than being killed -- not the routine
+        // "predicate agrees the mutant broke the suite" shape at all.
+        // Named explicitly, the same as `--require-baseline-evidence`'s
+        // own miss is on the baseline side, so a caller reading
+        // `warnings` sees which pattern was checked and against what,
+        // rather than only the bare `killed`/`survived` verdict.
+        const truncatedSides = [
+          testResult.stdoutTruncated ? "stdout" : undefined,
+          testResult.stderrTruncated ? "stderr" : undefined,
+        ].filter((side): side is string => side !== undefined);
+        const ambiguousMiss =
+          truncatedSides.length > 0 ||
+          testResult.exitCode === 0 ||
+          spec.expect === "pass";
+        if (ambiguousMiss) {
+          const truncatedNote =
+            truncatedSides.length > 0
+              ? ` (the mutant run's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
+              : "";
+          warnings.push(
+            `--pass-regex (${rt.passRegex.source}) did not match the mutant run's output${truncatedNote}; see ${testResult.logPath}`,
+          );
+        }
+      }
+    }
 
     // Zero-tests-executed detection, mutant side: the mutant run's OWN
     // output shows a known test runner executed nothing (the same
@@ -487,17 +658,19 @@ export async function runMutantAttempt(
       testResult.stderrTail,
     );
     // The generic byte-identical fallback: scoped to a verdict whose own
-    // exit code from the mutant's OWN run was PASSING (0) -- the exact
-    // silent exit-0 evidence this whole mechanism distrusts. Whichever
-    // direction `--expect` points, a mutant run that exited NON-ZERO
-    // already carries a real signal -- the process itself disagreed with
-    // the baseline -- that this output-only heuristic has no business
-    // second-guessing; that holds for a `survived` verdict under
-    // `--expect fail` bound to exit 0 exactly as it does for a `killed`
-    // verdict under `--expect pass` bound to exit 0, and it excludes a
+    // predicate on THIS mutant's run reads as PASSING -- exit code `0`
+    // by default, or `testPassed` itself (`--pass-regex`'s own match)
+    // when that flag is given -- the exact silent-pass evidence this
+    // whole mechanism distrusts. Whichever direction `--expect` points,
+    // a mutant run whose predicate reads FAILING already carries a real
+    // signal -- the run itself disagreed with the baseline -- that this
+    // output-only heuristic has no business second-guessing; that holds
+    // for a `survived` verdict under `--expect fail` bound to a passing
+    // predicate exactly as it does for a `killed` verdict under
+    // `--expect pass` bound to a passing predicate, and it excludes a
     // `survived` verdict under `--expect pass`, which is `survived`
-    // precisely because the mutant run exited NON-ZERO.
-    const restsOnPassingExit = testResult.exitCode === 0;
+    // precisely because the predicate read FAILING.
+    const restsOnPassingVerdict = testPassed;
     // Silence on both sides is common and legitimate (many hand-rolled
     // test scripts print nothing on a pass, relying on the exit code
     // alone -- this package's own fixtures included), so it is excluded
@@ -522,7 +695,7 @@ export async function runMutantAttempt(
       baselineOutput.stdoutTruncated ||
       baselineOutput.stderrTruncated;
     const genericFallback =
-      restsOnPassingExit &&
+      restsOnPassingVerdict &&
       hasComparableOutput &&
       !eitherTailTruncated &&
       !mutantZeroTests.detected &&

@@ -120,6 +120,18 @@ export interface ProbeOptions {
    * validated there (an invalid pattern is a usage error before this
    * ever runs). */
   requireBaselineEvidence?: RegExp;
+  /** Opt-in success predicate, `--pass-regex <regex>` on the CLI (or a
+   * plan's own `passWhen.regex`, the equivalent field a plan file
+   * carries): once given, replaces the exit code as the verdict for
+   * BOTH the baseline and this mutant's own run -- "passed" is the
+   * regex matching the run's combined stdout+stderr, "failed" is the
+   * regex absent, whatever the exit code says. Independent of
+   * `requireBaselineEvidence` above, which stays a gate on the baseline
+   * only; the two may be given together, one without the other, or
+   * neither. See the README's `--pass-regex` section for the motivating
+   * case (phpunit 9.6 exiting 1 on a green suite over deprecation
+   * notices). */
+  passRegex?: RegExp;
   cwd: string;
   logDir: string;
   /**
@@ -497,6 +509,7 @@ async function runProbePipeline(
       preCommand: opts.preCommand,
       env: opts.env,
       requireBaselineEvidence: opts.requireBaselineEvidence,
+      passRegex: opts.passRegex,
       exitOnSignal: opts.exitOnSignal ?? false,
       warnings,
       isolationField,
@@ -760,6 +773,15 @@ export interface ProbePlanOptions {
    * the same unremapped pair `baseline_failed` reports for a plan (see
    * the README's `--plan` section). */
   requireBaselineEvidence?: RegExp;
+  /** Opt-in success predicate, the same as `ProbeOptions.passRegex`:
+   * unlike `requireBaselineEvidence` above, this one DOES have a plan-file
+   * key (`passWhen.regex`) as well as a CLI flag, since it also decides
+   * every mutant's own verdict, not only the plan's shared baseline --
+   * `cli.ts` reconciles the two the same way it reconciles `isolation`/
+   * `expect`/`timeout` (a command-line `--pass-regex` wins when given,
+   * else the plan file's own `passWhen.regex`), and hands the single
+   * resolved value here. */
+  passRegex?: RegExp;
   /** See `ProbeOptions.exitOnSignal`: `true` for the CLI, whose process
    * exists to run exactly this plan. */
   exitOnSignal?: boolean;
@@ -1059,6 +1081,7 @@ export async function probePlan(
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
       requireBaselineEvidence: opts.requireBaselineEvidence,
+      passRegex: opts.passRegex,
       exitOnSignal: opts.exitOnSignal ?? false,
       warnings,
       isolationField,

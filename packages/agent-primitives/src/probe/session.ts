@@ -896,6 +896,21 @@ export interface MutantRuntime {
   effectiveIsolation: IsolationMode;
   testCommand: string;
   preCommand?: string;
+  /** Opt-in `--pass-regex <regex>` (or a plan's own `passWhen.regex`):
+   * when given, replaces the exit code as the verdict for BOTH the
+   * baseline (`setup.ts`, read from `input.passRegex` directly) and
+   * every mutant run (`step.ts`'s classify step, read from here) --
+   * "test passed" is the regex matching the run's own combined
+   * stdout+stderr, "test failed" is the regex absent, whatever the exit
+   * code says. The exit code itself is never dropped from the envelope
+   * (`ExecPhaseField`/`TestPhaseField` still carry it): it is what
+   * distinguishes a genuine crash (no output at all, an unusual exit
+   * code) from a real test failure once the regex alone can no longer
+   * tell the two apart (both read as "failed": neither's output matches
+   * the pattern). See the README's `--pass-regex` section for the
+   * motivating case (phpunit 9.6 exiting 1 on a green suite because of
+   * deprecation notices). */
+  passRegex?: RegExp;
   signal: AbortSignal;
   track: TrackFn;
   crashHandlers: CrashHandlers;

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
-import { execCommand } from "../src/exec.js";
+import { execCommand, signalNumberFromExitCode } from "../src/exec.js";
 import { execCommand as execCommandFromIndex } from "../src/index.js";
 
 const tmpDirs: string[] = [];
@@ -512,5 +512,31 @@ describe("execCommand", () => {
     const result = await execCommandFromIndex("echo hi", { logDir });
     expect(result.exitCode).toBe(0);
     expect(result.stdoutTail.trim()).toBe("hi");
+  });
+});
+
+describe("signalNumberFromExitCode(): the 128 + N band's own boundaries", () => {
+  // The band is 129 through 192 (128 + every signal number a POSIX
+  // system can deliver, 1..31 shared by macOS and Linux plus Linux's
+  // real-time signals 32..64); 128 and 193 sit one step outside either
+  // edge and must stay outside.
+  it("128 is outside the band: there is no signal 0 to die of", () => {
+    expect(signalNumberFromExitCode(128)).toBeUndefined();
+  });
+
+  it("129 is the band's low edge: signal 1", () => {
+    expect(signalNumberFromExitCode(129)).toBe(1);
+  });
+
+  it("192 is the band's high edge: signal 64", () => {
+    expect(signalNumberFromExitCode(192)).toBe(64);
+  });
+
+  it("193 is outside the band: an 8-bit exit status cannot encode signal 65", () => {
+    expect(signalNumberFromExitCode(193)).toBeUndefined();
+  });
+
+  it("null carries no exit code at all, so it is not in the band either", () => {
+    expect(signalNumberFromExitCode(null)).toBeUndefined();
   });
 });

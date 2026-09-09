@@ -1579,3 +1579,142 @@ describe("probePlan(): zero-tests-executed detection through the shared baseline
     ).toBe(true);
   }, 30000);
 });
+
+describe("plan.passWhen.regex: the plan-file equivalent of --pass-regex", () => {
+  it("parses to a RegExp on plan.passRegex", () => {
+    const parsed = parsePlanFile(
+      writePlan({
+        test: "npm test",
+        passWhen: { regex: "^OK \\(" },
+        mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.plan.passRegex).toBeInstanceOf(RegExp);
+    expect(parsed.plan.passRegex?.source).toBe("^OK \\(");
+    // Compiled through the same shared `compilePassRegex` `cli.ts` uses
+    // for `--pass-regex`, so `^`/`$` anchor per line, not only to the
+    // whole combined buffer (see `pass-regex.ts`'s own docblock).
+    expect(parsed.plan.passRegex?.flags).toBe("m");
+  });
+
+  it("an invalid regex is plan_invalid, naming plan.passWhen.regex", () => {
+    const parsed = parsePlanFile(
+      writePlan({
+        test: "npm test",
+        passWhen: { regex: "(" },
+        mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+      }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reason).toBe("plan_invalid");
+    expect(parsed.message).toContain("plan.passWhen.regex");
+  });
+
+  it("an unknown passWhen key, or a non-object passWhen, is plan_invalid rather than silently ignored", () => {
+    const extraKey = parsePlanFile(
+      writePlan({
+        test: "npm test",
+        passWhen: { regex: "OK", flags: "i" },
+        mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+      }),
+    );
+    expect(extraKey.ok).toBe(false);
+    if (!extraKey.ok) {
+      expect(extraKey.reason).toBe("plan_invalid");
+      expect(extraKey.message).toContain("plan.passWhen.flags");
+    }
+
+    const notObject = parsePlanFile(
+      writePlan({
+        test: "npm test",
+        passWhen: "OK",
+        mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+      }),
+    );
+    expect(notObject.ok).toBe(false);
+    if (!notObject.ok) {
+      expect(notObject.reason).toBe("plan_invalid");
+      expect(notObject.message).toContain("plan.passWhen");
+    }
+  });
+
+  it("a missing (non-string) regex field is plan_invalid", () => {
+    const parsed = parsePlanFile(
+      writePlan({
+        test: "npm test",
+        passWhen: {},
+        mutants: [{ file: "a.ts", line: 1, replace: "x" }],
+      }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reason).toBe("plan_invalid");
+    expect(parsed.message).toContain("plan.passWhen.regex");
+  });
+});
+
+describe("probePlan(): --pass-regex, threaded through the shared baseline and every mutant", () => {
+  // Same fake phpunit-style runner as `probe.test.ts`'s own --pass-regex
+  // describe block (GitHub issue #225): a green suite that still exits 1
+  // over deprecation notices.
+  const RUNNER_JS = [
+    "function summary() {",
+    '  return "OK (3 tests, 5 assertions)";',
+    "}",
+    "console.log(summary());",
+    "process.exit(1);",
+    "",
+  ].join("\n");
+
+  function initRunnerRepo(): string {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "runner.js"), RUNNER_JS);
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return repo;
+  }
+
+  function runnerPlanOptions(
+    repo: string,
+    overrides: Partial<ProbePlanOptions> = {},
+  ): ProbePlanOptions {
+    return planOptions(
+      repo,
+      [replaceMutant(2, '  return "FAILURES!";', "runner.js")],
+      {
+        testCommand: "node runner.js",
+        ...overrides,
+      },
+    );
+  }
+
+  it("without passRegex, the plan's shared baseline reports baseline_failed for the whole plan", async () => {
+    useLockDir();
+    const repo = initRunnerRepo();
+
+    const result = await probePlan(runnerPlanOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_failed");
+    expect(result.results.map((r) => r.status)).toEqual(["not_run"]);
+  });
+
+  it("with passRegex, the shared baseline passes despite exit 1, and the FAILURES! mutant is killed", async () => {
+    useLockDir();
+    const repo = initRunnerRepo();
+
+    const result = await probePlan(
+      runnerPlanOptions(repo, { passRegex: /^OK \(/ }),
+    );
+
+    expect(result.baseline?.exitCode).toBe(1);
+    expect(result.status).toBe("killed");
+    expect(result.results[0].status).toBe("killed");
+  });
+});
