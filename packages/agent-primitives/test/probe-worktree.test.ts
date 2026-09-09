@@ -505,6 +505,62 @@ describe("probe(): worktree isolation, node_modules and --pre", () => {
     ).toBe(false);
   });
 
+  it("beginWorktree's OWN nested-target guard (independent of composerLinkDirsFor's own bin-dir-inside-vendor-dir skip) protects an explicit --link nested inside an auto-linked composer vendor-dir from being destroyed through the parent symlink, and warns naming it", async () => {
+    // Discriminates the beginWorktree-level guard specifically:
+    // composerLinkDirsFor's own containment skip (the previous test)
+    // never sees an EXPLICIT --link at all, so a mutation probe that
+    // removes only the beginWorktree guard survives the previous test
+    // (composerLinkDirsFor's skip alone already keeps the DEFAULT
+    // vendor/bin pair out of the candidate list) but must be caught
+    // here, where the nested candidate reaches beginWorktree's own
+    // linking loop only via an operator-supplied --link.
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget" }),
+    );
+    git(repo, ["add", "composer.json", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    fs.mkdirSync(path.join(repo, "vendor", "extra-tool"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+    fs.writeFileSync(
+      path.join(repo, "vendor", "extra-tool", "marker.txt"),
+      "present\n",
+    );
+
+    const before = hashTree(repo);
+
+    const result = await probe(
+      baseOptions(repo, {
+        links: [path.join(repo, "vendor", "extra-tool")],
+      }),
+    );
+
+    const after = hashTree(repo);
+    expect(after).toEqual(before);
+    expect(
+      fs.lstatSync(path.join(repo, "vendor", "extra-tool")).isSymbolicLink(),
+    ).toBe(false);
+    expect(
+      fs.existsSync(path.join(repo, "vendor", "extra-tool", "marker.txt")),
+    ).toBe(true);
+    expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "vendor", "extra-tool")) &&
+          w.includes("nested inside a directory already linked"),
+      ),
+    ).toBe(true);
+  });
+
   it("repo defaults file (.agent-primitives.json): every probe invocation reads it and links what it names, no --link needed -- exercised through a repo reached via a symlinked ancestor (os.tmpdir() itself, on macOS), pinning the fix for the realpath-vs-display-path mismatch that used to drop this silently", async () => {
     useLockDir();
     const { repo } = initRepo();
