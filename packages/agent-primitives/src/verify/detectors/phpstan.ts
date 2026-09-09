@@ -65,6 +65,12 @@ export const phpstanDetector: Detector = {
     // for a truncated tail): a wrapped continuation line phpstan prints
     // below a long message is never mistaken for its own row, so the
     // row count alone can undercount a run with long messages.
+    // `failures.length` here is a direct-parse-only fallback: `parse()`
+    // is only ever reached, through the normal detector protocol, once
+    // `matches()` has already confirmed `ERROR_SUMMARY` (or `OK_LINE`,
+    // handled above) is present, so `summaryMatch` is unreachable-false
+    // under that protocol. It exists only for a caller invoking `parse()`
+    // directly on non-matching input, outside that protocol.
     const errors = summaryMatch ? Number(summaryMatch[1]) : failures.length;
 
     return {

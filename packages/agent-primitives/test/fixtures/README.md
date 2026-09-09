@@ -118,6 +118,54 @@ PHPUnit 9.6.36, PHPStan 2.2.13, PHP_CodeSniffer 3.13.6 (`--standard=PSR12`).
   namespace (exit `2`, `FOUND 12 ERRORS AFFECTING 5 LINES` plus one row
   per finding).
 
+### Round-2 PHP captures (task `55b0a5cc` review round 2)
+
+Same throwaway-`composer`-project-under-scratch-directory, same
+disposable-Docker-container, same trimming convention as the captures
+above; same tool versions (PHP 8.3.33, PHPUnit 9.6.36, PHPStan 2.2.13,
+PHP_CodeSniffer 3.13.6, `--standard=PSR12`).
+
+- `phpunit-skip-and-fail.txt`: `vendor/bin/phpunit --colors=never
+  tests/SkipFailTest.php` against a three-test suite (one pass, one
+  failing assertion, one `markTestSkipped`). Exit `1`. `FAILURES!` plus
+  `Tests: 3, Assertions: 2, Failures: 1, Skipped: 1.` -- the round-1
+  review's caught-mutant regression: the old fixed-order tally regex
+  parsed this to `failed: 0`, misread by `probe`'s zero-tests guard as
+  nothing executed.
+- `phpunit-all-skipped.txt`: the same command against a two-test suite
+  where both tests `markTestSkipped`. Exit `0`. `OK, but incomplete,
+  skipped, or risky tests!` plus `Tests: 2, Assertions: 0, Skipped: 2.`
+  -- no `FAILURES!`/`ERRORS!` marker at all, the shape `probe`'s
+  zero-tests guard previously never matched.
+- `phpunit-errors-and-failures.txt`: the same command against a
+  six-test suite (two pass, one failing assertion, one thrown
+  exception, one skipped, one incomplete). Exit `2`. `ERRORS!` (not
+  `FAILURES!`, even though the run has both) plus `Tests: 6, Assertions:
+  3, Errors: 1, Failures: 1, Skipped: 1, Incomplete: 1.` -- PHPUnit
+  prints `Errors:` before `Failures:` in the tally whenever a run has
+  both, and only the `ERRORS!` marker (never both), exercising the
+  order-independent named-count parsing.
+- `phpunit-warnings.txt`: the same command against a test class with
+  no public test methods (`No tests found in class "..."`, a genuine
+  PHPUnit-level warning, not an exception). Exit `2`. `WARNINGS!` plus
+  `Tests: 1, Assertions: 0, Warnings: 1.`
+- `phpcs-two-files.txt`: `vendor/bin/phpcs --standard=PSR12 --no-colors
+  <dir>` against two files, each with the same tab-indentation and
+  missing-visibility violations. Exit `2`. Two separate `FILE: ...` /
+  `FOUND 8 ERRORS AFFECTING 6 LINES` blocks, one per file -- PHPCS never
+  prints one grand-total summary across files; the round-1 review's
+  caught bug undercounted a multi-file run by taking only the first
+  block.
+- `phpcs-warnings-only.txt`: the same command against a file with two
+  over-long lines (PSR12's `Generic.Files.LineLength` warns above 120
+  characters, with no hard error threshold under PSR12's own
+  configuration). Exit `1` -- the round-1 review's measured PHPCS exit
+  mapping this fixture pins: `0` clean, `1` warnings only (no errors),
+  `2` errors present (fixable or not), `3` a processing error (verified
+  separately, not captured here as a fixture: `phpcs` prints usage help
+  to stderr and exits `3` when a standard names no sniffs at all, an
+  operator-input error rather than a lint result).
+
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 
 Minimal, self-contained projects with one deliberately failing check

@@ -134,13 +134,11 @@ commands read the command's own exit code (`0` pass, non-zero fail),
 which all three tools already follow. `verify`'s default detectors
 parse PHPUnit/PHPStan/PHPCS output the same way they parse
 vitest/tsc/eslint output; `probe`'s zero-tests guard recognizes
-PHPUnit's `No tests executed!` the same way it recognizes vitest's and
-node's zero-count shapes. `--pass-regex <regex>` (`passWhen: { regex }`
-in a `--plan` file) judges a check by matching its output instead of by
-exit code alone, for a runner whose exit code alone is not enough.
-`--link` (and a plan file's own `link:`, and a repo's
-`.agent-primitives.json` `{ "link": [...] }` defaults) auto-links a
-PHP project's composer `vendor-dir`/`bin-dir` into an isolated worktree
-the same way `node_modules` is auto-linked, so `vendor/bin/phpunit`
-resolves without a `composer install` per mutant. See the package
-README's "Non-JS test runners" section for the full detail.
+PHPUnit's `No tests executed!` (and a red run that is also all-skipped
+or all-incomplete) the same way it recognizes vitest's and node's
+zero-count shapes. A `--pass-regex`/`passWhen` pass predicate and a
+composer `vendor-dir`/`bin-dir` link rule are two more PHP-relevant
+additions on their own tasks (issue #225 parts 1 and 2), still open at
+the time of writing; each documents its own option in its own section
+once merged. See the package README's "Non-JS test runners" section for
+the full detail.

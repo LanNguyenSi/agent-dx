@@ -1,5 +1,8 @@
 import { vitestDetector } from "../verify/detectors/vitest.js";
-import { phpunitDetector } from "../verify/detectors/phpunit.js";
+import {
+  phpunitDetector,
+  phpunitZeroTestsExecuted,
+} from "../verify/detectors/phpunit.js";
 
 /**
  * Detects when a test command's own output shows that no test actually
@@ -20,11 +23,14 @@ import { phpunitDetector } from "../verify/detectors/phpunit.js";
  * `"no_tests_executed"` `RefusalReason` in `session.ts` for how a hit
  * here turns into a refusal or a verdict override.
  *
- * A third detector, PHPUnit's, reuses `phpunitDetector` from
- * `verify/detectors/phpunit.ts` the same way this module reuses
- * `vitestDetector`: that module already parses PHPUnit's `OK (...)`,
- * `Tests: ...`, and `No tests executed!` shapes against real captured
- * fixtures, so this module never re-implements the same regexes.
+ * A third shape, PHPUnit's, reuses `phpunitDetector.matches` (to decide
+ * whether the output is PHPUnit's at all) and `phpunitZeroTestsExecuted`
+ * (the actual zero-tests verdict, built on PHPUnit's own STATED total
+ * rather than `passed`/`failed`/`errors`, since a run with both a real
+ * failure and a real skip parses those three to `0` too -- see that
+ * function's own docblock in `verify/detectors/phpunit.ts` for the
+ * round-1 review finding this fixes) from that same module, so this
+ * module never re-implements PHPUnit's own regexes.
  */
 
 export type ZeroTestsDetectorName = "vitest" | "node_test" | "phpunit";
@@ -72,19 +78,17 @@ export function detectKnownZeroTestsEvidence(
     }
     return { detected: false };
   }
+  // The PHPUnit branch is kept as its own block, separate from the
+  // `combinedOutput` helper above: T-003 (merging separately) hoists an
+  // equivalent helper out of this file into `exec.ts`, and this block
+  // must not be entangled with that move.
   if (phpunitDetector.matches(input)) {
-    const parsed = phpunitDetector.parse(input);
-    // Same rule as the vitest branch above: a `Tests: ...` tally line
-    // whose failed/errors are both non-zero still executed something,
-    // and PHPUnit's own `No tests executed!` line (and a stated `OK (0
-    // tests, 0 assertions)`) already parse to passed:0/failed:0/errors:0
-    // via `phpunitDetector.parse`, so a single check here covers all
-    // three PHPUnit zero-count shapes without restating their patterns.
-    if (
-      parsed.summary.passed === 0 &&
-      parsed.summary.failed === 0 &&
-      parsed.summary.errors === 0
-    ) {
+    // Built on PHPUnit's own STATED total (via `phpunitZeroTestsExecuted`),
+    // never on `passed`/`failed`/`errors` alone: those three parse to `0`
+    // for a run that had a real failure alongside a real skip too (see
+    // that function's own docblock for the round-1 review finding this
+    // fixes).
+    if (phpunitZeroTestsExecuted(combined)) {
       return { detected: true, via: "phpunit" };
     }
     return { detected: false };

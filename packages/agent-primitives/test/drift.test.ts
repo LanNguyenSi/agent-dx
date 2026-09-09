@@ -482,6 +482,16 @@ describe("scan helpers", () => {
     expect(classifyLine("a.php", "class Foo {}")).toBeUndefined();
   });
 
+  it("classifyLine: a.php does NOT classify a PHP 8 attribute (`#[...]`) as a comment (negative control; round-1 review finding)", () => {
+    expect(classifyLine("a.php", "#[Test]")).toBeUndefined();
+    expect(classifyLine("a.php", "#[Route('/x')]")).toBeUndefined();
+    expect(classifyLine("a.php", "    #[Test]")).toBeUndefined();
+    // A real `#` line comment right next to an attribute is still
+    // recognized: the exclusion is scoped to `#[`, not to every line
+    // starting with `#`.
+    expect(classifyLine("a.php", "# not an attribute")).toBe("comment");
+  });
+
   it("parseGrepOutput strips the rev prefix and skips an unparseable (e.g. binary) line", () => {
     const output = [
       "abc123:src/a.ts:4:hit here",

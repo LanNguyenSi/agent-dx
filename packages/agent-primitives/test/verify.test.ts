@@ -2290,6 +2290,46 @@ describe("phpunitDetector: captured real output", () => {
     ).toBe(true);
   });
 
+  it("matches a run with both a real failure and a real skip (round-1 review fixture: caught mutant misread as no_tests_executed)", () => {
+    expect(
+      phpunitDetector.matches({
+        output: readCaptured("phpunit-skip-and-fail"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("matches an all-skipped run with no FAILURES!/ERRORS! marker at all (round-1 review fixture)", () => {
+    expect(
+      phpunitDetector.matches({
+        output: readCaptured("phpunit-all-skipped"),
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("matches an ERRORS! run (errors and failures together; round-1 review fixture)", () => {
+    expect(
+      phpunitDetector.matches({
+        output: readCaptured("phpunit-errors-and-failures"),
+        command: "",
+        exitCode: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it("matches a WARNINGS! run", () => {
+    expect(
+      phpunitDetector.matches({
+        output: readCaptured("phpunit-warnings"),
+        command: "",
+        exitCode: 2,
+      }),
+    ).toBe(true);
+  });
+
   it("does not match vitest, tsc, or eslint captured output (shape disjointness)", () => {
     for (const name of [
       "vitest-fail",
@@ -2317,6 +2357,10 @@ describe("phpunitDetector: captured real output", () => {
       "phpunit-fail",
       "phpunit-no-tests-executed",
       "phpunit-deprecation-notice",
+      "phpunit-skip-and-fail",
+      "phpunit-all-skipped",
+      "phpunit-errors-and-failures",
+      "phpunit-warnings",
     ]) {
       const output = readCaptured(name);
       expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
@@ -2420,6 +2464,92 @@ describe("phpunitDetector: captured real output", () => {
       ),
     ).toBe(true);
   });
+
+  it("parses a run with a real failure AND a real skip: failed/skipped both correctly counted, not zeroed out (round-1 review fixture)", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-skip-and-fail"),
+      command: "vendor/bin/phpunit",
+      exitCode: 1,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 1,
+      skipped: 1,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe("SkipFailTest::testFail");
+  });
+
+  it("parses an all-skipped run: no false pass, skipped counted, no failures (round-1 review fixture)", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-all-skipped"),
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 2,
+      errors: 0,
+      warnings: 0,
+    });
+  });
+
+  it("parses an ERRORS! run: errors and failures both counted (PHPUnit prints Errors: before Failures:), skipped folds in Incomplete too", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-errors-and-failures"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.summary.errors).toBe(1);
+    expect(parsed.summary.failed).toBe(1);
+    expect(parsed.summary.skipped).toBe(2); // 1 Skipped + 1 Incomplete
+    expect(parsed.summary.passed).toBe(2); // 6 total - 1 skipped - 1 incomplete - 1 failed - 1 error
+    expect(parsed.failures).toHaveLength(2);
+    expect(parsed.failures.map((f) => f.name)).toEqual([
+      "ErrFailTest::testError",
+      "ErrFailTest::testFail",
+    ]);
+    // The failures invariant this fixture exercises: every numbered
+    // entry `parse()` extracted is accounted for by errors+failed
+    // together (summary.failed alone undercounts here, since PHPUnit's
+    // own `Failures:` count excludes its `Errors:` count).
+    expect(
+      parsed.summary.failed + parsed.summary.errors,
+    ).toBeGreaterThanOrEqual(parsed.failures.length);
+  });
+
+  it("parses a WARNINGS! run: summary.warnings counted, no false failure from the warning's own numbered entry", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-warnings"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.summary.warnings).toBe(1);
+    expect(parsed.summary.failed).toBe(0);
+    expect(parsed.summary.errors).toBe(0);
+    expect(parsed.failures).toEqual([]);
+  });
+
+  it("failures invariant: summary.failed + summary.errors is never less than the parsed failures list, across every red/error fixture", () => {
+    for (const [name, exitCode] of [
+      ["phpunit-fail", 1],
+      ["phpunit-skip-and-fail", 1],
+      ["phpunit-errors-and-failures", 2],
+    ] as const) {
+      const parsed = phpunitDetector.parse({
+        output: readCaptured(name),
+        command: "vendor/bin/phpunit",
+        exitCode,
+      });
+      expect(
+        parsed.summary.failed + parsed.summary.errors,
+      ).toBeGreaterThanOrEqual(parsed.failures.length);
+    }
+  });
 });
 
 describe("phpstanDetector: captured real output", () => {
@@ -2486,6 +2616,15 @@ describe("phpstanDetector: captured real output", () => {
     expect(parsed.failures[1].line).toBe(12);
     expect(parsed.failures[1].message).toContain("Undefined variable");
   });
+
+  it("selectDetector against DEFAULT_DETECTORS: a real phpstan fixture selects phpstan (pin: deleting phpstanDetector from the array must fail this, not tsc)", () => {
+    const selection = selectDetector(DEFAULT_DETECTORS, genericDetector, {
+      output: readCaptured("phpstan-errors"),
+      command: "vendor/bin/phpstan analyse",
+      exitCode: 1,
+    });
+    expect(selection.detector.name).toBe("phpstan");
+  });
 });
 
 describe("phpcsDetector: captured real output", () => {
@@ -2522,18 +2661,66 @@ describe("phpcsDetector: captured real output", () => {
     }
   });
 
-  it("parses an errors run: every ERROR row (not WARNING rows), file from the FILE header, and the tool's own total", () => {
+  it("parses an errors run: every ERROR row, file from the FILE header, and the tool's own total (exact count, not merely > 0)", () => {
     const parsed = phpcsDetector.parse({
       output: readCaptured("phpcs-errors"),
       command: "vendor/bin/phpcs --standard=PSR12",
       exitCode: 2,
     });
     expect(parsed.summary.errors).toBe(12);
-    expect(parsed.failures.length).toBeGreaterThan(0);
+    expect(parsed.failures).toHaveLength(12);
+    expect(parsed.summary.warnings).toBe(0);
     expect(parsed.failures[0].file).toBe("phpcs-errors/Bad.php");
     expect(parsed.failures[0].line).toBe(1);
     expect(parsed.failures[0].message).toContain(
       "Header blocks must be separated",
     );
+  });
+
+  it("parses a warnings-only run: 0 errors, the tool's own warning total, no rows in failures (WARNING rows excluded)", () => {
+    const parsed = phpcsDetector.parse({
+      output: readCaptured("phpcs-warnings-only"),
+      command: "vendor/bin/phpcs --standard=PSR12",
+      exitCode: 1,
+    });
+    expect(parsed.summary.errors).toBe(0);
+    expect(parsed.summary.warnings).toBe(2);
+    expect(parsed.failures).toEqual([]);
+  });
+
+  it("matches and parses a warnings-only run (exit 1: PHPCS's own measured mapping is 0 clean, 1 warnings-only, 2 errors, 3 processing error)", () => {
+    expect(
+      phpcsDetector.matches({
+        output: readCaptured("phpcs-warnings-only"),
+        command: "",
+        exitCode: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("parses a two-file run: sums every file's own FOUND block instead of reading only the first (round-1 review fixture: 8+8, not 8)", () => {
+    const parsed = phpcsDetector.parse({
+      output: readCaptured("phpcs-two-files"),
+      command: "vendor/bin/phpcs --standard=PSR12",
+      exitCode: 2,
+    });
+    expect(parsed.summary.errors).toBe(16);
+    expect(parsed.failures).toHaveLength(16);
+    // Both files' findings are present, not only the first block's.
+    expect(
+      parsed.failures.some((f) => f.file === "phpcs-two-files/FileA.php"),
+    ).toBe(true);
+    expect(
+      parsed.failures.some((f) => f.file === "phpcs-two-files/FileB.php"),
+    ).toBe(true);
+  });
+
+  it("selectDetector against DEFAULT_DETECTORS: a real phpcs fixture selects phpcs (pin: deleting phpcsDetector from the array must fail this)", () => {
+    const selection = selectDetector(DEFAULT_DETECTORS, genericDetector, {
+      output: readCaptured("phpcs-errors"),
+      command: "vendor/bin/phpcs --standard=PSR12",
+      exitCode: 2,
+    });
+    expect(selection.detector.name).toBe("phpcs");
   });
 });

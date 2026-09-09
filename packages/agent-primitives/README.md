@@ -201,17 +201,26 @@ with the rule id appended to the message when the row carries one, and
 omitted for a rule-less row such as a `Parsing error: ...`; `warning` rows
 count into `summary.warnings` alone and never become a failure, even on a
 zero-exit check). Three more default candidates cover PHP: `phpunit`
-(`OK (N tests, M assertions)`, `FAILURES!` plus its `Tests: N,
-Assertions: M, Failures: F.` tally line, and `No tests executed!`; a
-PHP-level deprecation notice on an otherwise green run is reported as a
-detector warning, not a failure), `phpstan` (` [OK] No errors`, or a
-per-file table closed by ` [ERROR] Found N errors`, `summary.errors`
-preferring that stated total over the row count), and `phpcs` (a
-`FOUND N ERRORS ... AFFECTING M LINES` summary over one `<line> | ERROR
-| message` row per finding; a clean run prints nothing at all, so there
-is no "no errors" shape for this one to match, same as the tsc/eslint
-detectors' own clean captures). See "Non-JS test runners" below for the
-exit-code assumption these three inherit like every other check here.
+(`OK (N tests, M assertions)`; `FAILURES!`/`ERRORS!`/`WARNINGS!`/`OK,
+but incomplete, skipped, or risky tests!` plus a `Tests: N, Assertions:
+M, ...` tally line whose named counts -- `Errors`, `Failures`,
+`Warnings`, `Skipped`, `Incomplete`, `Risky` -- are read by name, not
+position, since PHPUnit's own field order changes with which marker
+fired; and `No tests executed!`; a PHP-level deprecation notice on an
+otherwise green run is reported as a detector warning, not a failure),
+`phpstan` (` [OK] No errors`, or a per-file table closed by ` [ERROR]
+Found N errors`, `summary.errors` preferring that stated total over the
+row count), and `phpcs` (one `FOUND N ERRORS ... AFFECTING M LINES`
+summary PER FILE, summed across every file rather than read from the
+first alone, over one `<line> | ERROR | message` row per finding; a
+clean run prints nothing at all, so there is no "no errors" shape for
+this one to match, same as the tsc/eslint detectors' own clean
+captures). All three target each tool's own DEFAULT non-colorized text
+output; a non-default format (PHPUnit's TestDox reporter or JUnit XML,
+PHPCS's `--error-format=raw`, or forced ANSI colors on any of the
+three) is out of scope and falls to `generic`. See "Non-JS test
+runners" below for the exit-code assumption these three inherit like
+every other check here.
 No reporter flags are injected: whichever of these shapes a check's own
 script happens to print is parsed as-is; a check that emits more than
 one shape at once (a `pretest` build followed by `vitest`, say) is
@@ -1591,40 +1600,41 @@ three things worth naming explicitly.
 `pass`/`fail` from the command's own exit code (`0` is `pass`,
 `126`/`127` are infra `error`s, anything else non-zero is `fail`), and
 `probe`'s `survived`/`killed` verdict is built on the same exit code
-too. PHPUnit, PHPStan, and PHPCS all follow this convention already
-(PHPUnit exits non-zero on any failure or error; PHPStan exits `1` when
-it finds errors; PHPCS exits `1` when it finds errors, `2` when it also
-finds fixable ones), so no wrapper is needed to make a `composer.json`
-`scripts` entry (or an `-x` override) work with either command as-is.
-The PHPUnit-specific corollary lives in `probe`'s zero-tests guard,
-below.
+too. PHPUnit and PHPStan follow this convention directly (PHPUnit exits
+non-zero on any failure or error; PHPStan exits `1` when it finds
+errors). PHPCS's own mapping, measured against real captures (see
+`test/fixtures/README.md`), is `0` clean, `1` when it finds only
+warnings, `2` when it finds any errors (fixable or not), `3` on a
+processing error (e.g. a `--standard` naming no sniffs at all) -- so a
+warnings-only PHPCS run reads as `fail` under this rule's plain
+"anything non-zero is fail", the same as an errors run, even though
+PHPCS itself distinguishes the two by exit code. No wrapper is needed
+to make a `composer.json` `scripts` entry (or an `-x` override) work
+with any of the three commands as-is. The PHPUnit-specific corollary
+lives in `probe`'s zero-tests guard, below.
 
 **The zero-tests guard now knows PHPUnit.** The same
 `no_tests_executed` refusal `probe` already applies to vitest's
 all-skipped/no-test-files shapes and node `--test`'s zero-count summary
-now also recognizes PHPUnit's own `No tests executed!` line and a
-stated `OK (0 tests, 0 assertions)`: a baseline (or mutant run) that
-exits `0` with nothing actually executed is `status: "inconclusive"`,
-`reason: "no_tests_executed"`, never read as a real pass, exactly like
-the vitest/node cases documented under `probe` above.
+now also recognizes PHPUnit's own `No tests executed!` line, a tally
+line whose own stated total (less Skipped and Incomplete) is zero (a
+red run that is ALSO all-skipped/incomplete no longer confuses this
+guard, since it never relies on `passed`/`failed`/`errors` alone), and
+a stated `OK (0 tests, 0 assertions)` (defensive -- not observed from a
+real capture; PHPUnit 9.6.36 prints `No tests executed!` for an empty
+suite instead): a baseline (or mutant run) that exits `0` with nothing
+actually executed is `status: "inconclusive"`, `reason:
+"no_tests_executed"`, never read as a real pass, exactly like the
+vitest/node cases documented under `probe` above.
 
-**The pass predicate.** `--pass-regex <regex>` (`passWhen: { regex }`
-in a `--plan` file) lets `probe` and `verify` judge a check by matching
-a pattern against its output instead of by exit code alone -- useful
-for a runner whose own exit code is not the whole story (a wrapper
-script, a runner that always exits `0`), and shipped in this same
-release.
-
-**The composer link rule.** A worktree-isolated `probe` run
-(`isolation: "worktree"`) auto-links `node_modules` into the fresh
-worktree so a Node project's dependencies do not need reinstalling per
-mutant; the same now happens for a PHP project's `composer.json`
-`vendor-dir` and `bin-dir` (auto-detected and auto-linked the same way
-`node_modules` is), so `vendor/bin/phpunit` and friends resolve in the
-isolated worktree without a `composer install` per mutant. A plan
-file's own `link:` list, and a repo-level `.agent-primitives.json`
-defaults file (`{ "link": [...] }`), extend this to any other directory
-a project wants linked the same way. Shipped in this same release.
+**The pass predicate and the composer link rule** are two more PHP-
+relevant additions landing in this same release window, on their own
+tasks (issue #225 parts 1 and 2: a `--pass-regex`/`passWhen` pass
+predicate, and a composer `vendor-dir`/`bin-dir` link rule) still open
+at the time of writing, so their exact surface is unsettled here; each
+task documents its own option in its own section once merged. This
+section only names the exit-code assumption they, like every other
+check here, still inherit.
 
 ## Output shape
 
