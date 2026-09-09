@@ -5198,6 +5198,19 @@ describe("the reviewer checklist items mirrored in this table still carry their 
 // an unclosed fence makes them throw, same as this guard -- accepted
 // as the same latent, currently-unused-shape cost, not a new one.
 
+// Round 4 lows (agent-dx 4ece8e1e): hoisted to module scope, beside
+// `citationScanParagraphs`, so both consumers below (`extractSiblingGuard
+// Citations`'s continuation-vs-full-tail filter, and `checkLogCitations`'s
+// own continuation-form rule) read the SAME regex object rather than each
+// carrying its own byte-identical hand copy with no coupling between them
+// (round 2's `PATH_SHAPED_BEFORE_MATCH_RE` and the log guard's own
+// `PATH_SHAPED_BEFORE_RE`, previously declared locally inside each
+// function). A single definition makes a drift between the two copies
+// structurally impossible, rather than merely asserted: a real
+// continuation is never directly preceded by a bare path (e.g. a `.toml`
+// citation's own `:N-M#"..."` tail), regardless of which caller is asking.
+const PATH_SHAPED_BEFORE_RE = /[\w./-]+\.[A-Za-z0-9]+$/;
+
 interface CitationScanParagraph {
   paragraphId: number;
   /** The paragraph's own lines, trimmed and re-joined with one space. */
@@ -5335,8 +5348,9 @@ function extractSiblingGuardCitations(
   // itself path-shaped (ends in `something.ext`) regardless of what that
   // extension is -- a real continuation is always preceded by prose or a
   // citation delimiter (`;`, `,`, whitespace), never directly by a bare
-  // path.
-  const PATH_SHAPED_BEFORE_MATCH_RE = /[\w./-]+\.[A-Za-z0-9]+$/;
+  // path. Round 4 lows: `PATH_SHAPED_BEFORE_RE` is the module-scope const
+  // beside `citationScanParagraphs`, shared with `checkLogCitations`'s own
+  // use of the same rule (no more hand-copied, driftable duplicate).
   const scanned = citationScanParagraphs(
     docText,
     "citation-sibling-drift guard",
@@ -5367,9 +5381,7 @@ function extractSiblingGuardCitations(
         (cm) =>
           !fullMatches.some((fm) => cm.index >= fm.index && cm.index < fm.end),
       )
-      .filter(
-        (cm) => !PATH_SHAPED_BEFORE_MATCH_RE.test(text.slice(0, cm.index)),
-      );
+      .filter((cm) => !PATH_SHAPED_BEFORE_RE.test(text.slice(0, cm.index)));
     // Process both kinds in true left-to-right document order so a full
     // citation earlier in the same paragraph updates the governing path
     // before a continuation later in that same paragraph reads it --
@@ -6261,6 +6273,47 @@ describe("citation-sibling-drift guard: fixtures reproduce the three review-batc
         `line" check): got last content line ${lastContentLine} = ` +
         JSON.stringify(anchorLine),
     ).toBe(false);
+  });
+
+  // Round 4 lows (agent-dx 4ece8e1e): the paragraph join through
+  // `citationScanParagraphs` is pinned at the log guard's own wrap
+  // fixtures (`checkLogCitations`, below), but `extractSiblingGuardCitations`
+  // is a separate function that also calls that helper, and nothing here
+  // pinned ITS OWN use of the join. A mutant that reverts
+  // `extractSiblingGuardCitations` alone back to a per-physical-line scan
+  // (bypassing `citationScanParagraphs`) would still pass every fixture
+  // above unchanged -- none of them puts a citation's own text across a
+  // hard line break -- while the log guard's fixtures, which exercise a
+  // different function, keep passing regardless. This fixture wraps BOTH
+  // a full citation's anchor and a path-less continuation's anchor across
+  // a hard line break in the same synthetic doc: a per-line reversion
+  // cannot match either (the anchor's closing quote is on the next
+  // physical line, invisible to ANCHOR_CITATION_RE/ANCHOR_CONTINUATION_
+  // CITATION_RE run one line at a time), so extraction would silently
+  // yield nothing at all. Each citation must still be reported at the
+  // PHYSICAL line its own text starts on (before the wrap), not the line
+  // its anchor happens to finish on.
+  it("a full citation and a path-less continuation whose own anchors each straddle a hard line break are still extracted by extractSiblingGuardCitations, each at the physical line its own text starts on", () => {
+    const docText =
+      'a full citation whose anchor wraps across the break (fixture-wrap.test.ts:5-6#"first line\n' +
+      'anchor") and, in the same paragraph, a continuation whose anchor also wraps (:9-10#"second line\n' +
+      'anchor") appear together.\n';
+    const citations = extractSiblingGuardCitations(docText, identity);
+    expect(
+      citations.map((c) => ({
+        real: c.real,
+        start: c.start,
+        end: c.end,
+        line: c.line,
+      })),
+      "both the full citation and the path-less continuation must be " +
+        "extracted despite each one's own anchor straddling a hard line " +
+        "break, each reported at the physical line its citation TEXT " +
+        `starts on (not the line its anchor happens to close on): ${JSON.stringify(citations)}`,
+    ).toEqual([
+      { real: "fixture-wrap.test.ts", start: 5, end: 6, line: 1 },
+      { real: "fixture-wrap.test.ts", start: 9, end: 10, line: 2 },
+    ]);
   });
 });
 
@@ -7461,14 +7514,13 @@ describe("docs/okf/log.md's own citations resolve, and it carries no path-less c
     resolveRealPath: (citedPath: string) => LogPathResolution,
     readTarget: (real: string) => string,
   ): LogCitationCheckResult {
-    // Round 2's own `PATH_SHAPED_BEFORE_MATCH_RE` (see
-    // `extractSiblingGuardCitations` above), duplicated here narrowly: a
-    // real continuation is never directly preceded by a bare path (e.g. a
-    // `.toml` citation's own `:N-M#"..."` tail), and this guard forbids
-    // the continuation FORM outright rather than resolving it, so it
-    // cannot reuse that function's resolved-citations return value to
-    // tell the two apart.
-    const PATH_SHAPED_BEFORE_RE = /[\w./-]+\.[A-Za-z0-9]+$/;
+    // The module-scope `PATH_SHAPED_BEFORE_RE` beside `citationScan
+    // Paragraphs` (round 4 lows: shared with `extractSiblingGuardCitations`
+    // above, no more hand-copied duplicate): a real continuation is never
+    // directly preceded by a bare path (e.g. a `.toml` citation's own
+    // `:N-M#"..."` tail), and this guard forbids the continuation FORM
+    // outright rather than resolving it, so it cannot reuse that
+    // function's resolved-citations return value to tell the two apart.
     const unresolvedFullCitations: string[] = [];
     const anchorNotInRange: string[] = [];
     const continuationForms: string[] = [];
@@ -7656,6 +7708,18 @@ describe("docs/okf/log.md's own citations resolve, and it carries no path-less c
       resolveLogCitationPath("packages/orchestrator-workflow/../../README.md")
         .real,
     ).toBeUndefined();
+    // Round 4 lows (agent-dx 4ece8e1e): the `..`-segment rejection above
+    // fires before the on-disk fallback ever runs, so it cannot pin the
+    // fallback's OWN containment check. `/etc/hosts` carries no `..`
+    // segment and reliably exists on disk (macOS and Linux CI runners
+    // alike), so it reaches the fallback: `path.resolve(repoRoot,
+    // "/etc/hosts")` discards `repoRoot` (an absolute second argument
+    // wins), leaving a candidate outside the repository that only the
+    // `candidate.startsWith(repoRoot + sep)` conjunct rejects.
+    // Neutralising that conjunct to `true &&` would let this resolve
+    // (the file exists), silently reading and anchor-checking a real
+    // file outside the repository.
+    expect(resolveLogCitationPath("/etc/hosts").real).toBeUndefined();
   });
 
   it("fixture: a bare basename that also exists at the repository root is reported ambiguous, not silently bound to this package's own file", () => {

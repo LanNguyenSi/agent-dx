@@ -338,6 +338,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count of what a guard found; the live figures are the guards' own
   computed test names, read off a passing run.
 
+### Fixed
+
+- Three unpinned properties from the review round 4 lows above
+  (task agent-dx 4ece8e1e) now have a discriminating fixture each: the
+  `log.md` resolver's on-disk fallback is checked against an existing,
+  outside-the-repository absolute path so its own containment conjunct is
+  no longer redundant with the `..`-segment rejection; `extractSiblingGuard
+  Citations` gets its own wrapped-citation fixture (full citation and
+  continuation each straddling a hard line break), independent of the
+  `log.md` guard's; and the previously duplicated `PATH_SHAPED_BEFORE_RE`
+  path-shaped regex is now one module-scope const both call sites read,
+  so the two copies can no longer drift apart.
+
 ## [0.31.0] - 2026-09-07
 
 ### Changed
