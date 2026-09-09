@@ -188,6 +188,7 @@ export type ProbeStatus =
  * other baseline-phase reasons. */
 export type RefusalReason =
   | "worktree_allow_outside_unsupported"
+  | "test_command_escapes_isolation"
   | "file_outside_root"
   | "probe_in_progress"
   | "lock_unavailable"
@@ -243,6 +244,7 @@ export const REFUSAL_RESULT_SHAPE: Record<
   { mutant: boolean; mutationProbe: boolean }
 > = {
   worktree_allow_outside_unsupported: { mutant: false, mutationProbe: false },
+  test_command_escapes_isolation: { mutant: false, mutationProbe: false },
   file_outside_root: { mutant: false, mutationProbe: false },
   probe_in_progress: { mutant: false, mutationProbe: false },
   lock_unavailable: { mutant: false, mutationProbe: false },
