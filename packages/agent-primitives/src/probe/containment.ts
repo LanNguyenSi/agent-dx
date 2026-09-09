@@ -346,10 +346,10 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  *   those characters, is still reported.
  *
  * The scope is a LITERALLY SPELLED root path, not "every way a command
- * can reach the real tree". Quoting, backslash escaping, `=`-forms,
- * wrappers, separator noise and, where the filesystem folds case,
- * casing are covered; anything that reaches the root without spelling
- * it that way is a residual this rule does not claim. The residuals
+ * can reach the real tree". Quoting and backslash escaping AROUND a
+ * spelling, `=`-forms, wrappers, separator noise and, where the
+ * filesystem folds case, casing are covered; anything that reaches the
+ * root without spelling it out that way is a residual. The residuals
  * KNOWN TODAY, which is not a claim that they are all of them (the
  * README's `-i worktree` section carries the same list for callers):
  * a path built at run time from a shell variable this tool does not
