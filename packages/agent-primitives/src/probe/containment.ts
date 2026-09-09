@@ -107,15 +107,23 @@ const PATH_REGION_TERMINATORS = new Set([
 /**
  * True when the character at `index` ends the path spelled just before
  * it: the end of the text, a `/` (the same directory, named with a
- * deeper component after it), or a character that cannot continue a
- * path component at all. A spelling NOT followed by one of these is
- * the prefix of a DIFFERENT path that merely starts with the same
- * characters -- a sibling `<root>2`, or `<root>-backup` -- and naming
- * one of those is not an escape into `root`.
+ * deeper component after it), a `\` that escapes such a `/` (every
+ * POSIX shell reads `\/` as `/`, so `<root>\/pkg` names `<root>/pkg`),
+ * or a character that cannot continue a path component at all. A
+ * spelling NOT followed by one of these is the prefix of a DIFFERENT
+ * path that merely starts with the same characters -- a sibling
+ * `<root>2`, or `<root>-backup` -- and naming one of those is not an
+ * escape into `root`.
+ *
+ * A bare `\` is deliberately NOT a boundary: the escaped space of
+ * `<root>\ backup` is part of a sibling's name, not a separator, so
+ * treating `\` itself as a boundary would report that sibling as a
+ * mention of `root`. Only the `\` of a `\/` pair ends the spelling.
  */
 function isPathBoundaryAt(text: string, index: number): boolean {
   if (index >= text.length) return true;
   const ch = text[index];
+  if (ch === "\\" && text[index + 1] === "/") return true;
   return ch === "/" || PATH_REGION_TERMINATORS.has(ch);
 }
 
@@ -156,15 +164,25 @@ function escapeRegExp(s: string): string {
 }
 
 /**
- * What one `/` in a spelling matches: a run of one or more separators
- * with any number of `.` ("this directory") segments among them, so
- * `<root>//pkg` and `<root>/./pkg`, which reach the same directory as
- * `<root>/pkg`, are matched as mentions of it. A `..` segment is
- * deliberately not in here: it names a DIFFERENT directory, so
- * accepting one would mean normalising the path rather than matching
- * its spelling (named as a residual on `escapingRootMentions`).
+ * What one `/` in a spelling matches: a run of one or more separators,
+ * each optionally backslash-escaped, with any number of `.` ("this
+ * directory") segments among them, so `<root>//pkg`, `<root>/./pkg`
+ * and `<parent>\/<base>/pkg`, which all reach the same directory as
+ * `<root>/pkg`, are matched as mentions of it. The `\` is optional
+ * because a shell reads `\/` as `/`, so an escaped separator INSIDE
+ * the root prefix spells the root just as the bare one does. A `..`
+ * segment is deliberately not in here: it names a DIFFERENT directory,
+ * so accepting one would mean normalising the path rather than
+ * matching its spelling (named as a residual on
+ * `escapingRootMentions`).
+ *
+ * Matching this against a long run of separators that never completes
+ * a spelling backtracks, so the scan's worst case is quadratic in the
+ * length of the scanned text; the text is this run's own operator-
+ * supplied `-t`/`--pre`/`--env` string, not attacker input, so no
+ * length cap is imposed on it.
  */
-const PATH_SEPARATOR_PATTERN = "/+(?:\\./+)*";
+const PATH_SEPARATOR_PATTERN = "(?:\\\\?/)+(?:\\.(?:\\\\?/)+)*";
 
 /**
  * A matcher for one spelling: every character matched literally
@@ -303,10 +321,13 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * `root` never spells it, so nothing outside the root is flagged.
  * Four things shape the match itself:
  *
- * - separator noise inside a spelling is tolerated, so `<root>//pkg`
- *   and `<root>/./pkg` are mentions of `root` (`spellingMatcher`);
+ * - separator noise inside a spelling is tolerated, so `<root>//pkg`,
+ *   `<root>/./pkg` and `<parent>\/<base>/pkg` are mentions of `root`
+ *   (`spellingMatcher`);
  * - a match must be followed by a path boundary (`isPathBoundaryAt`),
- *   so a sibling `<root>2` is NOT a mention of `root`;
+ *   which an escaped separator is (`<root>\/pkg`) and a bare
+ *   backslash is not, so a sibling `<root>2` or `<root>\ backup` is
+ *   NOT a mention of `root`;
  * - on a case-insensitive filesystem (measured, see
  *   `isCaseInsensitiveFilesystem`; `caseInsensitive` overrides the
  *   measurement, for tests) the match ignores case, so a miscased but
@@ -329,19 +350,23 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * wrappers, separator noise and, where the filesystem folds case,
  * casing are covered; anything that reaches the root without spelling
  * it that way is a residual this rule does not claim. The residuals
- * (the README's `-i worktree` section carries the same list for
- * callers): a path built at run time from a shell variable this tool
- * does not own (`cd "$REPO" && ...`), a command substitution
- * (`$(...)`), or `~` expansion; a RELATIVE path that walks out of the
- * isolation copy via `..`; an absolute path that walks back INTO the
- * root through `..` (`/abs/x/../my repo`), which this scan does not
- * normalise; a spelling that differs only in unicode normalisation (a
- * decomposed spelling of a composed root, which a filesystem may
- * resolve to the same directory); a wrapper script that itself `cd`s
- * using a path not spelled out in the scanned string; a path reaching
- * `root` only through a symlink alias that is neither `root`'s own
- * as-given spelling nor its realpath; and a repository root containing
- * a character neither spelling represents (e.g. a literal quote inside
+ * KNOWN TODAY, which is not a claim that they are all of them (the
+ * README's `-i worktree` section carries the same list for callers):
+ * a path built at run time from a shell variable this tool does not
+ * own (`cd "$REPO" && ...`), a command substitution (`$(...)`), or `~`
+ * expansion; a RELATIVE path that walks out of the isolation copy via
+ * `..`; an absolute path that walks back INTO the root through `..`
+ * (`/abs/x/../my repo`), which this scan does not normalise; a
+ * spelling broken up from the INSIDE by quoting or backslash escaping
+ * (`/x/re"p"o`, `/x/re\po`), which the shell rejoins into the root but
+ * the scanned text never carries as one run of characters; a spelling
+ * that differs only in unicode normalisation (a decomposed spelling of
+ * a composed root, which a filesystem may resolve to the same
+ * directory); a wrapper script that itself `cd`s using a path not
+ * spelled out in the scanned string; a path reaching `root` only
+ * through a symlink alias that is neither `root`'s own as-given
+ * spelling nor its realpath; and a repository root containing a
+ * character neither spelling represents (e.g. a literal quote inside
  * the path).
  */
 export function escapingRootMentions(

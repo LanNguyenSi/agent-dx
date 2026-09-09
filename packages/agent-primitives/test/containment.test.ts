@@ -356,10 +356,72 @@ describe("escapingRootMentions()", () => {
     ]);
   });
 
+  /** `<root>` with the separator before its last component escaped
+   * (`\/`), so the escape sits INSIDE the root prefix. A shell reads
+   * `\/` as `/`, so this reaches exactly the directory `<root>` does. */
+  function escapedSeparator(root: string): string {
+    return `${path.dirname(root)}\\/${path.basename(root)}`;
+  }
+
+  it("an escaped separator right AFTER the root is a boundary, so `<root>\\/pkg` is a mention of the root", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    // `\/` is `/` to the shell, so this command reaches `<root>/pkg`.
+    // The match ends at the `\`, which only counts as the end of the
+    // path because a `/` follows it.
+    expect(escapingRootMentions(`cd ${root}\\/pkg && node t.js`, root)).toEqual(
+      [`${root}\\/pkg`],
+    );
+    // Quoted and in a bare (env-shaped) value, the same way.
+    expect(
+      escapingRootMentions(`cd '${root}\\/pkg' && node t.js`, root),
+    ).toEqual([`${root}\\/pkg`]);
+    expect(escapingRootMentions(`${root}\\/.cache`, root)).toEqual([
+      `${root}\\/.cache`,
+    ]);
+  });
+
+  it("an escaped separator INSIDE the root prefix is still a mention of the root", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const noisy = `${escapedSeparator(root)}/pkg`;
+    expect(escapingRootMentions(`cd '${noisy}' && node t.js`, root)).toEqual([
+      noisy,
+    ]);
+  });
+
+  it("a BARE backslash after the root is not a boundary: a sibling spelled with an escaped space is not a mention of the root", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    // `<root>\ backup` is one token naming a SIBLING whose name ends in
+    // a space and `backup`, not the root followed by a separator. The
+    // `\/` boundary above must not widen to every backslash.
+    expect(
+      escapingRootMentions(`ls ${root}\\ backup; node t.js`, root),
+    ).toEqual([]);
+    // The escaped-space spelling of the ROOT itself is still reported
+    // (it is the root, not a sibling), which is what distinguishes the
+    // two: the escaped space sits INSIDE the root's own name there.
+    const spacedParent = makeTmpDir();
+    const spacedRoot = resolveDeepestExisting(
+      path.resolve(fs.mkdtempSync(path.join(spacedParent, "my repo-"))),
+    );
+    const escaped = spacedRoot.replace(/ /g, "\\ ");
+    expect(
+      escapingRootMentions(`cd ${escaped} && node t.js`, spacedRoot),
+    ).toEqual([escaped]);
+  });
+
   it("a `..` segment is NOT tolerated: it names a different directory, and normalising is outside this rule (documented residual)", () => {
     const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
     const walked = `${path.dirname(root)}/x/../${path.basename(root)}/pkg`;
     expect(escapingRootMentions(`cd '${walked}' && node t.js`, root)).toEqual(
+      [],
+    );
+    // The discriminating case: this spelling differs from the matching
+    // `<parent>/./<base>/pkg` in the `..` and NOTHING else, so a
+    // separator pattern that tolerated `..` alongside `.` would report
+    // it (and would report `<parent>/../<base>` as an escape into a
+    // root the command never reaches).
+    const onlyDots = `${path.dirname(root)}/../${path.basename(root)}/pkg`;
+    expect(escapingRootMentions(`cd '${onlyDots}' && node t.js`, root)).toEqual(
       [],
     );
   });

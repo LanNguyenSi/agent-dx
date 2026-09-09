@@ -43,14 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `=`-form or wrapper surrounds it (a plain `cd /abs/...`, a quoted
   path containing whitespace, a backslash-escaped space, a `--key=/abs`
   token, a `sh -c "..."` wrapper), and separator noise inside the path
-  (`<root>//pkg`, `<root>/./pkg`) is tolerated as the same directory.
-  The root is matched under two spellings (its own, as resolved, and
-  its realpath, each also with spaces backslash-escaped), matched
-  case-insensitively on a filesystem measured (by device and inode
-  under the case-flipped spelling) to resolve a miscased path to the
-  same directory and exactly otherwise, and only where the match ends
-  at a path boundary, so a sibling `<root>2` is not a mention of the
-  root. A match that resolves under the run's own `--log-dir` is
+  (`<root>//pkg`, `<root>/./pkg`, and a backslash-escaped separator
+  `<parent>\/<base>/pkg`, which every POSIX shell reads as a plain
+  `/`) is tolerated as the same directory. The root is matched under
+  two spellings (its own, as resolved, and its realpath, each also
+  with spaces backslash-escaped), matched case-insensitively on a
+  filesystem measured (by device and inode under the case-flipped
+  spelling) to resolve a miscased path to the same directory and
+  exactly otherwise, and only where the match ends at a path boundary
+  -- the end of the string, a `/`, a `\` escaping such a `/` (so
+  `<root>\/pkg` is refused), or a character that cannot continue a
+  path component -- so a sibling `<root>2`, and equally a sibling
+  `<root>\ backup` whose backslash escapes a space in its OWN name,
+  is not a mention of the root. A match that resolves under the run's own `--log-dir` is
   excluded rather than refused (the one case a path under the
   repository root legitimately names the isolation copy itself), but
   only when that `--log-dir` is strictly under the root and only at a
@@ -61,17 +66,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absolute path under the root (a cache directory, `--env
   CACHE_DIR=<root>/.cache`) is refused too, with the same two fixes
   named. This is a best-effort gate on a literal spelling, not a proof
-  that a command stays inside the copy: a path built at run time from a
-  shell variable, a command substitution or `~` expansion, a relative
-  path that walks out via `..`, an absolute path that walks back in
-  through `..` (`/abs/x/../my repo`, which the scan does not
-  normalise), a spelling differing only in unicode normalisation, a
+  that a command stays inside the copy, and the residuals below are the
+  ones known today rather than a closed set: a path built at run time
+  from a shell variable, a command substitution or `~` expansion, a
+  relative path that walks out via `..`, an absolute path that walks
+  back in through `..` (`/abs/x/../my repo`, which the scan does not
+  normalise), a spelling broken up from the INSIDE by quoting or
+  backslash escaping (`/x/re"p"o`, `/x/re\po`, which the shell rejoins
+  into the root while the scanned string never carries it as one run of
+  characters), a spelling differing only in unicode normalisation, a
   wrapper script that itself `cd`s using an unspelled path, a third
   unrelated symlink alias to the root, and a root path containing a
-  character neither spelling represents all reach the real tree without
-  being refused (README, same list). The rounds this took, the shapes
-  each one closed and the reproductions behind them are in the run
-  files for this task.
+  character neither spelling represents each reach the real tree
+  without being refused (README, same list). The rounds this took, the
+  shapes each one closed and the reproductions behind them are in the
+  run files for this task.
 
 - `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
   (or mutant run) that exited `0` with nothing actually executed was

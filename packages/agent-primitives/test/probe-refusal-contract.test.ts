@@ -1086,4 +1086,89 @@ describe("probe(): test-command isolation-escape detection", () => {
     expect(result.warnings.join(" ")).toContain(noisy);
     expect(result.warnings.join(" ")).toContain(ISOLATION_ESCAPE_ENV_FIX_HINT);
   });
+
+  // --- An ESCAPED separator, `\/`, which every POSIX shell reads as a
+  // plain `/`: `cd <root>\/pkg` is one contiguous literal spelling of
+  // the root that reaches the real tree exactly as `cd <root>/pkg`
+  // does. One test per channel, since each is scanned at its own call
+  // site (`setup.ts`), plus the escape sitting inside the root prefix
+  // rather than after it. ---
+
+  it("an escaped separator after the repository root is refused in the test command", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd ${repo}\\/pkg && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(`${repo}\\/pkg`);
+  });
+
+  it("an escaped separator after the repository root is refused in --pre", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        preCommand: `cd ${repo}\\/pkg && true`,
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain("--pre");
+    expect(result.warnings.join(" ")).toContain(`${repo}\\/pkg`);
+  });
+
+  it("an escaped separator after the repository root is refused in an --env value", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        env: { CACHE_DIR: `${repo}\\/.cache` },
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain("--env CACHE_DIR");
+    expect(result.warnings.join(" ")).toContain(`${repo}\\/.cache`);
+  });
+
+  it("an escaped separator INSIDE the repository root prefix is refused in the test command", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const noisy = `${path.dirname(repo)}\\/${path.basename(repo)}/pkg`;
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd '${noisy}' && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(noisy);
+  });
+
+  it("a sibling spelled with an escaped SPACE is not refused: a bare backslash does not end the root's spelling", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // `<repo>\ backup` is one token naming a SIBLING whose name ends in
+    // a space and `backup`, not the repository root followed by a
+    // separator, so it must reach a verdict rather than the
+    // isolation-escape refusal.
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `ls ${repo}\\ backup > /dev/null 2>&1; node fixture.test.js`,
+      }),
+    );
+    expect(result.reason).toBeUndefined();
+    expect(result.status).toBe("killed");
+  });
 });
