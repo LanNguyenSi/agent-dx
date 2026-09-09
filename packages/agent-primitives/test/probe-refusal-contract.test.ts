@@ -12,11 +12,16 @@ import {
   REFUSAL_RESULT_SHAPE,
   type RefusalReason,
 } from "../src/probe/session.js";
-import { writeMarker, readMarkerFor } from "../src/lock.js";
+import { writeMarker } from "../src/lock.js";
 import { execCommand } from "../src/exec.js";
 import { computeMutant } from "../src/probe/mutant.js";
 import { beginInplace } from "../src/probe/isolation.js";
-import { resolveDeepestExisting } from "../src/probe/containment.js";
+import {
+  ISOLATION_ESCAPE_CHANNEL_LABEL,
+  ISOLATION_ESCAPE_FIX_HINT,
+  resolveDeepestExisting,
+} from "../src/probe/containment.js";
+import { expectNoIsolationLeftovers } from "./helpers/no-leftovers.js";
 import { runArgv } from "../src/probe/run.js";
 
 /**
@@ -91,13 +96,6 @@ function useLockDir(): string {
 
 function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd });
-}
-
-function worktreeList(repo: string): string {
-  return execFileSync("git", ["worktree", "list", "--porcelain"], {
-    cwd: repo,
-    encoding: "utf8",
-  });
 }
 
 const FIXTURE_JS = [
@@ -635,13 +633,21 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
  * copy while a `-t` command that names an absolute path back into the
  * real repository root runs against the REAL, unmutated tree -- the
  * exact shape that gave a false `survived` in batch 45 (D-033: `cd
- * /abs/worktree/backend && npx vitest run ...`). These tests pin the
- * fix's actual boundary, beyond the generic contract loop above (which
- * only checks that the reason/shape match, not the surrounding cases):
- * the same command relative from the package dir still gets a real
- * verdict, a symlinked repository root still refuses (the realpath
- * comparison, not a string prefix), an absolute path OUTSIDE the repo
- * is left alone, and `-i inplace` is exempt entirely.
+ * /abs/worktree/backend && npx vitest run ...`). Round 3 (D-033, this
+ * batch) replaced the tokenizer both round 1 and round 2 built on with
+ * a substring rule (`containment.ts`'s `escapingRootMentions`): each of
+ * those rounds closed one reviewer-found quoting/escaping shape and
+ * left another (a quoted path with whitespace, a `--key=/abs` value,
+ * `--pre` never scanned, then a `sh -c "..."` wrapper read as one
+ * opaque token and a backslash-escaped space splitting a path in two).
+ * These tests pin the fix's actual boundary, beyond the generic
+ * contract loop above (which only checks that the reason/shape match,
+ * not the surrounding cases): every shape the three rounds enumerated,
+ * a `--env` value (the round-2 survivor closed this round), the
+ * `--log-dir`-inside-the-repo exemption, root reached via its own
+ * symlink spelling, an absolute path OUTSIDE the repo left alone, and
+ * `-i inplace` exempt entirely. Direct unit coverage of the substring
+ * rule itself lives in `containment.test.ts`.
  */
 describe("probe(): test-command isolation-escape detection (task 5bf16459)", () => {
   it("fixture pair: the absolute-cd shape is refused, the same test relative from the package dir is killed", async () => {
@@ -670,20 +676,25 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     expect(relative.reason).toBeUndefined();
   });
 
-  it("a repository root reached through a symlink still refuses: the realpath comparison, not a string-prefix one", async () => {
+  it("a repository root given via a symlink still refuses when the command spells it by its realpath instead", async () => {
     useLockDir();
     const { repo } = initRepo();
     const linkParent = makeTmpDir();
     const link = path.join(linkParent, "linked-repo");
     fs.symlinkSync(repo, link, "dir");
-    // The test command names the SYMLINKED path, never the real one: a
-    // string-prefix comparison against the resolved root would miss
-    // this (the symlink path is not a prefix match), while the
-    // realpath comparison this fix uses resolves both sides first.
+    // cwd (and so the computed root) is the SYMLINK; the test command
+    // spells the repository root via its REALPATH instead (which, on a
+    // macOS runner, differs from `repo`'s own as-given spelling too --
+    // /var is itself a symlink to /private/var -- so this resolves
+    // through BOTH symlinks). The substring rule recognizes a root's
+    // as-given spelling and its realpath (`containment.test.ts` pins
+    // this directly); a third, unrelated symlink alias pointing at the
+    // same target is a documented residual (README), not covered here.
+    const real = resolveDeepestExisting(repo);
     const result = await probe(
-      baseOptions(repo, {
+      baseOptions(link, {
         isolation: "worktree",
-        testCommand: `cd ${link} && node fixture.test.js`,
+        testCommand: `cd ${real} && node fixture.test.js`,
       }),
     );
     expect(result.status).toBe("usage_error");
@@ -716,8 +727,9 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     expect(result.reason).toBeUndefined();
   });
 
-  // --- Round 2 (task 5bf16459): three fail-open shapes review found in
-  // round 1's whitespace-split, prefix-only tokenizer, now closed. ---
+  // --- Round 2: two of three fail-open shapes review found in round 1's
+  // whitespace-split, prefix-only tokenizer (the third, --pre, is its
+  // own test below). Still closed by the round-3 substring rule. ---
 
   it("a quoted absolute path containing a space is refused, not read as a plain string prefix", async () => {
     useLockDir();
@@ -778,6 +790,102 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     expect(relative.reason).toBeUndefined();
   });
 
+  // --- Round 3 (D-033 redesign): the two shapes round 2's tokenizer
+  // still missed (a `sh -c` wrapper, a backslash-escaped space), the
+  // third unscanned channel (`--env`), and the scratch-root wiring
+  // pinned at the probe level (round 2's review found it unpinned). ---
+
+  it("a sh -c wrapper naming the repository root is refused, even though the whole command is one shell-quoted string", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `sh -c "cd ${repo} && node fixture.test.js"`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(repo);
+  });
+
+  it("a backslash-escaped space in an absolute repository path is refused", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const spacedParent = makeTmpDir();
+    const spacedRepoDir = path.join(spacedParent, "my repo");
+    fs.renameSync(repo, spacedRepoDir);
+    const escaped = spacedRepoDir.replace(/ /g, "\\ ");
+    const result = await probe(
+      baseOptions(spacedRepoDir, {
+        isolation: "worktree",
+        testCommand: `cd ${escaped} && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+  });
+
+  it("an --env value carrying the repository root is refused, naming --env <NAME> in the message, even though neither command string mentions the root directly", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        env: { REPO: repo },
+        testCommand: `sh -c 'cd "$REPO" && node fixture.test.js'`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain("--env REPO");
+    expect(result.warnings.join(" ")).toContain(repo);
+  });
+
+  it("an --env value naming a path OUTSIDE the repository root is not refused", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        env: { OUTSIDE: outside },
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+  });
+
+  it("an absolute path under a --log-dir pointed inside the repository does not trigger the refusal (the scratch-root exemption; the round-2 survivor)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, "aplogs");
+    fs.mkdirSync(logDir, { recursive: true });
+    const underLogDir = path.join(logDir, "wt-1", "wt");
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        logDir,
+        // The absolute mention resolves under this run's own --log-dir
+        // (the scratch root), so it must not read as an escape; the
+        // command still runs for real (a relative `node
+        // fixture.test.js`), so this reaches an actual kill/survive
+        // verdict rather than merely avoiding a refusal.
+        testCommand: `echo ${underLogDir} > /dev/null && node fixture.test.js`,
+      }),
+    );
+    expect(result.reason).toBeUndefined();
+    expect(result.status).toBe("killed");
+  });
+
+  it("pins the load-bearing fragments of the isolation-escape refusal message against the shared message constants", () => {
+    expect(ISOLATION_ESCAPE_FIX_HINT).toContain("--isolation inplace");
+    expect(ISOLATION_ESCAPE_FIX_HINT).toContain("--link");
+    expect(ISOLATION_ESCAPE_CHANNEL_LABEL.pre).toBe("--pre");
+    expect(ISOLATION_ESCAPE_CHANNEL_LABEL.env("REPO")).toBe("--env REPO");
+  });
+
   it("a refusal on this path leaves no worktree, lock, or marker behind", async () => {
     const lockDir = useLockDir();
     const { repo } = initRepo();
@@ -792,13 +900,6 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     // Only the main worktree (the repo itself) is registered: no linked
     // worktree was ever added, since the refusal happens before
     // `beginWorktree` runs at all.
-    const list = worktreeList(repo);
-    expect(list.split("\n\n").filter((b) => b.trim().length > 0)).toHaveLength(
-      1,
-    );
-    expect(readMarkerFor(resolveDeepestExisting(repo))).toBeUndefined();
-    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
-      [],
-    );
+    expectNoIsolationLeftovers(repo, lockDir);
   });
 });

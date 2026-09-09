@@ -22,37 +22,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `probe` refuses a test command or `--pre` that escapes `-i worktree`'s
-  isolation copy (task `5bf16459`): batch 45 (D-033) gave a `-t` command
-  of the shape `cd /abs/worktree/backend && npx vitest run ...`, which
-  never touches the isolated copy at all and ran the real, unmutated
-  tree instead, reporting `survived` for a mutant the test actually
-  kills. An absolute path under the real repository root named in the
-  test command or `--pre` (a `cd <abs>`, an absolute file/dir argument,
-  a quoted path containing whitespace, or the value half of a
-  `--key=/abs` token) is now refused outright
+- `probe` refuses a test command, `--pre`, or an `--env` value that
+  escapes `-i worktree`'s isolation copy (task `5bf16459`): a `-t`
+  command of the shape `cd /abs/worktree/backend && npx vitest run ...`
+  never touches the isolated copy at all and runs against the real,
+  unmutated tree instead, reporting `survived` for a mutant the test
+  actually kills. Any of the three channels containing the real
+  repository root as a literal substring (whatever quoting, escaping,
+  `=`-form or wrapper surrounds it -- a plain `cd /abs/...`, a quoted
+  path containing whitespace, a backslash-escaped space, a `--key=/abs`
+  token, or a `sh -c "..."` wrapper) is now refused outright
   (`reason: "test_command_escapes_isolation"`, a `usage_error`) before
-  the run reaches its baseline, naming the offending path(s), which
-  command(s) carried them, and the fix (a relative invocation resolved
-  inside the copy, or `--isolation inplace`); an absolute path to a
-  runner binary under the root is refused the same way, with `--link`
-  named as the fix for that shape. Detected as a syntactic scan of both
-  command strings (quote-aware splitting plus an `=`-split), realpath-
-  compared on both sides so a symlinked repository root cannot slip
-  past a string-prefix check, and excluding any path that resolves
-  under the run's own `--log-dir` instead (the one case a path under
-  the repository root legitimately names the isolation copy itself);
-  `--isolation inplace` is exempt (the real tree is the intended target
-  there), and an absolute path outside the repository root is left
-  alone. Round 1 of this fix scanned only the test command with a
-  whitespace-split, prefix-only tokenizer, which read as `survived`
-  under three shapes review caught before merge: a quoted absolute path
-  containing a space, the `--key=/abs` token form, and any absolute
-  path in `--pre` (never scanned at all); all three are closed above.
-  Known residuals: a relative path that walks out of the isolation copy
-  via `..`, and any path reached only through shell-level indirection
-  (a variable, `$(...)`, or a wrapper script that itself `cd`s) are not
-  inspected (README).
+  the run reaches its baseline, naming the offending channel(s), the
+  matched spelling, and the fix (a relative invocation resolved inside
+  the copy, or `--isolation inplace`); an absolute path to a runner
+  binary under the root is refused the same way, with `--link` named as
+  the fix for that shape. The root is matched under two spellings (its
+  own, as resolved, and its realpath, each also with spaces
+  backslash-escaped), excluding any match that resolves under the run's
+  own `--log-dir` instead (the one case a path under the repository
+  root legitimately names the isolation copy itself); `--isolation
+  inplace` is exempt, and an absolute path outside the repository root
+  is left alone. Known residuals: a path reached only through a shell
+  variable or command substitution, a relative path that walks out via
+  `..`, a wrapper script that itself `cd`s using an unspelled path, a
+  third unrelated symlink alias to the root, and a root path containing
+  a character neither spelling represents (README).
 
 - `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
   (or mutant run) that exited `0` with nothing actually executed was

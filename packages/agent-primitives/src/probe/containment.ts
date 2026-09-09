@@ -60,113 +60,108 @@ export function resolveDeepestExisting(p: string): string {
 }
 
 /**
- * Splits `command` on whitespace, except that a quote (`'` or `"`) opens
- * a run that does not end until its OWN matching quote, whitespace
- * inside included -- so `cd '/abs/my repo' && ...` yields the single
- * token `'/abs/my repo'`, not two. Still not a shell parse: no
- * variables, no `$(...)`, no escaped quotes, and an unterminated quote
- * simply runs to the end of the string. Good enough for the token shapes
- * `absolutePathTokens` below looks for.
+ * Every spelling of `p` the isolation-escape scan (`escapingRootMentions`
+ * below) recognizes as "the same path": `p` itself resolved
+ * (`path.resolve`), its realpath (`resolveDeepestExisting`, in case `p`
+ * is itself reached through a symlink or has a symlinked ancestor -- the
+ * two can differ), and for each of those the variant with every space
+ * backslash-escaped (`\ `), the shell's own way of embedding a space in
+ * an unquoted token. A quoted spelling (`'/abs/my repo'`, `"/abs/my
+ * repo"`) needs no entry of its own: quoting wraps a substring, it does
+ * not change it, so the plain (unescaped) spelling with a real space
+ * still occurs inside a quoted run built from it.
  */
-function splitCommandTokens(command: string): string[] {
-  const tokens: string[] = [];
-  let current = "";
-  let quote: string | undefined;
-  for (const ch of command) {
-    if (quote) {
-      current += ch;
-      if (ch === quote) quote = undefined;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      current += ch;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (current !== "") {
-        tokens.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += ch;
+function pathSpellings(p: string): string[] {
+  const resolved = path.resolve(p);
+  const real = resolveDeepestExisting(resolved);
+  const spellings = new Set<string>();
+  for (const spelling of [resolved, real]) {
+    spellings.add(spelling);
+    spellings.add(spelling.replace(/ /g, "\\ "));
   }
-  if (current !== "") tokens.push(current);
-  return tokens;
-}
-
-/** Strips a leading quote and a trailing shell metacharacter run
- * (`;`, `&`, `|`, `)`, `,`, a closing quote) off one raw token or
- * candidate substring. */
-function trimTokenEdges(raw: string): string {
-  return raw.replace(/^['"]/, "").replace(/['";&|),]+$/, "");
+  return [...spellings];
 }
 
 /**
- * Pulls every token out of `command` that LOOKS like an absolute path
- * (starts with `/`), whether it follows a `cd`, stands alone as a
- * file/dir argument, sits inside a quoted run that itself contains
- * whitespace (`cd '/abs/my repo' && ...`), or follows the first `=` of
- * an option token (`--prefix=/abs/repo`, including a quoted value:
- * `--pre='/abs/repo'`). Deliberately not a shell parse: quote-aware
- * splitting plus an `=`-split and the edge trim above is enough to
- * catch the D-033 shape (`cd /abs/... && npx vitest run ...`) and the
- * quoted and `--key=` variants of it, without pulling in a shell
- * grammar for a single probe-safety check. A relative path that walks
- * out of a directory via `..` is not a token this function looks for at
- * all (documented as a known limit), and neither is a path indirected
- * through a shell variable, `$(...)`, or a wrapper script that itself
- * `cd`s (same limit: no shell parse, no variable expansion).
+ * Every spelling of `root` (see `pathSpellings`) that occurs in `text`
+ * as a literal substring, after first removing every occurrence of
+ * `scratchRoot`'s own spellings from `text` (when `scratchRoot` is
+ * given) -- so a `--log-dir` pointed inside the repository (the one
+ * case an absolute path under `root` legitimately names the isolation
+ * copy itself, at `<scratchRoot>/wt-<uuid>/wt`) does not read as an
+ * escape. Returns every root spelling that matched (usually one; more
+ * than one only when `text` happens to spell the path two different
+ * ways), empty when `root` does not occur in `text` at all.
+ *
+ * `setup.ts` refuses `-i worktree`'s test command, `--pre`, and the
+ * VALUE half of every `--env NAME=VALUE` against this: a SUBSTRING
+ * rule rather than a token/shell parse. Rounds 1 and 2 of task
+ * 5bf16459 were both tokenizers, and each round's reviewer found a
+ * fresh quoting/escaping/wrapper shape the tokenizer had not
+ * enumerated -- a quoted absolute path containing whitespace, a
+ * `--key=/abs` form, `--pre` never scanned at all, then
+ * `sh -c "cd /abs && ..."` read as one opaque quoted token and a
+ * backslash-escaped space splitting a single path into two
+ * non-existent fragments. An absolute path under `root` contains
+ * `root` as a substring under EVERY quoting, escaping, `=`-form or
+ * wrapper that can surround it, so this rule needs no shape
+ * enumeration to be exhaustive for a literal absolute path -- unlike a
+ * path outside `root`, which never contains it, so nothing outside the
+ * root is ever flagged.
+ *
+ * Known residuals (see README): a path reached only through a shell
+ * variable this tool does not own (`cd "$REPO" && ...`) or a command
+ * substitution (`$(...)`); a RELATIVE path that walks out of the
+ * isolation copy via `..`; a wrapper script that itself `cd`s using a
+ * path not spelled out in the scanned string; a path reaching `root`
+ * only through a symlink alias that is neither `root`'s own as-given
+ * spelling nor its realpath (only those two, and their space-escaped
+ * variants, are recognized here -- a third, unrelated symlink pointing
+ * at the same target is invisible to a substring scan, unlike round
+ * 1/2's per-token realpath resolution, which this rule deliberately
+ * drops along with the tokenizer it belonged to); and a repository
+ * root containing a character neither spelling represents (e.g. a
+ * literal quote inside the path).
  */
-export function absolutePathTokens(command: string): string[] {
-  const tokens: string[] = [];
-  for (const raw of splitCommandTokens(command)) {
-    const candidates = [trimTokenEdges(raw)];
-    const eq = raw.indexOf("=");
-    if (eq !== -1) candidates.push(trimTokenEdges(raw.slice(eq + 1)));
-    for (const candidate of candidates) {
-      if (candidate.startsWith("/") && candidate.length > 1) {
-        tokens.push(candidate);
-      }
-    }
-  }
-  return tokens;
-}
-
-/**
- * The subset of `absolutePathTokens(command)` that resolves (via
- * `resolveDeepestExisting`, so a symlinked root or a symlinked ancestor
- * of the token is walked through, not compared by spelling) under
- * `root` -- the real, already-resolved repository root a `-i worktree`
- * run never mutates -- and that does NOT resolve under `scratchRoot`
- * when one is given. Used by `setup.ts` to refuse a test/`--pre`
- * command that would run against the real tree instead of the isolated
- * copy: a `-i worktree` run's isolation copy lives outside `root` by
- * construction UNLESS the run's own `--log-dir` was pointed inside the
- * repository, in which case the copy sits under `<root>/<log-dir
- * subpath>/wt-<uuid>/wt` -- still inside `root`, but it IS the
- * isolation copy, so it must not be flagged as an escape. `scratchRoot`
- * (the run's own resolved log dir, the same value `cleanupWorktree`
- * checks worktree removals against) is the caller's way of excluding
- * that one legitimate case; any other absolute path that DOES resolve
- * under `root` cannot be naming the isolation copy, whatever that
- * copy's own path turns out to be. `root` and `scratchRoot` must
- * already be absolute, resolved paths (the same contract
- * `isPathContained` has).
- */
-export function escapingAbsolutePaths(
-  command: string,
+export function escapingRootMentions(
+  text: string,
   root: string,
   scratchRoot?: string,
 ): string[] {
-  const escaping: string[] = [];
-  for (const token of absolutePathTokens(command)) {
-    const resolved = resolveDeepestExisting(token);
-    if (scratchRoot !== undefined && isPathContained(scratchRoot, resolved)) {
-      continue;
+  let scanned = text;
+  if (scratchRoot !== undefined) {
+    for (const spelling of pathSpellings(scratchRoot)) {
+      scanned = scanned.split(spelling).join("");
     }
-    if (isPathContained(root, resolved)) escaping.push(token);
   }
-  return escaping;
+  return pathSpellings(root).filter((spelling) => scanned.includes(spelling));
 }
+
+/**
+ * The three channels `setup.ts` scans with `escapingRootMentions`, and
+ * the label each one's mention is reported under in the
+ * `test_command_escapes_isolation` refusal message. Shared between the
+ * message builder and its own pin (`test/probe-refusal-contract.test.ts`)
+ * so the two cannot drift apart.
+ */
+export const ISOLATION_ESCAPE_CHANNEL_LABEL = {
+  testCommand: "the test command (-t)",
+  pre: "--pre",
+  env: (name: string): string => `--env ${name}`,
+} as const;
+
+/**
+ * The fixed remedy text of the `test_command_escapes_isolation` refusal
+ * message, appended after the offending channel(s) and matched
+ * spelling(s): the two fixes (a relative invocation, or
+ * `--isolation inplace`) and the runner-binary clause naming `--link`.
+ * Exported so its own load-bearing fragments (`--isolation inplace`,
+ * `--link`) can be pinned directly, rather than only indirectly through
+ * a probe scenario that happens to trigger this message.
+ */
+export const ISOLATION_ESCAPE_FIX_HINT =
+  "Run the command as a relative command from the package directory " +
+  "(a relative invocation resolved inside the copy), or pass " +
+  "--isolation inplace. An absolute path to a runner binary under the " +
+  "root is refused for the same reason; name it relatively, or pass " +
+  "its directory to --link so the copy carries it too.";

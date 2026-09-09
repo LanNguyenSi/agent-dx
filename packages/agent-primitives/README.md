@@ -539,49 +539,66 @@ The add that checks out the worktree and the apply that replays the
 tracked diff also use the content-write pins above; the capture and
 listing calls do not alter checkout content.
 
-`-i worktree` mutates a throwaway copy, but the `-t`/`--test-command`
-and `--pre` you supply run wherever THEIR OWN cwd/args point them:
-nothing about the isolation copy touches either command itself. An
-absolute path named in either one under the real repository root (a
-`cd <abs>` back into the checkout, or an absolute file/dir argument
-under it, including a quoted path containing whitespace or the value
-half of a `--key=/abs` token) never runs against the isolated copy at
-all, so the run exercises the unmutated real tree while the mutant sits
-untested in a copy nobody ran anything against, and reports
-`killed`/`survived` for whichever verdict the REAL tree happened to
-produce, whatever the mutant actually did. `probe` refuses this
-outright (`reason: "test_command_escapes_isolation"`, a `usage_error`)
-rather than warn: an absolute path resolving under the real,
-already-resolved repository root (realpath on both sides, so a
-symlinked root or a symlinked ancestor of the token does not slip past
-a naive string comparison) but named in the test command or `--pre` is
-always this mistake under `-i worktree` -- UNLESS it resolves under
-this run's own `--log-dir` instead, the one case an absolute path
-under the repository root legitimately names the isolation copy itself
-(`--log-dir` pointed inside the repository puts the copy at `<log-dir
-subpath>/wt-<uuid>/wt`, still under the repository root); that one
-case is excluded from the scan rather than refused. The refusal
-message names the offending path(s), which command(s) carried them
-(the test command, `--pre`, or both), and the fix: run the command as
-a relative invocation resolved inside the copy, or pass
-`--isolation inplace` (exempt from this check entirely, since the real
-tree IS the intended target there). An absolute path to a runner
+`-i worktree` mutates a throwaway copy, but the `-t`/`--test-command`,
+`--pre`, and every `--env NAME=VALUE` value you supply run wherever
+THEIR OWN cwd/args/environment point them: nothing about the isolation
+copy touches any of the three. An absolute path named in any of them
+under the real repository root (a `cd <abs>` back into the checkout,
+an absolute file/dir argument under it, or an `--env` value carrying
+it) never runs against the isolated copy at all, so the run exercises
+the unmutated real tree while the mutant sits untested in a copy
+nobody ran anything against, and reports `killed`/`survived` for
+whichever verdict the REAL tree happened to produce, whatever the
+mutant actually did. `probe` refuses this outright
+(`reason: "test_command_escapes_isolation"`, a `usage_error`) rather
+than warn: it is a SUBSTRING check, not a shell parse -- an absolute
+path under the real repository root always CONTAINS that root as a
+literal substring, whatever quoting, escaping, `=`-form or wrapper
+surrounds it (a plain `cd /abs/...`, a single- or double-quoted path
+containing whitespace, a backslash-escaped space, the value half of a
+`--key=/abs` token, or the whole command wrapped in `sh -c "..."`), so
+the rule needs no shape enumeration to be exhaustive for a literal
+absolute path; a path outside the root never contains it, so nothing
+outside the root is ever flagged. The root is matched under two
+spellings (its own, as resolved, and its realpath, so a repository
+root itself reached through a symlink still refuses under either
+spelling), each also with every space backslash-escaped -- UNLESS the
+match instead resolves under this run's own `--log-dir`, the one case
+an absolute path under the repository root legitimately names the
+isolation copy itself (`--log-dir` pointed inside the repository puts
+the copy at `<log-dir subpath>/wt-<uuid>/wt`, still under the
+repository root); that one case is excluded from the scan rather than
+refused. The refusal message names the offending channel(s) (the test
+command, `--pre`, or `--env NAME`), the matched spelling, and the fix:
+run the command as a relative invocation resolved inside the copy, or
+pass `--isolation inplace` (exempt from this check entirely, since the
+real tree IS the intended target there). An absolute path to a runner
 binary under the root (e.g. `node <repo>/tools/runner.js`, or an
 absolute `node_modules/.bin` entry) is refused for the same reason and
 by the same message; the fix there is the same relative-invocation
 form, or `--link` naming the binary's own directory so the isolation
-copy carries it too. Detection is a syntactic scan of both command
-strings (quote-aware whitespace-splitting -- a token opened by a quote
-runs to its own closing quote, whitespace included -- plus a check of
-the substring after a token's first `=`, each candidate trimmed of a
-leading quote and a trailing shell metacharacter), never a shell parse.
-Known residuals follow directly from that: a RELATIVE path that walks
+copy carries it too.
+
+Known residuals follow directly from a substring rule matching only
+the root's own two spellings: a path reached only through a shell
+variable this tool does not own (`cd "$REPO" && ...`) or a command
+substitution (`$(...)`) is invisible, since neither ever spells the
+root out literally in the scanned string; a RELATIVE path that walks
 out of the isolation copy via `..` (e.g. `cd ../../real-checkout &&
-...`) is not a token this scan looks for at all; and any path reached
-only through shell-level indirection -- a variable (`cd "$REPO" &&
-...`), a command substitution (`$(...)`), or a wrapper script that
-itself `cd`s into the real tree -- is invisible to a syntactic scan by
-construction and is not detected either.
+...`) is not inspected either, since it never names the root as an
+absolute path at all; a wrapper script that itself `cd`s using a path
+not spelled out in the scanned string is the same shell-level
+indirection; a path reaching the root only through a THIRD, unrelated
+symlink alias (one that is neither the root's own as-given spelling
+nor its realpath) is not recognized, since the rule matches spellings,
+not filesystem identity; and a repository root containing a character
+neither spelling represents (e.g. a literal quote inside the path)
+falls outside what the two spellings cover. These are the shapes a
+substring rule structurally cannot see, as opposed to rounds 1 and 2's
+tokenizer, which missed shapes a tokenizer COULD have been extended to
+catch (and each extension left another) -- the substring rule is
+exhaustive for every literal-absolute-path shape, and its residuals
+are exactly the shapes that are not a literal absolute path at all.
 
 `-i worktree` needs git 2.35 or newer: the sync relies on `git apply
 --allow-empty`, which an older git rejects, so the run ends in
@@ -1219,7 +1236,7 @@ above.
 | `reason` | `mutant` | `mutation_probe` | When it fires |
 | --- | --- | --- | --- |
 | `worktree_allow_outside_unsupported` | absent | absent | `--allow-outside` combined with `--isolation worktree`; refused before containment is even checked |
-| `test_command_escapes_isolation` | absent | absent | `-i worktree`'s test command or `--pre` names an absolute path under the real repository root (a `cd <abs>`, an absolute file/dir argument, a quoted path with whitespace, or a `--key=/abs` value), which the isolated copy never receives -- unless the path resolves under this run's own `--log-dir` instead, which the isolated copy does |
+| `test_command_escapes_isolation` | absent | absent | `-i worktree`'s test command, `--pre`, or an `--env` value contains the real repository root as a literal substring (any quoting, escaping, `=`-form or wrapper), which the isolated copy never receives -- unless the match resolves under this run's own `--log-dir` instead, which the isolated copy does |
 | `file_outside_root` | absent | absent | `--file` (or a `--link`) resolves outside the containment root |
 | `probe_in_progress` | absent | absent | the repository- or file-scoped lock is already held by another run |
 | `lock_unavailable` | absent | absent | the lock directory itself could not be acquired (an unwritable lock dir, an ancestor owned by another user) |
