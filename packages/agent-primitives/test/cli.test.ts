@@ -20,6 +20,7 @@ import {
   type StdoutSink,
 } from "../src/cli.js";
 import { UsageError } from "../src/envelope.js";
+import { resolveDeepestExisting } from "../src/probe/containment.js";
 import { trimToLastCompleteHunk } from "../src/probe/mutant.js";
 import type { VerifyResult, CheckResult } from "../src/verify/index.js";
 import {
@@ -3636,16 +3637,8 @@ describe("cli: probe --plan", () => {
     expect(JSON.parse(overridden.stdout).isolation.mode).toBe("worktree");
   }, 30000);
 
-  it("--plan's own link and --link merge and deduplicate (task 6c7e1532): both show up in isolation.linked", async () => {
-    const { repo: rawRepo } = initPlanRepo();
-    // Realpath'd: `beginWorktree`'s own linking loop compares each
-    // link's realpath'd absolute path against its own `root` parameter,
-    // which is never realpath'd, so a repo under a symlinked ancestor
-    // (macOS's `os.tmpdir()`, under `/var` -> `/private/var`) would
-    // silently fail to link either extra directory below -- a real,
-    // pre-existing gap outside this task's scope; sidestepped here so
-    // this test exercises the plan/--link merge itself.
-    const repo = fs.realpathSync(rawRepo);
+  it("--plan's own link and --link merge and deduplicate (task 6c7e1532): both show up in isolation.linked, reached through a symlinked ancestor (os.tmpdir() itself, on macOS) -- pins the fix for the realpath-vs-display-path root mismatch that used to drop both silently", async () => {
+    const { repo } = initPlanRepo();
     fs.mkdirSync(path.join(repo, "plan-link-dir"));
     fs.mkdirSync(path.join(repo, "cli-link-dir"));
     const planPath = writePlan(repo, {
@@ -3666,12 +3659,66 @@ describe("cli: probe --plan", () => {
 
     expect(run.code).toBe(0);
     const envelope = JSON.parse(run.stdout);
+    // Both entries reach `linked` already realpath'd (`index.ts`'s
+    // `absLinks`), which differs from `repo` itself exactly when `repo`
+    // sits under a symlinked ancestor -- the case this test exercises.
     expect(envelope.isolation.linked).toEqual(
       expect.arrayContaining([
-        path.join(repo, "plan-link-dir"),
-        path.join(repo, "cli-link-dir"),
+        resolveDeepestExisting(path.join(repo, "plan-link-dir")),
+        resolveDeepestExisting(path.join(repo, "cli-link-dir")),
       ]),
     );
+  }, 30000);
+
+  it("repo defaults file (.agent-primitives.json) contributes on the --plan path too, alongside the plan's own link (task 6c7e1532): both show up in isolation.linked (regression: this path was untested and `values: defaultsFile.links` could silently become `values: []` with the full suite still green)", async () => {
+    const { repo } = initPlanRepo();
+    fs.mkdirSync(path.join(repo, "plan-link-dir"));
+    fs.mkdirSync(path.join(repo, "defaults-link-dir"));
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["defaults-link-dir"] }),
+    );
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      link: ["plan-link-dir"],
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    expect(run.code).toBe(0);
+    const envelope = JSON.parse(run.stdout);
+    expect(envelope.isolation.linked).toEqual(
+      expect.arrayContaining([
+        resolveDeepestExisting(path.join(repo, "plan-link-dir")),
+        resolveDeepestExisting(path.join(repo, "defaults-link-dir")),
+      ]),
+    );
+  }, 30000);
+
+  it("repo defaults file: an unknown key refuses the --plan run with defaults_file_invalid, naming the path and the key, fail-closed", async () => {
+    const { repo } = initPlanRepo();
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["vendor"], typoKey: true }),
+    );
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    const envelope = JSON.parse(run.stdout);
+    expect(envelope.status).toBe("usage_error");
+    expect(envelope.reason).toBe("defaults_file_invalid");
+    expect(
+      envelope.warnings.some(
+        (w: string) =>
+          w.includes(path.join(repo, ".agent-primitives.json")) &&
+          w.includes("typoKey"),
+      ),
+    ).toBe(true);
   }, 30000);
 
   /** A repository whose fixture carries `count` one-line functions and a

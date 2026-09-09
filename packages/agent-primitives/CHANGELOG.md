@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `--link` (task `6c7e1532`, behaviour change): a value containing
+  `$(` or a backtick is now a usage error, the same check newly applied
+  to a `--plan` file's own `link` field and the repo defaults file's
+  `link` field (see the Added bullet above) -- applied to `--link`
+  itself too so all three `link` sources genuinely share one rule
+  rather than the command-line flag being merely assumed safe.
 - Test hygiene from the PR #218 reviews (task `482c3ef7`, no behaviour
   change): the node `--test` dot-reporter fixture builder shared by
   `test/probe-zero-tests.test.ts` and `test/plan.test.ts` now lives once

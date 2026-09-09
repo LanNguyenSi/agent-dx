@@ -326,15 +326,14 @@ function writeComposerProject(
 }
 
 describe("findComposerLinkDirs", () => {
-  it("finds the default vendor-dir and bin-dir for a composer.json with no config", () => {
+  it("finds only the default vendor-dir for a composer.json with no config: the default bin-dir ('vendor/bin') is nested inside it and must not be listed a second time (regression: linking it separately would delete the real vendor/bin through the vendor symlink, see beginWorktree)", () => {
     const root = makeTmpDir();
     writeComposerProject(root);
     fs.mkdirSync(path.join(root, "vendor", "bin"), { recursive: true });
 
     const found = findComposerLinkDirs(root);
 
-    expect(found).toContain(path.join(root, "vendor"));
-    expect(found).toContain(path.join(root, "vendor", "bin"));
+    expect(found).toEqual([path.join(root, "vendor")]);
   });
 
   it("finds a custom vendor-dir and a custom, non-nested bin-dir", () => {
@@ -420,6 +419,33 @@ describe("findComposerLinkDirs", () => {
     expect(findComposerLinkDirs(root)).toEqual([]);
   });
 
+  it("warns, naming the composer.json and the value, when a config value is skipped for resolving outside the containment root (a value skipped only because the directory does not exist stays silent, per the previous test)", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.writeFileSync(path.join(outside, "marker.txt"), "outside\n");
+    const relEscape = path.relative(root, outside);
+    writeComposerProject(root, { vendorDir: relEscape });
+    const warnings: string[] = [];
+
+    expect(findComposerLinkDirs(root, warnings)).toEqual([]);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(path.join(root, "composer.json"));
+    expect(warnings[0]).toContain(relEscape);
+  });
+
+  it("recognizes a composer.json that is itself a symlink to a file", () => {
+    const root = makeTmpDir();
+    const realComposerJson = path.join(root, "real-composer.json");
+    fs.writeFileSync(realComposerJson, JSON.stringify({ name: "acme/widget" }));
+    fs.symlinkSync(realComposerJson, path.join(root, "composer.json"));
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toEqual([path.join(root, "vendor")]);
+  });
+
   it("does not recurse into a linked vendor-dir looking for a nested composer.json (no double work / cycle)", () => {
     const root = makeTmpDir();
     writeComposerProject(root);
@@ -434,6 +460,25 @@ describe("findComposerLinkDirs", () => {
     const found = findComposerLinkDirs(root);
 
     expect(found).toEqual([path.join(root, "vendor")]);
+  });
+
+  it("does not recurse into a NESTED vendor-dir looking for a vendored package's own composer.json, even though the vendor-dir itself sits several directories below the composer.json naming it (README: 'wherever a composer.json sits ... its vendor-dir and bin-dir ... are symlinked in'; regression for a per-directory-only skip set)", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { vendorDir: "deps/vendor" });
+    fs.mkdirSync(path.join(root, "deps", "vendor"), { recursive: true });
+    // A vendored package's own composer.json, nested INSIDE the
+    // configured (non-default) vendor-dir: must never surface as a
+    // second, separate match just because "deps/vendor" itself sits
+    // below "deps", a directory this walk still has to descend into to
+    // reach it.
+    writeComposerProject(path.join(root, "deps", "vendor", "some-pkg"));
+    fs.mkdirSync(path.join(root, "deps", "vendor", "some-pkg", "vendor"), {
+      recursive: true,
+    });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toEqual([path.join(root, "deps", "vendor")]);
   });
 });
 

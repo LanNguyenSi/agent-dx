@@ -603,21 +603,45 @@ repository root included), its `vendor-dir` and `bin-dir` -- read from
 `vendor/bin` the way composer itself does -- are symlinked in, provided
 each already exists as a directory on disk and resolves inside the
 containment root (a `vendor-dir`/`bin-dir` naming a path outside the
-root, e.g. via `../..`, is silently skipped rather than linked: the same
+root, e.g. via `../..`, is skipped, with a warning naming the
+`composer.json` and the value, rather than linked: the same
 cycle/containment guard the node_modules walk gets from never following
-an arbitrary symlinked directory). Neither the node_modules nor the
-composer walk descends into what it just matched, so a vendored
-package's own nested `node_modules`/`composer.json` is never linked a
-second time. All of that, plus every `--link` extra, a `--plan` file's
-own `link`, and the repository defaults file's `link` (see below, and
-"Non-JS repositories"), is merged and deduplicated and symlinked into
-the worktree at the same relative path, so installed dependencies and
-tool caches are shared rather than reinstalled per probe. `--pre`/`-t`
-run with their cwd mapped onto the worktree at `--cwd`'s own relative
-offset from the containment root. Any non-zero exit while syncing, or a
-genuine filesystem failure while copying/linking, is `status:
-"inconclusive"`, `reason: "worktree_sync_failed"`, exit `2`, never a
-verdict.
+an arbitrary symlinked directory; a `vendor-dir`/`bin-dir` that simply
+does not exist on disk yet, the common case before `composer install`
+has run, stays silent). A `bin-dir` that resolves inside its own
+project's `vendor-dir` -- composer's own defaults, `vendor` and
+`vendor/bin`, are exactly this shape -- is linked once, as part of
+`vendor-dir`, never listed a second time: linking a directory already
+covered by another linked directory would symlink-create through the
+parent link and reach the SOURCE tree, not the worktree, wherever a
+path resolves inside a directory this run already linked (see the next
+paragraph). Neither the node_modules nor the composer walk descends
+into what it just matched anywhere in the walk, not only inside the
+directory a `composer.json` itself sits in, so a vendored package's own
+nested `node_modules`/`composer.json`, however many directories below a
+matched `vendor-dir`, is never linked a second time. All of that, plus
+every `--link` extra, a `--plan` file's own `link`, and the repository
+defaults file's `link` (see below, and "Non-JS repositories"), is
+merged and deduplicated and symlinked into the worktree at the same
+relative path, so installed dependencies and tool caches are shared
+rather than reinstalled per probe. `--pre`/`-t` run with their cwd
+mapped onto the worktree at `--cwd`'s own relative offset from the
+containment root. Any non-zero exit while syncing, or a genuine
+filesystem failure while copying/linking, is `status: "inconclusive"`,
+`reason: "worktree_sync_failed"`, exit `2`, never a verdict.
+
+Two guards apply to every directory this linking step symlinks in,
+auto-discovered or explicit alike, and each skip is a warning, never a
+silent drop: a candidate is skipped when it does not resolve (through
+realpath, on both sides of the comparison, so a repository reached
+through a symlinked ancestor -- macOS's `/tmp` -> `/private/tmp` is the
+common case -- links exactly the same as one reached directly) inside
+the repository root, and a candidate is skipped when it resolves inside
+a directory this run has already linked, whether that directory was
+auto-discovered or itself an explicit `--link`/plan-link/defaults-file
+entry: linking it would run its symlink-create THROUGH the already-
+linked parent's symlink and land back in the SOURCE tree instead of the
+worktree.
 
 The sync runs under the same abort machinery as `--pre`/`-t`: every git
 call it makes is killed on `SIGINT`/`SIGTERM` and waited for before

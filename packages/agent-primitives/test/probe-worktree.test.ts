@@ -93,6 +93,45 @@ function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd });
 }
 
+/** Every entry under `root` (`.git` excluded), keyed by its path relative
+ * to `root`, mapped to whether it is a symlink and, either way, a hash
+ * of its own content (a symlink's own target string, a regular file's
+ * bytes, never a followed read): proof a tree is byte-identical AND
+ * shape-identical (no path silently turned into a symlink) before and
+ * after a run, for the composer nested-bin-dir regression test, which
+ * must catch the SOURCE tree's own `vendor/bin` being deleted and
+ * replaced with a symlink through the parent `vendor` symlink the old
+ * `beginWorktree` loop created. */
+function hashTree(
+  root: string,
+): Map<string, { symlink: boolean; hash: string }> {
+  const out = new Map<string, { symlink: boolean; hash: string }>();
+  function walk(dir: string): void {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === ".git") continue;
+      const abs = path.join(dir, entry.name);
+      const rel = path.relative(root, abs);
+      if (entry.isSymbolicLink()) {
+        out.set(rel, {
+          symlink: true,
+          hash: createHash("sha256").update(fs.readlinkSync(abs)).digest("hex"),
+        });
+        continue;
+      }
+      if (entry.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      out.set(rel, {
+        symlink: false,
+        hash: createHash("sha256").update(fs.readFileSync(abs)).digest("hex"),
+      });
+    }
+  }
+  walk(root);
+  return out;
+}
+
 const FIXTURE_JS = [
   "function isPositive(n) {",
   "  return n > 0;",
@@ -421,19 +460,54 @@ describe("probe(): worktree isolation, node_modules and --pre", () => {
     expect(result.reason).toBe("baseline_failed");
   });
 
-  it("repo defaults file (.agent-primitives.json): every probe invocation reads it and links what it names, no --link needed", async () => {
+  it("composer: DEFAULT layout (no config, real vendor/ and vendor/bin/) links vendor only and never touches the SOURCE tree -- regression for the bug where linking the default bin-dir separately deleted the real vendor/bin through the vendor symlink and replaced it with a self-referential (ELOOP) symlink", async () => {
     useLockDir();
-    // Resolved through realpath (macOS puts `os.tmpdir()` under `/var`,
-    // itself a symlink to `/private/var`): `beginWorktree`'s own linking
-    // loop compares an explicit link's realpath'd absolute path against
-    // its OWN `root` parameter, which is never realpath'd, so a repo
-    // whose display path and realpath differ makes an otherwise-correct
-    // `--link`/defaults-file/plan-link entry silently fail to link, with
-    // no warning -- a real, pre-existing gap outside this task's scope
-    // (see the implementer's risk notes), sidestepped here so this test
-    // exercises the defaults-file merge itself rather than that gap.
-    const { repo: rawRepo } = initRepo();
-    const repo = fs.realpathSync(rawRepo);
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget" }),
+    );
+    git(repo, ["add", "composer.json", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    fs.mkdirSync(path.join(repo, "vendor", "bin"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+    fs.writeFileSync(
+      path.join(repo, "vendor", "bin", "phpunit"),
+      "#!/bin/sh\necho phpunit\n",
+    );
+
+    const before = hashTree(repo);
+
+    const result = await probe(baseOptions(repo));
+
+    const after = hashTree(repo);
+    expect(after).toEqual(before);
+    for (const [, entry] of after) {
+      expect(entry.symlink).toBe(false);
+    }
+    expect(
+      fs.lstatSync(path.join(repo, "vendor", "bin")).isSymbolicLink(),
+    ).toBe(false);
+    expect(fs.existsSync(path.join(repo, "vendor", "bin", "phpunit"))).toBe(
+      true,
+    );
+    expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "vendor", "bin")) &&
+          w.includes("nested inside a directory already linked"),
+      ),
+    ).toBe(false);
+  });
+
+  it("repo defaults file (.agent-primitives.json): every probe invocation reads it and links what it names, no --link needed -- exercised through a repo reached via a symlinked ancestor (os.tmpdir() itself, on macOS), pinning the fix for the realpath-vs-display-path mismatch that used to drop this silently", async () => {
+    useLockDir();
+    const { repo } = initRepo();
     fs.writeFileSync(path.join(repo, ".gitignore"), "extra-cache/\n");
     git(repo, ["add", ".gitignore"]);
     git(repo, [
@@ -457,7 +531,14 @@ describe("probe(): worktree isolation, node_modules and --pre", () => {
 
     const result = await probe(baseOptions(repo));
 
-    expect(result.isolation.linked).toContain(path.join(repo, "extra-cache"));
+    // `linked` carries the realpath'd form of an explicit link (the repo
+    // defaults file's own `link` entries are resolved the same way
+    // `--link` is, in `index.ts`'s `absLinks`), which differs from
+    // `repo` itself exactly when `repo` sits under a symlinked ancestor
+    // -- the case this test exercises.
+    expect(result.isolation.linked).toContain(
+      resolveDeepestExisting(path.join(repo, "extra-cache")),
+    );
   });
 
   it("repo defaults file: an unknown key is a usage error naming the path and the key, fail-closed", async () => {
