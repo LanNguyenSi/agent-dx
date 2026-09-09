@@ -471,6 +471,27 @@ describe("scan helpers", () => {
     expect(classifyLine("a.rb", "# comment")).toBeUndefined();
   });
 
+  it("classifyLine: a.php recognizes all four comment forms (// , # , /* ... */, and docblock ' * ' continuation), never a code line", () => {
+    expect(classifyLine("a.php", "// a comment")).toBe("comment");
+    expect(classifyLine("a.php", "# a comment")).toBe("comment");
+    expect(classifyLine("a.php", "/* a comment */")).toBe("comment");
+    expect(classifyLine("a.php", " * a docblock continuation line")).toBe(
+      "comment",
+    );
+    expect(classifyLine("a.php", "$x = 1;")).toBeUndefined();
+    expect(classifyLine("a.php", "class Foo {}")).toBeUndefined();
+  });
+
+  it("classifyLine: a.php does NOT classify a PHP 8 attribute (`#[...]`) as a comment (negative control; round-1 review finding)", () => {
+    expect(classifyLine("a.php", "#[Test]")).toBeUndefined();
+    expect(classifyLine("a.php", "#[Route('/x')]")).toBeUndefined();
+    expect(classifyLine("a.php", "    #[Test]")).toBeUndefined();
+    // A real `#` line comment right next to an attribute is still
+    // recognized: the exclusion is scoped to `#[`, not to every line
+    // starting with `#`.
+    expect(classifyLine("a.php", "# not an attribute")).toBe("comment");
+  });
+
   it("parseGrepOutput strips the rev prefix and skips an unparseable (e.g. binary) line", () => {
     const output = [
       "abc123:src/a.ts:4:hit here",
@@ -895,6 +916,90 @@ describe("drift (migration path tightened)", () => {
     expect(
       findSite(result.allowlisted, "migration/docs/note.md", 3),
     ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------
+// drift(): .php comment sites (`//`, `#`, `/* ... */`, docblock ` * `
+// continuation lines) are scanned the same way a .ts/.py comment is.
+// ---------------------------------------------------------------------
+
+const LEGACY_HELPER_PHP = [
+  "<?php",
+  "",
+  "// LegacyHelper computes the old way",
+  "# LegacyHelper is deprecated",
+  "/* LegacyHelper still referenced here */",
+  "/**",
+  " * LegacyHelper continuation line in a docblock",
+  " */",
+  "function currentHelper() {",
+  "    return 1;",
+  "}",
+  "",
+].join("\n");
+
+describe("drift (.php comment sites)", () => {
+  it("a removed identifier still named in each of the four PHP comment forms is reported at its own line, kind comment", async () => {
+    const repo = initRepo();
+    writeFile(repo, "src/legacy.ts", "export const LegacyHelper = 1;\n");
+    writeFile(repo, "src/Helper.php", LEGACY_HELPER_PHP);
+    const base = commit(repo, "base");
+    fs.rmSync(path.join(repo, "src/legacy.ts"));
+    const head = commit(repo, "head");
+
+    const result = await drift({ cwd: repo, base, head });
+    expect(result.removedIdentifiers).toContainEqual({
+      name: "LegacyHelper",
+      kind: "declaration",
+      file: "src/legacy.ts",
+      line: 1,
+    });
+
+    const slashSlash = findSite(result.sites, "src/Helper.php", 3);
+    expect(slashSlash?.identifier).toBe("LegacyHelper");
+    expect(slashSlash?.kind).toBe("comment");
+
+    const hash = findSite(result.sites, "src/Helper.php", 4);
+    expect(hash?.identifier).toBe("LegacyHelper");
+    expect(hash?.kind).toBe("comment");
+
+    const slashStar = findSite(result.sites, "src/Helper.php", 5);
+    expect(slashStar?.identifier).toBe("LegacyHelper");
+    expect(slashStar?.kind).toBe("comment");
+
+    const docblockContinuation = findSite(result.sites, "src/Helper.php", 7);
+    expect(docblockContinuation?.identifier).toBe("LegacyHelper");
+    expect(docblockContinuation?.kind).toBe("comment");
+
+    expect(result.status).toBe("fail");
+  });
+
+  it("a PHP code line mentioning the removed identifier's name only in an identifier token (not a comment) is not reported", async () => {
+    const repo = initRepo();
+    writeFile(repo, "src/legacy.ts", "export const LegacyHelper = 1;\n");
+    writeFile(
+      repo,
+      "src/Consumer.php",
+      [
+        "<?php",
+        "",
+        "function useLegacyHelper() {",
+        "    return 1;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const base = commit(repo, "base");
+    fs.rmSync(path.join(repo, "src/legacy.ts"));
+    const head = commit(repo, "head");
+
+    const result = await drift({ cwd: repo, base, head });
+    // `useLegacyHelper` is one identifier token, not a whole-word match
+    // for `LegacyHelper` (the same word-boundary trap the synthetic
+    // repo's `setRuntimeError`/`RuntimeError` pair pins in TS).
+    expect(findSite(result.sites, "src/Consumer.php", 3)).toBeUndefined();
+    expect(result.status).toBe("ok");
   });
 });
 

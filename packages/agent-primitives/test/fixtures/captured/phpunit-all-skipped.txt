@@ -1,0 +1,8 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+SS                                                                  2 / 2 (100%)
+
+Time: [elided]
+
+OK, but incomplete, skipped, or risky tests!
+Tests: 2, Assertions: 0, Skipped: 2.

@@ -1,0 +1,15 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+F.                                                                  2 / 2 (100%)
+
+Time: [elided]
+
+There was 1 failure:
+
+1) CalcFailTest::testAddWrong
+Failed asserting that 4 is identical to 5.
+
+tests/CalcFailTest.php:11
+
+FAILURES!
+Tests: 2, Assertions: 2, Failures: 1.
