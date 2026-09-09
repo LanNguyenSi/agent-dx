@@ -56,6 +56,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run (composer's default `vendor/bin` inside `vendor` is that last
   case, and is now reported rather than dropped before the policy sees
   it).
+- `probe -i worktree`'s worktree cleanup unlinks a recorded worktree
+  path that is itself a symlink, when the link sits at the probe's own
+  scratch shape under the run's `--log-dir` (task `6c7e1532`): the gate
+  judges a path through realpath, so such a leftover used to be refused
+  (correctly, since nothing may delete the tree at the other end) and
+  then kept alive by its own marker on every later run. Unlinking a
+  symlink never reaches what it points at. Only a broken linking step
+  can leave one, which the link policy above now prevents; this is the
+  second line of defence for it.
 - Test hygiene from the PR #218 reviews (task `482c3ef7`, no behaviour
   change): the node `--test` dot-reporter fixture builder shared by
   `test/probe-zero-tests.test.ts` and `test/plan.test.ts` now lives once

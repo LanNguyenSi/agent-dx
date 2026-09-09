@@ -2142,6 +2142,49 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
     );
     expect(fs.existsSync(elsewhere)).toBe(true);
   });
+
+  it("removes a scratch-shaped recorded path that is itself a SYMLINK under this run's log dir: the link goes, whatever it points at stays, and no marker is left waiting on it forever", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    // `beginWorktree` never creates a link here, so this can only be a
+    // leftover from a run whose linking step was broken (a candidate
+    // that named the copy's own root). The gate resolves a path through
+    // realpath, which for a link judges the tree at the other end --
+    // here the repository itself -- and refuses; without the unlink
+    // ahead of it, the link and its marker would survive every later
+    // run on this repository.
+    const leftover = scratchPath(logDir);
+    fs.mkdirSync(path.dirname(leftover), { recursive: true });
+    fs.symlinkSync(repo, leftover, "dir");
+
+    const cleanup = await cleanupWorktree(repo, leftover, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.refused).toBe(false);
+    expect(cleanup.ok).toBe(true);
+    expect(fs.existsSync(leftover)).toBe(false);
+    // Only the link went: the repository it pointed at is untouched,
+    // and it is still the repository git knows (its main worktree).
+    expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
+    expect(registeredPaths(repo)).toContain(resolveDeepestExisting(repo));
+  });
+
+  it("leaves a symlink that is NOT of the scratch shape alone, link and target both: the unlink is gated by the same shape and log-dir rules as every other removal", async () => {
+    const repo = initRepo();
+    const logDir = makeTmpDir();
+    const leftover = path.join(logDir, "not-a-scratch-name");
+    fs.symlinkSync(repo, leftover, "dir");
+
+    const cleanup = await cleanupWorktree(repo, leftover, logDir, {
+      scratchRoot: logDir,
+    });
+
+    expect(cleanup.refused).toBe(true);
+    expect(cleanup.ok).toBe(false);
+    expect(fs.lstatSync(leftover).isSymbolicLink()).toBe(true);
+    expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
+  });
 });
 
 describe("the scratch owner record", () => {

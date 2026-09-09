@@ -1779,6 +1779,14 @@ export interface CleanupWorktreeResult {
  * unverified instead of reporting a removal that took as one that did
  * not.
  *
+ * A recorded path that is itself a symlink is unlinked first, and only
+ * when the LINK's own location is of the scratch shape and sits under
+ * this run's `scratchRoot`: the gate below judges a link by what it
+ * points at, so such a leftover would otherwise be refused (correctly,
+ * since nothing may delete the tree at the other end) and then kept
+ * alive by its own marker for every later run. Unlinking a symlink
+ * never reaches its target.
+ *
  * Nothing is run against the path before it passes a gate, because the
  * path can come from a marker file, not only from this process's own
  * `beginWorktree`: it must be of the scratch shape (see
@@ -1808,6 +1816,44 @@ export async function cleanupWorktree(
 ): Promise<CleanupWorktreeResult> {
   const track: TrackGitCall = opts.track ?? ((started) => started);
   const logPaths: string[] = [];
+  // A recorded worktree path that is itself a SYMLINK is never a
+  // worktree this module created: `beginWorktree` has git create a
+  // DIRECTORY there and nothing in it ever replaces that with a link.
+  // It is unlinked here, before the gate below, because that gate
+  // judges the path through realpath -- which for a link means judging
+  // the tree it points AT, so a link pointing at the operator's own
+  // repository is refused (rightly: nothing may `rmSync` that) and then
+  // left behind together with its marker, forever. Unlinking a symlink
+  // can never reach what it points at, so this is the one removal that
+  // needs no gate of its own beyond the two the gate would apply
+  // anyway, judged on the LINK's own location rather than its target:
+  // the probe's own scratch shape, under this run's own log dir.
+  let ownStat: fs.Stats | undefined;
+  try {
+    ownStat = fs.lstatSync(worktreePath);
+  } catch {
+    ownStat = undefined;
+  }
+  if (ownStat?.isSymbolicLink() === true && opts.scratchRoot !== undefined) {
+    const own = path.resolve(worktreePath);
+    const location = path.join(
+      resolveDeepestExisting(path.dirname(own)),
+      path.basename(own),
+    );
+    const inScratchRoot = isPathContained(
+      resolveDeepestExisting(path.resolve(opts.scratchRoot)),
+      location,
+    );
+    if (isScratchWorktreePath(location) && inScratchRoot) {
+      try {
+        fs.unlinkSync(worktreePath);
+      } catch {
+        // Best-effort: whatever is still there fails the gate or the
+        // assertion below, and is reported the same as any other
+        // leftover.
+      }
+    }
+  }
   const target = resolveDeepestExisting(path.resolve(worktreePath));
   const rootReal = resolveDeepestExisting(path.resolve(root));
 
