@@ -1,5 +1,18 @@
 # Bundle log
 
+- 2026-09-09T00:00:00Z (CHANGELOG citations stay heading-form, task
+  agent-dx 25dfbf57): re-checked every live `CHANGELOG.md:N`-shaped
+  citation in this bundle (`rg -n "CHANGELOG.md:[0-9]" docs/okf`,
+  excluding this file's own historical prose); all 17 non-log.md hits
+  already resolve as heading-form citations
+  (`CHANGELOG.md:#[0.31.0]`/`#[Unreleased]`, optionally with a `#"..."`
+  content anchor), so none needed converting. Added the rule itself to
+  this file's Maintenance section (index.md) so a future citation is
+  written heading-first rather than re-discovered by the next line
+  shift. `npx okf-kit@0.10.0 check --json docs/okf` reports the same 17
+  findings before and after this commit (all pre-existing
+  `unresolved-ambiguous` notices in this file, none CHANGELOG-related).
+
 - 2026-09-08T11:05:00Z (citation scanning goes paragraph-joined, the
   log.md guard stops being silenceable, review round 4, D-050, task
   agent-dx b50fd903): review round 3 found five things wrong with the
