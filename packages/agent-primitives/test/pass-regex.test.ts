@@ -31,4 +31,13 @@ describe("compilePassRegex()", () => {
   it("an unparseable pattern throws the same SyntaxError new RegExp(...) would", () => {
     expect(() => compilePassRegex("(")).toThrow(SyntaxError);
   });
+
+  // Round 3 (task a435469b): `(?m)` is not "redundant, not a usage
+  // error" the way the README used to claim -- JS `RegExp` has no
+  // inline-flag syntax at all, so `(?m)` is not valid source and is
+  // rejected exactly like any other unparseable pattern, `m` already
+  // being always-on notwithstanding.
+  it("(?m) is not valid JS RegExp source and throws a usage error, the m flag already being always-on notwithstanding", () => {
+    expect(() => compilePassRegex("(?m)^OK")).toThrow(SyntaxError);
+  });
 });

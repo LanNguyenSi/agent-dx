@@ -902,7 +902,13 @@ side, since a pattern that matched output outside the captured tail
 would otherwise read as a plain, unexplained miss. The pattern is a bare
 JS `RegExp` source with no flags syntax (fold `i`/`m`/`s` into the
 pattern itself, e.g. `(?i)` is not supported); an unparseable one is a
-usage error before the run ever starts. Available under `--plan`: a plan
+usage error before the run ever starts. Unlike `--pass-regex`, this
+option's compiled pattern stays flagless (no `m`): `^`/`$` anchor to the
+WHOLE combined stdout+stderr buffer, not to each line, so a pattern
+copied from a `--pass-regex` recipe (`^OK \(` matching a summary line
+that is not the buffer's very first line) silently misses here and
+reads as a plain `baseline_evidence_not_matched` -- prefer an unanchored
+pattern (drop the leading `^`) for this option instead. Available under `--plan`: a plan
 runs every mutant against ONE shared baseline, so there is no
 two-sources conflict for this flag to referee (unlike `--env`, which
 stays refused there); like `--link` and `--allow-outside` there is no
@@ -937,16 +943,24 @@ exit `1` (a `warnings` entry names the exit code, so the override is
 visible rather than silently swallowed), and a mutant that flips the
 runner's own output to `FAILURES!` is killed, exactly as it would be
 under the exit-code default. The pattern is a bare JS `RegExp` source
-with no flags syntax to write yourself (fold `i`/`s` into the pattern
-itself); an unparseable one (on the command line, or in a plan file's
+with no flags syntax to write yourself: JS `RegExp` has no inline-flag
+form at all, so there is nothing to "fold `i`/`s` into the pattern"
+with beyond hand-rolling the equivalent -- a case-insensitive match
+becomes a character class (`[oO][kK]` rather than `(?i)ok`), and
+Node 23+ additionally supports scoped inline modifier groups
+(`(?i:ok)`) for a runtime guaranteed to be at least that version. An
+unparseable pattern (on the command line, or in a plan file's
 `passWhen.regex`) is a usage error before any run starts. Unlike
 `--require-baseline-evidence`, the compiled pattern always carries the
 `m` flag: `^`/`$` anchor to each LINE of the combined stdout+stderr
 buffer, not only to the buffer's very first/last character, so a real
 runner that prints something ahead of its own summary line (phpunit's
 own version banner, before the green `OK (...)` line the README's own
-recipe above matches) still matches -- `(?m)` is redundant, not a usage
-error, since the flag is already always on. Given on both the command
+recipe above matches) still matches. `(?m)` is NOT a redundant-but-
+harmless no-op here: it is not valid JS `RegExp` source at all (there
+is no inline-flag syntax to parse it as), so it is rejected as a usage
+error like any other unparseable pattern -- the `m` flag is simply
+never needed, since it is already always on. Given on both the command
 line and inside a `--plan` file at once, the command-line value wins,
 the same precedence `-i`/`--expect`/`--timeout` follow against their own
 plan-file counterparts. A miss -- the pattern given but absent from a

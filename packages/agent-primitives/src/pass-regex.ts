@@ -13,8 +13,13 @@
  * motivating shape -- since without `m` a leading banner line puts `^`
  * out of reach of the summary line entirely. There is still no flags
  * syntax on this option beyond that: fold `i`/`s` into the pattern
- * itself, and `(?m)` is redundant (the flag is already always on) --
- * neither is JS `RegExp` flags syntax in the first place. This
+ * itself (JS `RegExp` has no inline-flag syntax at all -- there is no
+ * followable `(?i)`/`(?s)` form to fall back on). `(?m)` in particular
+ * is NOT redundant-but-harmless: it is not valid JS `RegExp` source
+ * (`new RegExp("(?m)...")` throws `SyntaxError: Invalid group`), so it
+ * is rejected as a usage error like any other unparseable pattern --
+ * the `m` flag this option always applies makes the group unnecessary,
+ * it does not make the group valid. This
  * deliberately differs from `--require-baseline-evidence`, which stays
  * flagless (no `m`): that option gates whether a run may proceed at
  * all, not what a test-runner-shaped success line looks like, so it has

@@ -4469,6 +4469,126 @@ describe("probe(): --pass-regex", () => {
     expect(result.reason).toBe("baseline_failed");
   });
 
+  describe("timeout interaction (round 3 HIGH fix): a matching pattern must not paper over a hang", () => {
+    // A runner that prints its green summary line and then never exits:
+    // before round 3, `baselineFailed` read `!aborted && !matched`, so a
+    // baseline the regex DID match (the hang happened after printing)
+    // read as a PASSING baseline despite `timedOut: true` and
+    // `exitCode: null` -- the probe would go on to apply a mutant
+    // against a suite that never actually finished running once.
+    const HANGING_RUNNER_JS = [
+      'console.log("OK (3 tests, 5 assertions)");',
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n");
+
+    function initHangingRunnerRepo(): { repo: string } {
+      const repo = makeTmpDir();
+      git(repo, ["init", "-q"]);
+      git(repo, ["config", "user.email", "test@example.com"]);
+      git(repo, ["config", "user.name", "test"]);
+      fs.writeFileSync(path.join(repo, "runner.js"), HANGING_RUNNER_JS);
+      git(repo, ["add", "-A"]);
+      git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+      return { repo };
+    }
+
+    it("a baseline that matches then hangs is baseline_failed under --timeout, not a silent pass, and gets no '(null)' exit-code prose", async () => {
+      useLockDir();
+      const { repo } = initHangingRunnerRepo();
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: 'console.log("irrelevant");',
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        timeoutMs: 300,
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+      expect(result.baseline?.timedOut).toBe(true);
+      expect(result.baseline?.exitCode).toBeNull();
+      // Neither the "did not match" miss warning (the pattern DID
+      // match) nor the "(null)" exit-code prose (this baseline never
+      // reached the code path that names an exit code at all) may
+      // appear.
+      expect(
+        result.warnings.some(
+          (w) => w.includes("--pass-regex") && w.includes("did not match"),
+        ),
+      ).toBe(false);
+      expect(result.warnings.some((w) => w.includes("(null)"))).toBe(false);
+    }, 10000);
+
+    it("the same shape without --pass-regex is also baseline_failed under --timeout (the plain exit-code path already handled this)", async () => {
+      useLockDir();
+      const { repo } = initHangingRunnerRepo();
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: 'console.log("irrelevant");',
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        timeoutMs: 300,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+      expect(result.baseline?.timedOut).toBe(true);
+      expect(result.baseline?.exitCode).toBeNull();
+    }, 10000);
+
+    it("mirrors on the mutant side: a mutant run that matches then hangs is inconclusive/timeout (already-correct handling, unchanged by round 3)", async () => {
+      useLockDir();
+      // A quick, genuinely passing baseline (prints the matching line
+      // and exits 0 immediately), so the probe proceeds to the mutant.
+      const repo = makeTmpDir();
+      git(repo, ["init", "-q"]);
+      git(repo, ["config", "user.email", "test@example.com"]);
+      git(repo, ["config", "user.name", "test"]);
+      fs.writeFileSync(
+        path.join(repo, "runner.js"),
+        'console.log("OK (3 tests, 5 assertions)");\n',
+      );
+      git(repo, ["add", "-A"]);
+      git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        // The mutant also prints the matching line, but then hangs:
+        // the mutant run must time out, not be read as a false pass
+        // via the regex match that happened before the hang.
+        replaceText: HANGING_RUNNER_JS.trimEnd(),
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        timeoutMs: 300,
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("timeout");
+      expect(result.test?.timedOut).toBe(true);
+      expect(result.test?.exitCode).toBeNull();
+    }, 10000);
+  });
+
   describe("interaction with --require-baseline-evidence: the evidence regex stays a gate on the baseline, --pass-regex is the verdict", () => {
     it("both given, and the evidence regex matches: the gate passes, and --pass-regex (not the exit code) still decides the exit-1 baseline's own verdict", async () => {
       useLockDir();
@@ -4545,6 +4665,167 @@ describe("probe(): --pass-regex", () => {
       expect(result.status).toBe("inconclusive");
       expect(result.reason).toBe("baseline_evidence_not_matched");
     });
+  });
+});
+
+describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous misses (round 3)", () => {
+  // Round 3: the mutant-path "did not match" warning used to fire on
+  // EVERY miss, including the routine, expected shape of a textbook
+  // killed mutant (a healthy N-mutant plan would then never have an
+  // empty `warnings` array, and would carry N near-duplicate entries).
+  // It now fires only when the miss is actually ambiguous: a truncated
+  // tail, an exit code of 0 disagreeing with the predicate, or a miss
+  // under --expect pass (which means the mutant SURVIVED, not the
+  // "predicate agrees the mutant broke the suite" shape at all).
+
+  function initRepoWithFile(name: string, content: string): { repo: string } {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, name), content);
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo };
+  }
+
+  const MISS_WARNING = /--pass-regex .* did not match the mutant run's output/;
+
+  it("a textbook killed mutant (non-truncated, exit code non-zero, --expect fail) produces an EMPTY warnings array", async () => {
+    useLockDir();
+    // The exit code follows the text, the same as a real test runner's
+    // would: the baseline text matches and exits 0; the mutant's text
+    // does not match and exits 1 -- process and predicate agree on
+    // both runs, so this is the plain, unambiguous shape.
+    const RUNNER_JS = [
+      'const text = "OK (3 tests, 5 assertions)";',
+      "console.log(text);",
+      'process.exit(text.startsWith("OK (") ? 0 : 1);',
+      "",
+    ].join("\n");
+    const { repo } = initRepoWithFile("runner.js", RUNNER_JS);
+
+    const result = await probe({
+      file: "runner.js",
+      line: 1,
+      form: "replace",
+      replaceText: 'const text = "FAILURES!";',
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      passRegex: /^OK \(/,
+    });
+
+    expect(result.status).toBe("killed");
+    expect(result.test?.exitCode).toBe(1);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("ambiguous case 1/3 -- the mutant run's captured tail was truncated: warns", async () => {
+    useLockDir();
+    // Baseline: short, matches, exits 0 -- no baseline-side warnings.
+    // Mutant: prints the matching line FIRST, then 70 filler lines, then
+    // exits 1 -- more than exec.ts's 60-line tail bound, so the matching
+    // line scrolls out of the captured tail and the regex misses it.
+    const RUNNER_JS = [
+      "const linesToPrint = 1;",
+      "if (linesToPrint === 1) {",
+      '  console.log("OK (3 tests, 5 assertions)");',
+      "  process.exit(0);",
+      "} else {",
+      '  console.log("OK (3 tests, 5 assertions)");',
+      "  for (let i = 0; i < 70; i++) console.log(`filler line ${i}`);",
+      "  process.exit(1);",
+      "}",
+      "",
+    ].join("\n");
+    const { repo } = initRepoWithFile("runner.js", RUNNER_JS);
+
+    const result = await probe({
+      file: "runner.js",
+      line: 1,
+      form: "replace",
+      replaceText: "const linesToPrint = 2;",
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      passRegex: /^OK \(/,
+    });
+
+    expect(result.status).toBe("killed");
+    expect(result.warnings.length).toBeGreaterThan(0);
+    // The truncation note is folded into the same miss warning, so its
+    // presence pins that this case was recognized as the truncated-tail
+    // shape specifically, not one of the other two ambiguous shapes.
+    expect(
+      result.warnings.some(
+        (w) => MISS_WARNING.test(w) && w.includes("truncated"),
+      ),
+    ).toBe(true);
+  });
+
+  it("ambiguous case 2/3 -- exit code 0 disagrees with the predicate: warns", async () => {
+    useLockDir();
+    // Baseline: matches, exits 0. Mutant: does NOT match, but still
+    // exits 0 -- the process says success, the predicate says failure.
+    const RUNNER_JS = [
+      'const text = "OK (3 tests, 5 assertions)";',
+      "console.log(text);",
+      "process.exit(0);",
+      "",
+    ].join("\n");
+    const { repo } = initRepoWithFile("runner.js", RUNNER_JS);
+
+    const result = await probe({
+      file: "runner.js",
+      line: 1,
+      form: "replace",
+      replaceText: 'const text = "FAILURES!";',
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      passRegex: /^OK \(/,
+    });
+
+    expect(result.status).toBe("killed");
+    expect(result.test?.exitCode).toBe(0);
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings.some((w) => MISS_WARNING.test(w))).toBe(true);
+  });
+
+  it("ambiguous case 3/3 -- a miss under --expect pass (the mutant SURVIVED): warns", async () => {
+    useLockDir();
+    const RUNNER_JS = [
+      'const text = "OK (3 tests, 5 assertions)";',
+      "console.log(text);",
+      'process.exit(text.startsWith("OK (") ? 0 : 1);',
+      "",
+    ].join("\n");
+    const { repo } = initRepoWithFile("runner.js", RUNNER_JS);
+
+    const result = await probe({
+      file: "runner.js",
+      line: 1,
+      form: "replace",
+      replaceText: 'const text = "FAILURES!";',
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "pass",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      passRegex: /^OK \(/,
+    });
+
+    expect(result.status).toBe("survived");
+    expect(result.test?.exitCode).toBe(1);
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings.some((w) => MISS_WARNING.test(w))).toBe(true);
   });
 });
 
@@ -4727,7 +5008,7 @@ describe("probe(): --pass-regex and a mutant crash that prints a stack trace", (
     return { repo };
   }
 
-  it("is 'killed' with the SAME generic pass-regex-miss warning a real failure gets, and no silent-crash warning -- the envelope cannot tell the two apart", async () => {
+  it("is 'killed' with no pass-regex-miss warning (round 3: a plain --expect fail miss is not ambiguous) and no silent-crash warning -- the envelope cannot tell a crash from a real failure of this shape apart", async () => {
     useLockDir();
     const { repo } = initRunnerRepo();
 
@@ -4749,12 +5030,16 @@ describe("probe(): --pass-regex and a mutant crash that prints a stack trace", (
     expect(result.test?.stdoutTail).toBe("");
     expect((result.test?.stderrTail ?? "").length).toBeGreaterThan(0);
     expect(result.warnings.some((w) => /no output at all/.test(w))).toBe(false);
+    // Non-empty exit code (1, not 0) under the default --expect fail: the
+    // process and the predicate agree, so this plain miss is the routine
+    // killed shape, not an ambiguous one -- round 3 silences the
+    // "did not match" warning here (see step.ts's `ambiguousMiss`).
     expect(
       result.warnings.some(
         (w) =>
           w.includes("--pass-regex") &&
           w.includes("did not match the mutant run's output"),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 });

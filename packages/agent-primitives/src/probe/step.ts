@@ -519,25 +519,43 @@ export async function runMutantAttempt(
           `the mutant run produced no output at all (exit code ${String(testResult.exitCode)}); --pass-regex (${rt.passRegex.source}) cannot match empty output, so this reads as a crash, not a genuine test failure -- see test.exitCode and the empty test.stdoutTail/test.stderrTail; see ${testResult.logPath}`,
         );
       } else if (!testPassed) {
-        // A genuine miss with real (non-empty) output: named explicitly,
-        // the same as `--require-baseline-evidence`'s own miss is on the
-        // baseline side, so a caller reading `warnings` sees which
-        // pattern was checked and against what, rather than only the
-        // bare `killed`/`survived` verdict -- and, when either side of
-        // this run's own captured tail was truncated, that the pattern
-        // may have matched output outside the captured tail rather than
-        // being genuinely absent.
+        // A genuine miss with real (non-empty) output. Under the
+        // ordinary `--expect fail` shape this is the ROUTINE, expected
+        // outcome -- the predicate agrees the mutant broke the suite,
+        // exactly like every other killed mutant in an N-mutant plan --
+        // so warning on every one of them would fill `warnings` with N
+        // near-duplicate entries that read as noise, not as N distinct
+        // findings (a healthy plan run would otherwise never have an
+        // empty `warnings` array at all). Warned only when the miss is
+        // actually ambiguous: (1) either side of this run's own captured
+        // tail was truncated, so the pattern may have matched output
+        // this run never even captured; (2) the exit code itself reads
+        // `0` despite the predicate reading "failed" -- the process and
+        // the predicate disagree, worth a second look regardless of
+        // `--expect`; or (3) `--expect pass`, where a miss means the
+        // mutant SURVIVED rather than being killed -- not the routine
+        // "predicate agrees the mutant broke the suite" shape at all.
+        // Named explicitly, the same as `--require-baseline-evidence`'s
+        // own miss is on the baseline side, so a caller reading
+        // `warnings` sees which pattern was checked and against what,
+        // rather than only the bare `killed`/`survived` verdict.
         const truncatedSides = [
           testResult.stdoutTruncated ? "stdout" : undefined,
           testResult.stderrTruncated ? "stderr" : undefined,
         ].filter((side): side is string => side !== undefined);
-        const truncatedNote =
-          truncatedSides.length > 0
-            ? ` (the mutant run's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
-            : "";
-        warnings.push(
-          `--pass-regex (${rt.passRegex.source}) did not match the mutant run's output${truncatedNote}; see ${testResult.logPath}`,
-        );
+        const ambiguousMiss =
+          truncatedSides.length > 0 ||
+          testResult.exitCode === 0 ||
+          spec.expect === "pass";
+        if (ambiguousMiss) {
+          const truncatedNote =
+            truncatedSides.length > 0
+              ? ` (the mutant run's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
+              : "";
+          warnings.push(
+            `--pass-regex (${rt.passRegex.source}) did not match the mutant run's output${truncatedNote}; see ${testResult.logPath}`,
+          );
+        }
       }
     }
 
