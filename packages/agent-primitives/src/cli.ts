@@ -34,6 +34,8 @@ import {
 } from "./probe/index.js";
 import { parsePlanFile, type ProbePlanSpec } from "./probe/plan.js";
 import { reconcileEnvelopeDiffTruncation } from "./probe/mutant.js";
+import { containmentRoot } from "./probe/containment.js";
+import { linkEntryUsageError, mergeLinkSources } from "./probe/link-list.js";
 import {
   init,
   ALL_HARNESSES,
@@ -99,6 +101,22 @@ function parseList(value: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/** `--link`'s own comma-separated parse, plus `linkEntryUsageError`
+ * (shared with a `--plan` file's own `link` field and the repo defaults
+ * file), so all three `link` sources genuinely share one rule -- see
+ * that function's own docblock for why a `--link` value is checked at
+ * all when it never reaches a shell either way. */
+function parseLinkList(value: string): string[] {
+  const raw = parseList(value);
+  for (const entry of raw) {
+    const err = linkEntryUsageError(entry);
+    if (err !== undefined) {
+      throw new InvalidArgumentError(`--link: "${entry}" ${err}`);
+    }
+  }
+  return raw;
 }
 
 /** `-H, --harness <list>`: `claude`, `codex`, `opencode`, comma-separated,
@@ -1185,6 +1203,17 @@ async function runProbePlanCommand(
     : (plan.expect ?? opts.expect);
   const timeoutMs =
     opts.timeout !== undefined ? Number(opts.timeout) * 1000 : plan.timeoutMs;
+  // The plan's own `link` (relative to the repository root) merged with
+  // `--link` (relative to `global.cwd`); the repo defaults file is
+  // merged in ahead of THIS merged result by `probePlan` itself, on
+  // every invocation, so the full precedence is "defaults file, then
+  // plan, then CLI" (D-006 task `6c7e1532`). Resolved to absolute paths
+  // here so the merge's dedup compares like with like regardless of
+  // which of the two bases produced a given value.
+  const links = mergeLinkSources([
+    { base: containmentRoot(global.cwd), values: plan.link ?? [] },
+    { base: global.cwd, values: opts.link ?? [] },
+  ]);
   // Handed to `probePlan` for the duration of the call, the same as for a
   // single probe: it owns SIGINT and SIGTERM while it runs, because it
   // has a mutated file to restore before the process may end.
@@ -1198,7 +1227,7 @@ async function runProbePlanCommand(
       isolation,
       expect,
       timeoutMs,
-      links: opts.link ?? [],
+      links,
       allowOutside: opts.allowOutside ?? false,
       cwd: global.cwd,
       logDir: global.logDir,
@@ -1327,8 +1356,10 @@ program
   )
   .option(
     "--link <dirs>",
-    "comma-separated extra directories checked for containment",
-    parseList,
+    "comma-separated extra directories checked for containment; merged " +
+      "and deduplicated with a --plan file's own link and with " +
+      ".agent-primitives.json at the repo root (no $(...) or backtick)",
+    parseLinkList,
   )
   .option(
     "--allow-outside",

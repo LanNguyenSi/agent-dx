@@ -340,6 +340,147 @@ describe("probe(): worktree isolation, node_modules and --pre", () => {
     );
   });
 
+  it("composer: symlinks vendor-dir and a custom, non-default bin-dir (both gitignored/untracked) and lists them in isolation.linked; the baseline needing vendor/autoload.php passes with no --link", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // vendor/ and the custom bin-dir are exactly what a real composer
+    // project gitignores: untracked, and never synced by the normal
+    // untracked-file copy (`git ls-files --others --exclude-standard`
+    // skips them) -- proving the fixture needs the auto-link, not a
+    // sync this package already did for another reason.
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\nbin/\n");
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({ name: "acme/widget", config: { "bin-dir": "bin" } }),
+    );
+    git(repo, ["add", "composer.json", ".gitignore"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader, php need not be installed\n",
+    );
+    fs.mkdirSync(path.join(repo, "bin"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "bin", "composer-bin-marker.txt"),
+      "present\n",
+    );
+
+    // PHP is not assumed to be installed here: a `node` stand-in for a
+    // `phpunit`/composer test script, checking only that the isolation
+    // copy actually has `vendor/autoload.php` and the custom bin-dir on
+    // disk, never PHP's own autoloading semantics.
+    const testCommand =
+      "node -e \"require('node:fs').accessSync('vendor/autoload.php'); " +
+      "require('node:fs').accessSync('bin/composer-bin-marker.txt')\"";
+
+    const result = await probe(baseOptions(repo, { testCommand }));
+
+    expect(result.isolation.linked).toEqual(
+      expect.arrayContaining([
+        path.join(repo, "vendor"),
+        path.join(repo, "bin"),
+      ]),
+    );
+    // The test command never depends on fixture.js, so the mutant run
+    // observes the exact same outcome as the baseline: a deterministic
+    // "survived", not a mutation-probe result this fixture cares about,
+    // but proof the baseline itself did not fail -- which it would if
+    // vendor/bin were not on disk in the isolation copy.
+    expect(result.status).toBe("survived");
+  });
+
+  it("composer: without a composer.json, the same gitignored vendor/ is never synced and the baseline fails -- the bug the auto-link fixes", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "vendor/\n");
+    git(repo, ["add", ".gitignore"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "gitignore",
+    ]);
+    fs.mkdirSync(path.join(repo, "vendor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "vendor", "autoload.php"),
+      "<?php // stand-in autoloader\n",
+    );
+
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand:
+          "node -e \"require('node:fs').accessSync('vendor/autoload.php')\"",
+      }),
+    );
+
+    expect(result.isolation.linked).not.toContain(path.join(repo, "vendor"));
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_failed");
+  });
+
+  it("repo defaults file (.agent-primitives.json): every probe invocation reads it and links what it names, no --link needed", async () => {
+    useLockDir();
+    // Resolved through realpath (macOS puts `os.tmpdir()` under `/var`,
+    // itself a symlink to `/private/var`): `beginWorktree`'s own linking
+    // loop compares an explicit link's realpath'd absolute path against
+    // its OWN `root` parameter, which is never realpath'd, so a repo
+    // whose display path and realpath differ makes an otherwise-correct
+    // `--link`/defaults-file/plan-link entry silently fail to link, with
+    // no warning -- a real, pre-existing gap outside this task's scope
+    // (see the implementer's risk notes), sidestepped here so this test
+    // exercises the defaults-file merge itself rather than that gap.
+    const { repo: rawRepo } = initRepo();
+    const repo = fs.realpathSync(rawRepo);
+    fs.writeFileSync(path.join(repo, ".gitignore"), "extra-cache/\n");
+    git(repo, ["add", ".gitignore"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "gitignore",
+    ]);
+    fs.mkdirSync(path.join(repo, "extra-cache"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "extra-cache", "marker.txt"), "present\n");
+    // The defaults file itself is untracked repo content, exactly like a
+    // real `.agent-primitives.json` an operator keeps out of git or
+    // commits alongside the project; either way `probe()` reads it by
+    // path, not from git.
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["extra-cache"] }),
+    );
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.isolation.linked).toContain(path.join(repo, "extra-cache"));
+  });
+
+  it("repo defaults file: an unknown key is a usage error naming the path and the key, fail-closed", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["vendor"], typoKey: true }),
+    );
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("defaults_file_invalid");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, ".agent-primitives.json")) &&
+          w.includes("typoKey"),
+      ),
+    ).toBe(true);
+  });
+
   it("--pre rebuilds inside the worktree, and the mutant reaches a test that executes built output", async () => {
     useLockDir();
     const repo = makeTmpDir();

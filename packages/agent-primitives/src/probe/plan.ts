@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { linkEntryUsageError } from "./link-list.js";
 import type { MutantForm } from "./mutant.js";
 // Type-only, so this module never imports `index.js` at runtime: `index.ts`
 // imports `parsePlanFile` from here, and a runtime import back would make
@@ -43,6 +44,14 @@ export interface ProbePlanSpec {
   /** Milliseconds, converted from the file's `timeout` (seconds, the
    * unit `--timeout` itself takes). */
   timeoutMs?: number;
+  /** Extra directories to link into the isolation copy, relative to the
+   * repository root (never the invocation cwd, unlike `file`/`patch`
+   * above: a plan file's own `link` entries are meant to be portable
+   * regardless of where `--cwd` points inside the repo). Merged and
+   * deduplicated with `--link` and the repo defaults file by the caller
+   * (see `mergeLinkSources` in `link-list.ts`), never overridden by
+   * either -- see the README's `--plan` section. */
+  link?: string[];
   mutants: PlanMutantSpec[];
 }
 
@@ -59,6 +68,7 @@ const PLAN_KEYS = [
   "isolation",
   "expect",
   "timeout",
+  "link",
   "mutants",
 ] as const;
 
@@ -308,6 +318,20 @@ export function validatePlan(
       );
     }
     plan.timeoutMs = Math.round(parsed.timeout * 1000);
+  }
+  if (parsed.link !== undefined) {
+    if (!Array.isArray(parsed.link)) {
+      return invalid(planPath, "plan.link", "must be an array of strings");
+    }
+    const links: string[] = [];
+    for (const [index, entry] of parsed.link.entries()) {
+      const err = linkEntryUsageError(entry);
+      if (err !== undefined) {
+        return invalid(planPath, `plan.link[${String(index)}]`, err);
+      }
+      links.push(entry as string);
+    }
+    plan.link = links;
   }
   if (!Array.isArray(parsed.mutants)) {
     return invalid(planPath, "plan.mutants", "must be an array");

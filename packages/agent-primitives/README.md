@@ -596,13 +596,28 @@ submodule directory is tracked as a gitlink, not walked into.
 Every `node_modules` directory or directory symlink (e.g. a hoisted or
 workspace-linked install) found in the source tree up to 3 levels deep
 (never one nested inside another `node_modules`) is symlinked into the
-worktree at the same relative path, alongside every `--link` extra, so
-installed dependencies and tool caches are shared rather than
-reinstalled per probe. `--pre`/`-t` run with their cwd mapped onto the
-worktree at `--cwd`'s own relative offset from the containment root.
-Any non-zero exit while syncing, or a genuine filesystem failure while
-copying/linking, is `status: "inconclusive"`, `reason:
-"worktree_sync_failed"`, exit `2`, never a verdict.
+worktree at the same relative path. A composer project gets the same
+treatment: wherever a `composer.json` sits, at the same depth (the
+repository root included), its `vendor-dir` and `bin-dir` -- read from
+`composer.json`'s own `config` object, defaulting to `vendor` and
+`vendor/bin` the way composer itself does -- are symlinked in, provided
+each already exists as a directory on disk and resolves inside the
+containment root (a `vendor-dir`/`bin-dir` naming a path outside the
+root, e.g. via `../..`, is silently skipped rather than linked: the same
+cycle/containment guard the node_modules walk gets from never following
+an arbitrary symlinked directory). Neither the node_modules nor the
+composer walk descends into what it just matched, so a vendored
+package's own nested `node_modules`/`composer.json` is never linked a
+second time. All of that, plus every `--link` extra, a `--plan` file's
+own `link`, and the repository defaults file's `link` (see below, and
+"Non-JS repositories"), is merged and deduplicated and symlinked into
+the worktree at the same relative path, so installed dependencies and
+tool caches are shared rather than reinstalled per probe. `--pre`/`-t`
+run with their cwd mapped onto the worktree at `--cwd`'s own relative
+offset from the containment root. Any non-zero exit while syncing, or a
+genuine filesystem failure while copying/linking, is `status:
+"inconclusive"`, `reason: "worktree_sync_failed"`, exit `2`, never a
+verdict.
 
 The sync runs under the same abort machinery as `--pre`/`-t`: every git
 call it makes is killed on `SIGINT`/`SIGTERM` and waited for before
@@ -793,7 +808,48 @@ nothing else.
 `--file` and every `--link` entry must resolve inside the git work-tree
 root (or inside the cwd when not in a repo), unless `--allow-outside` is
 passed; otherwise the result is `status: "inconclusive"`,
-`reason: "file_outside_root"`, exit `2`.
+`reason: "file_outside_root"`, exit `2`. A `--link` value carrying a
+`$(...)` command substitution or a backtick is refused outright
+(`InvalidArgumentError`, before anything runs) rather than merely being
+inert the way it already is for `-p`/`--file` above: the same rule
+applies identically to a `--plan` file's own `link` field and to the
+repository defaults file's `link` field below, so all three `link`
+sources share one check rather than the command line being "safe" while
+the two file-sourced ones are merely "checked" -- see `link-list.ts`'s
+own docblock for why the check exists at all given none of the three
+ever reaches a shell.
+
+#### Non-JS repositories
+
+`node_modules` and a composer project's `vendor-dir`/`bin-dir` are the
+two auto-link rules probe ships with; anything else a non-JS
+repository's gitignored build/dependency output needs (Drupal's
+`docroot/core`, `docroot/modules/contrib`, `docroot/themes/contrib`,
+`docroot/libraries`, or an ecosystem with no auto-link rule at all) goes
+into `--link`, a `--plan` file's own `link`, or -- so every invocation
+picks it up without repeating any of them -- the repository defaults
+file below.
+
+#### Repo defaults file
+
+`.agent-primitives.json` at the repository root (the same directory
+`probe` treats as the containment root: the git work-tree root, or the
+invocation cwd outside a repository) is read on every `probe`/`--plan`
+invocation, no flag required. Its schema is `{ "link": [...] }` only,
+paths relative to the repository root: any other key is a usage error
+naming the file's path and the offending key (`reason:
+"defaults_file_invalid"`, fail-closed, so a typo does not silently do
+nothing), and a present-but-unparsable file (not JSON, not a JSON
+object, `link` not an array of valid link strings) is a usage error
+naming the path. An absent file is not an error: nothing to add. Every
+`link` entry is checked the same way `--link`/a plan's own `link` is
+(non-empty, no `$(...)` or backtick).
+
+Precedence across all three `link` sources is additive, not an
+override: the defaults file's own entries, then the plan's, then
+`--link`'s, are merged and deduplicated (each distinct resolved path
+kept once, in that order) -- a later source can only ADD a path, never
+remove one an earlier source already named.
 
 `--pre <command>` runs (e.g. a rebuild) before each test invocation, in
 both the baseline and mutant runs, and in the invocation cwd (not the
@@ -1249,6 +1305,7 @@ is a placeholder, not a real one, and the file is not runnable as-is.
   "isolation": "worktree",
   "expect": "fail",
   "timeout": 900,
+  "link": ["vendor", "docroot/core"],
   "mutants": [
     { "file": "src/example.ts", "line": 42, "replace": "  return true;" },
     { "file": "src/example-two.ts", "line": 44, "match": "n > 0", "with": "n >= 0" },
@@ -1269,9 +1326,14 @@ Unlike the single-probe `-p`, a plan mutant's `file` is never derived
 from the patch: every path in the plan is known before the run starts, so
 the containment check below can cover all of them up front. Paths in a
 plan file (`file`, `patch`) are resolved against the invocation cwd
-(`-C/--cwd`). An unknown key, a missing `test`, an empty `mutants`, a
-mutant with two forms or none, or a `replace`/`match` mutant without a
-`line` is `status: "usage_error"`, `reason: "plan_invalid"` (or
+(`-C/--cwd`); `link` is the one exception, resolved against the
+repository root instead (task `6c7e1532`) so a plan's own `link` entries
+mean the same thing regardless of which subdirectory `--cwd` names, the
+same way the repository defaults file's entries do. An unknown key, a
+missing `test`, an empty `mutants`, a mutant with two forms or none, a
+`link` entry that is empty or carries a `$(...)`/backtick, or a
+`replace`/`match` mutant without a `line` is `status: "usage_error"`,
+`reason: "plan_invalid"` (or
 `"plan_empty"`), exit `2`, naming the offending path inside the plan
 (`plan.mutants[2].patch`). A plan file that cannot be used at all
 (missing, not a regular file, unreadable, or over the 1&nbsp;MiB cap) is
@@ -1291,12 +1353,17 @@ plan file's own value, which wins over the CLI default. That covers the
 three a plan file can set -- `-i` (`isolation`), `--expect` (`expect`)
 and `--timeout` (`timeout`); a mutant's own `expect` wins over both,
 since it is the only one of them that is per mutant rather than per run.
-`--link` and `--allow-outside` have no plan key at all (`plan.link` is a
-`plan_invalid` refusal naming the unknown key), so for a plan they are
-command-line only and there is nothing for them to override.
-`--require-baseline-evidence` is the same shape: no plan key, command-line
-only, and (unlike `--env`) not refused under `--plan` -- see its own
-paragraph above.
+`--allow-outside` has no plan key at all: for a plan it is command-line
+only and there is nothing for it to override. `--link` is different
+(task `6c7e1532`): a plan's own `link` (see above) is not a run-shaping
+override at all, so the CLI/plan precedence rule above does not apply to
+it -- instead it is merged and deduplicated with `--link`'s own values
+(and with the repository defaults file's `link`, read for a plan the
+same as for a single probe), in that order: defaults file, then plan,
+then `--link`, each source only ever adding a path, never removing one
+an earlier source already named. `--require-baseline-evidence` keeps the
+older shape: no plan key, command-line only, and (unlike `--env`) not
+refused under `--plan` -- see its own paragraph above.
 
 Output: the envelope carries `plan: { baseline, results, summary }`
 instead of the single probe's top-level `mutant`/`mutation_probe`/`test`.

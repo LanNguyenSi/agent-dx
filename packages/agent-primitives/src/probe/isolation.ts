@@ -95,14 +95,26 @@ export function beginInplace(
 
 /** How many path segments below `root` a `node_modules` directory may sit
  * at and still be linked (`root/node_modules` is depth 1,
- * `root/a/b/node_modules` is depth 3). This is the single mutation-probed
- * constant for the whole depth cutoff: raising it must make a
- * previously-excluded deeper `node_modules` start showing up in `linked`. */
+ * `root/a/b/node_modules` is depth 3), and how many segments below `root`
+ * a `composer.json` may sit at and still have its `vendor-dir`/`bin-dir`
+ * linked (`root` itself is depth 0, so a composer.json at the repository
+ * root -- by far the common case -- is always in range). This is the
+ * single mutation-probed constant for the whole depth cutoff, shared by
+ * both matchers: raising it must make a previously-excluded deeper
+ * `node_modules` or `composer.json` start showing up in `linked`. */
 const NODE_MODULES_LINK_DEPTH = 3;
 
-/** Whether `p` (already known to be a symlink) points at a directory,
- * following the link exactly once. A dangling symlink (or one this
- * process cannot stat) is never linkable. */
+/** The default `config.vendor-dir`/`config.bin-dir` a composer project
+ * uses when its `composer.json` names neither: composer's own defaults. */
+const COMPOSER_DEFAULT_VENDOR_DIR = "vendor";
+const COMPOSER_DEFAULT_BIN_DIR = "vendor/bin";
+
+/** Whether `p` points at a directory, following a symlink exactly once
+ * when `p` is one. A dangling symlink (or one this process cannot stat)
+ * is never linkable. Used both for a `node_modules` entry already known
+ * to be a symlink, and for a composer `vendor-dir`/`bin-dir` path built
+ * from `composer.json`'s own config, which is never itself an entry this
+ * walk has classified yet. */
 function isDirectoryFollowingLink(p: string): boolean {
   try {
     return fs.statSync(p).isDirectory();
@@ -111,27 +123,114 @@ function isDirectoryFollowingLink(p: string): boolean {
   }
 }
 
+/** Whether `p` points at a regular file, following a symlink exactly
+ * once when `p` is one: the same shape as `isDirectoryFollowingLink`,
+ * for classifying a `composer.json` entry that is itself a symlink. */
+function isFileFollowingLink(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Reads one `config.vendor-dir`/`config.bin-dir` string from an
+ * already-parsed `composer.json`, falling back to composer's own default
+ * when the key is absent, not a string, or empty. */
+function readComposerDirOption(
+  config: Record<string, unknown>,
+  key: string,
+  fallback: string,
+): string {
+  const raw = config[key];
+  return typeof raw === "string" && raw.length > 0 ? raw : fallback;
+}
+
+/**
+ * The `vendor-dir` and `bin-dir` a `composer.json` at `dir` declares (or
+ * composer's own defaults), each resolved to an absolute path and kept
+ * only when it exists as a directory (or a symlink to one) AND resolves
+ * inside `rootReal` -- the same cycle guard `node_modules` gets from
+ * never following an arbitrary symlinked directory during the walk
+ * itself: `composer.json`'s `vendor-dir`/`bin-dir` are strings read out
+ * of repository content, not a name this walk discovered on disk, so a
+ * value like `../../etc` is checked against containment explicitly
+ * rather than being trusted to stay under `dir`. Malformed JSON, or a
+ * `composer.json` that is not a JSON object, yields no directories
+ * rather than failing the whole probe: a broken `composer.json` is the
+ * project's own problem, not a reason to refuse isolation for the rest
+ * of the tree. Deduplicated so a `bin-dir` left at its default
+ * (`vendor/bin`, nested inside the default `vendor-dir`) is not listed
+ * twice when a project sets neither.
+ */
+function composerLinkDirsFor(dir: string, rootReal: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      fs.readFileSync(path.join(dir, "composer.json"), "utf8"),
+    );
+  } catch {
+    return [];
+  }
+  const config =
+    isPlainRecord(parsed) && isPlainRecord(parsed.config) ? parsed.config : {};
+  const vendorDir = readComposerDirOption(
+    config,
+    "vendor-dir",
+    COMPOSER_DEFAULT_VENDOR_DIR,
+  );
+  const binDir = readComposerDirOption(
+    config,
+    "bin-dir",
+    COMPOSER_DEFAULT_BIN_DIR,
+  );
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const rel of [vendorDir, binDir]) {
+    const abs = path.resolve(dir, rel);
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    if (!isDirectoryFollowingLink(abs)) continue;
+    if (!isPathContained(rootReal, resolveDeepestExisting(abs))) continue;
+    found.push(abs);
+  }
+  return found;
+}
+
 /**
  * Every `node_modules` directory or directory symlink under `root`, at or
- * above `NODE_MODULES_LINK_DEPTH` segments deep, none of them nested
- * inside another `node_modules` this walk already found (a `node_modules`
- * entry is never itself recursed into, whether it is a real directory or
- * a symlink to one). For every OTHER entry, a symlink is not followed
- * (`Dirent` from `readdirSync` reports the entry's own type, not its
- * target's): this is what keeps the general walk itself from following a
- * symlinked directory into a cycle. A `node_modules` entry is the one
- * exception -- it is never recursed into either way, so following it
- * once just to classify it (a real directory, or a symlink to one, e.g.
- * a workspace's hoisted install) cannot introduce a cycle, and skipping
- * that one `stat` would otherwise silently drop every symlinked
- * `node_modules` from `linked`. `.git` is skipped outright: descending
- * into it would walk a large, irrelevant tree for no directory this
- * function could ever want. The walk itself goes one level past the
- * cutoff (never further), which is exactly enough to prove a directory
- * at the next depth is excluded rather than simply unvisited.
+ * above `NODE_MODULES_LINK_DEPTH` segments deep, plus every composer
+ * project's `vendor-dir`/`bin-dir` (`composerLinkDirsFor`) for a
+ * `composer.json` at or above the same depth cutoff -- one shared walk,
+ * `composer.json` a second matcher inside it rather than a parallel
+ * directory traversal. Neither a matched `node_modules` entry nor a
+ * matched composer directory is ever itself recursed into (whether a
+ * real directory or a symlink to one): for `node_modules` that is what
+ * keeps a nested `node_modules` (or, now, a vendored package's own
+ * `composer.json`) from being found a second time inside it; for a
+ * composer directory the same reasoning applies, and additionally avoids
+ * walking a vendor tree that can be arbitrarily large for no directory
+ * this function could ever want. For every OTHER entry, a symlink is not
+ * followed (`Dirent` from `readdirSync` reports the entry's own type,
+ * not its target's): this is what keeps the general walk itself from
+ * following a symlinked directory into a cycle. `.git` is skipped
+ * outright: descending into it would walk a large, irrelevant tree for
+ * no directory this function could ever want. The walk itself goes one
+ * level past the cutoff (never further), which is exactly enough to
+ * prove a directory (or a `composer.json`) at the next depth is excluded
+ * rather than simply unvisited.
  */
-export function findNodeModulesDirs(root: string): string[] {
-  const found: string[] = [];
+function walkAutoLinkDirs(root: string): {
+  nodeModules: string[];
+  composer: string[];
+} {
+  const nodeModules: string[] = [];
+  const composer: string[] = [];
+  const rootReal = resolveDeepestExisting(path.resolve(root));
   function walk(dir: string, depth: number): void {
     if (depth > NODE_MODULES_LINK_DEPTH + 1) return;
     let entries: fs.Dirent[];
@@ -139,6 +238,22 @@ export function findNodeModulesDirs(root: string): string[] {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
+    }
+    const composerSkip = new Set<string>();
+    if (depth <= NODE_MODULES_LINK_DEPTH) {
+      const composerEntry = entries.find((e) => e.name === "composer.json");
+      const composerJsonPath = path.join(dir, "composer.json");
+      const isComposerFile =
+        composerEntry !== undefined &&
+        (composerEntry.isFile() ||
+          (composerEntry.isSymbolicLink() &&
+            isFileFollowingLink(composerJsonPath)));
+      if (isComposerFile) {
+        for (const abs of composerLinkDirsFor(dir, rootReal)) {
+          composer.push(abs);
+          composerSkip.add(abs);
+        }
+      }
     }
     for (const entry of entries) {
       if (entry.name === ".git") continue;
@@ -149,16 +264,43 @@ export function findNodeModulesDirs(root: string): string[] {
           entry.isDirectory() ||
           (entry.isSymbolicLink() && isDirectoryFollowingLink(childPath));
         if (isLinkableDir && childDepth <= NODE_MODULES_LINK_DEPTH) {
-          found.push(childPath);
+          nodeModules.push(childPath);
         }
         continue;
       }
       if (!entry.isDirectory()) continue;
+      if (composerSkip.has(childPath)) continue;
       walk(childPath, childDepth);
     }
   }
   walk(root, 0);
-  return found;
+  return { nodeModules, composer };
+}
+
+/** Every `node_modules` directory or directory symlink `walkAutoLinkDirs`
+ * finds; see that function's own docblock for the depth and cycle rules.
+ * Exported (and kept to this exact behaviour) for the existing unit
+ * tests and for any caller that wants node_modules alone. */
+export function findNodeModulesDirs(root: string): string[] {
+  return walkAutoLinkDirs(root).nodeModules;
+}
+
+/** Every composer `vendor-dir`/`bin-dir` `walkAutoLinkDirs` finds for a
+ * `composer.json` in range; see that function's own docblock. Exported
+ * for direct unit testing of the composer matcher in isolation from
+ * `node_modules`. */
+export function findComposerLinkDirs(root: string): string[] {
+  return walkAutoLinkDirs(root).composer;
+}
+
+/** Every directory `beginWorktree` auto-links into the isolation copy
+ * without an explicit `--link`: `node_modules` directories first (the
+ * pre-existing order), then composer `vendor-dir`/`bin-dir`s -- one
+ * shared walk (`walkAutoLinkDirs`) rather than two separate traversals
+ * of the same tree. */
+export function findAutoLinkDirs(root: string): string[] {
+  const { nodeModules, composer } = walkAutoLinkDirs(root);
+  return [...nodeModules, ...composer];
 }
 
 /** Number of file records in a `git diff --numstat -z` listing. Parsed
@@ -199,7 +341,8 @@ export interface WorktreeSyncSuccess {
    * `root` that `cwd` itself has. */
   mappedCwd: string;
   /** Absolute source-tree paths of every directory symlinked into the
-   * worktree (linked `node_modules` directories plus `--link` extras). */
+   * worktree (linked `node_modules` directories, composer `vendor-dir`/
+   * `bin-dir`s, plus `--link` extras). */
   linked: string[];
   /** Number of `git diff HEAD --numstat -z` records synced into the
    * worktree (0 for a clean tree); NOT necessarily the number of bytes
@@ -467,7 +610,10 @@ function yieldToEventLoop(): Promise<void> {
  * space, including the worktree this call just created -- which is never
  * a source file to sync into the very worktree it is scratch space for.
  * Every `node_modules` directory (or directory symlink) up to
- * `NODE_MODULES_LINK_DEPTH` plus every `--link` extra is symlinked. Any
+ * `NODE_MODULES_LINK_DEPTH`, every composer project's `vendor-dir`/
+ * `bin-dir` at the same depth, plus every `--link` extra (`--link`
+ * itself already merged with a `--plan` file's own `link` and the repo
+ * defaults file by the caller; see `findAutoLinkDirs`) is symlinked. Any
  * non-zero git exit, or a genuine I/O failure while copying, is
  * `worktree_sync_failed`; the caller (`probe/session.ts`'s
  * `prepareWorktreeSession`) never treats a sync failure as a verdict.
@@ -691,10 +837,10 @@ export async function beginWorktree(
     };
   }
 
-  const nodeModulesDirs = findNodeModulesDirs(root);
+  const autoLinkDirs = findAutoLinkDirs(root);
   const linked: string[] = [];
   try {
-    for (const absDir of [...nodeModulesDirs, ...links]) {
+    for (const absDir of [...autoLinkDirs, ...links]) {
       const relPath = path.relative(root, absDir);
       if (relPath.startsWith("..") || path.isAbsolute(relPath)) continue;
       const dest = path.join(worktreePath, relPath);

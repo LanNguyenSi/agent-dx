@@ -3,6 +3,8 @@ import path from "node:path";
 import { sha256File } from "../hash.js";
 import { removeMarkerFor } from "../lock.js";
 import { findGitRoot, resolveDeepestExisting } from "./containment.js";
+import { readDefaultsFile } from "./defaults-file.js";
+import { mergeLinkSources } from "./link-list.js";
 import {
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
   listPatchTouchedPaths,
@@ -402,8 +404,25 @@ async function runProbePipeline(
       dryRunLogPaths: derivationLogPaths,
     };
   }
-  const links = opts.links ?? [];
-  const displayLinks = links.map((l) => path.resolve(cwd, l));
+  // The repo defaults file (D-006 task `6c7e1532`), read on every
+  // invocation, merged ahead of `opts.links` (`--link`, already merged
+  // with a `--plan` file's own `link` by the caller when there is one --
+  // see `cli.ts`'s `runProbePlanCommand`): "defaults file, then plan,
+  // then CLI", all three additive, never overriding one another.
+  const defaultsFile = readDefaultsFile(root);
+  if (!defaultsFile.ok) {
+    return {
+      status: "usage_error",
+      reason: defaultsFile.reason,
+      warnings: [...warnings, defaultsFile.message],
+      isolation: isolationField,
+      dryRunLogPaths: derivationLogPaths,
+    };
+  }
+  const displayLinks = mergeLinkSources([
+    { base: root, values: defaultsFile.links },
+    { base: cwd, values: opts.links ?? [] },
+  ]);
 
   // Containment and the lock/marker key are resolved through realpath
   // (before either check), so an in-repo symlink pointing outside the
@@ -834,9 +853,6 @@ export async function probePlan(
   const root = gitRoot ?? path.resolve(cwd);
   const realRoot = resolveDeepestExisting(root);
   const gitApplyTimeoutMs = opts.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS;
-  const links = opts.links ?? [];
-  const displayLinks = links.map((l) => path.resolve(cwd, l));
-  const absLinks = displayLinks.map(resolveDeepestExisting);
   const wtScratchRoot = path.resolve(opts.logDir);
 
   /** One entry of the plan, resolved: every path in a plan file (`file`,
@@ -938,6 +954,20 @@ export async function probePlan(
       "--plan carries no mutants; a plan needs at least one",
     );
   }
+  // The repo defaults file (D-006 task `6c7e1532`), read on every
+  // invocation, merged ahead of `opts.links` (`--link`, already merged
+  // with the plan's own `link` by the caller -- see `cli.ts`'s
+  // `runProbePlanCommand`): "defaults file, then plan, then CLI", all
+  // three additive, never overriding one another.
+  const defaultsFile = readDefaultsFile(root);
+  if (!defaultsFile.ok) {
+    return refuse("usage_error", defaultsFile.reason, defaultsFile.message);
+  }
+  const displayLinks = mergeLinkSources([
+    { base: root, values: defaultsFile.links },
+    { base: cwd, values: opts.links ?? [] },
+  ]);
+  const absLinks = displayLinks.map(resolveDeepestExisting);
   for (const item of planned) {
     if (item.spec.form !== "patch" && item.spec.line === undefined) {
       return refuse(

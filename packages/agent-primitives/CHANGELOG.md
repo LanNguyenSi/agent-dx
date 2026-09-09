@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `probe -i worktree`'s isolation copy auto-links a composer project's
+  `vendor-dir`/`bin-dir` the same way it already auto-links
+  `node_modules` (task `6c7e1532`, issue #225): wherever a
+  `composer.json` sits, at the same depth cutoff and behind the same
+  containment/cycle guard, its `config.vendor-dir`/`config.bin-dir`
+  (defaulting to `vendor`/`vendor/bin`) are symlinked in, so a composer
+  project's gitignored runtime no longer needs a `--link` per
+  invocation. A `--plan` file now accepts its own `link` field (paths
+  relative to the repository root, the same `$(...)`/backtick check
+  `--link` itself now applies), merged and deduplicated with `--link`.
+  A new repo-level defaults file, `.agent-primitives.json` at the
+  repository root (`{ "link": [...] }` only; an unknown key or an
+  unparsable file is a usage error naming the path), is read on every
+  `probe`/`--plan` invocation; the full precedence across all three
+  `link` sources is additive -- defaults file, then plan, then
+  `--link`, each only ever adding a path, never removing one an
+  earlier source already named.
+
 ### Changed
 
 - Test hygiene from the PR #218 reviews (task `482c3ef7`, no behaviour

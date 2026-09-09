@@ -9,6 +9,8 @@ import {
   beginWorktree,
   cleanupWorktree,
   countNumstatFiles,
+  findAutoLinkDirs,
+  findComposerLinkDirs,
   findNodeModulesDirs,
   isScratchWorktreePath,
   listRegisteredWorktrees,
@@ -296,6 +298,167 @@ describe("findNodeModulesDirs", () => {
     });
 
     expect(findNodeModulesDirs(root)).toEqual([]);
+  });
+});
+
+/** A composer.json declaring `config.vendor-dir`/`config.bin-dir` (or
+ * neither, to exercise composer's own defaults), plus the directories
+ * those names point at, so `findComposerLinkDirs` has something real to
+ * find. */
+function writeComposerProject(
+  dir: string,
+  config?: { vendorDir?: string; binDir?: string },
+): void {
+  fs.mkdirSync(dir, { recursive: true });
+  const composerJson: Record<string, unknown> = { name: "acme/widget" };
+  if (config !== undefined) {
+    composerJson.config = {
+      ...(config.vendorDir !== undefined
+        ? { "vendor-dir": config.vendorDir }
+        : {}),
+      ...(config.binDir !== undefined ? { "bin-dir": config.binDir } : {}),
+    };
+  }
+  fs.writeFileSync(
+    path.join(dir, "composer.json"),
+    JSON.stringify(composerJson),
+  );
+}
+
+describe("findComposerLinkDirs", () => {
+  it("finds the default vendor-dir and bin-dir for a composer.json with no config", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root);
+    fs.mkdirSync(path.join(root, "vendor", "bin"), { recursive: true });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toContain(path.join(root, "vendor"));
+    expect(found).toContain(path.join(root, "vendor", "bin"));
+  });
+
+  it("finds a custom vendor-dir and a custom, non-nested bin-dir", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { binDir: "bin" });
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+    fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toEqual(
+      expect.arrayContaining([
+        path.join(root, "vendor"),
+        path.join(root, "bin"),
+      ]),
+    );
+    expect(found).toHaveLength(2);
+  });
+
+  it("deduplicates when vendor-dir and bin-dir are configured to the same path", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { vendorDir: "tools", binDir: "tools" });
+    fs.mkdirSync(path.join(root, "tools"), { recursive: true });
+
+    expect(findComposerLinkDirs(root)).toEqual([path.join(root, "tools")]);
+  });
+
+  it("bin-dir left at its own composer default ('vendor/bin') is unrelated to a custom vendor-dir, so both survive as distinct entries", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { vendorDir: "deps" });
+    fs.mkdirSync(path.join(root, "deps"), { recursive: true });
+    fs.mkdirSync(path.join(root, "vendor", "bin"), { recursive: true });
+
+    expect(findComposerLinkDirs(root)).toEqual(
+      expect.arrayContaining([
+        path.join(root, "deps"),
+        path.join(root, "vendor", "bin"),
+      ]),
+    );
+  });
+
+  it("finds a composer.json at depth 3 but not at depth 4, the same cutoff node_modules uses", () => {
+    const root = makeTmpDir();
+    writeComposerProject(path.join(root, "a", "b", "c"));
+    fs.mkdirSync(path.join(root, "a", "b", "c", "vendor"), {
+      recursive: true,
+    });
+    writeComposerProject(path.join(root, "a", "b", "c", "d"));
+    fs.mkdirSync(path.join(root, "a", "b", "c", "d", "vendor"), {
+      recursive: true,
+    });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toContain(path.join(root, "a", "b", "c", "vendor"));
+    expect(found).not.toContain(path.join(root, "a", "b", "c", "d", "vendor"));
+  });
+
+  it("skips a vendor-dir/bin-dir that does not exist on disk", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root, { binDir: "bin" });
+    // Neither "vendor" nor "bin" created.
+
+    expect(findComposerLinkDirs(root)).toEqual([]);
+  });
+
+  it("skips a composer.json that is not valid JSON, rather than failing the whole walk", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, "composer.json"), "{ not json");
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+
+    expect(findComposerLinkDirs(root)).toEqual([]);
+  });
+
+  it("never links a vendor-dir a malicious composer.json points outside the containment root (cycle/containment guard)", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.writeFileSync(path.join(outside, "marker.txt"), "outside\n");
+    const relEscape = path.relative(root, outside);
+    writeComposerProject(root, { vendorDir: relEscape });
+
+    expect(findComposerLinkDirs(root)).toEqual([]);
+  });
+
+  it("does not recurse into a linked vendor-dir looking for a nested composer.json (no double work / cycle)", () => {
+    const root = makeTmpDir();
+    writeComposerProject(root);
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+    // A vendored package's own composer.json, which must never surface
+    // as a second, separate match.
+    writeComposerProject(path.join(root, "vendor", "some-pkg"));
+    fs.mkdirSync(path.join(root, "vendor", "some-pkg", "vendor"), {
+      recursive: true,
+    });
+
+    const found = findComposerLinkDirs(root);
+
+    expect(found).toEqual([path.join(root, "vendor")]);
+  });
+});
+
+describe("findAutoLinkDirs", () => {
+  it("combines node_modules and composer directories from one repo, node_modules first", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "node_modules"), { recursive: true });
+    writeComposerProject(root, { binDir: "bin" });
+    fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+    fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+
+    const found = findAutoLinkDirs(root);
+
+    expect(found).toEqual([
+      path.join(root, "node_modules"),
+      path.join(root, "vendor"),
+      path.join(root, "bin"),
+    ]);
+  });
+
+  it("is the union `beginWorktree` uses: a repo with neither shape finds nothing", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(root, { recursive: true });
+
+    expect(findAutoLinkDirs(root)).toEqual([]);
   });
 });
 

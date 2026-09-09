@@ -3636,6 +3636,44 @@ describe("cli: probe --plan", () => {
     expect(JSON.parse(overridden.stdout).isolation.mode).toBe("worktree");
   }, 30000);
 
+  it("--plan's own link and --link merge and deduplicate (task 6c7e1532): both show up in isolation.linked", async () => {
+    const { repo: rawRepo } = initPlanRepo();
+    // Realpath'd: `beginWorktree`'s own linking loop compares each
+    // link's realpath'd absolute path against its own `root` parameter,
+    // which is never realpath'd, so a repo under a symlinked ancestor
+    // (macOS's `os.tmpdir()`, under `/var` -> `/private/var`) would
+    // silently fail to link either extra directory below -- a real,
+    // pre-existing gap outside this task's scope; sidestepped here so
+    // this test exercises the plan/--link merge itself.
+    const repo = fs.realpathSync(rawRepo);
+    fs.mkdirSync(path.join(repo, "plan-link-dir"));
+    fs.mkdirSync(path.join(repo, "cli-link-dir"));
+    const planPath = writePlan(repo, {
+      test: "node fixture.test.js",
+      link: ["plan-link-dir"],
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "--link",
+      "cli-link-dir",
+    ]);
+
+    expect(run.code).toBe(0);
+    const envelope = JSON.parse(run.stdout);
+    expect(envelope.isolation.linked).toEqual(
+      expect.arrayContaining([
+        path.join(repo, "plan-link-dir"),
+        path.join(repo, "cli-link-dir"),
+      ]),
+    );
+  }, 30000);
+
   /** A repository whose fixture carries `count` one-line functions and a
    * test that catches a mutant of any of them: enough mutants for one
    * plan envelope to exceed the default `-m`. */
