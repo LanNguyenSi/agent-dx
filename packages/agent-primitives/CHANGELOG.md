@@ -19,7 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   position, since PHPUnit prints `Errors:` before `Failures:` -- and
   only the `ERRORS!` marker, never both -- whenever a run has both; and
   `No tests executed!`; PHP-level deprecation notices surfaced as
-  detector warnings), `phpstan` (` [OK] No errors` / a per-file table
+  detector warnings). The `phpunit` summary is derived from the run's
+  own stated total by spending it category by category: Skipped,
+  Incomplete and Warnings did not execute (PHPUnit counts a
+  `No tests found in class "X".` warning as a whole synthetic test, and
+  that run exits `0`), Failures, Errors and Risky did, so `executed` is
+  the total less the first group and `passed` is what remains of it
+  after failures and errors -- clamped, so `passed + failed + errors +
+  skipped + warnings` never exceeds the stated total and `passed` never
+  goes negative, for a truncated or self-contradictory tally too. A
+  numbered `N) Class::method` entry becomes a `failures` entry only
+  under an error or failure section header, since a risky or incomplete
+  entry carries the same header shape; an entry's message ends at the
+  next entry, the `--` divider, the next section header, a marker line,
+  or the tally. `phpstan` (` [OK] No errors` / a per-file table
   closed by ` [ERROR] Found N errors`), and `phpcs` (one `FOUND N
   ERRORS ... AFFECTING M LINES` summary PER FILE, summed across every
   file rather than read from the first alone, over per-finding rows) --
@@ -28,16 +41,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selects `vitest` with every PHP detector present as a candidate, now
   also pinned for phpstan/phpcs against `DEFAULT_DETECTORS` directly).
   `probe`'s zero-tests guard now also recognizes PHPUnit's `No tests
-  executed!`, a tally line whose own stated total (less Skipped and
-  Incomplete; Risky is excluded, since a risky test still ran) is zero
-  -- so a red run that is ALSO all-skipped/incomplete is never misread
-  as "nothing executed" by this guard, and an all-skipped/all-risky run
-  with no `FAILURES!`/`ERRORS!` marker at all is no longer missed
-  entirely -- and a stated `OK (0 tests, 0 assertions)` (defensive, not
-  observed from a real capture), yielding `inconclusive`/
-  `no_tests_executed` the same way it already does for vitest's and
-  node's zero-count shapes (reusing the new `phpunit` detector's
-  `phpunitZeroTestsExecuted` rather than restating its patterns).
+  executed!` and any run whose derived executed count is zero (an
+  all-skipped run, a warnings-only run, a stated `OK (0 tests, 0
+  assertions)` -- the last defensive, not observed from a real capture),
+  yielding `inconclusive`/`no_tests_executed` the same way it already
+  does for vitest's and node's zero-count shapes (reusing the new
+  `phpunit` detector's `phpunitZeroTestsExecuted` rather than restating
+  its patterns). A red run that is ALSO all-skipped/incomplete is never
+  misread as "nothing executed" by this guard, and an all-risky run is
+  deliberately not flagged, since a risky test did run.
   `drift` now scans `.php` comment sites too: `//`, `#`, `/* ... */`,
   and docblock ` * ` continuation lines (PHP is the only recognized
   language that accepts both the `//`/`/* */` and `#` comment
@@ -46,7 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skill (`assets/skill/SKILL.md`) gain a "Non-JS test runners" section
   naming the exit-code assumption these three inherit (including
   PHPCS's measured `0`/`1`/`2`/`3` mapping, distinct from PHPUnit's and
-  PHPStan's) and pointing at the `--pass-regex`/`passWhen` pass
+  PHPStan's, and PHPUnit's own zero-exit hole: a warnings-only run exits
+  `0` under 9.6, so the zero-tests guard and not the exit code is what
+  catches it) and pointing at the `--pass-regex`/`passWhen` pass
   predicate and the composer `vendor-dir`/`bin-dir` auto-link rule
   (issue #225 parts 1 and 2, tasks `a435469b`/`6c7e1532`) without
   restating their surface, since both are still open, unmerged siblings

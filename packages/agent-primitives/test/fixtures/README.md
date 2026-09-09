@@ -147,8 +147,13 @@ PHP_CodeSniffer 3.13.6, `--standard=PSR12`).
   order-independent named-count parsing.
 - `phpunit-warnings.txt`: the same command against a test class with
   no public test methods (`No tests found in class "..."`, a genuine
-  PHPUnit-level warning, not an exception). Exit `2`. `WARNINGS!` plus
-  `Tests: 1, Assertions: 0, Warnings: 1.`
+  PHPUnit-level warning, not an exception). Exit `0` -- re-run and
+  re-measured in round 3 (this file's own bytes came back identical, the
+  exit code did not: `2` as recorded here through round 2 was wrong, and
+  two tests were passing that wrong code in as an argument). A
+  PHPUnit-level warning does not fail the run under 9.6, which is why
+  `probe`'s zero-tests guard, not the exit code, is what catches this
+  shape. `WARNINGS!` plus `Tests: 1, Assertions: 0, Warnings: 1.`
 - `phpcs-two-files.txt`: `vendor/bin/phpcs --standard=PSR12 --no-colors
   <dir>` against two files, each with the same tab-indentation and
   missing-visibility violations. Exit `2`. Two separate `FILE: ...` /
@@ -165,6 +170,41 @@ PHP_CodeSniffer 3.13.6, `--standard=PSR12`).
   separately, not captured here as a fixture: `phpcs` prints usage help
   to stderr and exits `3` when a standard names no sniffs at all, an
   operator-input error rather than a lint result).
+
+### Round-3 PHP captures (task `55b0a5cc` review round 3)
+
+Same throwaway-`composer`-project-under-scratch-directory, same
+disposable-Docker-container (`composer:2`, `php:8.3-cli`), same trimming
+convention as the captures above; PHP 8.3.33 (cli), PHPUnit 9.6.36. All
+three exist to pin the executed/not-executed line the round-3
+redesign draws through PHPUnit's tally categories.
+
+- `phpunit-risky-and-real.txt`: `vendor/bin/phpunit --colors=never
+  tests/RiskyRealTest.php` against a two-test class, one asserting, one
+  performing no assertion at all (PHPUnit 9.6 flags that as risky by
+  default). Exit `0`. `OK, but incomplete, skipped, or risky tests!`
+  plus `Tests: 2, Assertions: 1, Risky: 1.`, and a numbered `1)
+  RiskyRealTest::testNoAssertions` entry under a `There was 1 risky
+  test:` header -- a real `Class::method` entry that is NOT a failure,
+  which is why the entry loop keys on the section header rather than on
+  the entry header's own grammar.
+- `phpunit-risky-only.txt`: the same command against a one-test class
+  whose single test performs no assertion. Exit `0`. `Tests: 1,
+  Assertions: 0, Risky: 1.` -- one test ran, so this is NOT a
+  zero-tests-executed run, even though it carries the same marker an
+  all-skipped run does.
+- `phpunit-errors-and-skipped.txt`: the same command against a
+  three-test class (one passing, one throwing, one `markTestSkipped`),
+  with no failing assertion anywhere. Exit `2`. `ERRORS!` plus `Tests:
+  3, Assertions: 1, Errors: 1, Skipped: 1.` -- an `Errors:` count with
+  no `Failures:` count beside it.
+
+Measured in the same session, not captured as fixtures: PHPUnit's
+`--testdox` and `--teamcity` reporters both still print the run's marker
+line and its `Tests: N, Assertions: M, ...` tally unchanged (only the
+numbered `N) Class::method` entries are absent), so the `phpunit`
+detector is still selected under them and its summary counts are
+correct, with `failures` empty.
 
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 

@@ -134,11 +134,13 @@ commands read the command's own exit code (`0` pass, non-zero fail),
 which all three tools already follow. `verify`'s default detectors
 parse PHPUnit/PHPStan/PHPCS output the same way they parse
 vitest/tsc/eslint output; `probe`'s zero-tests guard recognizes
-PHPUnit's `No tests executed!` (and a red run that is also all-skipped
-or all-incomplete) the same way it recognizes vitest's and node's
-zero-count shapes. A `--pass-regex`/`passWhen` pass predicate and a
-composer `vendor-dir`/`bin-dir` link rule are two more PHP-relevant
-additions on their own tasks (issue #225 parts 1 and 2), still open at
-the time of writing; each documents its own option in its own section
-once merged. See the package README's "Non-JS test runners" section for
-the full detail.
+PHPUnit's `No tests executed!` and any run whose executed count (the
+stated total less Skipped, Incomplete and Warnings) is zero, the same
+way it recognizes vitest's and node's zero-count shapes. Watch the two
+PHPUnit shapes that exit `0` with nothing executed: an all-skipped run
+and a warnings-only run (`No tests found in class "X".`); the guard, not
+the exit code, is what catches those. A `--pass-regex`/`passWhen` pass
+predicate and a composer `vendor-dir`/`bin-dir` link rule are two more
+PHP-relevant additions on their own tasks (issue #225 parts 1 and 2),
+each documenting its own option in its own section. See the package
+README's "Non-JS test runners" section for the full detail.

@@ -207,7 +207,17 @@ M, ...` tally line whose named counts -- `Errors`, `Failures`,
 `Warnings`, `Skipped`, `Incomplete`, `Risky` -- are read by name, not
 position, since PHPUnit's own field order changes with which marker
 fired; and `No tests executed!`; a PHP-level deprecation notice on an
-otherwise green run is reported as a detector warning, not a failure),
+otherwise green run is reported as a detector warning, not a failure.
+The counts are derived by spending the run's own stated total, one
+category at a time: Skipped, Incomplete and Warnings did not execute
+(PHPUnit counts a warning such as `No tests found in class "X".` as a
+whole synthetic test), Failures, Errors and Risky did (a risky test ran,
+it just asserted nothing), so `passed` is what remains of the executed
+count after failures and errors, never a negative number and never more
+than the run itself reported. A numbered `N) Class::method` entry
+becomes a `failures` entry only under an error or failure section
+header, since a risky or incomplete entry carries the same header
+shape),
 `phpstan` (` [OK] No errors`, or a per-file table closed by ` [ERROR]
 Found N errors`, `summary.errors` preferring that stated total over the
 row count), and `phpcs` (one `FOUND N ERRORS ... AFFECTING M LINES`
@@ -216,11 +226,15 @@ first alone, over one `<line> | ERROR | message` row per finding; a
 clean run prints nothing at all, so there is no "no errors" shape for
 this one to match, same as the tsc/eslint detectors' own clean
 captures). All three target each tool's own DEFAULT non-colorized text
-output; a non-default format (PHPUnit's TestDox reporter or JUnit XML,
-PHPCS's `--error-format=raw`, or forced ANSI colors on any of the
-three) is out of scope and falls to `generic`. See "Non-JS test
-runners" below for the exit-code assumption these three inherit like
-every other check here.
+output; a non-default format (PHPUnit's JUnit XML, PHPCS's
+`--error-format=raw`, or forced ANSI colors on any of the three) is out
+of scope and falls to `generic`. PHPUnit's `--testdox` and `--teamcity`
+reporters are the measured exception: both still print the run's marker
+line and its `Tests: N, Assertions: M, ...` tally unchanged, so
+`phpunit` is still selected and every summary count is right under them;
+what they drop is the numbered `N) Class::method` entries, so `failures`
+comes back empty. See "Non-JS test runners" below for the exit-code
+assumption these three inherit like every other check here.
 No reporter flags are injected: whichever of these shapes a check's own
 script happens to print is parsed as-is; a check that emits more than
 one shape at once (a `pretest` build followed by `vitest`, say) is
@@ -1608,33 +1622,38 @@ warnings, `2` when it finds any errors (fixable or not), `3` on a
 processing error (e.g. a `--standard` naming no sniffs at all) -- so a
 warnings-only PHPCS run reads as `fail` under this rule's plain
 "anything non-zero is fail", the same as an errors run, even though
-PHPCS itself distinguishes the two by exit code. No wrapper is needed
-to make a `composer.json` `scripts` entry (or an `-x` override) work
-with any of the three commands as-is. The PHPUnit-specific corollary
-lives in `probe`'s zero-tests guard, below.
+PHPCS itself distinguishes the two by exit code. PHPUnit has a
+zero-exit hole of its own: a run whose only outcome is a PHPUnit-level
+warning (`No tests found in class "X".`) exits `0` under 9.6 even though
+nothing ran, which is why the zero-tests guard below, and not the exit
+code, is what catches that shape. No wrapper is needed to make a
+`composer.json` `scripts` entry (or an `-x` override) work with any of
+the three commands as-is. The PHPUnit-specific corollary lives in
+`probe`'s zero-tests guard, below.
 
 **The zero-tests guard now knows PHPUnit.** The same
 `no_tests_executed` refusal `probe` already applies to vitest's
 all-skipped/no-test-files shapes and node `--test`'s zero-count summary
-now also recognizes PHPUnit's own `No tests executed!` line, a tally
-line whose own stated total (less Skipped and Incomplete) is zero (a
-red run that is ALSO all-skipped/incomplete no longer confuses this
-guard, since it never relies on `passed`/`failed`/`errors` alone), and
-a stated `OK (0 tests, 0 assertions)` (defensive -- not observed from a
-real capture; PHPUnit 9.6.36 prints `No tests executed!` for an empty
-suite instead): a baseline (or mutant run) that exits `0` with nothing
-actually executed is `status: "inconclusive"`, `reason:
-"no_tests_executed"`, never read as a real pass, exactly like the
-vitest/node cases documented under `probe` above.
+now also recognizes PHPUnit's own `No tests executed!` line and any run
+whose executed count is zero: the stated total less every tally category
+that did not execute (Skipped, Incomplete and Warnings), which covers an
+all-skipped run, a warnings-only run, and a stated `OK (0 tests, 0
+assertions)` (defensive -- not observed from a real capture; PHPUnit
+9.6.36 prints `No tests executed!` for an empty suite instead). A red
+run that is ALSO all-skipped/incomplete does not confuse this guard,
+since it never relies on `passed`/`failed`/`errors` alone; an all-risky
+run is deliberately not flagged, since a risky test did run. A baseline
+(or mutant run) that exits `0` with nothing actually executed is
+`status: "inconclusive"`, `reason: "no_tests_executed"`, never read as a
+real pass, exactly like the vitest/node cases documented under `probe`
+above.
 
 **The pass predicate and the composer link rule** are two more PHP-
-relevant additions landing in this same release window, on their own
-tasks (issue #225 parts 1 and 2: a `--pass-regex`/`passWhen` pass
-predicate, and a composer `vendor-dir`/`bin-dir` link rule) still open
-at the time of writing, so their exact surface is unsettled here; each
-task documents its own option in its own section once merged. This
-section only names the exit-code assumption they, like every other
-check here, still inherit.
+relevant additions on their own tasks (issue #225 parts 1 and 2: a
+`--pass-regex`/`passWhen` pass predicate, and a composer
+`vendor-dir`/`bin-dir` link rule); each documents its own option in its
+own section. This section only names the exit-code assumption they, like
+every other check here, still inherit.
 
 ## Output shape
 

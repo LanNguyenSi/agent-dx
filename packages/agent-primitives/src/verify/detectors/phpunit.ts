@@ -11,7 +11,7 @@ import type { Detector, DetectorInput, DetectorParseResult } from "../types.js";
  * -- `Errors`, `Failures`, `Warnings`, `Skipped`, `Incomplete`, `Risky`
  * -- appear only when nonzero, in PHPUnit's own fixed order, which this
  * detector does not rely on: each is picked out by name, not position);
- * a `WARNINGS!` marker (a `@dataProvider`-less test class, or any other
+ * a `WARNINGS!` marker (a test class with no test methods, or any other
  * PHPUnit-level warning) with the same tally shape; an all
  * skipped/incomplete/risky run's `OK, but incomplete, skipped, or risky
  * tests!` marker, exit `0`, with the same tally shape; and the "no tests
@@ -25,13 +25,21 @@ const OK_LINE = /^OK \((\d+) tests?, \d+ assertions?\)\s*$/m;
 const FAILURES_MARKER = /^FAILURES!\s*$/m;
 const ERRORS_MARKER = /^ERRORS!\s*$/m;
 const WARNINGS_MARKER = /^WARNINGS!\s*$/m;
-/** The all-skipped/incomplete/risky "still exit 0" marker: no
- * `FAILURES!`/`ERRORS!`/`WARNINGS!` line at all, only this one, followed
- * by the same `Tests: ...` tally shape (captured real: an all-skipped
- * run and an all-risky run, see `test/fixtures/README.md`). Round-1
- * review finding: before this marker was recognized, an all-skipped run
- * matched no shape here at all, so `probe`'s zero-tests guard never
- * fired for it. */
+/**
+ * The all-skipped/incomplete/risky "still exit 0" marker (captured real:
+ * an all-skipped run, an all-risky run, and a risky-plus-real run, see
+ * `test/fixtures/README.md`).
+ *
+ * Deliberately NOT part of `matches` below. Every captured run that
+ * prints this marker prints its `Tests: ...` tally on the very next
+ * line, and `exec.ts` keeps the TAIL of a truncated output, so a
+ * truncation that drops the tally has already dropped this marker above
+ * it: as a shape signal the marker can only ever fire where `TALLY_LINE`
+ * fires too (round-2 review finding: the marker's own `matches` arm was
+ * dead, a mutant removing it survived). It stays live as one of the
+ * entry-body terminators in `isMarkerLine` below, single-sourced here so
+ * the marker text exists exactly once in this module.
+ */
 const INCOMPLETE_SKIPPED_RISKY_MARKER =
   /^OK, but incomplete, skipped, or risky tests!\s*$/m;
 /**
@@ -51,14 +59,56 @@ const TALLY_LINE =
 /** Picks one `Name: N` token out of `TALLY_LINE`'s captured trailing
  * group, order-independent. */
 const NAMED_COUNT = /([A-Za-z]+):\s*(\d+)/g;
+/** The tally line's head alone, as an entry-body terminator: matches the
+ * same line `TALLY_LINE` does without requiring the trailing `.` to be
+ * present, so a tally cut short by output truncation still ends the
+ * entry above it rather than being folded into its message. */
+const TALLY_HEAD_LINE = /^Tests: \d+, Assertions: \d+/;
 const NO_TESTS_EXECUTED = /^No tests executed!\s*$/m;
 
+/**
+ * PHPUnit's own defect-section header, printed once above each group of
+ * numbered entries: `There was 1 error:` / `There were 2 errors:` and
+ * the same singular/plural pair for `failure`, `warning`, `risky test`,
+ * `incomplete test`, `skipped test`. The captured fixtures exercise the
+ * singular `error`, `failure`, `warning` and `risky test` forms; the
+ * plural `s` is optional here so the same pattern reads a multi-defect
+ * run's header, and the kind is captured (`error`, `risky test`, ...)
+ * rather than assumed, since only some kinds contribute to `failures`
+ * (see `COLLECTED_SECTION_KINDS`).
+ */
+const DEFECT_SECTION_HEADER = /^There (?:was|were) \d+ (.+?)s?:\s*$/;
+/**
+ * The defect kinds whose numbered entries become `failures` entries.
+ * DECISION (round-3 redesign): only the error and failure sections. A
+ * risky, warning, incomplete or skipped entry names a real
+ * `Class::method` too (captured real: `1) RiskyRealTest::
+ * testNoAssertions` in `phpunit-risky-and-real.txt`), so the entry
+ * header's own grammar cannot tell them apart -- the section header
+ * above them can, and it is the only thing that can. Those entries are
+ * dropped rather than reported: `DetectorParseResult` has no `notes`
+ * field to put them in, and `summary.skipped`/`summary.warnings` already
+ * carry their counts, so dropping them keeps the result contract
+ * unchanged (round-2 review finding: a risky entry was landing in
+ * `failures` while this module's own docblock promised it never would).
+ */
+const COLLECTED_SECTION_KINDS = new Set(["error", "failure"]);
+
 /** One `N) Class::method` failure/error header, PHPUnit's own numbered
- * entry format under `FAILURES!`/`ERRORS!`. Never matches a `WARNINGS!`
- * entry (`N) Warning`, no `::`) or a `RISKY!`/skipped entry under
- * `INCOMPLETE_SKIPPED_RISKY_MARKER` naming a real `Class::method` (not
- * captured by this detector at all: known boundary, see below). */
+ * entry format. Only collected inside an error/failure section (see
+ * `COLLECTED_SECTION_KINDS`). */
 const ENTRY_HEADER = /^\d+\) (.+?)::(.+)$/;
+/** Any numbered entry header, `Class::method` or not (`1) Warning` has
+ * no `::`): an entry-body terminator, so a warning entry following a
+ * collected one still ends it. */
+const ENTRY_START = /^\d+\) /;
+/** The `--` divider PHPUnit prints between two defect sections (captured
+ * real: between the error and failure sections of
+ * `phpunit-errors-and-failures.txt`). An entry-body terminator: without
+ * it the divider and everything after it up to the next entry header was
+ * being folded into the preceding entry's message (round-2 review
+ * finding). */
+const ENTRY_DIVIDER = /^--\s*$/;
 /** The `file:line` locator line PHPUnit prints under each entry's own
  * message (its own line, set off by a blank line above and below in the
  * default reporter). Captured structurally (`.+` up to the last `:`
@@ -74,10 +124,60 @@ const ENTRY_FILE_LINE = /^(.+):(\d+)$/;
  */
 const DEPRECATION_LINE = /^Deprecated: (.+)$/gm;
 
-/** Parses a matched `TALLY_LINE`'s named counts (all default `0` when
- * absent from the line, since PHPUnit only prints a nonzero one). */
-interface TallyCounts {
-  total: number;
+/**
+ * PHPUnit's tally categories, and the one attribute the whole derivation
+ * below turns on: did a test counted here actually RUN its body?
+ *
+ * | Category   | executed | Lands in                                  |
+ * | ---------- | -------- | ----------------------------------------- |
+ * | Failures   | yes      | `summary.failed`                          |
+ * | Errors     | yes      | `summary.errors`                          |
+ * | Risky      | yes      | `summary.passed` (ran; no defect counted) |
+ * | Skipped    | no       | `summary.skipped`                         |
+ * | Incomplete | no       | `summary.skipped`                         |
+ * | Warnings   | no       | `summary.warnings`                        |
+ *
+ * Risky is executed: a risky test ran, PHPUnit merely flagged it (it
+ * performed no assertions, say), so it may not be read as "nothing
+ * happened". Warnings is NOT executed: PHPUnit counts a synthetic
+ * `WarningTestCase` in its total (`No tests found in class "X".` is one
+ * whole `Tests: 1` on its own), so treating a warning as executed reads
+ * a run in which nothing at all ran as a green `passed: 1`. Erring
+ * toward "inconclusive" is the fail-safe direction for both the summary
+ * and `probe`'s zero-tests guard; erring toward "green" is the round-2
+ * review's HIGH finding.
+ *
+ * Round-2 review's structural finding: before this table, `executed` and
+ * `passed` were derived by subtracting one named category at a time, a
+ * new subtraction per newly captured shape and no invariant tying them
+ * to the stated total. `deriveCounts` below now spends the stated total
+ * once, category by category, so `passed + failed + errors + skipped +
+ * warnings === total` holds by construction for every input, including
+ * an inconsistent one.
+ */
+interface TallyCategory {
+  /** The `Name:` token PHPUnit prints for this category in its tally. */
+  readonly name: keyof NamedTallyCounts;
+  /** Whether a test counted here actually RAN its body. */
+  readonly executed: boolean;
+  /** Which `Summary` field this category is reported in. A category
+   * reporting as `passed` is never deducted from the executed budget; it
+   * IS the remainder (see `deriveCounts`). */
+  readonly reportsAs: "passed" | "failed" | "errors" | "skipped" | "warnings";
+}
+
+const TALLY_CATEGORIES: readonly TallyCategory[] = [
+  { name: "failures", executed: true, reportsAs: "failed" },
+  { name: "errors", executed: true, reportsAs: "errors" },
+  { name: "risky", executed: true, reportsAs: "passed" },
+  { name: "skipped", executed: false, reportsAs: "skipped" },
+  { name: "incomplete", executed: false, reportsAs: "skipped" },
+  { name: "warnings", executed: false, reportsAs: "warnings" },
+];
+
+/** The named counts PHPUnit prints after `Assertions: M` (each present
+ * only when nonzero, hence each defaulting to `0` here). */
+interface NamedTallyCounts {
   errors: number;
   failures: number;
   warnings: number;
@@ -86,10 +186,26 @@ interface TallyCounts {
   risky: number;
 }
 
-function parseTally(output: string): TallyCounts | undefined {
+interface RawTally extends NamedTallyCounts {
+  total: number;
+}
+
+/** The derived, invariant-respecting counts: the five `Summary` fields
+ * plus the two the derivation itself is defined in terms of. */
+interface DerivedCounts {
+  total: number;
+  executed: number;
+  passed: number;
+  failed: number;
+  errors: number;
+  skipped: number;
+  warnings: number;
+}
+
+function parseTally(output: string): RawTally | undefined {
   const head = TALLY_LINE.exec(output);
   if (!head) return undefined;
-  const counts: TallyCounts = {
+  const counts: RawTally = {
     total: Number(head[1]),
     errors: 0,
     failures: 0,
@@ -112,16 +228,90 @@ function parseTally(output: string): TallyCounts | undefined {
 }
 
 /**
+ * Derives every count from PHPUnit's own STATED total by spending that
+ * total, never by adding parsed parts up: `total` is a budget, the
+ * not-executed categories are taken out of it first (`TALLY_CATEGORIES`
+ * decides which those are), what remains is `executed`, the two defect
+ * categories are taken out of that, and whatever is still left is
+ * `passed` (which is where Risky lands, since nothing takes it out).
+ *
+ * Every `take` is clamped to the remaining budget, so two invariants
+ * hold for ANY input, a self-contradictory tally included (`Tests: 2,
+ * ..., Failures: 3, Skipped: 5.` cannot come from a real run, but a
+ * truncated or interleaved output can present one):
+ *
+ *   passed + failed + errors === executed
+ *   passed + failed + errors + skipped + warnings === total
+ *
+ * so the summary can never claim more tests than the run itself stated,
+ * and `passed` can never go negative. Order of the takes is fixed and
+ * load-bearing only for such an inconsistent input: the not-executed
+ * categories are trusted first (an over-count there shrinks `executed`
+ * toward zero, i.e. toward "inconclusive"), defects next, and `passed`
+ * -- the only reading that can turn into a false green -- absorbs the
+ * remainder last.
+ *
+ * Returns `undefined` when the output carries neither shape (`No tests
+ * executed!`, or output too truncated to hold either line).
+ */
+function deriveCounts(output: string): DerivedCounts | undefined {
+  const okMatch = OK_LINE.exec(output);
+  if (okMatch) {
+    const total = Number(okMatch[1]);
+    return {
+      total,
+      executed: total,
+      passed: total,
+      failed: 0,
+      errors: 0,
+      skipped: 0,
+      warnings: 0,
+    };
+  }
+  const tally = parseTally(output);
+  if (!tally) return undefined;
+
+  const total = Math.max(tally.total, 0);
+  let remaining = total;
+  const take = (count: number): number => {
+    const taken = Math.min(Math.max(count, 0), remaining);
+    remaining -= taken;
+    return taken;
+  };
+  const reported = { passed: 0, failed: 0, errors: 0, skipped: 0, warnings: 0 };
+  // Not executed first (the table decides which those are): whatever
+  // they take is out of `executed` before it is even computed.
+  for (const category of TALLY_CATEGORIES) {
+    if (category.executed) continue;
+    reported[category.reportsAs] += take(tally[category.name]);
+  }
+  const executed = remaining;
+  // Then the executed categories that report a defect. A category
+  // reporting as `passed` (Risky) is deliberately not taken out: it is
+  // part of the remainder below, which is what makes a risky test count
+  // as executed and as non-failing at once.
+  for (const category of TALLY_CATEGORIES) {
+    if (!category.executed || category.reportsAs === "passed") continue;
+    reported[category.reportsAs] += take(tally[category.name]);
+  }
+  reported.passed += remaining;
+  return { total, executed, ...reported };
+}
+
+/**
  * Whether `output` shows PHPUnit executed zero tests: either the
- * explicit `No tests executed!` line, a stated `OK (0 tests, ...)`
- * (defensive -- not observed from a real capture; PHPUnit 9.6.36
- * prints `No tests executed!` for an empty suite instead, see
- * `test/fixtures/README.md`), or a tally line whose own stated total,
- * less its Skipped and Incomplete counts, is zero. Risky is
- * DELIBERATELY excluded from that subtraction: a risky test still ran
- * (it just performed no assertions, or PHPUnit otherwise flagged it),
- * unlike a skipped or incomplete one, which never executed its body at
- * all. Reused by `probe/zero-tests.ts` so its gate is never built on
+ * explicit `No tests executed!` line, or a run whose derived `executed`
+ * count (the stated total less every not-executed category, per
+ * `TALLY_CATEGORIES`) is zero. That covers a stated `OK (0 tests, 0
+ * assertions)` (defensive -- not observed from a real capture; PHPUnit
+ * 9.6.36 prints `No tests executed!` for an empty suite instead), an
+ * all-skipped/all-incomplete run, and a warnings-only run (`Tests: 1,
+ * Assertions: 0, Warnings: 1.`, exit `0`, captured real: round-2 review
+ * finding, that shape was read as a green `passed: 1`). It deliberately
+ * does NOT cover a risky run: `Tests: 1, Assertions: 0, Risky: 1.` ran
+ * its test.
+ *
+ * Reused by `probe/zero-tests.ts` so its gate is never built on
  * `passed`/`failed`/`errors` alone -- round-1 review finding: a red run
  * with both a real failure and a real skip (`Tests: 3, Assertions: 2,
  * Failures: 1, Skipped: 1.`) parsed those three fields to 0 under the
@@ -131,28 +321,68 @@ function parseTally(output: string): TallyCounts | undefined {
  */
 export function phpunitZeroTestsExecuted(output: string): boolean {
   if (NO_TESTS_EXECUTED.test(output)) return true;
-  const okMatch = OK_LINE.exec(output);
-  if (okMatch) return Number(okMatch[1]) === 0;
-  const tally = parseTally(output);
-  if (tally) {
-    return tally.total - tally.skipped - tally.incomplete <= 0;
-  }
-  return false;
+  const counts = deriveCounts(output);
+  return counts !== undefined && counts.executed === 0;
+}
+
+/** Whether `line` is one of PHPUnit's own end-of-run marker lines. Built
+ * from the marker constants above rather than a second copy of their
+ * text. */
+function isMarkerLine(line: string): boolean {
+  return (
+    FAILURES_MARKER.test(line) ||
+    ERRORS_MARKER.test(line) ||
+    WARNINGS_MARKER.test(line) ||
+    INCOMPLETE_SKIPPED_RISKY_MARKER.test(line) ||
+    NO_TESTS_EXECUTED.test(line)
+  );
+}
+
+/**
+ * Where one numbered entry's message body ends. PHPUnit closes an entry
+ * with no terminator of its own, so the body runs until the next thing
+ * that cannot belong to it (all five captured real, see
+ * `test/fixtures/README.md`):
+ *
+ *   1. the next numbered entry header (`N) ...`, `Class::method` or the
+ *      `1) Warning` shape),
+ *   2. the `--` divider between two defect sections,
+ *   3. the next defect-section header (`There was 1 failure:`),
+ *   4. an end-of-run marker line (`ERRORS!`, `WARNINGS!`, ...),
+ *   5. the tally line's head (`Tests: N, Assertions: M`).
+ *
+ * The scan resumes ON the terminator line rather than after it, so a
+ * section header terminator still flips the collecting state.
+ */
+function isEntryBodyTerminator(line: string): boolean {
+  return (
+    ENTRY_START.test(line) ||
+    ENTRY_DIVIDER.test(line) ||
+    DEFECT_SECTION_HEADER.test(line) ||
+    isMarkerLine(line) ||
+    TALLY_HEAD_LINE.test(line)
+  );
 }
 
 /**
  * Known boundary: this detector reads PHPUnit's own numbered
  * `FAILURES!`/`ERRORS!` entries (`N) Class::method`) and the
  * `OK (...)`/`Tests: ...` summary lines. It does not parse PHPUnit's
- * TestDox reporter or its JUnit XML output. A `WARNINGS!`/skipped/
- * incomplete/risky entry (`N) Warning`, or a listed skip/risky reason)
- * is never added to `failures`: the risky-entry header does carry a
- * real `Class::method` name and so would match `ENTRY_HEADER`'s own
- * grammar, but no captured fixture this detector is tested against
- * exercises that combination (every all-skipped/all-risky/warnings-only
- * capture here prints zero numbered `Class::method` entries alongside
- * its marker), so this remains a documented, untested boundary rather
- * than a verified guarantee.
+ * JUnit XML output, nor forced-ANSI output.
+ *
+ * Measured (PHPUnit 9.6.36, PHP 8.3.33), against the earlier claim that
+ * they fall to `generic`: the `--testdox` and `--teamcity` reporters
+ * both still print the same end-of-run marker and the same `Tests: N,
+ * Assertions: M, ...` tally line, so this detector is still selected and
+ * every `summary` count is correct under them; what they drop is the
+ * numbered `N) Class::method` entries, so `failures` comes back empty.
+ *
+ * A numbered entry is collected only inside an error or failure section
+ * (`COLLECTED_SECTION_KINDS`), which is also the boundary for a
+ * truncated output: if the tail kept an entry but not the section header
+ * above it, that entry is dropped rather than guessed at. The summary
+ * counts still carry it, and `summary.failed + summary.errors >=
+ * failures.length` holds either way.
  */
 export const phpunitDetector: Detector = {
   name: "phpunit",
@@ -163,7 +393,6 @@ export const phpunitDetector: Detector = {
       FAILURES_MARKER.test(output) ||
       ERRORS_MARKER.test(output) ||
       WARNINGS_MARKER.test(output) ||
-      INCOMPLETE_SKIPPED_RISKY_MARKER.test(output) ||
       TALLY_LINE.test(output) ||
       NO_TESTS_EXECUTED.test(output)
     );
@@ -171,33 +400,34 @@ export const phpunitDetector: Detector = {
   parse(input: DetectorInput): DetectorParseResult {
     const output = input.output;
     const failures: DetectorParseResult["failures"] = [];
-    let passed = 0;
-    let failed = 0;
-    let errors = 0;
-    let skipped = 0;
-    let warningsCount = 0;
-
-    const okMatch = OK_LINE.exec(output);
-    const tally = parseTally(output);
-    if (okMatch) {
-      passed = Number(okMatch[1]);
-    } else if (tally) {
-      failed = tally.failures;
-      errors = tally.errors;
-      skipped = tally.skipped + tally.incomplete + tally.risky;
-      warningsCount = tally.warnings;
-      const executed = tally.total - tally.skipped - tally.incomplete;
-      passed = Math.max(executed - failed - errors, 0);
-    }
-    // `No tests executed!` (and any other shape none of the above
-    // matched, unreachable when `matches` gated this call) leaves every
-    // count at 0: correct as-is, not a false "nothing failed" claim --
-    // same convention as the vitest detector's "no test files" case.
+    // `No tests executed!` (and any other shape neither summary line
+    // matched) leaves every count at 0: correct as-is, not a false
+    // "nothing failed" claim -- same convention as the vitest detector's
+    // "no test files" case.
+    const counts = deriveCounts(output) ?? {
+      total: 0,
+      executed: 0,
+      passed: 0,
+      failed: 0,
+      errors: 0,
+      skipped: 0,
+      warnings: 0,
+    };
 
     const lines = output.split("\n");
+    let collecting = false;
     for (let i = 0; i < lines.length; i++) {
+      const section = DEFECT_SECTION_HEADER.exec(lines[i]);
+      if (section) {
+        collecting = COLLECTED_SECTION_KINDS.has(section[1]);
+        continue;
+      }
+      if (isMarkerLine(lines[i]) || TALLY_HEAD_LINE.test(lines[i])) {
+        collecting = false;
+        continue;
+      }
       const header = ENTRY_HEADER.exec(lines[i]);
-      if (!header) continue;
+      if (!header || !collecting) continue;
       const name = `${header[1]}::${header[2]}`;
       let file: string | undefined;
       let entryLine: number | undefined;
@@ -205,15 +435,7 @@ export const phpunitDetector: Detector = {
       let j = i + 1;
       for (; j < lines.length; j++) {
         const line = lines[j];
-        if (
-          ENTRY_HEADER.test(line) ||
-          /^(FAILURES!|ERRORS!|WARNINGS!|OK, but incomplete, skipped, or risky tests!)\s*$/.test(
-            line,
-          ) ||
-          /^Tests: \d+, Assertions: \d+/.test(line)
-        ) {
-          break;
-        }
+        if (isEntryBodyTerminator(line)) break;
         const trimmed = line.trim();
         if (trimmed.length === 0) continue;
         if (file === undefined) {
@@ -226,6 +448,8 @@ export const phpunitDetector: Detector = {
         }
         message = message.length > 0 ? `${message} ${trimmed}` : trimmed;
       }
+      // Resume ON the terminator line, so a section header or marker
+      // that ended this entry is still seen by the outer scan.
       i = j - 1;
       failures.push({
         ...(file ? { file } : {}),
@@ -242,11 +466,11 @@ export const phpunitDetector: Detector = {
 
     return {
       summary: {
-        passed,
-        failed,
-        skipped,
-        errors,
-        warnings: warningsCount,
+        passed: counts.passed,
+        failed: counts.failed,
+        skipped: counts.skipped,
+        errors: counts.errors,
+        warnings: counts.warnings,
       },
       failures,
       warnings,

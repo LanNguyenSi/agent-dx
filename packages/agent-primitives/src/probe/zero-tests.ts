@@ -26,11 +26,12 @@ import {
  * A third shape, PHPUnit's, reuses `phpunitDetector.matches` (to decide
  * whether the output is PHPUnit's at all) and `phpunitZeroTestsExecuted`
  * (the actual zero-tests verdict, built on PHPUnit's own STATED total
- * rather than `passed`/`failed`/`errors`, since a run with both a real
- * failure and a real skip parses those three to `0` too -- see that
- * function's own docblock in `verify/detectors/phpunit.ts` for the
- * round-1 review finding this fixes) from that same module, so this
- * module never re-implements PHPUnit's own regexes.
+ * less every category that did not execute -- Skipped, Incomplete and
+ * Warnings, per the tally-category table in
+ * `verify/detectors/phpunit.ts` -- rather than on
+ * `passed`/`failed`/`errors`, since a run with both a real failure and a
+ * real skip parses those three to `0` too) from that same module, so
+ * this module never re-implements PHPUnit's own regexes.
  */
 
 export type ZeroTestsDetectorName = "vitest" | "node_test" | "phpunit";
@@ -85,9 +86,10 @@ export function detectKnownZeroTestsEvidence(
   if (phpunitDetector.matches(input)) {
     // Built on PHPUnit's own STATED total (via `phpunitZeroTestsExecuted`),
     // never on `passed`/`failed`/`errors` alone: those three parse to `0`
-    // for a run that had a real failure alongside a real skip too (see
-    // that function's own docblock for the round-1 review finding this
-    // fixes).
+    // for a run that had a real failure alongside a real skip too, and a
+    // warnings-only run (`Tests: 1, Assertions: 0, Warnings: 1.`, exit
+    // `0`) reads as `passed: 1` on any derivation that counts a synthetic
+    // PHPUnit warning as an executed test (see that function's docblock).
     if (phpunitZeroTestsExecuted(combined)) {
       return { detected: true, via: "phpunit" };
     }

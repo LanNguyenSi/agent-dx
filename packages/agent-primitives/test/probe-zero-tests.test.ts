@@ -27,6 +27,16 @@ import { initNodeTestDotRepo } from "./helpers/node-test-dot-repo.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.join(__dirname, "..");
+
+/** Reads one captured real-tool-output fixture (see
+ * test/fixtures/README.md for the commands, tool versions and exit codes
+ * these were captured from). */
+function readCaptured(name: string): string {
+  return fs.readFileSync(
+    path.join(__dirname, "fixtures", "captured", `${name}.txt`),
+    "utf8",
+  );
+}
 const VITEST_ENTRY = path.join(
   PKG_ROOT,
   "node_modules",
@@ -165,6 +175,38 @@ describe("detectKnownZeroTestsEvidence()", () => {
   it("phpunit: an ERRORS! run (errors and failures together, Errors: printed before Failures:) is NOT flagged", () => {
     const evidence = detectKnownZeroTestsEvidence(
       "ERRORS!\nTests: 6, Assertions: 3, Errors: 1, Failures: 1, Skipped: 1, Incomplete: 1.\n",
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: a warnings-only run IS flagged (round-2 review finding: this shape exits 0 with nothing executed and was read as a green passed: 1)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-warnings"),
+      "",
+    );
+    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+  });
+
+  it("phpunit: a risky test alongside a real one is NOT flagged (a risky test ran)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-risky-and-real"),
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: an all-risky run is NOT flagged either, even though it prints the same marker an all-skipped run does", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-risky-only"),
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit: an errors-plus-skipped run with no failures is NOT flagged", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-errors-and-skipped"),
       "",
     );
     expect(evidence).toEqual({ detected: false });
