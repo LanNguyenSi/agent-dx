@@ -213,6 +213,27 @@ describe("escapingRootMentions()", () => {
     ).toEqual([]);
   });
 
+  it("the exemption window is half-open: a root mention starting exactly where the scratch mention ENDS is still reported", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "aplogs");
+    fs.mkdirSync(scratchRoot, { recursive: true });
+    // `<scratchRoot><root>/pkg` puts a second, independent mention of
+    // the root at exactly the index the scratch mention ends at. It
+    // names a real directory under the repository root that is NOT the
+    // isolation copy, so it must still be reported; an exemption whose
+    // upper bound included its own end index would swallow it. The
+    // first mention (the root's own leading spelling, inside the
+    // scratch mention) stays exempt either way, which is what makes
+    // this pin the END of the window rather than its start.
+    expect(
+      escapingRootMentions(
+        `cd ${scratchRoot}${root}/pkg && node t.js`,
+        root,
+        scratchRoot,
+      ),
+    ).toEqual([`${root}/pkg`]);
+  });
+
   it("a sibling directory whose name merely starts with the root is not a mention of the root", () => {
     const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
     expect(escapingRootMentions(`ls '${root}2'; node t.js`, root)).toEqual([]);
