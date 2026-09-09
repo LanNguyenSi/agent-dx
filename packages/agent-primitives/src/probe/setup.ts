@@ -819,18 +819,27 @@ export async function openRunSetup(
   const baselinePassRegexMatched =
     input.passRegex !== undefined &&
     input.passRegex.test(baselineCombinedOutput);
-  // A timed-out baseline is a failed baseline regardless of what its
-  // (necessarily incomplete) output looks like: the old `exitCode !== 0`
-  // form carried this implicitly, since a SIGKILLed child's `exitCode`
-  // is `null`, itself `!== 0`. `--pass-regex` replaces that whole
+  // A baseline that never reported an exit code of its own is a failed
+  // baseline regardless of what its (necessarily incomplete) output
+  // looks like. Two shapes reach that state: this package's own
+  // `--timeout` killed the run (`timedOut: true`), or something outside
+  // this probe did (an OOM killer, a CI cancel, a `kill` reaching the
+  // run's own process group), which `exec.ts` reports as
+  // `exitCode: null` with `timedOut: false`. The old `exitCode !== 0`
+  // form carried BOTH implicitly, since a killed child's `exitCode` is
+  // `null`, itself `!== 0`. `--pass-regex` replaces that whole
   // right-hand side with a text match that has no such fallback -- a
-  // runner that prints a matching line and then hangs (never reaches
-  // its own teardown) matches the pattern despite having produced no
-  // real verdict at all, so `timedOut` must be checked ahead of, not
-  // folded into, the pass-regex/exit-code branch below.
+  // runner that prints a matching line and is then killed (or hangs
+  // before ever reaching its own teardown) matches the pattern despite
+  // having produced no real verdict at all -- so `timedOut` and a
+  // `null` exit code must each be their OWN disjunct here, rather than
+  // folded into the pass-regex/exit-code branch that no longer carries
+  // them. Their order among the three disjuncts is not load-bearing;
+  // that each one is present is.
   const baselineFailed =
     !baselineTest.aborted &&
     (baselineTest.timedOut ||
+      baselineTest.exitCode === null ||
       (input.passRegex !== undefined
         ? !baselinePassRegexMatched
         : baselineTest.exitCode !== 0));
@@ -851,9 +860,17 @@ export async function openRunSetup(
     // `--require-baseline-evidence` miss on the same (non-aborted)
     // baseline is the more informative reason -- nothing proves tests
     // ran at all -- so it wins over the pass-regex miss instead of
-    // being masked by it.
+    // being masked by it. Scoped to a baseline that reported an exit
+    // code of its own: a run that timed out or was killed by a signal
+    // failed for a reason its own truncated, cut-short tail cannot
+    // explain, so reclassifying it by what that tail happens to
+    // contain would report `baseline_evidence_not_matched` for a
+    // baseline whose real finding is that it never finished -- it
+    // stays `baseline_failed`.
     if (
       !baselineTest.aborted &&
+      !baselineTest.timedOut &&
+      baselineTest.exitCode !== null &&
       input.passRegex !== undefined &&
       input.requireBaselineEvidence !== undefined &&
       !input.requireBaselineEvidence.test(baselineCombinedOutput)
@@ -871,11 +888,28 @@ export async function openRunSetup(
     }
 
     await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
+    // A baseline killed by a signal without ever reporting an exit code
+    // of its own (an OOM killer, a CI cancel, a `kill` reaching the
+    // run's process group): named explicitly, because `baseline_failed`
+    // alone reads as "the suite ran and was red", and because
+    // `baseline.exitCode` is `null` there -- a value no "exited
+    // non-zero" prose can honestly describe. `timedOut` is excluded:
+    // this package's own `--timeout` already reports itself through
+    // `baseline.timedOut`.
+    if (
+      !baselineTest.aborted &&
+      !baselineTest.timedOut &&
+      baselineTest.exitCode === null
+    ) {
+      warnings.push(
+        `the baseline run was terminated by a signal, no exit code was reported; nothing about the suite was measured; see ${baselineTest.logPath}`,
+      );
+    }
     // A `--pass-regex` miss (reached here means the baseline is not
     // aborted, so this fires only when `baselineFailed` is true BECAUSE
     // the pattern did not match, never merely because the baseline timed
-    // out despite a match -- `!baselinePassRegexMatched` excludes that
-    // case explicitly): named explicitly, the same as a
+    // out or was killed by a signal despite a match --
+    // `!baselinePassRegexMatched` excludes those cases explicitly): named explicitly, the same as a
     // `--require-baseline-evidence` miss is, so a caller reading
     // `warnings` sees which pattern was checked and against what,
     // rather than only the bare `baseline_failed` reason.
@@ -909,19 +943,14 @@ export async function openRunSetup(
   // explicitly (deprecation-notice noise -- phpunit 9.6 on a green suite,
   // the motivating case -- is the expected shape here), so a reader of
   // `warnings` sees why a red exit code was still treated as a pass.
-  // `exitCode !== null` excludes a `null` exit code (a signal-killed
-  // child) from this "non-zero" framing: `null` is a process that never
-  // reported a real exit code at all, not a red one, and reaching this
-  // line already means the run was neither aborted nor timed out (both
-  // return above via `baselineFailed`), so a `null` exit code here would
-  // only ever come from some other signal reaching the child -- naming
-  // that "a non-zero exit code (null)" would be misleading prose about a
-  // number that was never really zero OR non-zero.
-  if (
-    input.passRegex !== undefined &&
-    baselineTest.exitCode !== 0 &&
-    baselineTest.exitCode !== null
-  ) {
+  // `baselineTest.exitCode` is a real number by the time this line runs:
+  // an aborted, a timed-out, and a signal-killed baseline all returned
+  // above (the first two and the `exitCode === null` disjunct of
+  // `baselineFailed`), so this warning can never frame a `null` -- a
+  // process that never reported an exit code at all, neither zero nor
+  // non-zero -- as "a non-zero exit code (null)"; that case gets the
+  // signal warning above and the `baseline_failed` refusal instead.
+  if (input.passRegex !== undefined && baselineTest.exitCode !== 0) {
     warnings.push(
       `--pass-regex (${input.passRegex.source}) matched the baseline output despite a non-zero exit code (${String(baselineTest.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${baselineTest.logPath}`,
     );

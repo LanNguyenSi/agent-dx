@@ -52,11 +52,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this, and none is planned -- a crash that prints its own stack trace
   before exiting (an ordinary uncaught `throw`, not a segfault) is NOT
   distinguishable from a real test failure by this or any other
-  mechanism here (same exit-non-zero, same generic "did not match"
-  warning, same `killed` verdict), and a runner that prints its full
+  mechanism here (same exit-non-zero, same `killed` verdict, and
+  neither carries a miss warning), and a runner that prints its full
   green summary before crashing in its own teardown reads as a pass,
   same as a naive `grep` wrapper would read it -- both are inherent
-  limits of an output-only predicate, not gaps this package closes.
+  limits of an output-only predicate, not gaps this package closes. A
+  run that never reported an exit code of its own is never a pass under
+  `--pass-regex`, whatever its partial output matched: a baseline that
+  timed out or was killed by a signal refuses
+  `inconclusive`/`baseline_failed` (never `baseline_evidence_not_matched`,
+  a finding about a pattern rather than about a run that never
+  finished), and such a mutant run reports `inconclusive`/`timeout`
+  rather than `killed`/`survived`, with the signal shape named in
+  `warnings` on both sides and no reason string added to the contract.
+  The mutant-run miss warning fires only for an AMBIGUOUS miss (a
+  truncated tail, an exit code of `0` disagreeing with the predicate, no
+  exit code at all, or `--expect pass`, where a miss means the mutant
+  survived); a textbook kill under `--expect fail` carries none, so a
+  healthy plan run's `warnings` stays empty instead of collecting one
+  near-duplicate entry per killed mutant.
   Given on both the command line and inside a `--plan` file at once, the
   command-line value wins, the same precedence `-i`/`--expect`/
   `--timeout` already follow against their own plan-file counterparts.

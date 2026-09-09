@@ -967,8 +967,21 @@ plan-file counterparts. A miss -- the pattern given but absent from a
 run's own combined output -- gets its own `warnings` entry naming the
 pattern and the log path (and, when either side of that run's own
 captured tail was truncated, the same truncation caveat
-`--require-baseline-evidence`'s own miss carries), on the baseline path
-and on every mutant run alike.
+`--require-baseline-evidence`'s own miss carries) on the BASELINE path,
+where a miss is always the reason the run refuses. On a MUTANT run a
+miss is the routine, expected outcome under `--expect fail` (the
+predicate agreeing the mutant broke the suite, exactly like every
+killed mutant of an N-mutant plan), so warning on each one would fill
+`warnings` with N near-duplicate entries instead of N findings: there
+the miss warning fires only for an AMBIGUOUS miss -- either side of
+that run's own captured tail was truncated (the pattern may have
+matched output the run never captured), the exit code reads `0` while
+the predicate reads "failed" (the process and the predicate disagree),
+the run reported NO exit code at all (see the killed-run paragraph
+below), or `--expect pass`, where a miss means the mutant SURVIVED
+rather than being killed. A textbook kill -- real non-matching output,
+a non-zero exit code, an untruncated tail, under `--expect fail` --
+carries no miss warning at all.
 
 `--pass-regex` is independent of `--require-baseline-evidence`: the two
 answer different questions and may be given together, one without the
@@ -1006,12 +1019,11 @@ checks `test.exitCode` together with empty
 run that printed real (non-matching) output. This only ever catches a
 crash that produced no output at all: an uncaught exception that prints
 its own stack trace to stderr before the process exits (an ordinary
-`throw`, not a segfault) exits non-zero with real, non-empty output,
-gets the same plain "did not match" miss warning a genuine test failure
-would, and is `killed` (under `--expect fail`) with an envelope
-indistinguishable from a real failure of that same command -- nothing in
-this package tells the two apart; a caller who needs to must read the
-log itself.
+`throw`, not a segfault) exits non-zero with real, non-empty output and
+is `killed` (under `--expect fail`) with an envelope indistinguishable
+from a real failure of that same command -- neither carries a miss
+warning, since neither miss is ambiguous; nothing in this package tells
+the two apart, and a caller who needs to must read the log itself.
 
 `--pass-regex` is a PREDICATE over output, not a process-health check: a
 runner that prints its full green summary and then crashes during its
@@ -1019,6 +1031,26 @@ own teardown (after the reporter already wrote `OK (...)`) is read as a
 pass, exactly as a naive `grep` wrapper would read it -- there is no way
 for an output-only predicate to see past a crash that happens after the
 evidence it looks for was already printed.
+
+One shape IS ruled out, though the predicate alone could not tell: a run
+that never reported an exit code of its own. `--timeout` killing a
+hanging run, or anything outside this probe killing it (an OOM killer, a
+CI cancel, a `kill` reaching the run's own process group -- `exitCode:
+null` with `timedOut: false`), leaves a run that measured nothing, and
+whatever partial output it printed before dying may well match the
+pattern. Neither side reads such a run as a pass: the BASELINE refuses
+`inconclusive`/`baseline_failed`, with the signal case named in its own
+`warnings` entry (`baseline.timedOut` and a `null` `baseline.exitCode`
+tell the two apart in the envelope), and never as
+`baseline_evidence_not_matched`, which is a finding about a pattern
+rather than about a run that never finished; a MUTANT run reports
+`inconclusive`/`timeout` -- one reason for both shapes, with the signal
+case likewise named in `warnings`, since `reason: "timeout"` beside
+`test.timedOut: false` would otherwise read as this package's own bound
+having fired. This holds with or without `--pass-regex`: under the
+exit-code default a `null` exit code is not `0` either, which would
+otherwise read as "the test failed" and, under `--expect fail`, certify
+a kill the suite never actually made.
 
 Both detectors understand only each runner's DEFAULT text reporters:
 `node --test` with `--test-reporter=dot` (or any reporter besides the
@@ -1289,7 +1321,7 @@ above.
 | `git_apply_timeout` | absent | absent | the dry run's own `git apply` hit its bound and was killed |
 | `aborted` | present | present | a SIGINT/SIGTERM landed during the baseline phase (its `--pre`, or the baseline test itself); see the `exitOnSignal` note above for why this is a library-caller-only row |
 | `pre_failed` | present | present | `--pre` exited non-zero during the baseline phase |
-| `baseline_failed` | present | present | the baseline test itself exited non-zero (or timed out), or `--pass-regex` was given and its pattern did not match the baseline's own output |
+| `baseline_failed` | present | present | the baseline test itself exited non-zero, or reported no exit code at all (it timed out, or a signal killed it), or `--pass-regex` was given and its pattern did not match the baseline's own output |
 | `target_changed_during_baseline` | present | present | the baseline run rewrote the target (a formatter, a codegen step) before any mutation |
 | `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`) executed nothing, whatever its exit code -- see the zero-tests paragraph above |
 | `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |

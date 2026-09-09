@@ -468,10 +468,31 @@ export async function runMutantAttempt(
     reason = "aborted";
     mutationProbeResult = status;
     warnings.push(`the mutant run was aborted; see ${testResult.logPath}`);
-  } else if (testResult.timedOut) {
+  } else if (testResult.timedOut || testResult.exitCode === null) {
+    // The mutant run never reported an exit code of its own: this
+    // package's own `--timeout` killed it (`timedOut: true`), or
+    // something outside this probe did (an OOM killer, a CI cancel, a
+    // `kill` reaching the run's own process group), which `exec.ts`
+    // reports as `exitCode: null` with `timedOut: false`. Neither
+    // `killed` nor `survived` may be read out of such a run: under
+    // `--pass-regex` a partial output printed before the kill can match
+    // the pattern and read as a PASS the run never earned, and under
+    // the exit-code default a `null` exit code is not `0`, which reads
+    // as "the test failed" and, under `--expect fail`, certifies a KILL
+    // the suite never actually made. Same handling for both shapes --
+    // one run without a verdict, one `inconclusive`/`timeout` outcome,
+    // so the reported reason contract is unchanged -- with the signal
+    // shape named in `warnings`, since `reason: "timeout"` beside
+    // `test.timedOut: false` would otherwise read as this package's own
+    // bound having fired.
     status = "inconclusive";
     reason = "timeout";
     mutationProbeResult = status;
+    if (!testResult.timedOut) {
+      warnings.push(
+        `the mutant run was terminated by a signal, no exit code was reported; nothing about this mutant was measured; see ${testResult.logPath}`,
+      );
+    }
   } else {
     // `rt.passRegex` (`--pass-regex`/`passWhen.regex`): once given, it
     // is THIS mutant run's verdict in place of its exit code too, the
@@ -496,7 +517,10 @@ export async function runMutantAttempt(
         // Same deprecation-notice shape `setup.ts` warns about for the
         // baseline: named here too, so a caller reading `warnings` sees
         // why a red exit code was still read as a pass on the mutant
-        // side as well.
+        // side as well. `testResult.exitCode` is a real number in this
+        // whole block: a run that reported none returned above as
+        // `inconclusive`/`timeout`, so no warning here can frame a
+        // `null` as an exit code.
         warnings.push(
           `--pass-regex (${rt.passRegex.source}) matched the mutant run's output despite a non-zero exit code (${String(testResult.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${testResult.logPath}`,
         );

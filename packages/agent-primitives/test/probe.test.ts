@@ -4587,6 +4587,209 @@ describe("probe(): --pass-regex", () => {
       expect(result.test?.timedOut).toBe(true);
       expect(result.test?.exitCode).toBeNull();
     }, 10000);
+
+    it("a hanging baseline with BOTH regexes stays baseline_failed: a run that never finished is not reclassified by what its own cut-short tail happens to contain (round 4 MEDIUM)", async () => {
+      useLockDir();
+      const { repo } = initHangingRunnerRepo();
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: 'console.log("irrelevant");',
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        timeoutMs: 300,
+        passRegex: /^OK \(/,
+        // The evidence regex misses, because the hung run never got far
+        // enough to print it: before round 4 that miss reclassified a
+        // baseline that simply never finished as
+        // `baseline_evidence_not_matched` -- a finding about the
+        // pattern, reported instead of the one thing actually measured
+        // (the run hit its bound and was killed).
+        requireBaselineEvidence: /this text never appears/,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+      expect(result.baseline?.timedOut).toBe(true);
+      expect(result.baseline?.exitCode).toBeNull();
+    }, 10000);
+  });
+
+  describe("signal interaction (round 4 HIGH fix): a run killed without an exit code of its own is never read as a verdict", () => {
+    // `exec.ts` spawns every `--pre`/`-t` command as `sh -c <cmd>` with
+    // `detached: true`, so the command leads a process group of its
+    // OWN: `kill -9 -$$` from that shell, and `process.kill(0,
+    // "SIGKILL")` from a node child of it, both reach exactly that
+    // group -- this test process sits in another one and survives
+    // (measured directly with both forms before these tests were
+    // written). What the probe then sees is the shape an OOM killer, a
+    // CI cancel, or a stray `kill` produces: `exitCode: null`,
+    // `timedOut: false`, `aborted: false`, with everything printed
+    // BEFORE the kill still captured -- including the `^OK \(` line
+    // that made round 3's predicate read the run as a PASS.
+    const SIGNAL_WARNING = /terminated by a signal, no exit code was reported/;
+
+    /** Prints the green summary line and exits 0 on its own: whatever
+     * kills the run is added by each test (the test command itself for
+     * a baseline, the mutant's own replacement line for a mutant). */
+    const GREEN_RUNNER_JS = 'console.log("OK (3 tests, 5 assertions)");\n';
+
+    function initGreenRunnerRepo(): { repo: string } {
+      const repo = makeTmpDir();
+      git(repo, ["init", "-q"]);
+      git(repo, ["config", "user.email", "test@example.com"]);
+      git(repo, ["config", "user.name", "test"]);
+      fs.writeFileSync(path.join(repo, "runner.js"), GREEN_RUNNER_JS);
+      git(repo, ["add", "-A"]);
+      git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+      return { repo };
+    }
+
+    /** Prints the matching line, then kills the run's own process
+     * group: matching partial output, no exit code, no timeout. */
+    const KILLED_BASELINE_COMMAND = "node runner.js; kill -9 -$$";
+
+    it("a baseline that matches and is then killed by a signal is baseline_failed, not a pass: the signal is named and no '(null)' exit-code prose appears", async () => {
+      useLockDir();
+      const { repo } = initGreenRunnerRepo();
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: 'console.log("irrelevant");',
+        testCommand: KILLED_BASELINE_COMMAND,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+      expect(result.baseline?.exitCode).toBeNull();
+      // Not a timeout: this probe set no bound at all, the run was
+      // killed from outside.
+      expect(result.baseline?.timedOut).toBe(false);
+      expect(result.warnings.some((w) => SIGNAL_WARNING.test(w))).toBe(true);
+      // The pattern DID match the partial output, so no miss warning;
+      // and no warning may describe a `null` exit code as a number.
+      expect(
+        result.warnings.some(
+          (w) => w.includes("--pass-regex") && w.includes("did not match"),
+        ),
+      ).toBe(false);
+      expect(result.warnings.some((w) => w.includes("(null)"))).toBe(false);
+    }, 20000);
+
+    it("the same signal-killed baseline without --pass-regex is also baseline_failed, with the same signal warning in place of any exit-code prose", async () => {
+      useLockDir();
+      const { repo } = initGreenRunnerRepo();
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: 'console.log("irrelevant");',
+        testCommand: KILLED_BASELINE_COMMAND,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+      expect(result.baseline?.exitCode).toBeNull();
+      expect(result.baseline?.timedOut).toBe(false);
+      expect(result.warnings.some((w) => SIGNAL_WARNING.test(w))).toBe(true);
+      expect(result.warnings.some((w) => w.includes("(null)"))).toBe(false);
+    }, 20000);
+
+    it("a signal-killed baseline with BOTH regexes stays baseline_failed, not baseline_evidence_not_matched (round 4 MEDIUM)", async () => {
+      useLockDir();
+      const { repo } = initGreenRunnerRepo();
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: 'console.log("irrelevant");',
+        testCommand: KILLED_BASELINE_COMMAND,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        passRegex: /^OK \(/,
+        requireBaselineEvidence: /this text never appears/,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+      expect(result.baseline?.exitCode).toBeNull();
+      expect(result.warnings.some((w) => SIGNAL_WARNING.test(w))).toBe(true);
+    }, 20000);
+
+    it("a MUTANT run that matches and is then killed by a signal is inconclusive/timeout, never killed or survived, and the signal is named", async () => {
+      useLockDir();
+      const { repo } = initGreenRunnerRepo();
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        // The mutant prints the same matching line and then kills the
+        // run's own process group: before round 4 the predicate read
+        // that partial output as a PASS and reported the mutant
+        // `survived` (under `--expect fail`), a verdict from a run that
+        // measured nothing.
+        replaceText:
+          'console.log("OK (3 tests, 5 assertions)"); process.kill(0, "SIGKILL");',
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("timeout");
+      expect(result.test?.exitCode).toBeNull();
+      expect(result.test?.timedOut).toBe(false);
+      expect(result.warnings.some((w) => SIGNAL_WARNING.test(w))).toBe(true);
+      expect(result.mutation_probe?.result).toBe("inconclusive");
+    }, 20000);
+
+    it("the same signal-killed mutant without --pass-regex is inconclusive too: a `null` exit code is not a test failure, so `--expect fail` may not certify a kill from it", async () => {
+      useLockDir();
+      const { repo } = initGreenRunnerRepo();
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText:
+          'console.log("OK (3 tests, 5 assertions)"); process.kill(0, "SIGKILL");',
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("timeout");
+      expect(result.test?.exitCode).toBeNull();
+      expect(result.test?.timedOut).toBe(false);
+      expect(result.warnings.some((w) => SIGNAL_WARNING.test(w))).toBe(true);
+    }, 20000);
   });
 
   describe("interaction with --require-baseline-evidence: the evidence regex stays a gate on the baseline, --pass-regex is the verdict", () => {
