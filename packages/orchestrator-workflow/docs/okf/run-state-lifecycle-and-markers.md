@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-08T11:11:12Z
+timestamp: 2026-09-09T05:25:09Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -188,22 +188,22 @@ the seven checks (all but the SKILL.md Run state contract check itself)
 route through one `expectPointerMention` helper that asserts the exact
 phrase "`.ai/run` pointer" rather than the bare, incident-prone substring
 `.ai/run`
-(docs-consistency.test.ts:393-400#"expect(slice).toContain("):
+(docs-consistency.test.ts:400-407#"expect(slice).toContain("):
 SKILL.md Run state documents the `.ai/run` contract with its own specific
-phrases (docs-consistency.test.ts:402-408#"make sure it is ignored") and
+phrases (docs-consistency.test.ts:409-415#"make sure it is ignored") and
 carries the keyed example verbatim
-(docs-consistency.test.ts:411-412#"run-base[<repo-basename>] = <sha>");
+(docs-consistency.test.ts:418-419#"run-base[<repo-basename>] = <sha>");
 step 1 mentions the pointer via the helper
-(docs-consistency.test.ts:422-428#"expectPointerMention(step1)"); each of
+(docs-consistency.test.ts:429-435#"expectPointerMention(step1)"); each of
 the three harness bullets mentions it via the helper, in a loop
-(docs-consistency.test.ts:431-448#"expectPointerMention(bullet)"); the
+(docs-consistency.test.ts:438-455#"expectPointerMention(bullet)"); the
 policy-section bullet carries both facts
-(docs-consistency.test.ts:452-459#"run-base[<repo-basename>]"); and the
+(docs-consistency.test.ts:459-466#"run-base[<repo-basename>]"); and the
 README and both INSTALL-AGENT.md write-surface listings mention the pointer
 via the helper and `.gitignore` by substring
-(docs-consistency.test.ts:462-468#"expectPointerMention(section)";
-docs-consistency.test.ts:472-478#"expectPointerMention(section)";
-docs-consistency.test.ts:482-488#"expectPointerMention(section)").
+(docs-consistency.test.ts:469-475#"expectPointerMention(section)";
+docs-consistency.test.ts:479-485#"expectPointerMention(section)";
+docs-consistency.test.ts:489-495#"expectPointerMention(section)").
 
 ## The verdict markers: acceptance signals, fail CLOSED
 
@@ -337,12 +337,12 @@ hand-mapping terrain, SKILL.md:152#"with an index) before mapping terrain by han
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
 (`CHANGELOG.md:#[0.12.0]`). Pinned by
-docs-consistency.test.ts:312-317#"apply this optional guidance: when the repo carries a" (the hook's opening phrase, anchored so a
+docs-consistency.test.ts:319-324#"apply this optional guidance: when the repo carries a" (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
-"docs/okf/" also occur in the Discover-step test), docs-consistency.test.ts:321-323#"whether the change touches paths any bundle doc claims as sources" (source-overlap
-check phrase), docs-consistency.test.ts:327-329#"update the affected docs (re-verify and re-stamp) or record a follow-up task" (both responses named), docs-consistency.test.ts:333-334#"run the bundle validator when one is available" (validator-run
-phrase, `okf-kit check` framed as an example), docs-consistency.test.ts:338-340#"Repos without a bundle are unaffected" (non-gate
-optionality phrase), and docs-consistency.test.ts:343-346#"Outcome: updated | not affected | follow-up filed." (the template section, its outcome
+"docs/okf/" also occur in the Discover-step test), docs-consistency.test.ts:328-330#"whether the change touches paths any bundle doc claims as sources" (source-overlap
+check phrase), docs-consistency.test.ts:334-336#"update the affected docs (re-verify and re-stamp) or record a follow-up task" (both responses named), docs-consistency.test.ts:340-341#"run the bundle validator when one is available" (validator-run
+phrase, `okf-kit check` framed as an example), docs-consistency.test.ts:345-347#"Repos without a bundle are unaffected" (non-gate
+optionality phrase), and docs-consistency.test.ts:350-353#"Outcome: updated | not affected | follow-up filed." (the template section, its outcome
 vocabulary, and that it is marked Optional and bundle-scoped).
 
 ## Where the shapes are pinned, and what belongs to sibling docs
@@ -364,9 +364,9 @@ anything inside it.
 (role enumeration, review-gate wording, instruction trust boundary,
 subagent misfire rule, task-slicer/subagent-contract field superset); only
 its `run-base fill instruction ships in the skill`
-(docs-consistency.test.ts:361-367#"before the first implementation commit") and
+(docs-consistency.test.ts:368-374#"before the first implementation commit") and
 `hand off keeps a curated knowledge bundle current`
-(docs-consistency.test.ts:308-356#"Optional") `describe` blocks are this doc's topic.
+(docs-consistency.test.ts:315-363#"Optional") `describe` blocks are this doc's topic.
 The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see
