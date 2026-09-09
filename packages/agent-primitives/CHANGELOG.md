@@ -401,6 +401,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restating their surface. Running PHPUnit itself is out of scope for this
   package's own CI: the new detectors and the zero-tests/drift
   additions are proven only against the captured fixtures.
+- Four round-9 corrections to the composer/`node_modules` link policy
+  and the untracked-file sync's symlink check (task `6c7e1532`):
+  (1) `copySymlink`'s containment check now runs on the link's OWN
+  target -- resolved against the link's own directory the same way the
+  filesystem would follow it, then through `resolveDeepestExisting` --
+  rather than on the recreated link at `dest`: for a DANGLING target,
+  realpathing `dest` itself cannot follow through the missing target and
+  fell back to `dest`'s own (always-contained) path, so the check read
+  back as trivially contained no matter where the target actually
+  pointed. An untracked absolute symlink whose target does not exist yet
+  (a `--pre` writing through it lands in the real tree, with the
+  warning this time) and a relative `..`-escaping target with an
+  in-repo `--log-dir` are both pinned in `test/probe-worktree.test.ts`.
+  (2) Rule 3's target half now also refuses a candidate whose target
+  sits at or under the repository's OWN `.git` directory, whatever name
+  the candidate sits under: `.git` is neither a tracked path (git's own
+  index never lists it) nor a nested repository's boundary
+  (`nestedRepoBoundaryRelPath` looks for `<root>/.git/.git`, which a
+  plain `.git` directory does not have), so an auto-discovered
+  `node_modules -> .git` reached neither check and was linked with no
+  warning. Pinned by a unit test in `test/link-policy.test.ts` and an
+  e2e fixture that hashes the repository's own `.git` directory before
+  and after a gitignored `node_modules -> .git` candidate's `--pre`
+  tries to write into it. (3) The nested-repository refusal's own
+  wording now opens with what is actually known -- "its target <path>
+  sits inside a nested repository at <rel>, whose content the outer
+  index never lists" -- rather than "git tracks its target <path>",
+  which the outer index never does for nested content; the existing
+  unit test and the submodule e2e fixture are updated to match. (4) The
+  destination half of rule 3 (a directory named by repository content)
+  now reads "could not check whether git tracks <path>; treated as
+  tracked" instead of an unconditional "git tracks it" when the `git
+  ls-files` listing behind it could not run, matching the target half's
+  own fail-closed wording; pinned by a new unit test and by the
+  existing PATH-shim fixture in `test/probe-worktree.test.ts`, which now
+  asserts both halves' fail-closed wording in the one envelope a failed
+  listing produces. README's rule 3 paragraph and Limitations section
+  are corrected to match: the nested-repository boundary is walked from
+  the root DOWN to the target, reporting the outermost boundary
+  crossed, not "from the target up to the root" as previously stated,
+  and Limitations now names the DANGLING-`.git`-symlink boundary gap
+  (`fs.existsSync` on a symlink answers `false` when its target is
+  missing, so a nested repository marked only that way is not caught)
+  as a known, unaddressed residual rather than a fixed one.
 
 ### Changed
 

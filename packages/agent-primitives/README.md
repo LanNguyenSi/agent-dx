@@ -984,18 +984,26 @@ The four rules, in this order:
    resolves INTO the root while spelling a path outside it, and a target
    really named `SRC` is the tracked `src` the repository carries, which
    git's case-sensitive index would otherwise report as untracked. A
-   refusal names the target and that git tracks it. A target sitting
-   inside a nested repository's own boundary -- a submodule's root, or a
-   nested plain checkout's -- is refused the same way even though the
-   OUTER index never lists its content, only the submodule's own gitlink
-   (the boundary is the same one an untracked nested repository is
-   skipped at during the untracked-file sync, walked from the target up
-   to the root); that refusal names the target and the nested
-   repository's own path, and asks nothing of the nested repository's
-   own index -- sitting inside the boundary is enough. A listing that
-   cannot run leaves every such target treated as tracked, and the
-   refusal says the listing could not check rather than claiming git
-   answered.
+   refusal names the target and that git tracks it. A target at or under
+   the repository's OWN `.git` directory is refused outright, whatever
+   either question above would otherwise answer: `.git` is not itself a
+   tracked path (git's own index never lists it) and it is not a nested
+   repository's boundary either (that check looks for a `.git` entry
+   BELOW the target, which a plain `.git` directory does not have), so
+   an auto-discovered `node_modules -> .git` reaches neither question
+   with a reason to refuse it; the refusal names the target and that it
+   is the repository's own git directory. A target sitting inside a
+   nested repository's own boundary -- a submodule's root, or a nested
+   plain checkout's -- is refused the same way even though the OUTER
+   index never lists its content, only the submodule's own gitlink (the
+   boundary is the same one an untracked nested repository is skipped at
+   during the untracked-file sync, walked from the root down to the
+   target, reporting the outermost boundary crossed); that refusal names
+   the target and the nested repository's own path, and asks nothing of
+   the nested repository's own index -- sitting inside the boundary is
+   enough. A listing that cannot run leaves every such destination or
+   target treated as tracked, and either refusal says the listing could
+   not check rather than claiming git answered.
    `--link`, typed by the person running the probe, keeps its latitude
    for BOTH halves; rules 1, 2 and 4 apply to it the same as to
    everything else. That latitude has a price worth naming: a `--link`
@@ -1086,10 +1094,18 @@ through that inner path writes into the source tree. The same limit
 applies without any link at all: an untracked, non-ignored symlink that
 is itself absolute, or that resolves outside the copy, carries the
 sync's warning (see above) but is still recreated and still reaches the
-real tree; a COMMITTED absolute symlink is written by `git worktree add`
-itself, before this package's own sync ever runs, so it reaches the copy
-with no warning at all. Either way, a `--pre`/`-t` must not assume such
-a path is isolated. The invariant is
+real tree -- a DANGLING target (nothing exists there yet) carries the
+same warning, checked against the target's own spelling rather than
+against the recreated link, whose realpath a missing target would
+otherwise make unfollowable; a COMMITTED absolute symlink is written by
+`git worktree add` itself, before this package's own sync ever runs, so
+it reaches the copy with no warning at all. Either way, a `--pre`/`-t`
+must not assume such a path is isolated. The nested-repository boundary
+(rule 3's target half, and the untracked-file sync's own skip) is
+decided by `fs.existsSync` on a `.git` entry at each ancestor; a `.git`
+that is itself a DANGLING symlink answers `false` there, so a nested
+repository marked only that way is not caught by either check -- a
+known, unaddressed gap rather than a fixed one. The invariant is
 checked and then acted on, so a second process that changes the copy in
 between (replacing a directory with a symlink in the microseconds
 between the check and the syscall) is not covered; the copy lives in a

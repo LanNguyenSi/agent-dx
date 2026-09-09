@@ -211,6 +211,26 @@ describe("planLinks", () => {
     expect(plan.warnings[0]).toContain(".agent-primitives.json");
   });
 
+  it("reports the destination half's fail-closed refusal honestly too: 'could not check', never 'git tracks', when the listing never answered", () => {
+    const root = makeTmpDir();
+
+    const plan = planLinks(
+      [
+        {
+          absDir: path.join(root, "src"),
+          namedBy: '"src" named in the "link" list of .agent-primitives.json',
+        },
+      ],
+      ctx(root, { tracked: ["src"], trackedUnknown: true }),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain(
+      "could not check whether git tracks src; treated as tracked",
+    );
+    expect(plan.warnings[0]).not.toContain("git tracks it");
+  });
+
   it("keeps an operator's own --link (no provenance) usable for a tracked directory: the stricter rule is for repository content only", () => {
     const root = makeTmpDir();
 
@@ -940,9 +960,35 @@ describe("planLinks: rule 3's tracked-TARGET half", () => {
 
     expect(plan.links).toEqual([]);
     expect(plan.warnings[0]).toContain(
-      `git tracks its target ${path.join(root, "sub", "lib")}`,
+      `its target ${path.join(root, "sub", "lib")} sits inside a nested ` +
+        "repository at sub",
     );
     expect(plan.warnings[0]).toContain("inside a nested repository at sub");
+    expect(plan.warnings[0]).toContain(
+      "whose content the outer index never lists",
+    );
+    expect(plan.warnings[0]).not.toContain(
+      `git tracks its target ${path.join(root, "sub", "lib")}`,
+    );
+  });
+
+  it("refuses a target at or under the repository's own '.git' directory: neither a tracked path nor a nested-repository boundary would otherwise catch it", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, ".git"));
+    fs.symlinkSync(".git", path.join(root, "node_modules"), "dir");
+
+    const plan = planLinks(
+      // Neither tracked nor a nested boundary: `.git/.git` does not
+      // exist, so `nestedRepoBoundaryRelPath` would find nothing here
+      // without the dedicated check.
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      ctx(root),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain(
+      `its target ${path.join(root, ".git")} is the repository's own git directory`,
+    );
   });
 
   it("does not add the nested-repository clause when the target is already a directly tracked path (the gitlink itself)", () => {

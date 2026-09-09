@@ -698,10 +698,14 @@ export function planLinks(
       warnings.push(
         skippedLinkWarning(
           candidate,
-          "git tracks it; a directory named by repository content is only " +
-            "linked when git does not track it (these inputs exist for " +
-            "gitignored runtime output, and tracked source is copied into " +
-            "the isolation copy rather than shared with the source tree)",
+          ctx.trackedUnknown
+            ? `could not check whether git tracks ${canonicalRel}; treated ` +
+                "as tracked"
+            : "git tracks it; a directory named by repository content is " +
+                "only linked when git does not track it (these inputs " +
+                "exist for gitignored runtime output, and tracked source " +
+                "is copied into the isolation copy rather than shared " +
+                "with the source tree)",
         ),
       );
       continue;
@@ -730,6 +734,32 @@ export function planLinks(
     // submodule's gitlink is an entry of the outer index, never its
     // content), so a path below it is refused by the boundary alone.
     if (!hasOperatorLatitude(candidate)) {
+      // A target at or under the repository's OWN `.git` directory is
+      // refused outright, before either question below is even asked:
+      // `.git` is not a tracked path (git's own index never lists it,
+      // so `isTrackedPath` answers "untracked") and it is not a nested
+      // repository's boundary either (`nestedRepoBoundaryRelPath` would
+      // look for `<root>/.git/.git`, which a plain `.git` directory
+      // does not have), so a candidate pointing straight at it (an
+      // auto-discovered `node_modules -> .git`, gitignored like any
+      // other untracked directory) reaches neither check below with a
+      // reason to refuse it. A write through such a link lands in the
+      // repository's own live git state directly, which every other
+      // guarantee this run makes assumes stays untouched.
+      const gitDirReal = resolveDeepestExisting(
+        path.join(ctx.rootReal, ".git"),
+      );
+      if (isPathContained(gitDirReal, resolved)) {
+        warnings.push(
+          skippedLinkWarning(
+            candidate,
+            `its target ${resolved} is the repository's own git directory; ` +
+              "a write through such a link would reach the tree's real " +
+              "git state directly",
+          ),
+        );
+        continue;
+      }
       const targetRel = linkTargetRelPath(resolved, ctx.rootReal);
       if (targetRel !== undefined && targetRel !== "") {
         const targetTracked = ctx.isTrackedPath(
@@ -759,10 +789,12 @@ export function planLinks(
                 ? `could not check whether git tracks its target ${resolved}; ` +
                     "treated as tracked"
                 : nestedRepoRel !== undefined
-                  ? `git tracks its target ${resolved}; source is copied into the ` +
-                    "isolation copy, never shared with the tree being isolated " +
-                    "from, so every write through such a link would land in the " +
-                    `source tree, inside a nested repository at ${nestedRepoRel}`
+                  ? `its target ${resolved} sits inside a nested repository ` +
+                    `at ${nestedRepoRel}, whose content the outer index ` +
+                    "never lists; source is copied into the isolation " +
+                    "copy, never shared with the tree being isolated " +
+                    "from, so every write through such a link would land " +
+                    "in the source tree"
                   : `git tracks its target ${resolved}; source is copied into the ` +
                     "isolation copy, never shared with the tree being isolated " +
                     "from, so every write through such a link would land in the " +

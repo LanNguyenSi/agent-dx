@@ -520,13 +520,22 @@ function copyRegularFile(src: string, dest: string): void {
  * absolute or relative: an absolute target, or a relative one that
  * escapes through `..`, resolves outside the copy exactly as it did in
  * the source tree, so a `--pre`/`-t` writing through it reaches the
- * real tree rather than the isolated one. `resolveDeepestExisting` is
- * called once per untracked symlink, after it is created, to check for
- * that; `warnings` names the symlink and where it resolves rather than
- * refusing the sync outright, since a copy that carries every symlink
- * the source tree has is the isolation this function promises, and a
- * symlink escaping the copy is a property of the SOURCE tree, not a
- * mistake this sync made.
+ * real tree rather than the isolated one. The check runs on the link's
+ * OWN target -- `linkTarget` resolved against the link's own directory
+ * the same way the filesystem would follow it, then through
+ * `resolveDeepestExisting` -- rather than on the recreated link at
+ * `dest` itself: `dest` always sits inside the copy (that is where this
+ * function just created it), so realpathing `dest` for a DANGLING
+ * target throws, falls back to `dest`'s own contained path, and reads
+ * back as trivially contained no matter where the target actually
+ * points. Resolving the target's own spelling first still walks up to
+ * the deepest existing ancestor when the target itself does not exist,
+ * which is exactly what surfaces a dangling target that would land
+ * outside the copy. `warnings` names the symlink and where it resolves
+ * rather than refusing the sync outright, since a copy that carries
+ * every symlink the source tree has is the isolation this function
+ * promises, and a symlink escaping the copy is a property of the SOURCE
+ * tree, not a mistake this sync made.
  */
 function copySymlink(
   src: string,
@@ -539,7 +548,10 @@ function copySymlink(
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.rmSync(dest, { force: true });
   fs.symlinkSync(linkTarget, dest);
-  const resolved = resolveDeepestExisting(dest);
+  const resolvedLinkTarget = path.isAbsolute(linkTarget)
+    ? linkTarget
+    : path.resolve(path.dirname(dest), linkTarget);
+  const resolved = resolveDeepestExisting(resolvedLinkTarget);
   if (!isPathContained(worktreeRootReal, resolved)) {
     warnings.push(
       `untracked symlink ${displayRelPath} resolves to ${resolved}, outside ` +

@@ -1660,6 +1660,15 @@ describe("probe(): worktree isolation, a destination the copy spells differently
         w.includes("inside the isolation copy itself"),
       ),
     ).toBe(true);
+    // The copy's own `.git` FILE sits inside `ctx.copyRootReal`, exempted
+    // from the nested-repository boundary check for exactly this reason
+    // (see `copyRootReal`'s docblock): this fixture's target resolves
+    // there, and must be refused by the more specific "inside the
+    // isolation copy itself" reason above, never by a false-sounding
+    // "nested repository" one.
+    expect(result.warnings.some((w) => w.includes("nested repository"))).toBe(
+      false,
+    );
   });
 
   it("leaves a destination the untracked sync already recreated as the SAME symlink alone, reports it as carried rather than as reaching out of the copy, and still lists it in isolation.linked", async () => {
@@ -2704,9 +2713,9 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
         (w) =>
           w.includes("node_modules") &&
           w.includes(
-            `git tracks its target ${resolveDeepestExisting(path.join(repo, "sub", "lib"))}`,
+            `its target ${resolveDeepestExisting(path.join(repo, "sub", "lib"))} sits inside a nested repository at sub`,
           ) &&
-          w.includes("inside a nested repository at sub"),
+          w.includes("whose content the outer index never lists"),
       ),
     ).toBe(true);
   });
@@ -2814,6 +2823,38 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
     expect(fs.existsSync(path.join(repo, "plain", "lib", "CLOBBER.txt"))).toBe(
       true,
     );
+    expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
+  });
+
+  it("refuses an auto-discovered 'node_modules -> .git' (gitignored, so untracked, and outside any nested-repository boundary): neither isTrackedPath nor nestedRepoBoundaryRelPath sees a target that IS the repository's own git directory", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    commitAll(repo, "ignore node_modules");
+    // `.git/.git` does not exist, so `nestedRepoBoundaryRelPath` finds no
+    // boundary here, and git's own index never lists `.git` at all --
+    // only the dedicated `.git` refusal catches this candidate.
+    fs.symlinkSync(
+      path.join(repo, ".git"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+
+    const gitBefore = hashTree(path.join(repo, ".git"));
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const gitAfter = hashTree(path.join(repo, ".git"));
+
+    expect(gitAfter).toEqual(gitBefore);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.startsWith("skipped linking ") &&
+          w.includes("node_modules") &&
+          w.includes("is the repository's own git directory"),
+      ),
+    ).toBe(true);
     expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
   });
 });
@@ -3075,12 +3116,25 @@ describe("probe(): worktree isolation, the tracked-file listing behind the link 
           w.includes("treated as tracked"),
       ),
     ).toBe(true);
+    // The destination half's refusal says the listing could not check,
+    // never that git tracks it, the same as the target half below: the
+    // listing never got the chance to answer, and claiming it did would
+    // be false.
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join(repo, "vendor")) &&
+          w.includes(
+            "could not check whether git tracks vendor; treated as tracked",
+          ),
+      ),
+    ).toBe(true);
     expect(
       result.warnings.some(
         (w) =>
           w.includes(path.join(repo, "vendor")) && w.includes("git tracks it"),
       ),
-    ).toBe(true);
+    ).toBe(false);
     // The target half's refusal says the listing could not check,
     // never that git tracks it: the listing never got the chance to
     // answer, and claiming it did would be false.
@@ -4513,6 +4567,79 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
     const after = hashTree(repo);
 
     expect(after).toEqual(before);
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("docs") &&
+          w.includes(`resolves to ${path.join(repoReal, "src")}`) &&
+          w.includes("outside the isolation copy"),
+      ),
+    ).toBe(true);
+  });
+
+  it("an untracked DANGLING symlink whose target sits outside the copy still warns, even though the target does not exist yet: the containment check runs on the link's own target, not on the recreated link (which realpath cannot follow through a missing target and would otherwise read back as trivially contained)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const repoReal = resolveDeepestExisting(repo);
+    const escapedFile = path.join(repoReal, "created-by-pre.txt");
+    // Untracked, absolute, and DANGLING: nothing named
+    // "created-by-pre.txt" exists in the source tree yet, so the
+    // recreated link's own realpath cannot be followed at all.
+    fs.symlinkSync(escapedFile, path.join(repo, "docs"));
+
+    const result = await probe(
+      baseOptions(repo, {
+        preCommand:
+          "node -e \"require('fs').writeFileSync('docs', 'ESCAPED')\"",
+      }),
+    );
+
+    try {
+      // The `--pre` wrote through the recreated symlink, which still
+      // points at the real repository: the copy carries the same
+      // dangling link the source tree has, and this fixture's whole
+      // point is that the escape happened -- the warning, not
+      // prevention, is the deliverable.
+      expect(fs.readFileSync(escapedFile, "utf8")).toBe("ESCAPED");
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("docs") &&
+            w.includes(`resolves to ${escapedFile}`) &&
+            w.includes("outside the isolation copy"),
+        ),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(escapedFile, { force: true });
+    }
+  });
+
+  it("an untracked RELATIVE symlink whose target escapes through '..' still warns, with the probe's own --log-dir placed inside the repository (the relative target is resolved against the link's own real directory in the copy, not against the log dir)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const repoReal = resolveDeepestExisting(repo);
+    fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "src", "real.txt"), "real\n");
+    // Climbs from the copy (three directories below an in-repo
+    // `--log-dir`: `<log-dir>/wt-<uuid>/wt`) back up to the repository
+    // root, then back down into `src` -- landing on the source tree's
+    // own directory rather than the copy's.
+    fs.symlinkSync(path.join("..", "..", "..", "src"), path.join(repo, "docs"));
+    const logDir = path.join(repo, "probe-logs-rel-escape");
+    fs.mkdirSync(logDir, { recursive: true });
+
+    const result = await probe(baseOptions(repo, { logDir }));
+
+    // No `--pre` here writes through the link: the log dir sits inside
+    // the repository for this fixture (so its own scratch output is
+    // itself part of the tree), which is exactly why a whole-tree hash
+    // comparison would be the wrong check -- `src/real.txt` unchanged is
+    // the property this fixture is actually about.
+    expect(fs.readFileSync(path.join(repo, "src", "real.txt"), "utf8")).toBe(
+      "real\n",
+    );
     expect(result.status).toBe("killed");
     expect(
       result.warnings.some(
