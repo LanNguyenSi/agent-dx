@@ -1478,4 +1478,34 @@ describe("probePlan(): zero-tests-executed detection through the shared baseline
     expect(result.reason).toBe("baseline_evidence_not_matched");
     expect(result.results.map((r) => r.status)).toEqual(["not_run"]);
   }, 30000);
+
+  it("a truncated baseline tail that missed the pattern names the truncation in the warning", async () => {
+    // Plan-path twin of `probe-zero-tests.test.ts`'s "a truncated
+    // baseline tail that missed the pattern names the truncation in
+    // the warning" (`setup.ts`'s `--require-baseline-evidence` check is
+    // shared by `probe()` and `probePlan()`, so the same truncation
+    // note applies here): a pattern printed first, then scrolled out
+    // of the captured tail (`exec.ts`'s 60-line/6000-char bound) by 120
+    // filler lines, must not read as a plain miss without the warning
+    // naming the truncation.
+    useLockDir();
+    const repo = initNodeTestDotRepo(makeTmpDir);
+    const fillerLines = Array.from(
+      { length: 120 },
+      (_, i) => `console.log('filler line ${i}');`,
+    ).join(" ");
+
+    const result = await probePlan(
+      dotReporterPlanOptions(repo, {
+        testCommand: `node -e "console.log('EVIDENCE-LINE'); ${fillerLines}"`,
+        requireBaselineEvidence: /EVIDENCE-LINE/,
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_evidence_not_matched");
+    expect(
+      result.warnings.some((w) => /captured stdout tail was truncated/.test(w)),
+    ).toBe(true);
+  }, 30000);
 });

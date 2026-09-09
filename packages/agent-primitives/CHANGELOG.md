@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Test hygiene from the PR #218 reviews (task `482c3ef7`, no behaviour
+  change): the node `--test` dot-reporter fixture builder shared by
+  `test/probe-zero-tests.test.ts` and `test/plan.test.ts` now lives once
+  in `test/helpers/node-test-dot-repo.ts`; the CLI's `--plan` help
+  sentence is generated from `PLAN_EXCLUSIVE_OPTIONS` instead of
+  hand-mirrored, with a cli test pinning it; and `probePlan`'s
+  `--require-baseline-evidence` truncated-tail warning is now also
+  exercised on the plan path, not only the single-probe path.
+
 ### Fixed
 
 - `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
