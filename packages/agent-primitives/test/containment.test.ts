@@ -409,6 +409,172 @@ describe("escapingRootMentions()", () => {
     ).toEqual([escaped]);
   });
 
+  // --- The boundary rule as a TOTAL classification. The rule
+  // enumerates what CONTINUES a path word (a component NAME character,
+  // a `/`, or a backslash pair) instead of enumerating what terminates
+  // one, so every character has an answer and there is no third state.
+  // The two tables below walk that whole alphabet, so a neighbouring
+  // spelling cannot sit unclassified between two enumerated ones. ---
+
+  /** The characters that continue a component NAME, stated here
+   * independently of the implementation: the POSIX portable filename
+   * character set. `/` is deliberately NOT in here -- it continues the
+   * WORD, but as a further component, so it leaves the match a mention
+   * of the root (`<root>/pkg` names the root). */
+  const NAME_CHARACTERS =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-";
+
+  /** Every printable ASCII character (0x20..0x7e) plus TAB, LF and CR:
+   * the alphabet a scanned `-t`/`--pre`/`--env` string realistically
+   * carries right after a path. */
+  function scannedCharacters(): string[] {
+    const chars: string[] = ["\t", "\n", "\r"];
+    for (let code = 0x20; code <= 0x7e; code++) {
+      chars.push(String.fromCharCode(code));
+    }
+    return chars;
+  }
+
+  it("every printable ASCII character, TAB, LF and CR after the root spelling is either a name continuation (NOT a mention) or a boundary (a mention), with no third state", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const wrong: string[] = [];
+    for (const ch of scannedCharacters()) {
+      const continuesName = NAME_CHARACTERS.includes(ch);
+      // Case folding is injected rather than measured, so the table
+      // reads the same on a case-sensitive and a case-insensitive
+      // runner; the case rule has its own test above.
+      const mentions = escapingRootMentions(
+        `${root}${ch}`,
+        root,
+        undefined,
+        false,
+      );
+      if (mentions.length > 0 === continuesName) {
+        wrong.push(
+          `${JSON.stringify(ch)}: expected ${
+            continuesName ? "no mention" : "a mention"
+          }, got ${JSON.stringify(mentions)}`,
+        );
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("a non-ASCII character continues the name too, so a sibling spelled with one is not a mention", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    expect(
+      escapingRootMentions(`ls ${root}ä; node t.js`, root, undefined, false),
+    ).toEqual([]);
+    expect(
+      escapingRootMentions(`ls ${root}中; node t.js`, root, undefined, false),
+    ).toEqual([]);
+  });
+
+  it("a `\\` plus each of those characters after the root spelling is a mention only for `\\/` and for `\\`+newline", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const wrong: string[] = [];
+    for (const ch of scannedCharacters()) {
+      // `\/` is a separator (every POSIX shell reads it as `/`), and a
+      // `\`+newline pair is DELETED before the word is lexed, so what
+      // follows the pair decides -- here nothing follows, which ends
+      // the word. Every other `\X` escapes a character inside the SAME
+      // word, so the spelling is a different path's prefix.
+      const expectMention = ch === "/" || ch === "\n";
+      const mentions = escapingRootMentions(
+        `${root}\\${ch}`,
+        root,
+        undefined,
+        false,
+      );
+      if (mentions.length > 0 !== expectMention) {
+        wrong.push(
+          `${JSON.stringify(`\\${ch}`)}: expected ${
+            expectMention ? "a mention" : "no mention"
+          }, got ${JSON.stringify(mentions)}`,
+        );
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("what follows a `\\`+newline pair decides, since the shell deletes the pair", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    // A separator after the pair: still the root, one component deeper.
+    expect(
+      escapingRootMentions(`node ${root}\\\n/pkg/t.js`, root, undefined, false),
+    ).toEqual([`${root}\\\n/pkg/t.js`]);
+    // A name character after the pair: a SIBLING, not the root.
+    expect(
+      escapingRootMentions(
+        `ls ${root}\\\n-backup; node t.js`,
+        root,
+        undefined,
+        false,
+      ),
+    ).toEqual([]);
+    // Two pairs in a row are deleted just the same.
+    expect(
+      escapingRootMentions(
+        `node ${root}\\\n\\\n/pkg/t.js`,
+        root,
+        undefined,
+        false,
+      ),
+    ).toEqual([`${root}\\\n\\\n/pkg/t.js`]);
+  });
+
+  it("the sibling controls stay siblings and the deeper-path and word-ending controls stay mentions", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    for (const text of [
+      `ls ${root}2; node t.js`,
+      `ls ${root}-backup; node t.js`,
+      `ls ${root}\\ backup; node t.js`,
+      `ls ${root}\\\n-backup; node t.js`,
+    ]) {
+      expect({ text, mentions: escapingRootMentions(text, root) }).toEqual({
+        text,
+        mentions: [],
+      });
+    }
+    for (const [text, region] of [
+      [`cd ${root} && node t.js`, root],
+      [`cd ${root}/pkg && node t.js`, `${root}/pkg`],
+      [`cd ${root}\\/pkg && node t.js`, `${root}\\/pkg`],
+      [`cd ${root}\\\n/pkg && node t.js`, `${root}\\\n/pkg`],
+      // A POSIX operator ends the word with no whitespace at all, so
+      // the path IS the root in each of these three.
+      [`cd ${root}>/dev/null; node pkg/t.js`, root],
+      [`cd ${root}<&-; node pkg/t.js`, root],
+      ["node `echo " + root + "`/pkg/t.js", root],
+    ] as [string, string][]) {
+      expect({ text, mentions: escapingRootMentions(text, root) }).toEqual({
+        text,
+        mentions: [region],
+      });
+    }
+  });
+
+  it("a line continuation INSIDE the root prefix is tolerated on either side of the separator", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const parent = path.dirname(root);
+    const base = path.basename(root);
+    // Before the separator ...
+    const before = `${parent}\\\n/${base}/pkg`;
+    expect(escapingRootMentions(`cd ${before} && node t.js`, root)).toEqual([
+      before,
+    ]);
+    // ... and after it.
+    const after = `${parent}/\\\n${base}/pkg`;
+    expect(escapingRootMentions(`cd ${after} && node t.js`, root)).toEqual([
+      after,
+    ]);
+    // Combined with the `/./` noise the rule already tolerated.
+    const both = `${parent}\\\n/.\\\n/${base}/pkg`;
+    expect(escapingRootMentions(`cd ${both} && node t.js`, root)).toEqual([
+      both,
+    ]);
+  });
+
   it("a `..` segment is NOT tolerated: it names a different directory, and normalising is outside this rule (documented residual)", () => {
     const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
     const walked = `${path.dirname(root)}/x/../${path.basename(root)}/pkg`;

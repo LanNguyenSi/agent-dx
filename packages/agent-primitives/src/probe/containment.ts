@@ -83,69 +83,120 @@ function pathSpellings(p: string): string[] {
 }
 
 /**
- * Characters that cannot continue a path component in a scanned
- * command string, so a path that ends right before one of them is
- * finished: whitespace, either quote, and the shell separators that
- * can follow a path without a space (`;`, `&`, `|`, `)`, `,`).
+ * True when `ch` can continue the NAME of a path component: the POSIX
+ * portable filename character set (`A-Z a-z 0-9 . _ -`, the characters
+ * a portable filename is guaranteed to carry), plus every non-ASCII
+ * character, since those are filename characters too and the shell's
+ * word lexing gives none of them any meaning of its own.
  */
-const PATH_REGION_TERMINATORS = new Set([
-  " ",
-  "\t",
-  "\n",
-  "\r",
-  "\v",
-  "\f",
-  '"',
-  "'",
-  ";",
-  "&",
-  "|",
-  ")",
-  ",",
-]);
-
-/**
- * True when the character at `index` ends the path spelled just before
- * it: the end of the text, a `/` (the same directory, named with a
- * deeper component after it), a `\` that escapes such a `/` (every
- * POSIX shell reads `\/` as `/`, so `<root>\/pkg` names `<root>/pkg`),
- * or a character that cannot continue a path component at all. A
- * spelling NOT followed by one of these is the prefix of a DIFFERENT
- * path that merely starts with the same characters -- a sibling
- * `<root>2`, or `<root>-backup` -- and naming one of those is not an
- * escape into `root`.
- *
- * A bare `\` is deliberately NOT a boundary: the escaped space of
- * `<root>\ backup` is part of a sibling's name, not a separator, so
- * treating `\` itself as a boundary would report that sibling as a
- * mention of `root`. Only the `\` of a `\/` pair ends the spelling.
- */
-function isPathBoundaryAt(text: string, index: number): boolean {
-  if (index >= text.length) return true;
-  const ch = text[index];
-  if (ch === "\\" && text[index + 1] === "/") return true;
-  return ch === "/" || PATH_REGION_TERMINATORS.has(ch);
+function continuesComponentName(ch: string): boolean {
+  return /[A-Za-z0-9._-]/.test(ch) || ch.charCodeAt(0) > 0x7f;
 }
 
 /**
- * The end index of the path that starts before `start` and continues
- * from it: everything up to the first terminator, treating a
- * backslash and the character after it as one escaped unit (so the
- * `\ ` inside a space-escaped path does not read as the end of the
- * path). Used to report the ACTUAL region matched (the root spelling
- * plus the path text that follows it, e.g. `<root>/pkg`) instead of
- * only the bare root, which reads as if the command had named the
- * root itself.
+ * The index of the first character after the run of `\`+newline pairs
+ * that starts at `index`. `sh` DELETES such a pair (a line
+ * continuation) before it lexes the word, so a decision about what
+ * follows a spelling is made on what follows the pair, not on the
+ * pair itself.
+ */
+function skipLineContinuations(text: string, index: number): number {
+  let i = index;
+  while (text[i] === "\\" && text[i + 1] === "\n") i += 2;
+  return i;
+}
+
+/**
+ * True when a spelling that ends at `index` is a mention of the path
+ * it spells. The rule enumerates what CONTINUES a path word, not what
+ * terminates one: the match is a mention unless the text continues the
+ * path word with a further NAME character there. Provenance: POSIX
+ * shell word lexing, because the scanned string is handed to `sh -c`
+ * (`exec.ts`) and the shell's own lexing is the contract this scan has
+ * to match, plus the POSIX portable filename character set for what a
+ * component name may carry.
+ *
+ * A path word is CONTINUED at `index` by:
+ *
+ * - a portable filename character (`[A-Za-z0-9._-]`), plus any
+ *   non-ASCII character, since those are filename characters too --
+ *   the spelling is then the prefix of a DIFFERENT path and NOT a
+ *   mention;
+ * - `/`, a further component: still a mention, since `<root>/pkg`
+ *   names the root;
+ * - `\` followed by any character other than `/` or a newline: an
+ *   escaped character inside the SAME word, as in the sibling
+ *   `<root>\ backup`, so NOT a mention;
+ * - `\` followed by a newline followed by a continuation: the shell
+ *   deletes the `\`+newline pair, so the decision is made on what
+ *   follows the pair (`<root>\`+newline+`/pkg` is a mention,
+ *   `<root>\`+newline+`-backup` is not).
+ *
+ * `\` followed by `/` is a SEPARATOR rather than an escaped character
+ * inside the word: every POSIX shell reads `\/` as `/`, so
+ * `<root>\/pkg` names `<root>/pkg` and is a mention.
+ *
+ * Everything else terminates the word and therefore marks a boundary:
+ * the end of the text, whitespace, either quote, every POSIX operator
+ * character (`|`, `&`, `;`, `<`, `>`, `(`, `)` and a backtick), `$`,
+ * and punctuation such as `,`, `=`, `:`, `#`, `!`, `*`, `?`, `{`, `}`,
+ * `[`, `]` and `~`.
+ *
+ * Enumerating the continuations rather than the terminators is what
+ * makes the decision total: a character nobody thought of lands in
+ * "terminates the word", so an unforeseen spelling OVER-refuses (a
+ * refusal that names itself and carries two remedies) instead of
+ * silently reaching the real tree. The same trade costs a sibling
+ * named with a character outside the portable set (`<root>+backup`,
+ * `<root>@2`) a false refusal.
+ *
+ * The `\` rules come from the shell's lexing, and an `--env` VALUE is
+ * NOT shell-processed (it reaches the child as an environment entry,
+ * and a `\` inside an expanded parameter stays literal), so the same
+ * widening over-refuses an env value naming a directory whose own name
+ * carries a literal backslash (`<root>\/pkg` as a path, not as a
+ * separator) by design; the remedies `ISOLATION_ESCAPE_ENV_FIX_HINT`
+ * already names apply to it unchanged.
+ */
+function isPathBoundaryAt(text: string, index: number): boolean {
+  const i = skipLineContinuations(text, index);
+  if (i >= text.length) return true;
+  const ch = text[i];
+  if (ch === "/") return true;
+  if (ch === "\\") {
+    // A `\`+newline pair is already skipped above, so a `\` here
+    // either escapes the `/` of a separator or a character inside the
+    // word. A trailing `\` escapes nothing, so the word ends.
+    const next = text[i + 1];
+    return next === undefined || next === "/";
+  }
+  return !continuesComponentName(ch);
+}
+
+/**
+ * The end index of the path word that starts before `start` and
+ * continues from it, decided by the same continuation rule as
+ * `isPathBoundaryAt`: name characters and `/` extend it, a `\` and the
+ * character after it are one unit (a deleted `\`+newline pair, or an
+ * escaped character inside the word, so the `\ ` of a space-escaped
+ * path does not read as the end), and a trailing `\` escapes nothing
+ * and ends it. Used to report the ACTUAL region matched (the root
+ * spelling plus the path text that follows it, e.g. `<root>/pkg`)
+ * instead of only the bare root, which reads as if the command had
+ * named the root itself. A component carrying a character outside the
+ * portable set truncates the REPORTED region there; what is refused,
+ * and the remedies named with it, are unaffected.
  */
 function pathRegionEnd(text: string, start: number): number {
   let i = start;
   while (i < text.length) {
     const ch = text[i];
-    if (ch === "\\" && i + 1 < text.length) {
+    if (ch === "\\") {
+      if (i + 1 >= text.length) break;
       i += 2;
       continue;
     }
-    if (PATH_REGION_TERMINATORS.has(ch)) break;
+    if (ch !== "/" && !continuesComponentName(ch)) break;
     i++;
   }
   return i;
@@ -164,16 +215,29 @@ function escapeRegExp(s: string): string {
 }
 
 /**
+ * A `\` immediately followed by a newline, zero or more times, as a
+ * regex fragment: the shell DELETES such a pair (a line continuation)
+ * before it lexes the word, so one may sit anywhere inside a separator
+ * run without changing the directory the path reaches. Each repetition
+ * is anchored on the `\`, so no two positions in the pattern can claim
+ * the same pair.
+ */
+const LINE_CONTINUATIONS = String.raw`(?:\\\n)*`;
+
+/** One separator plus any line continuations after it: a `/` that may
+ * itself be backslash-escaped, since a shell reads `\/` as `/`. */
+const SEPARATOR = String.raw`\\?/` + LINE_CONTINUATIONS;
+
+/**
  * What one `/` in a spelling matches: a run of one or more separators,
- * each optionally backslash-escaped, with any number of `.` ("this
- * directory") segments among them, so `<root>//pkg`, `<root>/./pkg`
- * and `<parent>\/<base>/pkg`, which all reach the same directory as
- * `<root>/pkg`, are matched as mentions of it. The `\` is optional
- * because a shell reads `\/` as `/`, so an escaped separator INSIDE
- * the root prefix spells the root just as the bare one does. A `..`
- * segment is deliberately not in here: it names a DIFFERENT directory,
- * so accepting one would mean normalising the path rather than
- * matching its spelling (named as a residual on
+ * each optionally backslash-escaped and each able to carry line
+ * continuations around it, with any number of `.` ("this directory")
+ * segments among them, so `<root>//pkg`, `<root>/./pkg`,
+ * `<parent>\/<base>/pkg` and `<parent>\`+newline+`/<base>/pkg`, which
+ * all reach the same directory as `<root>/pkg`, are matched as
+ * mentions of it. A `..` segment is deliberately not in here: it names
+ * a DIFFERENT directory, so accepting one would mean normalising the
+ * path rather than matching its spelling (named as a residual on
  * `escapingRootMentions`).
  *
  * Matching this against a long run of separators that never completes
@@ -182,7 +246,10 @@ function escapeRegExp(s: string): string {
  * supplied `-t`/`--pre`/`--env` string, not attacker input, so no
  * length cap is imposed on it.
  */
-const PATH_SEPARATOR_PATTERN = "(?:\\\\?/)+(?:\\.(?:\\\\?/)+)*";
+const PATH_SEPARATOR_PATTERN =
+  LINE_CONTINUATIONS +
+  `(?:${SEPARATOR})+` +
+  `(?:${String.raw`\.`}${LINE_CONTINUATIONS}(?:${SEPARATOR})+)*`;
 
 /**
  * A matcher for one spelling: every character matched literally
@@ -322,12 +389,17 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * Four things shape the match itself:
  *
  * - separator noise inside a spelling is tolerated, so `<root>//pkg`,
- *   `<root>/./pkg` and `<parent>\/<base>/pkg` are mentions of `root`
+ *   `<root>/./pkg`, `<parent>\/<base>/pkg` and
+ *   `<parent>\`+newline+`/<base>/pkg` are mentions of `root`
  *   (`spellingMatcher`);
- * - a match must be followed by a path boundary (`isPathBoundaryAt`),
- *   which an escaped separator is (`<root>\/pkg`) and a bare
- *   backslash is not, so a sibling `<root>2` or `<root>\ backup` is
- *   NOT a mention of `root`;
+ * - a match is a mention unless the text CONTINUES the path word with
+ *   a further name character there (`isPathBoundaryAt`, which
+ *   enumerates the continuations rather than the terminators): a
+ *   further component (`<root>/pkg`, `<root>\/pkg`,
+ *   `<root>\`+newline+`/pkg`) keeps it a mention, while a sibling
+ *   whose name merely starts with the root (`<root>2`,
+ *   `<root>-backup`, `<root>\ backup`, `<root>\`+newline+`-backup`)
+ *   is NOT a mention of `root`;
  * - on a case-insensitive filesystem (measured, see
  *   `isCaseInsensitiveFilesystem`; `caseInsensitive` overrides the
  *   measurement, for tests) the match ignores case, so a miscased but
@@ -353,7 +425,11 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * KNOWN TODAY, which is not a claim that they are all of them (the
  * README's `-i worktree` section carries the same list for callers):
  * a path built at run time from a shell variable this tool does not
- * own (`cd "$REPO" && ...`), a command substitution (`$(...)`), or `~`
+ * own (`cd "$REPO" && ...`), a command substitution whose own text
+ * does not spell the root out (`$(git rev-parse --show-toplevel)`,
+ * `$(cat .repo-path)`) -- a substitution that DOES spell it, backticks
+ * included, is refused like any other literal spelling, since the
+ * backtick that closes it terminates the path word -- or `~`
  * expansion; a RELATIVE path that walks out of the isolation copy via
  * `..`; an absolute path that walks back INTO the root through `..`
  * (`/abs/x/../my repo`), which this scan does not normalise; a

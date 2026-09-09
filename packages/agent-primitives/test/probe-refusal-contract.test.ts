@@ -1155,6 +1155,102 @@ describe("probe(): test-command isolation-escape detection", () => {
     expect(result.warnings.join(" ")).toContain(noisy);
   });
 
+  // --- What the SHELL's own word lexing does with the character right
+  // after the root, which is the contract this scan has to match: it
+  // DELETES a `\`+newline pair before lexing the word, and it ends a
+  // word on an operator character with no whitespace of any kind. Each
+  // of these spellings reaches the real repository root, so `-i
+  // worktree` would issue a verdict for a mutant nothing was run
+  // against. ---
+
+  it("a line continuation after the repository root is refused in the test command", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `node ${repo}\\\n/fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(`${repo}\\\n/fixture.test.js`);
+  });
+
+  it("a line continuation after the repository root is refused in --pre", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        preCommand: `cd ${repo}\\\n/ && true`,
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain("--pre");
+    expect(result.warnings.join(" ")).toContain(`${repo}\\\n/`);
+  });
+
+  it("a `>` right after the repository root is refused: it ends the word, so the path named IS the root", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd ${repo}>/dev/null; node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(repo);
+  });
+
+  it("a `<` right after the repository root is refused for the same reason", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd ${repo}<&-; node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(repo);
+  });
+
+  it("a backtick right after the repository root is refused, so a command substitution that spells the root literally does not slip through", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: "node `echo " + repo + "`/fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(repo);
+  });
+
+  it("a sibling reached across a line continuation is not refused: the shell deletes the pair, so the word names a SIBLING", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // `<repo>\`+newline+`-backup` is `<repo>-backup` once the shell
+    // deletes the pair: a sibling, not the repository root, so this
+    // must reach a verdict rather than the isolation-escape refusal.
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `ls ${repo}\\\n-backup > /dev/null 2>&1; node fixture.test.js`,
+      }),
+    );
+    expect(result.reason).toBeUndefined();
+    expect(result.status).toBe("killed");
+  });
+
   it("a sibling spelled with an escaped SPACE is not refused: a bare backslash does not end the root's spelling", async () => {
     useLockDir();
     const { repo } = initRepo();

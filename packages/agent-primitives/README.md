@@ -585,38 +585,64 @@ it) never runs against the isolated copy at all, so the run exercises
 the unmutated real tree while the mutant sits untested in a copy
 nobody ran anything against, and reports `killed`/`survived` for
 whichever verdict the REAL tree happened to produce, whatever the
-mutant actually did. `probe` refuses this outright
-(`reason: "test_command_escapes_isolation"`, a `usage_error`) rather
-than warn. What it refuses is precisely this: a channel that SPELLS
-THE REPOSITORY ROOT OUT LITERALLY. That is a text scan, not a shell
-parse, so it does not depend on tokenising the command: an absolute
-path under the root contains the root spelled out whatever quoting,
+mutant actually did. `probe` refuses this outright (`reason:
+"test_command_escapes_isolation"`, a `usage_error`) rather than warn.
+What it refuses is precisely this: a channel that SPELLS THE
+REPOSITORY ROOT OUT LITERALLY. That is a text scan, not a shell parse,
+so it does not depend on tokenising the command: an absolute path
+under the root contains the root spelled out whatever quoting,
 escaping, `=`-form or wrapper surrounds it (a plain `cd /abs/...`, a
 single- or double-quoted path containing whitespace, a
 backslash-escaped space, the value half of a `--key=/abs` token, or
 the whole command wrapped in `sh -c "..."`), and separator noise
-inside the path (`<root>//pkg`, `<root>/./pkg`, and a backslash-escaped
+inside the path (`<root>//pkg`, `<root>/./pkg`, a backslash-escaped
 separator `<parent>\/<base>/pkg`, which the shell reads as a plain
-`/`) is tolerated because it names the same directory. A path outside
-the root never spells the root, so nothing outside the root is ever
-flagged. It is not a proof that a command stays inside the copy: a
-command that reaches the root WITHOUT spelling it literally is a
-residual, and the residuals known today are listed at the end of this
-section. The root is matched under two spellings (its own, as
-resolved, and its realpath, so a repository root itself reached
-through a symlink still refuses under either spelling), each also with
-every space backslash-escaped, and three further rules shape the
-match:
+`/`, and a line continuation `<parent>\`+newline+`/<base>/pkg`, which
+the shell deletes) is tolerated because it names the same directory. A
+path outside the root never spells the root, so nothing outside the
+root is ever flagged. It is not a proof that a command stays inside
+the copy: a command that reaches the root WITHOUT spelling it
+literally is a residual, and the residuals known today are listed at
+the end of this section. The root is matched under two spellings (its
+own, as resolved, and its realpath, so a repository root itself
+reached through a symlink still refuses under either spelling), each
+also with every space backslash-escaped, and three further rules shape
+the match:
 
-- A match must END AT A PATH BOUNDARY: the end of the string, a `/`, a
-  `\` that escapes such a `/` (so `<root>\/pkg` is a mention of the
-  root, since the shell reaches `<root>/pkg` through it), or a
-  character that cannot continue a path component (whitespace, either
-  quote, `;`, `&`, `|`, `)`, `,`). A sibling directory whose name
-  merely starts with the root (`<root>2`, `<root>-backup`, or
-  `<root>\ backup`, where the backslash escapes a space belonging to
-  the sibling's own name rather than a separator) is therefore not a
-  mention of the root and is not refused.
+- A match is a mention of the root unless the text CONTINUES THE PATH
+  WORD with a further name character there. The rule enumerates what
+  continues a path word, not what terminates one, and it takes that
+  alphabet from POSIX shell word lexing, since the scanned string is
+  what `sh -c` is handed. A path word is continued by a portable
+  filename character (`A-Z a-z 0-9 . _ -`) or any non-ASCII character,
+  which makes the match a DIFFERENT path's prefix and not a mention;
+  by `/`, a further component, which leaves it a mention
+  (`<root>/pkg`); by `\` plus any character other than `/` or a
+  newline, an escaped character inside the same word, which again is
+  not a mention; and by `\` plus a newline plus a continuation, since
+  the shell deletes that pair before it lexes the word, so what
+  follows the pair decides. A `\` before a `/` is a separator, not an
+  escaped character, so `<root>\/pkg` is a mention. Everything else
+  ends the word and therefore marks a boundary: the end of the string,
+  whitespace, either quote, every POSIX operator character (`|`, `&`,
+  `;`, `<`, `>`, `(`, `)` and a backtick), `$`, and punctuation such
+  as `,`, `=`, `:`, `#`, `!`, `*`, `?`, `{`, `}`, `[`, `]` and `~`. So
+  a sibling directory whose name merely starts with the root
+  (`<root>2`, `<root>-backup`, `<root>\ backup`, where the backslash
+  escapes a space belonging to the sibling's own name, or
+  `<root>\`+newline+`-backup`) is not a mention and is not refused,
+  while `cd <root>>/dev/null`, `cd <root><&-` and a backtick closing
+  right after the root all name the root itself and are. Enumerating
+  the continuations is what makes this total: a character nobody
+  thought of ends the word, so an unforeseen spelling over-refuses
+  (with a named remedy) instead of silently reaching the real tree,
+  at the cost of a false refusal for a sibling named with a character
+  outside the portable set (`<root>+backup`, `<root>@2`). The `\`
+  rules come from the shell, and an `--env` VALUE is not
+  shell-processed, so the same widening over-refuses an env value
+  naming a directory whose own name carries a literal backslash
+  (`<root>\/pkg` read as a path rather than as a separator) by
+  design; its two remedies below apply to it unchanged.
 - On a filesystem that resolves a differently-cased spelling to the
   same directory, both sides are compared CASE-FOLDED, so
   `cd '/PRIVATE/TMP/MY REPO/PKG'` is refused exactly as the
@@ -674,41 +700,44 @@ The residuals known today follow directly from a rule that matches the
 root's two spellings as text. Read the list as open: it names the
 shapes this rule is known not to catch, and is not a proof that no
 other shape reaches the real tree. A path reached only through a shell
-variable
-this tool does not own (`cd "$REPO" && ...`) or a command substitution
-(`$(...)`) is invisible, since neither ever spells the root out
-literally in the scanned string; `~` expansion is the same shape (`cd
-~/git/repo && ...` reaches the root without the scanned string ever
-containing it), as is any other expansion the shell performs at run
-time. A RELATIVE path that walks out of the isolation copy via `..`
-(e.g. `cd ../../real-checkout && ...`) is not inspected either, since
-it never names the root as an absolute path at all -- and neither is
-an ABSOLUTE path that walks back into the root through `..`
-(`cd /abs/x/../my repo && ...`): the scan does not normalise a path,
-it matches a spelling, so a `..` segment (unlike a `//` or a `/.`,
-which name the same directory) makes the spelling a different one. A
-spelling BROKEN UP FROM THE INSIDE by quoting or backslash escaping is
-not matched either: `cd /x/re"p"o/pkg` and `cd /x/re\po/pkg` both
-reach `/x/repo/pkg`, because the shell strips the quotes and the
-backslash before it ever opens the path, but the scanned string never
-carries the root as one run of characters, and this scan sees only
-that string. Separator noise and an escaped separator are the
-exception the rule does tolerate; an escape or a quote INSIDE a path
-component is not. A spelling that differs from the root's only in
-unicode normalisation (a
-decomposed form of a composed root, or the reverse, which macOS in
-particular may resolve to the same directory) is not matched for the
-same reason. A wrapper script that itself `cd`s using a path not
-spelled out in the scanned string is shell-level indirection like the
-first group; a path reaching the root only through a THIRD, unrelated
-symlink alias (one that is neither the root's own as-given spelling
-nor its realpath) is not recognized, since the rule matches spellings,
-not filesystem identity; and a repository root containing a character
-neither spelling represents (e.g. a literal quote inside the path)
-falls outside what the two spellings cover. Each of these reaches the
-real tree with `-i worktree` and is NOT refused, so a run whose
-command is built that way still needs `-i inplace` (or a relative
-command) to be trustworthy.
+variable this tool does not own (`cd "$REPO" && ...`), or through a
+command substitution whose own text does not spell the root out
+(`$(git rev-parse --show-toplevel)`, `$(cat .repo-path)`), is
+invisible, since neither ever spells the root literally in the scanned
+string. A substitution that DOES spell it is not a residual: backticks
+included, it is refused like any other literal spelling, since the
+backtick or `)` closing it ends the path word. `~` expansion is the
+invisible shape again (`cd ~/git/repo && ...` reaches the root without
+the scanned string ever containing it), as is any other expansion the
+shell performs at run time. A RELATIVE path that walks out of the
+isolation copy via `..` (e.g. `cd ../../real-checkout && ...`) is not
+inspected either, since it never names the root as an absolute path at
+all -- and neither is an ABSOLUTE path that walks back into the root
+through `..` (`cd /abs/x/../my repo && ...`): the scan does not
+normalise a path, it matches a spelling, so a `..` segment (unlike a
+`//` or a `/.`, which name the same directory) makes the spelling a
+different one. A spelling BROKEN UP FROM THE INSIDE by quoting or
+backslash escaping is not matched either: `cd /x/re"p"o/pkg` and `cd
+/x/re\po/pkg` both reach `/x/repo/pkg`, because the shell strips the
+quotes and the backslash before it ever opens the path, but the
+scanned string never carries the root as one run of characters, and
+this scan sees only that string. Separator noise, an escaped separator
+and a line continuation are the exceptions the rule does tolerate; an
+escape or a quote INSIDE a path component is not. A spelling that
+differs from the root's only in unicode normalisation (a decomposed
+form of a composed root, or the reverse, which macOS in particular may
+resolve to the same directory) is not matched for the same reason. A
+wrapper script that itself `cd`s using a path not spelled out in the
+scanned string is shell-level indirection like the first group; a path
+reaching the root only through a THIRD, unrelated symlink alias (one
+that is neither the root's own as-given spelling nor its realpath) is
+not recognized, since the rule matches spellings, not filesystem
+identity; and a repository root containing a character neither
+spelling represents (e.g. a literal quote inside the path) falls
+outside what the two spellings cover. Each of these reaches the real
+tree with `-i worktree` and is NOT refused, so a run whose command is
+built that way still needs `-i inplace` (or a relative command) to be
+trustworthy.
 
 `-i worktree` needs git 2.35 or newer: the sync relies on `git apply
 --allow-empty`, which an older git rejects, so the run ends in
