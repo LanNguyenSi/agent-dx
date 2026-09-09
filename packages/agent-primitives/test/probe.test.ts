@@ -5469,15 +5469,23 @@ describe("probe(): --pass-regex must not disable the generic byte-identical fall
   // and mutating the untested `unused` function never changes it: the
   // baseline and the mutant run are always BYTE-IDENTICAL, exactly the
   // shape the generic fallback exists to catch. The regex matches this
-  // output too (a phpunit-shaped "OK (" match on a suite that in truth
+  // output too (a caller's own "pass" string on a suite that in truth
   // ran nothing) -- exactly the false-positive-pass the fallback must
   // keep protecting against once a caller's own --pass-regex is in
   // charge of the verdict.
+  //
+  // The printed line is deliberately a shape NO built-in detector
+  // recognizes. The generic fallback only ever fires for a runner none
+  // of them understands (`hasKnownTestSummary` keeps it out of their
+  // way), so a phpunit- or vitest-shaped line here would be caught by
+  // that detector instead and these tests would pass without the
+  // fallback running at all. The phpunit-shaped zero-tests case has its
+  // own describe block below.
   const QUIET_RUNNER_JS = [
     "function unused() {",
     "  return 1;",
     "}",
-    'console.log("OK (0 tests, 0 assertions)");',
+    'console.log("ALL GREEN");',
     "process.exit(0);",
     "",
   ].join("\n");
@@ -5493,7 +5501,7 @@ describe("probe(): --pass-regex must not disable the generic byte-identical fall
     "function unused() {",
     "  return 1;",
     "}",
-    'console.log("OK (0 tests, 0 assertions)");',
+    'console.log("ALL GREEN");',
     "process.exit(1);",
     "",
   ].join("\n");
@@ -5548,7 +5556,7 @@ describe("probe(): --pass-regex must not disable the generic byte-identical fall
       const result = await probe(
         quietRunnerOptions(repo, {
           expect: expectVerdict,
-          passRegex: /^OK \(/,
+          passRegex: /^ALL GREEN/,
         }),
       );
 
@@ -5558,6 +5566,84 @@ describe("probe(): --pass-regex must not disable the generic byte-identical fall
       expect(result.mutation_probe?.result).toBe("not_run");
     });
   }
+});
+
+describe("probe(): the PHPUnit zero-tests branch and --pass-regex", () => {
+  // The PHPUnit branch of the zero-tests guard reads the same tail the
+  // pass predicate reads, and the guard runs FIRST: a phpunit-shaped run
+  // whose own stated total shows nothing executed is refused whatever
+  // `--pass-regex` would have said about it, the same way the vitest and
+  // node branches are. The second test is the control: the identical
+  // fixture with tests actually executed is NOT flagged, so the refusal
+  // above comes from the zero count and not from the output being
+  // phpunit-shaped at all.
+  function initPhpunitShapedRepo(summaryLine: string): { repo: string } {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(
+      path.join(repo, "runner.js"),
+      [
+        "function summary() {",
+        `  return ${JSON.stringify(summaryLine)};`,
+        "}",
+        "console.log(summary());",
+        // Exit 1 on a green suite: phpunit 9.6's own
+        // deprecation-notice shape, the reason --pass-regex exists.
+        "process.exit(1);",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo };
+  }
+
+  function phpunitShapedOptions(repo: string): ProbeOptions {
+    return {
+      file: "runner.js",
+      line: 2,
+      form: "replace",
+      replaceText: '  return "FAILURES!";',
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      passRegex: /^OK \(/,
+    };
+  }
+
+  it("a phpunit-shaped baseline with nothing executed is refused no_tests_executed even though --pass-regex matches its output", async () => {
+    useLockDir();
+    const { repo } = initPhpunitShapedRepo("OK (0 tests, 0 assertions)");
+
+    const result = await probe(phpunitShapedOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    // Named by the detector that fired, so the refusal is traceable to
+    // the phpunit branch rather than to the generic fallback.
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("no test was actually executed") && w.includes("phpunit"),
+      ),
+    ).toBe(true);
+  });
+
+  it("the same phpunit-shaped runner WITH tests executed is not flagged, and --pass-regex decides the verdict despite the exit 1", async () => {
+    useLockDir();
+    const { repo } = initPhpunitShapedRepo("OK (3 tests, 5 assertions)");
+
+    const result = await probe(phpunitShapedOptions(repo));
+
+    expect(result.baseline?.exitCode).toBe(1);
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+  });
 });
 
 describe("probe(): --pass-regex and a mutant crash that prints a stack trace", () => {
