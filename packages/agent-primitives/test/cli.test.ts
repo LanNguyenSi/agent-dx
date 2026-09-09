@@ -2603,7 +2603,7 @@ describe("cli: probe", () => {
       "--link",
       linkDir,
     ]);
-    expect(linkRun.stdout).not.toContain("usage_error");
+    expect(JSON.parse(linkRun.stdout).status).not.toBe("usage_error");
     expect(linkRun.stdout).not.toContain(
       "probe: --plan cannot be combined with",
     );
@@ -2617,7 +2617,7 @@ describe("cli: probe", () => {
       "--timeout",
       "30",
     ]);
-    expect(timeoutRun.stdout).not.toContain("usage_error");
+    expect(JSON.parse(timeoutRun.stdout).status).not.toBe("usage_error");
     expect(timeoutRun.stdout).not.toContain(
       "probe: --plan cannot be combined with",
     );
