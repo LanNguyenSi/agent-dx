@@ -36,8 +36,15 @@ export interface LinkCandidate {
  * will be created at. */
 export interface PlannedLink {
   candidate: LinkCandidate;
-  /** Destination path inside the copy, relative to the copy's root. */
+  /** Destination path inside the copy, relative to the copy's root, in
+   * the SOURCE tree's own spelling: the path the link is created at. */
   relPath: string;
+  /** The same destination in the COPY's spelling
+   * (`canonicalDestRelPath`), which is what rules 2, 3 and 4 are decided
+   * on. Kept on the accepted link so a later candidate's nesting check
+   * compares two paths the copy agrees about, rather than two source
+   * spellings that may name one directory. */
+  canonicalRelPath: string;
 }
 
 export interface LinkPolicyContext {
@@ -67,11 +74,12 @@ export interface LinkPolicyContext {
   /**
    * The isolation copy's OWN spelling of a destination (see
    * `canonicalDestRelPath`, which is what `beginWorktree` passes here).
-   * Rules 2 and 3 are decided on what it returns, never on the source
-   * tree's spelling alone: on a case-insensitive filesystem `SRC` and
-   * `src` are one directory, so a candidate spelled the first way
-   * compares as a different string against every protected and tracked
-   * path while naming exactly the directory they name.
+   * Rules 2, 3 and 4 are decided on what it returns, never on the
+   * source tree's spelling alone: on a case-insensitive filesystem
+   * `SRC` and `src` are one directory, so a candidate spelled the first
+   * way compares as a different string against every protected and
+   * tracked path, and against every destination already planned, while
+   * naming exactly the directory they name.
    *
    * Required rather than optional with an identity default: a caller
    * that forgets it would silently get the string comparison this
@@ -160,43 +168,78 @@ export function relContains(ancestorRel: string, rel: string): boolean {
  * carries, so scanning the parent for the entry with that identity
  * yields the copy's own name for the destination.
  *
- * Only the FINAL component is canonicalised that way; the parent chain
- * is resolved through `realpath` instead, which follows symlinks but
- * leaves case alone. A case-variant spelling of a parent therefore
- * still compares as a different string here (`SRC/sub` stays
- * `SRC/sub`), and what catches that shape is not this function but the
- * postcondition `beginWorktree` runs once the links are created: the
- * mapped cwd and every mutated path must still resolve inside the copy.
- * See the README's isolation limitations.
+ * Canonicalised PER SEGMENT, the whole chain, starting from `wtReal`:
+ * each segment is read back by that same entry identity inside the
+ * directory the segments before it named, and the next segment is
+ * looked up under the name that came back. Resolving the parent chain
+ * through `realpath` instead (which follows symlinks but leaves case
+ * alone) is what used to make a case-variant PARENT invisible: `SRC/sub`
+ * stayed `SRC/sub`, so it compared as a different string against the
+ * tracked `src/sub` in rules 2 and 3 and against the `:(literal)`
+ * pathspecs of the caller's `git ls-files` listing, while naming exactly
+ * the directory those paths name. Symlinks are still followed, because
+ * looking a segment up inside the directory the previous ones named is
+ * an ordinary path lookup: a chain that leaves the copy through a
+ * symlink reports the names it finds at the other end, and whether such
+ * a destination may be linked at all is the caller's containment check,
+ * not this function's.
  *
- * Returns `relPath` unchanged when the destination's parent does not
- * sit inside the copy at all (the caller's own containment check is
- * what decides about that shape) and when nothing exists at the
- * destination under any spelling, which is the ordinary case for the
- * gitignored runtime directories these links exist for: there is no
- * on-disk name to read, and the planned one is the name the link will
- * be created under.
+ * From the first segment that does not exist, the remaining segments are
+ * returned as given. That fallback is safe rather than merely
+ * convenient: nothing is on disk there under any spelling, so there is
+ * no entry that could alias it, and the name the link is created under
+ * is the planned one. It is also the ordinary case for the gitignored
+ * runtime directories these links exist for. A segment that DOES exist
+ * but whose parent cannot be listed keeps its given spelling too and the
+ * walk goes on through it: the path still resolves, only the on-disk
+ * name is unreadable.
  */
 export function canonicalDestRelPath(wtReal: string, relPath: string): string {
-  const dest = path.join(wtReal, relPath);
-  const parent = path.dirname(dest);
-  const parentRel = path.relative(wtReal, resolveDeepestExisting(parent));
-  if (parentRel.startsWith("..") || path.isAbsolute(parentRel)) return relPath;
-  let name = path.basename(dest);
+  const canonical: string[] = [];
+  let parent = wtReal;
+  let missing = false;
+  for (const segment of relPath.split(path.sep).filter((s) => s.length > 0)) {
+    if (missing) {
+      canonical.push(segment);
+      continue;
+    }
+    const name = canonicalEntryName(parent, segment);
+    if (name === undefined) {
+      missing = true;
+      canonical.push(segment);
+      continue;
+    }
+    canonical.push(name);
+    parent = path.join(parent, name);
+  }
+  return canonical.join(path.sep);
+}
+
+/** The name the directory entry `parent`/`name` really carries, found by
+ * `ino`/`dev` identity among `parent`'s entries; `name` itself when the
+ * entry exists but `parent` cannot be listed, and `undefined` when
+ * nothing is there under any spelling. Split out so
+ * `canonicalDestRelPath` can tell those last two apart: one keeps
+ * walking, the other stops looking. */
+function canonicalEntryName(parent: string, name: string): string | undefined {
+  let target: fs.Stats;
   try {
-    const destStat = fs.lstatSync(dest);
+    target = fs.lstatSync(path.join(parent, name));
+  } catch {
+    return undefined;
+  }
+  try {
     for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
       const entryStat = fs.lstatSync(path.join(parent, entry.name));
-      if (entryStat.ino === destStat.ino && entryStat.dev === destStat.dev) {
-        name = entry.name;
-        break;
+      if (entryStat.ino === target.ino && entryStat.dev === target.dev) {
+        return entry.name;
       }
     }
   } catch {
-    // Nothing exists at `dest` under any spelling (or the parent cannot
-    // be listed): the planned name is the one the link gets.
+    // The parent cannot be listed; the given spelling reaches the same
+    // entry the syscalls will.
   }
-  return parentRel === "" ? name : path.join(parentRel, name);
+  return name;
 }
 
 /** The one warning format every refusal and skip uses: what was
@@ -254,7 +297,12 @@ export function skippedLinkWarning(
  *    content gets no such latitude. The latitude rule 1 does grant --
  *    a `node_modules` symlinked to a sibling checkout's install, linked
  *    as the same symlink the real tree carries -- belongs to a
- *    candidate the walk found on disk, which names no path at all.
+ *    candidate the walk found on disk, which names no path at all, and
+ *    it is latitude for a target pointing AWAY from the root only: a
+ *    candidate of ANY source that resolves TO the root, or to a
+ *    directory containing it (`esc -> .`, `node_modules -> .`), is
+ *    skipped, since linking it puts the source tree inside the copy
+ *    under that name and every write through it lands in the real tree.
  * 2. The copy's root itself is never linked (a candidate whose relative
  *    path is empty), and neither is any candidate that contains the
  *    run's mapped cwd or the directory of a file the run mutates: those
@@ -270,9 +318,11 @@ export function skippedLinkWarning(
  * 4. Nesting: a candidate whose destination is at or under a
  *    destination this run already linked is skipped as already covered
  *    -- the only shape whose `rmSync`/`symlinkSync` would resolve
- *    through a link this loop itself created. Judged here on the
- *    planned destinations, and re-judged by `beginWorktree` against the
- *    links it has actually created, in the copy's own spelling.
+ *    through a link this loop itself created. Judged on the planned
+ *    destinations in the copy's own spelling (both sides of the
+ *    comparison, so a case variant of an already-planned destination
+ *    is seen as the same directory), and re-judged by `beginWorktree`
+ *    against the links it has actually created.
  */
 export function planLinks(
   candidates: readonly LinkCandidate[],
@@ -301,9 +351,10 @@ export function planLinks(
       );
       continue;
     }
+    const resolved = resolveDeepestExisting(candidate.absDir);
     if (
       candidate.namedBy !== undefined &&
-      !isPathContained(ctx.rootReal, resolveDeepestExisting(candidate.absDir))
+      !isPathContained(ctx.rootReal, resolved)
     ) {
       warnings.push(
         skippedLinkWarning(
@@ -315,7 +366,30 @@ export function planLinks(
       );
       continue;
     }
-    // The copy's own spelling, from here on: rules 2 and 3 are about
+    // Where a candidate RESOLVES may be the root itself, or an ancestor
+    // of it, while it SITS inside the root under a name of its own: a
+    // gitignored `esc -> .` (or a `node_modules -> .`) passes both rules
+    // above, and linking it hands the copy the whole source tree at that
+    // name, so every `--pre` write through it lands in the operator's
+    // real root. This applies to EVERY source, including a candidate the
+    // walk found on disk: rule 1's latitude is for a target pointing
+    // AWAY from the root (a sibling checkout's install, linked as the
+    // same symlink the real tree carries), never for one pointing at it.
+    if (isPathContained(resolved, ctx.rootReal)) {
+      warnings.push(
+        skippedLinkWarning(
+          candidate,
+          resolved === ctx.rootReal
+            ? "it resolves to the repository root itself; linking it would " +
+                "put the source tree inside the isolation copy"
+            : `it resolves to ${resolved}, which contains the repository ` +
+                "root; linking it would put the source tree inside the " +
+                "isolation copy",
+        ),
+      );
+      continue;
+    }
+    // The copy's own spelling, from here on: rules 2, 3 and 4 are about
     // which DIRECTORY OF THE COPY a candidate names, and a string that
     // merely differs in case names the same one.
     const canonicalRel = ctx.canonicalRelPath(relPath);
@@ -345,7 +419,7 @@ export function planLinks(
       continue;
     }
     const covering = links.find((planned) =>
-      relContains(planned.relPath, relPath),
+      relContains(planned.canonicalRelPath, canonicalRel),
     );
     if (covering !== undefined) {
       warnings.push(
@@ -356,7 +430,7 @@ export function planLinks(
       );
       continue;
     }
-    links.push({ candidate, relPath });
+    links.push({ candidate, relPath, canonicalRelPath: canonicalRel });
   }
   return { links, warnings };
 }

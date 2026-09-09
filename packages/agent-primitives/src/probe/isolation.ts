@@ -378,9 +378,15 @@ export interface WorktreeSyncSuccess {
   /** `cwd` re-based onto the worktree, at the same relative offset from
    * `root` that `cwd` itself has. */
   mappedCwd: string;
-  /** Absolute source-tree paths of every directory symlinked into the
-   * worktree (linked `node_modules` directories, composer `vendor-dir`/
-   * `bin-dir`s, plus `--link` extras). */
+  /** Absolute source-tree paths of every directory the copy resolves
+   * through a symlink (linked `node_modules` directories, composer
+   * `vendor-dir`/`bin-dir`s, plus `--link` extras). Almost always a
+   * link this step created; the one other entry is a destination the
+   * untracked sync had already recreated as the very same symlink the
+   * source tree carries, which this step leaves alone rather than
+   * deleting and recreating. Both mean the same thing to a reader: the
+   * copy reaches that directory. A candidate the link policy refused is
+   * absent, and the warning says why. */
   linked: string[];
   /** One entry per ACCEPTED link that repository content named (a
    * composer `config` value, a `--plan` file's `link`, the repo
@@ -1138,22 +1144,41 @@ export async function beginWorktree(
         );
         continue;
       }
+      // Rule 4's other direction, and the reason `linked` can be read as
+      // what the copy actually carries: this destination does not sit
+      // under an earlier link, it CONTAINS one. The `rmSync` below
+      // deletes recursively, so creating this link would destroy a link
+      // this same run created -- a defaults file naming `CACHE/inner`
+      // and then `cache` is exactly that shape, the first link's own
+      // parent directory being what the second one's delete removes.
+      // Refused rather than reported afterwards: nothing this run
+      // created should be destroyed by this run.
+      const destroyed = created.find((c) =>
+        relContains(canonicalRel, c.relPath),
+      );
+      if (destroyed !== undefined) {
+        syncWarnings.push(
+          skippedLinkWarning(
+            candidate,
+            `its destination ${canonicalRel} in the isolation copy contains ` +
+              `${destroyed.relPath} -> ${destroyed.absDir}, linked earlier ` +
+              "in this run, which the delete at that destination would remove",
+          ),
+        );
+        continue;
+      }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       // Re-checked after the `mkdirSync`, which is itself a filesystem
       // change, and before the two calls that DELETE and then create:
       // the parent again, plus the destination itself when something is
       // already there. The destination is judged by its PARENT, so a
-      // link is still replaceable by a link; what this refuses is a
+      // link is still replaceable by a link; what this catches is a
       // destination that already resolves out of the copy, which the
       // untracked sync produces when the source tree carries a
       // non-ignored symlink at that path and recreates it in the copy.
-      // Refusing there is conservative rather than protective (`rmSync`
-      // on a symlink unlinks the link and leaves its target alone,
-      // measured), and it costs nothing: the copy already carries the
-      // very symlink the link would have created. Nothing between this
-      // check and the `symlinkSync` needs a third one: `rmSync` only
-      // ever removes, and removing an entry cannot make a path resolve
-      // somewhere it did not already.
+      // Nothing between this check and the `symlinkSync` needs a third
+      // one: `rmSync` only ever removes, and removing an entry cannot
+      // make a path resolve somewhere it did not already.
       const parentAfter = resolveDeepestExisting(path.dirname(dest));
       const destResolved = existingDestResolved(dest);
       const stillInsideCopy =
@@ -1161,6 +1186,51 @@ export async function beginWorktree(
         (destResolved === undefined ||
           isPathContained(wtReal, path.dirname(destResolved)));
       if (!stillInsideCopy) {
+        // One shape reaching out of the copy is not a danger at all and
+        // does not read as one either: the destination is ALREADY a
+        // symlink resolving exactly where this link would point. The
+        // untracked sync leaves that behind whenever the source tree
+        // carries a non-ignored symlink at the path (a `node_modules`
+        // symlinked to a sibling checkout's install is the common one),
+        // recreating it in the copy as the same link. There is nothing
+        // to protect (`rmSync` on a symlink unlinks the link and leaves
+        // its target alone, measured) and nothing to gain, so it is left
+        // as synced -- and recorded in `linked`, because the copy really
+        // does resolve that directory through it, which a reader of the
+        // envelope otherwise could not tell from a directory that never
+        // reached the copy at all.
+        // Both halves are load-bearing, and the second is defense in
+        // depth: a destination that merely RESOLVES to the candidate's
+        // target through a symlinked ancestor is a real directory of the
+        // source tree, and deleting it would be exactly the data loss
+        // the checks above exist to prevent. That shape is already
+        // refused by the parent check before the `mkdirSync` (its parent
+        // resolves out of the copy by definition), so no fixture can
+        // reach here with it; the check states the condition anyway
+        // rather than relying on another guard's reach.
+        if (
+          destResolved !== undefined &&
+          destResolved === targetReal &&
+          isSymlinkPath(dest)
+        ) {
+          syncWarnings.push(
+            skippedLinkWarning(
+              candidate,
+              `the isolation copy already carries the same symlink the ` +
+                `source tree does at ${relPath}, resolving to ` +
+                `${targetReal}; it is left as synced rather than deleted ` +
+                "and recreated",
+            ),
+          );
+          linked.push(candidate.absDir);
+          if (candidate.namedBy !== undefined) {
+            linkedNamedBy.push({
+              path: candidate.absDir,
+              namedBy: candidate.namedBy,
+            });
+          }
+          continue;
+        }
         syncWarnings.push(
           skippedLinkWarning(
             candidate,
@@ -1261,6 +1331,19 @@ function existingDestResolved(dest: string): string | undefined {
     return undefined;
   }
   return resolveDeepestExisting(dest);
+}
+
+/** Whether `p` is itself a symlink (never whether it points at one).
+ * What separates "the copy already carries the very symlink this link
+ * would create" from a real directory of the copy's that merely
+ * RESOLVES to the same place through a symlinked ancestor: only the
+ * first is safe to leave alone and report as carried. */
+function isSymlinkPath(p: string): boolean {
+  try {
+    return fs.lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 /** The shape of every worktree this module creates: a directory named

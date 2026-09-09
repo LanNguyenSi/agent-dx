@@ -112,7 +112,11 @@ describe("planLinks", () => {
     const plan = planLinks([{ absDir: path.join(root, "vendor") }], ctx(root));
 
     expect(plan.links).toEqual([
-      { candidate: { absDir: path.join(root, "vendor") }, relPath: "vendor" },
+      {
+        candidate: { absDir: path.join(root, "vendor") },
+        relPath: "vendor",
+        canonicalRelPath: "vendor",
+      },
     ]);
     expect(plan.warnings).toEqual([]);
   });
@@ -127,7 +131,12 @@ describe("planLinks", () => {
 
     expect(plan.links).toEqual([]);
     expect(plan.warnings).toHaveLength(1);
-    expect(plan.warnings[0]).toContain("the repository root itself");
+    // The phrase of THIS rule, which judges where the candidate SITS,
+    // not the one of the rule below it, which judges where a candidate
+    // RESOLVES ("it resolves to the repository root itself"): both
+    // refuse this candidate, and a test that accepted either message
+    // could not tell which rule is still doing the work.
+    expect(plan.warnings[0]).toContain("it is the repository root itself");
     expect(plan.warnings[0]).toContain("bin-dir");
   });
 
@@ -338,6 +347,66 @@ describe("planLinks", () => {
     expect(plan.links).toEqual([]);
     expect(plan.warnings[0]).toContain("git tracks it");
   });
+
+  it("refuses a candidate that RESOLVES to the repository root, whatever named it: it sits inside the root under a name of its own, so neither the empty-path rule nor the resolve-inside rule sees it", () => {
+    const root = makeTmpDir();
+    fs.symlinkSync(root, path.join(root, "esc"));
+    fs.symlinkSync(root, path.join(root, "node_modules"));
+
+    const plan = planLinks(
+      [
+        {
+          absDir: path.join(root, "esc"),
+          namedBy: `"esc" named in "vendor-dir" of ${path.join(root, "composer.json")}`,
+        },
+        // No provenance at all: the auto-discovery walk found this one
+        // on disk, and rule 1's latitude does not extend to a target
+        // that points AT the root.
+        { absDir: path.join(root, "node_modules") },
+      ],
+      ctx(root),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings).toHaveLength(2);
+    for (const warning of plan.warnings) {
+      expect(warning).toContain("resolves to the repository root itself");
+    }
+    expect(plan.warnings[0]).toContain("composer.json");
+  });
+
+  it("refuses a candidate the walk found that resolves to a directory CONTAINING the root", () => {
+    const root = makeTmpDir();
+    fs.symlinkSync("..", path.join(root, "node_modules"));
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules") }],
+      ctx(root),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toContain("contains the repository root");
+  });
+
+  it("decides rule 4 on the COPY's spelling as well: a case variant of a destination already planned is seen as the same one, not as a second link", () => {
+    const root = makeTmpDir();
+
+    const plan = planLinks(
+      [
+        { absDir: path.join(root, "vendor") },
+        { absDir: path.join(root, "VENDOR") },
+      ],
+      ctx(root, {
+        canonicalRelPath: (relPath) =>
+          relPath === "VENDOR" ? "vendor" : relPath,
+      }),
+    );
+
+    expect(plan.links.map((l) => l.relPath)).toEqual(["vendor"]);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toContain("already covered by vendor");
+  });
 });
 
 describe("relContains: the separator is what keeps a sibling a sibling", () => {
@@ -408,17 +477,58 @@ describe("canonicalDestRelPath: the copy's own spelling of a destination", () =>
     }
   });
 
-  it("returns the planned path unchanged when the destination's parent does not sit inside the copy (the caller's own containment check owns that shape)", () => {
+  it("canonicalises a case-variant PARENT too, not only the final component: every segment is read back from the copy in turn", () => {
+    const wtReal = makeTmpDir();
+    fs.mkdirSync(path.join(wtReal, "src", "sub"), { recursive: true });
+
+    if (caseInsensitiveVolume(wtReal)) {
+      expect(canonicalDestRelPath(wtReal, path.join("SRC", "sub"))).toBe(
+        path.join("src", "sub"),
+      );
+      expect(canonicalDestRelPath(wtReal, path.join("SRC", "SUB"))).toBe(
+        path.join("src", "sub"),
+      );
+    } else {
+      // No alias to resolve: `SRC` is a directory that is not there, and
+      // from a segment that does not exist the rest is returned as
+      // given.
+      expect(canonicalDestRelPath(wtReal, path.join("SRC", "sub"))).toBe(
+        path.join("SRC", "sub"),
+      );
+    }
+  });
+
+  it("returns every segment from the first missing one as given: nothing is on disk there to alias it", () => {
+    const wtReal = makeTmpDir();
+    fs.mkdirSync(path.join(wtReal, "src"), { recursive: true });
+
+    // `src` exists and is canonicalised; `Deep/Nested` does not exist
+    // under any spelling, so it stays exactly as planned -- which is the
+    // name the link would be created under. True on every filesystem.
+    expect(
+      canonicalDestRelPath(wtReal, path.join("src", "Deep", "Nested")),
+    ).toBe(path.join("src", "Deep", "Nested"));
+    if (caseInsensitiveVolume(wtReal)) {
+      expect(
+        canonicalDestRelPath(wtReal, path.join("SRC", "Deep", "Nested")),
+      ).toBe(path.join("src", "Deep", "Nested"));
+    }
+  });
+
+  it("follows a chain that leaves the copy through a symlink, reporting the names it finds at the other end (whether such a destination may be linked at all is the caller's containment check)", () => {
     const wtReal = makeTmpDir();
     const outside = makeTmpDir();
     fs.mkdirSync(path.join(outside, "bin"));
     fs.symlinkSync(outside, path.join(wtReal, "vendor"));
 
-    // `vendor` is a link out of the copy, so `vendor/bin` has no
-    // spelling inside it at all.
     expect(canonicalDestRelPath(wtReal, path.join("vendor", "bin"))).toBe(
       path.join("vendor", "bin"),
     );
+    if (caseInsensitiveVolume(wtReal)) {
+      expect(canonicalDestRelPath(wtReal, path.join("VENDOR", "BIN"))).toBe(
+        path.join("vendor", "bin"),
+      );
+    }
   });
 
   it("reports a destination that IS a symlink by its own name, never by its target's", () => {

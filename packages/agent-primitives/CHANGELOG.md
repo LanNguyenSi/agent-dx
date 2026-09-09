@@ -76,6 +76,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   depends on the volume's case behaviour measures it (`test/helpers/
   case-fs.ts`) and asserts the branch it is on, rather than assuming a
   macOS host is case-insensitive.
+- The whole worktree-relative destination of a link, not only its final
+  component, is now read back from the isolation copy segment by segment
+  (task `6c7e1532`): a case-variant PARENT (`SRC/sub` over a tracked
+  `src/sub`, from the defaults file or from a composer
+  `config.vendor-dir`) used to miss both rule 2 and rule 3 and to miss
+  the `:(literal)` pathspec of the `git ls-files` listing behind rule 3,
+  so the link was created with no warning and a `--pre` writing there
+  clobbered the operator's tracked file whenever the mutant lived
+  outside the aliased parent. Rule 4 is decided on the copy's spelling
+  too, on both sides of the comparison. Alongside it, three narrower
+  fixes to the same policy: a candidate from ANY source whose realpath
+  IS the repository root or CONTAINS it (a gitignored `esc -> .` a
+  composer `vendor-dir` names, an auto-discovered `node_modules -> .`)
+  is refused, where before only a value repository content named was
+  checked and only for resolving OUTSIDE the root, so the root itself
+  passed; a destination that CONTAINS a link this run already created is
+  refused rather than linked, since the recursive delete before each
+  link create would otherwise remove that earlier link while leaving it
+  listed in `isolation.linked`; and a destination the untracked-file
+  copy had already recreated as the very same symlink is now reported as
+  left-as-synced in its own wording and listed in `isolation.linked`,
+  instead of borrowing the "resolves outside the copy" refusal wording
+  for a case where nothing is at risk. Rule 1's latitude for a target
+  pointing AWAY from the root (a `node_modules` symlinked to a sibling
+  checkout's install) is unchanged and still has its negative-control
+  test. New end-to-end fixtures in `test/probe-worktree.test.ts`, each
+  hashing the source tree before and after and asserting the refusal
+  text: the tracked parent alias from the defaults file and from
+  composer, both with the mutant outside the aliased parent and a
+  `--pre` that writes into it; the composer `esc -> .` next to the
+  existing `esc -> ..`; the reversed `["CACHE/inner", "cache"]` order,
+  whose witness inside the copy asserts the first link survived; and the
+  two halves of the postcondition, the mapped cwd and the mutated path,
+  each reached by a run whose own inputs spell one directory two ways.
+  `canonicalDestRelPath`'s per-segment walk, its missing-segment
+  fallback and the two new policy refusals are unit-tested in
+  `test/link-policy.test.ts`.
 - `isolation.linkedNamedBy` in the result envelope (task `6c7e1532`):
   one `{ path, namedBy }` entry per ACCEPTED link that repository
   content asked for, carrying the same provenance phrase a refusal of
