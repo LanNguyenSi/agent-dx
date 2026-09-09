@@ -7,7 +7,7 @@ import {
   readMarkerFor,
   removeMarkerFor,
 } from "../lock.js";
-import { isPathContained } from "./containment.js";
+import { escapingAbsolutePaths, isPathContained } from "./containment.js";
 import type { WorktreeSyncSuccess } from "./isolation.js";
 import { detectKnownZeroTestsEvidence } from "./zero-tests.js";
 import {
@@ -379,6 +379,43 @@ export async function openRunSetup(
       "worktree_allow_outside_unsupported",
       "--isolation worktree cannot be combined with --allow-outside",
     );
+  }
+
+  // `-i worktree` mutates a throwaway copy, but the test command the
+  // caller supplied runs wherever ITS OWN cwd/args point it: an
+  // absolute path in that command naming the real repository root (a
+  // `cd <abs>` back into the checkout, or an absolute file/dir argument
+  // under it) never touches the isolated copy at all, so the test
+  // exercises the unmutated real tree while the mutant sits in a copy
+  // nobody ran anything against -- reported `survived` no matter what
+  // the mutant actually does (batch 45, D-033: `cd
+  // /abs/worktree/backend && npx vitest run ...` did exactly this).
+  // Detected as a syntactic scan of the command string, not a shell
+  // parse (`containment.ts`'s `escapingAbsolutePaths`): every `-i
+  // worktree` isolation copy lives outside `realRoot` by construction,
+  // so any absolute token that DOES resolve under `realRoot` cannot be
+  // naming that copy, whatever its own path turns out to be -- the copy
+  // itself does not need to exist yet for this check to hold. `-i
+  // inplace` is exempt: the real tree IS the intended target there, so
+  // an absolute path back into it is not an escape. A relative path
+  // that walks out of the isolation copy via `..` is not a token this
+  // scan looks for (README limitation).
+  if (effectiveIsolation === "worktree") {
+    const escaping = [
+      ...new Set(escapingAbsolutePaths(input.testCommand, realRoot)),
+    ];
+    if (escaping.length > 0) {
+      return refuse(
+        "usage_error",
+        "test_command_escapes_isolation",
+        `the test command names an absolute path under the real ` +
+          `repository root (${root}), which "-i worktree" never mutates, ` +
+          `so the test would run against the real tree instead of the ` +
+          `isolated copy: ${escaping.join(", ")}. Run the test command ` +
+          `as a relative command from the package directory, or pass ` +
+          `--isolation inplace.`,
+      );
+    }
   }
 
   // Containment for EVERY target of the run (and every `--link`) up

@@ -58,3 +58,46 @@ export function resolveDeepestExisting(p: string): string {
     return path.join(resolveDeepestExisting(parent), path.basename(p));
   }
 }
+
+/**
+ * Pulls every token out of `command` that LOOKS like an absolute path
+ * (starts with `/`, once a leading quote and a trailing shell
+ * metacharacter -- `;`, `&`, `|`, `)`, `,`, a closing quote -- are
+ * stripped), whether it follows a `cd` or stands alone as a file/dir
+ * argument. Deliberately not a shell parse: whitespace-splitting plus
+ * this trim is enough to catch the D-033 shape (`cd /abs/... && npx
+ * vitest run ...`) and any absolute file argument beside it, without
+ * pulling in a shell grammar for a single probe-safety check. A
+ * relative path that walks out of a directory via `..` is not a token
+ * this function looks for at all (documented as a known limit).
+ */
+export function absolutePathTokens(command: string): string[] {
+  const tokens: string[] = [];
+  for (const raw of command.split(/\s+/)) {
+    let token = raw.replace(/^['"]/, "").replace(/['";&|),]+$/, "");
+    if (token.startsWith("/") && token.length > 1) tokens.push(token);
+  }
+  return tokens;
+}
+
+/**
+ * The subset of `absolutePathTokens(command)` that resolves (via
+ * `resolveDeepestExisting`, so a symlinked root or a symlinked ancestor
+ * of the token is walked through, not compared by spelling) under
+ * `root` -- the real, already-resolved repository root a `-i worktree`
+ * run never mutates. Used by `setup.ts` to refuse a test command that
+ * would run against the real tree instead of the isolated copy: every
+ * `-i worktree` run's isolation copy lives outside `root` by
+ * construction, so any absolute path a test command names that DOES
+ * resolve under `root` cannot be naming the isolation copy, whatever
+ * that copy's own path turns out to be. `root` must already be an
+ * absolute, resolved path (the same contract `isPathContained` has).
+ */
+export function escapingAbsolutePaths(command: string, root: string): string[] {
+  const escaping: string[] = [];
+  for (const token of absolutePathTokens(command)) {
+    const resolved = resolveDeepestExisting(token);
+    if (isPathContained(root, resolved)) escaping.push(token);
+  }
+  return escaping;
+}

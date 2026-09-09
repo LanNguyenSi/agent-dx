@@ -162,6 +162,20 @@ async function provokeWorktreeAllowOutsideUnsupported(): Promise<ProbeResult> {
   );
 }
 
+/** The D-033 shape (batch 45): a `-t` command that `cd`s back into the
+ * real repository root under `-i worktree`, which never touches the
+ * isolated worktree copy at all. */
+async function provokeTestCommandEscapesIsolation(): Promise<ProbeResult> {
+  useLockDir();
+  const { repo } = initRepo();
+  return probe(
+    baseOptions(repo, {
+      isolation: "worktree",
+      testCommand: `cd ${repo} && node fixture.test.js`,
+    }),
+  );
+}
+
 async function provokeFileOutsideRoot(): Promise<ProbeResult> {
   useLockDir();
   const { repo } = initRepo();
@@ -472,6 +486,7 @@ type Provocation = () => Promise<ProbeResult>;
 
 const provocations: Record<RefusalReason, Provocation> = {
   worktree_allow_outside_unsupported: provokeWorktreeAllowOutsideUnsupported,
+  test_command_escapes_isolation: provokeTestCommandEscapesIsolation,
   file_outside_root: provokeFileOutsideRoot,
   probe_in_progress: provokeProbeInProgress,
   lock_unavailable: provokeLockUnavailable,
@@ -511,6 +526,7 @@ const EXPECTED_SHAPE: Record<
   { mutant: boolean; mutationProbe: boolean }
 > = {
   worktree_allow_outside_unsupported: { mutant: false, mutationProbe: false },
+  test_command_escapes_isolation: { mutant: false, mutationProbe: false },
   file_outside_root: { mutant: false, mutationProbe: false },
   probe_in_progress: { mutant: false, mutationProbe: false },
   lock_unavailable: { mutant: false, mutationProbe: false },
@@ -605,4 +621,91 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
     expect(result.mutant).toBeUndefined();
     expect(result.mutation_probe).toBeUndefined();
   }, 30000);
+});
+
+/**
+ * Task 5bf16459 (batch 46, D-006): `-i worktree` mutates a throwaway
+ * copy while a `-t` command that names an absolute path back into the
+ * real repository root runs against the REAL, unmutated tree -- the
+ * exact shape that gave a false `survived` in batch 45 (D-033: `cd
+ * /abs/worktree/backend && npx vitest run ...`). These tests pin the
+ * fix's actual boundary, beyond the generic contract loop above (which
+ * only checks that the reason/shape match, not the surrounding cases):
+ * the same command relative from the package dir still gets a real
+ * verdict, a symlinked repository root still refuses (the realpath
+ * comparison, not a string prefix), an absolute path OUTSIDE the repo
+ * is left alone, and `-i inplace` is exempt entirely.
+ */
+describe("probe(): test-command isolation-escape detection (task 5bf16459)", () => {
+  it("fixture pair: the absolute-cd shape is refused, the same test relative from the package dir is killed", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const absolute = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd ${repo} && node fixture.test.js`,
+      }),
+    );
+    expect(absolute.status).toBe("usage_error");
+    expect(absolute.reason).toBe("test_command_escapes_isolation");
+    expect(absolute.warnings.join(" ")).toContain(repo);
+    expect(absolute.warnings.join(" ")).toContain("--isolation inplace");
+
+    useLockDir();
+    const { repo: repo2 } = initRepo();
+    const relative = await probe(
+      baseOptions(repo2, {
+        isolation: "worktree",
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(relative.status).toBe("killed");
+    expect(relative.reason).toBeUndefined();
+  });
+
+  it("a repository root reached through a symlink still refuses: the realpath comparison, not a string-prefix one", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const linkParent = makeTmpDir();
+    const link = path.join(linkParent, "linked-repo");
+    fs.symlinkSync(repo, link, "dir");
+    // The test command names the SYMLINKED path, never the real one: a
+    // string-prefix comparison against the resolved root would miss
+    // this (the symlink path is not a prefix match), while the
+    // realpath comparison this fix uses resolves both sides first.
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd ${link} && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+  });
+
+  it("an absolute path OUTSIDE the repository root is not refused", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: "/usr/bin/env node fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+  });
+
+  it("--isolation inplace is exempt: an absolute path back into the (real) tree is the intended target there", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "inplace",
+        testCommand: `cd ${repo} && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("killed");
+    expect(result.reason).toBeUndefined();
+  });
 });

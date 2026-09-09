@@ -539,6 +539,33 @@ The add that checks out the worktree and the apply that replays the
 tracked diff also use the content-write pins above; the capture and
 listing calls do not alter checkout content.
 
+`-i worktree` mutates a throwaway copy, but the `-t`/`--test-command` you
+supply runs wherever ITS OWN cwd/args point it: nothing about the
+isolation copy touches the test command itself. A test command that
+names an absolute path under the real repository root (a `cd <abs>`
+back into the checkout, or an absolute file/dir argument under it)
+never runs against the isolated copy at all, so the test exercises the
+unmutated real tree while the mutant sits untested in a copy nobody ran
+anything against, and the run reports `killed`/`survived` for
+whichever verdict the REAL tree happened to produce, whatever the
+mutant actually did. `probe` refuses this outright
+(`reason: "test_command_escapes_isolation"`, a `usage_error`) rather
+than warn: an absolute path resolving under the real, already-resolved
+repository root (realpath on both sides, so a symlinked root or a
+symlinked ancestor of the token does not slip past a naive string
+comparison) but named in the test command is always this mistake under
+`-i worktree`, since the isolation copy lives elsewhere by
+construction. The message names the offending path and both fixes: run
+the test command as a relative command from the package directory, or
+pass `--isolation inplace` (exempt from this check entirely, since the
+real tree IS the intended target there). Detection is a syntactic scan
+of the command string (whitespace-split tokens that start with `/`,
+trimmed of a leading quote and a trailing shell metacharacter), never a
+shell parse -- a known limit follows directly from that: a RELATIVE
+path that walks out of the isolation copy via `..` (e.g. `cd
+../../real-checkout && ...`) is not a token this scan looks for at
+all, and is not detected.
+
 `-i worktree` needs git 2.35 or newer: the sync relies on `git apply
 --allow-empty`, which an older git rejects, so the run ends in
 `inconclusive`/`worktree_sync_failed`, never a verdict (`-i inplace` has
@@ -1167,6 +1194,7 @@ above.
 | `reason` | `mutant` | `mutation_probe` | When it fires |
 | --- | --- | --- | --- |
 | `worktree_allow_outside_unsupported` | absent | absent | `--allow-outside` combined with `--isolation worktree`; refused before containment is even checked |
+| `test_command_escapes_isolation` | absent | absent | `-i worktree`'s test command names an absolute path under the real repository root (a `cd <abs>`, or an absolute file/dir argument), which the isolated copy never receives |
 | `file_outside_root` | absent | absent | `--file` (or a `--link`) resolves outside the containment root |
 | `probe_in_progress` | absent | absent | the repository- or file-scoped lock is already held by another run |
 | `lock_unavailable` | absent | absent | the lock directory itself could not be acquired (an unwritable lock dir, an ancestor owned by another user) |

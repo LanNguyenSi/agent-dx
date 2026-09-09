@@ -22,6 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `probe` refuses a test command that escapes `-i worktree`'s isolation
+  copy (task `5bf16459`): batch 45 (D-033) gave a `-t` command of the
+  shape `cd /abs/worktree/backend && npx vitest run ...`, which never
+  touches the isolated copy at all and ran the real, unmutated tree
+  instead, reporting `survived` for a mutant the test actually kills.
+  A test command naming an absolute path under the real repository
+  root (a `cd <abs>`, or an absolute file/dir argument) is now refused
+  outright (`reason: "test_command_escapes_isolation"`, a
+  `usage_error`) before the run reaches its baseline, naming the
+  offending path and both fixes (a relative command from the package
+  directory, or `--isolation inplace`). Detected as a syntactic scan
+  of the command string, realpath-compared on both sides so a
+  symlinked repository root cannot slip past a string-prefix check;
+  `--isolation inplace` is exempt (the real tree is the intended
+  target there), and an absolute path outside the repository root is
+  left alone. Known residual: a relative path that walks out of the
+  isolation copy via `..` is not inspected (README).
+
 - `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
   (or mutant run) that exited `0` with nothing actually executed was
   read as a real pass, twice reported as `survived` in batch 43 by a
