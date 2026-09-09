@@ -37,6 +37,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linked only when git does not track it; and nesting judged on the
   destination paths inside the copy, so two in-repo symlinks pointing
   at one shared install are both linked.
+- The link policy decides about path STRINGS while `mkdirSync`,
+  `rmSync` and `symlinkSync` resolve directory ENTRIES, and on a
+  case-insensitive filesystem those are not the same thing (task
+  `6c7e1532`): measured on APFS, `fs.realpathSync` returns the spelling
+  it was given for a plain directory (`.../SRC` stays `.../SRC`), a
+  recursive `mkdirSync` of `<copy>/VENDOR/deep` creates the directory in
+  the operator's real `vendor/` once `vendor` is linked, and an
+  `rmSync` of `<copy>/VENDOR/bin` deletes the operator's real
+  `vendor/bin` and leaves a self-referential symlink in its place; git's
+  own index, being case-sensitive, reports `SRC` as untracked while the
+  copy carries a tracked `src` there. Three answers, all three probed:
+  rules 2 and 3 (and the `:(literal)` pathspecs of the one `git
+  ls-files` listing behind rule 3) are now decided on the COPY's own
+  spelling of a destination, read back from its directory entry by
+  inode identity rather than assumed from the source tree's spelling;
+  containment is re-checked immediately before each of the three
+  syscalls that create a link, and a link may never point back into the
+  copy, so a destination that resolves through an earlier link of the
+  same run is refused with a warning naming the destination, where it
+  resolves to, and the link it would have resolved through; and once
+  the links exist, the mapped cwd and every mutated path must still
+  resolve inside the copy, a miss being `worktree_sync_failed` rather
+  than a warning, since the run's next act is to write there. Rule 1
+  additionally requires a directory named by repository content to
+  RESOLVE inside the root, not merely to sit inside it (the gitignored
+  `esc -> ..` a `composer.json` can point its `vendor-dir` at). Each
+  shape is pinned by an end-to-end probe over a scratch fixture that
+  hashes the source tree before and after and asserts the refusal text:
+  see the "a destination the copy spells differently" tests in
+  `test/probe-worktree.test.ts` (composer `bin-dir: "VENDOR/bin"`, a
+  defaults file naming `cache` and `CACHE/inner`, the missing
+  `VENDOR/deep/nested` that reaches the `mkdir`, `SRC` from all three
+  link sources with the mutant in `src/`, the `esc -> ..` refusal, and
+  the negative control that a case variant which is neither protected
+  nor tracked still links), plus `canonicalDestRelPath` and the
+  separator both ways in `test/link-policy.test.ts`. Every test that
+  depends on the volume's case behaviour measures it (`test/helpers/
+  case-fs.ts`) and asserts the branch it is on, rather than assuming a
+  macOS host is case-insensitive.
+- `isolation.linkedNamedBy` in the result envelope (task `6c7e1532`):
+  one `{ path, namedBy }` entry per ACCEPTED link that repository
+  content asked for, carrying the same provenance phrase a refusal of
+  that candidate would have carried. Until now only refusals named
+  their source, so a link the repository had quietly added could not be
+  told from one the operator typed. `linked` is unchanged and still
+  lists every link; every path in `linkedNamedBy` appears there too.
 - PHP support (task `55b0a5cc`, issue #225 part 3): `verify` gains three
   default detectors built from real captured tool output (see
   `test/fixtures/README.md`) -- `phpunit` (`OK (N tests, M assertions)`;

@@ -50,7 +50,14 @@ export type GitShimMode =
   /** Every `worktree list` call fails (exit status 128), whatever its
    * options: a registry that cannot be read in any form. Every other
    * call reaches the real git. */
-  | "no-worktree-list";
+  | "no-worktree-list"
+  /** The link policy's own tracked-file listing fails (exit status 128
+   * with a `fatal:` line), recognized by the `:(literal)` pathspec only
+   * that call uses. Every other call, the untracked-file listing (`git
+   * ls-files --others --exclude-standard -z`) included, reaches the
+   * real git, so the sync itself still runs and the run reaches the
+   * link policy with "which of these does git track" unanswerable. */
+  | "fail-ls-files-pathspec";
 
 /** The lines run for every argument after `worktree list`, per mode. */
 function inListLines(mode: GitShimMode): string[] {
@@ -73,8 +80,25 @@ function inListLines(mode: GitShimMode): string[] {
         "    fi",
       ];
     case "no-worktree-list":
+    case "fail-ls-files-pathspec":
       return [];
   }
+}
+
+/** The lines run before the `worktree list` scan, for a mode that keys
+ * on something other than `worktree list`. */
+function preambleLines(mode: GitShimMode): string[] {
+  if (mode !== "fail-ls-files-pathspec") return [];
+  return [
+    'for a in "$@"; do',
+    '  case "$a" in',
+    "    ':(literal)'*)",
+    "      printf '%s\\n' 'fatal: shimmed: the link-policy listing died' >&2",
+    "      exit 128",
+    "      ;;",
+    "  esac",
+    "done",
+  ];
 }
 
 /** Writes the executable `git` script for `mode` into `binDir` and
@@ -92,6 +116,7 @@ export function writeGitShim(binDir: string, mode: GitShimMode): string {
   const script = [
     "#!/bin/sh",
     "# Test shim; see test/helpers/git-shim.ts.",
+    ...preambleLines(mode),
     "seen_worktree=0",
     "seen_list=0",
     'for a in "$@"; do',

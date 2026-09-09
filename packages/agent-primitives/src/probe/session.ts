@@ -156,6 +156,12 @@ export interface IsolationField {
   mode: IsolationMode;
   path: string | null;
   linked: string[];
+  /** The provenance of the links in `linked` that repository content
+   * asked for (see `WorktreeSyncSuccess.linkedNamedBy`): a sibling of
+   * `linked`, not a replacement, so a reader of the envelope can tell a
+   * link the repository named from one the operator typed. Empty for an
+   * `inplace` run and for a copy whose links all came from `--link`. */
+  linkedNamedBy: { path: string; namedBy: string }[];
   syncedTrackedFiles: number;
   syncedUntrackedFiles: number;
 }

@@ -664,8 +664,11 @@ path they are given: a link created at the copy's own root, over a
 directory this run writes into, or underneath a link the same step
 already created does not replace something inside the copy at all -- it
 reaches straight back into the real source tree, which is why the
-decision comes first rather than as a check afterwards. Four rules, in
-this order:
+decision comes first rather than as a check afterwards. Four rules
+decided up front, plus an invariant enforced at each syscall, plus a
+postcondition once the links exist.
+
+The four rules, in this order:
 
 1. Where a candidate SITS decides whether it is inside the repository,
    never where it points. A `node_modules` that is itself a symlink to a
@@ -676,7 +679,19 @@ this order:
    `../../elsewhere`) is skipped. The parent chain is resolved through
    realpath on both sides of the comparison, so a repository reached
    through a symlinked ancestor (macOS's `/tmp` -> `/private/tmp` is the
-   common case) links exactly the same as one reached directly.
+   common case) links exactly the same as one reached directly. A
+   directory named by repository CONTENT must additionally RESOLVE
+   inside the root: a gitignored `esc -> ..` that a `composer.json`
+   points its `vendor-dir` at sits inside the repository and leaves it,
+   and repository content gets no such latitude. The latitude this rule
+   does grant belongs to a candidate the walk found on disk, which
+   names no path at all. A `--link`, a `--plan` file's `link`, or a
+   defaults-file `link` whose value resolves outside the root never
+   reaches this rule: it refuses the whole run up front (`reason:
+   "file_outside_root"`), before the policy sees any candidate, since a
+   path an invocation explicitly asked for and cannot have is a usage
+   error rather than something to skip past. Only an auto-discovered
+   candidate is skipped with a warning and the run carried on.
 2. The copy's own root is never linked, and neither is any directory
    that CONTAINS the cwd `--pre`/`-t` will run in or the directory a
    mutant is written into: those have to stay real directories of the
@@ -698,7 +713,51 @@ this order:
    `vendor/bin`, are exactly this shape). Nesting is judged on the
    destination paths inside the copy, not on what the links resolve to,
    so two different in-repo symlinks pointing at one shared install are
-   both linked.
+   both linked. Every comparison here is containment, never a prefix
+   match on the string: `vendor-bin` is not covered by `vendor`, and
+   `src-cache/app` does not make `src` a directory that must stay real.
+
+Rules 2 and 3 are decided on the COPY's own spelling of a destination,
+not on the source tree's. On a case-insensitive filesystem (APFS and
+HFS+ by default) `SRC` and `src` are one directory, so a `vendor-dir`
+of `SRC` names the directory under test while comparing as a different
+string against every protected and tracked path, and git's own index,
+which is case-sensitive, reports that spelling as untracked. The copy is
+asked instead: the destination's own directory entry is read back by
+inode identity, so the tracked-file question and the "must stay real"
+question are both answered about the directory the copy actually
+carries.
+
+The invariant, enforced immediately before each of the three syscalls
+that create a link (the recursive `mkdir` of the destination's parent,
+the delete at the destination, the symlink-create): the destination's
+parent must still RESOLVE inside the copy, and a link may only ever
+point at the source tree, never back into the copy. This is what the
+rules above cannot decide on their own, because it is not a property of
+the candidate at all: the links this same step created earlier are part
+of the path those syscalls walk, so a destination that was a plain path
+in the copy when the policy looked at it can resolve into the source
+tree by the time it is acted on. A candidate refused here is a warning
+naming the destination, where it resolves to, and the earlier link it
+would have resolved through; the run carries on without that link.
+
+The postcondition, once every link exists: the mapped cwd and the
+directory of every file this run mutates must still resolve inside the
+copy. A miss is `reason: "worktree_sync_failed"`, never a warning and
+never a verdict, since the run's next act is to write there.
+
+Limitations. The invariant is checked and then acted on, so a second
+process that changes the copy in between (replacing a directory with a
+symlink in the microseconds between the check and the syscall) is not
+covered; the copy lives in a fresh, per-run scratch directory under
+`--log-dir` that nothing else is expected to write into, and the
+repository-keyed lock keeps a second probe out of it. Only the final
+component of a destination is read back from the copy: a case-variant
+spelling of a PARENT (`SRC/sub` for `src/sub`) still compares as a
+different path in rules 2 and 3, and what catches that shape is the
+postcondition rather than the rules. Windows is not a supported
+platform for this package, and its own aliasing (8.3 short names, which
+are a second spelling no inode comparison resolves) is not addressed.
 
 The sync runs under the same abort machinery as `--pre`/`-t`: every git
 call it makes is killed on `SIGINT`/`SIGTERM` and waited for before
@@ -1276,7 +1335,7 @@ exactly which `reason` is which).
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below) |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
-| `isolation` | `{ mode, path, linked, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths symlinked in; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
+| `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths symlinked in; `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, a `--plan` file's `link`, the defaults file's `link`), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
 | `totalDurationMs` | number | always, for this envelope (see the top-level-usage-error carve-out above, and `--plan`, whose own envelope carries no `totalDurationMs` at all) | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
 
 #### Refusal reason shape

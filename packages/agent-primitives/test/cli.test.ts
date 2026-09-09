@@ -3637,7 +3637,7 @@ describe("cli: probe --plan", () => {
     expect(JSON.parse(overridden.stdout).isolation.mode).toBe("worktree");
   }, 30000);
 
-  it("--plan's own link and --link merge and deduplicate (task 6c7e1532): both show up in isolation.linked, reached through a symlinked ancestor (os.tmpdir() itself, on macOS) -- pins the fix for the realpath-vs-display-path root mismatch that used to drop both silently", async () => {
+  it("--plan's own link and --link merge and deduplicate: both show up in isolation.linked, reached through a symlinked ancestor (os.tmpdir() itself, on macOS) -- pins the fix for the realpath-vs-display-path root mismatch that used to drop both silently", async () => {
     const { repo } = initPlanRepo();
     fs.mkdirSync(path.join(repo, "plan-link-dir"));
     fs.mkdirSync(path.join(repo, "cli-link-dir"));
@@ -3660,8 +3660,9 @@ describe("cli: probe --plan", () => {
     expect(run.code).toBe(0);
     const envelope = JSON.parse(run.stdout);
     // Both entries reach `linked` already realpath'd (`index.ts`'s
-    // `absLinks`), which differs from `repo` itself exactly when `repo`
-    // sits under a symlinked ancestor -- the case this test exercises.
+    // `links[].abs`), which differs from `repo` itself exactly when
+    // `repo` sits under a symlinked ancestor -- the case this test
+    // exercises.
     expect(envelope.isolation.linked).toEqual(
       expect.arrayContaining([
         resolveDeepestExisting(path.join(repo, "plan-link-dir")),
@@ -3670,7 +3671,7 @@ describe("cli: probe --plan", () => {
     );
   }, 30000);
 
-  it("repo defaults file (.agent-primitives.json) contributes on the --plan path too, alongside the plan's own link (task 6c7e1532): both show up in isolation.linked (regression: this path was untested and `values: defaultsFile.links` could silently become `values: []` with the full suite still green)", async () => {
+  it("repo defaults file (.agent-primitives.json) contributes on the --plan path too, alongside the plan's own link: both show up in isolation.linked (regression: this path was untested and `values: defaultsFile.links` could silently become `values: []` with the full suite still green)", async () => {
     const { repo } = initPlanRepo();
     fs.mkdirSync(path.join(repo, "plan-link-dir"));
     fs.mkdirSync(path.join(repo, "defaults-link-dir"));

@@ -344,6 +344,10 @@ describe("findComposerLinkDirs", () => {
         rootReal: fs.realpathSync(root),
         protectedRelPaths: [],
         isTrackedPath: () => false,
+        // No copy in this unit test to ask, and no case-variant
+        // spelling in the fixture either: the source tree's own
+        // spelling is the canonical one here.
+        canonicalRelPath: (relPath) => relPath,
       }).links.map((planned) => planned.candidate.absDir),
     ).toEqual([path.join(root, "vendor")]);
   });
@@ -437,6 +441,7 @@ describe("findComposerLinkDirs", () => {
       rootReal: fs.realpathSync(root),
       protectedRelPaths: [],
       isTrackedPath: () => false,
+      canonicalRelPath: (relPath) => relPath,
     });
     expect(plan.links).toEqual([]);
     expect(plan.warnings).toHaveLength(1);
@@ -455,6 +460,7 @@ describe("findComposerLinkDirs", () => {
       rootReal: fs.realpathSync(root),
       protectedRelPaths: [],
       isTrackedPath: () => false,
+      canonicalRelPath: (relPath) => relPath,
     });
 
     expect(plan.links).toEqual([]);

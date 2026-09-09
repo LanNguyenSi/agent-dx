@@ -2,7 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { linkRelPath, planLinks } from "../src/probe/link-policy.js";
+import {
+  canonicalDestRelPath,
+  linkRelPath,
+  planLinks,
+  relContains,
+} from "../src/probe/link-policy.js";
+import { caseInsensitiveVolume } from "./helpers/case-fs.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -22,23 +28,33 @@ afterEach(() => {
 });
 
 /** The policy's defaults for a repository with nothing to protect and
- * nothing tracked; each test overrides only the part it is about. */
+ * nothing tracked; each test overrides only the part it is about.
+ *
+ * `canonicalRelPath` defaults to the identity: a copy whose own
+ * filesystem spells every destination exactly the way the source tree
+ * does, which is what a case-sensitive filesystem always gives and what
+ * a case-insensitive one gives for every candidate spelled the way the
+ * directory really is. The tests that are ABOUT the other case pass
+ * their own. */
 function ctx(
   rootReal: string,
   over: {
     protectedRelPaths?: string[];
     tracked?: string[];
+    canonicalRelPath?: (relPath: string) => string;
   } = {},
 ): {
   rootReal: string;
   protectedRelPaths: string[];
   isTrackedPath: (relPath: string) => boolean;
+  canonicalRelPath: (relPath: string) => string;
 } {
   const tracked = over.tracked ?? [];
   return {
     rootReal,
     protectedRelPaths: over.protectedRelPaths ?? [],
     isTrackedPath: (relPath) => tracked.includes(relPath),
+    canonicalRelPath: over.canonicalRelPath ?? ((relPath) => relPath),
   };
 }
 
@@ -234,6 +250,187 @@ describe("planLinks", () => {
     expect(plan.warnings).toEqual([]);
   });
 
+  it("refuses a candidate repository content named that SITS inside the root but RESOLVES outside it (a gitignored 'esc -> ..'), naming the file and the value", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.symlinkSync(outside, path.join(root, "esc"));
+
+    const plan = planLinks(
+      [
+        {
+          absDir: path.join(root, "esc"),
+          namedBy: `"esc" named in "vendor-dir" of ${path.join(root, "composer.json")}`,
+        },
+      ],
+      ctx(root),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toContain("resolves outside the repository root");
+    expect(plan.warnings[0]).toContain("composer.json");
+    expect(plan.warnings[0]).toContain('"esc"');
+  });
+
+  it("keeps that latitude for a candidate NO file named: a node_modules symlinked to a sibling checkout's install still links, as the same symlink", () => {
+    // The negative control for the rule above: the same shape on disk,
+    // the same target outside the root, and the only difference is that
+    // no repository content asked for it. This is the provisioning this
+    // org's own worktrees use, and refusing it would be a regression.
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.symlinkSync(outside, path.join(root, "node_modules"));
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules") }],
+      ctx(root),
+    );
+
+    expect(plan.links.map((l) => l.relPath)).toEqual(["node_modules"]);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("decides rule 2 on the COPY's spelling of a destination, not the source tree's: a candidate whose case variant names the mutated directory is refused", () => {
+    const root = makeTmpDir();
+
+    const plan = planLinks(
+      [
+        {
+          absDir: path.join(root, "SRC"),
+          namedBy: '"SRC" named in "vendor-dir" of composer.json',
+        },
+      ],
+      ctx(root, {
+        protectedRelPaths: ["src"],
+        // What a case-insensitive copy answers for this destination.
+        canonicalRelPath: (relPath) => (relPath === "SRC" ? "src" : relPath),
+      }),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain("must stay a real directory");
+  });
+
+  it("decides rule 3 on the COPY's spelling too, so the tracked-path question is asked about the directory the copy really carries", () => {
+    const root = makeTmpDir();
+    const asked: string[] = [];
+
+    const plan = planLinks(
+      [
+        {
+          absDir: path.join(root, "LIB"),
+          namedBy: '"LIB" named in the "link" list of .agent-primitives.json',
+        },
+      ],
+      {
+        ...ctx(root, {
+          tracked: ["lib"],
+          canonicalRelPath: (relPath) => (relPath === "LIB" ? "lib" : relPath),
+        }),
+        isTrackedPath: (relPath) => {
+          asked.push(relPath);
+          return relPath === "lib";
+        },
+      },
+    );
+
+    expect(asked).toEqual(["lib"]);
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain("git tracks it");
+  });
+});
+
+describe("relContains: the separator is what keeps a sibling a sibling", () => {
+  it("a protected path that merely shares a prefix does not sit inside a candidate: 'src' does not contain 'src-cache/app'", () => {
+    expect(relContains("src", path.join("src-cache", "app"))).toBe(false);
+    expect(relContains("src", path.join("src", "app"))).toBe(true);
+  });
+
+  it("a candidate that merely shares a prefix is not covered by an earlier link: 'vendor' does not contain 'vendor-bin'", () => {
+    expect(relContains("vendor", "vendor-bin")).toBe(false);
+    expect(relContains("vendor", path.join("vendor", "bin"))).toBe(true);
+  });
+
+  it("both directions through planLinks: the prefix-sharing sibling of a protected path is linked, and so is the prefix-sharing sibling of an earlier link", () => {
+    const root = makeTmpDir();
+
+    const plan = planLinks(
+      [
+        { absDir: path.join(root, "src") },
+        { absDir: path.join(root, "vendor") },
+        { absDir: path.join(root, "vendor-bin") },
+      ],
+      ctx(root, { protectedRelPaths: [path.join("src-cache", "app")] }),
+    );
+
+    expect(plan.links.map((l) => l.relPath)).toEqual([
+      "src",
+      "vendor",
+      "vendor-bin",
+    ]);
+    expect(plan.warnings).toEqual([]);
+  });
+});
+
+describe("canonicalDestRelPath: the copy's own spelling of a destination", () => {
+  it("reads the on-disk name of a destination reached under a different spelling, and leaves one that does not exist alone", () => {
+    const wtReal = makeTmpDir();
+    fs.mkdirSync(path.join(wtReal, "src"));
+
+    // Nothing at this destination under any spelling: the planned name
+    // is the one the link would be created under. True on every
+    // filesystem.
+    expect(canonicalDestRelPath(wtReal, "vendor")).toBe("vendor");
+
+    if (caseInsensitiveVolume(wtReal)) {
+      expect(canonicalDestRelPath(wtReal, "SRC")).toBe("src");
+    } else {
+      // A case-sensitive volume has no alias to resolve: `SRC` is
+      // simply a directory that is not there.
+      expect(canonicalDestRelPath(wtReal, "SRC")).toBe("SRC");
+    }
+    // The spelling that is already the on-disk one is unchanged either
+    // way.
+    expect(canonicalDestRelPath(wtReal, "src")).toBe("src");
+  });
+
+  it("keeps a nested destination's parent path, canonicalising the final component under it", () => {
+    const wtReal = makeTmpDir();
+    fs.mkdirSync(path.join(wtReal, "packages", "app"), { recursive: true });
+
+    expect(canonicalDestRelPath(wtReal, path.join("packages", "app"))).toBe(
+      path.join("packages", "app"),
+    );
+    if (caseInsensitiveVolume(wtReal)) {
+      expect(canonicalDestRelPath(wtReal, path.join("packages", "APP"))).toBe(
+        path.join("packages", "app"),
+      );
+    }
+  });
+
+  it("returns the planned path unchanged when the destination's parent does not sit inside the copy (the caller's own containment check owns that shape)", () => {
+    const wtReal = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.mkdirSync(path.join(outside, "bin"));
+    fs.symlinkSync(outside, path.join(wtReal, "vendor"));
+
+    // `vendor` is a link out of the copy, so `vendor/bin` has no
+    // spelling inside it at all.
+    expect(canonicalDestRelPath(wtReal, path.join("vendor", "bin"))).toBe(
+      path.join("vendor", "bin"),
+    );
+  });
+
+  it("reports a destination that IS a symlink by its own name, never by its target's", () => {
+    const wtReal = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.symlinkSync(outside, path.join(wtReal, "node_modules"));
+
+    expect(canonicalDestRelPath(wtReal, "node_modules")).toBe("node_modules");
+  });
+});
+
+describe("planLinks: candidates outside the root", () => {
   it("skips, never throws, on a candidate outside the root, and names it in the one warning format", () => {
     const root = makeTmpDir();
     const outside = makeTmpDir();

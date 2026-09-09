@@ -173,6 +173,7 @@ function emptyIsolationField(mode: IsolationMode): IsolationField {
     mode,
     path: null,
     linked: [],
+    linkedNamedBy: [],
     syncedTrackedFiles: 0,
     syncedUntrackedFiles: 0,
   };

@@ -558,6 +558,7 @@ export async function openRunSetup(
     wtSession = preparedWt.session;
     isolationField.path = wtSession.worktreePath;
     isolationField.linked = wtSession.linked;
+    isolationField.linkedNamedBy = wtSession.linkedNamedBy;
     isolationField.syncedTrackedFiles = wtSession.syncedTrackedFiles;
     isolationField.syncedUntrackedFiles = wtSession.syncedUntrackedFiles;
     setupLogPaths = [...priorLogPaths, ...wtSession.logPaths];
