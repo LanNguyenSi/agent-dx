@@ -4623,12 +4623,28 @@ describe("probe(): --pass-regex must not disable the generic byte-identical fall
     "",
   ].join("\n");
 
-  function initQuietRunnerRepo(): { repo: string } {
+  // Same shape, but exit `1` (phpunit's own deprecation-notice-on-a-green-
+  // suite shape): the regex still matches, so the verdict PASSES despite
+  // the non-zero exit code. This is what actually exercises the
+  // fallback's own "rests on a pass" predicate (`restsOnPassingVerdict`)
+  // for the --pass-regex path -- an exit-0 fixture cannot tell a fixed
+  // `testPassed`-based predicate apart from a reverted `exitCode === 0`
+  // one, since both read `true` when the process also happens to exit 0.
+  const QUIET_RUNNER_NONZERO_EXIT_JS = [
+    "function unused() {",
+    "  return 1;",
+    "}",
+    'console.log("OK (0 tests, 0 assertions)");',
+    "process.exit(1);",
+    "",
+  ].join("\n");
+
+  function initRunnerRepo(source: string): { repo: string } {
     const repo = makeTmpDir();
     git(repo, ["init", "-q"]);
     git(repo, ["config", "user.email", "test@example.com"]);
     git(repo, ["config", "user.name", "test"]);
-    fs.writeFileSync(path.join(repo, "runner.js"), QUIET_RUNNER_JS);
+    fs.writeFileSync(path.join(repo, "runner.js"), source);
     git(repo, ["add", "-A"]);
     git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
     return { repo };
@@ -4655,7 +4671,7 @@ describe("probe(): --pass-regex must not disable the generic byte-identical fall
   for (const expectVerdict of ["fail", "pass"] as const) {
     it(`without --pass-regex, byte-identical exit-0 output is inconclusive/no_tests_executed under --expect ${expectVerdict}`, async () => {
       useLockDir();
-      const { repo } = initQuietRunnerRepo();
+      const { repo } = initRunnerRepo(QUIET_RUNNER_JS);
 
       const result = await probe(
         quietRunnerOptions(repo, { expect: expectVerdict }),
@@ -4666,9 +4682,9 @@ describe("probe(): --pass-regex must not disable the generic byte-identical fall
       expect(result.mutation_probe?.result).toBe("not_run");
     });
 
-    it(`with --pass-regex matching the quiet output, the fallback still catches it as inconclusive/no_tests_executed under --expect ${expectVerdict} (never a silent killed/survived)`, async () => {
+    it(`with --pass-regex matching the quiet output despite a non-zero exit code, the fallback still catches it as inconclusive/no_tests_executed under --expect ${expectVerdict} (never a silent killed/survived)`, async () => {
       useLockDir();
-      const { repo } = initQuietRunnerRepo();
+      const { repo } = initRunnerRepo(QUIET_RUNNER_NONZERO_EXIT_JS);
 
       const result = await probe(
         quietRunnerOptions(repo, {
@@ -4677,6 +4693,7 @@ describe("probe(): --pass-regex must not disable the generic byte-identical fall
         }),
       );
 
+      expect(result.baseline?.exitCode).toBe(1);
       expect(result.status).toBe("inconclusive");
       expect(result.reason).toBe("no_tests_executed");
       expect(result.mutation_probe?.result).toBe("not_run");
