@@ -288,7 +288,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   differing only in unicode normalisation, a wrapper script that itself
   `cd`s using an unspelled path, a third unrelated symlink alias to the
   root, and a root path containing a character neither spelling represents
-  each reach the real tree without being refused (README, same list). The
+  each reach the real tree without being refused (README, same list); so
+  does, for the `--log-dir` exclusion only, a sibling of the log dir whose
+  name continues its spelling with a filename-legal word terminator
+  (`<root>/l@2/y.js` beside `--log-dir <root>/l`), which the exclusion
+  swallows along with the log dir itself (named, not closed). The
   rounds this took, the shapes each one closed and the reproductions
   behind them are in the run files for this task.
 

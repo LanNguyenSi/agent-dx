@@ -525,7 +525,12 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * SEPARATOR sitting INSIDE the root's own spelling rather than at its
  * end (`$'<parent>\x2f<base>/pkg'`, where `<parent>/<base>` is the
  * root: the boundary rule only ever widens at the end of an
- * already-matched spelling, not while a match is still forming); a
+ * already-matched spelling, not while a match is still forming); for
+ * the scratch-root EXCLUSION only, a sibling of the `--log-dir` whose
+ * name continues the log dir's spelling with a filename-legal word
+ * terminator (`@`, `~`, `,`, `=`, `$`, `{`, `?`: `<root>/l@2/y.js`
+ * beside `--log-dir <root>/l`), which ends the exclusion's match there
+ * and excludes the sibling along with it (named, not closed); a
  * spelling broken up by an ANSI-C escape that decodes a root
  * CHARACTER rather than a separator (`$'/x/re\x70o/pkg'`, where
  * `\x70` decodes to `p`), or by a `\c`-style control escape, which
