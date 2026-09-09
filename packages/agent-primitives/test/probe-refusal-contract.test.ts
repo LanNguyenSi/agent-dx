@@ -12,7 +12,7 @@ import {
   REFUSAL_RESULT_SHAPE,
   type RefusalReason,
 } from "../src/probe/session.js";
-import { writeMarker } from "../src/lock.js";
+import { writeMarker, readMarkerFor } from "../src/lock.js";
 import { execCommand } from "../src/exec.js";
 import { computeMutant } from "../src/probe/mutant.js";
 import { beginInplace } from "../src/probe/isolation.js";
@@ -91,6 +91,13 @@ function useLockDir(): string {
 
 function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd });
+}
+
+function worktreeList(repo: string): string {
+  return execFileSync("git", ["worktree", "list", "--porcelain"], {
+    cwd: repo,
+    encoding: "utf8",
+  });
 }
 
 const FIXTURE_JS = [
@@ -707,5 +714,91 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     );
     expect(result.status).toBe("killed");
     expect(result.reason).toBeUndefined();
+  });
+
+  // --- Round 2 (task 5bf16459): three fail-open shapes review found in
+  // round 1's whitespace-split, prefix-only tokenizer, now closed. ---
+
+  it("a quoted absolute path containing a space is refused, not read as a plain string prefix", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const spacedParent = makeTmpDir();
+    const spacedRepoDir = path.join(spacedParent, "my repo");
+    fs.renameSync(repo, spacedRepoDir);
+    const result = await probe(
+      baseOptions(spacedRepoDir, {
+        isolation: "worktree",
+        testCommand: `cd '${spacedRepoDir}' && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(spacedRepoDir);
+  });
+
+  it("the --key=/abs token form is refused, not only a bare absolute token", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `npm test --prefix=${repo}`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(repo);
+  });
+
+  it("an escaping --pre is refused even when the test command itself is relative, naming --pre in the message; the same --pre relative from the package dir is killed", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const escaping = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        preCommand: `cd ${repo} && true`,
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(escaping.status).toBe("usage_error");
+    expect(escaping.reason).toBe("test_command_escapes_isolation");
+    expect(escaping.warnings.join(" ")).toContain(repo);
+    expect(escaping.warnings.join(" ")).toContain("--pre");
+
+    useLockDir();
+    const { repo: repo2 } = initRepo();
+    const relative = await probe(
+      baseOptions(repo2, {
+        isolation: "worktree",
+        preCommand: "true",
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(relative.status).toBe("killed");
+    expect(relative.reason).toBeUndefined();
+  });
+
+  it("a refusal on this path leaves no worktree, lock, or marker behind", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd ${repo} && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    // Only the main worktree (the repo itself) is registered: no linked
+    // worktree was ever added, since the refusal happens before
+    // `beginWorktree` runs at all.
+    const list = worktreeList(repo);
+    expect(list.split("\n\n").filter((b) => b.trim().length > 0)).toHaveLength(
+      1,
+    );
+    expect(readMarkerFor(resolveDeepestExisting(repo))).toBeUndefined();
+    expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
+      [],
+    );
   });
 });

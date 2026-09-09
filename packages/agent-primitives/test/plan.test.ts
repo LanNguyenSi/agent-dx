@@ -847,6 +847,30 @@ describe("probePlan(): refusals before the lock, the marker or any worktree", ()
       `plan.mutants[1].file not found: ${path.join(repo, "does-not-exist.js")}`,
     );
   });
+
+  it("refuses a test command that escapes -i worktree's isolation copy (task 5bf16459), with every mutant not_run", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          replaceMutant(2, "  return false;"),
+          replaceMutant(5, "  return true;"),
+        ],
+        {
+          isolation: "worktree",
+          testCommand: `cd ${repo} && node fixture.test.js`,
+        },
+      ),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(repo);
+    expect(result.results.map((r) => r.status)).toEqual(["not_run", "not_run"]);
+  });
 });
 
 describe("probePlan(): several files in one plan", () => {

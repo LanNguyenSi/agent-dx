@@ -60,22 +60,76 @@ export function resolveDeepestExisting(p: string): string {
 }
 
 /**
+ * Splits `command` on whitespace, except that a quote (`'` or `"`) opens
+ * a run that does not end until its OWN matching quote, whitespace
+ * inside included -- so `cd '/abs/my repo' && ...` yields the single
+ * token `'/abs/my repo'`, not two. Still not a shell parse: no
+ * variables, no `$(...)`, no escaped quotes, and an unterminated quote
+ * simply runs to the end of the string. Good enough for the token shapes
+ * `absolutePathTokens` below looks for.
+ */
+function splitCommandTokens(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: string | undefined;
+  for (const ch of command) {
+    if (quote) {
+      current += ch;
+      if (ch === quote) quote = undefined;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (current !== "") {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (current !== "") tokens.push(current);
+  return tokens;
+}
+
+/** Strips a leading quote and a trailing shell metacharacter run
+ * (`;`, `&`, `|`, `)`, `,`, a closing quote) off one raw token or
+ * candidate substring. */
+function trimTokenEdges(raw: string): string {
+  return raw.replace(/^['"]/, "").replace(/['";&|),]+$/, "");
+}
+
+/**
  * Pulls every token out of `command` that LOOKS like an absolute path
- * (starts with `/`, once a leading quote and a trailing shell
- * metacharacter -- `;`, `&`, `|`, `)`, `,`, a closing quote -- are
- * stripped), whether it follows a `cd` or stands alone as a file/dir
- * argument. Deliberately not a shell parse: whitespace-splitting plus
- * this trim is enough to catch the D-033 shape (`cd /abs/... && npx
- * vitest run ...`) and any absolute file argument beside it, without
- * pulling in a shell grammar for a single probe-safety check. A
- * relative path that walks out of a directory via `..` is not a token
- * this function looks for at all (documented as a known limit).
+ * (starts with `/`), whether it follows a `cd`, stands alone as a
+ * file/dir argument, sits inside a quoted run that itself contains
+ * whitespace (`cd '/abs/my repo' && ...`), or follows the first `=` of
+ * an option token (`--prefix=/abs/repo`, including a quoted value:
+ * `--pre='/abs/repo'`). Deliberately not a shell parse: quote-aware
+ * splitting plus an `=`-split and the edge trim above is enough to
+ * catch the D-033 shape (`cd /abs/... && npx vitest run ...`) and the
+ * quoted and `--key=` variants of it, without pulling in a shell
+ * grammar for a single probe-safety check. A relative path that walks
+ * out of a directory via `..` is not a token this function looks for at
+ * all (documented as a known limit), and neither is a path indirected
+ * through a shell variable, `$(...)`, or a wrapper script that itself
+ * `cd`s (same limit: no shell parse, no variable expansion).
  */
 export function absolutePathTokens(command: string): string[] {
   const tokens: string[] = [];
-  for (const raw of command.split(/\s+/)) {
-    let token = raw.replace(/^['"]/, "").replace(/['";&|),]+$/, "");
-    if (token.startsWith("/") && token.length > 1) tokens.push(token);
+  for (const raw of splitCommandTokens(command)) {
+    const candidates = [trimTokenEdges(raw)];
+    const eq = raw.indexOf("=");
+    if (eq !== -1) candidates.push(trimTokenEdges(raw.slice(eq + 1)));
+    for (const candidate of candidates) {
+      if (candidate.startsWith("/") && candidate.length > 1) {
+        tokens.push(candidate);
+      }
+    }
   }
   return tokens;
 }
@@ -85,18 +139,33 @@ export function absolutePathTokens(command: string): string[] {
  * `resolveDeepestExisting`, so a symlinked root or a symlinked ancestor
  * of the token is walked through, not compared by spelling) under
  * `root` -- the real, already-resolved repository root a `-i worktree`
- * run never mutates. Used by `setup.ts` to refuse a test command that
- * would run against the real tree instead of the isolated copy: every
- * `-i worktree` run's isolation copy lives outside `root` by
- * construction, so any absolute path a test command names that DOES
- * resolve under `root` cannot be naming the isolation copy, whatever
- * that copy's own path turns out to be. `root` must already be an
- * absolute, resolved path (the same contract `isPathContained` has).
+ * run never mutates -- and that does NOT resolve under `scratchRoot`
+ * when one is given. Used by `setup.ts` to refuse a test/`--pre`
+ * command that would run against the real tree instead of the isolated
+ * copy: a `-i worktree` run's isolation copy lives outside `root` by
+ * construction UNLESS the run's own `--log-dir` was pointed inside the
+ * repository, in which case the copy sits under `<root>/<log-dir
+ * subpath>/wt-<uuid>/wt` -- still inside `root`, but it IS the
+ * isolation copy, so it must not be flagged as an escape. `scratchRoot`
+ * (the run's own resolved log dir, the same value `cleanupWorktree`
+ * checks worktree removals against) is the caller's way of excluding
+ * that one legitimate case; any other absolute path that DOES resolve
+ * under `root` cannot be naming the isolation copy, whatever that
+ * copy's own path turns out to be. `root` and `scratchRoot` must
+ * already be absolute, resolved paths (the same contract
+ * `isPathContained` has).
  */
-export function escapingAbsolutePaths(command: string, root: string): string[] {
+export function escapingAbsolutePaths(
+  command: string,
+  root: string,
+  scratchRoot?: string,
+): string[] {
   const escaping: string[] = [];
   for (const token of absolutePathTokens(command)) {
     const resolved = resolveDeepestExisting(token);
+    if (scratchRoot !== undefined && isPathContained(scratchRoot, resolved)) {
+      continue;
+    }
     if (isPathContained(root, resolved)) escaping.push(token);
   }
   return escaping;

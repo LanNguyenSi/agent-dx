@@ -22,23 +22,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `probe` refuses a test command that escapes `-i worktree`'s isolation
-  copy (task `5bf16459`): batch 45 (D-033) gave a `-t` command of the
-  shape `cd /abs/worktree/backend && npx vitest run ...`, which never
-  touches the isolated copy at all and ran the real, unmutated tree
-  instead, reporting `survived` for a mutant the test actually kills.
-  A test command naming an absolute path under the real repository
-  root (a `cd <abs>`, or an absolute file/dir argument) is now refused
-  outright (`reason: "test_command_escapes_isolation"`, a
-  `usage_error`) before the run reaches its baseline, naming the
-  offending path and both fixes (a relative command from the package
-  directory, or `--isolation inplace`). Detected as a syntactic scan
-  of the command string, realpath-compared on both sides so a
-  symlinked repository root cannot slip past a string-prefix check;
-  `--isolation inplace` is exempt (the real tree is the intended
-  target there), and an absolute path outside the repository root is
-  left alone. Known residual: a relative path that walks out of the
-  isolation copy via `..` is not inspected (README).
+- `probe` refuses a test command or `--pre` that escapes `-i worktree`'s
+  isolation copy (task `5bf16459`): batch 45 (D-033) gave a `-t` command
+  of the shape `cd /abs/worktree/backend && npx vitest run ...`, which
+  never touches the isolated copy at all and ran the real, unmutated
+  tree instead, reporting `survived` for a mutant the test actually
+  kills. An absolute path under the real repository root named in the
+  test command or `--pre` (a `cd <abs>`, an absolute file/dir argument,
+  a quoted path containing whitespace, or the value half of a
+  `--key=/abs` token) is now refused outright
+  (`reason: "test_command_escapes_isolation"`, a `usage_error`) before
+  the run reaches its baseline, naming the offending path(s), which
+  command(s) carried them, and the fix (a relative invocation resolved
+  inside the copy, or `--isolation inplace`); an absolute path to a
+  runner binary under the root is refused the same way, with `--link`
+  named as the fix for that shape. Detected as a syntactic scan of both
+  command strings (quote-aware splitting plus an `=`-split), realpath-
+  compared on both sides so a symlinked repository root cannot slip
+  past a string-prefix check, and excluding any path that resolves
+  under the run's own `--log-dir` instead (the one case a path under
+  the repository root legitimately names the isolation copy itself);
+  `--isolation inplace` is exempt (the real tree is the intended target
+  there), and an absolute path outside the repository root is left
+  alone. Round 1 of this fix scanned only the test command with a
+  whitespace-split, prefix-only tokenizer, which read as `survived`
+  under three shapes review caught before merge: a quoted absolute path
+  containing a space, the `--key=/abs` token form, and any absolute
+  path in `--pre` (never scanned at all); all three are closed above.
+  Known residuals: a relative path that walks out of the isolation copy
+  via `..`, and any path reached only through shell-level indirection
+  (a variable, `$(...)`, or a wrapper script that itself `cd`s) are not
+  inspected (README).
 
 - `probe`'s `survived`/`killed` verdict (task `273b3851`): a baseline
   (or mutant run) that exited `0` with nothing actually executed was
