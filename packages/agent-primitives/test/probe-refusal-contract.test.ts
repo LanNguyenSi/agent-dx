@@ -1271,6 +1271,27 @@ describe("probe(): test-command isolation-escape detection", () => {
     expect(result.warnings.join(" ")).toContain("--pre");
   });
 
+  it("an ANSI-C starter right after a --log-dir spelling does not exempt the root mention at the same index: still refused", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, "l");
+    fs.mkdirSync(logDir, { recursive: true });
+    // The scratch-root exemption match must use the narrow boundary
+    // rule: an ANSI-C starter (`\x`) right after the --log-dir
+    // spelling must not read as ending an exempt region there, or the
+    // repository-root mention this text also contains (the prefix of
+    // the --log-dir spelling itself) would be skipped along with it.
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        logDir,
+        testCommand: `node $'${logDir}\\x69b/fixture.test.js'`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+  });
+
   it("a sibling reached across a line continuation is not refused: the shell deletes the pair, so the word names a SIBLING", async () => {
     useLockDir();
     const { repo } = initRepo();

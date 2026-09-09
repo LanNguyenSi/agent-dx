@@ -559,11 +559,11 @@ describe("escapingRootMentions()", () => {
   // `\uHHHH`/`\UHHHHHHHH` and `\NNN` (octal) by numeric value inside a
   // `$'...'` word, and `/` (0x2f) is reachable through any of them:
   // `$'<root>\x2fpkg'`, `$'<root>\057pkg'` and `$'<root>/pkg'` all
-  // reach `<root>/pkg` exactly as `$'<root>/pkg'` does. Round-7 left
-  // this open: `\` followed by `x` (or `u`/`U`/an octal digit) was
-  // classified as an in-word escape, so the ANSI-C forms read as a
-  // different path's prefix and were NOT refused while the shell still
-  // reached the real tree. ---
+  // reach `<root>/pkg` exactly as `$'<root>/pkg'` does. Classifying `\`
+  // followed by `x` (or `u`/`U`/an octal digit) as an in-word escape
+  // left these ANSI-C forms reading as a different path's prefix, so
+  // they were NOT refused while the shell still reached the real
+  // tree. ---
 
   it("the ANSI-C forms that decode to a separator are mentions, same as the un-escaped control", () => {
     const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
@@ -588,6 +588,47 @@ describe("escapingRootMentions()", () => {
     // still does not end the root's spelling.
     expect(
       escapingRootMentions(`ls ${root}\\ backup; node t.js`, root),
+    ).toEqual([]);
+  });
+
+  it("the scratch-root exemption match uses the NARROW boundary rule: an ANSI-C starter right after the scratch spelling does not manufacture an exempt region that lets a --log-dir escape at the junction slip through unrefused", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // `$'<root>/l\x69b/fixture.test.js'`: the scratch spelling
+    // `<root>/l` ends right at the `\`+`x`. Under the (wrong) wide
+    // rule that reads as a boundary, the resulting exempt region sits
+    // at the same start index as the ROOT's own mention, so the root
+    // mention gets skipped too. Under the narrow rule the scratch
+    // match is rejected outright, so the root mention -- reported with
+    // the ANSI-C truncation the un-exempted case already pins above,
+    // extended through the `/l` component that precedes the escape --
+    // still comes through.
+    const text = `node $'${root}/l\\x69b/fixture.test.js'`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      `${root}/l`,
+    ]);
+  });
+
+  it("the ANSI-C analogue of the scratchRoot boundary property: a real path that merely starts with the scratch spelling, spelled with an ANSI-C escape, still reports the root", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "logs");
+    fs.mkdirSync(scratchRoot);
+    // `\x72` decodes to `r`, so the shell reads this as
+    // `<root>/logsrc/x.js` -- the same sibling shape the plain-text
+    // pin above covers, spelled with an ANSI-C escape instead of a
+    // literal `r`. The scan does not decode the escape, so it cannot
+    // report the sibling path; what it reports is the ROOT match,
+    // truncated (by `pathRegionEnd`) right before the escape.
+    const text = `node $'${root}/logs\\x72c/x.js'`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      `${root}/logs`,
+    ]);
+    // The genuine exemption (a real path under the scratch root, no
+    // escape involved) still works.
+    const copy = path.join(scratchRoot, "wt-1", "wt");
+    expect(
+      escapingRootMentions(`cd ${copy} && node t.js`, root, scratchRoot),
     ).toEqual([]);
   });
 
@@ -659,6 +700,26 @@ describe("escapingRootMentions()", () => {
     expect(escapingRootMentions(`cd ${both} && node t.js`, root)).toEqual([
       both,
     ]);
+  });
+
+  it("an ANSI-C escape decoding the separator INSIDE the root's own prefix is NOT tolerated (documented residual): the widened rule only ends a match at the boundary AFTER a spelling, never inside one", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const parent = path.dirname(root);
+    const base = path.basename(root);
+    // `\x2f` decodes to `/`, so a shell reads this as
+    // `${parent}/${base}/pkg`, i.e. `${root}/pkg` -- but the literal
+    // text never contains that spelling contiguously (the separator
+    // between `parent` and `base` is spelled `\x2f`, not `/`), and the
+    // boundary rule that treats `\`+ANSI-C-starter specially only ever
+    // fires at the END of an already-matched spelling, not while
+    // still trying to match one. So this is a residual, the same as
+    // the plain-text `/x/re\po` split-from-the-inside case, and stays
+    // unmatched rather than silently starting to match (or silently
+    // stopping to match) without a test noticing.
+    const interior = `${parent}\\x2f${base}/pkg`;
+    expect(
+      escapingRootMentions(`cd $'${interior}' && node t.js`, root),
+    ).toEqual([]);
   });
 
   it("a `..` segment is NOT tolerated: it names a different directory, and normalising is outside this rule (documented residual)", () => {

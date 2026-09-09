@@ -107,6 +107,19 @@ function skipLineContinuations(text: string, index: number): number {
 }
 
 /**
+ * True when `ch` starts an ANSI-C (`$'...'`) numeric escape that can
+ * decode to a path separator: `x` (`\xHH`), `u`/`U`
+ * (`\uHHHH`/`\UHHHHHHHH`) and an octal digit `0`-`7` (`\NNN`, one to
+ * three digits) each name a byte or code point by its numeric value,
+ * and `/` (0x2f) is reachable through any of them. A named escape like
+ * `\n` or `\t` decodes to a fixed character that is never `/`, so it
+ * is not included here and stays an in-word escape.
+ */
+function startsAnsiCNumericEscape(ch: string): boolean {
+  return ch === "x" || ch === "u" || ch === "U" || (ch >= "0" && ch <= "7");
+}
+
+/**
  * True when a spelling that ends at `index` is a mention of the path
  * it spells. The rule enumerates what CONTINUES a path word, not what
  * terminates one: the match is a mention unless the text continues the
@@ -149,10 +162,10 @@ function skipLineContinuations(text: string, index: number): number {
  * `$'<root>\x71pkg'` (`\x71` decodes to `q`, not a separator) is also
  * refused even though the shell reaches a SIBLING there, the same
  * over-refusal trade the rest of this rule already makes. A form this
- * does not model -- a `\c`-style control escape, or a `$'...'` escape
- * that decodes a root CHARACTER rather than the separator, e.g.
- * `$'/x/re\x70o/pkg'` -- is a residual, named on `escapingRootMentions`
- * below.
+ * does not model -- a `$'...'` escape that decodes a root CHARACTER
+ * rather than the separator, e.g. `$'/x/re\x70o/pkg'`, or a
+ * `\c`-style control escape, which cannot decode to a separator
+ * either -- is a residual, named on `escapingRootMentions` below.
  *
  * Everything else terminates the word and therefore marks a boundary:
  * the end of the text, whitespace, either quote, every POSIX operator
@@ -183,22 +196,32 @@ function skipLineContinuations(text: string, index: number): number {
  * carries a literal backslash (`<root>\/pkg` as a path, not as a
  * separator) by design; the remedies `ISOLATION_ESCAPE_ENV_FIX_HINT`
  * already names apply to it unchanged.
+ *
+ * The `ansiCIsBoundary` parameter picks which of the two directions
+ * above applies to the `\`+ANSI-C rule specifically, since it is
+ * right for one caller and wrong for the other: matching the ROOT's
+ * own spelling wants the WIDE rule (`true`, over-refuse), but matching
+ * the SCRATCH-ROOT spelling that decides the `--log-dir` exemption in
+ * `escapingRootMentions` wants the NARROW rule (`false`, the
+ * pre-widening behaviour, where `\`+ANSI-C-starter is just another
+ * in-word escape and not a boundary). Widening the scratch match too
+ * let a `--log-dir` under the root exempt a region it had no business
+ * exempting: with `-l <root>/l` and a test command containing
+ * `$'<root>/l\x69b/fixture.test.js'`, the scratch spelling `<root>/l`
+ * matched ending right at the `\`+`x`; under the wide rule that reads
+ * as a boundary, so the resulting exempt region started at the same
+ * index as the ROOT's own mention, and `escapingRootMentions` skipped
+ * that root mention too, reaching the real tree unrefused. Under the
+ * narrow rule the scratch match ending there is rejected outright
+ * (the same as it would be for a component name character), so the
+ * outer root mention survives and is reported, same as it would be
+ * without a `--log-dir` naming that spot at all.
  */
-
-/**
- * True when `ch` starts an ANSI-C (`$'...'`) numeric escape that can
- * decode to a path separator: `x` (`\xHH`), `u`/`U`
- * (`\uHHHH`/`\UHHHHHHHH`) and an octal digit `0`-`7` (`\NNN`, one to
- * three digits) each name a byte or code point by its numeric value,
- * and `/` (0x2f) is reachable through any of them. A named escape like
- * `\n` or `\t` decodes to a fixed character that is never `/`, so it
- * is not included here and stays an in-word escape.
- */
-function startsAnsiCNumericEscape(ch: string): boolean {
-  return ch === "x" || ch === "u" || ch === "U" || (ch >= "0" && ch <= "7");
-}
-
-function isPathBoundaryAt(text: string, index: number): boolean {
+function isPathBoundaryAt(
+  text: string,
+  index: number,
+  ansiCIsBoundary: boolean,
+): boolean {
   const i = skipLineContinuations(text, index);
   if (i >= text.length) return true;
   const ch = text[i];
@@ -209,7 +232,8 @@ function isPathBoundaryAt(text: string, index: number): boolean {
     // escape that may decode to one, or escapes a character inside the
     // word. A trailing `\` escapes nothing, so the word ends.
     const next = text[i + 1];
-    return next === undefined || next === "/" || startsAnsiCNumericEscape(next);
+    if (next === undefined || next === "/") return true;
+    return ansiCIsBoundary && startsAnsiCNumericEscape(next);
   }
   return !continuesComponentName(ch);
 }
@@ -325,12 +349,18 @@ interface SpellingMatch {
  * boundary, spelling by spelling and, within one spelling, left to
  * right. Each spelling is an absolute path, so its matcher always
  * consumes at least the leading separator and the walk always
- * advances.
+ * advances. `ansiCIsBoundary` is threaded straight through to
+ * `isPathBoundaryAt`: `true` (the ROOT spelling) for the over-refusing
+ * wide rule, `false` (the SCRATCH-ROOT spelling) so an ANSI-C escape
+ * sitting right after the scratch spelling does not manufacture an
+ * exempt region `escapingRootMentions` cannot actually verify (see
+ * `isPathBoundaryAt`'s docblock).
  */
 function matchedRegions(
   text: string,
   spellings: string[],
   caseInsensitive: boolean,
+  ansiCIsBoundary: boolean,
 ): SpellingMatch[] {
   const found: SpellingMatch[] = [];
   for (const spelling of spellings) {
@@ -339,7 +369,9 @@ function matchedRegions(
     let match: RegExpExecArray | null;
     while ((match = matcher.exec(text)) !== null) {
       const end = match.index + match[0].length;
-      if (isPathBoundaryAt(text, end)) found.push({ start: match.index, end });
+      if (isPathBoundaryAt(text, end, ansiCIsBoundary)) {
+        found.push({ start: match.index, end });
+      }
     }
   }
   return found;
@@ -472,10 +504,11 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * The scope is a root path spelled out LITERALLY, IN A FORM THE SCAN
  * MODELS, not "every way a command can reach the real tree". Quoting
  * and backslash escaping AROUND a spelling, `=`-forms, wrappers,
- * separator noise, the ANSI-C (`$'...'`) escapes that can decode to a
- * separator (`isPathBoundaryAt`) and, where the filesystem folds case,
- * casing are covered; anything that reaches the root without spelling
- * it out in a form this scan models is a residual. The residuals KNOWN
+ * separator noise, an ANSI-C (`$'...'`) escape that decodes to a
+ * separator AT OR AFTER the end of the root's own spelling
+ * (`isPathBoundaryAt`) and, where the filesystem folds case, casing
+ * are covered; anything that reaches the root without spelling it out
+ * in a form this scan models is a residual. The residuals KNOWN
  * TODAY, which is not a claim that they are all of them (the README's
  * `-i worktree` section carries the same list for callers): a path
  * built at run time from a shell variable this tool does not own
@@ -488,14 +521,20 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * `..`; an absolute path that walks back INTO the root through `..`
  * (`/abs/x/../my repo`), which this scan does not normalise; a
  * spelling broken up from the INSIDE by quoting or backslash escaping
- * (`/x/re"p"o`, `/x/re\po`), or by an ANSI-C escape that decodes a root
+ * (`/x/re"p"o`, `/x/re\po`), or by an ANSI-C escape that decodes a
+ * SEPARATOR sitting INSIDE the root's own spelling rather than at its
+ * end (`$'<parent>\x2f<base>/pkg'`, where `<parent>/<base>` is the
+ * root: the boundary rule only ever widens at the end of an
+ * already-matched spelling, not while a match is still forming); a
+ * spelling broken up by an ANSI-C escape that decodes a root
  * CHARACTER rather than a separator (`$'/x/re\x70o/pkg'`, where
- * `\x70` decodes to `p`) or a `\c`-style control escape -- the shell
- * reassembles each of these into the root, but the scan does not model
- * what the shell decodes there; a spelling that differs only in
- * unicode normalisation (a decomposed spelling of a composed root,
- * which a filesystem may resolve to the same directory); a wrapper
- * script that itself `cd`s using a path not spelled out in the scanned
+ * `\x70` decodes to `p`), or by a `\c`-style control escape, which
+ * cannot decode to a separator either -- the shell reassembles each
+ * of these into the root, but the scan does not model what the shell
+ * decodes there; a spelling that differs only in unicode
+ * normalisation (a decomposed spelling of a composed root, which a
+ * filesystem may resolve to the same directory); a wrapper script
+ * that itself `cd`s using a path not spelled out in the scanned
  * string; a path reaching `root` only through a symlink alias that is
  * neither `root`'s own as-given spelling nor its realpath; and a
  * repository root containing a character neither spelling represents
@@ -513,15 +552,25 @@ export function escapingRootMentions(
   // The scratch root is matched with the SAME construction as the root
   // and its matches are SKIPPED rather than removed from the text: the
   // scan runs over the original `text` throughout, so every index below
-  // indexes the spelling the command actually used.
+  // indexes the spelling the command actually used. It is matched with
+  // the NARROW (`false`) boundary rule, not the root's own wide one: a
+  // `\`+ANSI-C-starter right after the scratch spelling is not proof
+  // the shell decodes it into a further scratch-root path component,
+  // so it must not manufacture an exempt region there (see
+  // `isPathBoundaryAt`'s docblock for the regression this closes).
   const exempt =
     scratchRoot !== undefined && exemptsScratchRoot(root, scratchRoot)
-      ? matchedRegions(text, pathSpellings(scratchRoot), ignoresCase)
+      ? matchedRegions(text, pathSpellings(scratchRoot), ignoresCase, false)
       : [];
 
   const regions: string[] = [];
   const seen = new Set<string>();
-  for (const match of matchedRegions(text, pathSpellings(root), ignoresCase)) {
+  for (const match of matchedRegions(
+    text,
+    pathSpellings(root),
+    ignoresCase,
+    true,
+  )) {
     if (exempt.some((e) => match.start >= e.start && match.start < e.end)) {
       continue;
     }
