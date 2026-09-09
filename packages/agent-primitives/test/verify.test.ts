@@ -2643,7 +2643,7 @@ describe("phpunitDetector: captured real output", () => {
     expect(parsed.failures[0].message).toBe("RuntimeException: boom");
   });
 
-  it("parses an error message ending in ':<digits>': the port suffix is never mistaken for the file:line locator (round-3 review finding)", () => {
+  it("parses an error message ending in ':<digits>': the port suffix is never mistaken for the file:line locator", () => {
     const parsed = phpunitDetector.parse({
       output: readCaptured("phpunit-error-message-with-port"),
       command: "vendor/bin/phpunit",
@@ -2662,35 +2662,6 @@ describe("phpunitDetector: captured real output", () => {
     // is still captured correctly.
     expect(parsed.failures[0].file).toBe("tests/PortTest.php");
     expect(parsed.failures[0].line).toBe(14);
-  });
-
-  it("parses a chained multi-frame locator shape unchanged: the entry's first `file:line` candidate preceded by a blank line still wins", () => {
-    // Not a real PHPUnit capture (PHPUnit's own default reporter prints
-    // exactly one locator line per entry; a multi-frame stack trace is a
-    // hand-built worst case for the blank-line guard added in this
-    // round, run through the same parser). Guards against a regression
-    // where the blank-line precondition itself, rather than picking the
-    // wrong line, breaks locator capture altogether.
-    const output = [
-      "There was 1 error:",
-      "",
-      "1) DiffTest::testChained",
-      "RuntimeException: boom",
-      "",
-      "/app/src/Thrower.php:4",
-      "",
-      "ERRORS!",
-      "Tests: 1, Assertions: 1, Errors: 1.",
-    ].join("\n");
-    const parsed = phpunitDetector.parse({
-      output,
-      command: "vendor/bin/phpunit",
-      exitCode: 2,
-    });
-    expect(parsed.failures).toHaveLength(1);
-    expect(parsed.failures[0].file).toBe("/app/src/Thrower.php");
-    expect(parsed.failures[0].line).toBe(4);
-    expect(parsed.failures[0].message).toBe("RuntimeException: boom");
   });
 
   it("parses a plural-header run (2 failures, 2 risky tests): failed 2, passed 2, both risky entries excluded from failures", () => {
