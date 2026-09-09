@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { MutantForm } from "./mutant.js";
+import { compilePassRegex } from "../pass-regex.js";
 // Type-only, so this module never imports `index.js` at runtime: `index.ts`
 // imports `parsePlanFile` from here, and a runtime import back would make
 // the two modules a cycle.
@@ -339,7 +340,7 @@ export function validatePlan(
     );
     if (!regexSource.ok) return regexSource.result;
     try {
-      plan.passRegex = new RegExp(regexSource.value);
+      plan.passRegex = compilePassRegex(regexSource.value);
     } catch (err) {
       return invalid(
         planPath,

@@ -500,3 +500,18 @@ export function execCommand(
     });
   });
 }
+
+/**
+ * Concatenates a captured stdout tail and stderr tail into the single
+ * buffer every output-matching check in this package runs against: the
+ * zero-tests detectors and the generic byte-identical fallback
+ * (`probe/zero-tests.ts`), the baseline-stage `--pass-regex`/
+ * `--require-baseline-evidence` checks and the mutant-stage
+ * `--pass-regex` verdict (`probe/setup.ts`, `probe/step.ts`), and
+ * `verify`'s own detector selection (`verify/index.ts`). One shared
+ * definition so those five call sites can never drift into
+ * independently-maintained copies of the same `${a}\n${b}` join.
+ */
+export function combinedOutput(stdoutTail: string, stderrTail: string): string {
+  return `${stdoutTail}\n${stderrTail}`;
+}

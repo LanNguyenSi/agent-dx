@@ -4530,5 +4530,214 @@ describe("probe(): --pass-regex", () => {
       expect(result.status).toBe("inconclusive");
       expect(result.reason).toBe("baseline_failed");
     });
+
+    it("both miss (the pass-regex does not match AND the evidence regex does not match): baseline_evidence_not_matched wins, not baseline_failed -- the evidence gate is checked ahead of the pass-regex verdict", async () => {
+      useLockDir();
+      const { repo } = initRunnerRepo();
+
+      const result = await probe(
+        runnerOptions(repo, {
+          passRegex: /NOPE_NEVER_MATCHES/,
+          requireBaselineEvidence: /this text never appears either/,
+        }),
+      );
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_evidence_not_matched");
+    });
+  });
+});
+
+describe("probe(): --pass-regex miss pushes a warning (pattern, log path, truncation note), matching --require-baseline-evidence's own miss", () => {
+  function initScrolledOutRepo(): { repo: string } {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    // The pattern ("OK (") sits on the FIRST line, followed by 70 filler
+    // lines: real, untruncated-as-far-as-the-runner-is-concerned output,
+    // but the captured tail keeps only the LAST 60 lines (`exec.ts`'s
+    // `TAIL_LINES`), so by the time `--pass-regex` sees it, the pattern
+    // has scrolled out of the captured tail.
+    const lines = ['console.log("OK (3 tests, 5 assertions)");'];
+    for (let i = 0; i < 70; i++) {
+      lines.push(`console.log("filler line ${String(i)}");`);
+    }
+    lines.push("process.exit(1);");
+    fs.writeFileSync(path.join(repo, "runner.js"), `${lines.join("\n")}\n`);
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo };
+  }
+
+  it("baseline_failed, with a warning naming the pattern and the truncated stdout tail", async () => {
+    useLockDir();
+    const { repo } = initScrolledOutRepo();
+
+    const result = await probe({
+      file: "runner.js",
+      // A filler line, not the "OK (" line itself: the mutant's own
+      // content is irrelevant here, since the baseline never gets past
+      // its own gate.
+      line: 2,
+      form: "replace",
+      replaceText: 'console.log("irrelevant");',
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      passRegex: /^OK \(/,
+    });
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("baseline_failed");
+    expect(result.baseline?.exitCode).toBe(1);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("--pass-regex") &&
+          w.includes("did not match the baseline output") &&
+          w.includes("stdout") &&
+          w.includes("truncated"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("probe(): --pass-regex must not disable the generic byte-identical fallback (a false 'pass' match on zero-tests-shaped output)", () => {
+  // `console.log`'s exact text is the only output either run produces,
+  // and mutating the untested `unused` function never changes it: the
+  // baseline and the mutant run are always BYTE-IDENTICAL, exactly the
+  // shape the generic fallback exists to catch. The regex matches this
+  // output too (a phpunit-shaped "OK (" match on a suite that in truth
+  // ran nothing) -- exactly the false-positive-pass the fallback must
+  // keep protecting against once a caller's own --pass-regex is in
+  // charge of the verdict.
+  const QUIET_RUNNER_JS = [
+    "function unused() {",
+    "  return 1;",
+    "}",
+    'console.log("OK (0 tests, 0 assertions)");',
+    "process.exit(0);",
+    "",
+  ].join("\n");
+
+  function initQuietRunnerRepo(): { repo: string } {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "runner.js"), QUIET_RUNNER_JS);
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo };
+  }
+
+  function quietRunnerOptions(
+    repo: string,
+    overrides: Partial<ProbeOptions> = {},
+  ): ProbeOptions {
+    return {
+      file: "runner.js",
+      line: 2,
+      form: "replace",
+      replaceText: "  return 2;",
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      ...overrides,
+    };
+  }
+
+  for (const expectVerdict of ["fail", "pass"] as const) {
+    it(`without --pass-regex, byte-identical exit-0 output is inconclusive/no_tests_executed under --expect ${expectVerdict}`, async () => {
+      useLockDir();
+      const { repo } = initQuietRunnerRepo();
+
+      const result = await probe(
+        quietRunnerOptions(repo, { expect: expectVerdict }),
+      );
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("no_tests_executed");
+      expect(result.mutation_probe?.result).toBe("not_run");
+    });
+
+    it(`with --pass-regex matching the quiet output, the fallback still catches it as inconclusive/no_tests_executed under --expect ${expectVerdict} (never a silent killed/survived)`, async () => {
+      useLockDir();
+      const { repo } = initQuietRunnerRepo();
+
+      const result = await probe(
+        quietRunnerOptions(repo, {
+          expect: expectVerdict,
+          passRegex: /^OK \(/,
+        }),
+      );
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("no_tests_executed");
+      expect(result.mutation_probe?.result).toBe("not_run");
+    });
+  }
+});
+
+describe("probe(): --pass-regex and a mutant crash that prints a stack trace", () => {
+  // The fake phpunit-style runner (green suite, exit 1), reused: mutating
+  // `summary()` to throw makes node print a real stack trace to stderr
+  // (an ordinary uncaught exception, not a segfault) and exit 1 -- real,
+  // non-empty output on stderr, so this is NOT the silent (both tails
+  // empty) crash shape the "no output at all" warning exists for.
+  const RUNNER_JS = [
+    "function summary() {",
+    '  return "OK (3 tests, 5 assertions)";',
+    "}",
+    "console.log(summary());",
+    "process.exit(1);",
+    "",
+  ].join("\n");
+
+  function initRunnerRepo(): { repo: string } {
+    const repo = makeTmpDir();
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "runner.js"), RUNNER_JS);
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    return { repo };
+  }
+
+  it("is 'killed' with the SAME generic pass-regex-miss warning a real failure gets, and no silent-crash warning -- the envelope cannot tell the two apart", async () => {
+    useLockDir();
+    const { repo } = initRunnerRepo();
+
+    const result = await probe({
+      file: "runner.js",
+      line: 2,
+      form: "replace",
+      replaceText: '  throw new Error("boom");',
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      passRegex: /^OK \(/,
+    });
+
+    expect(result.status).toBe("killed");
+    expect(result.test?.exitCode).toBe(1);
+    expect(result.test?.stdoutTail).toBe("");
+    expect((result.test?.stderrTail ?? "").length).toBeGreaterThan(0);
+    expect(result.warnings.some((w) => /no output at all/.test(w))).toBe(false);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("--pass-regex") &&
+          w.includes("did not match the mutant run's output"),
+      ),
+    ).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { sha256File } from "../hash.js";
+import { combinedOutput } from "../exec.js";
 import {
   acquireLock,
   markerFilePathFor,
@@ -306,6 +307,28 @@ export interface RunSetupInput {
 
 export type RunSetupOutcome =
   { ok: true; run: OpenedRun } | { ok: false; refusal: RunSetupRefusal };
+
+/**
+ * The `(the baseline's captured ... tail was truncated; the pattern may
+ * have matched output outside the captured tail)` suffix (or `""` when
+ * neither side was truncated) every baseline-stage warning that names a
+ * pattern miss appends -- `--require-baseline-evidence`'s own miss and
+ * a `--pass-regex` miss alike -- so the caveat is worded identically
+ * wherever it fires rather than maintained as separate copies that
+ * could drift apart.
+ */
+function truncationNote(
+  stdoutTruncated: boolean,
+  stderrTruncated: boolean,
+): string {
+  const truncatedSides = [
+    stdoutTruncated ? "stdout" : undefined,
+    stderrTruncated ? "stderr" : undefined,
+  ].filter((side): side is string => side !== undefined);
+  return truncatedSides.length > 0
+    ? ` (the baseline's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
+    : "";
+}
 
 /**
  * The setup both entry points run before their first mutant: isolation
@@ -789,7 +812,10 @@ export async function openRunSetup(
   // absent, whatever the exit code says. Checked only on a baseline that
   // was not aborted: an aborted run answered nothing about the test, so
   // its own (non-)output must never be read as a pass or a fail either.
-  const baselineCombinedOutput = `${baselineOutput.stdoutTail}\n${baselineOutput.stderrTail}`;
+  const baselineCombinedOutput = combinedOutput(
+    baselineOutput.stdoutTail,
+    baselineOutput.stderrTail,
+  );
   const baselinePassRegexMatched =
     input.passRegex !== undefined &&
     input.passRegex.test(baselineCombinedOutput);
@@ -807,7 +833,45 @@ export async function openRunSetup(
       // below, so the re-hash reads settled content.
       await deferToHandlerIfActive(crashHandlers, exitOnSignal);
     }
+
+    // The evidence gate is checked ahead of the pass-regex verdict (see
+    // the README's `--pass-regex`/`--require-baseline-evidence`
+    // interaction paragraph): when this baseline would otherwise refuse
+    // `baseline_failed` because `--pass-regex` did not match, a
+    // `--require-baseline-evidence` miss on the same (non-aborted)
+    // baseline is the more informative reason -- nothing proves tests
+    // ran at all -- so it wins over the pass-regex miss instead of
+    // being masked by it.
+    if (
+      !baselineTest.aborted &&
+      input.passRegex !== undefined &&
+      input.requireBaselineEvidence !== undefined &&
+      !input.requireBaselineEvidence.test(baselineCombinedOutput)
+    ) {
+      await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
+      warnings.push(
+        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
+      );
+      return refuse(
+        "inconclusive",
+        "baseline_evidence_not_matched",
+        undefined,
+        { logPaths: stepLogPaths, baseline },
+      );
+    }
+
     await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
+    // A `--pass-regex` miss (reached here means the baseline is not
+    // aborted, so `baselineFailed` is true precisely because the
+    // pattern did not match): named explicitly, the same as a
+    // `--require-baseline-evidence` miss is, so a caller reading
+    // `warnings` sees which pattern was checked and against what,
+    // rather than only the bare `baseline_failed` reason.
+    if (!baselineTest.aborted && input.passRegex !== undefined) {
+      warnings.push(
+        `--pass-regex (${input.passRegex.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
+      );
+    }
     // An aborted baseline is not a red baseline: nothing about the test
     // was learned, the run was stopped. Reported apart from a baseline
     // that genuinely failed, so a caller cannot read a cancelled run as
@@ -864,8 +928,7 @@ export async function openRunSetup(
   // match `--require-baseline-evidence` before this run may go on to
   // apply a mutant, whatever the exit code said.
   if (input.requireBaselineEvidence !== undefined) {
-    const combined = `${baselineOutput.stdoutTail}\n${baselineOutput.stderrTail}`;
-    if (!input.requireBaselineEvidence.test(combined)) {
+    if (!input.requireBaselineEvidence.test(baselineCombinedOutput)) {
       discardOpened();
       // Both this check and the zero-tests detectors above only ever see
       // the CAPTURED tail (`exec.ts`'s `TAIL_LINES`/`TAIL_CHARS` bound),
@@ -873,16 +936,8 @@ export async function openRunSetup(
       // output now scrolled out of the tail reads as a plain miss unless
       // the warning says so, so a caller does not chase a pattern fix
       // for output truncation instead.
-      const truncatedSides = [
-        baselineTest.stdoutTruncated ? "stdout" : undefined,
-        baselineTest.stderrTruncated ? "stderr" : undefined,
-      ].filter((side): side is string => side !== undefined);
-      const truncatedNote =
-        truncatedSides.length > 0
-          ? ` (the baseline's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
-          : "";
       warnings.push(
-        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncatedNote}; see ${baselineTest.logPath}`,
+        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
       );
       return refuse(
         "inconclusive",

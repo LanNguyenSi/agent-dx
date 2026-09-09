@@ -33,6 +33,7 @@ import {
   type ProbePlanResult,
 } from "./probe/index.js";
 import { parsePlanFile, type ProbePlanSpec } from "./probe/plan.js";
+import { compilePassRegex } from "./pass-regex.js";
 import { reconcileEnvelopeDiffTruncation } from "./probe/mutant.js";
 import {
   init,
@@ -218,17 +219,15 @@ function parseRequireBaselineEvidence(value: string): RegExp {
   }
 }
 
-/** Compiles `--pass-regex <regex>` into a `RegExp`, the same way
- * `parseRequireBaselineEvidence` above compiles its own option: an
- * unparseable pattern is a usage error before it ever reaches
- * `probe()`/`probePlan()`. Also documents `passWhen.regex`, the plan-file
- * field this option is equivalent to (see the README's `--pass-regex`
- * section): both compile the same way, and an invalid pattern in either
- * place is a usage error. No flags syntax here either, for the same
- * reason `--require-baseline-evidence` has none. */
+/** Compiles `--pass-regex <regex>` via the shared `compilePassRegex`
+ * (`pass-regex.ts`) -- the same compile `probe/plan.ts`'s `validatePlan`
+ * uses for `passWhen.regex`, so both parsers apply the same `m` flag
+ * (per-line `^`/`$` anchoring; see `pass-regex.ts`'s own docblock) and
+ * an unparseable pattern is a usage error before it ever reaches
+ * `probe()`/`probePlan()`, rather than throwing from inside the run. */
 function parsePassRegex(value: string): RegExp {
   try {
-    return new RegExp(value);
+    return compilePassRegex(value);
   } catch (err) {
     throw new InvalidArgumentError(
       `--pass-regex must be a valid regular expression (got "${value}"): ${err instanceof Error ? err.message : String(err)}`,

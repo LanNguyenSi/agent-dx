@@ -1,4 +1,5 @@
 import { vitestDetector } from "../verify/detectors/vitest.js";
+import { combinedOutput } from "../exec.js";
 
 /**
  * Detects when a test command's own output shows that no test actually
@@ -25,10 +26,6 @@ export type ZeroTestsDetectorName = "vitest" | "node_test";
 export interface ZeroTestsEvidence {
   detected: boolean;
   via?: ZeroTestsDetectorName;
-}
-
-function combinedOutput(stdoutTail: string, stderrTail: string): string {
-  return `${stdoutTail}\n${stderrTail}`;
 }
 
 /**

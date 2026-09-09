@@ -1818,6 +1818,43 @@ describe("cli: probe", () => {
     expect(parsedWithRegex.baseline.exitCode).toBe(1);
   });
 
+  it("--pass-regex is compiled with the m flag: a header line ahead of the summary still lets ^OK \\( match per-line, not only at the whole buffer's start", async () => {
+    const repo = initRepo();
+    // Same fake phpunit-style runner, with a version banner printed
+    // BEFORE the green summary -- real phpunit's own shape. Without the
+    // `m` flag, `^` anchors to the whole combined buffer's first
+    // character (the banner line), and `^OK \(` can never match this
+    // baseline at all.
+    const HEADER_RUNNER_JS = [
+      'console.log("PHPUnit 9.6.13 by Sebastian Bergmann and contributors.");',
+      ...RUNNER_JS.split("\n"),
+    ].join("\n");
+    fs.writeFileSync(path.join(repo, "runner.js"), HEADER_RUNNER_JS);
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "runner.js",
+      "-n",
+      "3",
+      "-r",
+      '  return "FAILURES!";',
+      "-t",
+      "node runner.js",
+      "-i",
+      "inplace",
+      "--pass-regex",
+      "^OK \\(",
+    ]);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.baseline.exitCode).toBe(1);
+    expect(parsed.status).toBe("killed");
+    expect(parsed.reason).toBeUndefined();
+  });
+
   it("--pass-regex is allowed alongside --plan (unlike --env); plan.passWhen.regex is the plan-file equivalent, and a command-line --pass-regex wins when both are given", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "runner.js"), RUNNER_JS);

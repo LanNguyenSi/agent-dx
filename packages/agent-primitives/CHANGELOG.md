@@ -23,21 +23,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crash and a genuinely failing test then looked identical). A
   non-zero exit alongside a regex match is reported as a pass, with a
   `warnings` entry naming the exit code; a zero exit without a match is
-  still a failure. Independent of `--require-baseline-evidence`, which
-  stays a gate on the baseline only (checked first; a miss still
-  refuses `baseline_evidence_not_matched` before `--pass-regex` is even
-  consulted) -- the two may be given together, one without the other,
-  or neither. A mutant run that crashes outright (no output on either
-  stream, an unusual exit code) is reported `killed` the same as a
-  genuine test failure would be (neither can match an absent regex),
-  but is distinguishable in the envelope via `test.exitCode` (kept as
-  data regardless of `--pass-regex`) together with the empty
-  `test.stdoutTail`/`test.stderrTail`, and gets its own `warnings` entry
-  naming the crash. Given on both the command line and inside a
-  `--plan` file at once, the command-line value wins, the same
-  precedence `-i`/`--expect`/`--timeout` already follow against their
-  own plan-file counterparts. An unparseable pattern, in either place,
-  is a usage error before any run starts.
+  still a failure, with its own `warnings` entry naming the pattern, the
+  side (baseline or mutant), the log path, and a truncation caveat when
+  either side's captured tail was cut. The compiled pattern (both
+  `--pass-regex` and `passWhen.regex`, through one shared
+  `compilePassRegex`) always carries the `m` flag, unlike
+  `--require-baseline-evidence`'s flagless compile: `^`/`$` anchor per
+  LINE of the combined buffer, not only to its very first/last
+  character, so the README's own `^OK \(` recipe still matches a real
+  runner that prints something (a version banner) ahead of its green
+  summary line. Independent of `--require-baseline-evidence`: the two
+  may be given together, one without the other, or neither; given
+  together, the evidence gate is now genuinely checked first (a
+  same-baseline miss on both refuses `baseline_evidence_not_matched`,
+  never `baseline_failed`, matching what was always documented). The
+  generic byte-identical fallback (the zero-tests safety net for a
+  runner neither built-in detector recognizes) is NOT disabled by
+  `--pass-regex`: a custom "pass" string that itself matches on
+  byte-identical, nothing-executed output from both runs is exactly the
+  false-positive shape the fallback exists to catch, whichever predicate
+  is in charge of the verdict. A mutant run that crashes SILENTLY (no
+  output on either stream, an unusual exit code) is reported `killed`
+  the same as a genuine test failure would be (neither can match an
+  absent regex), and is distinguishable in the envelope via
+  `test.exitCode` (kept as data regardless of `--pass-regex`) together
+  with the empty `test.stdoutTail`/`test.stderrTail`, plus its own
+  `warnings` entry naming the crash; no new typed field was added for
+  this, and none is planned -- a crash that prints its own stack trace
+  before exiting (an ordinary uncaught `throw`, not a segfault) is NOT
+  distinguishable from a real test failure by this or any other
+  mechanism here (same exit-non-zero, same generic "did not match"
+  warning, same `killed` verdict), and a runner that prints its full
+  green summary before crashing in its own teardown reads as a pass,
+  same as a naive `grep` wrapper would read it -- both are inherent
+  limits of an output-only predicate, not gaps this package closes.
+  Given on both the command line and inside a `--plan` file at once, the
+  command-line value wins, the same precedence `-i`/`--expect`/
+  `--timeout` already follow against their own plan-file counterparts.
+  An unparseable pattern, in either place, is a usage error before any
+  run starts.
 
 ### Changed
 

@@ -1523,6 +1523,10 @@ describe("plan.passWhen.regex: the plan-file equivalent of --pass-regex", () => 
     if (!parsed.ok) return;
     expect(parsed.plan.passRegex).toBeInstanceOf(RegExp);
     expect(parsed.plan.passRegex?.source).toBe("^OK \\(");
+    // Compiled through the same shared `compilePassRegex` `cli.ts` uses
+    // for `--pass-regex`, so `^`/`$` anchor per line, not only to the
+    // whole combined buffer (see `pass-regex.ts`'s own docblock).
+    expect(parsed.plan.passRegex?.flags).toBe("m");
   });
 
   it("an invalid regex is plan_invalid, naming plan.passWhen.regex", () => {

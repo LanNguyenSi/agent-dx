@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { sha256File } from "../hash.js";
 import { removeMarkerFor, writeMarker } from "../lock.js";
+import { combinedOutput } from "../exec.js";
 import {
   applyPatchForReal,
   computeMutant,
@@ -478,7 +479,10 @@ export async function runMutantAttempt(
     // "passed" is the regex matching the run's own combined
     // stdout+stderr, "failed" is the regex absent, whatever the exit
     // code says.
-    const testCombinedOutput = `${testResult.stdoutTail}\n${testResult.stderrTail}`;
+    const testCombinedOutput = combinedOutput(
+      testResult.stdoutTail,
+      testResult.stderrTail,
+    );
     const testPassed =
       rt.passRegex !== undefined
         ? rt.passRegex.test(testCombinedOutput)
@@ -514,6 +518,26 @@ export async function runMutantAttempt(
         warnings.push(
           `the mutant run produced no output at all (exit code ${String(testResult.exitCode)}); --pass-regex (${rt.passRegex.source}) cannot match empty output, so this reads as a crash, not a genuine test failure -- see test.exitCode and the empty test.stdoutTail/test.stderrTail; see ${testResult.logPath}`,
         );
+      } else if (!testPassed) {
+        // A genuine miss with real (non-empty) output: named explicitly,
+        // the same as `--require-baseline-evidence`'s own miss is on the
+        // baseline side, so a caller reading `warnings` sees which
+        // pattern was checked and against what, rather than only the
+        // bare `killed`/`survived` verdict -- and, when either side of
+        // this run's own captured tail was truncated, that the pattern
+        // may have matched output outside the captured tail rather than
+        // being genuinely absent.
+        const truncatedSides = [
+          testResult.stdoutTruncated ? "stdout" : undefined,
+          testResult.stderrTruncated ? "stderr" : undefined,
+        ].filter((side): side is string => side !== undefined);
+        const truncatedNote =
+          truncatedSides.length > 0
+            ? ` (the mutant run's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
+            : "";
+        warnings.push(
+          `--pass-regex (${rt.passRegex.source}) did not match the mutant run's output${truncatedNote}; see ${testResult.logPath}`,
+        );
       }
     }
 
@@ -527,17 +551,19 @@ export async function runMutantAttempt(
       testResult.stderrTail,
     );
     // The generic byte-identical fallback: scoped to a verdict whose own
-    // exit code from the mutant's OWN run was PASSING (0) -- the exact
-    // silent exit-0 evidence this whole mechanism distrusts. Whichever
-    // direction `--expect` points, a mutant run that exited NON-ZERO
-    // already carries a real signal -- the process itself disagreed with
-    // the baseline -- that this output-only heuristic has no business
-    // second-guessing; that holds for a `survived` verdict under
-    // `--expect fail` bound to exit 0 exactly as it does for a `killed`
-    // verdict under `--expect pass` bound to exit 0, and it excludes a
+    // predicate on THIS mutant's run reads as PASSING -- exit code `0`
+    // by default, or `testPassed` itself (`--pass-regex`'s own match)
+    // when that flag is given -- the exact silent-pass evidence this
+    // whole mechanism distrusts. Whichever direction `--expect` points,
+    // a mutant run whose predicate reads FAILING already carries a real
+    // signal -- the run itself disagreed with the baseline -- that this
+    // output-only heuristic has no business second-guessing; that holds
+    // for a `survived` verdict under `--expect fail` bound to a passing
+    // predicate exactly as it does for a `killed` verdict under
+    // `--expect pass` bound to a passing predicate, and it excludes a
     // `survived` verdict under `--expect pass`, which is `survived`
-    // precisely because the mutant run exited NON-ZERO.
-    const restsOnPassingExit = testResult.exitCode === 0;
+    // precisely because the predicate read FAILING.
+    const restsOnPassingVerdict = testPassed;
     // Silence on both sides is common and legitimate (many hand-rolled
     // test scripts print nothing on a pass, relying on the exit code
     // alone -- this package's own fixtures included), so it is excluded
@@ -562,7 +588,7 @@ export async function runMutantAttempt(
       baselineOutput.stdoutTruncated ||
       baselineOutput.stderrTruncated;
     const genericFallback =
-      restsOnPassingExit &&
+      restsOnPassingVerdict &&
       hasComparableOutput &&
       !eitherTailTruncated &&
       !mutantZeroTests.detected &&
@@ -573,13 +599,6 @@ export async function runMutantAttempt(
       // deterministic runner (e.g. `node --test --test-reporter=dot`'s
       // bare `..`) is reported `survived`, not second-guessed here.
       !baselineOutput.requireBaselineEvidenceMatched &&
-      // `--pass-regex`/`passWhen.regex` is the same kind of opt-in
-      // evidence, read directly rather than through the exit code: once
-      // given, `testPassed` above already reflects the caller's own
-      // reading of this run's real output, so this exit-code-shaped
-      // heuristic (built to distrust a runner's exit code, not its
-      // content) has nothing left to add and must not override it.
-      rt.passRegex === undefined &&
       !hasKnownTestSummary(testResult.stdoutTail, testResult.stderrTail) &&
       !hasKnownTestSummary(
         baselineOutput.stdoutTail,
