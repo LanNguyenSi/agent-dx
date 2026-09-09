@@ -508,15 +508,45 @@ function copyRegularFile(src: string, dest: string): void {
   fs.copyFileSync(src, dest);
 }
 
-/** A symlink, recreated (dangling or not) rather than followed: the
+/**
+ * A symlink, recreated (dangling or not) rather than followed: the
  * worktree's copy must carry the SAME link target the source tree has,
  * not whatever that target currently resolves to (which may not even
- * exist). */
-function copySymlink(src: string, dest: string): void {
+ * exist). `fs.rmSync(dest, { force: true })` is defensive rather than
+ * exercised: nothing has written `dest` before this call reaches it, on
+ * any volume this package's fixtures run on.
+ *
+ * The copy therefore carries the SAME symlink the source tree does,
+ * absolute or relative: an absolute target, or a relative one that
+ * escapes through `..`, resolves outside the copy exactly as it did in
+ * the source tree, so a `--pre`/`-t` writing through it reaches the
+ * real tree rather than the isolated one. `resolveDeepestExisting` is
+ * called once per untracked symlink, after it is created, to check for
+ * that; `warnings` names the symlink and where it resolves rather than
+ * refusing the sync outright, since a copy that carries every symlink
+ * the source tree has is the isolation this function promises, and a
+ * symlink escaping the copy is a property of the SOURCE tree, not a
+ * mistake this sync made.
+ */
+function copySymlink(
+  src: string,
+  dest: string,
+  displayRelPath: string,
+  worktreeRootReal: string,
+  warnings: string[],
+): void {
   const linkTarget = fs.readlinkSync(src);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.rmSync(dest, { force: true });
   fs.symlinkSync(linkTarget, dest);
+  const resolved = resolveDeepestExisting(dest);
+  if (!isPathContained(worktreeRootReal, resolved)) {
+    warnings.push(
+      `untracked symlink ${displayRelPath} resolves to ${resolved}, outside ` +
+        "the isolation copy: the copy carries the same symlink the source " +
+        "tree does, so a write through it is not isolated",
+    );
+  }
 }
 
 /**
@@ -551,6 +581,7 @@ function copyUntrackedEntry(
   srcAbs: string,
   destAbs: string,
   displayRelPath: string,
+  worktreeRootReal: string,
   warnings: string[],
 ): void {
   let st: fs.Stats;
@@ -560,7 +591,7 @@ function copyUntrackedEntry(
     return;
   }
   if (st.isSymbolicLink()) {
-    copySymlink(srcAbs, destAbs);
+    copySymlink(srcAbs, destAbs, displayRelPath, worktreeRootReal, warnings);
     return;
   }
   if (st.isDirectory() && fs.existsSync(path.join(srcAbs, ".git"))) {
@@ -888,6 +919,12 @@ export async function beginWorktree(
 
   const logDirReal = resolveDeepestExisting(path.resolve(logDir));
   const syncWarnings: string[] = [];
+  // The copy's own root, resolved once here rather than per symlink:
+  // `git worktree add` has already created `worktreePath` by this
+  // point, and `copySymlink` needs it to tell an untracked symlink that
+  // resolves inside the copy from one reaching back out to the real
+  // tree.
+  const worktreeRootReal = resolveDeepestExisting(worktreePath);
   const syncableRelPaths = untrackedRelPaths.filter((relPath) => {
     // The probe's own scratch space (this run's worktree, its
     // tracked-diff file, or a leftover from a previous run sharing this
@@ -915,6 +952,7 @@ export async function beginWorktree(
         path.join(root, relPath),
         path.join(worktreePath, relPath),
         relPath,
+        worktreeRootReal,
         syncWarnings,
       );
     }
@@ -1075,6 +1113,8 @@ export async function beginWorktree(
     rootReal,
     protectedRelPaths,
     isTrackedPath,
+    trackedUnknown,
+    copyRootReal: wtReal,
     canonicalRootRelPath,
     canonicalRelPath,
   });

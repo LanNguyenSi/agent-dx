@@ -850,7 +850,12 @@ of its own. A path inside `--log-dir` itself (this probe's own scratch
 space, including the worktree just created) is never treated as a
 source to sync; that is decided by where the entry itself sits, so an
 untracked symlink that merely points into `--log-dir` is recreated
-like any other symlink. `isolation.syncedUntrackedFiles` counts the
+like any other symlink. The copy therefore carries the SAME symlink the
+source tree does: an absolute target, or a relative one resolving out
+of the copy through `..`, still reaches the real tree, so a `--pre`/`-t`
+writing through it is not isolated for that path; the sync warns when a
+recreated untracked symlink resolves outside the copy, naming the
+symlink and where it resolves. `isolation.syncedUntrackedFiles` counts the
 `ls-files` entries this sync acted on, not the number of files that
 ended up on disk -- a skipped entry still counts as one. A gitignored
 `--file` is therefore never synced either way (not tracked, and
@@ -952,11 +957,15 @@ The four rules, in this order:
 3. What git tracks is never shared, asked in two places. A directory
    named by repository CONTENT -- a composer `config` value, a `--plan`
    file's `link`, the repository defaults file's `link` -- is linked
-   only when git does not track that DESTINATION; and no candidate at
-   all, the auto-discovered ones included, is linked when git tracks
-   what it POINTS AT, whatever name it sits under. These inputs exist
-   for gitignored runtime output (`vendor/`, an install directory, a
-   tool cache); a tracked directory is source, and source is copied into
+   only when git does not track that DESTINATION; and no candidate but
+   an operator's own `--link`, the auto-discovered ones included, is
+   linked when git tracks what it POINTS AT, whatever name it sits
+   under -- including a target inside a nested repository's own
+   boundary (a submodule, or a nested plain checkout), which the outer
+   index lists nowhere but a `--pre`/`-t` would still write straight
+   into. These inputs exist for gitignored runtime output (`vendor/`, an
+   install directory, a tool cache); a tracked directory is source, and
+   source is copied into
    the isolation copy, never shared with the tree being isolated from.
    The destination question is asked about the copy's own spelling of
    the whole path (see below), so a value naming a tracked directory
@@ -975,7 +984,18 @@ The four rules, in this order:
    resolves INTO the root while spelling a path outside it, and a target
    really named `SRC` is the tracked `src` the repository carries, which
    git's case-sensitive index would otherwise report as untracked. A
-   refusal names the target and that git tracks it.
+   refusal names the target and that git tracks it. A target sitting
+   inside a nested repository's own boundary -- a submodule's root, or a
+   nested plain checkout's -- is refused the same way even though the
+   OUTER index never lists its content, only the submodule's own gitlink
+   (the boundary is the same one an untracked nested repository is
+   skipped at during the untracked-file sync, walked from the target up
+   to the root); that refusal names the target and the nested
+   repository's own path, and asks nothing of the nested repository's
+   own index -- sitting inside the boundary is enough. A listing that
+   cannot run leaves every such target treated as tracked, and the
+   refusal says the listing could not check rather than claiming git
+   answered.
    `--link`, typed by the person running the probe, keeps its latitude
    for BOTH halves; rules 1, 2 and 4 apply to it the same as to
    everything else. That latitude has a price worth naming: a `--link`
@@ -1062,7 +1082,14 @@ copied, and the policy judges only that link's own destination and its
 own target: a symlink INSIDE a linked directory that points back into
 the repository (a sibling install carrying a `back -> ../repo`) is
 reached through the link like any other file in it, so a `--pre` writing
-through that inner path writes into the source tree. The invariant is
+through that inner path writes into the source tree. The same limit
+applies without any link at all: an untracked, non-ignored symlink that
+is itself absolute, or that resolves outside the copy, carries the
+sync's warning (see above) but is still recreated and still reaches the
+real tree; a COMMITTED absolute symlink is written by `git worktree add`
+itself, before this package's own sync ever runs, so it reaches the copy
+with no warning at all. Either way, a `--pre`/`-t` must not assume such
+a path is isolated. The invariant is
 checked and then acted on, so a second process that changes the copy in
 between (replacing a directory with a symlink in the microseconds
 between the check and the syscall) is not covered; the copy lives in a

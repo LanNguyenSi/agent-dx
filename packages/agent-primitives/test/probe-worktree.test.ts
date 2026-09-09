@@ -316,6 +316,25 @@ function initTrackedSrcRepo(): string {
   return repo;
 }
 
+/** A standalone git repository with a committed `lib/file.txt`, meant to
+ * be added as a submodule (`-c protocol.file.allow=always submodule add
+ * <this> sub`) or copied in as a nested plain repository: the shape
+ * `nestedRepoBoundaryRelPath` looks for is a directory carrying its OWN
+ * `.git`, and a repo with real history is what both `git submodule add`
+ * and a plain `git init` in place naturally produce. */
+function initUpstreamLibRepo(): string {
+  const upstream = makeTmpDir();
+  git(upstream, ["init", "-q"]);
+  git(upstream, ["config", "user.email", "test@example.com"]);
+  git(upstream, ["config", "user.name", "test"]);
+  git(upstream, ["config", "core.autocrlf", "false"]);
+  fs.mkdirSync(path.join(upstream, "lib"), { recursive: true });
+  fs.writeFileSync(path.join(upstream, "lib", "file.txt"), "vendored\n");
+  git(upstream, ["add", "-A"]);
+  git(upstream, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+  return upstream;
+}
+
 function commitAll(repo: string, message: string): void {
   git(repo, ["add", "-A"]);
   git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", message]);
@@ -2534,17 +2553,15 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
     ).toBe(true);
   });
 
-  it("refuses the ALIAS spelling of the same target ('node_modules -> ../REPO/src'), which resolves into the root while spelling a path outside it: containment of the target is decided by identity, never by relativizing two realpath strings", async () => {
+  it("refuses the ALIAS spelling of the same target ('node_modules -> ../REPO/src'), which resolves into the root while spelling a path outside it: containment of the target is decided by identity, never by relativizing two realpath strings", async (t) => {
     useLockDir();
     const repo = initTrackedSrcRepo();
     fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
     commitAll(repo, "ignore node_modules");
-    if (!caseInsensitiveVolume(repo)) {
-      // On this volume the uppercased repository name is simply a
-      // directory that is not there, the symlink dangles, and the walk
-      // never offers the candidate at all.
-      return;
-    }
+    // On a case-sensitive volume the uppercased repository name is
+    // simply a directory that is not there, the symlink dangles, and
+    // the walk never offers the candidate at all.
+    t.skip(!caseInsensitiveVolume(repo), "not on a case-insensitive volume");
     fs.symlinkSync(
       path.join("..", path.basename(repo).toUpperCase(), "src"),
       path.join(repo, "node_modules"),
@@ -2649,6 +2666,155 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
     expect(fs.readFileSync(path.join(repo, "src", "tracked.js"), "utf8")).toBe(
       "module.exports = 1;\n",
     );
+  });
+
+  it("refuses a target BELOW a submodule's own root ('node_modules -> sub/lib'), which the outer index lists nowhere but the submodule's own gitlink", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    const upstream = initUpstreamLibRepo();
+    git(repo, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      upstream,
+      "sub",
+    ]);
+    commitAll(repo, "add submodule");
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    commitAll(repo, "ignore node_modules");
+    fs.symlinkSync(
+      path.join("sub", "lib"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(repo, "sub", "lib", "CLOBBER.txt"))).toBe(
+      false,
+    );
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("node_modules") &&
+          w.includes(
+            `git tracks its target ${resolveDeepestExisting(path.join(repo, "sub", "lib"))}`,
+          ) &&
+          w.includes("inside a nested repository at sub"),
+      ),
+    ).toBe(true);
+  });
+
+  it("control: the submodule's own ROOT ('node_modules -> sub') stays refused by the OUTER index's gitlink, the same as before the nested-repository boundary existed", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    const upstream = initUpstreamLibRepo();
+    git(repo, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      upstream,
+      "sub",
+    ]);
+    commitAll(repo, "add submodule");
+    fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
+    commitAll(repo, "ignore node_modules");
+    fs.symlinkSync("sub", path.join(repo, "node_modules"), "dir");
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(repo, "sub", "CLOBBER.txt"))).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      refusedForTrackedTarget(
+        result.warnings,
+        "node_modules",
+        path.join(repo, "sub"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a target BELOW a gitignored NESTED PLAIN repository's own root ('node_modules -> nested/lib'), the same boundary a submodule's content sits behind", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.writeFileSync(
+      path.join(repo, ".gitignore"),
+      ["node_modules", "nested"].join("\n") + "\n",
+    );
+    commitAll(repo, "ignore node_modules and nested");
+    const nested = path.join(repo, "nested");
+    fs.mkdirSync(path.join(nested, "lib"), { recursive: true });
+    fs.writeFileSync(path.join(nested, "lib", "file.txt"), "nested\n");
+    git(nested, ["init", "-q"]);
+    git(nested, ["config", "user.email", "test@example.com"]);
+    git(nested, ["config", "user.name", "test"]);
+    git(nested, ["add", "-A"]);
+    git(nested, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "init nested",
+    ]);
+    fs.symlinkSync(
+      path.join("nested", "lib"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(fs.existsSync(path.join(nested, "lib", "CLOBBER.txt"))).toBe(false);
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("node_modules") &&
+          w.includes("inside a nested repository at nested"),
+      ),
+    ).toBe(true);
+  });
+
+  it("negative control: a gitignored nested directory carrying no '.git' of its own still links -- nesting alone is not the boundary", async () => {
+    useLockDir();
+    const repo = initTrackedSrcRepo();
+    fs.writeFileSync(
+      path.join(repo, ".gitignore"),
+      ["node_modules", "plain"].join("\n") + "\n",
+    );
+    commitAll(repo, "ignore node_modules and plain");
+    fs.mkdirSync(path.join(repo, "plain", "lib"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "plain", "lib", "file.txt"), "plain\n");
+    fs.symlinkSync(
+      path.join("plain", "lib"),
+      path.join(repo, "node_modules"),
+      "dir",
+    );
+
+    const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toEqual([path.join(repo, "node_modules")]);
+    expect(fs.existsSync(path.join(repo, "plain", "lib", "CLOBBER.txt"))).toBe(
+      true,
+    );
+    expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
   });
 });
 
@@ -2806,7 +2972,7 @@ describe("probe(): worktree isolation, a link target that CONTAINS the isolation
     ).toBe(true);
   });
 
-  it("refuses the same in-repo --log-dir named under a CASE VARIANT ('.PROBE-LOGS' for a '.probe-logs' log dir): the mirror is decided by filesystem identity, which is the only thing that sees it", async () => {
+  it("refuses the same in-repo --log-dir named under a CASE VARIANT ('.PROBE-LOGS' for a '.probe-logs' log dir): the mirror is decided by filesystem identity, which is the only thing that sees it", async (t) => {
     useLockDir();
     const { repo } = initRepo();
     const logDir = path.join(repo, ".probe-logs");
@@ -2824,11 +2990,10 @@ describe("probe(): worktree isolation, a link target that CONTAINS the isolation
     );
     git(repo, ["add", "-A"]);
     git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "log dir"]);
-    if (!caseInsensitiveVolume(repo)) {
-      // On this volume `.PROBE-LOGS` is a directory that is not there:
-      // it contains no copy, and the mirror has nothing to decide.
-      return;
-    }
+    // On a case-sensitive volume `.PROBE-LOGS` is a directory that is
+    // not there: it contains no copy, and the mirror has nothing to
+    // decide.
+    t.skip(!caseInsensitiveVolume(repo), "not on a case-insensitive volume");
     const targetSpelling = resolveDeepestExisting(
       path.join(repo, ".PROBE-LOGS"),
     );
@@ -2916,13 +3081,25 @@ describe("probe(): worktree isolation, the tracked-file listing behind the link 
           w.includes(path.join(repo, "vendor")) && w.includes("git tracks it"),
       ),
     ).toBe(true);
+    // The target half's refusal says the listing could not check,
+    // never that git tracks it: the listing never got the chance to
+    // answer, and claiming it did would be false.
     expect(
       result.warnings.some(
         (w) =>
           w.includes(path.join(repo, "node_modules")) &&
-          w.includes("git tracks its target"),
+          w.includes(
+            `could not check whether git tracks its target ${resolveDeepestExisting(path.join(repo, "node_modules"))}; treated as tracked`,
+          ),
       ),
     ).toBe(true);
+    expect(
+      result.warnings.some((w) =>
+        w.includes(
+          `git tracks its target ${resolveDeepestExisting(path.join(repo, "node_modules"))}; source is copied`,
+        ),
+      ),
+    ).toBe(false);
     // Both candidates rule 3 questions are refused; the operator's own
     // `--link`, which neither half of it applies to, still links.
     expect(result.isolation.linked).toEqual([
@@ -4316,6 +4493,35 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
       if (previousEnv === undefined) delete process.env.LINK_CHECK_OUT_PATH;
       else process.env.LINK_CHECK_OUT_PATH = previousEnv;
     }
+  });
+
+  it("an untracked ABSOLUTE symlink that resolves outside the copy is still recreated, with a warning naming it and where it resolves", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const repoReal = resolveDeepestExisting(repo);
+    fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "src", "real.txt"), "real\n");
+    // Untracked and absolute: the copy recreates the same symlink the
+    // source tree has, which still resolves into the real repository
+    // rather than into the copy. No `--pre` here writes through it: the
+    // warning, not a byte-identical write-through demonstration, is
+    // what this fixture is about.
+    fs.symlinkSync(path.join(repoReal, "src"), path.join(repo, "docs"), "dir");
+
+    const before = hashTree(repo);
+    const result = await probe(baseOptions(repo));
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("docs") &&
+          w.includes(`resolves to ${path.join(repoReal, "src")}`) &&
+          w.includes("outside the isolation copy"),
+      ),
+    ).toBe(true);
   });
 
   it("the probe's own --log-dir, when it sits inside the repository, is excluded from the untracked sync entirely", async () => {

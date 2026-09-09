@@ -8,6 +8,7 @@ import {
   hasOperatorLatitude,
   linkRelPath,
   linkTargetRelPath,
+  nestedRepoBoundaryRelPath,
   planLinks,
   relContains,
 } from "../src/probe/link-policy.js";
@@ -50,6 +51,8 @@ function ctx(
   over: {
     protectedRelPaths?: string[];
     tracked?: string[];
+    trackedUnknown?: boolean;
+    copyRootReal?: string;
     canonicalRelPath?: (relPath: string) => string;
     canonicalRootRelPath?: (relPath: string) => string;
   } = {},
@@ -57,6 +60,8 @@ function ctx(
   rootReal: string;
   protectedRelPaths: string[];
   isTrackedPath: (relPath: string) => boolean;
+  trackedUnknown: boolean;
+  copyRootReal: string | undefined;
   canonicalRootRelPath: (relPath: string) => string;
   canonicalRelPath: (relPath: string) => string;
 } {
@@ -66,6 +71,8 @@ function ctx(
     protectedRelPaths: over.protectedRelPaths ?? [],
     isTrackedPath: (relPath) =>
       tracked.some((t) => t === relPath || t.startsWith(relPath + path.sep)),
+    trackedUnknown: over.trackedUnknown ?? false,
+    copyRootReal: over.copyRootReal,
     canonicalRootRelPath: over.canonicalRootRelPath ?? ((relPath) => relPath),
     canonicalRelPath: over.canonicalRelPath ?? ((relPath) => relPath),
   };
@@ -912,14 +919,130 @@ describe("planLinks: rule 3's tracked-TARGET half", () => {
       `git tracks its target ${path.join(root, "src")}`,
     );
   });
+
+  it("refuses a target BELOW a nested repository's own root, which the outer index lists nowhere (a submodule's content, a nested plain repository's)", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "sub", "lib"), { recursive: true });
+    fs.mkdirSync(path.join(root, "sub", ".git"), { recursive: true });
+    fs.symlinkSync(
+      path.join("sub", "lib"),
+      path.join(root, "node_modules"),
+      "dir",
+    );
+
+    const plan = planLinks(
+      // `tracked: []`: the outer index never lists a submodule's own
+      // content, only its gitlink at "sub" -- which this candidate does
+      // not even name.
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      ctx(root),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain(
+      `git tracks its target ${path.join(root, "sub", "lib")}`,
+    );
+    expect(plan.warnings[0]).toContain("inside a nested repository at sub");
+  });
+
+  it("does not add the nested-repository clause when the target is already a directly tracked path (the gitlink itself)", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "sub"), { recursive: true });
+    fs.mkdirSync(path.join(root, "sub", ".git"), { recursive: true });
+    fs.symlinkSync("sub", path.join(root, "node_modules"), "dir");
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      // The gitlink itself, exactly as `git ls-files` would report it.
+      ctx(root, { tracked: ["sub"] }),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain(
+      `git tracks its target ${path.join(root, "sub")}; source is copied ` +
+        "into the isolation copy, never shared with the tree being " +
+        "isolated from, so every write through such a link would land in " +
+        "the source tree",
+    );
+    expect(plan.warnings[0]).not.toContain("inside a nested repository");
+  });
+
+  it("leaves a target under a gitignored PLAIN nested directory (no '.git' of its own) linkable: the boundary, not mere nesting, is what refuses", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "plain", "lib"), { recursive: true });
+    fs.symlinkSync(
+      path.join("plain", "lib"),
+      path.join(root, "node_modules"),
+      "dir",
+    );
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      ctx(root),
+    );
+
+    expect(plan.links.map((planned) => planned.candidate.absDir)).toEqual([
+      path.join(root, "node_modules"),
+    ]);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("reports the fail-closed refusal honestly: 'could not check', never 'git tracks', when the listing never answered", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "src"));
+    fs.symlinkSync("src", path.join(root, "node_modules"), "dir");
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      // `isTrackedPath` answering `true` for every path is what a real
+      // `trackedUnknown` caller's own closure does (see `isolation.ts`);
+      // this stub is told the same thing directly rather than
+      // reimplementing that closure.
+      ctx(root, { tracked: ["src"], trackedUnknown: true }),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain(
+      `could not check whether git tracks its target ${path.join(root, "src")}; treated as tracked`,
+    );
+  });
+
+  it("never refuses a target INSIDE the isolation copy's own directory as a nested repository, even though a linked worktree carries its own '.git' too", () => {
+    const root = makeTmpDir();
+    // The isolation copy's own root, somewhere inside the source tree
+    // (a `--log-dir` placed inside the repository): a linked git
+    // worktree carries a `.git` FILE at its own root the same way a
+    // submodule does, and this candidate's target sits inside it.
+    const copyRoot = path.join(root, "probe-logs", "wt-1", "wt");
+    fs.mkdirSync(path.join(copyRoot, "vendor"), { recursive: true });
+    fs.mkdirSync(path.join(copyRoot, ".git"), { recursive: true });
+    fs.symlinkSync(
+      path.join(copyRoot, "vendor"),
+      path.join(root, "node_modules"),
+      "dir",
+    );
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "node_modules"), discovered: true }],
+      ctx(root, { copyRootReal: copyRoot }),
+    );
+
+    // Accepted here: `beginWorktree`'s own, more specific postcondition
+    // (not exercised by this unit test) is what actually refuses a
+    // target resolving into the copy, with the right reason.
+    expect(plan.links.map((planned) => planned.candidate.absDir)).toEqual([
+      path.join(root, "node_modules"),
+    ]);
+    expect(plan.warnings).toEqual([]);
+  });
 });
 
 describe("planLinks: a target that reaches the root under a second spelling", () => {
-  it("skips an auto-discovered node_modules whose target is a CASE variant of the repository root, in the same wording the exact spelling gets", () => {
+  it("skips an auto-discovered node_modules whose target is a CASE variant of the repository root, in the same wording the exact spelling gets", (t) => {
     const base = makeTmpDir();
     const root = path.join(base, "repo");
     fs.mkdirSync(root);
-    if (!caseInsensitiveVolume(base)) return;
+    t.skip(!caseInsensitiveVolume(base), "not on a case-insensitive volume");
     const absDir = path.join(root, "node_modules");
     fs.symlinkSync(path.join("..", "REPO"), absDir);
 
@@ -935,11 +1058,11 @@ describe("planLinks: a target that reaches the root under a second spelling", ()
     ]);
   });
 
-  it("skips one whose target is a CASE variant of a directory containing the root", () => {
+  it("skips one whose target is a CASE variant of a directory containing the root", (t) => {
     const base = makeTmpDir();
     const root = path.join(base, "Ancestor", "repo");
     fs.mkdirSync(root, { recursive: true });
-    if (!caseInsensitiveVolume(base)) return;
+    t.skip(!caseInsensitiveVolume(base), "not on a case-insensitive volume");
     const absDir = path.join(root, "node_modules");
     const variant = path.join(base, "ancestor");
     fs.symlinkSync(variant, absDir);
@@ -952,5 +1075,62 @@ describe("planLinks: a target that reaches the root under a second spelling", ()
         "the repository root; linking it would put the source tree inside " +
         "the isolation copy",
     ]);
+  });
+});
+
+describe("nestedRepoBoundaryRelPath: a target inside a nested repository's own boundary", () => {
+  it("finds the boundary at a directory strictly BELOW a nested repository's own root", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "sub", "lib"), { recursive: true });
+    fs.mkdirSync(path.join(root, "sub", ".git"), { recursive: true });
+
+    expect(nestedRepoBoundaryRelPath(path.join("sub", "lib"), root)).toBe(
+      "sub",
+    );
+  });
+
+  it("finds the boundary at the nested repository's own root when the target IS that root", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "nested"), { recursive: true });
+    fs.mkdirSync(path.join(root, "nested", ".git"), { recursive: true });
+
+    expect(nestedRepoBoundaryRelPath("nested", root)).toBe("nested");
+  });
+
+  it("recognizes a '.git' FILE as the boundary too (a linked worktree or a submodule's own root)", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "sub", "lib"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "sub", ".git"),
+      "gitdir: /elsewhere/.git/modules/sub\n",
+    );
+
+    expect(nestedRepoBoundaryRelPath(path.join("sub", "lib"), root)).toBe(
+      "sub",
+    );
+  });
+
+  it("returns undefined for a plain nested directory carrying no '.git' of its own", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "plain", "lib"), { recursive: true });
+
+    expect(
+      nestedRepoBoundaryRelPath(path.join("plain", "lib"), root),
+    ).toBeUndefined();
+  });
+
+  it("returns the OUTERMOST boundary when a nested repository itself contains a further-nested one", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "outer", "inner", "lib"), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(root, "outer", ".git"), { recursive: true });
+    fs.mkdirSync(path.join(root, "outer", "inner", ".git"), {
+      recursive: true,
+    });
+
+    expect(
+      nestedRepoBoundaryRelPath(path.join("outer", "inner", "lib"), root),
+    ).toBe("outer");
   });
 });

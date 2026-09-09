@@ -344,6 +344,8 @@ describe("findComposerLinkDirs", () => {
         rootReal: fs.realpathSync(root),
         protectedRelPaths: [],
         isTrackedPath: () => false,
+        trackedUnknown: false,
+        copyRootReal: undefined,
         // No copy in this unit test to ask, and no case-variant
         // spelling in the fixture either: the source tree's own
         // spelling is the canonical one on both sides here.
@@ -442,6 +444,8 @@ describe("findComposerLinkDirs", () => {
       rootReal: fs.realpathSync(root),
       protectedRelPaths: [],
       isTrackedPath: () => false,
+      trackedUnknown: false,
+      copyRootReal: undefined,
       canonicalRootRelPath: (relPath) => relPath,
       canonicalRelPath: (relPath) => relPath,
     });
@@ -462,6 +466,8 @@ describe("findComposerLinkDirs", () => {
       rootReal: fs.realpathSync(root),
       protectedRelPaths: [],
       isTrackedPath: () => false,
+      trackedUnknown: false,
+      copyRootReal: undefined,
       canonicalRootRelPath: (relPath) => relPath,
       canonicalRelPath: (relPath) => relPath,
     });

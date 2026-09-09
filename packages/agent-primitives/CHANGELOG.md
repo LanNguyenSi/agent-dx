@@ -178,16 +178,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a listing that cannot run leaves every candidate but a `--link`
   treated as tracked. New end-to-end fixtures in
   `test/probe-worktree.test.ts` ("a link target that is TRACKED
-  source"), each hashing the source tree before and after and asserting
-  the refusal names the target: the gitignored symlink, the committed
-  one, the alias spelling, the tracked `node_modules` directory, and the
-  two negative controls. `linkTargetRelPath` and the rule's two
+  source"): five of the six hash the source tree before and after and
+  assert the refusal names the target (the gitignored symlink, the
+  committed one, the alias spelling, the tracked `node_modules`
+  directory, and the negative control for a target OUTSIDE the root);
+  the sixth, the negative control for an UNTRACKED target INSIDE the
+  root, asserts by path instead, since its `--pre` writes into the tree
+  by design. `linkTargetRelPath` and the rule's two
   provenance flags are unit-tested in `test/link-policy.test.ts`, which
   also pins `entryRelationTo`'s identity branches through a symlinked
   alias rather than a case-variant spelling, so both are exercised on a
   case-sensitive volume too. The dangling-symlink branch of the
   blocking-ancestor check and the case-variant form of the
   target-contains-the-copy mirror gained fixtures of their own.
+- Rule 3's target half now also refuses a target sitting inside a
+  NESTED repository's own boundary (task `6c7e1532`): a submodule's
+  content is listed nowhere in the OUTER repository's index (only its
+  gitlink is, at the submodule's own root), so an auto-discovered
+  `node_modules -> sub/lib` under a submodule, or `node_modules ->
+  nested/lib` under a gitignored nested plain repository, read as
+  untracked to `isTrackedPath` and linked with no warning, while a
+  `--pre` writing through either wrote straight into the nested
+  checkout. `nestedRepoBoundaryRelPath` walks the target's path from the
+  repository root looking for the same `.git` marker
+  `copyUntrackedEntry`'s untracked-file sync already refuses to cross,
+  and asks nothing of the nested repository's own index: sitting inside
+  its boundary is enough. The submodule's own root stays refused by the
+  outer index as before (pinned as a control), and a gitignored nested
+  directory carrying no `.git` of its own still links (a second,
+  negative control). The check never fires on the isolation copy's OWN
+  directory tree (`LinkPolicyContext.copyRootReal`, the same `wtReal`
+  `beginWorktree` already resolves): a linked git worktree carries a
+  `.git` FILE at its own root too, and a `--log-dir` placed inside the
+  repository puts that worktree where the composer/`node_modules`
+  auto-discovery walk can find its own copied `vendor` and offer it back
+  as a candidate; that shape already had its own, more specific refusal
+  ("its target resolves to ..., inside the isolation copy itself"),
+  which the new check would otherwise have pre-empted with a
+  false-sounding "nested repository" reason. Fixtures for both shapes
+  and the negative control live alongside the existing "a link target
+  that is TRACKED source" group in `test/probe-worktree.test.ts`;
+  `nestedRepoBoundaryRelPath` is unit-tested in
+  `test/link-policy.test.ts`.
+- The tracked-file listing's own fail-closed wording no longer claims
+  git answered when it never got the chance to (task `6c7e1532`): when
+  the `git ls-files` listing behind rule 3 cannot run, the per-candidate
+  refusal now reads "could not check whether git tracks its target
+  <path>; treated as tracked", and the "git tracks its target <path>"
+  wording is reserved for a listing that actually answered. Pinned with
+  the existing PATH-shim fixture (`test/probe-worktree.test.ts`, "the
+  tracked-file listing behind the link policy"), updated to assert the
+  new wording.
+- The untracked-file sync now warns when a recreated untracked symlink
+  resolves outside the isolation copy (task `6c7e1532`): the copy
+  carries the SAME symlink the source tree does, so an absolute target,
+  or a relative one escaping through `..`, still reaches the real tree,
+  and a `--pre`/`-t` writing through it is not isolated for that path.
+  `copySymlink` calls `resolveDeepestExisting` once per untracked
+  symlink, after creating it, and names the symlink and where it
+  resolves in a warning rather than refusing the sync outright. A
+  COMMITTED absolute symlink is written by `git worktree add` itself,
+  before this sync ever runs, so that half of the limit carries no
+  warning; both README's isolation section and its Limitations
+  paragraph now say so. Fixture: an untracked absolute symlink in
+  `test/probe-worktree.test.ts`.
 - `isolation.linkedNamedBy` in the result envelope (task `6c7e1532`):
   one `{ path, namedBy }` entry per ACCEPTED link that repository
   content asked for, carrying the same provenance phrase a refusal of

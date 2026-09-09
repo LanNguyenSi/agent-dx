@@ -103,6 +103,38 @@ export interface LinkPolicyContext {
    */
   isTrackedPath: (relPath: string) => boolean;
   /**
+   * Whether the `git ls-files` listing behind `isTrackedPath` could not
+   * run at all (the caller's `lsFilesResult.exitCode !== 0` case):
+   * `isTrackedPath` still answers `true` for every path it is asked
+   * about while this is set, which is what keeps every questioned
+   * candidate from being linked, but a refusal produced under it must
+   * say the listing never answered, not claim git found tracked
+   * content it never got the chance to look for.
+   */
+  trackedUnknown: boolean;
+  /**
+   * The isolation copy's own root, already resolved through realpath,
+   * when one exists yet (`beginWorktree` calls `planLinks` after
+   * `git worktree add`, so it always does for an `-i worktree` run);
+   * `undefined` for a caller with no copy of its own (a unit test
+   * exercising the policy directly).
+   *
+   * Needed for exactly one thing: the nested-repository boundary
+   * (`nestedRepoBoundaryRelPath`) must never fire on the copy's OWN
+   * directory tree. A linked git worktree carries its own `.git` FILE
+   * at its root the same way a submodule does, and a `--log-dir` placed
+   * inside the repository puts that worktree on disk somewhere the
+   * auto-discovery walk can find it (a composer `vendor`/`composer.json`
+   * the copy itself carries, offered back as a candidate whose target
+   * resolves INTO the copy). That shape already has its own, more
+   * specific refusal once the copy's real root is known
+   * (`beginWorktree`'s own postcondition, `its target resolves to
+   * ..., inside the isolation copy itself`); the nested-repository
+   * check must stay out of its way rather than firing first with the
+   * wrong reason.
+   */
+  copyRootReal: string | undefined;
+  /**
    * The SOURCE tree's OWN spelling of a path relative to the repository
    * root: the same per-segment identity read `canonicalRelPath` performs
    * for the copy, anchored at the root instead (`beginWorktree` passes
@@ -362,6 +394,50 @@ export function linkTargetRelPath(
   }
 }
 
+/**
+ * The repository-relative path of the nearest ancestor of a candidate's
+ * TARGET (`targetRel`, the same value `linkTargetRelPath` hands rule
+ * 3's target half, itself included, the repository root excluded) that
+ * carries its OWN `.git` entry: a submodule's root, or a nested plain
+ * repository's, the same boundary `copyUntrackedEntry`'s untracked-file
+ * sync (in `isolation.ts`) refuses to cross rather than pulling an
+ * unrelated checkout into the copy. `undefined` when no directory
+ * between the root and the target crosses one.
+ *
+ * `isTrackedPath` cannot see this on its own: `git ls-files` never
+ * descends across a `.git` boundary, so a submodule's own content is
+ * listed nowhere in the OUTER repository's index -- only the gitlink at
+ * the submodule's own root is (which the destination or target
+ * questions above already catch by being a tracked path in their own
+ * right). A path BELOW that root (`sub/lib`) is not itself a tracked
+ * entry of the outer index at all, and would otherwise link straight
+ * into the operator's real nested checkout. Refusal here does not ask
+ * whether the NESTED repository itself tracks the path -- it is enough
+ * that the target sits inside one at all, the same latitude-free stance
+ * `copyUntrackedEntry` takes for the untracked-file sync.
+ *
+ * Walked forward from the root rather than backward from the target:
+ * `targetRel` is already known to sit inside `rootReal` (the caller only
+ * asks this once `linkTargetRelPath` returned a defined, non-empty
+ * value), so rebuilding each ancestor by joining segments onto
+ * `rootReal` needs no further identity resolution the way walking
+ * upward from an arbitrary absolute path would.
+ */
+export function nestedRepoBoundaryRelPath(
+  targetRel: string,
+  rootReal: string,
+): string | undefined {
+  const segments = targetRel.split(path.sep).filter((s) => s.length > 0);
+  let rel = "";
+  for (const segment of segments) {
+    rel = rel === "" ? segment : path.join(rel, segment);
+    if (fs.existsSync(path.join(rootReal, rel, ".git"))) {
+      return rel;
+    }
+  }
+  return undefined;
+}
+
 /** `ino`/`dev` of what `p` resolves to -- symlinks followed, the same
  * way the syscalls that create a link follow them -- or `undefined` when
  * nothing is there to identify. */
@@ -513,9 +589,14 @@ export function skippedLinkWarning(
  *    have nothing to say about while handing the copy the operator's
  *    real source. Only a target INSIDE the root is asked about, by
  *    filesystem identity (`linkTargetRelPath`): a target outside it is
- *    rule 1's latitude and is not this repository's source at all. An
- *    operator's own `--link` keeps its latitude for both halves (rules
- *    1, 2 and 4 still apply to it).
+ *    rule 1's latitude and is not this repository's source at all. A
+ *    target under a submodule's own root, or under a nested plain
+ *    repository's, is refused the same way even though the OUTER
+ *    index never lists it (`nestedRepoBoundaryRelPath`): only the
+ *    submodule's gitlink is a tracked entry, never its content, so a
+ *    path below it would otherwise link straight into the operator's
+ *    real nested checkout. An operator's own `--link` keeps its
+ *    latitude for both halves (rules 1, 2 and 4 still apply to it).
  * 4. Nesting: a candidate whose destination is at or under a
  *    destination this run already linked is skipped as already covered
  *    -- the only shape whose `rmSync`/`symlinkSync` would resolve
@@ -643,23 +724,53 @@ export function planLinks(
     // for a directory really named `repo` resolves into the root while
     // spelling a path outside it, and `-> SRC` names the tracked `src`
     // under a spelling git's case-sensitive index calls untracked.
+    // `nestedRepoBoundaryRelPath` covers what the OUTER index cannot: a
+    // target under a submodule's own root, or under a nested plain
+    // repository's, reads as untracked to `isTrackedPath` (only the
+    // submodule's gitlink is an entry of the outer index, never its
+    // content), so a path below it is refused by the boundary alone.
     if (!hasOperatorLatitude(candidate)) {
       const targetRel = linkTargetRelPath(resolved, ctx.rootReal);
-      if (
-        targetRel !== undefined &&
-        targetRel !== "" &&
-        ctx.isTrackedPath(ctx.canonicalRootRelPath(targetRel))
-      ) {
-        warnings.push(
-          skippedLinkWarning(
-            candidate,
-            `git tracks its target ${resolved}; source is copied into the ` +
-              "isolation copy, never shared with the tree being isolated " +
-              "from, so every write through such a link would land in the " +
-              "source tree",
-          ),
+      if (targetRel !== undefined && targetRel !== "") {
+        const targetTracked = ctx.isTrackedPath(
+          ctx.canonicalRootRelPath(targetRel),
         );
-        continue;
+        // Only asked when the outer index itself did not already answer
+        // "tracked" (a submodule's own root is already caught by
+        // `targetTracked`, its gitlink IS a tracked entry, and asking
+        // here too would report a target that simply IS a nested
+        // repository's root as sitting "inside" one), and never for a
+        // target inside the isolation copy's OWN directory: a linked
+        // git worktree carries its own `.git` FILE at its root the same
+        // way a submodule does, and that shape has its own, more
+        // specific refusal once the copy's real root is known (see
+        // `copyRootReal`'s docblock).
+        const nestedRepoRel =
+          targetTracked ||
+          (ctx.copyRootReal !== undefined &&
+            isPathContained(ctx.copyRootReal, resolved))
+            ? undefined
+            : nestedRepoBoundaryRelPath(targetRel, ctx.rootReal);
+        if (targetTracked || nestedRepoRel !== undefined) {
+          warnings.push(
+            skippedLinkWarning(
+              candidate,
+              ctx.trackedUnknown
+                ? `could not check whether git tracks its target ${resolved}; ` +
+                    "treated as tracked"
+                : nestedRepoRel !== undefined
+                  ? `git tracks its target ${resolved}; source is copied into the ` +
+                    "isolation copy, never shared with the tree being isolated " +
+                    "from, so every write through such a link would land in the " +
+                    `source tree, inside a nested repository at ${nestedRepoRel}`
+                  : `git tracks its target ${resolved}; source is copied into the ` +
+                    "isolation copy, never shared with the tree being isolated " +
+                    "from, so every write through such a link would land in the " +
+                    "source tree",
+            ),
+          );
+          continue;
+        }
       }
     }
     const covering = links.find((planned) =>
